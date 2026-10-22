@@ -1,0 +1,91 @@
+{
+  "$defs": {
+    "BackupUploadGrant": {
+      "additionalProperties": false,
+      "description": "An S3 POST policy authorising writes under one repository's prefix.\n\nMinted by `ObjectStore.presign_backup_write` and passed through verbatim.\n`url` + `fields` are the signed form the endpoint POSTs to; `key_prefix`\nand `max_bytes` restate the two conditions signed INTO the policy so the\nagent can check its own key before spending a round trip on a write S3\nwill reject. Restating them is not enforcement \u2014 S3 enforces the signed\ndocument, and nothing the agent believes about these two values changes\nwhat it will accept.\n\nIt is a bearer credential for its lifetime: never logged, never audited,\nnever returned by an API route.",
+      "properties": {
+        "fields": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Fields",
+          "type": "object"
+        },
+        "key_prefix": {
+          "title": "Key Prefix",
+          "type": "string"
+        },
+        "max_bytes": {
+          "title": "Max Bytes",
+          "type": "integer"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "fields",
+        "key_prefix",
+        "max_bytes"
+      ],
+      "title": "BackupUploadGrant",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "server -> agent: the dedup answer and the write grant for it.\n\n`new` is the subset of the query's `check` that this repository does NOT\nalready hold, in the order it was asked. Everything not in `new` is\ndeduplicated: the agent must not upload it and must still reference it from\nthe manifest.\n\nThe grant covers `{storage_ref}/`, which is every write the run performs \u2014\nthe new chunks AND the manifest object, whose name the agent mints. It is\nNOT scoped to the `new` keys individually: an S3 POST policy can carry a\n`starts-with $key` condition, and per-key conditions would need a separate\nsigned document per chunk. `max_bytes` is what bounds the damage a\ncompromised endpoint can do with it.\n\nThere is deliberately NO error variant. Every authorization failure \u2014\nunknown job, a job targeting another device, a job that is not a\n`backup.run`, an expired job, a run that has already finished \u2014 produces\nSILENCE plus an audit event, never a distinguishable reply. A reply that\nsaid \"no such job\" and a reply that said \"not your job\" would together be\nan oracle a compromised endpoint could walk.",
+  "properties": {
+    "expires_at": {
+      "title": "Expires At",
+      "type": "string"
+    },
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "kind": {
+      "const": "backup_chunk_grant",
+      "title": "Kind",
+      "type": "string"
+    },
+    "new": {
+      "items": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "maxItems": 1024,
+      "title": "New",
+      "type": "array"
+    },
+    "query_id": {
+      "title": "Query Id",
+      "type": "string"
+    },
+    "recorded": {
+      "minimum": 0,
+      "title": "Recorded",
+      "type": "integer"
+    },
+    "upload": {
+      "$ref": "#/$defs/BackupUploadGrant"
+    },
+    "v": {
+      "const": 1,
+      "title": "V",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "kind",
+    "job_id",
+    "query_id",
+    "recorded",
+    "upload",
+    "expires_at"
+  ],
+  "title": "BackupChunkGrantMsg",
+  "type": "object"
+}

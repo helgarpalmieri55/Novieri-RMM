@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "PatchApplyOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "identifier": {
+          "title": "Identifier",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "installed",
+            "failed"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "identifier",
+        "state"
+      ],
+      "title": "PatchApplyOutcome",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "applied_at": {
+      "title": "Applied At",
+      "type": "string"
+    },
+    "reboot_required": {
+      "default": false,
+      "title": "Reboot Required",
+      "type": "boolean"
+    },
+    "reboot_scheduled_for": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reboot Scheduled For"
+    },
+    "results": {
+      "items": {
+        "$ref": "#/$defs/PatchApplyOutcome"
+      },
+      "title": "Results",
+      "type": "array"
+    },
+    "user_present": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "User Present"
+    }
+  },
+  "required": [
+    "results",
+    "applied_at"
+  ],
+  "title": "PatchApplyResult",
+  "type": "object"
+}

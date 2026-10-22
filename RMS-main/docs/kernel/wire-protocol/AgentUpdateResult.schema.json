@@ -1,0 +1,71 @@
+{
+  "description": "agent -> server: the outcome, reported by whichever process finished.\n\n`updated`/`already_current` arrive as `succeeded`; `rolled_back`/`aborted`\nas `failed` (spec \u00a73.1). `JobResultMsg.state` is not widened.",
+  "properties": {
+    "from_version": {
+      "title": "From Version",
+      "type": "string"
+    },
+    "outcome": {
+      "enum": [
+        "updated",
+        "already_current",
+        "rolled_back",
+        "aborted"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Stable token (spec \u00a74.4).",
+      "title": "Reason"
+    },
+    "sha256": {
+      "description": "Digest of the binary now running.",
+      "title": "Sha256",
+      "type": "string"
+    },
+    "signature": {
+      "anyOf": [
+        {
+          "enum": [
+            "verified",
+            "not_required"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Signature"
+    },
+    "starts": {
+      "default": 0,
+      "description": "Starts of the new binary during trial.",
+      "title": "Starts",
+      "type": "integer"
+    },
+    "to_version": {
+      "title": "To Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "outcome",
+    "from_version",
+    "to_version",
+    "sha256"
+  ],
+  "title": "AgentUpdateResult",
+  "type": "object"
+}

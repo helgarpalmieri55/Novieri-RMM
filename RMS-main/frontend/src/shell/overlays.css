@@ -1,0 +1,198 @@
+/* Overlay component styles: `.overlay`, `.drawer*`, `.modal*`, `.palette*`,
+ * `.toast*` and `.close-btn` (Drawer, Dialog/ConfirmDialog, CommandPalette,
+ * Toaster).
+ *
+ * WHAT IS v3's AND WHAT IS NOT. `docs/design/itms-prototype-v3.html` has no
+ * overlay of any kind -- no drawer, no modal, no palette, no toast -- so these
+ * rules are the console's own, repainted in v3's vocabulary (task A3,
+ * 2026-09-07): `--surface` grounds, `--line` hairlines, the 6 / 10 / 999
+ * radius ladder, the type ramp, `--shadow`, and the severity family for the
+ * toast tones. The toast keeps its dark ground and paints it with the rail's
+ * tokens, which is the one dark ground the palette has.
+ *
+ * `.overlay`, `.modal`, `.modal.open`, `.modal-head`, `.modal-title`,
+ * `.modal-body` AND `.close-btn` ARE TRANSCRIBED, declaration for declaration,
+ * from the block task A4 added to v3 (the design file carries them since
+ * 2026-09-07; `src/test/base-styles.test.ts` is the guard that reads both
+ * sides, and A4 re-points it at v3). The drawer's head, title and foot keep
+ * rules of their own so the modal's stay a clean transcription.
+ */
+
+.overlay { position: fixed; inset: 0; z-index: 70; display: none; background: var(--scrim); }
+.overlay.open { display: block; }
+.drawer {
+      position: fixed;
+      top: 0; right: 0; bottom: 0;
+      z-index: 90;
+      width: min(620px, 92vw);
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      border-left: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      transform: translateX(102%);
+      transition: transform .22s ease;
+}
+.drawer.open { transform: translateX(0); }
+.drawer-head { min-height: 66px; padding: 14px 18px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line);
+}
+/* The ramp's h2 at v3's heading weight. */
+.drawer-title { font-size: var(--t-h2); font-weight: 600;
+}
+.drawer-body { padding: 18px; overflow-y: auto; flex: 1;
+}
+.drawer-foot, .modal-foot { padding: 13px 18px; display: flex; justify-content: flex-end; gap: 9px; border-top: 1px solid var(--line); background: var(--surface-2);
+}
+/* v3 `.close-btn`, transcribed. The hover and ring are the console's, in the
+ * same vocabulary as every other control's. */
+.close-btn { margin-left: auto; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--line-control); background: var(--surface); border-radius: var(--r-ctl); color: var(--ink-2); }
+.close-btn:hover { background: var(--accent-s); border-color: var(--muted);
+}
+.close-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+/* v3 `.modal` family, transcribed. */
+.modal { position: fixed; inset: 50% auto auto 50%; z-index: 95; width: min(640px, 92vw); max-height: 88vh; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow); opacity: 0; pointer-events: none; transform: translate(-50%, -47%) scale(.98); transition: opacity .15s, transform .15s; }
+.modal.open { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+.modal-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.modal-title { font-size: var(--t-h2); font-weight: 600; }
+.modal-body { padding: 18px; overflow-y: auto; }
+
+/* ANCHORED TO THE TOP BAR'S FIELD, NOT CENTRED ON THE VIEWPORT.
+ *
+ * "The search bar is a pop-up, it shouldn't be like that" -- the operator, so
+ * the panel hangs off `.topbar-find` (shell.css) and takes its width from the
+ * field it belongs to. `.picker-list` in components.css is the same three
+ * lines for the same reason; this console already had the pattern. Panel
+ * radius, hairline and shadow are v3's `.panel`. */
+.palette {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      right: 0;
+      z-index: 100;
+      max-height: 72vh;
+      display: none;
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--r-panel);
+      box-shadow: var(--shadow);
+}
+.palette.open { display: block; }
+/* ON A HANDSET THE PANEL ANCHORS TO THE VIEWPORT, not to a 36px box. The
+ * collapsed field expands on focus, so `left: 0; right: 0` would still be
+ * measured against a wrapper that is mid-flex; pinning it to the screen puts
+ * the results where a person can read them and keeps the top bar's own
+ * geometry out of it. */
+@media (max-width: 640px) {
+  .palette { position: fixed; top: 56px; left: 8px; right: 8px; width: auto; }
+}
+.palette-results { max-height: 58vh; overflow-y: auto; padding: 8px;
+}
+.palette-item { width: 100%; min-height: 44px; padding: 0 10px; display: flex; align-items: center; gap: 11px; border: 0; border-radius: var(--r-ctl); background: transparent; color: var(--ink); text-align: left; font-size: var(--t-body);
+}
+/* The selected row is v3's info pill pair: accent on its wash (5.03:1). */
+.palette-item:hover, .palette-item.active { background: var(--accent-s); color: var(--accent);
+}
+.palette-item .meta { margin-left: auto; color: var(--muted); font-size: var(--t-sm);
+}
+/* The result's two lines, on the ramp where the guard can see them. */
+.palette-label { display: block; font-size: var(--t-body); font-weight: 500; }
+.palette-sub { display: block; margin-top: 2px; color: var(--muted); font-size: var(--t-sm); }
+/* While records are still being looked up for the query. */
+.palette-status { margin: 0; padding: 12px 10px; color: var(--muted); font-size: var(--t-sm); }
+
+/* --- Find or Ask: the assistant hand-off in the palette -------------------
+ *
+ * A SEARCH BOX IS WHERE SOMEBODY ARRIVES HOLDING A QUESTION, and half of
+ * those questions are not lookups. "Which machines missed last night's patch
+ * window" matches no record by construction; this row is the other door.
+ *
+ * PINNED ABOVE THE RESULTS, not mixed into them: it is a different kind of
+ * thing from a device or a ticket, and sorting it among them would make its
+ * position depend on what you typed. Drawn on `--surface-2` with the accent
+ * as the glyph's ground, so it reads as an offer rather than as a result. */
+.palette-ask {
+  width: 100%;
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  text-align: left;
+}
+.palette-ask:hover,
+.palette-ask:focus-visible {
+  background: var(--accent-s);
+}
+.palette-ask:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.palette-ask-icon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-ctl);
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+.palette-ask-copy { min-width: 0; flex: 1; display: block; }
+.palette-ask-copy strong { display: block; font-size: var(--t-body); font-weight: 500; }
+.palette-ask-query {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--t-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.palette-ask-go { flex: 0 0 auto; color: var(--accent); }
+
+/* --- Toasts -----------------------------------------------------------------
+ *
+ * The one dark surface outside the rail, so it is painted with the rail's
+ * tokens: `--rail` ground, `--rail-2` edge and hover, `--rail-ink` secondary
+ * text (7.85:1 on `--rail`). The icon tile takes the severity family's
+ * FILL with white on it -- `--sev-ok` 6.13:1, `--sev-crit` 6.11:1, `--accent`
+ * 5.81:1 -- rather than a tinted wash a dark ground would swallow. */
+.toast-stack { position: fixed; z-index: 110; right: 22px; bottom: 22px; display: flex; flex-direction: column; gap: 9px;
+}
+.toast { min-width: 310px; max-width: 430px; padding: 12px 13px; display: flex; gap: 10px; align-items: flex-start; color: #fff; background: var(--rail); border: 1px solid var(--rail-2); border-radius: var(--r-panel); box-shadow: var(--shadow); animation: toastIn .22s ease;
+}
+@keyframes toastIn { from { opacity: 0; transform: translateY(12px); } }
+.toast-icon { width: 24px; height: 24px; display: grid; place-items: center; flex: 0 0 auto; color: #fff; background: var(--sev-ok); border-radius: var(--r-ctl);
+}
+.toast-title { font-size: var(--t-body); font-weight: 600;
+}
+.toast-copy { margin-top: 2px; color: var(--rail-ink); font-size: var(--t-sm);
+}
+/* The error and info tones and the dismiss control (Toaster.tsx). The dismiss
+ * is sized and coloured for the dark toast rather than borrowing `.close-btn`,
+ * which is a bordered white square built for the light drawer chrome. */
+.toast-icon.red { color: #fff; background: var(--sev-crit);
+}
+.toast-icon.info { color: #fff; background: var(--accent);
+}
+.toast-dismiss {
+      margin-left: auto;
+      align-self: flex-start;
+      flex: 0 0 auto;
+      width: 20px; height: 20px;
+      display: grid; place-items: center;
+      border: 0; border-radius: var(--r-ctl);
+      background: transparent;
+      color: var(--rail-ink);
+}
+/* No `:focus-visible` outline of its own: the boundary guard in
+ * `contrast.test.ts` grades every declared ring against the three LIGHT
+ * control surfaces, and no permitted token clears 3:1 on this dark ground,
+ * while white (17:1 here) is not a permitted ring token. The browser's own
+ * focus ring, which it draws in a contrasting colour, is what this control
+ * had before the port and keeps. */
+.toast-dismiss:hover { background: var(--rail-2); color: #fff;
+}

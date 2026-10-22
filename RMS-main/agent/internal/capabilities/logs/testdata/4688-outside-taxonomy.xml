@@ -1,0 +1,15 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Security-Auditing"/>
+    <EventID>4688</EventID>
+    <TimeCreated SystemTime="2026-07-18T09:12:04.0000000Z"/>
+    <EventRecordID>184394</EventRecordID>
+    <Channel>Security</Channel>
+    <Computer>WS-0142.corp.toeshee.local</Computer>
+  </System>
+  <EventData>
+    <Data Name="SubjectUserName">jsmith</Data>
+    <Data Name="NewProcessName">C:\Windows\System32\cmd.exe</Data>
+    <Data Name="CommandLine">cmd.exe /c net user administrator Passw0rd!23</Data>
+  </EventData>
+</Event>

@@ -1,0 +1,42 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "kind": {
+      "const": "job_log",
+      "title": "Kind",
+      "type": "string"
+    },
+    "level": {
+      "default": "info",
+      "enum": [
+        "debug",
+        "info",
+        "warn",
+        "error"
+      ],
+      "title": "Level",
+      "type": "string"
+    },
+    "msg": {
+      "title": "Msg",
+      "type": "string"
+    },
+    "v": {
+      "const": 1,
+      "title": "V",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "kind",
+    "job_id",
+    "msg"
+  ],
+  "title": "JobLogMsg",
+  "type": "object"
+}

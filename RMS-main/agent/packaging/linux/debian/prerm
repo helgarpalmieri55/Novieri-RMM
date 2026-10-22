@@ -1,0 +1,21 @@
+#!/bin/sh
+# its-agent prerm — stop the service before its binary is removed.
+set -e
+
+SERVICE=its-agent.service
+
+case "$1" in
+  remove|deconfigure)
+    if [ -d /run/systemd/system ]; then
+      systemctl stop "$SERVICE" || true
+      systemctl disable "$SERVICE" >/dev/null 2>&1 || true
+    fi
+    ;;
+  upgrade)
+    # Left running: postinst restarts it after the new binary is in place, so an
+    # upgrade is a restart rather than a window where the fleet is dark.
+    ;;
+  failed-upgrade) ;;
+esac
+
+exit 0

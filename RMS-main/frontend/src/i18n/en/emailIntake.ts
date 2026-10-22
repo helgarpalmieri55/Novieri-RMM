@@ -1,0 +1,193 @@
+/**
+ * Email intake: the mailboxes mail is read from, the Microsoft 365 connection,
+ * the log of inbound messages and the page Microsoft returns the browser to.
+ * Mailbox addresses, hosts, folders, sender addresses, subjects, message text
+ * and the server's own error text (`last_error`, a test's `detail`) are
+ * recorded data and are never catalogued. The disposition labels live in
+ * `enums.Disposition`.
+ */
+export const emailIntake = {
+  common: { loading: "Loading…" },
+  prerequisites: {
+    title: "Before mail can become tickets",
+    subtitle: "What the service desk and Settings need to hold for a mailbox to raise tickets.",
+    categoryLabel: "A ticket category exists",
+    categoryDone: {
+      one: "{count} ticket category exists for mail to land in.",
+      other: "{count} ticket categories exist for mail to land in.",
+    },
+    categoryMissing:
+      "Every mailbox files its tickets under a category, and none exists yet, so no mailbox can be set up.",
+    categoryCta: "Create a category",
+    senderLabel: "The people writing in are users here",
+    senderDone: "No recent message was held back for coming from someone who is not a user here.",
+    senderMissing: {
+      one: "Mail from {count} address that is not a user here was held back instead of becoming a ticket. The message log below lists it. If they are your people, add them as users.",
+      other:
+        "Mail from {count} addresses that are not a user here was held back instead of becoming a ticket. The message log below lists them. If they are your people, add them as users.",
+    },
+    senderCta: "Add these senders as users",
+  },
+  admin: {
+    title: "Email intake",
+    description: "Mail to the support address becomes a ticket; replies thread back.",
+    mailboxesLabel: "Mailboxes configured",
+    mailboxesZero: "none configured, so no mail is polled",
+    polling: { one: "{count} polling", other: "{count} polling" },
+    switchedOff: { one: "{count} switched off", other: "{count} switched off" },
+    errorsLabel: "Mailboxes reporting errors",
+    errorsZero: "every mailbox polling cleanly",
+    errorsFoot: { one: "{errors} of {count} configured", other: "{errors} of {count} configured" },
+    messagesLabel: "Messages in scope",
+    messagesZero: "nothing received yet",
+    listedBelow: { one: "{count} of them listed below", other: "{count} of them listed below" },
+    reachedTicket: { one: "{count} reached a ticket", other: "{count} reached a ticket" },
+    heldBack: { one: "{count} held back", other: "{count} held back" },
+    quarantinedLabel: "Quarantined",
+    quarantinedZero: "nothing quarantined",
+    quarantinedFoot: { one: "{quarantined} of {count} messages", other: "{quarantined} of {count} messages" },
+  },
+  mailboxes: {
+    title: "Mailboxes",
+    subtitle: "The platform checks each address for new mail every few minutes.",
+    add: "Add mailbox",
+    forbidden: "Mailboxes not available (insufficient permissions).",
+    failed: "Mailboxes did not load. {reason}",
+    colAddress: "Address",
+    colStatus: "Status",
+    colCredentials: "Credentials",
+    colLastPolled: "Last polled",
+    implicitTls: "Implicit TLS",
+    starttls: "STARTTLS",
+    notConnected: "Not connected",
+    signInExpired: "Microsoft sign-in expired",
+    connected: "Connected",
+    connect: "Connect with Microsoft",
+    reconnect: "Reconnect",
+    disconnect: "Disconnect",
+    actionAria: "{action}: {address}",
+    microsoft365: "Microsoft 365",
+    credentialSet: "Set",
+    credentialNotSet: "Not set",
+    noErrorRecorded: "No error recorded",
+    edit: "Edit",
+    editAria: "Edit {address}",
+    test: "Test",
+    testing: "Testing…",
+    testAria: "Test {address}",
+    delete: "Delete",
+    empty: "No mailboxes configured.",
+    startFailed: "Could not start the Microsoft sign-in. {reason}",
+    disconnectFailed: "The mailbox was not disconnected. {reason}",
+    deleteFailed: "The mailbox was not deleted. {reason}",
+    disconnectTitle: "Disconnect from Microsoft",
+    disconnectBody:
+      "The saved Microsoft sign-in is deleted and the mailbox is switched off, so its mail stops becoming tickets. Nothing falls back to a password. Connect with Microsoft again to resume.",
+    deleteTitle: "Delete mailbox",
+    deleteBody:
+      "The mailbox, its stored password and every inbound message recorded for it are deleted permanently. Tickets already created from them remain. This cannot be undone; clear Active instead to stop polling.",
+    deleteConfirm: "Delete mailbox",
+  },
+  form: {
+    addTitle: "Add mailbox",
+    editTitle: "Edit mailbox",
+    signIn: "Sign-in",
+    password: "Password",
+    microsoft365: "Microsoft 365",
+    switchingHint:
+      "Saving removes the saved password. The mailbox stays switched off until you connect it with Connect with Microsoft.",
+    microsoftHint:
+      "After saving, use Connect with Microsoft on the mailbox list and sign in as this mailbox. It stays switched off until then.",
+    address: "Address",
+    addressPlaceholder: "helpdesk@acme.test",
+    host: "IMAP host",
+    port: "Port",
+    transport: "Transport",
+    implicitOption: "Implicit TLS (993)",
+    starttlsOption: "STARTTLS (143)",
+    transportHint:
+      "Both transports verify the server certificate and refuse to send the password if verification fails or STARTTLS is unavailable.",
+    folder: "Folder",
+    username: "Username",
+    passwordConfigured:
+      "Password: configured. It is held in the vault and is never returned by the API. Leave this blank to keep it.",
+    passwordNotConfigured:
+      "Password: not configured. It is held in the vault and is never returned by the API. Leave this blank to keep it.",
+    newPassword: "New password",
+    defaultCategory: "Default category",
+    categoryId: "Category ID",
+    categorySublabel: "ticket category",
+    categoryEmpty:
+      "No ticket categories exist yet. Create one under Service desk → Admin → Categories, then choose it here.",
+    categoryPlaceholder: "Search categories…",
+    categoryHint:
+      "Inbound tickets land in this category, and in the queue that category defaults to. A category with no default queue quarantines every message.",
+    reopenWindow: "Reopen window (days)",
+    badAddress: "Address must be an email address such as {example}; \"{value}\" is not one",
+    badPort: "Port must be a whole number; \"{value}\" is not one",
+    portRange: "Port must be between 1 and 65535; {port} is not",
+    badReopen: "Reopen window (days) must be a whole number of days; \"{value}\" is not one",
+    reopenRange: "Reopen window (days) must be between 1 and 3650; {days} is not",
+  },
+  microsoft: {
+    title: "Microsoft 365 connection",
+    subtitle: "The Azure app that Microsoft 365 mailboxes sign in through.",
+    switchedOff:
+      "Connect with Microsoft is switched off on this server: the address people open this console at has not been set. Someone with server access has to set it.",
+    adminNeeds: "What the server administrator needs to set",
+    adminSteps:
+      "<code>ITS_PUBLIC_CONSOLE_URL</code> in the server's .env, set to the https address of this console, then restart the stack.",
+    tenant: "Directory (tenant) ID",
+    tenantHelp: "From the Azure app's Overview page.",
+    tenantPlaceholder: "contoso.onmicrosoft.com",
+    client: "Application (client) ID",
+    clientHelp: "From the same Overview page.",
+    secret: "Client secret",
+    secretHelpSet:
+      "Client secret: set. Leave the box blank to keep it. It is stored encrypted and this console can never show it to you.",
+    secretHelpNotSet:
+      "Client secret: not set. It is stored encrypted and this console can never show it to you.",
+    returnAddress: "Return address to register in Azure",
+    returnHelp: "Add this exact address in the Azure app under Authentication → Web → Redirect URIs.",
+    save: "Save Microsoft 365 connection",
+  },
+  messages: {
+    title: "Inbound messages",
+    subtitle: "What each message became, in the order this platform recorded it.",
+    quarantinedCount: "Quarantined count",
+    quarantined: { one: "{count} quarantined", other: "{count} quarantined" },
+    inScope: "in this scope",
+    filterAria: "Filter by disposition",
+    allDispositions: "All dispositions",
+    showing: {
+      one: "Showing {shown} of {count} matching messages.",
+      other: "Showing {shown} of {count} matching messages.",
+    },
+    forbidden: "Messages not available (insufficient permissions).",
+    failed: "Messages did not load. {reason}",
+    colMessage: "Message",
+    colDisposition: "Disposition",
+    colRecorded: "Recorded",
+    colTicket: "Ticket",
+    noText: "No message text",
+    truncated: "Truncated (4 KiB excerpt)",
+    noReason: "No reason recorded",
+    openTicket: "Open ticket",
+    openTicketAria: "Open the ticket for {subject}",
+    noTicket: "No ticket",
+    empty: "No messages recorded.",
+  },
+  oauth: {
+    title: "Microsoft 365 sign-in",
+    working: "Finishing the Microsoft sign-in…",
+    connected:
+      "Connected. Switch the mailbox on in Email intake when you are ready for its mail to become tickets.",
+    connectedAs:
+      "Connected as {address}. Switch the mailbox on in Email intake when you are ready for its mail to become tickets.",
+    cancelled:
+      "The Microsoft sign-in was not completed, so nothing changed. You can start it again from Email intake.",
+    failed: "Not connected. {reason}",
+    notStarted: "This page was not opened by a Microsoft sign-in this console started.",
+    back: "Back to Email intake",
+  },
+} as const;

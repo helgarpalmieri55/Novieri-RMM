@@ -1,0 +1,42 @@
+{
+  "additionalProperties": false,
+  "description": "agent -> server: what the push did, carrying no secret (invariant #3).\n\n`enrolled` is the endpoint's own statement that it began the ordinary\nenrolment with the delivered token; the DEVICE IDENTITY is issued only by\nthe enrolment path to a keypair the target generated itself (\u00a77.1), never\nminted here.",
+  "properties": {
+    "arch_detected": {
+      "default": "",
+      "title": "Arch Detected",
+      "type": "string"
+    },
+    "detail": {
+      "default": "",
+      "title": "Detail",
+      "type": "string"
+    },
+    "os_detected": {
+      "default": "",
+      "title": "Os Detected",
+      "type": "string"
+    },
+    "outcome": {
+      "enum": [
+        "installed",
+        "os_mismatch",
+        "unreachable",
+        "auth_failed",
+        "failed"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "target_address": {
+      "title": "Target Address",
+      "type": "string"
+    }
+  },
+  "required": [
+    "target_address",
+    "outcome"
+  ],
+  "title": "AgentPushInstallResult",
+  "type": "object"
+}

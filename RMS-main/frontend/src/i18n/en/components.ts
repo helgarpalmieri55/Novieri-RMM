@@ -1,0 +1,70 @@
+export const components = {
+  ui: {
+    actions: "Actions",
+    scrollForMore: "Scroll for more columns",
+  },
+  confirm: {
+    typeToConfirm: "Type <strong>{subject}</strong> to confirm",
+  },
+  attributes: {
+    yes: "Yes",
+    no: "No",
+    viewRaw: "View raw",
+  },
+  picker: {
+    search: "Search…",
+    loading: "Loading…",
+    noMatch: "No match.",
+  },
+  rowMenu: {
+    moreActionsFor: "More actions for {subject}",
+    moreActions: "More actions",
+    actionsFor: "Actions for {subject}",
+  },
+  duration: {
+    unit: "Unit",
+    seconds: "seconds",
+    minutes: "minutes",
+    hours: "hours",
+    days: "days",
+  },
+  chart: {
+    category: "Category",
+  },
+  prerequisites: {
+    checking: "Checking…",
+    cannotCheckNeeds: "This cannot be checked from this account: it needs {permissions}.",
+    cannotCheck: "This cannot be checked from this account.",
+    couldNotCheck: "This could not be checked. {reason}",
+  },
+  weekPainter: {
+    day: {
+      sunday: "Sunday",
+      monday: "Monday",
+      tuesday: "Tuesday",
+      wednesday: "Wednesday",
+      thursday: "Thursday",
+      friday: "Friday",
+      saturday: "Saturday",
+    },
+    dayShort: {
+      sunday: "Sun",
+      monday: "Mon",
+      tuesday: "Tue",
+      wednesday: "Wed",
+      thursday: "Thu",
+      friday: "Fri",
+      saturday: "Sat",
+    },
+    dayColumn: "Day",
+    rangeTo: "{from} to {to}",
+    and: "and",
+    nothingSelected: "Nothing selected. Paint the hours the window should open, or leave it empty for always.",
+    custom: "Custom expression: the grid cannot draw it. Edit it under Advanced.",
+    selected: "Selected: {summary}.",
+    advanced: "Advanced",
+    cronExpression: "Cron expression",
+    cronHelp:
+      "Five fields: minute, hour, day of month, month, day of week. The grid draws expressions whose minute is 0 and whose day of month and month are both *.",
+  },
+} as const;

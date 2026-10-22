@@ -1,0 +1,70 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "default": 1,
+      "title": "Format",
+      "type": "integer"
+    },
+    "manifest_ref": {
+      "title": "Manifest Ref",
+      "type": "string"
+    },
+    "mode": {
+      "enum": [
+        "restore",
+        "verify"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "repo_key": {
+      "title": "Repo Key",
+      "type": "string"
+    },
+    "repository_id": {
+      "title": "Repository Id",
+      "type": "string"
+    },
+    "restore_kind": {
+      "anyOf": [
+        {
+          "const": "files",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Restore Kind"
+    },
+    "selection": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Selection",
+      "type": "array"
+    },
+    "storage_ref": {
+      "title": "Storage Ref",
+      "type": "string"
+    },
+    "target": {
+      "additionalProperties": true,
+      "title": "Target",
+      "type": "object"
+    }
+  },
+  "required": [
+    "repository_id",
+    "storage_ref",
+    "manifest_ref",
+    "selection",
+    "target",
+    "mode",
+    "repo_key"
+  ],
+  "title": "BackupRestoreParams",
+  "type": "object"
+}

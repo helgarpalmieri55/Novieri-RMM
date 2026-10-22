@@ -1,0 +1,60 @@
+{
+  "additionalProperties": false,
+  "description": "agent -> server: what the key exchange revealed, and nothing else.\n\nCarries no secret, because the probe presented none. `host_key_fingerprint`\nis pinned on the asset row for the operator to confirm before a push.",
+  "properties": {
+    "banner": {
+      "default": "",
+      "description": "The server's identification string (ssh).",
+      "title": "Banner",
+      "type": "string"
+    },
+    "host_key_fingerprint": {
+      "default": "",
+      "description": "SHA256:... of the SSH host key; empty for winrm.",
+      "title": "Host Key Fingerprint",
+      "type": "string"
+    },
+    "host_key_type": {
+      "default": "",
+      "description": "e.g. ssh-ed25519; empty for winrm.",
+      "title": "Host Key Type",
+      "type": "string"
+    },
+    "kdc_reachable": {
+      "default": false,
+      "description": "A KDC for the realm answered from the site server (winrm).",
+      "title": "Kdc Reachable",
+      "type": "boolean"
+    },
+    "target_address": {
+      "title": "Target Address",
+      "type": "string"
+    },
+    "transport": {
+      "enum": [
+        "ssh",
+        "winrm"
+      ],
+      "title": "Transport",
+      "type": "string"
+    },
+    "winrm_http": {
+      "default": false,
+      "description": "5985 answered (winrm).",
+      "title": "Winrm Http",
+      "type": "boolean"
+    },
+    "winrm_https": {
+      "default": false,
+      "description": "5986 answered (winrm).",
+      "title": "Winrm Https",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "target_address",
+    "transport"
+  ],
+  "title": "AgentPushProbeResult",
+  "type": "object"
+}

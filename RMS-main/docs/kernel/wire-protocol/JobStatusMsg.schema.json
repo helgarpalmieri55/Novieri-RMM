@@ -1,0 +1,33 @@
+{
+  "additionalProperties": false,
+  "description": "agent -> server: state transition (running).",
+  "properties": {
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "kind": {
+      "const": "job_status",
+      "title": "Kind",
+      "type": "string"
+    },
+    "state": {
+      "const": "running",
+      "title": "State",
+      "type": "string"
+    },
+    "v": {
+      "const": 1,
+      "title": "V",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "kind",
+    "job_id",
+    "state"
+  ],
+  "title": "JobStatusMsg",
+  "type": "object"
+}

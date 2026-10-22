@@ -1,0 +1,839 @@
+/* ITMS login theme, on the v3 design.
+ *
+ * === WHY THE TOKENS ARE COPIED AND NOT IMPORTED ==========================
+ *
+ * Keycloak serves this stylesheet from its own container, on its own origin,
+ * out of a bind-mounted directory. It CANNOT reach `frontend/src/index.css`:
+ * different process, different origin, different deploy unit. There is no
+ * import that would work and no build step here to inline one. So the values
+ * in the `:root` below are DUPLICATED BY NECESSITY, transcribed from the
+ * console's token block, which is itself transcribed from
+ * `docs/design/itms-prototype-v3.html` (operator approved 2026-09-07), the
+ * authority for all of them.
+ *
+ * THE COPY IS PINNED, NOT REMEMBERED. `backend/tests/test_console_auth_realm.py`
+ * parses this `:root` and the FIRST `:root` of `frontend/src/index.css` and
+ * requires every token declared here to exist there under the same name at
+ * exactly the same value; it also requires every token copied here to be
+ * painted by some rule below, so an unused copy cannot sit here and drift.
+ * Move a value in the design file, transcribe it to the console, and this
+ * file goes red until it is transcribed here too, in the same commit.
+ *
+ * WHAT v3 CHANGED ON THIS PAGE. One accent (`--accent`) where there were two;
+ * the magenta is retired and nothing here names it. Five type sizes
+ * (`--t-h1..--t-cap`), three radii (`--r-ctl`, `--r-panel`, `--r-pill`), one
+ * shadow. The button, the field, the notice and the pill are the console
+ * kit's shapes (`frontend/src/shell/components.css`: `.btn`, `.inp`,
+ * `.notice`, `.pill`) transcribed onto Keycloak's markup, so the first screen
+ * an operator sees is drawn from the same kit as the console it signs them
+ * in to.
+ *
+ * NONE OF THE RATIOS IN THIS FILE ARE TRANSCRIBED. The test above computes
+ * every pair the page paints against its WCAG floor: 4.5:1 for text (SC
+ * 1.4.3), 3:1 for a control boundary or a focus ring (SC 1.4.11). It also
+ * measures the two refusals this page rests on -- that the accent is not
+ * text on the dark field, and that the decorative hairlines are not a
+ * control's boundary -- and asserts they still fail and are still unused.
+ *
+ * === THE PAGE =============================================================
+ *
+ * One card on the rail's own dark ground. The rail becoming the whole
+ * background is what ties sign-in to the console: the first surface of the
+ * product is the surface the product is built on. Above the card everything
+ * is light-on-dark and uses the rail's text tones; inside it everything is
+ * the console's page.
+ *
+ * INTER IS SELF-HOSTED HERE TOO. The console ships the font from its own
+ * bundle (`frontend/src/fonts.css`); a theme that merely NAMED Inter would
+ * fall through to the system font on every machine without it installed, so
+ * the login page would look like a different product to exactly the people
+ * who never installed it. Only the LATIN subset is copied: this page renders
+ * UI copy and an email address. The OFL license ships beside the font.
+ */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("../fonts/inter-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+:root {
+  /* --- copied from the first `:root` of frontend/src/index.css ---------- */
+  --t-h1: 22px;
+  --t-h2: 15px;
+  --t-body: 13.5px;
+  --t-sm: 12px;
+  --r-ctl: 6px;
+  --r-panel: 10px;
+  --r-pill: 999px;
+  --surface: #ffffff;
+  --surface-2: #f9fafc;
+  --ink: #141619;
+  --ink-2: #3b4048;
+  --muted: #606a7a;
+  --line: #e5e8ee;
+  --line-control: #828895;
+  --rail: #0f1a20;
+  --rail-2: #182730;
+  --rail-ink: #9db0b8;
+  --accent: #1f5fd1;
+  --accent-s: #e8effd;
+  --accent-ink: #ffffff;
+  --sev-crit: #c1182f;
+  --sev-crit-s: #fdecee;
+  --sev-warn: #9a6100;
+  --sev-warn-s: #fdf3e2;
+  --sev-ok: #17703f;
+  --sev-ok-s: #e6f6ed;
+  --shadow: 0 1px 2px rgba(15,26,32,.05),0 6px 20px rgba(15,26,32,.06);
+  --mono: ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans: Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+
+  /* --- this page only: Tabler glyphs on markup Keycloak owns ------------
+   *
+   * Keycloak's base template renders the brand block, the "try another way"
+   * link and the message box itself; this theme does not own their contents,
+   * so the glyphs on them come from CSS rather than markup. The shield is a
+   * BACKGROUND IMAGE on the brand's accent tile and carries its own white
+   * stroke, the console's `.brand-mark` (white glyph on `--accent`); the
+   * other five are masks painted in `currentColor`, where the stroke colour
+   * in the URI is ignored. The paths are Tabler's (outline, 24 grid, stroke
+   * 1.75), the same set the console draws from its sprite; the MIT notice is
+   * beside the font in `../tabler-MIT.txt`. */
+  --icon-shield-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11.46 20.846a12 12 0 0 1 -7.96 -14.846a12 12 0 0 0 8.5 -3a12 12 0 0 0 8.5 3a12 12 0 0 1 -.09 7.06'/%3E%3Cpath d='M15 19l2 2l4 -4'/%3E%3C/svg%3E");
+  --icon-key: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1 -4.069 0l-.301 -.301l-6.558 6.558a2 2 0 0 1 -1.239 .578l-.175 .008h-1.172a1 1 0 0 1 -.993 -.883l-.007 -.117v-1.172a2 2 0 0 1 .467 -1.284l.119 -.13l.414 -.414h2v-2h2v-2l2.144 -2.144l-.301 -.301a2.877 2.877 0 0 1 0 -4.069l2.643 -2.643a2.877 2.877 0 0 1 4.069 0'/%3E%3Cpath d='M15 9h.01'/%3E%3C/svg%3E");
+  --icon-circle-x: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0'/%3E%3Cpath d='M10 10l4 4m0 -4l-4 4'/%3E%3C/svg%3E");
+  --icon-alert-triangle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 9v4'/%3E%3Cpath d='M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0'/%3E%3Cpath d='M12 16h.01'/%3E%3C/svg%3E");
+  --icon-circle-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0'/%3E%3Cpath d='M9 12l2 2l4 -4'/%3E%3C/svg%3E");
+  --icon-info-circle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0'/%3E%3Cpath d='M12 9h.01'/%3E%3Cpath d='M11 12h1v4h1'/%3E%3C/svg%3E");
+}
+
+/* --- the field -------------------------------------------------------------
+ *
+ * The rail's two grounds, and nothing else: v3 has no glow and no tint. Light
+ * text is worst where the field is BRIGHTEST, so `--rail-2` -- the lighter
+ * stop -- is the ground every on-field ratio is measured against; the test
+ * reads the stops out of this rule rather than assuming them.
+ *
+ * `fixed` so a tall page (authenticator enrolment, with its QR block) scrolls
+ * the card over a still field rather than dragging the gradient with it.
+ */
+html {
+  min-height: 100%;
+  background: var(--rail);
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font: var(--t-body)/1.5 var(--sans);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 40px 24px;
+  background: linear-gradient(168deg, var(--rail) 0%, var(--rail-2) 100%);
+  background-attachment: fixed;
+  background-color: var(--rail);
+}
+
+/* --- the card --------------------------------------------------------------
+ *
+ * `#kc-content` IS the card: under `parent=base` the brand block, the page
+ * title, `#kc-username` and the locale switcher are its siblings, above it,
+ * inside the wrapper `theme.properties` names (`kcLoginClass=itms-login`).
+ * v3's panel: white, one hairline, the panel radius, the one shadow.
+ *
+ * THE WRAPPER CARRIES THE WIDTH. `body` is a grid that centres its one item,
+ * and a grid item is shrink-to-fit, so a `min(400px, 100%)` on the card
+ * itself resolves the `100%` against whatever the card's own content
+ * happens to need: the error page came out at 250px and the passkey page at
+ * 220px while sign-in was 400px, and the flow stopped reading as one
+ * product. `.itms-login` takes the width, and the card and `#kc-username`
+ * fill it.
+ *
+ * `color` is set explicitly rather than inherited. Everything ABOVE the card
+ * is light-on-dark, and a card that inherited that would be white text on a
+ * white surface -- the one failure on this page that leaves no trace in the
+ * markup.
+ */
+.itms-login {
+  width: min(400px, 100%);
+  box-sizing: border-box;
+}
+
+#kc-content {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 26px 28px 24px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  box-shadow: var(--shadow);
+}
+
+/* --- the brand block, above the card ---------------------------------------
+ *
+ * Keycloak's base layout renders the realm's display name and the page's own
+ * title ABOVE the card element, so this is CSS only: no template carries brand
+ * markup, and the wordmark stays the realm's `displayName`, converged, in one
+ * place.
+ *
+ * The console's `.brand`: the shield on a 28px accent tile at the control
+ * radius, the name beside it in white. The wordmark takes `--t-h1` because on
+ * this page it is the page's largest text; the tile keeps the console's
+ * geometry so the mark is the same mark and not a bigger cousin of it.
+ */
+#kc-header-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: var(--accent-ink);
+  font-size: var(--t-h1);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+#kc-header-wrapper::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-ctl);
+  background: var(--accent) var(--icon-shield-check) center / 16px no-repeat;
+}
+
+/* The step, under the brand. It answers "where am I in signing in" on a flow
+ * that is several pages long, and it is what each template's `header` section
+ * says. `--rail-ink` is the rail's text tone. */
+#kc-page-title {
+  margin: 0 0 18px;
+  font-size: var(--t-body);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-align: center;
+  color: var(--rail-ink);
+}
+
+/* --- the account being signed in, also above the card ----------------------
+ *
+ * Base renders this INSTEAD of `#kc-page-title` once a username is known
+ * (`auth.showUsername()`), which is every page after the first: the OTP step,
+ * the password change, the authenticator picker. It sits on the dark field,
+ * so everything in it is a light-on-dark pair.
+ */
+#kc-username {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 auto 18px;
+}
+
+#kc-attempted-username {
+  font-size: var(--t-body);
+  font-weight: 600;
+  color: var(--accent-ink);
+  word-break: break-all;
+}
+
+/* THE TWO GROUNDS RULE. The accent is 2.64:1 on `--rail-2`, so on the field
+ * it is never text: the restart link is white, and it is a link because it is
+ * underlined, not because it is blue. */
+#reset-login {
+  font-size: var(--t-sm);
+  font-weight: 500;
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+
+/* Base wraps the restart link's label in a tooltip span it positions with its
+ * own stylesheet, which this theme does not inherit. Left visible it prints
+ * the tooltip text inline beside the link. */
+#reset-login .kc-login-tooltip { display: inline; }
+
+/* --- the locale switcher ------------------------------------------------------
+ *
+ * The realm turns `internationalizationEnabled` on (English and Spanish), so
+ * base renders a dropdown ABOVE the card, onto the dark field: a button naming
+ * the current language and a menu of the others. The language is normally
+ * already right -- the console passes `ui_locales`, and a person Keycloak knows
+ * has their saved `locale` -- so this is the way to correct it, not the way to
+ * choose it, and it is kept quiet.
+ *
+ * BASE SHIPS NO STYLESHEET FOR IT, so left alone the button is the browser's
+ * grey form control and the menu is a permanently open list. The menu's
+ * script opens it by setting an inline `display: block` and closes it by
+ * removing that, which is why the rule below can simply default it to none.
+ * Colours are the page's own on-field tones: `--rail-ink` for the closed
+ * control, `--accent-ink` for the open list (both held to 4.5:1 by
+ * test_console_auth_realm.py).
+ */
+#kc-locale { display: grid; justify-items: center; margin-bottom: 12px; }
+#kc-locale-dropdown { position: relative; text-align: center; }
+#kc-locale #kc-current-locale-link {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: var(--t-sm);
+  color: var(--rail-ink);
+  cursor: pointer;
+}
+#kc-locale ul { display: none; list-style: none; margin: 6px 0 0; padding: 0; }
+#kc-locale li a { color: var(--accent-ink); font-size: var(--t-sm); text-decoration: underline; }
+
+/* --- the form ------------------------------------------------------------- */
+
+.itms-form {
+  display: block;
+  margin: 0;
+}
+
+/* v3 `.field`: 16px below, the label at `--t-sm`/500 in ink, 5px above the
+ * control, help at `--t-sm` in muted 5px below it. */
+.itms-field {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.itms-field label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: var(--t-sm);
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.itms-input {
+  position: relative;
+  display: block;
+}
+
+/* Vertically centred, and `pointer-events: none` so the icon never eats a
+ * click meant for the field it decorates. */
+.itms-input-icon {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/* v3 `.inp`: white, one control-grey boundary, the control radius, 36px tall.
+ * `--line-control` is the boundary that identifies a control (SC 1.4.11,
+ * 3:1); the hairlines are decorative and never draw one. Focus is the
+ * console's: the boundary turns accent and a 2px accent ring sits 1px out. */
+.itms-field input,
+.itms-field select {
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  box-sizing: border-box;
+  border: 1px solid var(--line-control);
+  border-radius: var(--r-ctl);
+  padding: 8px 11px;
+  background: var(--surface);
+  font: inherit;
+  color: var(--ink);
+  caret-color: var(--accent);
+}
+
+.itms-field input:focus,
+.itms-field select:focus { border-color: var(--accent); }
+
+/* The ring, scoped to the card by selector and not only by circumstance: the
+ * guard at the foot of this file refuses any accent outline whose selector
+ * does not begin with `#kc-content`, and a field only ever renders inside it. */
+#kc-content .itms-field input:focus,
+#kc-content .itms-field select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.itms-field input::placeholder { color: var(--muted); }
+
+/* AFTER `.itms-field input`, AND THAT IS THE WHOLE MECHANISM.
+ *
+ * Both selectors are (0,1,1), so source order decides, and `.itms-field
+ * input` sets the padding SHORTHAND, which rewrites `padding-left`. Declared
+ * before it, this rule lost every time and the icon sat on the first typed
+ * character. Not every field carries an icon (the OTP enrolment page has
+ * none), so the room for one is made here and not in the shared rule. */
+.itms-input input {
+  width: 100%;
+  padding-left: 36px;
+  box-sizing: border-box;
+}
+
+/* --- buttons ---------------------------------------------------------------
+ *
+ * v3 `.btn`, full width: 500 at `--t-body`, `9px 13px`, the control radius,
+ * one 1px boundary. `.itms-primary` is `.btn.pri` (accent fill, white label,
+ * accent edge); the secondary controls below are `.btn` (white, control-grey
+ * edge, ink). The focus ring sits 2px OUTSIDE the button, on the card: drawn
+ * against the primary's own fill it would be accent on accent, 1:1.
+ *
+ * `#authenticateWebAuthnButton` is base's id for the passkey button on the
+ * one page this theme does not template (`webauthn-authenticate.ftl`, which
+ * would mean owning base's WebAuthn JavaScript to change a button's colour).
+ * It takes the primary treatment because on that page the passkey is the
+ * action the page exists for, exactly as Sign in is on the password page.
+ */
+.itms-primary,
+#authenticateWebAuthnButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 36px;
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: 9px 13px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-ctl);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: 500 var(--t-body)/1 var(--sans);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.itms-primary:active,
+#authenticateWebAuthnButton:active { transform: translateY(1px); }
+
+/* The one link on the card, in the accent, at body size. */
+.itms-secondary-link {
+  display: inline-block;
+  margin-top: 14px;
+  font-size: var(--t-body);
+  font-weight: 500;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.itms-secondary-link:hover { text-decoration: underline; }
+
+.itms-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0 16px;
+  color: var(--muted);
+  font-size: var(--t-sm);
+  text-transform: lowercase;
+}
+
+.itms-divider::before,
+.itms-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.itms-social {
+  display: grid;
+  gap: 10px;
+}
+
+/* --- the secondary controls ------------------------------------------------
+ *
+ * The identity-provider buttons, "try another way", the cancel button and the
+ * authenticator options are all the same object: v3's secondary `.btn`, full
+ * width. Hover is the console's -- the ground goes tinted AND the edge
+ * hardens to `--ink-2`, because a ground wash alone (1.02:1) is a change the
+ * eye does not register.
+ */
+.itms-social-link,
+.itms-alt,
+#try-another-way,
+.itms-authenticator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding: 9px 13px;
+  border: 1px solid var(--line-control);
+  border-radius: var(--r-ctl);
+  background: var(--surface);
+  color: var(--ink);
+  font: 500 var(--t-body)/1 var(--sans);
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.itms-social-link:hover,
+.itms-alt:hover,
+#try-another-way:hover,
+.itms-authenticator:hover {
+  background: var(--surface-2);
+  border-color: var(--ink-2);
+}
+
+.itms-social-link:active,
+.itms-alt:active,
+#try-another-way:active,
+.itms-authenticator:active { transform: translateY(1px); }
+
+.itms-alt { margin-top: 10px; }
+.itms-alt svg { width: 16px; height: 16px; }
+
+/* Base renders this control itself, after the form, whenever the flow has
+ * another execution to offer -- which on this deployment is the passkey. The
+ * theme deliberately renders no second one of its own. */
+#kc-select-try-another-way-form { margin: 10px 0 0; }
+
+/* The key, as a mask rather than markup, because the anchor is base's. A
+ * browser without mask support simply gets the label, which is the whole
+ * meaning anyway. */
+#try-another-way::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  -webkit-mask: var(--icon-key) center / contain no-repeat;
+  mask: var(--icon-key) center / contain no-repeat;
+}
+
+/* --- feedback --------------------------------------------------------------
+ *
+ * Keycloak's own message block, and the per-field errors the templates emit.
+ * v3 `.notice`: a bordered box on the kind's wash carrying the kind's ink, at
+ * body size, with the kind's icon first so colour is never the only carrier.
+ * Base's markup reserves an icon slot (`.pf-c-alert__icon`) that this theme
+ * leaves empty and hides; the glyph is a mask on the box itself.
+ *
+ * The per-field ids are `input-error-otp-code`, `input-error-otp-label`,
+ * `input-error-password` and `input-error-password-confirm` -- NOT
+ * `input-error` -- so the prefix selector is what covers them.
+ */
+.alert-error,
+.alert-info,
+.alert-warning,
+.alert-success {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  font-size: var(--t-body);
+  line-height: 1.5;
+}
+
+.alert-error .pf-c-alert__icon,
+.alert-info .pf-c-alert__icon,
+.alert-warning .pf-c-alert__icon,
+.alert-success .pf-c-alert__icon { display: none; }
+
+.alert-error::before,
+.alert-info::before,
+.alert-warning::before,
+.alert-success::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  background: currentColor;
+  -webkit-mask: var(--icon-info-circle) center / contain no-repeat;
+  mask: var(--icon-info-circle) center / contain no-repeat;
+}
+
+.alert-error { background: var(--sev-crit-s); color: var(--sev-crit); }
+.alert-error::before { -webkit-mask-image: var(--icon-circle-x); mask-image: var(--icon-circle-x); }
+.alert-warning { background: var(--sev-warn-s); color: var(--sev-warn); }
+.alert-warning::before { -webkit-mask-image: var(--icon-alert-triangle); mask-image: var(--icon-alert-triangle); }
+.alert-success { background: var(--sev-ok-s); color: var(--sev-ok); }
+.alert-success::before { -webkit-mask-image: var(--icon-circle-check); mask-image: var(--icon-circle-check); }
+.alert-info { background: var(--accent-s); color: var(--accent); }
+
+[id^="input-error"] {
+  display: block;
+  margin-top: 5px;
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--sev-crit);
+}
+
+/* --- the pill --------------------------------------------------------------
+ *
+ * v3 `.pill`: `--t-sm`/500 on the kind's wash, the pill radius, the kind's
+ * icon first. The OTP page wears one to say the password step succeeded.
+ */
+.itms-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border-radius: var(--r-pill);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.itms-pill svg { width: 14px; height: 14px; }
+.itms-pill-ok { background: var(--sev-ok-s); color: var(--sev-ok); }
+
+/* --- the rest of the flow --------------------------------------------------
+ *
+ * `parent=base` gives templates and no styling, so every page the theme does
+ * not dress renders as bare HTML: the authenticator code on every sign-in,
+ * enrolling a device, changing a password, and the three pages you land on
+ * when something goes wrong.
+ */
+
+/* The line that carries the state from the previous step: the reason the
+ * second page reads as a continuation rather than as a fresh start. */
+.itms-step-note {
+  margin: 0 0 18px;
+  font-size: var(--t-body);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.itms-step-note .itms-pill { margin-bottom: 8px; }
+
+/* An <a> that has to sit where a button sits (the error, info and expired
+ * pages have no form to submit). */
+.itms-primary-link {
+  text-align: center;
+  text-decoration: none;
+  margin-bottom: 4px;
+}
+
+.itms-steps {
+  margin: 0 0 16px;
+  padding-left: 18px;
+  font-size: var(--t-body);
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+/* v3's tinted surface inside a panel, at the panel radius. */
+.itms-qr,
+.itms-secret {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--surface-2);
+}
+
+.itms-qr { justify-items: center; }
+
+/* The QR image is scanned by a camera; it needs a white quiet zone of its own
+ * regardless of what the panel behind it is doing. */
+.itms-qr img {
+  width: 160px;
+  height: 160px;
+  display: block;
+  padding: 8px;
+  border-radius: var(--r-ctl);
+  background: var(--surface);
+}
+
+.itms-secret-label { font-size: var(--t-sm); color: var(--muted); }
+
+/* Monospace HERE is not a costume: this is a secret being transcribed
+ * character by character into another device, and the reader needs 0 and O
+ * to differ. `user-select: all` makes one click take the whole thing. v3's
+ * code face and size. */
+.itms-secret-value {
+  font-family: var(--mono);
+  font-size: var(--t-sm);
+  letter-spacing: .04em;
+  word-break: break-all;
+  user-select: all;
+  color: var(--ink);
+}
+
+/* The one-time code: a number being transcribed from a phone, so it gets the
+ * same treatment as the secret above -- wide tracking, unambiguous glyphs --
+ * one step up the ramp. */
+#otp, #totp {
+  font-family: var(--mono);
+  font-size: var(--t-h2);
+  letter-spacing: .18em;
+}
+
+/* Under a field, in v3's `.field .help` position: what to type, before you
+ * get it wrong. */
+.itms-help {
+  margin: 5px 0 0;
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* "Authorized access only." A sign-in page for domain-admin-equivalent control
+ * over a fleet should say what this is before you are inside it. Inside the
+ * card, with a rule to separate it: pulled out of the card's padding it once
+ * collapsed into the preceding control. `--t-sm` is the ramp's small step and
+ * `docs/product.md` §11's floor for prose. */
+.itms-footnote {
+  margin: 20px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
+  text-align: center;
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* --- the authenticator picker ----------------------------------------------
+ *
+ * The page reached by "try another way", which is where a passkey is chosen.
+ * Each option is a secondary `.btn` carrying two lines, left-aligned: a name
+ * at body weight 500, and a help line at `--t-sm` in muted.
+ */
+.itms-authenticators,
+#kc-select-credential-form ul,
+#kc-select-credential-form li {
+  list-style: none;
+}
+
+.itms-authenticators {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+}
+
+.itms-authenticator {
+  display: grid;
+  gap: 3px;
+  justify-content: stretch;
+  padding: 10px 13px;
+  text-align: left;
+  line-height: 1.4;
+}
+
+.itms-authenticator-name { font-size: var(--t-body); font-weight: 500; color: var(--ink); }
+.itms-authenticator-help { font-size: var(--t-sm); font-weight: 400; color: var(--muted); }
+
+/* --- the surfaces nobody draws ---------------------------------------------
+ * Selection and focus ship with browser defaults that belong to no design
+ * system. On a four-page flow they are most of what the eye meets outside the
+ * form itself.
+ */
+::selection { background: var(--accent-s); color: var(--ink); }
+
+/* THE FOCUS RING IS SPLIT BY WHERE THE PAGE NESTS, AND THE SAFE COLOUR IS THE
+ * DEFAULT rather than the exception.
+ *
+ * The accent cannot be a ring on the field: it measures 2.64:1 on `--rail-2`,
+ * under SC 1.4.11's 3:1 floor for a non-text indicator, and a default that is
+ * wrong everywhere it is not overridden is a defect waiting for the next
+ * element somebody adds above the card. So the default is white, which clears
+ * the floor at both ends of the gradient, and the accent is scoped to the
+ * card -- `#kc-content` -- where it is 5.81:1 and where white would be
+ * hopeless. Neither colour is safe in both places, which is why this is a
+ * split and not a swap.
+ *
+ * ONLY `#kc-content`, deliberately: it selects DESCENDANTS, and the outer
+ * wrapper (`.itms-login`) is an ancestor of the field too. Measured in
+ * `backend/tests/test_console_auth_realm.py`, which holds both rings to 3:1
+ * against the grounds they are actually drawn on and refuses to let the
+ * accent back into the field's table. */
+:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+#kc-content :focus-visible { outline-color: var(--accent); }
+
+/* The card is 400px wide and the viewport can be 320. */
+@media (max-width: 460px) {
+  body { padding: 20px 12px; }
+  #kc-content { padding: 22px 18px 20px; }
+  .itms-qr img { width: 148px; height: 148px; }
+}
+
+/* The page animates nothing, but the hover transitions above are still motion
+ * to somebody who has asked for none. */
+@media (prefers-reduced-motion: no-preference) {
+  .itms-social-link,
+  .itms-alt,
+  .itms-authenticator,
+  #try-another-way,
+  .itms-field input,
+  .itms-field select {
+    transition: background-color .12s ease, border-color .12s ease;
+  }
+}
+
+/* --- passkeys: webauthn-register.ftl and webauthn-error.ftl --------------
+ *
+ * "Sign out from other devices". Rendered by base's
+ * password-commons.ftl `logoutOtherSessions` macro, so its markup is
+ * Keycloak's -- `#kc-form-options > div > .checkbox > label > input` -- and
+ * nothing else in this theme styles it. Deliberately NOT inside `.itms-field`:
+ * that rule gives every `input` a full-width bordered box, which is right for a
+ * text field and absurd for a checkbox. */
+#kc-form-options { margin: 0 0 14px; }
+#kc-form-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--t-sm);
+  line-height: 1.4;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+#kc-form-options input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* The failure people actually hit, said where they are looking when it
+ * happens. The tinted panel `.itms-secret` already uses, at the same radius,
+ * so it reads as part of the page rather than as an alert about it -- it is
+ * advice, not an error. */
+.itms-note {
+  display: grid;
+  gap: 4px;
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  background: var(--surface-2);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  color: var(--muted);
+}
+.itms-note-title {
+  font-weight: 500;
+  color: var(--ink);
+}

@@ -1,0 +1,32 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}"/>
+    <EventID Qualifiers="0">4625</EventID>
+    <Version>0</Version>
+    <Level>0</Level>
+    <Task>12544</Task>
+    <TimeCreated SystemTime="2026-07-18T09:14:41.0009901Z"/>
+    <EventRecordID>184418</EventRecordID>
+    <Channel>Security</Channel>
+    <Computer>WS-0142.corp.toeshee.local</Computer>
+    <Security/>
+  </System>
+  <EventData>
+    <Data Name="SubjectUserSid">S-1-0-0</Data>
+    <Data Name="SubjectUserName">-</Data>
+    <Data Name="SubjectDomainName">-</Data>
+    <Data Name="TargetUserSid">S-1-0-0</Data>
+    <Data Name="TargetUserName">administrator</Data>
+    <Data Name="TargetDomainName">TOESHEE</Data>
+    <Data Name="Status">0xc000006d</Data>
+    <Data Name="FailureReason">%%2313</Data>
+    <Data Name="SubStatus">0xc000006a</Data>
+    <Data Name="LogonType">3</Data>
+    <Data Name="LogonProcessName">NtLmSsp </Data>
+    <Data Name="AuthenticationPackageName">NTLM</Data>
+    <Data Name="WorkstationName">KALI</Data>
+    <Data Name="ProcessName">-</Data>
+    <Data Name="IpAddress">10.20.7.199</Data>
+    <Data Name="IpPort">44112</Data>
+  </EventData>
+</Event>

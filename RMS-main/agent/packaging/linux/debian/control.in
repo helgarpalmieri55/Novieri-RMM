@@ -1,0 +1,22 @@
+Package: its-agent
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: Toeshee <it@toeshee.example>
+Section: admin
+Priority: optional
+Homepage: https://github.com/Toeshee-Lab/it-suite
+Installed-Size: @SIZE@
+Description: ITMS endpoint agent
+ One static Go binary per endpoint. It holds a single long-lived OUTBOUND
+ mutual-TLS connection to the control plane and executes only jobs that are
+ cryptographically signed by it. It opens no listening port and accepts no
+ inbound connection.
+ .
+ The package installs the binary and the systemd unit but carries NO
+ credentials: an enrollment token in a .deb would be a credential in a
+ distributable artifact. Run `its-agent-enroll --url <control-plane>` with the
+ token in the environment or on stdin after installing.
+ .
+ Depends on nothing: the binary is built CGO_ENABLED=0 and is statically
+ linked, so it has no libc version floor and the same package runs on Ubuntu
+ 24.04 and later.

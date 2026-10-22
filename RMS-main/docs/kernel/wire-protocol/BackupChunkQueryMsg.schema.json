@@ -1,0 +1,52 @@
+{
+  "additionalProperties": false,
+  "description": "agent -> server: \"which of these chunks does my repository already\nhave, and may I write the ones it does not?\"\n\nCarries NO repository id and NO storage prefix. `job_id` is the only thing\nthe agent names, and the server resolves (org, device, repository, prefix)\nfrom the job IT signed \u2014 the key-is-derived-never-accepted rule that\n`app.core.storage`'s presign helpers are built on, applied to the tenancy\nquestion instead of the key question. An agent that named its own\nrepository could name someone else's.\n\n`stored` is this agent reporting chunks it has successfully uploaded since\nits last query; the server records them in the index under the repository\nit resolved. `check` is the list to partition. Both are bounded by\n`MAX_CHUNK_BATCH` at the parse layer, so a malformed or hostile agent\ncannot make one frame arbitrarily large.\n\nCompatibility: strictly additive. An older control plane rejects this kind\nat `parse_agent_message` and logs it; the agent's run then fails on the\nunanswered query, which is no worse than the refusal it does today. An\nolder agent never sends it and is never sent a `backup_chunk_grant`.",
+  "properties": {
+    "check": {
+      "items": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "maxItems": 1024,
+      "title": "Check",
+      "type": "array"
+    },
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "kind": {
+      "const": "backup_chunk_query",
+      "title": "Kind",
+      "type": "string"
+    },
+    "query_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Query Id",
+      "type": "string"
+    },
+    "stored": {
+      "items": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "maxItems": 1024,
+      "title": "Stored",
+      "type": "array"
+    },
+    "v": {
+      "const": 1,
+      "title": "V",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "kind",
+    "job_id",
+    "query_id"
+  ],
+  "title": "BackupChunkQueryMsg",
+  "type": "object"
+}

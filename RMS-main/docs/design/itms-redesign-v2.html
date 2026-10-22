@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ITMS console redesign v2: signals, not a spreadsheet</title>
+<style>
+:root{
+  --bg:#f6f7fa; --surface:#fff; --surface-2:#fafbfd; --ink:#14161a; --ink-2:#3a3f47;
+  --muted:#646b76; --line:#e4e7ec; --line-2:#cdd2da;
+  --rail:#101a1f; --rail-2:#17262d; --rail-ink:#9fb2b9;
+  --sev-crit:#c0182f; --sev-crit-s:#fdecee;
+  --sev-warn:#9a6100; --sev-warn-s:#fdf3e2;
+  --sev-ok:#17703f;   --sev-ok-s:#e7f6ee;
+  --sev-run:#0f5f95;  --sev-run-s:#e8f2fa;
+  --accent:#1e5fd0;   --accent-s:#e9f0fe;
+  --r:6px; --r-lg:10px;
+  --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{margin:0;font-weight:600;letter-spacing:-.012em}
+.wrap{max-width:1320px;margin:0 auto;padding:0 28px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+/* Presentation lives HERE, not on the sprite. A <use> in a separate <svg>
+   element does not inherit fill/stroke from the sprite's own <svg>, so the
+   Tabler outline paths default to fill:black and render as solid blobs.
+   Scoped to the icon classes so the sparkline's filled area is untouched. */
+svg.ic,svg.ic14,svg.ic20{flex:none;fill:none;stroke:currentColor;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+svg.ic{width:17px;height:17px}
+svg.ic14{width:14px;height:14px;stroke-width:1.9}
+svg.ic20{width:20px;height:20px}
+
+.doc-head{background:var(--rail);color:#fff;padding:42px 0 36px}
+.doc-head h1{font-size:29px;color:#fff;letter-spacing:-.022em}
+.doc-head p{color:var(--rail-ink);max-width:66ch;margin:11px 0 0}
+.kicker{font-size:11.5px;color:var(--rail-ink);text-transform:uppercase;letter-spacing:.14em;margin-bottom:11px}
+section.block{padding:40px 0;border-top:1px solid var(--line)}
+.lede{color:var(--ink-2);max-width:72ch;margin:9px 0 0}
+.note{font-size:12.5px;color:var(--muted);max-width:74ch;margin:13px 0 0}
+h2.sec{font-size:21px}
+
+.frame{margin-top:20px;border:1px solid var(--line-2);border-radius:var(--r-lg);overflow:hidden;
+  background:var(--surface);box-shadow:0 1px 3px rgba(16,26,31,.07)}
+.frame-bar{display:flex;align-items:center;gap:7px;padding:7px 12px;background:var(--surface-2);
+  border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--muted)}
+.app{display:grid;grid-template-columns:210px minmax(0,1fr);min-height:480px}
+.rail{background:var(--rail);color:var(--rail-ink);padding:12px 0;font-size:13px}
+.rail .grp{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:#6f858d;padding:13px 15px 5px}
+.rail a{display:flex;align-items:center;gap:10px;padding:7px 15px;color:var(--rail-ink);
+  text-decoration:none;border-left:2px solid transparent}
+.rail a.on{background:var(--rail-2);color:#fff;border-left-color:var(--accent)}
+.rail a svg{opacity:.75} .rail a.on svg{opacity:1}
+.rail .ct{margin-left:auto;font-family:var(--mono);font-size:11px;color:#7e939b}
+.rail .ct.hot{color:#ff8b99}
+
+.pg{padding:16px 18px;min-width:0;overflow-x:hidden}
+.pg-head{display:flex;align-items:flex-start;gap:14px;margin-bottom:14px}
+.pg-head h2{font-size:18px}
+.pg-head .sub{font-size:12.5px;color:var(--muted);margin-top:2px;max-width:60ch}
+.pg-head .act{margin-left:auto;display:flex;gap:7px;flex:none}
+.btn{display:inline-flex;align-items:center;gap:6px;font:500 12.5px/1 var(--sans);padding:8px 12px;
+  border-radius:var(--r);border:1px solid var(--line-2);background:var(--surface);color:var(--ink);cursor:pointer}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn:active{transform:translateY(1px)}
+
+/* ---- stat strip with sparklines ---- */
+.strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line);
+  border-radius:var(--r-lg);overflow:hidden;margin-bottom:14px}
+.strip>div{padding:11px 13px;border-right:1px solid var(--line);background:var(--surface);position:relative}
+.strip>div:last-child{border-right:0}
+.strip .k{display:flex;align-items:center;gap:6px;font-size:10.5px;text-transform:uppercase;
+  letter-spacing:.1em;color:var(--muted)}
+.strip .v{font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:-.03em;margin-top:2px;line-height:1.05}
+.strip .z{font-size:11.5px;color:var(--muted);margin-top:1px}
+.strip .crit{background:var(--sev-crit-s)} .strip .crit .v,.strip .crit .k{color:var(--sev-crit)}
+.strip .warn{background:var(--sev-warn-s)} .strip .warn .v,.strip .warn .k{color:var(--sev-warn)}
+svg.sp{position:absolute;right:10px;bottom:9px;width:104px;height:26px;opacity:.9}
+svg.sp .a{fill:currentColor;opacity:.11;stroke:none}
+svg.sp .l{fill:none;stroke:currentColor;stroke-width:1.6;vector-effect:non-scaling-stroke}
+svg.sp .p{fill:currentColor;stroke:var(--surface);stroke-width:1.4}
+.strip .crit svg.sp{color:var(--sev-crit)} .strip .warn svg.sp{color:var(--sev-warn)}
+.strip svg.sp{color:var(--muted)}
+
+/* ---- fleet heatmap ---- */
+.heat{display:flex;flex-wrap:wrap;gap:2.5px;padding:12px 13px;border:1px solid var(--line);
+  border-radius:var(--r-lg);background:var(--surface);margin-bottom:14px}
+.heat i{width:9px;height:9px;border-radius:2px;background:var(--sev-ok);opacity:.42}
+.heat i.c-crit{background:var(--sev-crit);opacity:1}
+.heat i.c-warn{background:var(--sev-warn);opacity:1}
+.heat i.c-run{background:var(--sev-run);opacity:1}
+.heat-h{display:flex;align-items:center;gap:8px;width:100%;margin-bottom:9px}
+.heat-h .t{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.heat-h .lg{margin-left:auto;display:flex;gap:11px;font-size:11.5px;color:var(--muted)}
+.heat-h .lg span{display:inline-flex;align-items:center;gap:4px}
+.heat-h .lg b{width:8px;height:8px;border-radius:2px;display:inline-block}
+
+/* ---- filters ---- */
+.filters{display:flex;gap:7px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.inp{display:flex;align-items:center;gap:7px;border:1px solid var(--line-2);border-radius:var(--r);
+  padding:7px 10px;background:var(--surface);color:var(--muted);font-size:12.5px;min-width:210px}
+.chip{display:inline-flex;align-items:center;gap:5px;font:12px/1 var(--sans);padding:6px 10px;
+  border-radius:999px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);cursor:pointer}
+.chip.on{background:var(--accent-s);border-color:var(--accent);color:var(--accent)}
+.count{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+
+/* ---- device rows: not a table ---- */
+.rows{border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+.row{display:grid;grid-template-columns:3px 34px minmax(150px,1.4fr) 128px minmax(120px,1fr) 108px 92px;
+  align-items:center;gap:0 11px;padding:0;border-bottom:1px solid var(--line);background:var(--surface)}
+.row:last-child{border-bottom:0}
+.row:hover{background:var(--surface-2)}
+.row .gut{align-self:stretch;background:transparent}
+.row.crit .gut{background:var(--sev-crit)} .row.warn .gut{background:var(--sev-warn)}
+.row.run .gut{background:var(--sev-run)}
+.row .osw{display:flex;align-items:center;justify-content:center;color:var(--muted);padding:10px 0}
+.row .name{padding:9px 0;min-width:0}
+.row .name b{font-weight:600;font-size:13px;display:block}
+.row .name span{font-size:11.5px;color:var(--muted);font-family:var(--mono)}
+.state{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:550;
+  padding:3px 8px 3px 6px;border-radius:999px;white-space:nowrap}
+.s-crit{background:var(--sev-crit-s);color:var(--sev-crit)}
+.s-warn{background:var(--sev-warn-s);color:var(--sev-warn)}
+.s-ok{background:var(--sev-ok-s);color:var(--sev-ok)}
+.s-run{background:var(--sev-run-s);color:var(--sev-run)}
+.row .own{display:flex;align-items:center;gap:7px;font-size:12.5px;min-width:0}
+.av{width:22px;height:22px;border-radius:50%;flex:none;display:grid;place-items:center;
+  font:600 9.5px/1 var(--sans);color:#fff;letter-spacing:.02em}
+.row .seen{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+/* outstanding as a bar, not a bare integer */
+.out{padding-right:12px}
+.out .n{font-family:var(--mono);font-size:12.5px;display:block;margin-bottom:3px}
+.out .bar{height:4px;border-radius:2px;background:var(--line);overflow:hidden}
+.out .bar i{display:block;height:100%;background:var(--sev-warn)}
+.out .bar i.hi{background:var(--sev-crit)}
+
+/* ---- donuts ---- */
+.dons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border:1px solid var(--line);
+  border-radius:var(--r-lg);overflow:hidden;background:var(--surface)}
+.don{padding:15px;text-align:center;border-right:1px solid var(--line);position:relative}
+.don:last-child{border-right:0}
+.don svg{width:60px;height:60px;transform:rotate(-90deg)}
+.don .trk{fill:none;stroke:var(--line);stroke-width:7}
+.don .arc{fill:none;stroke-width:7;stroke-linecap:round}
+.don-v{position:absolute;top:34px;left:0;right:0;font-family:var(--mono);font-size:15px;font-weight:600}
+.don-v span{font-size:10px}
+.don-k{font-size:12.5px;font-weight:600;margin-top:6px}
+.don-z{font-size:11.5px;color:var(--muted)}
+
+/* ---- the week painter ---- */
+.wk{display:inline-block;border:1px solid var(--line);border-radius:var(--r);padding:9px 11px;background:var(--surface)}
+.wk-row{display:flex;align-items:center;gap:2px;margin-bottom:2px}
+.wk-d{width:30px;font-size:10.5px;color:var(--muted);flex:none}
+/* The grid reads as a grid through its BOUNDARY, not a heavy fill. SC 1.4.11
+   asks whether the two STATES are distinguishable, and selected-vs-unselected
+   measures 4.70:1; darkening every empty cell to hit 3:1 on its own would make
+   the unpainted week look painted, which is the opposite of the point. */
+.wk-c{width:13px;height:15px;border-radius:2px;background:var(--line);
+  border:1px solid var(--line-2);cursor:pointer;flex:none}
+.wk-c:hover{background:var(--line-2);border-color:var(--muted)}
+.wk-c.on{background:var(--accent);border-color:var(--accent)}
+.wk-h{width:13px;font-size:9px;color:var(--muted);flex:none;text-align:left;font-family:var(--mono)}
+.wk-legend{font-size:11.5px;color:var(--muted);margin-top:7px;display:flex;align-items:center;gap:6px}
+
+/* ---- job timeline ---- */
+.tl{border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface);padding:12px 14px}
+.tl-row{display:grid;grid-template-columns:250px minmax(0,1fr);align-items:center;gap:12px;padding:5px 0}
+.tl-k{display:flex;align-items:center;gap:7px;min-width:0}
+.tl-t{font-family:var(--mono);font-size:12px}
+.tl-h{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-track{position:relative;height:16px;background:var(--surface-2);border-radius:3px;
+  border:1px solid var(--line)}
+.tl-bar{position:absolute;top:2px;bottom:2px;border-radius:2px}
+.b-crit{background:var(--sev-crit)} .b-warn{background:var(--sev-warn)}
+.b-run{background:var(--sev-run)} .b-ok{background:var(--sev-ok)}
+.tl-axis{position:relative;height:15px;margin:6px 0 0 262px;font-family:var(--mono);font-size:9.5px;color:var(--muted)}
+.tl-axis i{position:absolute;transform:translateX(-50%)}
+.tl-row .tl-k svg{color:var(--muted)}
+
+/* ---- side-by-side compare ---- */
+.vs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:18px}
+.vs>div{border:1px solid var(--line);border-radius:var(--r-lg);padding:15px 17px;background:var(--surface)}
+.vs .tag{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;
+  display:inline-flex;align-items:center;gap:5px;margin-bottom:8px}
+.vs .bad{color:var(--sev-crit)} .vs .good{color:var(--sev-ok)}
+.vs h4{font-size:13.5px;margin-bottom:6px}
+.vs p{margin:0;font-size:12.5px;color:var(--ink-2);line-height:1.5}
+.cli{font-family:var(--mono);font-size:12px;background:#101a1f;color:#9fb2b9;padding:9px 11px;
+  border-radius:var(--r);margin:9px 0 0;display:block}
+
+.cov{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:16px}
+.cov th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);
+  padding:8px 11px;border-bottom:1px solid var(--line-2)}
+.cov td{padding:10px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+.cov td:first-child{white-space:nowrap;font-weight:600}
+.cov .pages{font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.65}
+.cov .n{font-family:var(--mono);text-align:right}
+.cov-scroll{overflow-x:auto} .cov-scroll>.cov{min-width:620px}
+.tscroll{overflow-x:auto} .tscroll>*{min-width:640px}
+
+@media (max-width:1024px){
+  .app{grid-template-columns:1fr} .rail{display:none}
+  .strip{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .vs,.dons{grid-template-columns:1fr}
+}
+@media (max-width:640px){ .wrap{padding:0 15px} .strip{grid-template-columns:1fr} }
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style></head><body>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true"
+     fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round">
+<symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3 8l4 -16l3 8h4" /></symbol>
+<symbol id="i-adjustments" viewBox="0 0 24 24"><path d="M4 10a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M6 4v4" /> <path d="M6 12v8" /> <path d="M10 16a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M12 4v10" /> <path d="M12 18v2" /> <path d="M16 7a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M18 4v1" /> <path d="M18 9v11" /></symbol>
+<symbol id="i-alert-triangle" viewBox="0 0 24 24"><path d="M12 9v4" /> <path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0" /> <path d="M12 16h.01" /></symbol>
+<symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5l0 14" /> <path d="M18 13l-6 6" /> <path d="M6 13l6 6" /></symbol>
+<symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 5l0 14" /> <path d="M18 11l-6 -6" /> <path d="M6 11l6 -6" /></symbol>
+<symbol id="i-brand-apple" viewBox="0 0 24 24"><path d="M8.286 7.008c-3.216 0 -4.286 3.23 -4.286 5.92c0 3.229 2.143 8.072 4.286 8.072c1.165 -.05 1.799 -.538 3.214 -.538c1.406 0 1.607 .538 3.214 .538s4.286 -3.229 4.286 -5.381c-.03 -.011 -2.649 -.434 -2.679 -3.23c-.02 -2.335 2.589 -3.179 2.679 -3.228c-1.096 -1.606 -3.162 -2.113 -3.75 -2.153c-1.535 -.12 -3.032 1.077 -3.75 1.077c-.729 0 -2.036 -1.077 -3.214 -1.077" /> <path d="M12 4a2 2 0 0 0 2 -2a2 2 0 0 0 -2 2" /></symbol>
+<symbol id="i-brand-debian" viewBox="0 0 24 24"><path d="M12 17c-2.397 -.943 -4 -3.153 -4 -5.635c0 -2.19 1.039 -3.14 1.604 -3.595c2.646 -2.133 6.396 -.27 6.396 3.23c0 2.5 -2.905 2.121 -3.5 1.5c-.595 -.621 -1 -1.5 -.5 -2.5" /> <path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /></symbol>
+<symbol id="i-brand-ubuntu" viewBox="0 0 24 24"><path d="M10 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M17.723 7.41a7.992 7.992 0 0 0 -3.74 -2.162m-3.971 0a7.993 7.993 0 0 0 -3.789 2.216m-1.881 3.215a8 8 0 0 0 -.342 2.32c0 .738 .1 1.453 .287 2.132m1.96 3.428a7.993 7.993 0 0 0 3.759 2.19m4 0a7.993 7.993 0 0 0 3.747 -2.186m1.962 -3.43a8.008 8.008 0 0 0 .287 -2.131c0 -.764 -.107 -1.503 -.307 -2.203" /> <path d="M3 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M17 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /></symbol>
+<symbol id="i-brand-windows" viewBox="0 0 24 24"><path d="M17.8 20l-12 -1.5c-1 -.1 -1.8 -.9 -1.8 -1.9v-9.2c0 -1 .8 -1.8 1.8 -1.9l12 -1.5c1.2 -.1 2.2 .8 2.2 1.9v12.1c0 1.2 -1.1 2.1 -2.2 1.9l0 .1" /> <path d="M12 5l0 14" /> <path d="M4 12l16 0" /></symbol>
+<symbol id="i-calendar-week" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12" /> <path d="M16 3v4" /> <path d="M8 3v4" /> <path d="M4 11h16" /> <path d="M7 14h.013" /> <path d="M10.01 14h.005" /> <path d="M13.01 14h.005" /> <path d="M16.015 14h.005" /> <path d="M13.015 17h.005" /> <path d="M7.01 17h.005" /> <path d="M10.01 17h.005" /></symbol>
+<symbol id="i-chart-donut-3" viewBox="0 0 24 24"><path d="M12 3v5m4 4h5" /> <path d="M8.929 14.582l-3.429 2.918" /> <path d="M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" /> <path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /></symbol>
+<symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6" /></symbol>
+<symbol id="i-circle-check" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /> <path d="M9 12l2 2l4 -4" /></symbol>
+<symbol id="i-circle-x" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /> <path d="M10 10l4 4m0 -4l-4 4" /></symbol>
+<symbol id="i-clock-exclamation" viewBox="0 0 24 24"><path d="M20.986 12.502a9 9 0 1 0 -5.973 7.98" /> <path d="M12 7v5l3 3" /> <path d="M19 16v3" /> <path d="M19 22v.01" /></symbol>
+<symbol id="i-clock-hour-4" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /> <path d="M12 12l3 2" /> <path d="M12 7v5" /></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><path d="M5 6a1 1 0 0 1 1 -1h12a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-12a1 1 0 0 1 -1 -1l0 -12" /> <path d="M9 9h6v6h-6l0 -6" /> <path d="M3 10h2" /> <path d="M3 14h2" /> <path d="M10 3v2" /> <path d="M14 3v2" /> <path d="M21 10h-2" /> <path d="M21 14h-2" /> <path d="M14 21v-2" /> <path d="M10 21v-2" /></symbol>
+<symbol id="i-device-desktop" viewBox="0 0 24 24"><path d="M3 5a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1v-10" /> <path d="M7 20h10" /> <path d="M9 16v4" /> <path d="M15 16v4" /></symbol>
+<symbol id="i-devices" viewBox="0 0 24 24"><path d="M13 9a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-6a1 1 0 0 1 -1 -1v-10" /> <path d="M18 8v-3a1 1 0 0 0 -1 -1h-13a1 1 0 0 0 -1 1v12a1 1 0 0 0 1 1h9" /> <path d="M16 9h2" /></symbol>
+<symbol id="i-dots" viewBox="0 0 24 24"><path d="M4 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M18 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2" /> <path d="M7 11l5 5l5 -5" /> <path d="M12 4l0 12" /></symbol>
+<symbol id="i-external-link" viewBox="0 0 24 24"><path d="M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6" /> <path d="M11 13l9 -9" /> <path d="M15 4h5v5" /></symbol>
+<symbol id="i-file-text" viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4" /> <path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2" /> <path d="M9 9l1 0" /> <path d="M9 13l6 0" /> <path d="M9 17l6 0" /></symbol>
+<symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 4h16v2.172a2 2 0 0 1 -.586 1.414l-4.414 4.414v7l-6 2v-8.5l-4.48 -4.928a2 2 0 0 1 -.52 -1.345v-2.227" /></symbol>
+<symbol id="i-grip-vertical" viewBox="0 0 24 24"><path d="M8 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M8 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M8 19a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M14 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M14 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M14 19a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /></symbol>
+<symbol id="i-hand-click" viewBox="0 0 24 24"><path d="M8 13v-8.5a1.5 1.5 0 0 1 3 0v7.5" /> <path d="M11 11.5v-2a1.5 1.5 0 0 1 3 0v2.5" /> <path d="M14 10.5a1.5 1.5 0 0 1 3 0v1.5" /> <path d="M17 11.5a1.5 1.5 0 0 1 3 0v4.5a6 6 0 0 1 -6 6h-2h.208a6 6 0 0 1 -5.012 -2.7l-.196 -.3c-.312 -.479 -1.407 -2.388 -3.286 -5.728a1.5 1.5 0 0 1 .536 -2.022a1.867 1.867 0 0 1 2.28 .28l1.47 1.47" /> <path d="M5 3l-1 -1" /> <path d="M4 7h-1" /> <path d="M14 3l1 -1" /> <path d="M15 6h1" /></symbol>
+<symbol id="i-heartbeat" viewBox="0 0 24 24"><path d="M19.5 13.572l-7.5 7.428l-2.896 -2.868m-6.117 -8.104a5 5 0 0 1 9.013 -3.022a5 5 0 1 1 7.5 6.572" /> <path d="M3 13h2l2 3l2 -6l1 3h3" /></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><path d="M16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1 -4.069 0l-.301 -.301l-6.558 6.558a2 2 0 0 1 -1.239 .578l-.175 .008h-1.172a1 1 0 0 1 -.993 -.883l-.007 -.117v-1.172a2 2 0 0 1 .467 -1.284l.119 -.13l.414 -.414h2v-2h2v-2l2.144 -2.144l-.301 -.301a2.877 2.877 0 0 1 0 -4.069l2.643 -2.643a2.877 2.877 0 0 1 4.069 0" /> <path d="M15 9h.01" /></symbol>
+<symbol id="i-layout-dashboard" viewBox="0 0 24 24"><path d="M5 4h4a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1v-6a1 1 0 0 1 1 -1" /> <path d="M5 16h4a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1v-2a1 1 0 0 1 1 -1" /> <path d="M15 12h4a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1v-6a1 1 0 0 1 1 -1" /> <path d="M15 4h4a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1v-2a1 1 0 0 1 1 -1" /></symbol>
+<symbol id="i-list-check" viewBox="0 0 24 24"><path d="M3.5 5.5l1.5 1.5l2.5 -2.5" /> <path d="M3.5 11.5l1.5 1.5l2.5 -2.5" /> <path d="M3.5 17.5l1.5 1.5l2.5 -2.5" /> <path d="M11 6l9 0" /> <path d="M11 12l9 0" /> <path d="M11 18l9 0" /></symbol>
+<symbol id="i-package" viewBox="0 0 24 24"><path d="M12 3l8 4.5l0 9l-8 4.5l-8 -4.5l0 -9l8 -4.5" /> <path d="M12 12l8 -4.5" /> <path d="M12 12l0 9" /> <path d="M12 12l-8 -4.5" /> <path d="M16 5.25l-8 4.5" /></symbol>
+<symbol id="i-player-play" viewBox="0 0 24 24"><path d="M7 4v16l13 -8l-13 -8" /></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5l0 14" /> <path d="M5 12l14 0" /></symbol>
+<symbol id="i-printer" viewBox="0 0 24 24"><path d="M17 17h2a2 2 0 0 0 2 -2v-4a2 2 0 0 0 -2 -2h-14a2 2 0 0 0 -2 2v4a2 2 0 0 0 2 2h2" /> <path d="M17 9v-4a2 2 0 0 0 -2 -2h-6a2 2 0 0 0 -2 2v4" /> <path d="M7 15a2 2 0 0 1 2 -2h6a2 2 0 0 1 2 2v4a2 2 0 0 1 -2 2h-6a2 2 0 0 1 -2 -2l0 -4" /></symbol>
+<symbol id="i-progress" viewBox="0 0 24 24"><path d="M10 20.777a8.942 8.942 0 0 1 -2.48 -.969" /> <path d="M14 3.223a9.003 9.003 0 0 1 0 17.554" /> <path d="M4.579 17.093a8.961 8.961 0 0 1 -1.227 -2.592" /> <path d="M3.124 10.5c.16 -.95 .468 -1.85 .9 -2.675l.169 -.305" /> <path d="M6.907 4.579a8.954 8.954 0 0 1 3.093 -1.356" /></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" /> <path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" /></symbol>
+<symbol id="i-router" viewBox="0 0 24 24"><path d="M3 15a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v4a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2l0 -4" /> <path d="M17 17l0 .01" /> <path d="M13 17l0 .01" /> <path d="M15 13l0 -2" /> <path d="M11.75 8.75a4 4 0 0 1 6.5 0" /> <path d="M8.5 6.5a8 8 0 0 1 13 0" /></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0" /> <path d="M21 21l-6 -6" /></symbol>
+<symbol id="i-server-2" viewBox="0 0 24 24"><path d="M3 7a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-2" /> <path d="M3 15a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3l0 -2" /> <path d="M7 8l0 .01" /> <path d="M7 16l0 .01" /> <path d="M11 8h6" /> <path d="M11 16h6" /></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065" /> <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" /></symbol>
+<symbol id="i-shield-check" viewBox="0 0 24 24"><path d="M11.46 20.846a12 12 0 0 1 -7.96 -14.846a12 12 0 0 0 8.5 -3a12 12 0 0 0 8.5 3a12 12 0 0 1 -.09 7.06" /> <path d="M15 19l2 2l4 -4" /></symbol>
+<symbol id="i-shield-lock" viewBox="0 0 24 24"><path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3" /> <path d="M11 11a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M12 12l0 2.5" /></symbol>
+<symbol id="i-ticket" viewBox="0 0 24 24"><path d="M15 5l0 2" /> <path d="M15 11l0 2" /> <path d="M15 17l0 2" /> <path d="M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-3a2 2 0 0 0 0 -4v-3a2 2 0 0 1 2 -2" /></symbol>
+<symbol id="i-topology-star-3" viewBox="0 0 24 24"><path d="M10 19a2 2 0 1 0 -4 0a2 2 0 0 0 4 0" /> <path d="M18 5a2 2 0 1 0 -4 0a2 2 0 0 0 4 0" /> <path d="M10 5a2 2 0 1 0 -4 0a2 2 0 0 0 4 0" /> <path d="M6 12a2 2 0 1 0 -4 0a2 2 0 0 0 4 0" /> <path d="M18 19a2 2 0 1 0 -4 0a2 2 0 0 0 4 0" /> <path d="M14 12a2 2 0 1 0 -4 0a2 2 0 0 0 4 0" /> <path d="M22 12a2 2 0 1 0 -4 0a2 2 0 0 0 4 0" /> <path d="M6 12h4" /> <path d="M14 12h4" /> <path d="M15 7l-2 3" /> <path d="M9 7l2 3" /> <path d="M11 14l-2 3" /> <path d="M13 14l2 3" /></symbol>
+<symbol id="i-users-group" viewBox="0 0 24 24"><path d="M10 13a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M8 21v-1a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v1" /> <path d="M15 5a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M17 10h2a2 2 0 0 1 2 2v1" /> <path d="M5 5a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M3 13v-1a2 2 0 0 1 2 -2h2" /></symbol>
+<symbol id="i-wifi" viewBox="0 0 24 24"><path d="M12 18l.01 0" /> <path d="M9.172 15.172a4 4 0 0 1 5.656 0" /> <path d="M6.343 12.343a8 8 0 0 1 11.314 0" /> <path d="M3.515 9.515c4.686 -4.687 12.284 -4.687 17 0" /></symbol>
+</svg>
+
+<header class="doc-head"><div class="wrap">
+  <div class="kicker">ITMS console &middot; design direction v2 &middot; 7 September 2026</div>
+  <h1>Signals, not a spreadsheet</h1>
+  <p>v1 was text and rectangles, and it read like a database client. This pass replaces
+     the numbers with things you can see, and takes the command line out of the form.</p>
+</div></header>
+
+<div class="wrap">
+
+<section class="block" style="border-top:0">
+  <h2 class="sec">The two notes on v1, taken literally</h2>
+  <div class="vs">
+    <div><div class="tag bad"><svg class="ic14"><use href="#i-circle-x"/></svg>v1</div>
+      <h4>&ldquo;Just text and squares, like a db table&rdquo;</h4>
+      <p>Correct. Every value was a glyphless string in a cell. Nothing had a shape,
+         so nothing could be read at a glance, which is the only way an operations
+         console is ever read.</p></div>
+    <div><div class="tag good"><svg class="ic14"><use href="#i-circle-check"/></svg>v2</div>
+      <h4>Every number gets a shape</h4>
+      <p>286 devices become a 286-cell wall you can spot the red in. Trends get
+         sparklines. Compliance gets arcs. Job runs get a timeline. Rows get OS marks,
+         owner faces, and a bar for how far behind they are.</p></div>
+    <div><div class="tag bad"><svg class="ic14"><use href="#i-circle-x"/></svg>v1</div>
+      <h4>&ldquo;Who sets up a schedule using cron in a UI?&rdquo;</h4>
+      <p>Nobody. That field was the CLI leaking through the form. It also cannot be
+         checked by eye: a typo in a cron string is invisible until the window silently
+         never opens.</p>
+      <code class="cli">Maintenance window&nbsp;&nbsp;[ 0 2 * * SAT ]</code></div>
+    <div><div class="tag good"><svg class="ic14"><use href="#i-circle-check"/></svg>v2</div>
+      <h4>You paint the window on a week</h4>
+      <p>Seven rows, twenty-four columns, drag to select. The window is the picture, so
+         it is right or obviously wrong. The console still stores cron; the operator
+         never types it.</p></div>
+  </div>
+  <p class="note">Icons are real: Tabler Icons (MIT) and their brand set, vendored as an
+     inline sprite. None are hand-drawn, which the skill bans outright. Simple Icons no
+     longer ships Windows or Ubuntu marks after trademark requests, so those come from
+     Tabler's brand set instead.</p>
+</section>
+
+<section class="block">
+  <h2 class="sec">Archetype A: the fleet, seen rather than counted</h2>
+  <p class="lede">28 of the 65 pages are this shape. The wall is the change: it answers
+     &ldquo;how bad is it&rdquo; before you have read a single word.</p>
+
+  <div class="frame"><div class="frame-bar"><svg class="ic14"><use href="#i-devices"/></svg> itms.toeshee.com/devices</div>
+  <div class="app">
+    <nav class="rail">
+      <div class="grp">Overview</div>
+      <a href="#"><svg class="ic"><use href="#i-layout-dashboard"/></svg>Dashboard</a>
+      <a href="#"><svg class="ic"><use href="#i-activity"/></svg>Reports</a>
+      <div class="grp">Fleet</div>
+      <a href="#" class="on"><svg class="ic"><use href="#i-devices"/></svg>Devices<span class="ct">286</span></a>
+      <a href="#"><svg class="ic"><use href="#i-topology-star-3"/></svg>Add Devices</a>
+      <a href="#"><svg class="ic"><use href="#i-users-group"/></svg>Groups</a>
+      <a href="#"><svg class="ic"><use href="#i-heartbeat"/></svg>Health<span class="ct hot">12</span></a>
+      <a href="#"><svg class="ic"><use href="#i-shield-check"/></svg>Patch</a>
+      <a href="#"><svg class="ic"><use href="#i-package"/></svg>Deployment</a>
+      <div class="grp">Service</div>
+      <a href="#"><svg class="ic"><use href="#i-ticket"/></svg>Service Desk<span class="ct">23</span></a>
+    </nav>
+    <div class="pg">
+      <div class="pg-head">
+        <div><h2>Devices</h2><div class="sub">286 endpoints, 272 with an agent reporting.</div></div>
+        <div class="act"><button class="btn"><svg class="ic14"><use href="#i-download"/></svg>Export</button>
+          <button class="btn pri"><svg class="ic14"><use href="#i-plus"/></svg>Install agent</button></div>
+      </div>
+
+      <div class="heat">
+        <div class="heat-h"><span class="t">Fleet at a glance</span>
+          <span class="lg">
+            <span><b style="background:var(--sev-crit)"></b>7 need a person</span>
+            <span><b style="background:var(--sev-warn)"></b>18 degraded</span>
+            <span><b style="background:var(--sev-run)"></b>4 working</span>
+            <span><b style="background:var(--sev-ok);opacity:.42"></b>257 healthy</span>
+          </span></div>
+        <i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-crit"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-crit"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-run"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-run"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-crit"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-crit"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-crit"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-crit"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-crit"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-run"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-run"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-warn"></i><i class="c-ok"></i><i class="c-ok"></i><i class="c-ok"></i>
+      </div>
+
+      <div class="strip">
+        <div class="crit"><div class="k"><svg class="ic14"><use href="#i-alert-triangle"/></svg>Needs a person</div>
+          <div class="v">7</div><div class="z">4 offline, 3 certs</div><svg class="sp" viewBox="0 0 104 26" preserveAspectRatio="none" aria-hidden="true"><path class="a" d="M0.0 24.0 L8.0 21.1 L16.0 24.0 L24.0 18.3 L32.0 9.7 L40.0 12.6 L48.0 18.3 L56.0 21.1 L64.0 15.4 L72.0 4.0 L80.0 9.7 L88.0 12.6 L96.0 15.4 L104.0 15.4 L104 26 L0 26 Z"/><path class="l" d="M0.0 24.0 L8.0 21.1 L16.0 24.0 L24.0 18.3 L32.0 9.7 L40.0 12.6 L48.0 18.3 L56.0 21.1 L64.0 15.4 L72.0 4.0 L80.0 9.7 L88.0 12.6 L96.0 15.4 L104.0 15.4"/><circle class="p" cx="104.0" cy="15.4" r="2.4"/></svg></div>
+        <div class="warn"><div class="k"><svg class="ic14"><use href="#i-clock-exclamation"/></svg>Degraded</div>
+          <div class="v">18</div><div class="z">Agent behind or patch-stale</div><svg class="sp" viewBox="0 0 104 26" preserveAspectRatio="none" aria-hidden="true"><path class="a" d="M0.0 4.0 L8.0 9.0 L16.0 11.5 L24.0 6.5 L32.0 14.0 L40.0 16.5 L48.0 11.5 L56.0 19.0 L64.0 21.5 L72.0 16.5 L80.0 19.0 L88.0 24.0 L96.0 21.5 L104.0 19.0 L104 26 L0 26 Z"/><path class="l" d="M0.0 4.0 L8.0 9.0 L16.0 11.5 L24.0 6.5 L32.0 14.0 L40.0 16.5 L48.0 11.5 L56.0 19.0 L64.0 21.5 L72.0 16.5 L80.0 19.0 L88.0 24.0 L96.0 21.5 L104.0 19.0"/><circle class="p" cx="104.0" cy="19.0" r="2.4"/></svg></div>
+        <div><div class="k"><svg class="ic14"><use href="#i-circle-check"/></svg>Healthy</div>
+          <div class="v">261</div><div class="z">Reporting and current</div></div>
+        <div><div class="k"><svg class="ic14"><use href="#i-cpu"/></svg>Agent coverage</div>
+          <div class="v">95<span style="font-size:15px">%</span></div>
+          <div class="z">272 of 286</div></div>
+      </div>
+
+      <div class="filters">
+        <span class="inp"><svg class="ic14"><use href="#i-search"/></svg>Hostname, IP, serial, owner</span>
+        <button class="chip on"><svg class="ic14"><use href="#i-alert-triangle"/></svg>Needs a person</button>
+        <button class="chip"><svg class="ic14"><use href="#i-brand-windows"/></svg>Windows</button>
+        <button class="chip"><svg class="ic14"><use href="#i-brand-ubuntu"/></svg>Linux</button>
+        <button class="chip"><svg class="ic14"><use href="#i-brand-apple"/></svg>macOS</button>
+        <span class="count">7 of 286</span>
+      </div>
+
+      <div class="tscroll"><div class="rows"><div class="row crit"><div class="gut"></div><div class="osw"><svg class="ic20"><use href="#i-brand-ubuntu"/></svg></div><div class="name"><b>sentinel-db-02</b><span>10.20.4.31</span></div><div><span class="state s-crit"><svg class="ic14"><use href="#i-circle-x"/></svg>Offline 3d</span></div><div class="own"><span class="av" style="background:#7a4bbd">IC</span><span>Ines Caetano</span></div><div class="seen">4 Sep 06:25</div><div class="out"><span class="n">41</span><div class="bar"><i class="hi" style="width:98.39999999999999%"></i></div></div></div><div class="row crit"><div class="gut"></div><div class="osw"><svg class="ic20"><use href="#i-brand-windows"/></svg></div><div class="name"><b>ws-holloway</b><span>10.20.9.114</span></div><div><span class="state s-crit"><svg class="ic14"><use href="#i-alert-triangle"/></svg>Cert expires 2d</span></div><div class="own"><span class="av" style="background:#0f5f95">AO</span><span>Adaeze Okonkwo</span></div><div class="seen">7 Sep 09:41</div><div class="out"><span class="n">12</span><div class="bar"><i class="" style="width:28.799999999999997%"></i></div></div></div><div class="row warn"><div class="gut"></div><div class="osw"><svg class="ic20"><use href="#i-brand-debian"/></svg></div><div class="name"><b>build-runner-07</b><span>10.20.4.77</span></div><div><span class="state s-warn"><svg class="ic14"><use href="#i-clock-exclamation"/></svg>Agent behind</span></div><div class="own"><span class="av" style="background:#17703f">MR</span><span>Mateus Ribeiro</span></div><div class="seen">7 Sep 09:38</div><div class="out"><span class="n">3</span><div class="bar"><i class="" style="width:7.199999999999999%"></i></div></div></div><div class="row run"><div class="gut"></div><div class="osw"><svg class="ic20"><use href="#i-brand-apple"/></svg></div><div class="name"><b>mbp-okonkwo</b><span>10.20.11.8</span></div><div><span class="state s-run"><svg class="ic14"><use href="#i-progress"/></svg>Patching</span></div><div class="own"><span class="av" style="background:#0f5f95">AO</span><span>Adaeze Okonkwo</span></div><div class="seen">7 Sep 09:42</div><div class="out"><span class="n">6</span><div class="bar"><i class="" style="width:14.399999999999999%"></i></div></div></div><div class="row ok"><div class="gut"></div><div class="osw"><svg class="ic20"><use href="#i-brand-windows"/></svg></div><div class="name"><b>fs-archive-01</b><span>10.20.4.12</span></div><div><span class="state s-ok"><svg class="ic14"><use href="#i-circle-check"/></svg>Healthy</span></div><div class="own"><span class="av" style="background:#9a6100">TK</span><span>Tomas Kalu</span></div><div class="seen">7 Sep 09:42</div><div class="out"><span class="n">0</span><div class="bar"></div></div></div></div></div>
+    </div>
+  </div></div>
+  <p class="note">The state pill carries an <em>icon as well as</em> a colour. Colour alone
+     fails WCAG 1.4.1, and it also fails the operator who is colour-blind at 02:00 with
+     the brightness down.</p>
+</section>
+
+<section class="block">
+  <h2 class="sec">Settings: the cron field, replaced</h2>
+  <p class="lede">The maintenance window is the one control in the whole console that was
+     pure command line. It becomes something you drag.</p>
+
+  <div class="frame"><div class="frame-bar"><svg class="ic14"><use href="#i-settings"/></svg> itms.toeshee.com/settings/patch</div>
+  <div class="app">
+    <nav class="rail"><div class="grp">Platform</div>
+      <a href="#" class="on"><svg class="ic"><use href="#i-settings"/></svg>Settings</a>
+      <a href="#"><svg class="ic"><use href="#i-activity"/></svg>Platform Status</a>
+      <a href="#"><svg class="ic"><use href="#i-key"/></svg>Users &amp; Roles</a></nav>
+    <div class="pg">
+      <div class="pg-head"><div><h2>Patch policy</h2>
+        <div class="sub">Production &middot; database. Falls back to the org default where no group matches.</div></div>
+        <div class="act"><button class="btn pri">Save</button></div></div>
+
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:26px">
+        <div>
+          <div style="font-size:12.5px;font-weight:600;margin-bottom:7px;display:flex;
+            align-items:center;gap:6px"><svg class="ic14"><use href="#i-calendar-week"/></svg>Maintenance window</div>
+          <div class="wk"><div class="wk-row"><div class="wk-d"></div><i class="wk-h">0</i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h">6</i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h">12</i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h">18</i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h"></i><i class="wk-h"></i></div><div class="wk-row"><div class="wk-d">Mon</div><i class="wk-c" title="Mon 00:00"></i><i class="wk-c" title="Mon 01:00"></i><i class="wk-c" title="Mon 02:00"></i><i class="wk-c" title="Mon 03:00"></i><i class="wk-c" title="Mon 04:00"></i><i class="wk-c" title="Mon 05:00"></i><i class="wk-c" title="Mon 06:00"></i><i class="wk-c" title="Mon 07:00"></i><i class="wk-c" title="Mon 08:00"></i><i class="wk-c" title="Mon 09:00"></i><i class="wk-c" title="Mon 10:00"></i><i class="wk-c" title="Mon 11:00"></i><i class="wk-c" title="Mon 12:00"></i><i class="wk-c" title="Mon 13:00"></i><i class="wk-c" title="Mon 14:00"></i><i class="wk-c" title="Mon 15:00"></i><i class="wk-c" title="Mon 16:00"></i><i class="wk-c" title="Mon 17:00"></i><i class="wk-c" title="Mon 18:00"></i><i class="wk-c" title="Mon 19:00"></i><i class="wk-c" title="Mon 20:00"></i><i class="wk-c" title="Mon 21:00"></i><i class="wk-c" title="Mon 22:00"></i><i class="wk-c" title="Mon 23:00"></i></div><div class="wk-row"><div class="wk-d">Tue</div><i class="wk-c" title="Tue 00:00"></i><i class="wk-c" title="Tue 01:00"></i><i class="wk-c" title="Tue 02:00"></i><i class="wk-c" title="Tue 03:00"></i><i class="wk-c" title="Tue 04:00"></i><i class="wk-c" title="Tue 05:00"></i><i class="wk-c" title="Tue 06:00"></i><i class="wk-c" title="Tue 07:00"></i><i class="wk-c" title="Tue 08:00"></i><i class="wk-c" title="Tue 09:00"></i><i class="wk-c" title="Tue 10:00"></i><i class="wk-c" title="Tue 11:00"></i><i class="wk-c" title="Tue 12:00"></i><i class="wk-c" title="Tue 13:00"></i><i class="wk-c" title="Tue 14:00"></i><i class="wk-c" title="Tue 15:00"></i><i class="wk-c" title="Tue 16:00"></i><i class="wk-c" title="Tue 17:00"></i><i class="wk-c" title="Tue 18:00"></i><i class="wk-c" title="Tue 19:00"></i><i class="wk-c" title="Tue 20:00"></i><i class="wk-c" title="Tue 21:00"></i><i class="wk-c" title="Tue 22:00"></i><i class="wk-c" title="Tue 23:00"></i></div><div class="wk-row"><div class="wk-d">Wed</div><i class="wk-c" title="Wed 00:00"></i><i class="wk-c" title="Wed 01:00"></i><i class="wk-c" title="Wed 02:00"></i><i class="wk-c" title="Wed 03:00"></i><i class="wk-c" title="Wed 04:00"></i><i class="wk-c" title="Wed 05:00"></i><i class="wk-c" title="Wed 06:00"></i><i class="wk-c" title="Wed 07:00"></i><i class="wk-c" title="Wed 08:00"></i><i class="wk-c" title="Wed 09:00"></i><i class="wk-c" title="Wed 10:00"></i><i class="wk-c" title="Wed 11:00"></i><i class="wk-c" title="Wed 12:00"></i><i class="wk-c" title="Wed 13:00"></i><i class="wk-c" title="Wed 14:00"></i><i class="wk-c" title="Wed 15:00"></i><i class="wk-c" title="Wed 16:00"></i><i class="wk-c" title="Wed 17:00"></i><i class="wk-c" title="Wed 18:00"></i><i class="wk-c" title="Wed 19:00"></i><i class="wk-c" title="Wed 20:00"></i><i class="wk-c" title="Wed 21:00"></i><i class="wk-c" title="Wed 22:00"></i><i class="wk-c" title="Wed 23:00"></i></div><div class="wk-row"><div class="wk-d">Thu</div><i class="wk-c" title="Thu 00:00"></i><i class="wk-c" title="Thu 01:00"></i><i class="wk-c" title="Thu 02:00"></i><i class="wk-c" title="Thu 03:00"></i><i class="wk-c" title="Thu 04:00"></i><i class="wk-c" title="Thu 05:00"></i><i class="wk-c" title="Thu 06:00"></i><i class="wk-c" title="Thu 07:00"></i><i class="wk-c" title="Thu 08:00"></i><i class="wk-c" title="Thu 09:00"></i><i class="wk-c" title="Thu 10:00"></i><i class="wk-c" title="Thu 11:00"></i><i class="wk-c" title="Thu 12:00"></i><i class="wk-c" title="Thu 13:00"></i><i class="wk-c" title="Thu 14:00"></i><i class="wk-c" title="Thu 15:00"></i><i class="wk-c" title="Thu 16:00"></i><i class="wk-c" title="Thu 17:00"></i><i class="wk-c" title="Thu 18:00"></i><i class="wk-c" title="Thu 19:00"></i><i class="wk-c" title="Thu 20:00"></i><i class="wk-c" title="Thu 21:00"></i><i class="wk-c" title="Thu 22:00"></i><i class="wk-c" title="Thu 23:00"></i></div><div class="wk-row"><div class="wk-d">Fri</div><i class="wk-c" title="Fri 00:00"></i><i class="wk-c" title="Fri 01:00"></i><i class="wk-c" title="Fri 02:00"></i><i class="wk-c" title="Fri 03:00"></i><i class="wk-c" title="Fri 04:00"></i><i class="wk-c" title="Fri 05:00"></i><i class="wk-c" title="Fri 06:00"></i><i class="wk-c" title="Fri 07:00"></i><i class="wk-c" title="Fri 08:00"></i><i class="wk-c" title="Fri 09:00"></i><i class="wk-c" title="Fri 10:00"></i><i class="wk-c" title="Fri 11:00"></i><i class="wk-c" title="Fri 12:00"></i><i class="wk-c" title="Fri 13:00"></i><i class="wk-c" title="Fri 14:00"></i><i class="wk-c" title="Fri 15:00"></i><i class="wk-c" title="Fri 16:00"></i><i class="wk-c" title="Fri 17:00"></i><i class="wk-c" title="Fri 18:00"></i><i class="wk-c" title="Fri 19:00"></i><i class="wk-c" title="Fri 20:00"></i><i class="wk-c" title="Fri 21:00"></i><i class="wk-c" title="Fri 22:00"></i><i class="wk-c" title="Fri 23:00"></i></div><div class="wk-row"><div class="wk-d">Sat</div><i class="wk-c" title="Sat 00:00"></i><i class="wk-c" title="Sat 01:00"></i><i class="wk-c on" title="Sat 02:00"></i><i class="wk-c on" title="Sat 03:00"></i><i class="wk-c on" title="Sat 04:00"></i><i class="wk-c on" title="Sat 05:00"></i><i class="wk-c" title="Sat 06:00"></i><i class="wk-c" title="Sat 07:00"></i><i class="wk-c" title="Sat 08:00"></i><i class="wk-c" title="Sat 09:00"></i><i class="wk-c" title="Sat 10:00"></i><i class="wk-c" title="Sat 11:00"></i><i class="wk-c" title="Sat 12:00"></i><i class="wk-c" title="Sat 13:00"></i><i class="wk-c" title="Sat 14:00"></i><i class="wk-c" title="Sat 15:00"></i><i class="wk-c" title="Sat 16:00"></i><i class="wk-c" title="Sat 17:00"></i><i class="wk-c" title="Sat 18:00"></i><i class="wk-c" title="Sat 19:00"></i><i class="wk-c" title="Sat 20:00"></i><i class="wk-c" title="Sat 21:00"></i><i class="wk-c" title="Sat 22:00"></i><i class="wk-c" title="Sat 23:00"></i></div><div class="wk-row"><div class="wk-d">Sun</div><i class="wk-c" title="Sun 00:00"></i><i class="wk-c" title="Sun 01:00"></i><i class="wk-c" title="Sun 02:00"></i><i class="wk-c" title="Sun 03:00"></i><i class="wk-c" title="Sun 04:00"></i><i class="wk-c" title="Sun 05:00"></i><i class="wk-c" title="Sun 06:00"></i><i class="wk-c" title="Sun 07:00"></i><i class="wk-c" title="Sun 08:00"></i><i class="wk-c" title="Sun 09:00"></i><i class="wk-c" title="Sun 10:00"></i><i class="wk-c" title="Sun 11:00"></i><i class="wk-c" title="Sun 12:00"></i><i class="wk-c" title="Sun 13:00"></i><i class="wk-c" title="Sun 14:00"></i><i class="wk-c" title="Sun 15:00"></i><i class="wk-c" title="Sun 16:00"></i><i class="wk-c" title="Sun 17:00"></i><i class="wk-c" title="Sun 18:00"></i><i class="wk-c" title="Sun 19:00"></i><i class="wk-c" title="Sun 20:00"></i><i class="wk-c" title="Sun 21:00"></i><i class="wk-c" title="Sun 22:00"></i><i class="wk-c" title="Sun 23:00"></i></div></div>
+          <div class="wk-legend"><svg class="ic14"><use href="#i-hand-click"/></svg>
+            Drag to paint. Selected: <strong style="color:var(--ink)">Saturdays 02:00 to 06:00</strong>.
+            Next window opens in 2 days.</div>
+
+          <div style="font-size:12.5px;font-weight:600;margin:22px 0 7px;display:flex;
+            align-items:center;gap:6px"><svg class="ic14"><use href="#i-clock-hour-4"/></svg>Scan frequency</div>
+          <div style="display:flex;gap:7px">
+            <button class="chip">6 hours</button><button class="chip">12 hours</button>
+            <button class="chip on"><svg class="ic14"><use href="#i-circle-check"/></svg>Daily</button>
+            <button class="chip">Weekly</button></div>
+          <p class="note" style="margin-top:8px">The sweep ticks hourly, so a daily scan
+            lands up to an hour after the interval elapses. That is why yesterday's ran at
+            15:54 and today's at 16:54.</p>
+        </div>
+
+        <div style="border-left:1px solid var(--line);padding-left:22px">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;
+            color:var(--muted);margin-bottom:9px">What this policy will do</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">
+            <svg class="ic14"><use href="#i-devices"/></svg><span style="font-size:12.5px">Applies to
+            <strong>34 devices</strong></span></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px">
+            <svg class="ic14"><use href="#i-shield-check"/></svg><span style="font-size:12.5px">
+            <strong>212 updates</strong> would install</span></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+            <svg class="ic14"><use href="#i-refresh"/></svg><span style="font-size:12.5px">
+            <strong>19 devices</strong> would restart</span></div>
+          <div class="dons" style="grid-template-columns:1fr;border:0">
+            <div class="don" style="border:1px solid var(--line);border-radius:var(--r-lg)">
+              <svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="26" class="trk"/>
+              <circle cx="30" cy="30" r="26" class="arc"
+                style="stroke:var(--sev-warn);stroke-dasharray:88 163"/></svg>
+              <div class="don-v" style="color:var(--sev-warn)">54<span>%</span></div>
+              <div class="don-k">Group compliance</div>
+              <div class="don-z">after this window: 91%</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+  <p class="note">The right column is the other half of the fix. A policy form that does
+     not tell you what it is about to do to 34 machines is asking you to guess.</p>
+</section>
+
+<section class="block">
+  <h2 class="sec">Patch and jobs: arcs and a timeline, not two more tables</h2>
+
+  <div class="frame"><div class="frame-bar"><svg class="ic14"><use href="#i-shield-check"/></svg> itms.toeshee.com/patch</div>
+  <div class="app">
+    <nav class="rail"><div class="grp">Fleet</div>
+      <a href="#"><svg class="ic"><use href="#i-devices"/></svg>Devices</a>
+      <a href="#" class="on"><svg class="ic"><use href="#i-shield-check"/></svg>Patch</a>
+      <a href="#"><svg class="ic"><use href="#i-heartbeat"/></svg>Health<span class="ct hot">12</span></a></nav>
+    <div class="pg">
+      <div class="pg-head"><div><h2>Patch compliance</h2>
+        <div class="sub">By operating system, from each platform's own scan.</div></div></div>
+      <div class="dons"><div class="don"><svg viewBox="0 0 60 60" aria-hidden="true"><circle cx="30" cy="30" r="26" class="trk"/><circle cx="30" cy="30" r="26" class="arc" style="stroke:var(--sev-ok);stroke-dasharray:153.6 163.4"/></svg><div class="don-v" style="color:var(--sev-ok)">94<span>%</span></div><div class="don-k">Windows</div><div class="don-z">168 of 179 current</div></div><div class="don"><svg viewBox="0 0 60 60" aria-hidden="true"><circle cx="30" cy="30" r="26" class="trk"/><circle cx="30" cy="30" r="26" class="arc" style="stroke:var(--sev-warn);stroke-dasharray:116.0 163.4"/></svg><div class="don-v" style="color:var(--sev-warn)">71<span>%</span></div><div class="don-k">Linux</div><div class="don-z">62 of 87 current</div></div><div class="don"><svg viewBox="0 0 60 60" aria-hidden="true"><circle cx="30" cy="30" r="26" class="trk"/><circle cx="30" cy="30" r="26" class="arc" style="stroke:var(--muted);stroke-dasharray:0.0 163.4"/></svg><div class="don-v" style="color:var(--muted)">0<span>%</span></div><div class="don-k">macOS</div><div class="don-z">never scanned</div></div></div>
+      <p class="note" style="margin-bottom:14px">macOS reads zero because
+        <code>softwareupdate</code> has never run, not because the Macs are behind. An
+        unmeasured zero and a measured zero must never draw the same.</p>
+
+      <div class="pg-head" style="margin-top:6px"><div><h2 style="font-size:16px">Recent job runs</h2>
+        <div class="sub">Last six hours across the fleet.</div></div></div>
+      <div class="tl">
+        <div class="tscroll"><div><div class="tl-row"><div class="tl-k"><svg class="ic14"><use href="#i-circle-x"/></svg><span class="tl-t">patch.apply</span><span class="tl-h">sentinel-db-02</span></div><div class="tl-track"><span class="tl-bar b-crit" style="left:6%;width:17%" title="failed after 3 attempts"></span></div></div><div class="tl-row"><div class="tl-k"><svg class="ic14"><use href="#i-clock-exclamation"/></svg><span class="tl-t">inventory.collect</span><span class="tl-h">build-runner-07</span></div><div class="tl-track"><span class="tl-bar b-warn" style="left:22%;width:55%" title="dispatched, never acknowledged"></span></div></div><div class="tl-row"><div class="tl-k"><svg class="ic14"><use href="#i-progress"/></svg><span class="tl-t">patch.apply</span><span class="tl-h">mbp-okonkwo</span></div><div class="tl-track"><span class="tl-bar b-run" style="left:64%;width:11%" title="running, 12m elapsed"></span></div></div><div class="tl-row"><div class="tl-k"><svg class="ic14"><use href="#i-circle-check"/></svg><span class="tl-t">patch.scan</span><span class="tl-h">fs-archive-01</span></div><div class="tl-track"><span class="tl-bar b-ok" style="left:30%;width:4%" title="succeeded"></span></div></div><div class="tl-row"><div class="tl-k"><svg class="ic14"><use href="#i-circle-check"/></svg><span class="tl-t">backup.run</span><span class="tl-h">fs-archive-01</span></div><div class="tl-track"><span class="tl-bar b-ok" style="left:44%;width:9%" title="succeeded, verified"></span></div></div>
+        <div class="tl-axis"><i style="left:0.0%">04:00</i><i style="left:16.666666666666668%">05:00</i><i style="left:33.333333333333336%">06:00</i><i style="left:50.0%">07:00</i><i style="left:66.66666666666667%">08:00</i><i style="left:83.33333333333333%">09:00</i><i style="left:100.0%">10:00</i></div></div></div>
+      </div>
+    </div>
+  </div></div>
+  <p class="note">A run has a start, a duration and an end. A table row has none of those,
+     which is why &ldquo;stalled&rdquo; was a word you had to work out from two timestamps
+     instead of a gap you can see.</p>
+</section>
+
+<section class="block">
+  <h2 class="sec">Where else the command line is showing</h2>
+  <p class="lede">The cron box was the worst one, not the only one. Same test applied
+     across the console: is this control a form, or is it a shell prompt wearing a border?</p>
+  <div class="cov-scroll"><table class="cov">
+    <thead><tr><th>Control</th><th>Today</th><th>Should be</th></tr></thead>
+    <tbody>
+      <tr><td>Maintenance window</td><td class="pages">0 2 * * SAT</td>
+        <td>Week grid you drag. Cron is stored, never typed.</td></tr>
+      <tr><td>Device group rules</td><td class="pages">JSON rule object</td>
+        <td>Condition builder, with the matching count updating as you build it.</td></tr>
+      <tr><td>Subnet entry</td><td class="pages">10.20.4.0/24</td>
+        <td>CIDR is fine here, but show the usable range and count beside it as you type.</td></tr>
+      <tr><td>Health thresholds</td><td class="pages">gt / lt + a number</td>
+        <td>Slider against the last 30 days of that metric, so you can see what you would have alerted on.</td></tr>
+      <tr><td>Patch approval rings</td><td class="pages">ring_name + ring_order</td>
+        <td>Ordered lanes you drag groups between. Order is the meaning.</td></tr>
+      <tr><td>Job parameters</td><td class="pages">Raw JSON textarea</td>
+        <td>Typed fields from the job's own schema. The server already has it.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Every row is the same defect: a backend representation shown directly to
+     a person. The storage format is not the interface.</p>
+</section>
+
+<section class="block">
+  <h2 class="sec">Still true from v1</h2>
+  <p class="lede">The structural finding has not changed, and it is still the larger half
+     of the work: 65 pages, eight archetypes, 28 of them the same one built 28 ways. The
+     visual direction above is what those eight components should look like; the coverage
+     map and the adoption cost are in
+     <code>docs/design/itms-redesign-2026-09.html</code>.</p>
+  <p class="note">This remains a mockup. <code>docs/design/itms-prototype.html</code> is
+     the design authority, <code>tokens.test.ts</code> and <code>base-styles.test.ts</code>
+     enforce it, and nothing here reaches the product without moving the prototype first.</p>
+</section>
+
+</div></body></html>

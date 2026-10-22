@@ -1,0 +1,52 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "agent_healthy": {
+      "title": "Agent Healthy",
+      "type": "boolean"
+    },
+    "domain_joined": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Domain Joined"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "hostname_set": {
+      "title": "Hostname Set",
+      "type": "boolean"
+    },
+    "state": {
+      "enum": [
+        "success",
+        "failed"
+      ],
+      "title": "State",
+      "type": "string"
+    }
+  },
+  "required": [
+    "state",
+    "hostname_set",
+    "agent_healthy"
+  ],
+  "title": "ProvisionEnrollResult",
+  "type": "object"
+}

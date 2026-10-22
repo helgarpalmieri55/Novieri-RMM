@@ -1,0 +1,136 @@
+/* ELEMENT-LEVEL styles -- TRANSCRIBED from `docs/design/itms-prototype-v3.html`.
+ *
+ * WHY THIS FILE EXISTS, AND THE BUG THAT CREATED IT. The first two extraction
+ * passes of the previous port selected rules BY CLASS NAME, so every rule the
+ * design writes against a bare element -- `table`, `th`, `td`, `button`, `a`,
+ * `svg`, and the form-control reset -- was dropped without a trace. Nothing in
+ * the test suite could see it: the DOM was correct, the class names were
+ * correct, `tsc` was clean, 541 tests passed. It took rendering the console in
+ * a real browser and LOOKING at it: the table headers ran together with no
+ * padding, no borders and no muted colour, because `th` and `td` had no
+ * styling at all. `src/test/base-styles.test.ts` now asserts these rules
+ * exist.
+ *
+ * v3 HAS NO `<table>`. Its list is `.lrow` grid rows with a caption header
+ * (`.lhead`), a hairline between rows and a hover wash. The console keeps
+ * `<table>` semantics (109 files, and a screen reader's table navigation is
+ * worth keeping) and gives `th` the `.lhead` look and `td` the `.lrow .cell`
+ * look, declaration for declaration, so the two read as one list.
+ *
+ * `:root`, `html` and `body` are deliberately NOT here -- they live in
+ * index.css, where the token guard diffs them against the design.
+ */
+
+* { box-sizing: border-box;
+}
+button, input, select, textarea { font: inherit;
+}
+/* THE CHECKED STATE WAS THE OPERATOR'S OPERATING SYSTEM'S TO PICK, and this is
+ * the one line that takes it back. An unstyled checkbox fills with
+ * `AccentColor`: the accent the person's desktop happens to be set to, at any
+ * hue and any lightness a vendor ships. On a platform where a checkbox decides
+ * which devices a bulk action reaches, "which rows are ticked" is not a
+ * question to answer in a colour this product neither chose nor can measure.
+ * `--accent` clears 3:1 on all three light surfaces; `contrast.test.ts`
+ * computes it from this declaration.
+ *
+ * `accent-color` AND NOT A DRAWN CONTROL: authoring `border` or `background`
+ * on a native checkbox switches Blink and WebKit out of native appearance and
+ * takes the checkmark with it. The unchecked boundary stays the user agent's,
+ * which is where SC 1.4.11 leaves it ("determined by the user agent and not
+ * modified by the author"). */
+input[type="checkbox"], input[type="radio"] { accent-color: var(--accent);
+}
+button { cursor: pointer;
+}
+/* v3: `a{color:var(--accent);text-decoration:none}`. A link is accent by
+ * default; the components that are links and must not read as one (a tile,
+ * a rail item, a tab) set their own ink. */
+a { color: var(--accent); text-decoration: none;
+}
+/* THIS FILE IS UNLAYERED (see `.sr-only` below for why), so the rule above
+ * beats Tailwind's layered `underline` utility regardless of specificity --
+ * and a link inside a sentence that asked for its underline lost it, which
+ * axe reports as `link-in-text-block` (the accent against body ink is under
+ * 3:1, so the underline is the distinction). Restated here so the utility
+ * keeps meaning what it says. */
+a.underline { text-decoration: underline;
+}
+h1, h2, h3, p, dl, dd, dt { margin: 0;
+}
+/* v3: `.mono,.tile .v,.cell .mono,.six{font-family:var(--mono);
+ * font-variant-numeric:tabular-nums}`. */
+.mono, .tile .v, .cell .mono, .six { font-family: var(--mono); font-variant-numeric: tabular-nums;
+}
+svg { display: block;
+}
+/* v3: `svg.ic{...}`. `Icon` sets the same attributes on the element, so this
+ * only matters when a sprite glyph is drawn by other markup; it is here so the
+ * two agree. `vertical-align` is what sits a 14px glyph on a text baseline
+ * inside a pill or a button. */
+svg.ic { flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px;
+}
+/* ONE FOCUS RING FOR EVERYTHING THAT CAN TAKE FOCUS. v3 has one accent, so
+ * the ring is the accent, 2px outside the element. Controls that need a
+ * different offset (`.btn`, `.picker-option`, `.wk-c`) restate it; the
+ * browser pass tabs through sixty stops on the preview and fails on any that
+ * shows nothing, and this is what stops a new link or a raw button from
+ * falling back to whatever the user agent draws. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
+}
+table { width: 100%; border-collapse: collapse;
+}
+
+/* ------------------------------------------------------------------------
+ * `.sr-only` HAS TO BEAT AN UNLAYERED ELEMENT RULE.
+ *
+ * `sr-only` is Tailwind's utility and lives in the `utilities` CASCADE LAYER.
+ * `table { width: 100% }` two lines up is UNLAYERED, and unlayered author CSS
+ * beats any layered rule regardless of specificity -- so a `<table
+ * class="sr-only">` lost its `width: 1px`, laid out at the full width of its
+ * containing block, and `white-space: nowrap` then pushed its min-content
+ * width past the viewport: 314px of horizontal scroll on every screen that
+ * draws a chart. WCAG 2.2 SC 1.4.10.
+ *
+ * THE FIX IS A SECOND, UNLAYERED DECLARATION, not a layer reshuffle and not an
+ * `!important`. Declared here, unlayered, `.sr-only` (0,1,0) outranks `table`
+ * (0,0,1) by specificity in the same layer, and outranks any FUTURE unlayered
+ * element rule for the same reason. Transcribed from the design's own
+ * `.sr-only` so the two agree rather than fight.
+ * ------------------------------------------------------------------------ */
+.sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border-width: 0;
+}
+/* v3 `.lhead`: the caption rung, uppercase, letter-spaced, muted, ruled off
+ * with the stronger hairline. `--muted` on `--surface` is graded at 4.5:1 in
+ * `contrast.test.ts`, which is what makes a 10.5px caption legible at all. */
+th {
+      padding: 9px 12px;
+      text-align: left;
+      color: var(--muted);
+      background: var(--surface);
+      border-bottom: 1px solid var(--line-2);
+      font-size: var(--t-cap);
+      font-weight: 500;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      white-space: nowrap;
+}
+/* v3 `.lrow .cell`: body size, the secondary ink, a hairline under each row.
+ * `contrast.test.ts` requires a cell to be at least the body step. */
+td { padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: var(--t-body); color: var(--ink-2); vertical-align: middle;
+}
+tr:last-child td { border-bottom: 0;
+}
+/* v3 `.lrow:not(.lhead):hover{background:var(--surface-2)}`. */
+tbody tr:hover td { background: var(--surface-2);
+}

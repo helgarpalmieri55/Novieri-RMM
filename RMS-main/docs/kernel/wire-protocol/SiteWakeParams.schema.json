@@ -1,0 +1,36 @@
+{
+  "additionalProperties": false,
+  "description": "server -> agent. Everything the endpoint is permitted to know and do.",
+  "properties": {
+    "broadcast": {
+      "title": "Broadcast",
+      "type": "string"
+    },
+    "port": {
+      "default": 9,
+      "enum": [
+        7,
+        9
+      ],
+      "title": "Port",
+      "type": "integer"
+    },
+    "repeat": {
+      "default": 3,
+      "maximum": 3,
+      "minimum": 1,
+      "title": "Repeat",
+      "type": "integer"
+    },
+    "target_mac": {
+      "title": "Target Mac",
+      "type": "string"
+    }
+  },
+  "required": [
+    "target_mac",
+    "broadcast"
+  ],
+  "title": "SiteWakeParams",
+  "type": "object"
+}

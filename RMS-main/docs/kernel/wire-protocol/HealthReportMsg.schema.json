@@ -1,0 +1,92 @@
+{
+  "$defs": {
+    "HealthReportLine": {
+      "additionalProperties": false,
+      "description": "One threshold edge, or one periodic summary, for one check.\n\nSix scalars and nothing else. There is no sample array, no window, no\nrolling average and no \"last N values\" \u2014 a series on this wire is a series\na consumer can retain, which is the boundary\ndocs/modules/endpoint-health-alerting/spec.md \u00a70.12 exists to hold.\n`value` is a STRING (\u00a72.4): a `service.state` check observes \"stopped\", a\n`disk.free_pct` check observes \"3.1\", and typing the column numerically is\nthe first step toward someone aggregating it over time.",
+      "properties": {
+        "check_id": {
+          "title": "Check Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "breach",
+            "recovery",
+            "summary"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "observed_at": {
+          "title": "Observed At",
+          "type": "string"
+        },
+        "selector": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Selector",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "ok",
+            "breaching",
+            "unavailable"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "value": {
+          "default": "",
+          "maxLength": 64,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "check_id",
+        "kind",
+        "state",
+        "observed_at"
+      ],
+      "title": "HealthReportLine",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "agent -> server: threshold edges and periodic summaries (at-least-once).\n\nCarries no device identity: the binding comes from the mTLS connection, and\n`handle_agent_message` resolves `device_id`/`org_id` from it and audits\nmismatches. A `device` field here would be a second, forgeable source of\nthe same fact.\n\nCarries no sample series \u2014 see `HealthReportLine`, spec \u00a70.12 and \u00a75.1's\nwire rule.\n\n`reports` is bounded at 64 because a profile is capped at 32 checks\n(\u00a70.11), so a full summary plus edges fits in one message; an agent with\nmore to say sends more messages rather than one unbounded one.\nRe-delivery after a reconnect is expected and is not deduplicated here: a\nre-delivered health edge is not a distinct fact the way a security event\nis, so there is no `event_uid`.",
+  "properties": {
+    "kind": {
+      "const": "health_report",
+      "title": "Kind",
+      "type": "string"
+    },
+    "policy_version": {
+      "minimum": 0,
+      "title": "Policy Version",
+      "type": "integer"
+    },
+    "reports": {
+      "items": {
+        "$ref": "#/$defs/HealthReportLine"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "title": "Reports",
+      "type": "array"
+    },
+    "v": {
+      "const": 1,
+      "title": "V",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "kind",
+    "policy_version",
+    "reports"
+  ],
+  "title": "HealthReportMsg",
+  "type": "object"
+}

@@ -1,0 +1,21 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}"/>
+    <EventID>4732</EventID>
+    <TimeCreated SystemTime="2026-07-18T11:02:17.4410000Z"/>
+    <EventRecordID>184901</EventRecordID>
+    <Channel>Security</Channel>
+    <Computer>WS-0142.corp.toeshee.local</Computer>
+  </System>
+  <EventData>
+    <Data Name="MemberName">CN=jsmith,OU=Users,DC=corp,DC=toeshee,DC=local</Data>
+    <Data Name="MemberSid">S-1-5-21-1004336348-1177238915-682003330-1287</Data>
+    <Data Name="TargetUserName">Administrators</Data>
+    <Data Name="TargetDomainName">Builtin</Data>
+    <Data Name="TargetSid">S-1-5-32-544</Data>
+    <Data Name="SubjectUserSid">S-1-5-21-1004336348-1177238915-682003330-500</Data>
+    <Data Name="SubjectUserName">svc-provision</Data>
+    <Data Name="SubjectDomainName">TOESHEE</Data>
+    <Data Name="PrivilegeList">-</Data>
+  </EventData>
+</Event>

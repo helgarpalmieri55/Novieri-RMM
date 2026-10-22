@@ -1,0 +1,46 @@
+#!/bin/sh
+# its-agent postrm.
+#
+# `remove` keeps the state directory: the enrolled identity survives, so
+# reinstalling the package resumes as the SAME device rather than minting a
+# second record for one endpoint.
+#
+# `purge` destroys it, and that is irreversible in one specific way — the device
+# key and certificate are gone, so a later install needs a NEW enrollment token
+# and becomes a NEW device.
+#
+# NEITHER touches, because an endpoint is not authorised to make fleet
+# decisions about itself:
+#   * the device record in the control plane (retire it in the console),
+#   * its certificate at the gateway (revoke it there if decommissioning),
+#   * the audit log, which is append-only and hash-chained (invariant #4).
+set -e
+
+STATEDIR=/var/lib/its-agent
+CONFDIR=/etc/its-agent
+
+case "$1" in
+  purge)
+    # The credentials first and by name, so a failure removing the directory
+    # still takes the token and the private keys with it. ALL FOUR, not two:
+    # agent.key.pending is the private key a certificate rotation built its CSR
+    # over, and previous.json carries {cert, chain, KEY} for the identity a
+    # rotation replaced (agent/internal/enroll/rotate.go).
+    rm -f "$STATEDIR/enroll-token" "$STATEDIR/agent.key" \
+          "$STATEDIR/agent.key.pending" "$STATEDIR/previous.json" || true
+    rm -rf "$STATEDIR" || true
+    rm -rf "$CONFDIR" || true
+    echo "its-agent purged. The device record in the control plane, its certificate"
+    echo "at the gateway and the audit log are untouched — retire or revoke there."
+    ;;
+  remove)
+    echo "its-agent removed. $STATEDIR kept (identity, key, pins): reinstalling"
+    echo "resumes as the same device. Use 'apt purge its-agent' to destroy it."
+    ;;
+esac
+
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload || true
+fi
+
+exit 0

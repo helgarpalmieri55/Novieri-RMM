@@ -1,0 +1,758 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ITMS console redesign: archetype mockup, 2026-09-07</title>
+<style>
+/* ==========================================================================
+   ITMS CONSOLE REDESIGN: MOCKUP
+   Produced with the `design-taste-frontend` skill, 2026-09-07.
+
+   READ THE SCOPE NOTE AT THE TOP OF THE PAGE BEFORE READING THE MOCKUPS.
+   This is a design DIRECTION on eight archetypes, not a drop-in for the
+   running console. `docs/design/itms-prototype.html` remains the authority
+   that `tokens.test.ts` and `base-styles.test.ts` enforce.
+   ========================================================================== */
+
+:root{
+  /* ---- Neutrals. Cooler and flatter than the shipped palette: an operator
+     stares at this for a whole shift, and the current --canvas #f4f5f8 sits
+     bright against white surfaces. ---- */
+  --bg:        #f7f8fa;
+  --surface:   #ffffff;
+  --surface-2: #fbfcfd;
+  --ink:       #14161a;
+  --ink-2:     #3a3f47;
+  --muted:     #646b76;
+  --line:      #e4e7ec;
+  --line-2:    #cdd2da;
+  --rail:      #101a1f;
+  --rail-2:    #17262d;
+  --rail-ink:  #9fb2b9;
+
+  /* ---- SEVERITY OWNS COLOUR. One saturated red, one amber, one green, one
+     blue for "in flight". Category hues are gone from data surfaces. See the
+     scope note, move 1. ---- */
+  --sev-crit:  #c0182f;
+  --sev-crit-s:#fdecee;
+  --sev-warn:  #9a6100;
+  --sev-warn-s:#fdf3e2;
+  --sev-ok:    #17703f;
+  --sev-ok-s:  #e7f6ee;
+  --sev-run:   #0f5f95;
+  --sev-run-s: #e8f2fa;
+  --accent:    #1e5fd0;   /* interactive only. never decorative. */
+  --accent-s:  #e9f0fe;
+
+  --r-sm: 4px; --r: 6px; --r-lg: 8px;   /* ONE radius ladder, sharp end */
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+:root[data-theme="dark"]{
+  --bg:#0d1114; --surface:#141a1f; --surface-2:#111619;
+  --ink:#e9edf1; --ink-2:#c2cad3; --muted:#8b95a1;
+  --line:#232c34; --line-2:#33404a;
+  --rail:#0a0e11; --rail-2:#131c22; --rail-ink:#8fa3ab;
+  --sev-crit:#ff6b7d; --sev-crit-s:#2a1519;
+  --sev-warn:#e0a341; --sev-warn-s:#2a2114;
+  --sev-ok:#4cc98a;   --sev-ok-s:#12261c;
+  --sev-run:#5aaee0;  --sev-run-s:#12222c;
+  --accent:#6aa6ff;   --accent-s:#14243a;
+}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);
+  -webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{margin:0;font-weight:600;letter-spacing:-.011em}
+a{color:var(--accent)}
+.wrap{max-width:1320px;margin:0 auto;padding:0 28px}
+.num{font-variant-numeric:tabular-nums;font-family:var(--mono)}
+
+/* ---------- document chrome (this page, not the product) ---------- */
+.doc-head{background:var(--rail);color:#fff;padding:44px 0 38px}
+.doc-head h1{font-size:30px;color:#fff;letter-spacing:-.02em}
+.doc-head p{color:var(--rail-ink);max-width:70ch;margin:12px 0 0}
+.kicker{font-size:12px;color:var(--rail-ink);text-transform:uppercase;
+  letter-spacing:.13em;margin-bottom:12px}
+.scope{background:var(--sev-warn-s);border-left:3px solid var(--sev-warn);
+  padding:20px 24px;margin:28px 0;border-radius:0 var(--r) var(--r) 0}
+.scope h3{font-size:15px;margin-bottom:8px;color:var(--ink)}
+.scope p{margin:8px 0;max-width:78ch;color:var(--ink-2)}
+.dials{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:22px 0 6px}
+.dial{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px}
+.dial .v{font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:-.02em}
+.dial .k{font-size:11px;text-transform:uppercase;letter-spacing:.11em;color:var(--muted)}
+.dial .why{font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.45}
+section.block{padding:44px 0;border-top:1px solid var(--line)}
+.eyebrow{font-size:11.5px;font-family:var(--mono);color:var(--muted);
+  text-transform:uppercase;letter-spacing:.14em}
+.lede{color:var(--ink-2);max-width:76ch;margin:10px 0 0}
+.note{font-size:13px;color:var(--muted);max-width:76ch;margin:14px 0 0}
+
+/* ---------- the mockup frame ---------- */
+.frame{margin-top:24px;border:1px solid var(--line-2);border-radius:var(--r-lg);
+  overflow:hidden;background:var(--surface);box-shadow:0 1px 2px rgba(16,26,31,.06)}
+.frame-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;
+  background:var(--surface-2);border-bottom:1px solid var(--line);
+  font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.app{display:grid;grid-template-columns:212px minmax(0,1fr);min-height:520px}
+
+/* ---------- rail ---------- */
+.rail{background:var(--rail);color:var(--rail-ink);padding:14px 0;font-size:13px}
+.rail .grp{font-size:10.5px;text-transform:uppercase;letter-spacing:.13em;
+  color:#6f858d;padding:14px 16px 6px}
+.rail a{display:flex;align-items:center;gap:9px;padding:7px 16px;color:var(--rail-ink);
+  text-decoration:none;border-left:2px solid transparent}
+.rail a.on{background:var(--rail-2);color:#fff;border-left-color:var(--accent)}
+.rail .dot{width:6px;height:6px;border-radius:50%;background:var(--sev-crit);flex:none}
+.rail .ct{margin-left:auto;font-family:var(--mono);font-size:11px;color:#7e939b}
+
+/* ---------- page body ---------- */
+.pg{padding:18px 20px;min-width:0}
+.pg-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:16px}
+.pg-head h2{font-size:19px}
+.pg-head .sub{font-size:13px;color:var(--muted);margin-top:3px;max-width:64ch}
+.pg-head .act{margin-left:auto;display:flex;gap:8px;flex:none}
+.btn{font:500 13px/1 var(--sans);padding:8px 13px;border-radius:var(--r);
+  border:1px solid var(--line-2);background:var(--surface);color:var(--ink);cursor:pointer}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn:active{transform:translateY(1px)}
+
+/* ---------- THE SCAN STRIP: archetype A's defining move ---------- */
+.strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+  border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;margin-bottom:16px}
+.strip>div{padding:12px 14px;border-right:1px solid var(--line);background:var(--surface)}
+.strip>div:last-child{border-right:0}
+.strip .k{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.strip .v{font-family:var(--mono);font-size:25px;font-weight:600;letter-spacing:-.02em;
+  margin-top:3px;line-height:1.1}
+.strip .z{font-size:12px;color:var(--muted);margin-top:2px}
+.strip .crit{background:var(--sev-crit-s)} .strip .crit .v{color:var(--sev-crit)}
+.strip .warn{background:var(--sev-warn-s)} .strip .warn .v{color:var(--sev-warn)}
+
+/* ---------- filter row ---------- */
+.filters{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.inp{border:1px solid var(--line-2);border-radius:var(--r);padding:7px 10px;
+  font:13px var(--sans);background:var(--surface);color:var(--ink);min-width:200px}
+.chip{font:12px/1 var(--sans);padding:6px 10px;border-radius:999px;
+  border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);cursor:pointer}
+.chip.on{background:var(--accent-s);border-color:var(--accent);color:var(--accent)}
+.count{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted)}
+
+/* ---------- table: hairlines, no card, mono numerics ---------- */
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--muted);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line-2)}
+tbody td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tbody tr:hover td{background:var(--surface-2)}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.host{font-weight:550}
+.sub2{font-size:12px;color:var(--muted)}
+/* the left severity gutter: the whole point of archetype A */
+td.gut{width:3px;padding:0;border-bottom:1px solid var(--line)}
+tr.r-crit td.gut{background:var(--sev-crit)}
+tr.r-warn td.gut{background:var(--sev-warn)}
+tr.r-ok   td.gut{background:transparent}
+tr.r-run  td.gut{background:var(--sev-run)}
+
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:550;
+  padding:3px 8px;border-radius:999px;white-space:nowrap}
+.p-crit{background:var(--sev-crit-s);color:var(--sev-crit)}
+.p-warn{background:var(--sev-warn-s);color:var(--sev-warn)}
+.p-ok  {background:var(--sev-ok-s);color:var(--sev-ok)}
+.p-run {background:var(--sev-run-s);color:var(--sev-run)}
+.p-mut {background:var(--bg);color:var(--muted)}
+
+/* ---------- detail archetype ---------- */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line-2);margin:4px 0 16px}
+.tabs a{padding:9px 13px;font-size:13px;color:var(--muted);text-decoration:none;
+  border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:var(--ink);border-bottom-color:var(--accent);font-weight:550}
+.facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;
+  border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;margin-bottom:16px}
+.facts>div{padding:11px 14px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+.facts .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.facts .v{margin-top:3px;font-size:13.5px}
+
+/* ---------- settings archetype ---------- */
+.set{display:grid;grid-template-columns:200px minmax(0,1fr);gap:28px}
+.set-nav a{display:block;padding:7px 11px;border-radius:var(--r);color:var(--ink-2);
+  text-decoration:none;font-size:13px}
+.set-nav a.on{background:var(--accent-s);color:var(--accent);font-weight:550}
+.field{margin-bottom:16px;max-width:520px}
+.field label{display:block;font-size:12.5px;font-weight:550;margin-bottom:5px}
+.field .help{font-size:12px;color:var(--muted);margin-top:5px}
+.field input,.field select{width:100%;border:1px solid var(--line-2);border-radius:var(--r);
+  padding:8px 10px;font:13px var(--sans);background:var(--surface);color:var(--ink)}
+
+/* ---------- journey archetype ---------- */
+.steps{display:grid;gap:0;border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+.step{display:grid;grid-template-columns:3px 30px minmax(0,1fr) auto;gap:0 13px;
+  align-items:start;padding:0;border-bottom:1px solid var(--line)}
+.step:last-child{border-bottom:0}
+.step .bar{background:transparent}
+.step.done .bar{background:var(--sev-ok)} .step.now .bar{background:var(--accent)}
+.step.blocked .bar{background:var(--sev-crit)}
+.step .ix{font-family:var(--mono);font-size:12px;color:var(--muted);padding:14px 0 14px 11px}
+.step .body{padding:14px 0}
+.step .body h4{font-size:13.5px}
+.step .body p{margin:4px 0 0;font-size:12.5px;color:var(--muted);max-width:62ch}
+.step .go{padding:14px 14px 14px 0;align-self:center}
+
+/* ---------- dashboard archetype ---------- */
+.dash{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
+.tile{border:1px solid var(--line);border-radius:var(--r-lg);padding:13px 15px;background:var(--surface)}
+.tile.s{grid-column:span 2} .tile.m{grid-column:span 3} .tile.w{grid-column:span 6}
+.tile .k{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.tile .v{font-family:var(--mono);font-size:28px;font-weight:600;letter-spacing:-.025em;margin-top:4px}
+.tile.alarm{border-color:var(--sev-crit);background:var(--sev-crit-s)}
+.tile.alarm .v{color:var(--sev-crit)}
+.tile .z{font-size:12px;color:var(--muted);margin-top:2px}
+
+/* ---------- coverage map ---------- */
+.cov{width:100%;border-collapse:collapse;font-size:13px;margin-top:18px}
+.cov th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--muted);padding:9px 12px;border-bottom:1px solid var(--line-2)}
+.cov td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.cov td:first-child{white-space:nowrap;font-weight:600}
+.cov .pages{font-family:var(--mono);font-size:11.5px;color:var(--muted);line-height:1.7}
+.cov .n{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+
+.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px;margin-top:20px}
+.card{border:1px solid var(--line);border-radius:var(--r-lg);padding:18px 20px;background:var(--surface)}
+.card h4{font-size:13.5px;margin-bottom:8px}
+.card p{margin:0;font-size:13px;color:var(--ink-2);line-height:1.55}
+.was{color:var(--sev-crit);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.09em}
+.now{color:var(--sev-ok);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.09em}
+
+@media (max-width:1024px){
+  .app{grid-template-columns:1fr} .rail{display:none}
+  .strip{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .facts{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .dials,.two{grid-template-columns:1fr}
+  .set{grid-template-columns:1fr}
+  .dash{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tile.s,.tile.m,.tile.w{grid-column:span 2}
+}
+/* Wide content scrolls inside its own box, never the page. The coverage map
+   and the mockup tables both exceed a 390px viewport by design: a device table
+   with six meaningful columns cannot usefully reflow to one column, so it pans
+   within its own frame instead. */
+.tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tscroll>table{min-width:560px}
+.cov-scroll{overflow-x:auto}
+.cov-scroll>.cov{min-width:640px}
+.pg{overflow-x:hidden}
+
+@media (max-width:640px){
+  .wrap{padding:0 16px} .strip{grid-template-columns:1fr}
+  .facts{grid-template-columns:1fr} .dash{grid-template-columns:1fr}
+  .tile.s,.tile.m,.tile.w{grid-column:span 1}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="doc-head">
+  <div class="wrap">
+    <div class="kicker">ITMS console &middot; design direction &middot; 7 September 2026</div>
+    <h1>Sixty-five pages, eight archetypes</h1>
+    <p>A redesign mockup for the ITMS operator console, produced with the
+       <code>design-taste-frontend</code> skill. It is a direction to argue with,
+       not a patch to apply.</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<div class="scope">
+  <h3>Scope, stated first because the skill requires it</h3>
+  <p><strong>This brief is out of scope for the skill I was asked to use.</strong>
+     <code>design-taste-frontend</code> &sect;13 lists what it is not for, and ITMS is
+     three items on that list at once: dense product UI and admin panels, data tables,
+     and multi-step wizards. The skill's instruction in that case is to say so
+     explicitly, name the right tool, and apply only the parts that transfer. That is
+     what this document does.</p>
+  <p><strong>The right tool, per the skill's own &sect;2.A:</strong> an operations
+     console of this density points at <em>IBM Carbon</em> (<code>@carbon/react</code>),
+     which the skill picks out for &ldquo;mature data-density patterns&rdquo;. I have
+     not adopted Carbon here, because that is a decision with a real migration cost
+     attached. I have designed <em>as if</em> its density discipline applied, which is
+     the transferable part.</p>
+  <p><strong>What did transfer:</strong> layout discipline, the AI-tell bans, colour
+     calibration, interactive-state completeness, the long-list rules, and the
+     content-density rules. <strong>What did not:</strong> hero composition, scroll
+     choreography, marquees, motion intensity, logo walls, and the whole
+     landing-page vocabulary. An RMM console has no hero.</p>
+  <p><strong>This does not drop into the codebase.</strong>
+     <code>docs/design/itms-prototype.html</code> is the design authority, and
+     <code>tokens.test.ts</code> (<code>:root</code> parity) plus
+     <code>base-styles.test.ts</code> (selector-by-selector, whitespace-exact) enforce
+     it. Every token below differs from the shipped set, so adopting any of it means
+     changing the prototype first and the tests with it, deliberately.</p>
+</div>
+
+<div class="dials">
+  <div class="dial"><div class="k">Design variance</div><div class="v">3</div>
+    <div class="why">Near the skill's floor, against its 8 baseline. Operators build
+      muscle memory across sixty-five pages; asymmetry that delights on a portfolio
+      costs a second per page here, every page, every shift.</div></div>
+  <div class="dial"><div class="k">Motion intensity</div><div class="v">2</div>
+    <div class="why">A console that animates while somebody triages an outage is
+      hostile. Motion is reserved for state change (a row arriving, a job
+      finishing) and nothing else.</div></div>
+  <div class="dial"><div class="k">Visual density</div><div class="v">8</div>
+    <div class="why">Cockpit. The skill's own rule at this level: card containers
+      banned, 1px lines separate data, mono for every number. The shipped console is
+      card-heavy at roughly a 4.</div></div>
+</div>
+
+<p class="note"><strong>Design read:</strong> operations console for on-call IT staff
+  under time pressure, with a utilitarian data-density language, leaning toward
+  Carbon-style discipline rather than any landing-page aesthetic.</p>
+
+<!-- ================================================================= -->
+<section class="block">
+  <div class="eyebrow">The finding</div>
+  <h2 style="font-size:23px;margin-top:8px">The problem is not that the pages are ugly. It is that there are sixty-five of them.</h2>
+  <p class="lede">I classified all 65 page components by structure: tables, tabs,
+    stat grids, forms. They collapse into <strong>eight</strong> archetypes, and 28 of
+    them are the same one. Those 28 are each built slightly differently: different
+    filter placement, different empty states, different column ordering, different
+    ideas about where a count goes.</p>
+  <p class="lede" style="margin-top:12px">So the highest-value redesign is not a new
+    palette. It is <strong>eight components that 65 pages consume</strong>. The visual
+    direction below matters, but it is the smaller half of the win.</p>
+
+  <div class="cov-scroll">
+  <table class="cov">
+    <thead><tr><th>Archetype</th><th style="width:52%">Pages it covers</th><th class="n">n</th></tr></thead>
+    <tbody>
+      <tr><td>A &middot; Rollup list</td>
+        <td class="pages">Devices, Jobs, Audit, Changes, Candidates, Security, Sessions, Licenses,
+          Subscriptions, ProvisioningRuns, ErrorMonitor, Drift, Profiles, Images, AgentReleases,
+          BackupPoints, Repositories, Plans, TicketList, Deploy, SubnetTree, PlatformStatus,
+          MyWork, Enrollment, Credentials, Software, Docs, SiteServers</td><td class="n">28</td></tr>
+      <tr><td>B &middot; Registry list</td>
+        <td class="pages">PushAuthorizations, PushCredentialScopes, Actions, AutonomyDial,
+          ConfirmationQueue, Expenses, Groups, Registry, ScanAuthorizations, Products, Vendors,
+          Packages, Scripts, Import, MyTickets</td><td class="n">15</td></tr>
+      <tr><td>C &middot; Entity detail</td>
+        <td class="pages">DeviceDetail, SubnetDetail, SiteServerDetail, TicketDetail,
+          PortalTicketDetail</td><td class="n">5</td></tr>
+      <tr><td>D &middot; Settings / admin</td>
+        <td class="pages">Settings, AiSettings, ServiceDeskAdmin, SlaAdmin, NotificationAdmin,
+          EmailIntakeAdmin, BudgetAdmin, BudgetPlanner, Profile</td><td class="n">9</td></tr>
+      <tr><td>E &middot; Guided journey</td>
+        <td class="pages">Onboard, Setup, NewTicket</td><td class="n">3</td></tr>
+      <tr><td>F &middot; Command centre</td>
+        <td class="pages">Dashboard</td><td class="n">1</td></tr>
+      <tr><td>G &middot; Tabbed workspace</td>
+        <td class="pages">FleetPatch, Health, Search</td><td class="n">3</td></tr>
+      <tr><td>H &middot; End-user portal</td>
+        <td class="pages">Portal surfaces. The one place the skill's consumer sensibility
+          genuinely applies, because the reader is a colleague raising a ticket, not an operator</td><td class="n">1</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="note">65 accounted for. <code>PreviewPage</code> is the a11y harness, not a
+    product page, and is excluded on purpose.</p>
+</section>
+
+<!-- ================================================================= -->
+<section class="block">
+  <h2 style="font-size:21px">Archetype A: the rollup list, and the 28 pages it absorbs</h2>
+  <p class="lede">Counts that mean something, a filter row that says what it is hiding,
+    and a table whose left edge carries state.</p>
+
+  <div class="frame">
+    <div class="frame-bar">itms.toeshee.com/devices</div>
+    <div class="app">
+      <nav class="rail">
+        <div class="grp">Overview</div>
+        <a href="#">Dashboard</a>
+        <div class="grp">Fleet</div>
+        <a href="#" class="on">Devices &amp; Inventory<span class="ct">286</span></a>
+        <a href="#">Add Devices</a>
+        <a href="#">Device Groups</a>
+        <a href="#"><span class="dot"></span>Health &amp; Alerts<span class="ct">12</span></a>
+        <a href="#">Patch Management</a>
+        <a href="#">Software Deployment</a>
+        <div class="grp">Service</div>
+        <a href="#">Service Desk<span class="ct">23</span></a>
+      </nav>
+      <div class="pg">
+        <div class="pg-head">
+          <div><h2>Devices &amp; Inventory</h2>
+            <div class="sub">Every endpoint the control plane has seen, and what it is doing now.</div></div>
+          <div class="act"><button class="btn">Export</button><button class="btn pri">Install agent</button></div>
+        </div>
+
+        <div class="strip">
+          <div class="crit"><div class="k">Needs a person</div><div class="v">7</div>
+            <div class="z">4 offline &gt; 24h, 3 cert expiring</div></div>
+          <div class="warn"><div class="k">Degraded</div><div class="v">18</div>
+            <div class="z">Agent behind, or patch-stale</div></div>
+          <div><div class="k">Healthy</div><div class="v">261</div>
+            <div class="z">Reporting, current, no alerts</div></div>
+          <div><div class="k">Fleet</div><div class="v">286</div>
+            <div class="z">272 managed &middot; 14 unmanaged assets</div></div>
+        </div>
+
+        <div class="filters">
+          <input class="inp" placeholder="Hostname, IP, serial, owner">
+          <button class="chip on">Needs a person</button>
+          <button class="chip">Windows</button>
+          <button class="chip">Linux</button>
+          <button class="chip">macOS</button>
+          <span class="count">7 of 286 &middot; filtered by 1</span>
+        </div>
+
+        <div class="tscroll"><table>
+          <thead><tr><th></th><th>Device</th><th>State</th><th>Operating system</th>
+            <th>Agent</th><th>Last seen</th><th>Outstanding</th></tr></thead>
+          <tbody>
+            <tr class="r-crit"><td class="gut"></td>
+              <td><div class="host">sentinel-db-02</div><div class="sub2">10.20.4.31 &middot; Rack B4</div></td>
+              <td><span class="pill p-crit">Offline 3d</span></td><td>Ubuntu 26.04 LTS</td>
+              <td class="n">1.8.2</td><td class="n">4 Sep 06:25</td><td class="n">41</td></tr>
+            <tr class="r-crit"><td class="gut"></td>
+              <td><div class="host">ws-holloway</div><div class="sub2">10.20.9.114 &middot; Ines Caetano</div></td>
+              <td><span class="pill p-crit">Cert expires 2d</span></td><td>Windows 11 23H2</td>
+              <td class="n">1.8.2</td><td class="n">7 Sep 09:41</td><td class="n">12</td></tr>
+            <tr class="r-warn"><td class="gut"></td>
+              <td><div class="host">build-runner-07</div><div class="sub2">10.20.4.77</div></td>
+              <td><span class="pill p-warn">Agent behind</span></td><td>Debian 13</td>
+              <td class="n">1.6.4</td><td class="n">7 Sep 09:38</td><td class="n">3</td></tr>
+            <tr class="r-run"><td class="gut"></td>
+              <td><div class="host">mbp-okonkwo</div><div class="sub2">10.20.11.8 &middot; Adaeze Okonkwo</div></td>
+              <td><span class="pill p-run">Patching</span></td><td>macOS 15.4</td>
+              <td class="n">1.8.2</td><td class="n">7 Sep 09:42</td><td class="n">6</td></tr>
+            <tr class="r-ok"><td class="gut"></td>
+              <td><div class="host">fs-archive-01</div><div class="sub2">10.20.4.12</div></td>
+              <td><span class="pill p-ok">Healthy</span></td><td>Windows Server 2022</td>
+              <td class="n">1.8.2</td><td class="n">7 Sep 09:42</td><td class="n">0</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="two">
+    <div class="card"><div class="was">Now</div>
+      <h4>Colour is category</h4>
+      <p>Tiles are blue for inventory, green for online, violet for tickets, red for
+        alerts. The comment in <code>DashboardPage.tsx</code> states the rule outright:
+        colour is category, weight is urgency. That is coherent, and it is the wrong
+        axis for a screen somebody opens because a pager went off.</p></div>
+    <div class="card"><div class="now">Proposed</div>
+      <h4>Colour is severity, and nothing else</h4>
+      <p>Four hues total: red needs a person, amber is degrading, green is fine, blue is
+        in flight. Category is carried by position and label, which are free. The first
+        tile answers the only question being asked at 02:00, and the left gutter repeats
+        that answer on every row so the table is scannable without reading it.</p></div>
+    <div class="card"><div class="was">Now</div>
+      <h4>A count with no denominator</h4>
+      <p>&ldquo;286 devices.&rdquo; True, and not actionable. The audit of 2026-08-20
+        caught this in its other direction, where a findings list read as a device
+        count.</p></div>
+    <div class="card"><div class="now">Proposed</div>
+      <h4>Every number carries its own second line</h4>
+      <p>7 is useless; &ldquo;7 &middot; 4 offline &gt;24h, 3 certs expiring&rdquo; is a
+        work queue. The subtext is not decoration, it is the breakdown that makes the
+        number a decision. Where nothing is measured the tile says so rather than
+        printing a zero that reads as health.</p></div>
+  </div>
+</section>
+
+<!-- ================================================================= -->
+<section class="block">
+  <h2 style="font-size:21px">Archetype C: entity detail, across 5 pages</h2>
+  <p class="lede"><code>DeviceDetailPage</code> currently carries 8 tables and 10 stat
+    cards behind tabs. The fix is not fewer facts, it is a fact header that does not
+    pretend to be a dashboard.</p>
+
+  <div class="frame">
+    <div class="frame-bar">itms.toeshee.com/devices/sentinel-db-02</div>
+    <div class="app">
+      <nav class="rail">
+        <div class="grp">Fleet</div>
+        <a href="#" class="on">Devices &amp; Inventory</a>
+        <a href="#">Device Groups</a>
+        <a href="#"><span class="dot"></span>Health &amp; Alerts<span class="ct">12</span></a>
+        <a href="#">Patch Management</a>
+      </nav>
+      <div class="pg">
+        <div class="pg-head">
+          <div>
+            <h2>sentinel-db-02 <span class="pill p-crit" style="vertical-align:middle;margin-left:6px">Offline 3d</span></h2>
+            <div class="sub">Ubuntu 26.04 LTS &middot; 10.20.4.31 &middot; last contact 4 Sep 06:25</div>
+          </div>
+          <div class="act"><button class="btn">Run job</button><button class="btn">Remote</button></div>
+        </div>
+
+        <div class="facts">
+          <div><div class="k">Agent</div><div class="v"><span class="num">1.8.2</span> <span class="sub2">current</span></div></div>
+          <div><div class="k">Certificate</div><div class="v">Valid to <span class="num">14 Nov 2026</span></div></div>
+          <div><div class="k">Group</div><div class="v">Production &middot; database</div></div>
+          <div><div class="k">Site server</div><div class="v">rack-b4-relay</div></div>
+          <div><div class="k">Outstanding updates</div><div class="v"><span class="num">41</span> <span class="sub2">3 critical</span></div></div>
+          <div><div class="k">Last backup</div><div class="v"><span class="num">3 Sep 01:14</span> <span class="sub2">verified</span></div></div>
+          <div><div class="k">Open alerts</div><div class="v"><span class="num">2</span></div></div>
+          <div><div class="k">Provenance</div><div class="v">Enrolled by agent</div></div>
+        </div>
+
+        <div class="tabs">
+          <a href="#" class="on">Overview</a><a href="#">Inventory</a><a href="#">Patch</a>
+          <a href="#">Jobs</a><a href="#">Backup</a><a href="#">Health</a><a href="#">Sessions</a>
+        </div>
+
+        <div class="tscroll"><table>
+          <thead><tr><th></th><th>Event</th><th>Detail</th><th>When</th></tr></thead>
+          <tbody>
+            <tr class="r-crit"><td class="gut"></td><td>Agent disconnected</td>
+              <td class="sub2">No inbound heartbeat; last job acknowledged 4 Sep 06:24</td><td class="n">4 Sep 06:25</td></tr>
+            <tr class="r-warn"><td class="gut"></td><td>Patch apply finished with failures</td>
+              <td class="sub2">2 installed, 1 failed. <span style="font-family:var(--mono)">linux-image-6.14: dpkg was interrupted</span></td><td class="n">3 Sep 22:40</td></tr>
+            <tr class="r-ok"><td class="gut"></td><td>Backup verified</td>
+              <td class="sub2">Restore test passed on 4 of 4 sampled chunks</td><td class="n">3 Sep 01:41</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+  <p class="note">The fact header is a bordered grid, not eight cards. At density 8 the
+    skill bans card containers outright, and it is right: eight elevated boxes for eight
+    single values is chrome costing more pixels than the values.</p>
+</section>
+
+<!-- ================================================================= -->
+<section class="block">
+  <h2 style="font-size:21px">Archetype F: the command centre</h2>
+  <p class="lede">The dashboard became customizable last week. The direction below is
+    what the tiles should look like once the operator can arrange them: one alarm state,
+    everything else quiet.</p>
+
+  <div class="frame">
+    <div class="frame-bar">itms.toeshee.com/</div>
+    <div class="app">
+      <nav class="rail">
+        <div class="grp">Overview</div>
+        <a href="#" class="on">Dashboard</a><a href="#">Reports</a><a href="#">Assistant</a>
+        <div class="grp">Fleet</div>
+        <a href="#">Devices &amp; Inventory</a>
+        <a href="#"><span class="dot"></span>Health &amp; Alerts<span class="ct">12</span></a>
+      </nav>
+      <div class="pg">
+        <div class="pg-head">
+          <div><h2>Dashboard</h2><div class="sub">Composed from each module's own query, showing only what this account may read.</div></div>
+          <div class="act"><button class="btn">Customize</button></div>
+        </div>
+        <div class="dash">
+          <div class="tile s alarm"><div class="k">Jobs needing attention</div><div class="v">28</div>
+            <div class="z">21 failed &middot; 7 stalled &gt;1h</div></div>
+          <div class="tile s"><div class="k">Open alerts</div><div class="v">12</div>
+            <div class="z">1 critical &middot; 11 warning</div></div>
+          <div class="tile s"><div class="k">Managed endpoints</div><div class="v">286</div>
+            <div class="z">272 online now</div></div>
+          <div class="tile m"><div class="k">Patch compliance</div>
+            <div class="v">84<span style="font-size:17px">%</span></div>
+            <div class="z">Windows 94% &middot; Linux 71% &middot; macOS not yet measured</div></div>
+          <div class="tile m"><div class="k">Backup coverage</div>
+            <div class="v">96<span style="font-size:17px">%</span></div>
+            <div class="z">11 restore points await verification</div></div>
+          <div class="tile w"><div class="k">Devices needing a person</div>
+            <table style="margin-top:8px">
+              <tbody>
+                <tr class="r-crit"><td class="gut"></td><td class="host">sentinel-db-02</td>
+                  <td><span class="pill p-crit">Offline 3d</span></td><td class="sub2">Production &middot; database</td><td class="n">41 outstanding</td></tr>
+                <tr class="r-crit"><td class="gut"></td><td class="host">ws-holloway</td>
+                  <td><span class="pill p-crit">Cert expires 2d</span></td><td class="sub2">Ines Caetano</td><td class="n">12 outstanding</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="note">One tile is loud. The skill's colour rule and this console's own
+    &ldquo;rationed hue&rdquo; rule agree: if six tiles are equally saturated, none of
+    them is telling you anything.</p>
+</section>
+
+<!-- ================================================================= -->
+<section class="block">
+  <h2 style="font-size:21px">Archetypes D and E: settings and the guided journey, 12 pages</h2>
+
+  <div class="frame">
+    <div class="frame-bar">itms.toeshee.com/settings/patch</div>
+    <div class="app">
+      <nav class="rail"><div class="grp">Platform</div>
+        <a href="#" class="on">Settings</a><a href="#">Platform Status</a><a href="#">Users &amp; Roles</a></nav>
+      <div class="pg">
+        <div class="pg-head"><div><h2>Patch policy</h2>
+          <div class="sub">Applies to every device in the group, and to the org default where no group matches.</div></div></div>
+        <div class="set">
+          <nav class="set-nav">
+            <a href="#">General</a><a href="#">Identity</a><a href="#" class="on">Patch</a>
+            <a href="#">Backup</a><a href="#">Health</a><a href="#">Notifications</a><a href="#">AI assistant</a>
+          </nav>
+          <div>
+            <div class="field"><label for="si">Scan interval</label>
+              <select id="si"><option>Every 24 hours (default)</option><option>Every 12 hours</option><option>Every 7 days</option></select>
+              <div class="help">The sweep runs hourly and dispatches to a device whose last
+                scan is older than this. A scan therefore lands up to an hour after the
+                interval elapses, which is why the daily job drifts an hour later each day.</div></div>
+            <div class="field"><label for="rb">Reboot</label>
+              <select id="rb"><option>If required (default)</option><option>Never</option><option>Forced</option></select>
+              <div class="help">&ldquo;Never&rdquo; installs updates that need a restart and
+                leaves the machine reporting them as pending until somebody reboots it.</div></div>
+            <div class="field"><label for="mw">Maintenance window</label>
+              <input id="mw" value="0 2 * * SAT" style="font-family:var(--mono)">
+              <div class="help">Cron, in the organization's timezone. Empty means apply on
+                dispatch with no window.</div></div>
+            <div style="display:flex;gap:8px;margin-top:22px">
+              <button class="btn pri">Save policy</button><button class="btn">Discard</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame" style="margin-top:22px">
+    <div class="frame-bar">itms.toeshee.com/devices/onboard</div>
+    <div class="app">
+      <nav class="rail"><div class="grp">Fleet</div>
+        <a href="#">Devices &amp; Inventory</a><a href="#" class="on">Add Devices</a></nav>
+      <div class="pg">
+        <div class="pg-head"><div><h2>Add devices</h2>
+          <div class="sub">From an unregistered network to an enrolled fleet. Each step links to
+            the page that holds the act, under the permission that page enforces.</div></div></div>
+        <div class="steps">
+          <div class="step done"><div class="bar"></div><div class="ix">01</div>
+            <div class="body"><h4>Register the network</h4>
+              <p>3 subnets recorded. 10.20.4.0/24, 10.20.9.0/24, 10.20.11.0/24.</p></div>
+            <div class="go"><span class="pill p-ok">Done</span></div></div>
+          <div class="step done"><div class="bar"></div><div class="ix">02</div>
+            <div class="body"><h4>Authorize scanning</h4>
+              <p>All 3 authorized. This grant decides where the platform puts packets on
+                somebody's wire, so it stays admin-tier.</p></div>
+            <div class="go"><span class="pill p-ok">Done</span></div></div>
+          <div class="step blocked"><div class="bar"></div><div class="ix">03</div>
+            <div class="body"><h4>Sweep for what is out there</h4>
+              <p>2 of 3 swept. <strong>10.20.11.0/24 could not be swept at all</strong>:
+                no site server on that segment, so nothing looked there. That is not the same
+                as nothing being there.</p></div>
+            <div class="go"><button class="btn">Fix</button></div></div>
+          <div class="step now"><div class="bar"></div><div class="ix">04</div>
+            <div class="body"><h4>Review what answered</h4>
+              <p>41 addresses answered and were recorded as assets. A ping reply is not a
+                machine. A sweep returns printers, phones and the coffee machine.</p></div>
+            <div class="go"><button class="btn pri">Review</button></div></div>
+          <div class="step"><div class="bar"></div><div class="ix">05</div>
+            <div class="body"><h4>Get the agent onto them</h4>
+              <p>Requires <span style="font-family:var(--mono);font-size:12px">agent.push</span>,
+                which this account does not hold.</p></div>
+            <div class="go"><span class="pill p-mut">Blocked</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="note">The journey's left bar is the only place a colour ramp runs vertically,
+    because progression is the one thing on the page that is genuinely ordered. A blocked
+    step states the permission by name rather than hiding, which is the rule the existing
+    page already follows and worth keeping.</p>
+</section>
+
+<!-- ================================================================= -->
+<section class="block">
+  <h2 style="font-size:21px">Dark is the operator's default, not a preference</h2>
+  <p class="lede">The one deliberate theme switch in this document. Everything above is
+    light; this is the same archetype A in dark, because an on-call console is read at
+    02:00 more often than at noon.</p>
+
+  <div class="frame" style="background:#141a1f">
+    <div style="--bg:#0d1114;--surface:#141a1f;--surface-2:#111619;--ink:#e9edf1;--ink-2:#c2cad3;
+                --muted:#8b95a1;--line:#232c34;--line-2:#33404a;--rail:#0a0e11;--rail-2:#131c22;
+                --rail-ink:#8fa3ab;--sev-crit:#ff6b7d;--sev-crit-s:#2a1519;--sev-warn:#e0a341;
+                --sev-warn-s:#2a2114;--sev-ok:#4cc98a;--sev-ok-s:#12261c;--sev-run:#5aaee0;
+                --sev-run-s:#12222c;--accent:#6aa6ff;--accent-s:#14243a;
+                background:var(--surface);color:var(--ink)">
+      <div class="frame-bar">itms.toeshee.com/jobs</div>
+      <div class="app">
+        <nav class="rail"><div class="grp">Platform</div>
+          <a href="#" class="on">Signed job engine<span class="ct">47</span></a>
+          <a href="#">Agent Packages</a><a href="#">Site Servers</a></nav>
+        <div class="pg">
+          <div class="pg-head"><div><h2>Signed job engine</h2>
+            <div class="sub">Every instruction sent to an endpoint is signed here and verified there.</div></div></div>
+          <div class="strip">
+            <div class="crit"><div class="k">Failed</div><div class="v">21</div><div class="z">18 patch.apply, 3 inventory</div></div>
+            <div class="warn"><div class="k">Stalled &gt;1h</div><div class="v">7</div><div class="z">Dispatched, never acknowledged</div></div>
+            <div><div class="k">Running</div><div class="v">4</div><div class="z">Longest 12m</div></div>
+            <div><div class="k">Succeeded 24h</div><div class="v">1284</div><div class="z">99.1% of dispatched</div></div>
+          </div>
+          <div class="tscroll"><table>
+            <thead><tr><th></th><th>Type</th><th>Target</th><th>Status</th><th>Attempts</th><th>Issued</th></tr></thead>
+            <tbody>
+              <tr class="r-crit"><td class="gut"></td><td>patch.apply</td>
+                <td class="sub2">sentinel-db-02</td><td><span class="pill p-crit">Failed</span></td>
+                <td class="n">3</td><td class="n">3 Sep 22:38</td></tr>
+              <tr class="r-warn"><td class="gut"></td><td>inventory.collect</td>
+                <td class="sub2">build-runner-07</td><td><span class="pill p-warn">Stalled 4h</span></td>
+                <td class="n">1</td><td class="n">7 Sep 05:12</td></tr>
+              <tr class="r-run"><td class="gut"></td><td>patch.apply</td>
+                <td class="sub2">mbp-okonkwo</td><td><span class="pill p-run">Running 12m</span></td>
+                <td class="n">1</td><td class="n">7 Sep 09:30</td></tr>
+              <tr class="r-ok"><td class="gut"></td><td>patch.scan</td>
+                <td class="sub2">fs-archive-01</td><td><span class="pill p-ok">Succeeded</span></td>
+                <td class="n">1</td><td class="n">7 Sep 09:28</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================= -->
+<section class="block">
+  <div class="eyebrow">If you want this built</div>
+  <h2 style="font-size:21px;margin-top:8px">What adopting it would actually cost</h2>
+  <div class="two">
+    <div class="card"><h4>1. The prototype moves first</h4>
+      <p><code>docs/design/itms-prototype.html</code> is the authority.
+        <code>tokens.test.ts</code> compares <code>:root</code> against it and
+        <code>base-styles.test.ts</code> compares named selectors whitespace-exact. Any
+        token here reaching the app without the prototype changing first turns both red.
+        That ordering is a feature: it is what stopped the console drifting before.</p></div>
+    <div class="card"><h4>2. Eight components, then 65 call sites</h4>
+      <p>The archetypes are the deliverable, not the palette. Build
+        <code>RollupList</code>, <code>RegistryList</code>, <code>EntityDetail</code>,
+        <code>SettingsPane</code>, <code>Journey</code>, <code>TileGrid</code>,
+        <code>TabbedWorkspace</code>, <code>PortalPage</code>; migrate the 28 archetype-A
+        pages first, since they are where the inconsistency is.</p></div>
+    <div class="card"><h4>3. The a11y pass is not optional here</h4>
+      <p><code>docs/product.md</code> &sect;11 makes WCAG 2.2 AA binding and CI runs axe at
+        five viewports. The severity palette above needs measuring, not asserting:
+        amber on white is the one at risk, and <code>#9a6100</code> was picked to clear
+        4.5:1 rather than because it looked right.</p></div>
+    <div class="card"><h4>4. What I would not do</h4>
+      <p>Adopt Carbon. The skill points there and it is the honest pointer, but swapping the
+        component layer of a 65-page console for a third-party system is a quarter of work
+        that buys density patterns you can get by writing eight components carefully. The
+        pointer is worth recording; taking it is not.</p></div>
+  </div>
+</section>
+
+<footer style="padding:34px 0 56px;color:var(--muted);font-size:12.5px">
+  <div class="wrap">Mockup only. No application code changed. Produced with
+    <code>design-taste-frontend</code>, whose &sect;13 excludes dense product UI.
+    The exclusion, and what was taken anyway, are stated at the top.</div>
+</footer>
+
+</div>
+</body>
+</html>

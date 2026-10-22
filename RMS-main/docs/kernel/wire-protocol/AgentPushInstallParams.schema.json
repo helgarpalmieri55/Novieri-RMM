@@ -1,0 +1,158 @@
+{
+  "$defs": {
+    "PushCredential": {
+      "additionalProperties": false,
+      "description": "The decrypted administrative credential, presented to the target's\nauthentication exchange and never persisted on it (spec \u00a76.1).\n\n**NO FREE-FORM MEMBER.** `username` and `secret` and nothing else; a push\ncannot authenticate without them, and nothing else in the params is sealed\nmaterial (invariant #3, spec \u00a72.4). Redacted on every API read and scrubbed\nfrom `jobs.params` on any terminal state.",
+      "properties": {
+        "secret": {
+          "title": "Secret",
+          "type": "string"
+        },
+        "username": {
+          "title": "Username",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "secret"
+      ],
+      "title": "PushCredential",
+      "type": "object"
+    },
+    "PushRelease": {
+      "additionalProperties": false,
+      "description": "The agent artefact to place: identified by version and SHA-256, server-read.\n\n**`url` IS PRESIGNED BY THE SERVER FROM THE `agent_releases` ROW IT SELECTED**\n(spec \u00a74.2). An operator-supplied URL is an operator-supplied payload with\nextra steps, so there is no field for one. The agent verifies `sha256`\nagainst the bytes it downloads BEFORE transferring a byte to the target\n(spec \u00a711, agent falsifier 6).",
+      "properties": {
+        "sha256": {
+          "description": "Hex digest.",
+          "maxLength": 64,
+          "minLength": 64,
+          "title": "Sha256",
+          "type": "string"
+        },
+        "url": {
+          "description": "Presigned, short-lived, server-minted. A bearer grant.",
+          "title": "Url",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "sha256",
+        "url"
+      ],
+      "title": "PushRelease",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "`agent.push_install` -- the whole instruction, and it contains no code.\n\nSpec \u00a74.1. Everything the endpoint acts on is here and signed; the endpoint\nnever decides what it may touch (spec \u00a711): `target_address` is the one\naddress it may reach, and it is refused if the params name a different one\n(agent falsifier 4).",
+  "properties": {
+    "arch": {
+      "description": "Operator-declared; verified.",
+      "enum": [
+        "amd64",
+        "arm64"
+      ],
+      "title": "Arch",
+      "type": "string"
+    },
+    "credential": {
+      "$ref": "#/$defs/PushCredential"
+    },
+    "dns_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Required for `winrm` (Kerberos `HTTP/<fqdn>`); unused for `ssh`.",
+      "title": "Dns Name"
+    },
+    "enroll_token": {
+      "description": "Single-use, <=30 min. Delivered, never minting an identity (\u00a77.1).",
+      "title": "Enroll Token",
+      "type": "string"
+    },
+    "enroll_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The console's bare https origin (ITS_PUBLIC_CONSOLE_URL), written into the installed service's ITS_AGENT_ENROLL_URL; the agent's enrollment client appends /enroll/v1. Set on every install the server dispatches (`winrm` and `ssh`). Server configuration, never operator-authored, and never derived from the presigned release URL. Optional on the wire so the field is additive.",
+      "title": "Enroll Url"
+    },
+    "expected_mac": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "From the promoted asset, if known. Never widened.",
+      "title": "Expected Mac"
+    },
+    "host_key_fingerprint": {
+      "description": "NEVER null: the confirmed key the SSH client verifies against (\u00a74.4, \u00a77.3). A push to a host with no pinned, confirmed key is refused before this job exists.",
+      "minLength": 1,
+      "title": "Host Key Fingerprint",
+      "type": "string"
+    },
+    "os": {
+      "description": "Operator-declared; the agent verifies it on the target (\u00a77.2).",
+      "enum": [
+        "linux",
+        "darwin",
+        "windows"
+      ],
+      "title": "Os",
+      "type": "string"
+    },
+    "release": {
+      "$ref": "#/$defs/PushRelease"
+    },
+    "target_address": {
+      "description": "Exactly one IP literal.",
+      "title": "Target Address",
+      "type": "string"
+    },
+    "transport": {
+      "description": "`ssh` (Linux/macOS) or `winrm` (Windows, Kerberos only).",
+      "enum": [
+        "ssh",
+        "winrm"
+      ],
+      "title": "Transport",
+      "type": "string"
+    }
+  },
+  "required": [
+    "target_address",
+    "transport",
+    "os",
+    "arch",
+    "release",
+    "enroll_token",
+    "credential",
+    "host_key_fingerprint"
+  ],
+  "title": "AgentPushInstallParams",
+  "type": "object"
+}

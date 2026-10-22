@@ -1,0 +1,84 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
+import { describe, expect, it, vi } from "vitest";
+import { ApiError } from "../../../lib/api";
+import { DecisionBar } from "../DecisionBar";
+
+const mockUseApi = vi.fn();
+vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+function renderBar() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <DecisionBar
+          selectedIds={["p1"]}
+          onSelectionChange={() => undefined}
+          matchingTotal={1}
+          resolveMatching={() => Promise.resolve({ ids: ["p1"], matching: 1, truncated: false })}
+          ringOptions={[{ name: "broad", deviceCount: 12 }]}
+          fleetDeviceTotal={12}
+          scopeName="Windows updates"
+        />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+const APPROVED = {
+  id: "c1",
+  type: "normal",
+  title: "September patching",
+  description: "",
+  risk: "medium",
+  affected: [],
+  window_start: null,
+  window_end: null,
+  rollback_plan: null,
+  state: "approved",
+  created_by: "u",
+  created_at: "2026-09-20T00:00:00Z",
+};
+
+describe("linking an approval to a change", () => {
+  it("offers only approved changes and sends the one chosen", async () => {
+    const user = userEvent.setup();
+    const bulkApprovePatches = vi
+      .fn()
+      .mockResolvedValue({ items: [], total: 1, newly_approved: 1, already_in_force: 0 });
+    mockUseApi.mockReturnValue({
+      listChanges: vi.fn().mockResolvedValue([APPROVED, { ...APPROVED, id: "c2", title: "Draft", state: "draft" }]),
+      bulkApprovePatches,
+    });
+    renderBar();
+    const picker = await screen.findByRole("combobox", { name: /Change this approval implements/ });
+    expect(screen.queryByRole("option", { name: "Draft" })).toBeNull();
+    await user.selectOptions(picker, "c1");
+    await user.click(screen.getByRole("button", { name: /^Approve 1 update/ }));
+    await user.click(await screen.findByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(bulkApprovePatches).toHaveBeenCalled());
+    expect(bulkApprovePatches.mock.calls[0]?.[0]).toEqual({
+      patch_ids: ["p1"],
+      ring_name: "broad",
+      change_id: "c1",
+    });
+  });
+
+  it("shows the server's refusal when a gate needs a change", async () => {
+    const user = userEvent.setup();
+    const refusal =
+      "Approving updates for the broad ring reaches the Servers group, which needs an approved change. Choose an approved change to link, or have one approved first.";
+    mockUseApi.mockReturnValue({
+      listChanges: vi.fn().mockRejectedValue(new ApiError(403, "")),
+      bulkApprovePatches: vi.fn().mockRejectedValue(new ApiError(409, refusal)),
+    });
+    renderBar();
+    await user.click(await screen.findByRole("button", { name: /^Approve 1 update/ }));
+    await user.click(await screen.findByRole("button", { name: "Approve" }));
+    expect(await screen.findByText(refusal)).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: /Change this approval implements/ })).toBeNull();
+  });
+});

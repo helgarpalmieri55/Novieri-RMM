@@ -1,0 +1,104 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\7-Zip]
+"DisplayName"="7-Zip 23.01 (x64)"
+"DisplayVersion"="23.01"
+"DisplayIcon"="C:\\Program Files\\7-Zip\\7zFM.exe"
+"InstallLocation"="C:\\Program Files\\7-Zip\\"
+"UninstallString"="\"C:\\Program Files\\7-Zip\\Uninstall.exe\""
+"NoModify"=dword:00000001
+"NoRepair"=dword:00000001
+"EstimatedSize"=dword:000016f8
+"VersionMajor"=dword:00000017
+"VersionMinor"=dword:00000001
+"Publisher"="Igor Pavlov"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\AddressBook]
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Connection Manager]
+"SystemComponent"=dword:00000001
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{0E3A3E54-9E1C-4F1B-9E8C-2B5C8F1D6E71}]
+"AuthorizedCDFPrefix"=""
+"Comments"=""
+"Contact"=""
+"DisplayVersion"="14.38.33135"
+"HelpLink"=""
+"InstallDate"="20240110"
+"InstallLocation"=""
+"InstallSource"="C:\\ProgramData\\Package Cache\\{0E3A3E54-9E1C-4F1B-9E8C-2B5C8F1D6E71}v14.38.33135\\packages\\vcRuntimeMinimum_amd64\\"
+"ModifyPath"=hex(2):4d,00,73,00,69,00,45,00,78,00,65,00,63,00,00,00
+"Publisher"="Microsoft Corporation"
+"SystemComponent"=dword:00000001
+"WindowsInstaller"=dword:00000001
+"DisplayName"="Microsoft Visual C++ 2022 X64 Minimum Runtime - 14.38.33135"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{90160000-008C-0000-1000-0000000FF1CE}]
+"DisplayName"="Office 16 Click-to-Run Extensibility Component"
+"DisplayVersion"="16.0.17928.20156"
+"Publisher"="Microsoft Corporation"
+"InstallDate"="20240912"
+"SystemComponent"=dword:00000001
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\O365ProPlusRetail - en-us]
+"DisplayName"="Microsoft 365 Apps for enterprise - en-us"
+"DisplayVersion"="16.0.17928.20156"
+"Publisher"="Microsoft Corporation"
+"UninstallString"="\"C:\\Program Files\\Common Files\\Microsoft Shared\\ClickToRun\\OfficeClickToRun.exe\" scenario=install scenariosubtype=ARP sourcetype=None productstoremove=O365ProPlusRetail.16_en-us_x-none culture=en-us version.16=16.0"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Notepad++]
+"DisplayName"="Notepad++ (64-bit x64)"
+"DisplayVersion"="8.6.2"
+"Publisher"="Notepad++ Team"
+"InstallDate"="2024-9-18"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Harmony Endpoint]
+"DisplayName"="Check Point Harmony Endpoint"
+"DisplayVersion"="E88.30"
+"Publisher"="Check Point Software Technologies Ltd."
+"InstallDate"="20240801"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Google Chrome]
+"DisplayName"="Google Chrome"
+"DisplayVersion"="129.0.6668.59"
+"InstallDate"="20240918"
+"InstallLocation"="C:\\Program Files\\Google\\Chrome\\Application"
+"Publisher"="Google LLC"
+"Version"="129.0.6668.59"
+"VersionMajor"=dword:00001a14
+"VersionMinor"=dword:0000003b
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\{e7802eac-3305-4da0-9378-e55d1ed05518}]
+"BundleCachePath"="C:\\ProgramData\\Package Cache\\{e7802eac-3305-4da0-9378-e55d1ed05518}\\VC_redist.x64.exe"
+"DisplayName"="Microsoft Visual C++ 2015-2022 Redistributable (x64) - 14.38.33135"
+"DisplayVersion"="14.38.33135.0"
+"Publisher"="Microsoft Corporation"
+"InstallDate"="20240110"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\{90160000-0011-0000-0000-0000000FF1CE}_Office16.PROPLUS_{0E2A4F63-9CE2-4DB2-A6D9-3F8C4B8E1F12}]
+"DisplayName"="Security Update for Microsoft Office 2016 (KB5002469) 32-Bit Edition"
+"ParentKeyName"="Office16.PROPLUS"
+"ParentDisplayName"="Microsoft Office Professional Plus 2016"
+"ReleaseType"="Security Update"
+"Publisher"="Microsoft"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\KB2504637]
+"DisplayName"="Update for  (KB2504637)"
+"ReleaseType"="Update"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Google Chrome Old]
+"DisplayName"="Google Chrome"
+"DisplayVersion"="128.0.6613.85"
+"Publisher"="Google LLC"
+
+[HKEY_USERS\S-1-5-21-3623811015-3361044348-30300820-1013\Software\Microsoft\Windows\CurrentVersion\Uninstall\OneDriveSetup.exe]
+"DisplayName"="Microsoft OneDrive"
+"DisplayVersion"="24.161.0811.0001"
+"Publisher"="Microsoft Corporation"
+"SystemComponent"=dword:00000000
+
+[HKEY_USERS\S-1-5-21-3623811015-3361044348-30300820-1013\Software\Microsoft\Windows\CurrentVersion\Uninstall\ZoomUMX]
+"DisplayName"="Zoom Workplace"
+"DisplayVersion"="6.1.11 (45896)"
+"Publisher"="Zoom Video Communications, Inc."
+"InstallDate"="20240905"

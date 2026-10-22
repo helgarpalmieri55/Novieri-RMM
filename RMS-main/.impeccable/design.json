@@ -1,0 +1,321 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-07T15:40:00Z",
+  "title": "Design System: ITMS",
+  "extensions": {
+    "colorMeta": {
+      "rail": {
+        "role": "tertiary",
+        "displayName": "Rail",
+        "canonical": "#0f1a20",
+        "purpose": "The rail's ground. The product's one dark surface."
+      },
+      "rail-lifted": {
+        "role": "tertiary",
+        "displayName": "Rail lifted",
+        "canonical": "#182730",
+        "purpose": "The ground a rail item lifts to on hover and when active."
+      },
+      "rail-ink": {
+        "role": "neutral",
+        "displayName": "Rail ink",
+        "canonical": "#9db0b8",
+        "purpose": "Rail items. 7.85:1 on the rail, 6.81:1 lifted."
+      },
+      "rail-dim": {
+        "role": "neutral",
+        "displayName": "Rail dim",
+        "canonical": "#7f939c",
+        "purpose": "The rail's 10.5px group captions and mono counts. 5.51:1 on the rail, 4.78:1 lifted. Arrived at #6d838c (4.44:1) and was lightened in the design file first."
+      },
+      "rail-hot": {
+        "role": "status",
+        "displayName": "Rail hot",
+        "canonical": "#ff8d9a",
+        "purpose": "The alert count in the rail. 8.01:1."
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Accent",
+        "canonical": "#1f5fd1",
+        "purpose": "The one accent: links, the primary button, focus rings, the active tab and rail edge, the checked state, the info pill. 5.81:1 on white."
+      },
+      "accent-wash": {
+        "role": "primary",
+        "displayName": "Accent wash",
+        "canonical": "#e8effd",
+        "purpose": "The accent at lower volume: the info pill, a selected chip."
+      },
+      "page": {
+        "role": "neutral",
+        "displayName": "Page",
+        "canonical": "#f5f6f9",
+        "purpose": "The ground behind the panels."
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "canonical": "#ffffff",
+        "purpose": "Every panel, tile, row and field."
+      },
+      "surface-tinted": {
+        "role": "neutral",
+        "displayName": "Surface tinted",
+        "canonical": "#f9fafc",
+        "purpose": "A hovered row."
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#141619",
+        "purpose": "Primary text. 18.13:1 on white."
+      },
+      "ink-secondary": {
+        "role": "neutral",
+        "displayName": "Ink secondary",
+        "canonical": "#3b4048",
+        "purpose": "Cell values, chips, icon buttons. 10.43:1."
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "canonical": "#606a7a",
+        "purpose": "Captions, sub-lines, placeholders. 5.47:1 on white, 4.74:1 on the accent wash, the tightest ground it lands on. Arrived at #667080 (4.39:1 on the crit and mut washes) and was darkened in the design file first."
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#e5e8ee",
+        "purpose": "Decorative separation only. Never a control boundary."
+      },
+      "hairline-strong": {
+        "role": "neutral",
+        "displayName": "Hairline strong",
+        "canonical": "#cfd4dc",
+        "purpose": "The list header's rule and the tab strip's underline. Decorative; never a control boundary."
+      },
+      "control-grey": {
+        "role": "neutral",
+        "displayName": "Control grey",
+        "canonical": "#828895",
+        "purpose": "The boundary of anything you can operate. 3.56:1 on white, 3.29:1 on the page."
+      },
+      "sev-crit": {
+        "role": "status",
+        "displayName": "Critical",
+        "canonical": "#c1182f",
+        "purpose": "Failed, offline, breached. Icon circle-x. 5.35:1 on its wash #fdecee."
+      },
+      "sev-warn": {
+        "role": "status",
+        "displayName": "Warning",
+        "canonical": "#9a6100",
+        "purpose": "Degraded, pending, due. Icon alert-triangle. 4.68:1 on its wash #fdf3e2."
+      },
+      "sev-ok": {
+        "role": "status",
+        "displayName": "Ok",
+        "canonical": "#17703f",
+        "purpose": "Healthy, online, succeeded. Icon circle-check. 5.48:1 on its wash #e6f6ed."
+      },
+      "sev-run": {
+        "role": "status",
+        "displayName": "Running",
+        "canonical": "#0f5f95",
+        "purpose": "In progress, open. Icon progress. 5.94:1 on its wash #e7f1fa."
+      },
+      "sev-mut": {
+        "role": "status",
+        "displayName": "Muted severity",
+        "canonical": "#606a7a",
+        "purpose": "Unknown, retired, not applicable. Icon minus. 4.79:1 on its wash #eef0f4."
+      }
+    },
+    "typographyMeta": {
+      "h1": {
+        "displayName": "H1",
+        "purpose": "The page title, one per page. --t-h1."
+      },
+      "h2": {
+        "displayName": "H2",
+        "purpose": "A panel's heading, the brand, a donut's figure. --t-h2."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Everything read: rows, cells, buttons, fields, rail items. --t-body, 13.5px is the working size."
+      },
+      "small": {
+        "displayName": "Small",
+        "purpose": "Sub-lines, pills, breadcrumbs, mono values, code. --t-sm."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Tile labels, list headers, rail group captions. Uppercase by CSS, 0.1em tracked. --t-cap, and the floor: nothing renders below it."
+      },
+      "kpi": {
+        "displayName": "KPI",
+        "purpose": "The figure on a tile. The one size outside the five-step scale. --t-kpi."
+      },
+      "code": {
+        "displayName": "Code",
+        "purpose": "Mono values, hostnames, expressions. Tabular numerals."
+      }
+    },
+    "shadows": [
+      {
+        "name": "shadow",
+        "value": "0 1px 2px rgba(15,26,32,.05),0 6px 20px rgba(15,26,32,.06)",
+        "purpose": "The resting state of every panel and tile, and the only shadow. It separates white from white."
+      }
+    ],
+    "motion": [
+      {
+        "name": "press",
+        "value": "transform: translateY(1px) on :active",
+        "purpose": "Buttons. The only motion in the design; nothing animates at rest."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "tiles",
+        "value": "1300px"
+      },
+      {
+        "name": "rail-drawer",
+        "value": "1024px"
+      },
+      {
+        "name": "sm",
+        "value": "640px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Accent fill, white text at 5.81:1. The focus ring sits outside the fill because accent on accent is 1:1.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Enroll device</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;gap:6px;font:500 13.5px/1 Inter,system-ui,sans-serif;padding:9px 13px;border-radius:6px;border:1px solid #828895;background:#fff;color:#141619;cursor:pointer;white-space:nowrap}.ds-btn-primary{background:#1f5fd1;border-color:#1f5fd1;color:#fff}.ds-btn:active{transform:translateY(1px)}.ds-btn:focus-visible{outline:2px solid #1f5fd1;outline-offset:2px}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Everything else. The control-grey border is the entire visual claim that a button is here, at 3.56:1.",
+      "html": "<button class=\"ds-btn\">Bulk actions</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;gap:6px;font:500 13.5px/1 Inter,system-ui,sans-serif;padding:9px 13px;border-radius:6px;border:1px solid #828895;background:#fff;color:#141619;cursor:pointer;white-space:nowrap}.ds-btn:focus-visible{outline:2px solid #1f5fd1;outline-offset:2px}"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "36px, 6px radius, control-grey border. Placeholder in muted (5.47:1), typed text in ink.",
+      "html": "<input class=\"ds-inp\" placeholder=\"Find a device, ticket, address, or ask a question\">",
+      "css": ".ds-inp{display:flex;align-items:center;gap:8px;border:1px solid #828895;border-radius:6px;padding:8px 11px;background:#fff;min-height:36px;font:13.5px/1.5 Inter,system-ui,sans-serif;color:#141619}.ds-inp::placeholder{color:#606a7a}.ds-inp:focus{outline:none;border-color:#1f5fd1}"
+    },
+    {
+      "name": "Tile",
+      "kind": "card",
+      "refersTo": "tile",
+      "description": "A 10.5px caption leads a 26px figure. Only crit and warn colour the whole tile; ok colours the figure. A tile with a destination is a link.",
+      "html": "<div class=\"ds-tile\"><div class=\"ds-k\">Managed endpoints</div><div class=\"ds-v\">286</div><div class=\"ds-z\">12 enrolled this week</div></div>",
+      "css": ".ds-tile{position:relative;background:#fff;border:1px solid #e5e8ee;border-radius:10px;padding:14px 16px;box-shadow:0 1px 2px rgba(15,26,32,.05),0 6px 20px rgba(15,26,32,.06);min-height:92px;font-family:Inter,system-ui,sans-serif}.ds-k{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:#606a7a}.ds-v{font-size:26px;font-weight:600;letter-spacing:-.03em;line-height:1.1;margin-top:5px;color:#141619}.ds-z{font-size:12px;color:#606a7a;margin-top:2px}"
+    },
+    {
+      "name": "Rail Navigation Item",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "Active state is white on the lifted ground with a 2px accent edge. The edge is 2.64:1 there and is never the only carrier.",
+      "html": "<nav class=\"ds-rail\"><span class=\"ds-grp\">Fleet</span><a class=\"ds-nav\" href=\"#\">Devices<span class=\"ds-ct\">286</span></a><a class=\"ds-nav ds-on\" href=\"#\">Health<span class=\"ds-ct ds-hot\">1</span></a></nav>",
+      "css": ".ds-rail{width:232px;padding:14px 0;background:#0f1a20;color:#9db0b8;font-family:Inter,system-ui,sans-serif}.ds-grp{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.13em;color:#7f939c;padding:14px 18px 5px}.ds-nav{display:flex;align-items:center;gap:10px;padding:7px 18px;color:#9db0b8;font-size:13.5px;border-left:2px solid transparent;text-decoration:none}.ds-nav:hover,.ds-on{color:#fff;background:#182730}.ds-on{border-left-color:#1f5fd1}.ds-ct{margin-left:auto;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#7f939c}.ds-hot{color:#ff8d9a}"
+    },
+    {
+      "name": "Severity Pill",
+      "kind": "chip",
+      "refersTo": "pill",
+      "description": "Ink on its own wash, with the kind's icon first so colour is never the only carrier.",
+      "html": "<span class=\"ds-pill ds-ok\">online</span> <span class=\"ds-pill ds-crit\">offline</span> <span class=\"ds-pill ds-warn\">due</span> <span class=\"ds-pill ds-mut\">n/a</span>",
+      "css": ".ds-pill{display:inline-flex;align-items:center;gap:5px;font:500 12px/1.5 Inter,system-ui,sans-serif;padding:3px 9px 3px 7px;border-radius:999px;white-space:nowrap}.ds-crit{background:#fdecee;color:#c1182f}.ds-warn{background:#fdf3e2;color:#9a6100}.ds-ok{background:#e6f6ed;color:#17703f}.ds-run{background:#e7f1fa;color:#0f5f95}.ds-mut{background:#eef0f4;color:#606a7a}"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "The workspace container. Hairline and the one shadow; an H2 head with a muted sub-line.",
+      "html": "<section class=\"ds-panel\"><header class=\"ds-panel-h\"><h2>Recent jobs</h2><p>Last 24 hours</p></header><div class=\"ds-panel-b\">Content</div></section>",
+      "css": ".ds-panel{background:#fff;border:1px solid #e5e8ee;border-radius:10px;box-shadow:0 1px 2px rgba(15,26,32,.05),0 6px 20px rgba(15,26,32,.06);overflow:hidden;font-family:Inter,system-ui,sans-serif;color:#141619}.ds-panel-h{padding:14px 18px;border-bottom:1px solid #e5e8ee}.ds-panel-h h2{margin:0;font-size:15px;font-weight:600}.ds-panel-h p{margin:2px 0 0;font-size:12px;color:#606a7a}.ds-panel-b{padding:16px 18px;font-size:13.5px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Instrument Rail",
+    "overview": "A dark spine runs down the left of every screen and never changes. Everything to its right is bright, white, and dense with fact. The rail is the instrument; the workspace is the readout. An operator glances left to know where they are and looks right to read what is true, and the two never compete for attention.\n\nThe workspace is deliberately busy - this is a console for people who manage hundreds of endpoints. What keeps density from becoming noise is that colour is rationed. Most of a screen is near-black text on white with hairline rules. Colour appears only where it carries meaning: a severity, or the one accent.\n\nv3 simplified the previous language rather than replacing its idea: one accent where there were two, five severities where there were nine hues, five type sizes where there were three ramps, three radii where there were six. Every page is composed from one kit, and a browser-side harmony gate measures every routed page against the token allowlist.",
+    "keyCharacteristics": [
+      "A permanent dark rail (232px) against a cool-white workspace",
+      "One accent, the only colour on the page that is not a severity or a grey",
+      "Five severities, each with a wash and an icon, so colour is never the only carrier",
+      "Hairline-and-wash depth; one soft shadow",
+      "Every ratio computed in CI, never asserted in prose; every page measured in a browser"
+    ],
+    "rules": [
+      {
+        "name": "The One Accent Rule",
+        "body": "There is one accent and it is the only colour on the page that does not mean a severity. A control that navigates, reveals or commits is the accent; nothing else is. The previous 'azure informs, magenta commits' rule is retired with the magenta.",
+        "section": "colors"
+      },
+      {
+        "name": "The Rationed Hue Rule",
+        "body": "A colour must be carrying information. If a hue could be swapped for grey without losing meaning, it should be grey.",
+        "section": "colors"
+      },
+      {
+        "name": "The Second Carrier Rule",
+        "body": "Colour is never the only carrier. Every severity pill carries its icon; a tile's kind is carried by its wash and its label; the active rail item is carried by white text and the lifted ground, not only by its accent edge.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Grounds Rule",
+        "body": "No accent is safe on both the rail and the page. The accent is 5.81:1 on white and 3.04:1 on the rail; the rail tones are the mirror image. On the rail the accent is an edge, never text.",
+        "section": "colors"
+      },
+      {
+        "name": "The Absent Zero Rule",
+        "body": "Unmeasured is drawn as absent: n/a, no arc, no bar, a hollow pip. Never as a measured 0, and never in the ok colour.",
+        "section": "colors"
+      },
+      {
+        "name": "The Floor Is The Ramp's Smallest Step",
+        "body": "Nothing renders below --t-cap, 10.5px - not in a stylesheet, not inline in JSX. CI enforces both halves. The caption is legible at that size only because every caption pair is graded at 4.5:1.",
+        "section": "typography"
+      },
+      {
+        "name": "The Label Leads Rule",
+        "body": "On a tile the caption sits above the figure. The number is bigger, but the word is what makes it mean anything.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-Until-Touched Rule",
+        "body": "Surfaces rest almost flat. A hover changes the ground or the border, and a hover that changes only a border must step it at least 2:1 so the eye registers it.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do edit docs/design/itms-prototype-v3.html first. tokens.test.ts requires its :root to match the first :root of frontend/src/index.css exactly; the design file is the authority and the console is the transcription. Leave a comment beside a changed value naming the old value, the new value and the measured ratio.",
+      "Do compute every contrast ratio with the helper in frontend/src/test/contrast.test.ts and add the pair to the table matching its floor - 4.5:1 for text, 3:1 for a control boundary or state.",
+      "Do name the v3 token (--sev-crit, --muted, --r-ctl) in new code. The legacy aliases exist so old code keeps resolving; a module is finished migrating when it reads none of them.",
+      "Do give every pill its icon and every unmeasured value its n/a.",
+      "Do give every tile, KPI and figure a destination. A number an operator cannot click is a number they cannot act on.",
+      "Do run node scripts/harmony.mjs on the routes you touched. It is the browser's opinion of whether the page is on the allowlist."
+    ],
+    "donts": [
+      "Don't paint --line or --line-2 as a control boundary. They measure 1.23:1 and 1.49:1; the criterion asks 3:1 and the boundary scan in contrast.test.ts grades every rule that names a control.",
+      "Don't introduce a second accent, or reach for the retired magenta, violet, gold or teal by name. They alias to the one accent or to a severity.",
+      "Don't write a font size or a radius as a literal. 14, 16, 18 and 20px are not on the ramp; 8, 12, 14 and 16px are not on the ladder; the harmony gate reports each as a stray.",
+      "Don't type uppercase copy or an em dash into UI text. Captions are uppercased by CSS; sentence case everywhere else.",
+      "Don't ship a dead control in the chrome. No bell, no '+ New'.",
+      "Don't reference an undefined token with a fallback (var(--brand, #6d4aff)). Two of those shipped, both silently painting a retired colour for months.",
+      "Don't widen a guard to make a colour pass. Change the colour, in the design file, first."
+    ]
+  }
+}

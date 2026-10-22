@@ -1,0 +1,160 @@
+name: agent-update-e2e
+
+# Self-update on a real service, on all three operating systems
+# (docs/modules/agent-distribution/spec-self-update.md §11). Its own workflow
+# because it runs only on PRs that touch the paths below, which a job inside
+# ci.yml cannot express. Until this is green on windows-latest and
+# macos-latest, the spec's per-OS rows stay "never executed".
+
+# The same paths on push: a merge to main that touches none of them was
+# already proven here on its PR (or never could change the result), and every
+# run costs a macOS and a Windows hosted runner.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "agent/**"
+      - "docs/kernel/wire-protocol/**"
+      - "backend/app/modules/agent_update/**"
+      # The Group Policy MSI: TestMsiInstallWindows builds it with this builder.
+      - "backend/app/services/msi_build.py"
+      - "backend/app/modules/agent_distribution/**"
+      - ".github/workflows/agent-update-e2e.yml"
+  pull_request:
+    paths:
+      - "agent/**"
+      - "docs/kernel/wire-protocol/**"
+      - "backend/app/modules/agent_update/**"
+      # The Group Policy MSI: TestMsiInstallWindows builds it with this builder.
+      - "backend/app/services/msi_build.py"
+      - "backend/app/modules/agent_distribution/**"
+      - ".github/workflows/agent-update-e2e.yml"
+
+concurrency:
+  group: agent-update-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  agent-update-e2e:
+    name: agent-update-e2e (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    # Hosted only: the job installs a system service, trusts a throwaway CA
+    # and runs as root. That only means what it says on a machine thrown away
+    # afterwards.
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: agent
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: agent/go.sum
+
+      - name: paths
+        # A Windows-style path on Windows (pwd -W), which both bash and the Go
+        # test binary understand.
+        run: |
+          root="$(cd .. && (pwd -W 2>/dev/null || pwd))"
+          echo "E2E_REPO_ROOT=$root" >> "$GITHUB_ENV"
+          echo "E2E_BIN_DIR=$root/agent/e2e-bin" >> "$GITHUB_ENV"
+          echo "E2E_TEST=$root/agent/e2e-bin/e2e.test$(go env GOEXE)" >> "$GITHUB_ENV"
+
+      - name: build A, B, C, D with a throwaway release key
+        run: ./internal/update/e2e/build.sh "$E2E_BIN_DIR"
+
+      - name: compile the harness
+        run: go test -c -tags e2e -o "$E2E_TEST" ./internal/update/e2e
+
+      - name: harness smoke (no root, no service)
+        run: '"$E2E_TEST" -test.run TestHarnessSmoke -test.v -test.timeout 5m'
+
+      - name: the six scenarios against a real service
+        if: runner.os != 'Windows'
+        run: |
+          sudo env E2E_BIN_DIR="$E2E_BIN_DIR" E2E_REPO_ROOT="$E2E_REPO_ROOT" RUNNER_OS="$RUNNER_OS" \
+            "$E2E_TEST" -test.run TestSelfUpdateEndToEnd -test.v -test.timeout 65m
+
+      - name: the six scenarios against a real service (Windows, already elevated)
+        if: runner.os == 'Windows'
+        run: '"$E2E_TEST" -test.run TestSelfUpdateEndToEnd -test.v -test.timeout 65m'
+
+      - name: install link — self-installer, link enrollment, agent.uninstall (Windows)
+        # install-link spec §5 Part 1: the file the link serves installs the
+        # service, the service enrolls with the link code, and a signed
+        # agent.uninstall removes service, binary and data directory.
+        if: runner.os == 'Windows'
+        run: '"$E2E_TEST" -test.run TestInstallLinkWindows -test.v -test.timeout 20m'
+
+      # The Group Policy MSI (GPO MSI spec 2026-09-30, Testing): built by the
+      # server's own builder (backend/app/services/msi_build.py, stdlib only,
+      # run as a script) with MSYS2's wixl -- msitools 0.106, the version the
+      # api image installs -- then installed by msiexec as SYSTEM.
+      - uses: actions/setup-python@v5
+        if: runner.os == 'Windows'
+        with:
+          python-version: "3.12"
+
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: false
+          install: mingw-w64-ucrt-x86_64-msitools
+
+      - name: Group Policy MSI — wixl-built, msiexec as SYSTEM, upgrade, removal (Windows)
+        if: runner.os == 'Windows'
+        env:
+          E2E_MSITOOLS_DIR: ${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin
+          E2E_PYTHON: python
+        run: '"$E2E_TEST" -test.run TestMsiInstallWindows -test.v -test.timeout 30m'
+
+      - name: agent.uninstall on systemd (Linux)
+        # Review M4: a signed agent.uninstall against a service the shipped
+        # linux/install.sh installed; the transient helper unit must remove the
+        # unit, /etc/its-agent, the binary and the data directory.
+        if: runner.os == 'Linux'
+        run: |
+          sudo env E2E_BIN_DIR="$E2E_BIN_DIR" E2E_REPO_ROOT="$E2E_REPO_ROOT" RUNNER_OS="$RUNNER_OS" \
+            "$E2E_TEST" -test.run TestUninstallLinux -test.v -test.timeout 15m
+
+      - name: SSH push install mode on systemd (Linux)
+        # The SSH push's target side: the staged artefact and 0600 token, then
+        # the pushing agent's one fixed command (pushinstall.InstallCommand).
+        # The install mode must lay the agent out as linux/install.sh does,
+        # delete both staged files, and the service must enroll with the token.
+        if: runner.os == 'Linux'
+        run: |
+          sudo env E2E_BIN_DIR="$E2E_BIN_DIR" E2E_REPO_ROOT="$E2E_REPO_ROOT" RUNNER_OS="$RUNNER_OS" \
+            "$E2E_TEST" -test.run TestPushInstallLinux -test.v -test.timeout 10m
+
+      - name: diagnostics
+        if: failure()
+        run: |
+          case "$RUNNER_OS" in
+            Linux)
+              sudo journalctl -u its-agent -u its-agent-update -u its-agent-uninstall --no-pager -n 400 || true
+              sudo cat /var/lib/its-agent/update/helper.log /var/lib/its-agent/update/state.json || true ;;
+            macOS)
+              sudo tail -n 400 /var/log/its-agent/agent.log || true
+              sudo cat /var/lib/its-agent/update/helper.log /var/lib/its-agent/update/state.json || true ;;
+            Windows)
+              cat "$PROGRAMDATA/ITSuite/agent/update/helper.log" "$PROGRAMDATA/ITSuite/agent/update/state.json" || true
+              powershell -NoProfile -Command "Get-WinEvent -LogName System -MaxEvents 200 | Where-Object { \$_.Message -like '*its-agent*' } | Format-List TimeCreated,Message" || true
+              # agent.uninstall's helper copy: was it staged (review M1:
+              # %ProgramData%\ITSuite\uninstall-<n>\its-agent-uninstall.exe)?
+              # $env: is PowerShell's, not bash's: the single quotes are the point.
+              # shellcheck disable=SC2016
+              powershell -NoProfile -Command 'Get-ChildItem "$env:ProgramData\ITSuite\uninstall-*" -Recurse -ErrorAction SilentlyContinue | Format-List FullName' || true ;;
+          esac

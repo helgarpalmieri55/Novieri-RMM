@@ -1,0 +1,86 @@
+import type { Shape } from "../types";
+import type { audit as en } from "../en/audit";
+
+export const audit: Shape<typeof en> = {
+  page: {
+    title: "Registro de auditoría",
+    description: "Quién hizo qué y cuándo. Las entradas no se pueden modificar ni eliminar.",
+    verifyChain: "Verificar la cadena",
+    verifying: "Verificando…",
+    tabEvents: "Búsqueda de eventos",
+    tabIntegrity: "Integridad de la cadena",
+    unknown: "desconocido",
+  },
+  broken: {
+    title: "Ha FALLADO la verificación de la cadena de hashes.",
+    body: "La cadena de solo anexado no se verifica a partir del evento <mono>{id}</mono>. No se puede confiar en la evidencia de auditoría posterior a ese eslabón. Trátalo como un incidente de seguridad.",
+  },
+  tiles: {
+    events: "Eventos de auditoría",
+    eventsZero: "No se ha registrado nada para esta organización",
+    loaded: "{loaded} cargados, los más recientes primero",
+    wholeRecord: "Todo el registro que guarda esta organización",
+    integrity: "Integridad de la cadena",
+    chain: {
+      verifying: "Verificando…",
+      unknown: "Sin verificar",
+      intact: "Verificada",
+      broken: "ROTA",
+    },
+    chainFoot: {
+      verifying: "Recorriendo la cadena ahora",
+      unknown: "No se ha recorrido la cadena",
+      intact: "Recalculada al cargar y a petición",
+      broken: "El recorrido se detuvo en un eslabón dañado",
+    },
+    verified: "Eventos en la cadena verificada",
+    verifiedZero: "La cadena se verificó y no contiene eventos",
+    verifiedFoot: "Contados por el recorrido del servidor, no por esta página",
+    actionTypes: "Tipos de acción a la vista",
+    actionTypesZero: "No se cargó ningún evento para contarlos",
+    mostly: "Sobre todo «{action}», {count} de {total}",
+  },
+  denied: {
+    loading: "Cargando…",
+    title: "No se muestra el registro de auditoría",
+    checking: "Comprobando qué permisos tiene esta cuenta.",
+    body: "Esta cuenta no tiene {code}, así que no se muestra el registro de auditoría.",
+  },
+  events: {
+    searchPlaceholder: "Acción, actor o destino",
+    searchAria: "Buscar en la página cargada por acción, actor o destino",
+    actionPlaceholder: "Acción exacta, p. ej., job.dispatch",
+    actionAria: "Filtrar por acción exacta, en el servidor",
+    emptyForAction: "No hay eventos de auditoría registrados para la acción \"{action}\".",
+    emptyNone: "Aún no hay eventos de auditoría registrados.",
+    emptyFiltered: "Ningún evento de auditoría cargado coincide con ese filtro.",
+    action: "Acción",
+    actor: "Actor",
+    when: "Cuándo",
+    chainHash: "Hash de la cadena",
+    noActor: "No se registró ningún actor",
+    copy: "Copiar",
+    copyAria: "Copiar el hash completo de la cadena {hash}",
+    copied: "Hash completo de la cadena copiado: <mono>{hash}</mono>",
+  },
+  integrity: {
+    title: "Integridad de la cadena de hashes",
+    subtitle: "Verificación de la secuencia de solo anexado, recorrida en el servidor a petición",
+    verifyingTitle: "Verificando la cadena…",
+    verifyingBody: "El servidor está recorriendo cada eslabón desde el origen hasta el último.",
+    didNotRun: "La verificación no se ejecutó.",
+    didNotRunBody:
+      "La solicitud para verificar la cadena falló, así que no se sabe nada de su estado. Esto <em>no</em> significa que la cadena esté intacta.",
+    brokenTitle: "La cadena está ROTA.",
+    brokenBody: {
+      one: "La verificación recorrió {count} evento y se detuvo en <mono>{id}</mono>. Todos los eventos a partir de ese eslabón quedan sin comprobar.",
+      other: "La verificación recorrió {count} eventos y se detuvo en <mono>{id}</mono>. Todos los eventos a partir de ese eslabón quedan sin comprobar.",
+    },
+    verifiedTitle: "Cadena verificada",
+    verifiedPill: "verificada",
+    verifiedBody: {
+      one: "{count} evento verificado desde el origen hasta el último, sin ningún eslabón ausente ni alterado, en el momento de esta solicitud.",
+      other: "{count} eventos verificados desde el origen hasta el último, sin ningún eslabón ausente ni alterado, en el momento de esta solicitud.",
+    },
+  },
+};

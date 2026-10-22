@@ -1,0 +1,52 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "deferral_hours": {
+      "default": 24,
+      "title": "Deferral Hours",
+      "type": "integer"
+    },
+    "patches": {
+      "items": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "title": "Patches",
+      "type": "array"
+    },
+    "reboot": {
+      "enum": [
+        "never",
+        "if_required",
+        "forced"
+      ],
+      "title": "Reboot",
+      "type": "string"
+    },
+    "reboot_not_after": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reboot Not After"
+    },
+    "result_version": {
+      "default": 2,
+      "title": "Result Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "patches",
+    "reboot"
+  ],
+  "title": "PatchApplyParams",
+  "type": "object"
+}

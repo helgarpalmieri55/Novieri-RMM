@@ -1,0 +1,70 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "mismatch": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Mismatch"
+    },
+    "restored_bytes": {
+      "title": "Restored Bytes",
+      "type": "integer"
+    },
+    "state": {
+      "enum": [
+        "success",
+        "failed"
+      ],
+      "title": "State",
+      "type": "string"
+    },
+    "verified": {
+      "title": "Verified",
+      "type": "boolean"
+    },
+    "warnings": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Warnings"
+    }
+  },
+  "required": [
+    "state",
+    "restored_bytes",
+    "verified"
+  ],
+  "title": "BackupRestoreResult",
+  "type": "object"
+}

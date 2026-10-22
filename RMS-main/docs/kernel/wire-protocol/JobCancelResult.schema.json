@@ -1,0 +1,26 @@
+{
+  "additionalProperties": false,
+  "description": "agent -> server: what the endpoint did with the job it was told to stop.\n\n`JobResultMsg.state` for a `job.cancel` is `succeeded` whenever the agent\nCARRIED OUT ITS INSTRUCTION -- including `unknown`, which is a true and\nuseful answer (\"this agent has never seen that job\"). The job succeeded;\nthe outcome says what it found.\n\nNO WIRE ENUM IS WIDENED BY THIS TYPE. `JobResultMsg.state` is untouched:\nadding `\"cancelled\"` to it would be safe for a new server reading an old\nagent and fatal in the direction that actually bites -- a NEWER agent\nagainst an older control plane, where `parse_agent_message` drops the whole\nmessage and the job hangs to expiry with only a `logger.warning`\n(design \u00a73.1).\n\n`dropped_before_start` IS ACCEPTED AND IS NOT PRODUCED BY THIS PROJECT'S\nAGENT. See `docs/kernel/wire-protocol/README.md`: the agent's two pieces of\ncancellation state (design \u00a73.8) cannot distinguish \"queued in the\ndispatcher\" from \"never seen\", so it answers `unknown` and the suppressed\ntarget reports for itself. The value stays in the schema because the server\nmust keep accepting it from an agent that CAN tell the difference -- that\nis the additive direction, and narrowing an enum an agent may already send\nis a break.",
+  "properties": {
+    "outcome": {
+      "enum": [
+        "interrupted",
+        "dropped_before_start",
+        "already_finished",
+        "unknown"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "target_job_id": {
+      "title": "Target Job Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "target_job_id",
+    "outcome"
+  ],
+  "title": "JobCancelResult",
+  "type": "object"
+}

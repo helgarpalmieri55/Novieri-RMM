@@ -1,0 +1,25 @@
+{
+  "additionalProperties": false,
+  "description": "`agent.cert.install` \u2014 server \u2192 agent, leg 2 of certificate rotation.\n\nCarries the issued certificate, its chain, and the serial the CA reported.\n\n`cert_serial` is on the wire even though the AGENT IGNORES IT. It is here so\nthe control plane records exactly the serial string its own CA gave back:\n`OpenBaoPkiCA` returns Vault's colon-separated form while re-deriving it\nfrom the DER would produce bare hex, and `enrollment.revoke_agent` feeds\n`agents.cert_serial` straight back to `CAService.revoke`. Re-deriving it\nwould leave revocation working before a rotation and broken after one, on\nOpenBao deployments only \u2014 the kind of defect that surfaces in production\nand in no test.",
+  "properties": {
+    "cert_pem": {
+      "title": "Cert Pem",
+      "type": "string"
+    },
+    "cert_serial": {
+      "title": "Cert Serial",
+      "type": "string"
+    },
+    "chain_pem": {
+      "title": "Chain Pem",
+      "type": "string"
+    }
+  },
+  "required": [
+    "cert_pem",
+    "chain_pem",
+    "cert_serial"
+  ],
+  "title": "AgentCertInstallParams",
+  "type": "object"
+}

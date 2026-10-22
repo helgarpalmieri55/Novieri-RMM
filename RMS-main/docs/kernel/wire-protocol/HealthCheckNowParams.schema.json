@@ -1,0 +1,7 @@
+{
+  "additionalProperties": false,
+  "description": "server -> agent: sample every check now and emit a full summary (\u00a75.3).\n\nExactly the shape of `logs.ship`: dispatching it tells the agent to act now;\nthe scheduled cadence comes from the policy. A parameter here would be a\nsecond, unversioned way to configure the tick.",
+  "properties": {},
+  "title": "HealthCheckNowParams",
+  "type": "object"
+}

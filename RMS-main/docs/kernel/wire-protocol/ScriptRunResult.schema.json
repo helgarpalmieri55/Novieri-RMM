@@ -1,0 +1,82 @@
+{
+  "$defs": {
+    "InstallOutcome": {
+      "additionalProperties": false,
+      "description": "Shared go-forward install-result contract (docs/modules/app-deploy/\nspec.md AD-03). `app.deploy`/`script.run` (app/modules/deploy/schema.py)\nalready emit this; `patch.apply` will migrate its module-specific\n`PatchApplyOutcome` (app/modules/patch/schema.py) onto this contract in a\nlater, deferred cleanup.",
+      "properties": {
+        "detected_after": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detected After"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exit Code"
+        },
+        "identifier": {
+          "title": "Identifier",
+          "type": "string"
+        },
+        "log": {
+          "default": "",
+          "title": "Log",
+          "type": "string"
+        },
+        "log_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Log Ref"
+        },
+        "state": {
+          "enum": [
+            "installed",
+            "failed",
+            "not_applicable",
+            "succeeded"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "identifier",
+        "state"
+      ],
+      "title": "InstallOutcome",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "outcome": {
+      "$ref": "#/$defs/InstallOutcome"
+    }
+  },
+  "required": [
+    "outcome"
+  ],
+  "title": "ScriptRunResult",
+  "type": "object"
+}

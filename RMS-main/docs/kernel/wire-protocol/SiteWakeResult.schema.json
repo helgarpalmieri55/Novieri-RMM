@@ -1,0 +1,26 @@
+{
+  "additionalProperties": false,
+  "description": "agent -> server. `sent`, never `woke` (\u00a70.9).",
+  "properties": {
+    "broadcast": {
+      "title": "Broadcast",
+      "type": "string"
+    },
+    "sent": {
+      "title": "Sent",
+      "type": "boolean"
+    },
+    "sent_at": {
+      "format": "date-time",
+      "title": "Sent At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "sent",
+    "broadcast",
+    "sent_at"
+  ],
+  "title": "SiteWakeResult",
+  "type": "object"
+}

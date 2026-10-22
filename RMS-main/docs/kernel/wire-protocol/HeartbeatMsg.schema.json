@@ -1,0 +1,26 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "heartbeat",
+      "title": "Kind",
+      "type": "string"
+    },
+    "ts": {
+      "title": "Ts",
+      "type": "string"
+    },
+    "v": {
+      "const": 1,
+      "title": "V",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "kind",
+    "ts"
+  ],
+  "title": "HeartbeatMsg",
+  "type": "object"
+}

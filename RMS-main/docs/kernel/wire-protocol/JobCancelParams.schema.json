@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "description": "`job.cancel` -- server -> agent, cycle 2 of the job-lifecycle design.\n\n**A CANCEL THAT REACHES AN ENDPOINT IS A JOB, AND TAKES THE JOB PATH.**\nInvariant #1 has no \"it is only a cancel\" exemption: a mechanism that makes\nan endpoint stop what it is doing is a command to that endpoint, so it is\nsigned over canonical bytes with the platform's job-signing key, verified\nby the agent against the key pinned at enrollment, bound to that device,\nnonce-checked and freshness-checked, exactly like every other job. A forged\ncancel would otherwise be a denial-of-service primitive against the whole\nfleet -- one unsigned frame per running job and the fleet stops working.\n\n**IT IS NOT A NEW WIRE `kind`, AND THAT IS THE COMPATIBILITY DECISION**\n(design \u00a73.1). An unknown inbound `kind` is dropped by a deployed agent in\nSILENCE -- `wire.Decode` returns `ErrKind`, the runner logs locally and\nanswers nothing -- which is the worst possible property for a verb whose\nwhole difficulty is knowing what the endpoint did. An unknown job TYPE is\nrefused `unknown_type` loudly and on the record, before anything runs. So\nan agent that predates this change answers a cancel in seconds with a\n`job_result` the control plane reads as \"this endpoint cannot be\ninterrupted\", and the target job runs or expires exactly as it would have.\n\n`target_job_id` IS THE ONLY FIELD, AND IT IS THE SERVER'S OWN. The target\nis read back out of THESE SIGNED PARAMS when the result arrives -- never\nout of the agent's result body -- so a compromised endpoint cannot name a\ndifferent job to close.",
+  "properties": {
+    "target_job_id": {
+      "title": "Target Job Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "target_job_id"
+  ],
+  "title": "JobCancelParams",
+  "type": "object"
+}

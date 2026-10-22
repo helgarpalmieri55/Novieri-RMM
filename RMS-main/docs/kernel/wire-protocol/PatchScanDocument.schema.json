@@ -1,0 +1,193 @@
+{
+  "$defs": {
+    "AppSourceStatus": {
+      "additionalProperties": false,
+      "description": "Whether one app package manager (winget, Homebrew) was scanned.",
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "scanned",
+            "unsupported",
+            "failed"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "state"
+      ],
+      "title": "AppSourceStatus",
+      "type": "object"
+    },
+    "PatchEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "cve": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cve"
+        },
+        "identifier": {
+          "title": "Identifier",
+          "type": "string"
+        },
+        "kb": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kb"
+        },
+        "severity": {
+          "enum": [
+            "critical",
+            "important",
+            "moderate",
+            "low",
+            "unknown"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "superseded_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Superseded By"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "identifier",
+        "title",
+        "severity"
+      ],
+      "title": "PatchEntry",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "app_sources": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/AppSourceStatus"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "App Sources"
+    },
+    "booted_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Booted At"
+    },
+    "installed_identifiers": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Installed Identifiers",
+      "type": "array"
+    },
+    "os_family": {
+      "enum": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "title": "Os Family",
+      "type": "string"
+    },
+    "patches": {
+      "items": {
+        "$ref": "#/$defs/PatchEntry"
+      },
+      "title": "Patches",
+      "type": "array"
+    },
+    "reboot_required": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reboot Required"
+    },
+    "scanned_at": {
+      "title": "Scanned At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "os_family",
+    "patches",
+    "scanned_at"
+  ],
+  "title": "PatchScanDocument",
+  "type": "object"
+}

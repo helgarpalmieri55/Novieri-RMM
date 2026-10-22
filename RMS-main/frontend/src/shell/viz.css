@@ -1,0 +1,302 @@
+/* The visual pieces v3 introduced -- TRANSCRIBED from
+ * `docs/design/itms-prototype-v3.html`: the KPI tile with its sparkline, the
+ * heat strip, the donut, the facts strip, the timeline, the week grid and the
+ * steps list. Rendered by `viz.tsx` and `components/weekpainter.tsx`.
+ *
+ * Every colour here is a token and every size a ramp step; the two literal
+ * radii (2px and 3px, the heat and week cells and the timeline track) are the
+ * design's own and the harmony gate allows exactly those two. Sparkline,
+ * donut and timeline are inline SVG painted with `currentColor`, so a kind
+ * sets ONE colour on the container and the figure follows.
+ */
+
+/* -------------------------------------------------------------------- tile */
+
+/* v3 `.tile`. `kind` colours the whole tile; only crit and warn ever do, ok
+ * colours the figure, anything else is the plain white card. The console's
+ * tile is usually a LINK to the list behind the number, so it also answers
+ * the pointer and the keyboard (design additions: `:hover`, `:focus-visible`)
+ * and keeps the page ink rather than a link's accent. */
+.tile { position: relative; display: block; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); padding: 14px 16px; box-shadow: var(--shadow); min-height: 92px; color: var(--ink); min-width: 0;
+}
+/* `a.tile`, NOT `.tile`. Not every tile has a destination: `Tile` renders a
+ * <div> when `to` is absent, and a div that lights up under the pointer
+ * promises a click that never happens. The step itself is unchanged
+ * (`--line` to `--line-control`, 2.9:1, graded in `contrast.test.ts`); only
+ * what it applies to is narrower. */
+a.tile:hover { border-color: var(--line-control);
+}
+.tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.tile .k { display: flex; align-items: center; gap: 6px; font-size: var(--t-cap); text-transform: uppercase; letter-spacing: .1em; color: var(--muted);
+}
+/* `--t-kpi`, 26px: the one size outside the five-step scale, named in `:root`
+ * so the harmony gate can allow it. */
+.tile .v { font-size: var(--t-kpi); font-weight: 600; letter-spacing: -.03em; line-height: 1.1; margin-top: 5px;
+}
+.tile .v small { font-size: var(--t-body); font-weight: 500; margin-left: 1px;
+}
+.tile .z { font-size: var(--t-sm); color: var(--muted); margin-top: 2px;
+}
+.tile.has-sp .z, .tile.has-sp .k { padding-right: 112px;
+}
+.tile.crit { background: var(--sev-crit-s); border-color: var(--sev-crit-s);
+}
+a.tile.crit:hover { border-color: var(--sev-crit);
+}
+.tile.crit .v, .tile.crit .k { color: var(--sev-crit);
+}
+.tile.warn { background: var(--sev-warn-s); border-color: var(--sev-warn-s);
+}
+a.tile.warn:hover { border-color: var(--sev-warn);
+}
+.tile.warn .v, .tile.warn .k { color: var(--sev-warn);
+}
+.tile.ok .v { color: var(--sev-ok);
+}
+/* The trend inside `.z`: an arrow glyph carries the direction, so the line
+ * reads the same in the muted ink as it would in a colour. */
+.tile .z .trend { display: inline-flex; align-items: center; gap: 3px;
+}
+/* v3 `svg.sp`: the sparkline sits in the tile's bottom-right corner and paints
+ * in `currentColor`, which the kind sets.
+ *
+ * `fill: none` ON THE ROOT, mirroring `svg.ic` in `base.css`. The user
+ * agent's initial `fill` is BLACK, and it inherits into every child that
+ * does not set its own -- so the root itself measured `rgb(0, 0, 0)`, which
+ * is not a token, on every tile carrying a sparkline. The children that do
+ * paint (`.a`, `.l`, `.p`) each state their fill below; the root paints
+ * nothing and must say so. */
+svg.sp { position: absolute; right: 12px; bottom: 10px; width: 104px; height: 26px; color: var(--muted); fill: none;
+}
+.tile.crit svg.sp { color: var(--sev-crit);
+}
+.tile.warn svg.sp { color: var(--sev-warn);
+}
+svg.sp .a { fill: currentColor; opacity: .12;
+}
+svg.sp .l { fill: none; stroke: currentColor; stroke-width: 1.6;
+}
+svg.sp .p { fill: currentColor; stroke: var(--surface); stroke-width: 1.4;
+}
+/* A sparkline drawn on its own (outside a tile) keeps the design's size and
+ * takes the kind as its colour. */
+svg.sp.free { position: static; display: inline-block;
+}
+svg.sp.sp-crit { color: var(--sev-crit);
+}
+svg.sp.sp-warn { color: var(--sev-warn);
+}
+svg.sp.sp-ok { color: var(--sev-ok);
+}
+svg.sp.sp-run { color: var(--sev-run);
+}
+svg.sp.sp-info { color: var(--accent);
+}
+
+/* -------------------------------------------------------------------- heat */
+
+/* v3 `.heat`: one cell per device, ok at rest (40% of the ok green), and the
+ * three attention kinds at full strength. Each cell names its kind for
+ * assistive technology (`viz.tsx`), so the strip is not colour alone. */
+.heat { display: flex; flex-wrap: wrap; gap: 3px;
+}
+.heat i { width: 10px; height: 10px; border-radius: 2px; background: var(--sev-ok); opacity: .4;
+}
+.heat .h-crit { background: var(--sev-crit); opacity: 1;
+}
+.heat .h-warn { background: var(--sev-warn); opacity: 1;
+}
+.heat .h-run { background: var(--sev-run); opacity: 1;
+}
+.heat .h-mut { background: var(--sev-mut); opacity: 1;
+}
+.heat .h-info { background: var(--accent); opacity: 1;
+}
+/* The console's column count, when a caller passes one: a fixed grid instead
+ * of a wrapping row. */
+.heat[data-columns] { display: grid;
+}
+
+/* ------------------------------------------------------------------- donut */
+
+/* v3 `.dons` / `.don` / `.don-v` / `.don-k` / `.don-z`. An unmeasured value
+ * draws no arc and reads `n/a` in the muted ink; never a zero. */
+.dons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0;
+}
+.don { position: relative; text-align: center; padding: 6px 8px;
+}
+/* `fill: none` for the same reason `svg.sp` states: the UA's initial black
+ * fill on the root is a stray value the arcs never override, because they
+ * are strokes. */
+.don svg { width: 64px; height: 64px; transform: rotate(-90deg); margin: 0 auto; fill: none;
+}
+.don .trk { fill: none; stroke: var(--line); stroke-width: 7;
+}
+.don .arc { fill: none; stroke: currentColor; stroke-width: 7; stroke-linecap: round;
+}
+.don-v { position: absolute; top: 26px; left: 0; right: 0; font-family: var(--mono); font-size: var(--t-h2); font-weight: 600;
+}
+.don-v small { font-size: var(--t-cap);
+}
+.don-k { font-weight: 600; margin-top: 4px;
+}
+.don-z { font-size: var(--t-sm); color: var(--muted);
+}
+.don.crit { color: var(--sev-crit);
+}
+.don.warn { color: var(--sev-warn);
+}
+.don.ok { color: var(--sev-ok);
+}
+.don.run { color: var(--sev-run);
+}
+.don.info { color: var(--accent);
+}
+.don.mut { color: var(--muted);
+}
+/* The label and sub-line stay in the page inks whatever the kind paints. */
+.don .don-k { color: var(--ink);
+}
+
+/* ------------------------------------------------------------------- facts */
+
+/* v3 `.facts`: a strip of caption/value cells that wraps to the width. */
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); border: 1px solid var(--line); border-radius: var(--r-panel); overflow: hidden; margin-bottom: 16px; background: var(--surface);
+}
+.facts > div { padding: 11px 14px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+}
+.facts .k { display: block; font-size: var(--t-cap); text-transform: uppercase; letter-spacing: .1em; color: var(--muted);
+}
+.facts .v { display: block; margin-top: 3px;
+}
+
+/* ---------------------------------------------------------------- timeline */
+
+/* v3 `.tl-row` / `.tl-k` / `.tl-h` / `.tl-track` / `.tl-bar` / `.tl-axis`. */
+.tl-row { display: grid; grid-template-columns: 260px minmax(0, 1fr); align-items: center; gap: 12px; padding: 5px 0;
+}
+.tl-k { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted);
+}
+.tl-k .mono { color: var(--ink); font-size: var(--t-sm);
+}
+.tl-h { font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tl-track { position: relative; height: 16px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 3px;
+}
+.tl-bar { position: absolute; top: 2px; bottom: 2px; border-radius: 2px;
+}
+.b-crit { background: var(--sev-crit);
+}
+.b-warn { background: var(--sev-warn);
+}
+.b-run { background: var(--sev-run);
+}
+.b-ok { background: var(--sev-ok);
+}
+.b-mut { background: var(--sev-mut);
+}
+.b-info { background: var(--accent);
+}
+.tl-k.crit { color: var(--sev-crit);
+}
+.tl-k.warn { color: var(--sev-warn);
+}
+.tl-k.run { color: var(--sev-run);
+}
+.tl-k.ok { color: var(--sev-ok);
+}
+.tl-axis { position: relative; height: 14px; margin: 6px 0 0 272px; font-family: var(--mono); font-size: var(--t-cap); color: var(--muted);
+}
+.tl-axis i { position: absolute; transform: translateX(-50%); font-style: normal;
+}
+@media (max-width: 640px) {
+  .tl-row { grid-template-columns: 1fr; gap: 4px; }
+  .tl-axis { margin-left: 0; }
+}
+
+/* -------------------------------------------------------------------- week */
+
+/* v3 `.wk` / `.wk-row` / `.wk-d` / `.wk-c` / `.wk-h`. The console renders
+ * each cell as a `<button role="gridcell" aria-pressed>`, so the cell's edge
+ * identifies a control: `--line-control`, 3:1 (design edit, recorded in the
+ * design file's console-additions block). The reset on `.wk-c` is what keeps
+ * a button from bringing the user agent's padding along. */
+.wk { display: block; max-width: 100%; overflow-x: auto;
+}
+.wk-row { display: flex; gap: 2px; margin-bottom: 2px; align-items: center;
+}
+/* `position: relative` ON THE HEADER CELLS IS LOAD-BEARING, for the reason
+ * `Th` in components/ui.tsx records: the hour name for assistive technology
+ * is an `.sr-only` span, which is `position: absolute`, and an absolutely
+ * positioned box with no positioned ancestor inside the scroller has its
+ * containing block OUTSIDE it -- so `.wk`'s `overflow-x: auto` never clips
+ * it, and 48 one-pixel names laid out at their static positions across a
+ * 414px grid widened a 390px document to 433px. Measured on the preview. */
+.wk-d { width: 30px; font-size: var(--t-cap); color: var(--muted); font-style: normal; flex: none; position: relative;
+}
+.wk-c { width: 14px; height: 16px; border-radius: 2px; background: var(--line); border: 1px solid var(--line-control); flex: none; padding: 0; cursor: pointer;
+}
+.wk-c.on { background: var(--accent); border-color: var(--accent);
+}
+.wk-c:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px;
+}
+.wk-c:disabled { cursor: not-allowed; opacity: .5;
+}
+.wk-h { width: 14px; font-size: var(--t-cap); color: var(--muted); font-family: var(--mono); font-style: normal; flex: none; position: relative;
+}
+/* The console's additions around the grid: the sentence under it, the
+ * "custom expression" state and the Advanced disclosure. */
+.wk-help { font-size: var(--t-sm); color: var(--muted); margin-top: 6px;
+}
+.wk-adv { margin-top: 8px;
+}
+.wk-adv > summary { font-size: var(--t-sm); color: var(--muted); cursor: pointer;
+}
+.wk-adv .inp, .wk-adv .input-field { margin-top: 6px; font-family: var(--mono);
+}
+
+/* ------------------------------------------------------------------- steps */
+
+/* v3 `.steps` / `.step` / `.sbar` / `.six` / `.sbody` / `.sgo`. The state is
+ * carried three ways: the bar, the pill and the words. */
+.steps { border: 1px solid var(--line); border-radius: var(--r-panel); overflow: hidden; background: var(--surface);
+}
+.step { display: grid; grid-template-columns: 3px 30px minmax(0, 1fr) auto; gap: 0 12px; align-items: center; border-bottom: 1px solid var(--line);
+}
+.step:last-child { border-bottom: 0;
+}
+.sbar { align-self: stretch; background: transparent;
+}
+.step.ok .sbar { background: var(--sev-ok);
+}
+.step.now .sbar { background: var(--accent);
+}
+.step.crit .sbar { background: var(--sev-crit);
+}
+/* Design addition, wave 2: a step blocked on something that is not yet a
+ * failure. Without this rung the list had to call it critical or say
+ * nothing. */
+.step.warn .sbar { background: var(--sev-warn);
+}
+.six { font-size: var(--t-sm); color: var(--muted); padding-left: 10px;
+}
+.sbody { padding: 13px 0;
+}
+.sbody b { display: block;
+}
+.sbody p { font-size: var(--t-sm); color: var(--muted); margin-top: 2px; max-width: 66ch;
+}
+.sgo { padding: 0 14px;
+}
+
+/* THE DESTINATION STACKS UNDER THE STEP, IT DOES NOT TAKE A COLUMN FROM IT.
+ * `.step`'s fourth track is `auto`, which at 390px is the action button's own
+ * width taken out of the 1fr the body was living in -- so the button painted
+ * over the step's title and its state pill. Three tracks and the action on
+ * its own row below the body. */
+@media (max-width: 640px) {
+  .step { grid-template-columns: 3px 30px minmax(0, 1fr); }
+  .step .sgo { grid-column: 3; padding: 0 0 13px; }
+  .sbody { padding: 13px 0 6px; }
+}

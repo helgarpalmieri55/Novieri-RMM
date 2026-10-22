@@ -1,0 +1,15 @@
+   -    \    |
+Name                                  Id                           Version        Available      Source
+---------------------------------------------------------------------------------------------------------
+Mozilla Firefox (x64 en-US)           Mozilla.Firefox              130.0          131.0.2        winget
+Google Chrome                         Google.Chrome                128.0.6613.120 129.0.6668.59  winget
+Microsoft Visual C++ 2015-2022 Redis… Microsoft.VCRedist.2015+.x64 14.38.33135.0  14.40.33810.0  winget
+7-Zip 23.01 (x64)                     7zip.7zip                    < 23.01        24.08          winget
+Some Very Long Application Name Tha… SomePublisher.SomeVeryLongA… 1.0            2.0            winget
+Zoom Workplace                        Zoom.Zoom                    6.1.1.36333    6.2.0.46690    winget
+5 upgrades available.
+
+The following packages have an upgrade available, but require explicit targeting for upgrade:
+Name       Id              Version Available Source
+----------------------------------------------------
+Pinned App Pinned.App      1.0     2.0       winget

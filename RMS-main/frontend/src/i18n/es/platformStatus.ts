@@ -1,0 +1,86 @@
+import type { Shape } from "../types";
+import type { platformStatus as en } from "../en/platformStatus";
+
+export const platformStatus: Shape<typeof en> = {
+  page: {
+    title: "Estado de la plataforma",
+    description: "Si los servicios que necesita esta plataforma están respondiendo y si cada uno de sus procesos está en marcha.",
+    reprobing: "Volviendo a sondear…",
+    reprobe: "Sondear de nuevo",
+    readAt: {
+      one: "Sondas leídas: {when}. Se vuelven a leer cada {count} segundo.",
+      other: "Sondas leídas: {when}. Se vuelven a leer cada {count} segundos.",
+    },
+    rereadEvery: {
+      one: "Las sondas se vuelven a leer cada {count} segundo.",
+      other: "Las sondas se vuelven a leer cada {count} segundos.",
+    },
+  },
+  status: { ok: "En buen estado", degraded: "Degradado", down: "Caído" },
+  banner: {
+    probesFailing: {
+      one: "{count} de {total} sondas de dependencias está fallando",
+      other: "{count} de {total} sondas de dependencias están fallando",
+    },
+    processesShort: {
+      one: "{count} proceso tiene menos instancias de las necesarias",
+      other: "{count} procesos tienen menos instancias de las necesarias",
+    },
+    noReasonCode: "La sonda no indicó un código de motivo para este fallo.",
+    openErrors: "Abrir grupos de errores",
+  },
+  tiles: {
+    probes: "Sondas de dependencias",
+    probesZero: "Esta compilación no registró ninguna sonda",
+    slowest: "Más lenta: {probe}, {ms} ms",
+    probesNotOk: "Sondas con problemas",
+    probesNotOkZero: "Todas las sondas respondieron correctamente",
+    ofProbes: { one: "de {count} sonda", other: "de {count} sondas" },
+    short: "Procesos con menos instancias de las necesarias",
+    shortZero: "Todos los procesos tienen todas sus réplicas",
+    ofProcesses: { one: "de {count} proceso", other: "de {count} procesos" },
+    modules: "Módulos registrados",
+    modulesZero: "No se registró nada al arrancar",
+    routes: { one: "{count} ruta", other: "{count} rutas" },
+    jobTypes: { one: "{count} tipo de tarea", other: "{count} tipos de tarea" },
+  },
+  dependencies: {
+    title: "Dependencias",
+    probe: "Sonda",
+    status: "Estado",
+    duration: "Duración",
+    reason: "Motivo",
+    detail: "Detalle",
+    noReason: "Esta sonda no indicó ningún código de motivo",
+    noDetail: "Esta sonda no indicó ningún detalle medido",
+    yes: "sí",
+    no: "no",
+  },
+  processes: {
+    title: "Procesos",
+    process: "Proceso",
+    healthyInstances: "Instancias en buen estado",
+    status: "Estado",
+    oldestHeartbeat: "Latido más antiguo",
+    version: "Versión",
+    healthy: "{healthy} / {total} en buen estado",
+    noVersion: "Este proceso no indicó su versión",
+  },
+  modules: {
+    title: "Módulos registrados",
+    subtitle: "Registro, no estado de salud: aquí no se sondea nada.",
+    module: "Módulo",
+    routes: "Rutas",
+    jobTypes: "Tipos de tarea",
+  },
+  guidance: {
+    unreachable: "La dependencia no respondió. Comprueba que está en marcha y que este host aún puede alcanzarla.",
+    timeout: "Respondió demasiado despacio para ser útil. Revisa la carga y la ruta de red entre este host y ella.",
+    auth_failed: "Respondió y rechazó nuestras credenciales. Revisa la credencial con la que está configurada esta instalación.",
+    sealed: "La bóveda está sellada, así que no se puede descifrar nada de lo que guarda. Desbloquéala para restaurar todo lo que lee una credencial almacenada.",
+    empty_cache: "La caché respondió pero aún no contiene nada: es normal poco después de un reinicio y un problema si persiste.",
+    misconfigured: "La dependencia es alcanzable, pero la configuración de esta instalación para ella es incorrecta. Revisa la configuración.",
+    stale: "La última actualización es más antigua de lo debido: la dependencia responde, pero lo que sirve ha dejado de cambiar.",
+    failed: "La última ejecución informó de un fallo. Lee el registro de esa ejecución en el host (journalctl) para conocer la causa.",
+  },
+};

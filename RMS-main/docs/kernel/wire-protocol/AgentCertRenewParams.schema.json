@@ -1,0 +1,7 @@
+{
+  "additionalProperties": false,
+  "description": "`agent.cert.renew` \u2014 server \u2192 agent, leg 1 of certificate rotation\n(docs/modules/agent/cert-renewal.md \u00a70.3).\n\nCarries NOTHING. The agent needs no instruction beyond \"produce a CSR\": the\nkeypair is generated on the endpoint and the private half never leaves it,\nexactly as at enrollment. Everything about *who the certificate is for* is\nthe server's own knowledge (`jobs.target_id`, `jobs.org_id`) and is never\nread from anything the agent sends \u2014 \u00a70.5.",
+  "properties": {},
+  "title": "AgentCertRenewParams",
+  "type": "object"
+}

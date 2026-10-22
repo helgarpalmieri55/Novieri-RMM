@@ -1,0 +1,78 @@
+{
+  "$defs": {
+    "JobPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "expires_at": {
+          "title": "Expires At",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "issued_at": {
+          "title": "Issued At",
+          "type": "string"
+        },
+        "nonce": {
+          "title": "Nonce",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "device",
+        "params",
+        "issued_at",
+        "expires_at",
+        "nonce"
+      ],
+      "title": "JobPayload",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "server -> agent: a signed job. `sig` covers canonical_bytes(job).",
+  "properties": {
+    "job": {
+      "$ref": "#/$defs/JobPayload"
+    },
+    "kind": {
+      "const": "job",
+      "title": "Kind",
+      "type": "string"
+    },
+    "sig": {
+      "title": "Sig",
+      "type": "string"
+    },
+    "v": {
+      "const": 1,
+      "title": "V",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "kind",
+    "job",
+    "sig"
+  ],
+  "title": "JobEnvelope",
+  "type": "object"
+}

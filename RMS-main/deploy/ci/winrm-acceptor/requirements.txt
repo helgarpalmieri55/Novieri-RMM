@@ -1,0 +1,12 @@
+# The independent WinRM acceptor for the agent-winrm CI job (plan Task 9).
+# pyspnego implements SPNEGO and the MS-WSMV wrap_winrm/unwrap_winrm itself
+# and drives MIT Kerberos through python-gssapi (from Debian, see the
+# Dockerfile) -- none of it shares the agent's Go. The [kerberos] extra adds
+# pykrb5, which its Kerberos acceptor requires; it compiles against
+# libkrb5-dev. Everything is pinned to what resolved when the known-answer
+# vector in gsswrap_test.go was captured (2026-09-29), so the oracle does not
+# drift under the vector. (The plan suggested pyspnego 0.11.*; 0.12.2 is
+# current.)
+pyspnego[kerberos]==0.12.2
+krb5==0.10.0
+cryptography==50.0.1

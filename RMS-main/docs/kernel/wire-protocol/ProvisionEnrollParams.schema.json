@@ -1,0 +1,47 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "expected_agent_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected Agent Version"
+    },
+    "hostname": {
+      "title": "Hostname",
+      "type": "string"
+    },
+    "os_family": {
+      "enum": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "title": "Os Family",
+      "type": "string"
+    },
+    "post_config": {
+      "additionalProperties": true,
+      "title": "Post Config",
+      "type": "object"
+    },
+    "provision_run_id": {
+      "title": "Provision Run Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "provision_run_id",
+    "os_family",
+    "hostname",
+    "post_config"
+  ],
+  "title": "ProvisionEnrollParams",
+  "type": "object"
+}

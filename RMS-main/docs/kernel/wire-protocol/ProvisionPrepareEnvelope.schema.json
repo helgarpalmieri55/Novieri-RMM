@@ -1,0 +1,78 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "answer_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Answer Ref"
+    },
+    "image_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Image Ref"
+    },
+    "image_sha256": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Image Sha256"
+    },
+    "os_family": {
+      "enum": [
+        "windows",
+        "linux",
+        "macos"
+      ],
+      "title": "Os Family",
+      "type": "string"
+    },
+    "provision_run_id": {
+      "title": "Provision Run Id",
+      "type": "string"
+    },
+    "target_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Target Ref"
+    },
+    "wake_on_lan": {
+      "additionalProperties": true,
+      "title": "Wake On Lan",
+      "type": "object"
+    }
+  },
+  "required": [
+    "provision_run_id",
+    "os_family",
+    "image_ref",
+    "image_sha256",
+    "answer_ref",
+    "target_ref",
+    "wake_on_lan"
+  ],
+  "title": "ProvisionPrepareEnvelope",
+  "type": "object"
+}

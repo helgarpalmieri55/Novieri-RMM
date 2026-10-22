@@ -1,0 +1,127 @@
+{
+  "$defs": {
+    "SweepHost": {
+      "additionalProperties": false,
+      "description": "One responding address (\u00a75.4). `extra=\"forbid\"` -- see the module\ndocstring; this is where \u00a70.10 point 5 is enforced.\n\n`hostname` is display-only agent-side reverse DNS. It is never a\nreconciliation predicate and never matches an address to a device: identity\ncomes from MACs and from inventory, both of which have a chain of custody.",
+      "properties": {
+        "address": {
+          "maxLength": 64,
+          "title": "Address",
+          "type": "string"
+        },
+        "hostname": {
+          "anyOf": [
+            {
+              "maxLength": 255,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hostname"
+        },
+        "mac": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mac"
+        },
+        "responded_via": {
+          "enum": [
+            "icmp",
+            "arp",
+            "both"
+          ],
+          "title": "Responded Via",
+          "type": "string"
+        }
+      },
+      "required": [
+        "address",
+        "responded_via"
+      ],
+      "title": "SweepHost",
+      "type": "object"
+    }
+  },
+  "description": "agent -> server (\u00a75.4). Checked in full by \u00a76.4 before a single row is\nwritten, and rejected WHOLE on any failure.\n\n`hosts` is bounded here at the schema's ceiling for `max_targets`; \u00a76.4\nadditionally checks it against the value this job was actually SIGNED with,\nwhich is the bound that matters.",
+  "properties": {
+    "errors": {
+      "items": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Errors",
+      "type": "array"
+    },
+    "finished_at": {
+      "format": "date-time",
+      "title": "Finished At",
+      "type": "string"
+    },
+    "hosts": {
+      "items": {
+        "$ref": "#/$defs/SweepHost"
+      },
+      "maxItems": 65536,
+      "title": "Hosts",
+      "type": "array"
+    },
+    "method": {
+      "maxLength": 16,
+      "title": "Method",
+      "type": "string"
+    },
+    "probed_count": {
+      "maximum": 16777216,
+      "minimum": 0,
+      "title": "Probed Count",
+      "type": "integer"
+    },
+    "scope_digest": {
+      "maxLength": 64,
+      "minLength": 64,
+      "title": "Scope Digest",
+      "type": "string"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "subnet_id": {
+      "title": "Subnet Id",
+      "type": "string"
+    },
+    "sweep_run_id": {
+      "title": "Sweep Run Id",
+      "type": "string"
+    },
+    "truncated": {
+      "default": false,
+      "title": "Truncated",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "subnet_id",
+    "sweep_run_id",
+    "scope_digest",
+    "method",
+    "started_at",
+    "finished_at",
+    "probed_count"
+  ],
+  "title": "NetSweepDocument",
+  "type": "object"
+}

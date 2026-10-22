@@ -1,0 +1,21 @@
+# Optional OpenBao auto-unseal. OFF by default.
+#
+# Active only when deploy/.env says
+#   COMPOSE_FILE=docker-compose.yml:openbao/auto-unseal.yml
+# which scripts/openbao-seal.sh enable writes after migrating the seal. Do not
+# add that line by hand: without the migration OpenBao will not unseal.
+#
+# Paths are relative to deploy/ (the first compose file's directory).
+services:
+  openbao:
+    command: server -config=/bao/config.hcl -config=/bao/seal/${OPENBAO_SEAL_STANZA:-static}.hcl
+    volumes:
+      - ./openbao/seal:/bao/seal:ro
+      # Long syntax so a missing key file fails the start instead of Docker
+      # creating an empty directory in its place.
+      - type: bind
+        source: ${OPENBAO_UNSEAL_KEY_FILE:?OPENBAO_UNSEAL_KEY_FILE is unset -- run scripts/openbao-seal.sh status}
+        target: /bao/unseal/unseal.key
+        read_only: true
+        bind:
+          create_host_path: false

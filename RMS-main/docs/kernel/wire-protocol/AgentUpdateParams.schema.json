@@ -1,0 +1,101 @@
+{
+  "additionalProperties": false,
+  "description": "server -> agent: replace this agent with one release artefact.\n\nPer device: the artefact for that device's `(os, arch)` only. The agent\nchecks every field before it fetches anything (spec \u00a74.1).",
+  "properties": {
+    "arch": {
+      "description": "Must equal runtime.GOARCH.",
+      "enum": [
+        "amd64",
+        "arm64"
+      ],
+      "title": "Arch",
+      "type": "string"
+    },
+    "artifact_sha256": {
+      "description": "agent_releases.sha256, computed by the server.",
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Artifact Sha256",
+      "type": "string"
+    },
+    "artifact_size": {
+      "maximum": 268435456,
+      "minimum": 1,
+      "title": "Artifact Size",
+      "type": "integer"
+    },
+    "artifact_url": {
+      "description": "Presigned GET for agent_releases.storage_ref.",
+      "pattern": "^https://",
+      "title": "Artifact Url",
+      "type": "string"
+    },
+    "health_window_s": {
+      "default": 600,
+      "maximum": 3600,
+      "minimum": 120,
+      "title": "Health Window S",
+      "type": "integer"
+    },
+    "os": {
+      "description": "Must equal runtime.GOOS.",
+      "enum": [
+        "linux",
+        "windows",
+        "darwin"
+      ],
+      "title": "Os",
+      "type": "string"
+    },
+    "release_signature": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Base64 Ed25519 signature by the offline release key over version, platform and digest. Required by agents built with a pinned release key.",
+      "title": "Release Signature"
+    },
+    "rollback": {
+      "default": false,
+      "description": "Must be true to install a lower version.",
+      "title": "Rollback",
+      "type": "boolean"
+    },
+    "rollout_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "For logs only.",
+      "title": "Rollout Id"
+    },
+    "target_version": {
+      "description": "Strict semver; no +build suffix.",
+      "maxLength": 51,
+      "pattern": "^v?(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$",
+      "title": "Target Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "target_version",
+    "os",
+    "arch",
+    "artifact_url",
+    "artifact_sha256",
+    "artifact_size"
+  ],
+  "title": "AgentUpdateParams",
+  "type": "object"
+}

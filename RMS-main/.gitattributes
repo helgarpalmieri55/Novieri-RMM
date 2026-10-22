@@ -1,0 +1,7 @@
+# Files that run or are parsed on Linux and macOS are LF in every checkout,
+# including a Windows one with core.autocrlf: a CR after a shebang makes the
+# kernel look for `bash\r`, and dpkg, systemd and launchd read these files as
+# they are. The packaging tests check them byte for byte on every OS.
+*.sh                      text eol=lf
+agent/packaging/linux/**  text eol=lf
+agent/packaging/darwin/** text eol=lf

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The Toeshee endpoint agent as a launchd SYSTEM daemon
+  (/Library/LaunchDaemons, loaded into the `system` domain, running as root).
+
+  Invariant #2: there is no Sockets key and no socket activation. launchd never
+  binds anything on this agent's behalf, because the agent has no listening
+  port. It dials outbound and only outbound.
+
+  The enrollment token is NOT here. EnvironmentVariables in a plist under
+  /Library/LaunchDaemons is world-readable and is echoed by `launchctl print
+  system/com.toeshee.itsagent`. The token goes to /var/lib/its-agent/enroll-token
+  at mode 0600 (config.EnrollTokenPath), and the agent deletes it once it has
+  exchanged it for a certificate.
+
+  ProgramArguments carries the binary and nothing else, for the same reason:
+  argv is visible in `ps` to every user on the machine.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.toeshee.itsagent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/libexec/its-agent</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!--
+      KeepAlive unconditionally: this is the supervision half of the agent's
+      restart story, the counterpart of Restart=always in the systemd unit. The
+      agent exits non-zero on a terminal verdict (a 4401/4403 from the gateway,
+      an unusable identity), and an operator seeing a device that is off is the
+      intended outcome of those.
+
+      ThrottleInterval BOUNDS THE RATE OF A RESTART LOOP; IT DOES NOT END ONE.
+      launchd will respawn an agent that can never start, once every
+      ThrottleInterval seconds, indefinitely. The thing that actually prevents
+      the loop is upstream: install.sh does not bootstrap this job at all when
+      the Mac has neither an identity nor an enrollment token, because that is
+      the state in which the agent exits 2 on every start. Same rule as
+      linux/debian/postinst and windows/install.ps1.
+    -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!--
+      launchd sends SIGTERM on `launchctl bootout` and at shutdown;
+      internal/service turns it into a cancelled context so the outbound buffer
+      is flushed. 30 s, matching TimeoutStopSec in the systemd unit, then SIGKILL.
+    -->
+    <key>ExitTimeOut</key>
+    <integer>30</integer>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>ITS_AGENT_DATA_DIR</key>
+        <string>/var/lib/its-agent</string>
+        <!--
+          ITS_AGENT_ENROLL_URL is written here by install.sh. It is not a
+          secret. The token is not, and must never be.
+        -->
+    </dict>
+
+    <!--
+      The agent logs to stderr. /var/log/its-agent is created 0750 root:wheel by
+      install.sh; no credential is ever logged (asserted in internal/enroll's
+      tests). Rotation is newsyslog's job (see packaging/README.md).
+    -->
+    <key>StandardErrorPath</key>
+    <string>/var/log/its-agent/agent.log</string>
+    <key>StandardOutPath</key>
+    <string>/var/log/its-agent/agent.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

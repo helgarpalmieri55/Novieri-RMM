@@ -1,0 +1,100 @@
+{
+  "$defs": {
+    "ScreenConsent": {
+      "additionalProperties": false,
+      "description": "What the endpoint user is shown before they allow a session.",
+      "properties": {
+        "org": {
+          "title": "Org",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "technician": {
+          "title": "Technician",
+          "type": "string"
+        },
+        "timeout_s": {
+          "maximum": 120,
+          "minimum": 15,
+          "title": "Timeout S",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "technician",
+        "org",
+        "reason",
+        "timeout_s"
+      ],
+      "title": "ScreenConsent",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Signed params of ``remote.screen.open``.\n\n``relay_token`` is a one-shot secret valid until ``connect_by``; the agent\npresents it in the AUTH frame on ``relay_url``. ``desktop`` is ``user`` in\nphase 1; phase 2 adds ``secure``. New members must be optional with a\ndefault: the agent ignores members it does not know.",
+  "properties": {
+    "allow_input": {
+      "default": true,
+      "title": "Allow Input",
+      "type": "boolean"
+    },
+    "connect_by": {
+      "title": "Connect By",
+      "type": "string"
+    },
+    "consent": {
+      "$ref": "#/$defs/ScreenConsent"
+    },
+    "consent_mode": {
+      "enum": [
+        "attended",
+        "unattended"
+      ],
+      "title": "Consent Mode",
+      "type": "string"
+    },
+    "desktop": {
+      "const": "user",
+      "default": "user",
+      "title": "Desktop",
+      "type": "string"
+    },
+    "max_duration_s": {
+      "maximum": 86400,
+      "minimum": 60,
+      "title": "Max Duration S",
+      "type": "integer"
+    },
+    "record": {
+      "default": true,
+      "title": "Record",
+      "type": "boolean"
+    },
+    "relay_token": {
+      "title": "Relay Token",
+      "type": "string"
+    },
+    "relay_url": {
+      "title": "Relay Url",
+      "type": "string"
+    },
+    "session_id": {
+      "title": "Session Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_id",
+    "relay_url",
+    "relay_token",
+    "connect_by",
+    "consent_mode",
+    "consent",
+    "max_duration_s"
+  ],
+  "title": "RemoteScreenOpenParams",
+  "type": "object"
+}

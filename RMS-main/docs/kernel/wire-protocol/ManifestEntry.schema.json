@@ -1,0 +1,59 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "chunk_ids": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Chunk Ids",
+      "type": "array"
+    },
+    "kind": {
+      "enum": [
+        "file",
+        "dir",
+        "symlink"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "mode": {
+      "title": "Mode",
+      "type": "integer"
+    },
+    "mtime": {
+      "title": "Mtime",
+      "type": "number"
+    },
+    "path": {
+      "title": "Path",
+      "type": "string"
+    },
+    "size": {
+      "title": "Size",
+      "type": "integer"
+    },
+    "target": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Target"
+    }
+  },
+  "required": [
+    "path",
+    "kind",
+    "mode",
+    "size",
+    "mtime"
+  ],
+  "title": "ManifestEntry",
+  "type": "object"
+}

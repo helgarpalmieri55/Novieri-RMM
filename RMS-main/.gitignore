@@ -1,0 +1,57 @@
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+node_modules/
+dist/
+frontend/dist/
+# The harmony gate's screenshots and report (scripts/harmony.mjs). Regenerated
+# on every run and uploaded from CI as an artifact; never a source of truth.
+frontend/.harmony/
+.coverage
+
+# Mutation-testing sidecars from review agents — never committable
+*.mutbak
+*.py.bak
+
+# Redis snapshot — redis-server writes this into whatever cwd it was launched from
+dump.rdb
+
+# Operator TLS material for the Traefik :443 entrypoint (deploy/certs/).
+# The deployment is a `git pull` on the host, so this directory is a bind
+# mount the operator drops real certificates into -- they must never be
+# committed. deploy/certs/.gitkeep keeps the directory itself in the tree so
+# a fresh clone has somewhere to put them.
+deploy/certs/*
+!deploy/certs/.gitkeep
+
+# Agent skills installed with `npx skills add` (2026-09-07, operator's call).
+#
+# LOCAL TO WHOEVER INSTALLS THEM, deliberately. These are authoring aids for
+# the person driving the agent, not part of the product: nothing in backend/,
+# frontend/ or agent/ imports them, no test reads them, and CI never runs
+# them. A contributor who wants the same set runs the same `npx skills add`.
+#
+# `.claude/skills/` is NOT ignored wholesale -- the repo's own skills
+# (brainstorming, writing-plans, subagent-driven-development, ...) live there
+# and are checked in on purpose. Only the symlinks pointing into `.agents/`
+# are ignored, by name, so a new repo skill is never silently untracked.
+.agents/
+skills-lock.json
+.claude/skills/brandkit
+.claude/skills/design-taste-frontend
+.claude/skills/design-taste-frontend-v1
+.claude/skills/full-output-enforcement
+.claude/skills/gpt-taste
+.claude/skills/high-end-visual-design
+.claude/skills/image-to-code
+.claude/skills/imagegen-frontend-mobile
+.claude/skills/imagegen-frontend-web
+.claude/skills/industrial-brutalist-ui
+.claude/skills/minimalist-ui
+.claude/skills/redesign-existing-projects
+.claude/skills/stitch-design-taste

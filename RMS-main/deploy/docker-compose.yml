@@ -1,0 +1,890 @@
+# it-suite on-prem stack (docs/01-architecture.md, single-node topology).
+# Secrets come from .env (see .env.example) — never commit real values.
+
+name: it-suite
+
+services:
+  traefik:
+    # v3.1's embedded Docker client negotiates API version 1.24, which Docker
+    # Engine 26+ REFUSES ("client version 1.24 is too old. Minimum supported
+    # API version is 1.40"). Traefik then discovers no containers at all and
+    # every request -- /api, the console, and the gateway's TCP passthrough --
+    # answers a bare Traefik 404. Nothing else in the stack looks broken,
+    # which is what makes it expensive to diagnose. Keep this at a v3 release
+    # new enough for the Engine you run.
+    image: traefik:v3.6
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.gateway.address=:8443
+      - --providers.file.filename=/etc/traefik/dynamic.yml
+    # BIND ADDRESS, NOT JUST PORT. `"443:443"` binds 0.0.0.0 and holds :443 on
+    # every interface -- which is right on a dedicated host and WRONG on a host
+    # that already runs something else on :443. Linux refuses a wildcard bind
+    # for a port any specific address already holds, so on a shared host
+    # `docker compose up` dies with EADDRINUSE and giving ITMS its own IP does
+    # not help until this is set. ITMS_BIND_IP is that setting: the address
+    # ITMS answers on, from .env, default 0.0.0.0 = today's behaviour.
+    #
+    # It belongs here rather than in the console's settings screen: a value
+    # compose reads to create the container cannot be changed by the
+    # application inside it.
+    ports:
+      - "${ITMS_BIND_IP:-0.0.0.0}:443:443"
+      - "${ITMS_BIND_IP:-0.0.0.0}:8443:8443"
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      # The operator's real certificate for the :443 entrypoint, as a BIND
+      # MOUNT of a gitignored directory in the working tree -- see
+      # traefik/dynamic.yml for the filenames and why this is not a named
+      # volume. (It replaces a `traefik-certs` named volume that nothing ever
+      # wrote to: there is no ACME resolver configured, so it only ever held
+      # nothing, and a `git pull` deployment cannot put a file inside it.)
+      - ./certs:/etc/traefik/certs:ro
+    depends_on:
+      - api
+      - web
+
+  api:
+    # Tagged so a rollback can RETAG rather than rebuild. `git checkout <sha>
+    # && rebuild` was the documented rollback and is not one: base layers and
+    # dependency resolution can differ from what originally shipped, so the
+    # artefact you roll back to is not the artefact that was running.
+    #
+    # ONE image name for api/gateway/worker/migrate: all four build the same
+    # context with the same Dockerfile and differ only in `command`, so they
+    # are one artefact wearing four hats. Four names would build and store the
+    # same bytes four times.
+    image: itsuite/backend:${IT_SUITE_VERSION:-dev}
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    # --no-proxy-headers: uvicorn >= 0.30 rewrites request.client from
+    # X-Forwarded-For by default (taking the LEFTMOST, client-written entry)
+    # and reads FORWARDED_ALLOW_IPS from .env. The install link decides by
+    # source address, so app/core/client_address.py alone reads the header.
+    command: uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --no-proxy-headers
+    restart: unless-stopped
+    # LONG ENOUGH FOR A RUNNING MCP WRITE TO FINISH. On SIGTERM uvicorn first
+    # waits for in-flight requests, and a write tool call can hold its request
+    # for up to `TOOL_TIMEOUT_S` (30 s, app/mcp/invoke.py); only then does the
+    # lifespan shutdown start, which gives a write still running in the
+    # background `_SHUTDOWN_GRACE_S` (30 s, app/mcp/server.py) more. Docker's
+    # default is 10 s and then SIGKILL, which would kill that write part-way.
+    # 70 s is both, plus room for uvicorn's own shutdown.
+    # backend/tests/test_deploy_mcp_route.py holds it to both constants.
+    stop_grace_period: 70s
+    env_file: .env
+    environment:
+      ITS_REDIS_URL: redis://redis:6379/0
+      # WHERE THE API READS AND WRITES OBJECTS. Internal on purpose: bulk
+      # object traffic must not go out to Traefik and back.
+      #
+      # ITS_S3_PUBLIC_ENDPOINT is deliberately NOT set here -- it is where
+      # ENDPOINTS reach the same bucket, so its value is the operator's own
+      # hostname and it comes from .env. It is not optional: with
+      # ITS_ENVIRONMENT=production, ObjectStore refuses to construct without
+      # it rather than sign artifact URLs at `minio`, which no agent can
+      # resolve. See .env.example, "Object storage".
+      ITS_S3_ENDPOINT: http://minio:9000
+      # Screen share: the api's side of the relay. The gateway's internal
+      # listener, on this compose network only (see the gateway service).
+      ITS_RELAY_INTERNAL_URL: ws://gateway:8444/relay-internal
+      # The install link (spec 2026-09-28 §1.1) believes X-Forwarded-For only
+      # from a peer on this network -- the one Traefik sits on. Defaults to
+      # ITMS_NETWORK_SUBNET so a site that moved the network moves this too.
+      ITS_TRUSTED_PROXY_CIDRS: ${ITS_TRUSTED_PROXY_CIDRS:-${ITMS_NETWORK_SUBNET:-172.19.240.0/24}}
+    labels:
+      traefik.enable: "true"
+      # THE TRAILING SLASH ON `/enroll/` IS THE WHOLE FIX, and it closes a
+      # BLOCKER. Traefik matches PathPrefix as a RAW string prefix, so
+      # `PathPrefix(`/enroll`)` also matched the console's own `/enrollment`
+      # route: a direct load or refresh of https://host/enrollment was handed
+      # to FastAPI, which has no such path and answered
+      # {"detail":"Not Found"} — a logged-in operator staring at raw JSON
+      # instead of the page they bookmarked. nginx was never the problem; its
+      # `try_files $uri $uri/ /index.html` was correct all along and the
+      # request simply never reached it.
+      #
+      # `/enroll/` cannot match `/enrollment` (the next character after
+      # `/enroll` is `m`, not `/`) and still matches the only route that lives
+      # under it, `POST /enroll/v1` (backend/app/api/v1/enrollment.py:174) —
+      # so deployed agents keep enrolling. It also keeps matching a future
+      # /enroll/v2 without another edit here.
+      #
+      # This was the only one of the console's 85 routes with this fault: no
+      # other SPA path shares a prefix with an API path (checked).
+      #
+      # `/i/` (trailing slash, for the reason given above) is the install
+      # link's public page (spec 2026-09-28 §1.2); no console route starts
+      # with it, which backend/tests/test_deploy_install_link.py checks against
+      # frontend/scripts/routes.mjs.
+      #
+      # The MCP server (spec 2026-10-09 §2): `/mcp` itself and its RFC 9728
+      # metadata, `/.well-known/oauth-protected-resource[/mcp]`. The other two
+      # `/.well-known/` prefixes are discovery FALLBACKS and are here so they
+      # answer 404: an MCP client looks for the realm's metadata at
+      # `/.well-known/oauth-authorization-server/realms/<realm>` and
+      # `/.well-known/openid-configuration/realms/<realm>` before trying
+      # `/realms/<realm>/.well-known/...`, moves on after a 4xx -- and fails
+      # the whole sign-in on the SPA's 200 `index.html`, which is what `web`
+      # would answer. The realm's own documents begin `/realms` and stay on
+      # `kc`. backend/tests/test_deploy_mcp_route.py holds all of this.
+      traefik.http.routers.api.rule: PathPrefix(`/api`) || PathPrefix(`/enroll/`) || PathPrefix(`/i/`) || PathPrefix(`/mcp`) || PathPrefix(`/.well-known/oauth-protected-resource`) || PathPrefix(`/.well-known/oauth-authorization-server`) || PathPrefix(`/.well-known/openid-configuration`)
+      traefik.http.routers.api.entrypoints: websecure
+      traefik.http.routers.api.tls: "true"
+      traefik.http.services.api.loadbalancer.server.port: "8000"
+    healthcheck:
+      # /livez, not /readyz: it answers 200 whenever this process can answer
+      # at all and consults no dependency, so a container whose Postgres or
+      # Redis is down still reports healthy here -- restarting api would not
+      # fix either, and /readyz already exists for a caller who needs that
+      # distinction. No curl/wget in this image; python is.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/livez', timeout=2).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-grants:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      keycloak:
+        condition: service_started
+      openbao-init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+    volumes:
+      - its-ca:/var/lib/its/ca
+      # Audit-chain HMAC key (ITS_AUDIT_HMAC_KEY_PATH). create_app() loads it
+      # at startup and, with ITS_ENVIRONMENT=production, fails closed if it is
+      # absent -- so it must live on a volume that survives `docker compose up
+      # --force-recreate`, and it must be the SAME bytes here and in the
+      # gateway or the two processes compute different chain links for the
+      # same org. See deploy/README.md "Audit HMAC key" and
+      # docs/07-backup-restore.md.
+      #
+      # This volume is also where an OPTIONAL AI provider API key belongs
+      # (ITS_AI_<KEY>_API_KEY_PATH, api only -- no worker or gateway sweep
+      # resolves a provider). Nothing in this stack mounts /run/secrets, and
+      # this is the only path on `api` that both survives --force-recreate and
+      # sits inside the volume set docs/07-backup-restore.md §2.2 backs up.
+      # No mount is added for it: a deployment that sets no ITS_AI_* has no
+      # provider, so there is no file here and nothing reads one.
+      - its-secrets:/var/lib/its/secrets
+      # Platform backup results, written by the host's backup scripts
+      # (deploy/README.md, "Platform backups"). Read-only: nothing in a
+      # container writes to the host.
+      - /var/lib/it-suite/backup-status:/var/lib/its/backup-status:ro
+
+  gateway:
+    image: itsuite/backend:${IT_SUITE_VERSION:-dev}
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    command: python -m app.gateway.main
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ITS_REDIS_URL: redis://redis:6379/0
+      ITS_GATEWAY_HOST: 0.0.0.0
+      ITS_GATEWAY_PORT: "8443"
+      ITS_GATEWAY_TLS_CERT: /var/lib/its/tls/gateway.crt
+      ITS_GATEWAY_TLS_KEY: /var/lib/its/tls/gateway.key
+      ITS_GATEWAY_CLIENT_CA: /var/lib/its/ca/root.crt
+      # Screen-share relay. Agents dial wss://<host>:8443/relay (the SAME mTLS
+      # passthrough port as /agent; ITS_GATEWAY_RELAY_URL in .env). The api
+      # joins the other end on 8444, plain WebSocket on this compose network:
+      # NOT published and NOT routed by Traefik, so keep it out of `ports:`.
+      ITS_RELAY_INTERNAL_PORT: "8444"
+    # Traefik passes the TCP stream through untouched: the gateway itself
+    # terminates mTLS so the client certificate reaches the process.
+    labels:
+      traefik.enable: "true"
+      traefik.tcp.routers.gateway.rule: HostSNI(`*`)
+      traefik.tcp.routers.gateway.entrypoints: gateway
+      traefik.tcp.routers.gateway.tls.passthrough: "true"
+      traefik.tcp.services.gateway.loadbalancer.server.port: "8443"
+    healthcheck:
+      # No HTTP surface (mutual-TLS WebSocket server only), so liveness is
+      # read off this instance's own heartbeat in Redis -- the exact
+      # mechanism app.api.v1.platform's status endpoint reads
+      # (app.core.health.heartbeat.read_heartbeats), not a second, divergent
+      # check. A container that has stopped writing its heartbeat has
+      # stalled its own event loop; restarting it is the correct remedy,
+      # unlike a dependency-down /readyz case.
+      test: ["CMD", "python", "-c", "import asyncio, sys, time\nfrom app.core.config import get_settings\nimport redis.asyncio as aioredis\nfrom app.core.health.heartbeat import read_heartbeats\nasync def main() -> None:\n    r = aioredis.from_url(get_settings().redis_url, decode_responses=True)\n    hbs = await read_heartbeats(r, now=time.time())\n    sys.exit(0 if any(h.process == 'gateway' and h.status == 'ok' for h in hbs) else 1)\nasyncio.run(main())"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-grants:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    volumes:
+      - its-ca:/var/lib/its/ca
+      - its-gateway-tls:/var/lib/its/tls
+      # Same audit HMAC key the api loads -- the gateway records audit events
+      # too (agent connect, job result), so a divergent key here silently
+      # breaks GET /api/v1/audit/verify. Shared volume, not a copy.
+      - its-secrets:/var/lib/its/secrets
+
+  worker:
+    image: itsuite/backend:${IT_SUITE_VERSION:-dev}
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    # --schedule IS NOT OPTIONAL. Without it beat writes `celerybeat-schedule`
+    # into WORKDIR (/srv/app, root-owned), the unprivileged `its` user gets
+    # EACCES, and the beat process dies at startup while the Celery consumer
+    # carries on regardless. Every periodic sweep in app/worker.py then silently
+    # never runs -- the patch scan sweep, both health sweeps, the backup window,
+    # SLA, notification delivery, the error drain, every retention job -- and
+    # the healthcheck below reads the WORKER's heartbeat, so the container still
+    # reports healthy and the status page agrees. Found dead on the first live
+    # deployment; guarded by backend/tests/test_worker_beat_schedule.py.
+    command: celery -A app.worker worker --beat --schedule=/var/lib/its/beat/celerybeat-schedule --loglevel=info
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ITS_REDIS_URL: redis://redis:6379/0
+      # The beat sweeps this container runs build an ObjectStore: backup
+      # retention GC and verification, remote-recording retention deletes, and
+      # the provisioning timeout sweep's answer-file cleanup. Without this the
+      # worker's boto3 client has endpoint_url=None and talks to the public AWS
+      # S3 endpoint instead of MinIO -- the `api` service already sets it for
+      # the same reason.
+      ITS_S3_ENDPOINT: http://minio:9000
+    healthcheck:
+      # No HTTP surface (Celery consumer only), so liveness is read off this
+      # instance's own heartbeat in Redis -- the same mechanism the status
+      # page reads (app.core.health.heartbeat.read_heartbeats), not a second,
+      # divergent check.
+      #
+      # WHAT THIS DOES AND DOES NOT DO. Marking the container unhealthy has no
+      # consequence in this compose file: `restart: unless-stopped` reacts to
+      # container EXIT, not to health status, there is no autoheal sidecar, and
+      # every `depends_on: service_healthy` here points at postgres/minio/
+      # openbao, never at this service. So this is an OBSERVABLE SIGNAL
+      # (`docker ps`, `docker inspect`), not a self-healing mechanism. An
+      # earlier version of this comment claimed it restarts the container; it
+      # does not, and acting on that belief would mean nobody watches it.
+      #
+      # FALSE-POSITIVE FIXED: the worker used to write this heartbeat from a
+      # QUEUED Celery task (`app.worker.platform_heartbeat`), sharing a queue
+      # with long sweeps -- a worker whose slots were all busy with, say,
+      # backup verification delayed the heartbeat and read as degraded while
+      # entirely alive, reporting queue saturation rather than process death.
+      # It now writes from a daemon thread the worker process starts once, at
+      # `worker_process_init`, and owns directly (`app.worker.
+      # _worker_heartbeat_forever`) -- independent of the task queue, the
+      # same posture the api and gateway containers already use for their own
+      # heartbeats. This check therefore measures what it always claimed to:
+      # whether this process is alive, not how busy its queue is.
+      test: ["CMD", "python", "-c", "import asyncio, sys, time\nfrom app.core.config import get_settings\nimport redis.asyncio as aioredis\nfrom app.core.health.heartbeat import read_heartbeats\nasync def main() -> None:\n    r = aioredis.from_url(get_settings().redis_url, decode_responses=True)\n    hbs = await read_heartbeats(r, now=time.time())\n    sys.exit(0 if any(h.process == 'worker' and h.status == 'ok' for h in hbs) else 1)\nasyncio.run(main())"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-grants:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    volumes:
+      - its-ca:/var/lib/its/ca
+      # The worker MUST mount its-secrets: create_celery() calls
+      # load_audit_hmac_key(settings) at import time, which read_bytes() the
+      # configured path. With ITS_AUDIT_HMAC_KEY_PATH set in .env but the
+      # volume absent, the container dies on startup with FileNotFoundError.
+      # It must also be the SAME key the api and gateway load, or the worker's
+      # links are authenticated under a different secret and verify() breaks
+      # at the first worker-written event -- which is the defect this mount
+      # exists to close, not a new one.
+      - its-secrets:/var/lib/its/secrets
+      # Celery beat's last-run state. A volume rather than a bare writable path
+      # so it is not discarded on every recreate -- which would fire every
+      # periodic task at once on each deploy.
+      - beat-schedule:/var/lib/its/beat
+      # Read-only, as on api: the worker samples these and alerts on them.
+      - /var/lib/it-suite/backup-status:/var/lib/its/backup-status:ro
+
+  backup-replicator:
+    # The off-site backup copy (docs/modules/backup/spec-server-backup.md
+    # §6.3): a Celery consumer of the `backup_replication` queue ONLY, so a
+    # multi-hour first seed never delays the `worker` sweeps. Same image, same
+    # secrets as `worker` (the vault decrypts the off-site credential here and
+    # nowhere else); no beat, which stays in `worker`. One task at a time: the
+    # copy is bandwidth-bound and holds a Redis lock anyway.
+    image: itsuite/backend:${IT_SUITE_VERSION:-dev}
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    command: celery -A app.worker worker -Q backup_replication --concurrency=1 --hostname=backup-replicator@%h --loglevel=info
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ITS_REDIS_URL: redis://redis:6379/0
+      ITS_S3_ENDPOINT: http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-grants:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    volumes:
+      - its-ca:/var/lib/its/ca
+      - its-secrets:/var/lib/its/secrets
+
+  migrate:
+    image: itsuite/backend:${IT_SUITE_VERSION:-dev}
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    command: alembic upgrade head
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  postgres-grants:
+    # Applies app_user's real table privileges (deploy/postgres/
+    # grant-app-privileges.sql) once the schema `migrate` produces actually
+    # exists -- init-app-user.sh (which runs before any table exists) can
+    # only set up the ALTER DEFAULT PRIVILEGES baseline; this narrows the
+    # few tables that must not inherit it wholesale. See that file's own
+    # header comment. Uses the postgres:16 image (already has psql) rather
+    # than the backend image, so no application image needs a DB client.
+    image: postgres:16
+    environment:
+      PGPASSWORD: ${POSTGRES_ADMIN_PASSWORD:?set in .env}
+    volumes:
+      - ./postgres/grant-app-privileges.sql:/grant-app-privileges.sql:ro
+    command:
+      - psql
+      - -v
+      - ON_ERROR_STOP=1
+      - -h
+      - postgres
+      - -U
+      - its_admin
+      - -d
+      - itsuite
+      - -f
+      - /grant-app-privileges.sql
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  web:
+    image: itsuite/web:${IT_SUITE_VERSION:-dev}
+    build:
+      context: ..
+      dockerfile: deploy/frontend.Dockerfile
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.web.rule: PathPrefix(`/`)
+      traefik.http.routers.web.priority: "1"
+      traefik.http.routers.web.entrypoints: websecure
+      traefik.http.routers.web.tls: "true"
+      traefik.http.services.web.loadbalancer.server.port: "80"
+    restart: unless-stopped
+    healthcheck:
+      # /livez, not /readyz: this is nginx's SPA catch-all (there is no
+      # backend for it to be unready against), so the check only proves the
+      # web server itself is answering. No curl in this image; busybox wget
+      # (already in nginx:alpine) is.
+      #
+      # 127.0.0.1, NOT localhost, and the difference is the whole check. This
+      # server block is `listen 80;` -- IPv4 only -- while Alpine's /etc/hosts
+      # maps localhost to ::1 as well, and busybox wget takes the FIRST address
+      # getaddrinfo returns and gives up on refusal rather than trying the next.
+      # So `http://localhost/livez` connects to [::1]:80, is refused, and the
+      # container is marked unhealthy while nginx serves every real request
+      # perfectly. Observed on the first real deploy with FailingStreak 99: it
+      # had never passed once, on any deployment, and nothing was wrong with
+      # the web server on any of them.
+      #
+      # api's probe next door survives the same /etc/hosts because it runs
+      # through Python's urllib, and socket.create_connection walks ALL
+      # getaddrinfo results. Only the busybox client needs the address pinned.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/livez"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: itsuite
+      POSTGRES_USER: its_admin
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?set in .env}
+      # Consumed by ./postgres/init-app-user.sh, which creates app_user and
+      # portal_user with a LOGIN password on first boot. Passed explicitly
+      # rather than via `env_file: .env` so the database container never sees
+      # the application's OpenBao token, S3 keys or OIDC config. Without
+      # these two the init script aborts with "APP_DB_PASSWORD must be set"
+      # and the container exits 1 before the database is ever usable.
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set in .env}
+      PORTAL_DB_PASSWORD: ${PORTAL_DB_PASSWORD:?set in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init-app-user.sh:/docker-entrypoint-initdb.d/10-app-user.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U its_admin -d itsuite"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    # Valkey (BSD-3), a drop-in for Redis OSS 7.2. `redis:7-alpine` floated
+    # onto RSAL/SSPL releases. The service keeps the name `redis` so every
+    # ITS_REDIS_URL stays valid. Only standard commands are used (pub/sub,
+    # GET/SET NX EX, GETDEL, INCRBY, MGET, KEYS, Celery's kombu transport).
+    # A new volume, not redis-data: Valkey 8 cannot load Redis 7.4's RDB v12,
+    # and everything here is transient (docs/07-backup-restore.md §1).
+    image: valkey/valkey:8.1.10-alpine
+    restart: unless-stopped
+    volumes:
+      - valkey-data:/data
+
+  minio:
+    # Pinned: object storage holds every backup chunk, every deployment
+    # artifact and every session recording. `latest` on a data-bearing
+    # service is an unreviewed upgrade waiting for a `docker compose pull`.
+    #
+    # BUILT HERE FROM SOURCE (deploy/minio/Dockerfile): since 2026-09 MinIO
+    # publishes no free image or binary anywhere. The first `up -d` builds it
+    # (a few minutes, once); the tag names the MinIO release it contains, so a
+    # later change of release is a change to this line and the Dockerfile.
+    build:
+      context: minio
+    image: itsuite/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address :9001
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env}
+    volumes:
+      - minio-data:/data
+    labels:
+      # OBJECT STORAGE ON :443, PRESIGN-ONLY.
+      #
+      # Endpoints must reach the bucket: `app.deploy` hands the agent a
+      # presigned artifact URL and backup hands it a presigned upload. Until
+      # this router existed those URLs named `http://minio:9000` -- resolvable
+      # in this Docker network and nowhere else -- so every one of them was
+      # dead on arrival. See ITS_S3_PUBLIC_ENDPOINT in .env.example.
+      #
+      # WHY A PATH PREFIX AND NOT A SUBDOMAIN. The operator has one hostname
+      # and one certificate; `objects.itms.toeshee.com` would need a new DNS
+      # record and a SAN. A prefix works here for one specific reason: the
+      # prefix IS THE BUCKET NAME, so the public URL
+      # `https://itms.toeshee.com/it-suite/<key>` is already exactly S3
+      # path-style addressing. NOTHING IS REWRITTEN -- there is deliberately
+      # no stripPrefix middleware. SigV4 signs the host and the full path, so
+      # a stripped prefix would make MinIO recompute the signature over a
+      # different path and refuse every grant with SignatureDoesNotMatch, and
+      # an unstripped foreign prefix (`/objects/it-suite/<key>`) would be read
+      # as bucket `objects`. Both were measured against this MinIO release.
+      #
+      # THE RULE ADMITS THREE THINGS AND NOTHING ELSE:
+      #   * GET/HEAD of an object UNDER the bucket -- the presigned read.
+      #   * POST to the bucket itself -- the S3 POST-policy upload backup
+      #     uses (its `starts-with $key` and content-length-range conditions
+      #     are enforced by MinIO; verified, not assumed).
+      #   * nothing else. PUT and DELETE are unroutable, so even a leaked root
+      #     credential cannot destroy a tenant's backups through this
+      #     entrypoint; the control plane's own deletes go over the internal
+      #     endpoint and are unaffected.
+      # `!Path(/<bucket>/)` and requiring a segment after the bucket are what
+      # keep BUCKET LISTING off the public route: `GET /it-suite?list-type=2`
+      # and `GET /it-suite/` are not matched here even when correctly signed,
+      # so MinIO never sees them. They do NOT 404 in a running stack -- the
+      # `web` router's PathPrefix(`/`) catch-all answers index.html with a 200
+      # for everything this rule does not claim, which is why "listing is
+      # blocked" has to be checked by the absence of a ListBucketResult rather
+      # than by a status code (deploy/GO-LIVE.md §3). PathPrefix is a raw
+      # string match, not segment-aware, so the trailing slash is also what
+      # stops `/it-suiteXYZ` being swallowed.
+      #
+      # NOT THE CONSOLE. `--console-address :9001` puts the admin console on a
+      # different container port and the loadbalancer port below is 9000, so
+      # the console is unreachable from :443 -- deliberately, and it must stay
+      # that way: it is an unauthenticated-until-login admin UI over the root
+      # credential. MinIO publishes no port of its own either, so the console
+      # stays inside the Docker network.
+      #
+      # Anonymous access is refused by MinIO itself: a bucket created by
+      # `_ensure_bucket` has NO bucket policy (`NoSuchBucketPolicy`), and
+      # MinIO's default for a bucket with no policy is deny. Do not run
+      # `mc anonymous set download` on this bucket.
+      traefik.enable: "true"
+      # Every continuation line sits at the SAME indent as the first, so this
+      # folds into one line. A more-indented line would make YAML keep the
+      # newlines literally and hand Traefik a multi-line rule.
+      traefik.http.routers.minio.rule: >-
+        (PathPrefix(`/${ITS_S3_BUCKET:-it-suite}/`)
+        && !Path(`/${ITS_S3_BUCKET:-it-suite}/`)
+        && (Method(`GET`) || Method(`HEAD`)))
+        || (Path(`/${ITS_S3_BUCKET:-it-suite}`) && Method(`POST`))
+      traefik.http.routers.minio.entrypoints: websecure
+      traefik.http.routers.minio.tls: "true"
+      # EXPLICIT, and not optional: the container exposes 9000 (S3 API) and
+      # 9001 (console). Left to Traefik to guess, a two-port container is
+      # ambiguous and the console is one of the candidates.
+      traefik.http.services.minio.loadbalancer.server.port: "9000"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  keycloak:
+    # PINNED AT 26.2 AS A FEATURE FLOOR, not a preference. SMTP XOAUTH2
+    # (`authType: token` in the realm's smtpServer block) arrived in 26.2;
+    # below it the five token keys are stored and then ignored, so an
+    # OAuth-configured outgoing relay would silently fail to send with
+    # nothing in any log. `backend/tests/test_keycloak_image_pin.py` holds
+    # this to a test.
+    #
+    # UPGRADING THIS IS ONE-WAY. Keycloak migrates its own schema in the
+    # `keycloak` database on first start and does not migrate back, so
+    # re-pinning to an older tag produces a container that refuses to start.
+    # Rollback is restore-from-backup -- see
+    # docs/superpowers/specs/2026-09-11-mail-oauth-design.md §7.2.
+    image: quay.io/keycloak/keycloak:26.2
+    command: start --import-realm --hostname-strict=false --http-enabled=true --proxy-headers=xforwarded
+    restart: unless-stopped
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:?set in .env}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set in .env}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: its_admin
+      KC_DB_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?set in .env}
+      # THE PUBLIC ADDRESS, FOR EVERY LINK KEYCLOAK WRITES INTO AN EMAIL.
+      # Without it Keycloak builds links from the address it was CALLED on, and
+      # an invitation or password reset is triggered by the API calling
+      # http://keycloak:8080 on the compose network -- so the first invitation
+      # sent on 2026-09-23 reached its recipient as
+      # `keycloak:8080/realms/it-suite/login-actions/action-token?...`, which
+      # no browser can resolve (DNS_PROBE_FINISHED_NXDOMAIN).
+      #
+      # Tested against keycloak:26.2 on 2026-09-23: with this set, the issuer
+      # and every front-end URL use it, and calls made on the internal address
+      # (the API's admin client, `kcadm` in keycloak-init) still work. EMPTY IS
+      # UNSET: Keycloak then behaves exactly as before, which is what CI and a
+      # host that has not set ITS_PUBLIC_CONSOLE_URL get.
+      KC_HOSTNAME: ${ITS_PUBLIC_CONSOLE_URL:-}
+      # THE LOGIN THEME IS A BIND MOUNT AND ITS URL NEVER CHANGES, which makes
+      # Keycloak's production defaults wrong for it in a way that is invisible
+      # until somebody edits the theme.
+      #
+      # Theme resources are served from `/resources/<keycloak-build>/login/...`
+      # -- a path that moves when KEYCLOAK is upgraded and not when the theme
+      # is. With the default `static-max-age` of 2592000, every browser that
+      # has ever loaded the sign-in page holds that stylesheet for THIRTY DAYS.
+      # Ship a theme change and returning users get the new HTML against the
+      # old CSS: icons outside their fields, unstyled help text, a bare link
+      # where a button belongs. Exactly what the operator photographed on
+      # 2026-08-20, twice, after a correct deploy -- and what a customer would
+      # see for a month after any theme fix.
+      #
+      # `-1` disables the browser cache for theme resources. The cost is a few
+      # KB per sign-in on a page nobody loads in a loop; the alternative is a
+      # month-long window where the product looks broken and nothing in the
+      # deployment explains why.
+      KC_SPI_THEME_STATIC_MAX_AGE: -1
+      # And Keycloak's own in-memory cache of templates, off for the same
+      # reason: with the theme on a bind mount, `docker compose restart
+      # keycloak` should not be the thing that makes an edit visible.
+      KC_SPI_THEME_CACHE_THEMES: "false"
+    volumes:
+      - ./keycloak/realm-it-suite.json:/opt/keycloak/data/import/realm-it-suite.json:ro
+      # The ITMS login theme (docs/modules/console-auth/spec.md §3.1). A BIND
+      # MOUNT rather than a baked image: the Keycloak image is pinned and not
+      # built here, and the theme is static assets an operator may legitimately
+      # re-brand without rebuilding anything.
+      #
+      # IF THIS MOUNT IS MISSING, the realm's `loginTheme: itms` falls back to
+      # Keycloak's own theme SILENTLY -- an unbranded login page and nothing in
+      # any log to say why. `backend/tests/test_console_auth_realm.py` asserts
+      # this line exists for that reason.
+      - ./keycloak/themes:/opt/keycloak/themes:ro
+    labels:
+      traefik.enable: "true"
+      # THE ADMIN CONSOLE PREFIX IS DELIBERATELY ABSENT, and adding it back
+      # is a security regression, not a convenience. That console can create
+      # any user and reset any password in the fleet: the whole estate's
+      # authority in one page, behind one password, on the same public
+      # hostname as the product itself. It has no business on :443.
+      #
+      # These three are what SIGN-IN needs and all it needs: `/realms` (the
+      # OIDC endpoints and the login pages), `/resources` (the ITMS login
+      # theme's assets) and `/js` (the adapter script the pages load). Remove
+      # any of them and nobody can log in -- `backend/tests/test_public_surface.py`
+      # asserts both halves, so neither the removal nor a silent re-addition
+      # passes unnoticed.
+      #
+      # Administering the realm is VENDOR-ONLY break-glass now, reached over
+      # an SSH tunnel to the container instead of over the internet. This
+      # service publishes NO host port, so the tunnel forwards to the
+      # container's address on the compose network -- the exact two commands
+      # are in deploy/README.md, "Break-glass: the identity admin console
+      # (VENDOR-ONLY)". Everything an operator needs in normal operation is
+      # in ITMS itself.
+      traefik.http.routers.kc.rule: PathPrefix(`/realms`) || PathPrefix(`/resources`) || PathPrefix(`/js`)
+      traefik.http.routers.kc.entrypoints: websecure
+      traefik.http.routers.kc.tls: "true"
+      traefik.http.services.kc.loadbalancer.server.port: "8080"
+      # ONLY STRICT OPENID CONNECT CLIENT REGISTRATION REACHES KEYCLOAK (MCP
+      # spec 2026-10-09 §3.3). Anonymous registration is open so any AI app can
+      # connect, but Keycloak serves several registration providers under
+      # `/realms/<realm>/clients-registrations/<provider>`: `openid-connect`
+      # refuses a client-chosen client_id; `default` takes a raw client
+      # representation, clientId included, so an app could register AS the
+      # console's audience. AN ALLOWLIST, NOT A BLOCKLIST, because a blocklist
+      # only parses clean paths: JAX-RS strips matrix parameters
+      # (`/realms;x/...`) and Traefik forwards encoded `;` and `/` by default,
+      # so a pattern that names `default` misses spellings Keycloak still
+      # routes there. Three routers, highest priority first:
+      #
+      #   kc-registration-oidc    the ONE strict lowercase form of OIDC
+      #                           registration (and RFC 7592 management of an
+      #                           app's own client), forwarded to Keycloak;
+      #   kc-registration-closed  `clients-registrations` in any case anywhere,
+      #                           and any Keycloak-bound path carrying `;`, a
+      #                           backslash, a dot segment or an encoded
+      #                           `;` `\` `.` `/` NUL -- answered 403;
+      #   kc                      everything else Keycloak serves.
+      #
+      # `backend/tests/test_deploy_keycloak_registration_edge.py` models the
+      # selection; Traefik's own normalisation and Keycloak's routing are proved
+      # only live (Task 12's CI step).
+      traefik.http.routers.kc-registration-oidc.rule: PathRegexp(`^/realms/[a-z0-9][a-z0-9_-]*/clients-registrations/openid-connect(/[a-z0-9-]+)?/?$`)
+      traefik.http.routers.kc-registration-oidc.priority: "20000"
+      traefik.http.routers.kc-registration-oidc.entrypoints: websecure
+      traefik.http.routers.kc-registration-oidc.tls: "true"
+      traefik.http.routers.kc-registration-oidc.service: kc
+      traefik.http.routers.kc-registration-closed.rule: PathRegexp(`(?i)clients-registrations`) || (PathRegexp(`(?i)^/+(realms|resources|js)`) && PathRegexp(`;|\\|%(3[bB]|5[cC]|2[eEfF]|00)|(^|/)\.{1,2}(/|$)`))
+      traefik.http.routers.kc-registration-closed.priority: "10000"
+      traefik.http.routers.kc-registration-closed.entrypoints: websecure
+      traefik.http.routers.kc-registration-closed.tls: "true"
+      traefik.http.routers.kc-registration-closed.middlewares: kc-registration-deny
+      traefik.http.routers.kc-registration-closed.service: kc
+      # Traefik has no native deny, so this is an IP allowlist no client can be
+      # on: 0.0.0.0 is never the source address of a TCP connection, and an
+      # IPv6 client matches no IPv4 range. Every request answers 403.
+      # Never add ipStrategy here -- the deny relies on matching no remote
+      # address, and ipStrategy would make it read a client-supplied header.
+      traefik.http.middlewares.kc-registration-deny.ipallowlist.sourcerange: "0.0.0.0/32"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  keycloak-init:
+    # WHAT REPLACED THREE SSH SESSIONS AND A SECOND PORTAL. This one-shot job
+    # creates the `it-suite-provisioning` and `it-suite-events` service clients,
+    # grants each exactly its roles, writes both secrets to `its-secrets` mode
+    # 600, and then retires the bootstrap admin by rotating its password to a
+    # random value that only that volume holds. `deploy/README.md` steps 8-10
+    # used to ask the operator to do all of it by hand in the identity
+    # provider's own admin console -- which no longer answers on :443 (see the
+    # `keycloak` labels above), and which a buyer should never have to know
+    # exists. See deploy/keycloak/init-clients.py and
+    # docs/superpowers/specs/2026-08-19-invisible-identity-layer-design.md §3.2.
+    #
+    # RE-RUN IS THE NORMAL CASE, not the exception: compose starts a one-shot
+    # service again on every `up`, so the script converges on the desired state
+    # from whatever partial state it finds. `backend/tests/
+    # test_keycloak_init_job.py` holds that to a test.
+    #
+    # The backend image, because it already exists here and the script needs
+    # nothing but the standard library -- no new image to pin, no new pull.
+    image: itsuite/backend:${IT_SUITE_VERSION:-dev}
+    build:
+      context: ..
+      dockerfile: deploy/backend.Dockerfile
+    entrypoint: ["python", "/init/init-clients.py"]
+    environment:
+      # In-network. This job never goes out through traefik, which is what lets
+      # the admin API stay off the public entrypoint entirely.
+      ITS_KEYCLOAK_URL: http://keycloak:8080
+      ITS_KEYCLOAK_REALM: ${ITS_KEYCLOAK_REALM:-it-suite}
+      KEYCLOAK_ADMIN_USER: ${KEYCLOAK_ADMIN_USER:?set in .env}
+      # STALE AFTER THE FIRST RUN, deliberately: this job rotates that password
+      # away. It stays here for the FIRST run and for the case where the job
+      # died between writing the replacement and applying it -- the script tries
+      # the volume's copy first and falls back to this one.
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set in .env}
+      # The MCP audience is `<this>/mcp` (spec 2026-10-09 §3.2). Optional: unset,
+      # the `mcp` scope converges without an audience and the job says so.
+      ITS_PUBLIC_CONSOLE_URL: ${ITS_PUBLIC_CONSOLE_URL:-}
+      # The operator's opt-in to AI apps registering themselves in the realm:
+      # anonymous registration opens only when this is `open` AND the URL
+      # above is set. Unset (the default) keeps it closed; everything else MCP
+      # needs still converges. deploy/README.md "AI connections (MCP)".
+      ITS_MCP_REGISTRATION: ${ITS_MCP_REGISTRATION:-}
+      # The console's token audience, whose clientId the job reserves so no
+      # registered app can take that name. Same setting and default the api
+      # validates against (`app/core/config.py`, `oidc_audience`).
+      ITS_OIDC_AUDIENCE: ${ITS_OIDC_AUDIENCE:-it-suite}
+    volumes:
+      # Bind-mounted rather than baked in, for the same reason the login theme
+      # is: the image is built from `..` and this file is deploy-side config.
+      - ./keycloak/init-clients.py:/init/init-clients.py:ro
+      # THE SAME REALM FILE KEYCLOAK IMPORTS, and that is the point: a realm is
+      # imported only when it does not already exist, so every deployment past
+      # its first boot ignores this file completely. The job converges an
+      # allowlist of realm settings from it -- required actions, login theme,
+      # passkey policy, the browser client's redirect URIs -- onto realms the
+      # import will never touch again. See init-clients.py's own header.
+      - ./keycloak/realm-it-suite.json:/init/realm-it-suite.json:ro
+      # The same volume the api reads ITS_KEYCLOAK_ADMIN_SECRET_PATH and
+      # ITS_KEYCLOAK_EVENTS_SECRET_PATH from, and the same one the audit HMAC
+      # key and the install code live on. Back it up (GO-LIVE §6): after the
+      # first run this volume holds the ONLY copy of the bootstrap admin's
+      # password.
+      - its-secrets:/var/lib/its/secrets
+    depends_on:
+      keycloak:
+        # service_started is all compose can express -- `keycloak` publishes no
+        # port and ships no healthcheck -- so the script polls the realm's
+        # discovery document itself before doing anything. Without that poll
+        # the normal outcome on a cold host is a connection error that reads
+        # like a misconfiguration.
+        condition: service_started
+    # NOTHING GATES ON THIS COMPLETING, and that is the deliberate choice. A
+    # failure here means the setup screen reports that it cannot create the
+    # first account -- visible, diagnosable, and repaired by
+    # `docker compose up keycloak-init`. Making `api` depend on it would turn
+    # the same failure into a product that does not start at all.
+    restart: "no"
+
+  openbao:
+    # PINNED, not `latest`. This is the job-signing key, the agent CA and the
+    # credential vault: an unattended `docker compose pull` must never be able
+    # to change it under a running fleet. It is not hypothetical -- `latest`
+    # moving to v2.x is exactly what made the first-boot runbook's step 3
+    # impossible (see openbao/config.hcl's `disable_mlock` note).
+    image: quay.io/openbao/openbao:2.6.1
+    command: server -config=/bao/config.hcl
+    # unless-stopped, but NOTE: OpenBao comes back SEALED after any restart or
+    # host reboot and must be unsealed by hand before the api/gateway/worker
+    # can sign a job or issue a certificate. That is the Shamir seal working
+    # as designed, not a fault -- deploy/GO-LIVE.md covers auto-unseal.
+    restart: unless-stopped
+    environment:
+      # The `bao` CLI defaults to https://127.0.0.1:8200, but the listener
+      # above is plaintext (in-cluster only, never routed by Traefik), so
+      # every `docker compose exec openbao bao ...` in the first-boot runbook
+      # -- operator init, unseal, status -- otherwise fails with
+      # `http: server gave HTTP response to HTTPS client`. Setting it here
+      # means the documented commands work as written.
+      BAO_ADDR: http://127.0.0.1:8200
+    # `bao status` exits 0 only when the vault is initialized AND UNSEALED
+    # (exit 2 = sealed). That makes this healthcheck the thing that turns
+    # "restarted, therefore sealed" from a confusing cascade into a clean
+    # wait: openbao-init below gates on service_healthy, so `docker compose
+    # up -d` after a host reboot BLOCKS on the unseal instead of failing
+    # `openbao-init` with `Vault is sealed` and leaving `api` never started
+    # (api depends on openbao-init completing). retries*interval is the
+    # window you have to unseal before compose gives up.
+    healthcheck:
+      test: ["CMD", "bao", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    # No cap_add: IPC_LOCK. OpenBao 2.x dropped mlock entirely, so the
+    # capability buys nothing and a secret store should not hold a Linux
+    # capability it cannot use. Keep swap off (or encrypted) on the host
+    # instead -- deploy/GO-LIVE.md.
+    volumes:
+      - ./openbao/config.hcl:/bao/config.hcl:ro
+      # The least-privilege runtime policy, mounted (not `docker compose cp`-ed)
+      # so first-boot step 3.4 is a single `bao policy write` against a path
+      # that is always present and always matches the tree you pulled.
+      - ./openbao/its-app.hcl:/bao/its-app.hcl:ro
+      # Same reasoning, for the token `scripts/issue-gateway-cert.py` uses. That
+      # script was documented as taking the ROOT token; it needs `update` on
+      # exactly one path.
+      - ./openbao/gateway-issuer.hcl:/bao/gateway-issuer.hcl:ro
+      # Mount target MUST match `storage "file" { path }` in config.hcl and
+      # MUST be the image's own /openbao/file -- see that file's comment.
+      - openbao-data:/openbao/file
+
+  openbao-init:
+    # Same pin as the `openbao` service above -- the provisioning script and
+    # the server must not be able to drift to different majors.
+    image: quay.io/openbao/openbao:2.6.1
+    entrypoint: ["/bin/sh", "/init/init.sh"]
+    environment:
+      BAO_ADDR: http://openbao:8200
+      BAO_TOKEN: ${OPENBAO_TOKEN:?set in .env}
+    volumes:
+      - ./openbao/init.sh:/init/init.sh:ro
+    depends_on:
+      openbao:
+        # service_healthy, not service_started: an unsealed vault, not merely
+        # a running process. See the healthcheck above.
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  postgres-data:
+  valkey-data:
+  minio-data:
+  openbao-data:
+  its-ca:
+  its-gateway-tls:
+  # Key material the application processes read at startup (audit HMAC key
+  # today). Back this up with the same care as the CA -- see
+  # docs/07-backup-restore.md.
+  its-secrets:
+  # Celery beat's schedule shelf. Small and reconstructible -- losing it costs
+  # one early firing of each periodic task, not data -- so it is deliberately
+  # NOT in the backup set in docs/07-backup-restore.md §1.
+  beat-schedule:
+
+# --- The container network ------------------------------------------------
+# PINNED, NOT LEFT TO DOCKER'S ALLOCATOR. Docker's default address pool is
+# 172.16.0.0/12 carved into /16s -- which spans 172.16 through 172.31 and so
+# INCLUDES 172.22.0.0/16. A site whose real networks live in 172.22 (client
+# subnets, the management LAN) can therefore have Docker hand a container
+# network the same range its endpoints are on: containers blackhole the very
+# machines this platform manages, and the failure looks like a routing or
+# firewall problem for a long time before anyone suspects Docker.
+#
+# It is not a live risk on a host with two or three networks -- the allocator
+# starts at 172.17 and works up -- which is exactly why it is worth pinning
+# before it becomes one. Overridable because this default cannot be right
+# everywhere: set ITMS_NETWORK_SUBNET if it collides with something here.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${ITMS_NETWORK_SUBNET:-172.19.240.0/24}

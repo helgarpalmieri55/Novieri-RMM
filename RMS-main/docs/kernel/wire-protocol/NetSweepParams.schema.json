@@ -1,0 +1,76 @@
+{
+  "additionalProperties": false,
+  "description": "server -> agent (\u00a75.2). SIGNED: every bound here is covered by the job\nsignature (invariant #1).\n\n`targets` is an **explicit enumerated list**, never \"the subnet\". The agent\nis never asked to decide what it may touch and has no local configuration to\nconsult -- \u00a70.9's whole argument is that a locally scheduled or locally\nscoped sweep is a standing authorization signed once and executed for weeks.\n\n`rate_pps`, `max_targets` and `budget_s` are inside these params rather than\nin agent configuration so the ceiling on what a sweep can COST is set by the\nserver and cannot be raised by anything on the endpoint.",
+  "properties": {
+    "budget_s": {
+      "default": 300,
+      "maximum": 900,
+      "minimum": 10,
+      "title": "Budget S",
+      "type": "integer"
+    },
+    "max_targets": {
+      "default": 4096,
+      "maximum": 65536,
+      "minimum": 1,
+      "title": "Max Targets",
+      "type": "integer"
+    },
+    "method": {
+      "default": "icmp+arp",
+      "enum": [
+        "icmp",
+        "icmp+arp"
+      ],
+      "title": "Method",
+      "type": "string"
+    },
+    "probe_timeout_ms": {
+      "default": 500,
+      "maximum": 5000,
+      "minimum": 100,
+      "title": "Probe Timeout Ms",
+      "type": "integer"
+    },
+    "rate_pps": {
+      "default": 50,
+      "maximum": 200,
+      "minimum": 1,
+      "title": "Rate Pps",
+      "type": "integer"
+    },
+    "scope_digest": {
+      "maxLength": 64,
+      "minLength": 64,
+      "title": "Scope Digest",
+      "type": "string"
+    },
+    "subnet_id": {
+      "title": "Subnet Id",
+      "type": "string"
+    },
+    "sweep_run_id": {
+      "title": "Sweep Run Id",
+      "type": "string"
+    },
+    "targets": {
+      "items": {
+        "maxLength": 43,
+        "minLength": 7,
+        "type": "string"
+      },
+      "maxItems": 4096,
+      "minItems": 1,
+      "title": "Targets",
+      "type": "array"
+    }
+  },
+  "required": [
+    "subnet_id",
+    "sweep_run_id",
+    "targets",
+    "scope_digest"
+  ],
+  "title": "NetSweepParams",
+  "type": "object"
+}

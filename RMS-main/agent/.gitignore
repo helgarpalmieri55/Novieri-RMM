@@ -1,0 +1,8 @@
+# Build output
+/agent
+/its-agent
+/dist/
+
+# Go fuzzing corpus additions are committed deliberately (testdata/fuzz/), but
+# the cache the toolchain maintains is not.
+**/testdata/fuzz/**/.cache/

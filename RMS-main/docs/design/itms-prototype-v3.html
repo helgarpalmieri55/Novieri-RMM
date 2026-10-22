@@ -1,0 +1,1218 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ITMS console prototype v3</title>
+<style>
+/* ===================================================================== tokens
+   THE ALLOWLIST. The audit at the bottom of the file reads every element on
+   every page and fails on any font-size, radius or colour not declared here.
+   Five type sizes, one radius ladder, one palette. */
+:root {
+  /* ONE DECLARATION PER LINE, because `frontend/src/test/tokens.test.ts`
+     reads this block line by line and requires `frontend/src/index.css` to
+     carry every token below at exactly this value. Values are the approved
+     v3 palette except where a measured floor said otherwise; those edits are
+     recorded here, ratio by ratio, and were made HERE FIRST, then transcribed.
+     Ratios are WCAG 2.2 contrast, computed with the helper in
+     `frontend/src/test/contrast.test.ts` (2026-09-07 port, task A1).
+
+     1. `--line-control: #828895` ADDED. v3 drew the border of `.btn`, `.inp`,
+        `.chip` and the `.tog` track in `--line-2` (#cfd4dc): 1.49:1 on
+        `--surface`, 1.43:1 on `--surface-2`, 1.38:1 on `--bg`. SC 1.4.11 asks
+        3:1 of the boundary that identifies a control. `--line-control`
+        measures 3.56:1 / 3.41:1 / 3.29:1 on those three surfaces, and those
+        four rules now paint it. `--line` and `--line-2` keep every decorative
+        job (row rules, panel edges, tab and header underlines) unchanged.
+     2. `--rail-dim` LIGHTENED #6d838c -> #7f939c. It paints the 10.5px
+        uppercase group captions and the `.ct` counts, which are text: it
+        measured 4.44:1 on `--rail` and 3.85:1 on `--rail-2` (the hover and
+        active ground the counts sit on). Now 5.51:1 and 4.78:1.
+     3. `--sans` starts with `Inter`, which the bundle self-hosts
+        (`frontend/src/fonts.css`); the system stack stays as the fallback.
+     4. `--muted` DARKENED #667080 -> #606a7a, and `--sev-mut` with it (the two
+        are one tone: the mut pill's ink is the secondary text colour). It
+        paints `.tile .z` on the crit and warn tiles' own wash and the `.p-mut`
+        pill on `--sev-mut-s`, and measured 4.39:1 on `--sev-crit-s`, 4.39:1
+        on `--sev-mut-s`, 4.34:1 on `--accent-s`, 4.38:1 on `--sev-run-s`.
+        Now 4.79 / 4.79 / 4.74 / 4.78:1, and 5.06:1 on `--bg` (was 4.63).
+     5. `--t-kpi: 26px` NAMED. It is the one size outside the five-step scale,
+        the KPI figure in `.tile .v`, and it is named so the console's type
+        utilities can reach it and the harmony gate can allow it.
+     6. `--rail-hot` and `--av-1..6` NAMED. They were literals in this file
+        (`.rail .ct.hot`, the avatar palette in the script) and values are
+        unchanged; every colour the console paints has to be a token here or
+        the harmony gate reports it as a stray. `--rail-hot` measures 8.01:1
+        on `--rail`, 6.95:1 on `--rail-2`; white on each `--av-*` is at least
+        5.10:1.
+     7. `--scrim` and `--hatch-ink` NAMED (2026-09-08, closing wave). Both
+        were colour literals the console paints and this block did not
+        declare: the overlay's `rgba(15,26,32,.38)` (written twice, here in
+        `.overlay` and again in the app's `overlays.css`) and the hatch
+        stroke the charts lay over a series fill so two bars are never told
+        apart by colour alone. Values are UNCHANGED; naming them is what
+        makes "every colour the console paints is a token here" true rather
+        than nearly true, and the harmony gate now follows a `url(#...)`
+        paint into its pattern and measures what is inside it, so the hatch
+        was about to be reported as a stray with nowhere to be fixed.
+     8. `--accent-2: #1a4fae` ADDED (2026-09-08, closing wave). A FILLED
+        button has to answer the pointer on its FILL: v3 draws `.btn:hover`
+        as a ground step for the white secondary, and on `.btn.pri` -- and on
+        the top bar's Install agent, which is drawn `.btn.pri` here -- that
+        rule changes only the border, 1.80:1 apart from the accent, which
+        `contrast.test.ts`'s hover-step guard measured and refused. The
+        deeper accent steps the ground 1.30:1 (a ground step is a carrier the
+        eye registers where a border step of the same size is not) and
+        carries `--accent-ink` at 7.57:1, up from the accent's own 5.81:1.
+     Unchanged and worth knowing: `--accent` on `--rail-2` is 2.64:1, so the
+     2px active edge of `.rail a.on` is never the only carrier of the active
+     state (white text and the `--rail-2` ground carry it too). */
+  --t-h1: 22px;
+  --t-h2: 15px;
+  --t-body: 13.5px;
+  --t-sm: 12px;
+  --t-cap: 10.5px;
+  --t-kpi: 26px;
+  --r-ctl: 6px;
+  --r-panel: 10px;
+  --r-pill: 999px;
+  --bg: #f5f6f9;
+  --surface: #ffffff;
+  --surface-2: #f9fafc;
+  --ink: #141619;
+  --ink-2: #3b4048;
+  --muted: #606a7a;
+  --line: #e5e8ee;
+  --line-2: #cfd4dc;
+  --line-control: #828895;
+  --rail: #0f1a20;
+  --rail-2: #182730;
+  --rail-ink: #9db0b8;
+  --rail-dim: #7f939c;
+  --rail-hot: #ff8d9a;
+  --accent: #1f5fd1;
+  --accent-2: #1a4fae;
+  --accent-s: #e8effd;
+  --accent-ink: #ffffff;
+  --sev-crit: #c1182f;
+  --sev-crit-s: #fdecee;
+  --sev-warn: #9a6100;
+  --sev-warn-s: #fdf3e2;
+  --sev-ok: #17703f;
+  --sev-ok-s: #e6f6ed;
+  --sev-run: #0f5f95;
+  --sev-run-s: #e7f1fa;
+  --sev-mut: #606a7a;
+  --sev-mut-s: #eef0f4;
+  --av-1: #5b3fb0;
+  --av-2: #0f5f95;
+  --av-3: #17703f;
+  --av-4: #9a6100;
+  --av-5: #b03a5b;
+  --av-6: #0f7a80;
+  --scrim: rgba(15,26,32,.38);
+  --hatch-ink: rgba(255,255,255,.55);
+  --shadow: 0 1px 2px rgba(15,26,32,.05),0 6px 20px rgba(15,26,32,.06);
+  --mono: ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans: Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:var(--t-body)/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}
+h1,h2,h3,p,dl,dd,dt{margin:0}
+.mono,.tile .v,.cell .mono,.six{font-family:var(--mono);font-variant-numeric:tabular-nums}
+svg.ic{flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;vertical-align:-3px}
+
+/* ---- shell ---- */
+.shell{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
+.rail{background:var(--rail);color:var(--rail-ink);padding:14px 0 24px;position:sticky;top:0;height:100vh;overflow:auto}
+.brand{display:flex;align-items:center;gap:10px;padding:6px 18px 18px;color:#fff;font-weight:600;font-size:var(--t-h2)}
+/* 8px -> var(--r-ctl) (6px), 2026-09-08. The ladder this file declares is
+   6 / 10 / 999, plus 2px/3px heat cells and 50% avatars and pips; 8px is on
+   none of those rungs and the harmony gate reports it. The console has always
+   painted 6px. Aligning the file to the ladder it sets is the fix; loosening
+   the ladder for one mark is not. */
+.brand i{width:28px;height:28px;border-radius:var(--r-ctl);background:var(--accent);display:grid;place-items:center;color:#fff}
+.rail .grp{font-size:var(--t-cap);text-transform:uppercase;letter-spacing:.13em;color:var(--rail-dim);padding:14px 18px 5px}
+.rail a{display:flex;align-items:center;gap:10px;padding:7px 18px;color:var(--rail-ink);font-size:var(--t-body);border-left:2px solid transparent}
+.rail a>span:first-of-type,.rail a{white-space:nowrap}.rail a .lbl{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.rail a:hover{color:#fff;background:var(--rail-2)}
+.rail a.on{color:#fff;background:var(--rail-2);border-left-color:var(--accent)}
+.rail a svg{opacity:.7}.rail a.on svg{opacity:1}
+.rail .ct{margin-left:auto;font-family:var(--mono);font-size:var(--t-sm);color:var(--rail-dim)}
+.rail .ct.hot{color:var(--rail-hot)}
+.main{min-width:0}
+.top{display:flex;align-items:center;gap:16px;height:60px;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.top .srch{flex:1;max-width:520px;margin-right:auto}
+/* 2026-09-08, two edits, both to match what the console paints and both for
+   a measured reason.
+   BORDER --line -> --line-control. `.ib` is a BUTTON: SC 1.4.11 asks 3:1 of
+   the boundary that identifies a control, and `--line` measures 1.49:1 on
+   `--surface`. This is edit 1 in `:root` applied to the one control that had
+   been missed; `.btn`, `.inp`, `.chip` and `.tog` were already repaired.
+   DOT 7px -> 10px. The console's pip carries a SILHOUETTE per state, because
+   colour is never the only carrier (SC 1.4.1) and green/amber/red is the
+   worst trio for the eyes that criterion is about. A 7px pip minus its 2px
+   ring is 3px of fill, which is no shape at all. Offsets move with it. */
+.top .ib{width:36px;height:36px;border-radius:var(--r-ctl);border:1px solid var(--line-control);background:var(--surface);display:grid;place-items:center;color:var(--ink-2);position:relative}
+.top .ib .dot{position:absolute;top:5px;right:5px;width:10px;height:10px;border-radius:50%;background:var(--sev-crit);border:2px solid var(--surface)}
+.top .ib.ok .dot{background:var(--sev-ok)}
+.top .me{display:flex;align-items:center;gap:9px;padding-left:10px}
+.top .me small{display:block;color:var(--muted);font-size:var(--t-sm);line-height:1.2}
+.content{padding:22px 24px 40px;max-width:1440px}
+
+/* ---- page head ---- */
+.ph{margin-bottom:18px}
+.crumb{display:flex;align-items:center;gap:4px;font-size:var(--t-sm);color:var(--muted);margin-bottom:6px}
+.ph-row{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap} /* wraps: the action row drops below a long title on a narrow viewport */
+.ph h1{font-size:var(--t-h1);font-weight:600;letter-spacing:-.015em}
+.ph .sub{color:var(--muted);margin-top:3px;max-width:70ch}
+.ph-act{margin-left:auto;display:flex;gap:8px;flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end} /* may shrink and wrap within itself, actions stay right-aligned */
+.btn{display:inline-flex;align-items:center;gap:6px;font:500 var(--t-body)/1 var(--sans);padding:9px 13px;border-radius:var(--r-ctl);border:1px solid var(--line-control);background:var(--surface);color:var(--ink);cursor:pointer;white-space:nowrap}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.pri:hover{background:var(--accent-2);border-color:var(--accent-2)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--accent)}
+.btn:active{transform:translateY(1px)}
+.tabs{display:flex;flex-wrap:wrap;gap:2px 0;border-bottom:1px solid var(--line-2);margin-bottom:18px} /* wraps: six tabs are 782px of nowrap labels, and a strip that cannot fold is a horizontal scroll at 390px. NO COLUMN GAP: the hairline under a folded row is drawn by the tabs themselves (see `.tabs a`), and a 2px gap broke it into dashes. The 2px row gap stays. */
+.tabs a{padding:9px 13px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;background-image:linear-gradient(var(--line-2),var(--line-2));background-origin:border-box;background-repeat:no-repeat;background-size:100% 1px;background-position:0 100%} /* EVERY ROW GETS THE STRIP'S HAIRLINE. `.tabs` rules along its own bottom, which under a folded strip is the LAST row only, so the rows above it float free of the page. The 1px line is painted by each tab at the bottom of its border box -- exactly where the container's line sits, so the last row is unchanged -- and under the 2px bottom border, so `.on` still covers it with the accent. */
+.tabs a.on{color:var(--ink);border-bottom-color:var(--accent);font-weight:500}
+
+/* ---- tiles ---- */
+.tiles{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px;margin-bottom:18px;align-items:start} /* a tile is as tall as what is in it: stretching every tile to the tallest gave the ones with no caption line a dead band under the figure */
+.tile{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-panel);padding:14px 16px;box-shadow:var(--shadow);min-height:92px}
+.tile .k{display:flex;align-items:center;gap:6px;font-size:var(--t-cap);text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.tile .v{font-size:var(--t-kpi);font-weight:600;letter-spacing:-.03em;line-height:1.1;margin-top:5px}
+.tile .v small{font-size:var(--t-body);font-weight:500;margin-left:1px}
+.tile .z{font-size:var(--t-sm);color:var(--muted);margin-top:2px}
+.tile.has-sp .z,.tile.has-sp .k{padding-right:112px}
+.tile.crit{background:var(--sev-crit-s);border-color:var(--sev-crit-s)}.tile.crit .v,.tile.crit .k{color:var(--sev-crit)}
+.tile.warn{background:var(--sev-warn-s);border-color:var(--sev-warn-s)}.tile.warn .v,.tile.warn .k{color:var(--sev-warn)}
+.tile.ok .v{color:var(--sev-ok)}
+svg.sp{position:absolute;right:12px;bottom:10px;width:104px;height:26px;color:var(--muted)}
+.tile.crit svg.sp{color:var(--sev-crit)}.tile.warn svg.sp{color:var(--sev-warn)}
+svg.sp .a{fill:currentColor;opacity:.12}svg.sp .l{fill:none;stroke:currentColor;stroke-width:1.6}svg.sp .p{fill:currentColor;stroke:var(--surface);stroke-width:1.4}
+.tile .v{font-size:var(--t-kpi)} /* the one size outside the 5-step scale, and it is the KPI figure; named in :root so the app can reach it */
+
+/* ---- panel ---- */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-panel);box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden}
+.panel-h{display:flex;align-items:flex-start;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.panel-h h2{font-size:var(--t-h2);font-weight:600}
+.panel-h p{color:var(--muted);font-size:var(--t-sm);margin-top:2px}
+.panel-a{margin-left:auto;display:flex;gap:8px;align-items:center}
+.panel-b{padding:16px 18px}.panel-b.bare{padding:0}
+
+/* ---- list rows ---- */
+.list{overflow-x:auto}
+.lrow{display:grid;align-items:center;gap:0 12px;min-width:720px;border-bottom:1px solid var(--line);background:var(--surface)}
+.lrow:last-child{border-bottom:0}
+.lrow:not(.lhead):hover{background:var(--surface-2)}
+.lhead{font-size:var(--t-cap);text-transform:uppercase;letter-spacing:.1em;color:var(--muted);padding:9px 0;border-bottom:1px solid var(--line-2)}
+.lhead span{padding-right:12px}
+.lrow .gut{align-self:stretch;background:transparent}
+.lrow.crit .gut{background:var(--sev-crit)}.lrow.warn .gut{background:var(--sev-warn)}.lrow.run .gut{background:var(--sev-run)}
+.lrow .lead{display:flex;align-items:center;justify-content:center;color:var(--muted);padding:11px 0}
+.lrow .ttl{padding:10px 0;min-width:0}
+.lrow .ttl b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lrow .ttl small{display:block;font-size:var(--t-sm);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lrow .cell{padding:10px 14px 10px 0;font-size:var(--t-body);min-width:0;color:var(--ink-2)}
+.cell .mono{font-size:var(--t-sm)}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:var(--t-sm);font-weight:500;padding:3px 9px 3px 7px;border-radius:var(--r-pill);white-space:nowrap}
+.p-crit{background:var(--sev-crit-s);color:var(--sev-crit)}.p-warn{background:var(--sev-warn-s);color:var(--sev-warn)}
+.p-ok{background:var(--sev-ok-s);color:var(--sev-ok)}.p-run{background:var(--sev-run-s);color:var(--sev-run)}
+.p-mut{background:var(--sev-mut-s);color:var(--sev-mut)}.p-info{background:var(--accent-s);color:var(--accent)}
+.av{display:inline-grid;place-items:center;border-radius:50%;color:#fff;font-weight:600;letter-spacing:.02em;flex:none}
+.who{display:inline-flex;align-items:center;gap:7px}
+.bar{display:block;height:5px;border-radius:var(--r-pill);background:var(--line);overflow:hidden;min-width:70px}
+.bar i{display:block;height:100%}.bar .crit{background:var(--sev-crit)}.bar .warn{background:var(--sev-warn)}.bar .ok{background:var(--sev-ok)}.bar .run{background:var(--sev-run)}.bar .mut{background:var(--sev-mut)}
+.prog{margin-bottom:12px}.prog-l{display:flex;justify-content:space-between;font-size:var(--t-sm);margin-bottom:4px}
+.prog .mono{color:var(--muted)}
+
+/* ---- heat / donut / timeline / week / steps / facts ---- */
+.heat{display:flex;flex-wrap:wrap;gap:3px}
+.heat i{width:10px;height:10px;border-radius:2px;background:var(--sev-ok);opacity:.4}
+.heat .h-crit{background:var(--sev-crit);opacity:1}.heat .h-warn{background:var(--sev-warn);opacity:1}.heat .h-run{background:var(--sev-run);opacity:1}
+.dons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0}
+.don{position:relative;text-align:center;padding:6px 8px}
+.don svg{width:64px;height:64px;transform:rotate(-90deg)}.don .trk{fill:none;stroke:var(--line);stroke-width:7}.don .arc{fill:none;stroke-width:7;stroke-linecap:round}
+.don-v{position:absolute;top:26px;left:0;right:0;font-family:var(--mono);font-size:var(--t-h2);font-weight:600}.don-v small{font-size:var(--t-cap)}
+.don-k{font-weight:600;margin-top:4px}.don-z{font-size:var(--t-sm);color:var(--muted)}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));border:1px solid var(--line);border-radius:var(--r-panel);overflow:hidden;margin-bottom:16px;background:var(--surface)}
+.facts>div{padding:11px 14px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+.facts .k{display:block;font-size:var(--t-cap);text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.facts .v{display:block;margin-top:3px}
+.tl-row{display:grid;grid-template-columns:260px minmax(0,1fr);align-items:center;gap:12px;padding:5px 0}
+.tl-k{display:flex;align-items:center;gap:7px;min-width:0;color:var(--muted)}.tl-k .mono{color:var(--ink);font-size:var(--t-sm)}
+.tl-h{font-size:var(--t-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-track{position:relative;height:16px;background:var(--surface-2);border:1px solid var(--line);border-radius:3px}
+.tl-bar{position:absolute;top:2px;bottom:2px;border-radius:2px}.b-crit{background:var(--sev-crit)}.b-warn{background:var(--sev-warn)}.b-run{background:var(--sev-run)}.b-ok{background:var(--sev-ok)}
+.tl-axis{position:relative;height:14px;margin:6px 0 0 272px;font-family:var(--mono);font-size:var(--t-cap);color:var(--muted)}.tl-axis i{position:absolute;transform:translateX(-50%);font-style:normal}
+.wk{display:block;max-width:100%;overflow-x:auto}.wk-row{display:flex;gap:2px;margin-bottom:2px;align-items:center}
+.wk-d{width:30px;font-size:var(--t-cap);color:var(--muted);font-style:normal;flex:none}
+.wk-c{width:14px;height:16px;border-radius:2px;background:var(--line);border:1px solid var(--line-control);flex:none}.wk-c.on{background:var(--accent);border-color:var(--accent)}
+.wk-h{width:14px;font-size:var(--t-cap);color:var(--muted);font-family:var(--mono);font-style:normal;flex:none}
+.steps{border:1px solid var(--line);border-radius:var(--r-panel);overflow:hidden;background:var(--surface)}
+.step{display:grid;grid-template-columns:3px 30px minmax(0,1fr) auto;gap:0 12px;align-items:center;border-bottom:1px solid var(--line)}.step:last-child{border-bottom:0}
+.sbar{align-self:stretch;background:transparent}.step.ok .sbar{background:var(--sev-ok)}.step.now .sbar{background:var(--accent)}.step.crit .sbar{background:var(--sev-crit)}
+.six{font-size:var(--t-sm);color:var(--muted);padding-left:10px}
+.sbody{padding:13px 0}.sbody b{display:block}.sbody p{font-size:var(--t-sm);color:var(--muted);margin-top:2px;max-width:66ch}
+.sgo{padding:0 14px}
+
+/* ---- forms ---- */
+.field{margin-bottom:16px;max-width:560px}.field label{display:block;font-weight:500;font-size:var(--t-sm);margin-bottom:5px}
+.field .help{font-size:var(--t-sm);color:var(--muted);margin-top:5px}
+.inp{display:flex;align-items:center;gap:8px;border:1px solid var(--line-control);border-radius:var(--r-ctl);padding:8px 11px;background:var(--surface);min-height:36px}
+.inp .ph{color:var(--muted)}.inp.sel{justify-content:space-between}.inp.srch{color:var(--muted)}
+.tog{display:inline-block;width:34px;height:20px;border-radius:var(--r-pill);background:var(--line-control);position:relative;vertical-align:middle}
+.tog i{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff}.tog.on{background:var(--accent)}.tog.on i{left:16px}
+.chips{display:flex;gap:7px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:var(--t-sm);padding:6px 11px;border-radius:var(--r-pill);border:1px solid var(--line-control);background:var(--surface);color:var(--ink-2)}
+.chip.on{background:var(--accent-s);border-color:var(--accent);color:var(--accent)}
+.tb{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}.tb-l{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.tb-r{margin-left:auto;display:flex;gap:8px;align-items:center;font-size:var(--t-sm);color:var(--muted)}
+.tb .inp.srch{min-width:260px}
+.g2{display:grid;gap:16px;align-items:start}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:8px 18px;font-size:var(--t-body)}.kv dt{color:var(--muted)}
+.empty{text-align:center;padding:36px 20px;color:var(--muted)}.empty b{display:block;color:var(--ink);margin:10px 0 4px}.empty p{max-width:52ch;margin:0 auto 12px}
+.note{font-size:var(--t-sm);color:var(--muted)}
+@media (max-width:1100px){.shell{grid-template-columns:1fr}.rail{display:none}.tiles .tile{grid-column:span 6!important}.g2{grid-template-columns:1fr!important}}
+@media (max-width:640px){.tiles .tile{grid-column:span 12!important}.content{padding:14px}.form-grid{grid-template-columns:minmax(0,1fr)}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ===================================================================== console additions
+   RULES THE CONSOLE NEEDS THAT THE MOCK HAD NO OCCASION TO DRAW (2026-09-07
+   port, task A4). A static prototype never disables a button, never opens a
+   modal over itself, never fails a request and never hides a table header
+   from sighted readers; the console does all four on every page. Each rule
+   below is written in this file's own vocabulary -- the tokens above, the
+   6 / 10 / 999 radius ladder, the five type sizes -- and then TRANSCRIBED
+   into `frontend/src/shell/*.css`, never the reverse.
+   `frontend/src/test/base-styles.test.ts` compares the two declaration for
+   declaration, and its parser reads `selector { ... }` one rule per line
+   (note the space before the brace, unlike the rules above), which is why
+   this block is formatted the way it is.
+
+   The six edits that touch rules above rather than adding new ones:
+     .tabs    gains `flex-wrap:wrap`. The mock draws at most four tabs on a
+              desktop; the console's device page draws six, 782px of
+              `white-space:nowrap` labels, and `/devices` adds a count to
+              each. `scripts/harmony.mjs` measured both at 390px as a
+              horizontal scroll (SC 1.4.10), the same defect `.ph-row`'s
+              wrap repaired in the page head. A folded second row keeps the
+              active underline on its tab; only the last row meets the
+              strip's hairline.
+     .wk-c    border was `--line-2` (1.49:1 on --surface). The console renders
+              each cell as a <button role="gridcell">, so its edge identifies
+              a control and SC 1.4.11 asks 3:1 of it; `--line-control`
+              (3.56:1) is the same repair edit 1 in `:root` made to `.btn`
+              and `.inp`. The rule above is repainted in place; only the
+              focus ring is new here.
+     .wk      `display:inline-block` -> `display:block;max-width:100%;
+              overflow-x:auto`. The grid is 414px wide and the console lays
+              it in a panel that can be 324px on a handset; a block scroll
+              container sizes to the panel from the first layout, where an
+              inline-block's percentage max-width resolved late and let the
+              mobile viewport widen to 433px before it settled.
+     .tile    gains :hover, :focus-visible and per-kind hover rules, because
+              the console's tile is a link to the list behind the number
+              ("a number on a dashboard is a promise") and a link has to
+              answer the pointer and the keyboard. The hover steps the
+              border to `--line-control` (2.9:1 against `--line`, which the
+              guard in `contrast.test.ts` measures) rather than lifting or
+              casting a shadow, which the eye does not register.
+              QUALIFIED `a.tile` FROM 2026-09-08: not every tile has a
+              destination. `Tile` renders a <div> when `to` is absent, and a
+              div that lights up under the pointer promises a click that
+              never happens -- a false affordance is worse than no
+              affordance. The rules are unchanged; only what they apply to
+              is narrower.
+     .btn     gains :hover, :focus-visible and :disabled. The focus ring sits
+              2px OUTSIDE the button: drawn against the fill of `.btn.pri`
+              it would be accent on accent, 1:1.
+     .field   gains `> span` beside `label`: the console's `Field` wraps the
+              control in the <label> and puts the caption in a <span>. */
+.btn:hover { background: var(--surface-2); border-color: var(--ink-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.danger { border-color: var(--sev-crit); color: var(--sev-crit); }
+.btn.ghost:hover { background: var(--accent-s); }
+.btn.small { padding: 6px 10px; font-size: var(--t-sm); }
+.btn.icon-only { padding: 9px; }
+/* NEW, not an edit: the settings console needs a destructive action that
+   reads as text, not as a bordered button (`docs/design/settings-language.md`
+   "Users" -- Delete set apart from the row's ordinary and quiet actions,
+   rather than a fourth border shouting alongside them). `.btn.ghost` alone
+   cannot carry it: `.btn.danger`'s border-color would still win on source
+   order at equal specificity, redrawing the very edge ghost removes. Three
+   classes beats that outright. */
+.btn.ghost.danger { border-color: transparent; color: var(--sev-crit); }
+.btn.ghost.danger:hover { background: var(--sev-crit-s); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn:disabled { cursor: not-allowed; transform: none; color: var(--muted); background: var(--surface-2); border-color: var(--line-2); box-shadow: none; }
+a.tile:hover { border-color: var(--line-control); }
+a.tile.crit:hover { border-color: var(--sev-crit); }
+a.tile.warn:hover { border-color: var(--sev-warn); }
+.tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wk-c:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.field > span { display: block; font-weight: 500; font-size: var(--t-sm); margin-bottom: 5px; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.form-grid > .field { margin-bottom: 0; max-width: none; }
+.field.full { grid-column: 1 / -1; }
+.notice { display: flex; gap: 10px; align-items: flex-start; max-width: 76ch; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--accent-s); color: var(--accent); font-size: var(--t-body); }
+.notice.gold { background: var(--sev-warn-s); color: var(--sev-warn); }
+.notice.red { background: var(--sev-crit-s); color: var(--sev-crit); }
+.code { display: block; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--surface-2); color: var(--ink); font: 12px/1.7 var(--mono); overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+code.code { display: inline-block; max-width: 100%; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; border-width: 0; }
+.overlay { position: fixed; inset: 0; z-index: 70; display: none; background: var(--scrim); }
+.overlay.open { display: block; }
+.modal { position: fixed; inset: 50% auto auto 50%; z-index: 95; width: min(640px, 92vw); max-height: 88vh; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow); opacity: 0; pointer-events: none; transform: translate(-50%, -47%) scale(.98); transition: opacity .15s, transform .15s; }
+.modal.open { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+.modal-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.modal-title { font-size: var(--t-h2); font-weight: 600; }
+.modal-body { padding: 18px; overflow-y: auto; }
+.close-btn { margin-left: auto; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--line-control); background: var(--surface); border-radius: var(--r-ctl); color: var(--ink-2); }
+
+/* ------------------------------------------------------------------------
+   CONSOLE ADDITIONS, WAVE 2 (2026-09-08). Eight rules every module group
+   reached for and the mock had no occasion to draw. Each is written in v3's
+   own vocabulary; none introduces a colour, a radius or a size that is not
+   already a token.
+
+   .btn.on   A TOGGLE, not a command. The mock's buttons all run something;
+             the console has controls that are on or off (the error monitor's
+             Events toggle, a filter that stays down). Drawn as `.chip.on` is
+             drawn -- the accent wash, the accent edge, the accent ink --
+             because a pressed button and a selected chip are the same idea
+             and should not be two looks. `aria-pressed` carries it for
+             anything not looking at pixels, so colour is not the only
+             carrier.
+   .step.warn Sits beside `.step.crit`, which is already here. A step can be
+             blocked on something that is not yet a failure; without the warn
+             rung the list had to call it critical or say nothing.
+   .table-foot The foot of a paged list. `.tb` is the HEAD of a list -- it
+             carries a bottom margin and no rule -- so /devices, /enrollment
+             and /patch each drew a foot out of `.tb` and got its bottom
+             hairline under a row that has nothing below it. This rules along
+             its TOP, which is the edge a foot shares with the table.
+   tr[aria-current="true"] > td, tr.sel > td
+             THE SELECTED ROW IN A MASTER-DETAIL LIST. Four pages painted it
+             with `--surface-2`, which is exactly what `.lrow:hover` paints,
+             so the row under the pointer and the row being read were the
+             same colour. The accent wash is what v3 already uses for "this
+             is the one" (`.chip.on`, `.rail a.on`), and it is distinct from
+             hover. Reached by `aria-current` so the state is announced, or
+             by `.sel` where the row is not the current item of a set.
+   tr.wash-crit > td
+             A row whose CONTENT is alarming rather than selected (an
+             autonomous approved action). Separate name because it is a
+             separate meaning; sharing one class for both is how a selection
+             came to be painted like a failure.
+   .toggle-row
+             THE CONSOLE'S `.tog` IS OPERABLE. The mock draws the track and
+             the knob as decoration; a switch a person can throw needs a hit
+             area, a visible label beside it and a focus ring, so the console
+             renders `<button role="switch" aria-checked>` around the
+             design's `.tog` and this is that button's box. It carries no
+             colour of its own -- the track is still `.tog` / `.tog.on`.
+   .chart-canvas
+             `fill: none` ON THE ROOT, the same repair `svg.ic` makes above.
+             The user agent's initial `fill` is BLACK and inherits into every
+             child that does not state its own, so the chart root, its groups
+             and its axis lines all measured `rgb(0,0,0)` -- 25 of them on
+             /budget, which is not a colour this palette contains. Every
+             element that actually paints (the bars, the ticks, the axis
+             labels, the target callout) states its own fill. The legend's
+             14px swatch is a second root and needs the same.
+   .k        The caption rung, UNSCOPED. `.tile .k` and `.facts .k` say the
+             same thing twice already; a caption over a plain card had
+             nothing and pages reached for `.note`, which is body-sized. The
+             two scoped rules stay: they win on specificity and each adds a
+             layout the bare caption does not have.
+   ------------------------------------------------------------------------ */
+.btn.on { background: var(--accent-s); border-color: var(--accent); color: var(--accent); }
+.step.warn .sbar { background: var(--sev-warn); }
+.table-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 10px 18px; border-top: 1px solid var(--line); font-size: var(--t-sm); color: var(--muted); }
+tr[aria-current="true"] > td, tr.sel > td { background: var(--accent-s); }
+tr.wash-crit > td { background: var(--sev-crit-s); }
+.chart-canvas, .chart-legend li > svg { fill: none; }
+.chart-scroll { overflow-x: auto; }
+.toggle-row { display: inline-flex; align-items: center; gap: 9px; padding: 4px 0; border: 0; background: transparent; color: var(--ink); font: var(--t-body)/1.4 var(--sans); cursor: pointer; }
+.toggle-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-ctl); }
+.toggle-row:disabled { cursor: not-allowed; color: var(--muted); }
+.k { display: block; font-size: var(--t-cap); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+
+/* ------------------------------------------------------------------------
+   CONSOLE ADDITIONS, WAVE 3 (2026-09-08). The review wave's kit findings,
+   each filed by more than one module group and none reachable from a module
+   file. Written in v3's own vocabulary; no new colour, radius or size.
+
+   select.input-field, select.select-field
+             THE MOCK DRAWS A SELECT AS `.inp.sel` -- a div, with a Tabler
+             chevron-down at 14px drawn into it (see the `select()` helper
+             below). The console renders a REAL `<select>`, which brings the
+             user agent's own indicator: a different glyph on every engine,
+             none of them this one. `appearance: none` removes it and the
+             design's glyph is restored as a background image. The stroke
+             colour is written out as `#667080` because a `url()` cannot read
+             a custom property; it is `--muted`, and `tokens.test.ts`'s
+             allowlist records the literal. TAG-QUALIFIED, and both classes
+             are named: `inputClass` is `.input-field`, and 63 of the
+             console's 136 selects wear it, so a rule on `.select-field`
+             alone would have left more than half of them with the browser's
+             own arrow. An `<input>` or a search box under those same classes
+             takes nothing -- only a select has a drop arrow.
+   .dash-widget / .dash-widget-body
+             A DASHBOARD ROW IS AS TALL AS ITS TALLEST PANEL, and a shorter
+             panel beside it left bare `--bg` under itself -- ~460px of it on
+             the console's first row. Grid children stretch by default; a
+             `.panel` inside one does not, because the widget frame is the
+             grid item and the panel is its child. Making the frame and its
+             body columns that grow passes the row's height down to the panel.
+             The edit-mode bar stays a flex child above the body.
+   .table-scroll / .table-scroll-hint
+             A TABLE THAT SCROLLS SIDEWAYS SAYS SO. `.table-wrap` is
+             `overflow-x: auto` over a table with a 560px floor, so on a
+             handset the trailing columns of a wide list are reachable only by
+             dragging the card -- correct for SC 1.4.10, and invisible. The
+             hint is a caption UNDER the scroller, shown only while there is
+             more to the right, and `aria-hidden` because a keyboard or
+             screen-reader user reaches the wrapper as a tab stop already. A
+             right-edge fade was tried first and measured: it veiled the
+             trailing column's own content down to 1.3:1.
+   .srch-wrap
+             THE SEARCH BOX'S MAGNIFIER. v3 draws a search control as
+             `.inp.srch` with the glyph inside the box; the console's
+             `.search-field` is a bare `<input type="search">` and had none.
+   ::-webkit-* on .input-field
+             THE DATE CONTROL'S INTERIOR. `<input type="date">` is drawn by
+             the user agent inside the box the kit gives it: its own type
+             size, its own ink, and a picker button in the browser's grey.
+             These three bring the interior onto the ramp and give the button
+             the muted rung. WHAT THEY CANNOT REACH, and what no CSS can: the
+             field ORDER, which is the reader's locale (mm/dd/yyyy in en-US).
+             Replacing the control with a text field that parses and prints
+             one chosen format was considered and refused -- the native input
+             is the one date widget every keyboard, screen reader and locale
+             already agrees on, and the pages that carry one read the chosen
+             date back beside it in the console's own format.
+   ------------------------------------------------------------------------ */
+select.input-field, select.select-field { appearance: none; -webkit-appearance: none; padding-right: 30px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23667080' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6l6 -6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; background-size: 14px 14px; }
+.dash-widget { display: flex; flex-direction: column; }
+.dash-widget-body { flex: 1; display: flex; flex-direction: column; }
+.dash-widget-body > * { flex: 1; }
+.table-scroll { display: block; }
+.table-scroll-hint { display: flex; align-items: center; justify-content: flex-end; gap: 4px; padding: 6px 18px 2px; font-size: var(--t-cap); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.srch-wrap { position: relative; display: flex; align-items: center; flex: 1 1 230px; min-width: 0; }
+.srch-wrap > .ic { position: absolute; left: 11px; color: var(--muted); pointer-events: none; }
+.srch-wrap > .search-field { padding-left: 32px; min-width: 0; }
+.input-field::-webkit-calendar-picker-indicator { opacity: .55; cursor: pointer; }
+.input-field::-webkit-datetime-edit { font-size: var(--t-body); color: var(--ink); }
+.input-field::-webkit-datetime-edit-fields-wrapper { padding: 0; }
+
+/* ------------------------------------------------------------------------
+   CONSOLE ADDITIONS, WAVE 4 (2026-09-08). The all-routes visual review's
+   kit-level findings (M4, M5, M11, M15, M16). Written in v3's own
+   vocabulary; no new colour, radius or size.
+
+   The three edits that touch rules above rather than adding new ones:
+     .tabs    `gap:2px` -> `gap:2px 0`. See `.tabs a`: the folded row's
+              hairline is now drawn by the tabs, and a 2px column gap chopped
+              it into dashes. The row gap is unchanged.
+     .tabs a  gains the four background longhands that paint that hairline.
+              The review found /budget (2 rows), /devices/:id (3 rows) and
+              /licenses (2 rows) at 390px with the strip's rule under the
+              LAST row only, so the rows above read as detached from the
+              page. Painted as a background rather than a border because a
+              background sits UNDER the element's own border: `.on`'s 2px
+              accent covers it, with no second rule to keep in step.
+     .tiles   gains `align-items:start`, for the same reason as
+              `.stats-grid` below.
+
+   .stats-grid
+             THE CONSOLE'S TILE ROW, which this mock draws as `.tiles`. It
+             takes a track COUNT rather than a span, and it is declared in
+             `frontend/src/shell/components.css` alone -- recorded here only
+             because the two rules below are the same decision as the
+             `.tiles` edit above. `align-items: start` stops a row of tiles
+             from stretching every tile to the tallest: on /ipam two tiles
+             carry a two-line caption and two carry none, and the two with
+             none were drawn 120px tall with 28px of empty card under the
+             figure. A two-tile row is TWO HALVES whatever count was
+             declared, so /discovered (two tiles in a four-track grid, at
+             ~280px) and /service-desk/my-work (two tiles at ~570px) stop
+             being two different components.
+   .chips.stacked
+             A CHOICE GROUP, not a filter row. `.chips` wraps, which is right
+             for a filter strip across a page and wrong inside a table cell:
+             /assistant/autonomy draws three options in each of nine cells
+             and every one of them wrapped 2 + 1, so `Needs approval` sat on
+             a second line and no option row lined up with the same option in
+             the column beside it. Stacked, each option is one row, the rows
+             line up across the columns, and the cell is as wide as its
+             widest label instead of as wide as two of them.
+   .table-foot .count
+             THE RESULT COUNT IN A LIST FOOT IS PROSE. It was set in
+             `.mono`, so "Showing 1-14 of 14 devices." was drawn in the
+             monospace face and broke across three lines beside the pager
+             buttons at 390px. The face is the page's own; only the figures
+             stay tabular, so the number does not jitter as pages change.
+   ------------------------------------------------------------------------ */
+.chips.stacked { flex-direction: column; align-items: stretch; }
+.table-foot .count { font-variant-numeric: tabular-nums; }
+
+/* ===================================================================== console additions
+   CONSOLE ADDITIONS, WAVE 5 (2026-09-10). The settings rework needs somewhere
+   to put a clause of help beside a field, and there is nowhere: nine settings
+   tabs read like a schema dump because eleven labels carry their unit and
+   default inside parentheses ("Transcript retention (days)").
+
+   THE HELP CANNOT LIVE INSIDE `.field`, AND THAT IS A MARKUP FACT, NOT A
+   TASTE. The console's `Field` wraps the control in the <label> (see the
+   `.field > span` note in the first block), so anything rendered in there
+   joins the control's accessible NAME -- `/agent-push/authorizations` shipped
+   a field announced as its whole help sentence. The help is therefore a
+   SIBLING of the label, wired with `aria-describedby`, and `.field-wrap` is
+   the box that makes caption / control / help one stack again.
+
+   Which is why the help gets its own rule here. The mock styles help as
+   `.field .help`, a DESCENDANT selector, and outside the label the paragraph
+   is no longer a descendant of anything -- it would draw at body size in full
+   ink, reading as a second caption under the control rather than as a hint.
+   Same two declarations, on the selector the new markup actually has. The
+   4px gap comes from the field's own margin below, so there is no `margin-top`
+   to double it.
+
+   `.form-grid > .field-wrap` mirrors `.form-grid > .field`: in the grid the
+   14px gap does the spacing, and a wrapper that kept its own bottom margin
+   would drop every field carrying help 14px below the ones beside it.
+
+   THE 560px CAP MOVES OUT TO THE WRAPPER, AND THAT IS THE SAME MIRROR AGAIN.
+   `.field` caps itself at 560px and `.form-grid > .field` lifts the cap so a
+   field fills its cell; once the grid's child is `.field-wrap`, NEITHER of
+   those matches the label any more. Left alone, a field carrying help draws a
+   560px control beside a 670px one in the same row (`.content` is 1440px, so
+   a two-column `.form-grid` on a page is ~670px per cell), and a `full` cell
+   in a modal -- a textarea, which is what help is most often for -- loses 42px
+   against the `.field.full` beside it. The paragraph has the same hole: capped
+   at 560px while it was a descendant of `.field`, unbounded the moment it left.
+   So the box owns the measure: the WRAPPER carries the 560px, the field and
+   the help fill the wrapper, and `.form-grid > .field-wrap` lifts it exactly
+   as `.form-grid > .field` does. One number, in one place, for both children.
+   ------------------------------------------------------------------------ */
+.field-wrap { margin-bottom: 14px; max-width: 560px; }
+.field-wrap > .field { margin-bottom: 4px; max-width: none; }
+.field-wrap.full { grid-column: 1 / -1; }
+.field-wrap > .help { font-size: var(--t-sm); color: var(--muted); }
+.form-grid > .field-wrap { margin-bottom: 0; max-width: none; }
+
+/* ===================================================================== console additions
+   CONSOLE ADDITIONS, WAVE 6 (2026-09-10). Nine settings tabs render one flat
+   grid of label+input pairs -- no sub-heading breaks a tab into the sections
+   a person actually scans for ("Connection", "Retention", "Maintenance
+   window"). The mock names its own settings sections this way:
+   `<div style="font-weight:500"><icon> Maintenance window</div>` -- so this
+   is that grouping, given to the console's kit rather than typed once per
+   tab.
+
+   NOT A DIV. The mock's own markup is a styled div because a static page has
+   no navigation to preserve; the console's does, so the console draws an
+   `h3` in its place -- a titled `Panel` has already spent the `h2` above it,
+   and a group heading one level under that is exactly what `h3` is for. The
+   type size and weight below are the mock's own div rule, carried over
+   unchanged; only the element and the icon gap are new.
+
+   `.field-group > h3` sets the glyph gap itself rather than reusing a
+   `.toggle-row`-style 9px, because the icon here sits at 14px (a sub-heading
+   glyph, not a control's), and the mock's own spacing at that size is 7px --
+   `svg + text` throughout the settings mock never exceeds an 8px gap once
+   the glyph drops below 16px.
+   ------------------------------------------------------------------------ */
+.field-group { margin-bottom: 22px; }
+.field-group > h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 10px; font-size: var(--t-body); font-weight: 500; color: var(--ink); }
+.field-group:last-child { margin-bottom: 0; }
+
+/* ===================================================================== console additions
+   CONSOLE ADDITIONS, WAVE 7 (2026-09-11). The settings language pass moved
+   two counts on the Roles tab -- how many users hold a role, how many
+   permission codes it carries -- off `.mono`. Numbers in a table want
+   tabular figures, not a code font: `.mono` is for identifiers, and a count
+   is prose with digits in it, the same reasoning `.table-foot .count`
+   already recorded for a list's own result count. That rule is scoped to a
+   list's foot, though, and these two sit in an ordinary table body, so the
+   one property either place needs moves to a bare, unscoped `.count`.
+   ------------------------------------------------------------------------ */
+.count { font-variant-numeric: tabular-nums; }
+
+/* ===================================================================== console additions
+   CONSOLE ADDITIONS, WAVE 8 (2026-09-11). `Chips` had no disabled state, so
+   every settings tab offering a fixed enumeration to a reader who could not
+   save carried a second, parallel `<select disabled>` beside the live chip
+   group -- the twin this wave removes. `.chip:disabled` is `.btn:disabled`'s
+   own four properties (fill, edge, ink, cursor), transcribed onto `.chip`:
+   there is no `transform` or `box-shadow` to reset here, because `.chip` has
+   no hover or active lift of its own for those to undo. AFTER `.chip.on`,
+   same specificity (0,2,0) as the variant it sometimes has to flatten -- the
+   same reason `.btn:disabled` sits after `.btn.on` in this file: a selected
+   option that is also disabled must read as flat and inert, not
+   accent-filled, and source order is the entire mechanism by which it does.
+   ------------------------------------------------------------------------ */
+.chip:disabled { cursor: not-allowed; color: var(--muted); background: var(--surface-2); border-color: var(--line-2); }
+
+/* ===================================================================== console additions
+   CONSOLE ADDITIONS, WAVE 9 (2026-09-11). `components/duration.tsx`'s number
+   + unit control (`.duration-field`) rendered as an empty 24px sliver beside
+   a full-width dropdown, at every width, in a real browser -- 3,815 green
+   unit tests said nothing, because jsdom has no cascade. The mock never
+   draws this control, so the rule is added here and transcribed from here,
+   the same shape as every other addition in this block.
+
+   THE CAUSE IS THE CASCADE, NOT SPECIFICITY. `.select-field { width: 100%;
+   max-width: 100% }` above is UNLAYERED -- plain CSS, no `@layer` -- and the
+   console's own Tailwind build puts a width utility like `w-32` in
+   `@layer utilities`. An unlayered declaration beats a layered one
+   regardless of specificity or source order, full stop, so no class the
+   select could wear FROM TAILWIND was ever going to win this fight; the
+   control's own JSX was never the bug. The honest fix stays in the same
+   unlayered bucket `.select-field` lives in and out-specifies it there:
+   `.duration-field > .select-field` is (0,2,0) against `.select-field`'s
+   (0,1,0), which wins in the same layer regardless of order -- and
+   `.select-field` itself is untouched, since 63 other selects in the
+   product still need its `width: 100%`.
+
+   `flex: 1 1 80px` ON THE NUMBER INPUT is what actually gives it width: a
+   flex item's used main size is taken from `flex-basis`, not from `width`,
+   the moment `flex-basis` is anything but `auto` -- so `80px` here makes
+   `.input-field`'s own `width: 100%` irrelevant to layout, the same
+   mechanism the select's fix leans on in reverse. `flex: none` on the select
+   (`flex-basis: auto`) is what makes ITS `width: auto` here take over from
+   `.select-field`'s `width: 100%`, so the select shrinks to its own content
+   (the longest option word, "minutes"/"seconds") instead of claiming the
+   row. `min-width: 0` on both the row and the number input is what stops the
+   pair overflowing a narrow panel instead of fitting inside it: the default
+   flex item `min-width: auto` floors a shrinking item at its OWN min-content
+   size regardless of how little room is left, which is exactly how ~13px of
+   the select (chevron included) came to sit outside a 390px panel that is
+   `overflow: hidden`, past `.duration-field`'s own row -- never wide enough
+   to reach `documentElement.scrollWidth`, which is why the harmony gate
+   called it clean.
+   ------------------------------------------------------------------------ */
+.duration-field { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.duration-field > .input-field { flex: 1 1 80px; min-width: 0; }
+.duration-field > .select-field { flex: none; width: auto; max-width: 100%; }
+
+/* ===================================================================== console additions
+   CONSOLE ADDITIONS, WAVE 10 (2026-09-23). Two-layer navigation and the
+   device page as the incident hub (review 2026-09-23, reviewer 2 §1 and
+   top-15 items 1, 4 and 15).
+
+   `.rail a.sub` IN THE CONSOLE'S VOCABULARY, `.nav-item.sub`. The rail holds
+   ten daily destinations, the Governance and Assets & Spend pages as ordinary
+   items under their own captions, and one area, Admin; while the operator is
+   inside Admin its pages open beneath it under their section captions.
+
+   REVISED 2026-09-23, THE SAME DAY. The first version folded Governance and
+   Assets & Spend into areas too, and drew every sub-page one step down the
+   ramp with no glyph. The operator's verdict on the deployed rail: those pages
+   "look so small now and without importance". So only configuration is
+   folded, and a sub-page is now the same size as every other item, carries
+   its own glyph, and is indented one step (32px) under its caption. It is lit
+   by ground, ink and weight, never the accent edge: the parent keeps the
+   rail's one edge, and two edges one above the other would read as two
+   current pages.
+
+   `.tabs.scroll`, A STRIP THAT SCROLLS INSTEAD OF FOLDING. Wave 1 gave `.tabs`
+   `flex-wrap: wrap`, which is right for three or four tabs and wrong for the
+   device page's eleven: at 390px they folded into three rows above the panel.
+   The scrolling strip cannot use the container's border for its hairline --
+   `overflow` clips at the padding box, so the tabs' `-1px` overlap would be
+   cut off and the active underline with it -- so the line is an inset shadow
+   on the container, which stays put while the tabs scroll over it, and each
+   tab sits flush on it. No scrollbar: a finger swipes and the keyboard's
+   arrow keys move focus, which scrolls the focused tab into view.
+   ------------------------------------------------------------------------ */
+.nav-item.sub { padding: 6px 18px 6px 32px; }
+.nav-item.sub.active { color: #fff; background: var(--rail-2); border-left-color: transparent; font-weight: 500; }
+.tabs.scroll { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; border-bottom: 0; box-shadow: inset 0 -1px 0 var(--line-2); scrollbar-width: none; }
+.tabs.scroll > .tab { flex: none; margin-bottom: 0; }
+
+</style></head><body>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+<symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3 8l4 -16l3 8h4" /></symbol>
+<symbol id="i-adjustments" viewBox="0 0 24 24"><path d="M4 10a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M6 4v4" /> <path d="M6 12v8" /> <path d="M10 16a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M12 4v10" /> <path d="M12 18v2" /> <path d="M16 7a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M18 4v1" /> <path d="M18 9v11" /></symbol>
+<symbol id="i-alert-triangle" viewBox="0 0 24 24"><path d="M12 9v4" /> <path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0" /> <path d="M12 16h.01" /></symbol>
+<symbol id="i-archive" viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2" /> <path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-10" /> <path d="M10 12l4 0" /></symbol>
+<symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5l0 14" /> <path d="M18 13l-6 6" /> <path d="M6 13l6 6" /></symbol>
+<symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12l14 0" /> <path d="M13 18l6 -6" /> <path d="M13 6l6 6" /></symbol>
+<symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 5l0 14" /> <path d="M18 11l-6 -6" /> <path d="M6 11l6 -6" /></symbol>
+<symbol id="i-arrows-exchange" viewBox="0 0 24 24"><path d="M7 10h14l-4 -4" /> <path d="M17 14h-14l4 4" /></symbol>
+<symbol id="i-badge-tm" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-10" /> <path d="M6 9h4" /> <path d="M8 9v6" /> <path d="M13 15v-6l2 3l2 -3v6" /></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3h-16a4 4 0 0 0 2 -3v-3a7 7 0 0 1 4 -6" /> <path d="M9 17v1a3 3 0 0 0 6 0v-1" /></symbol>
+<symbol id="i-bell-ringing" viewBox="0 0 24 24"><path d="M10 5a2 2 0 0 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3h-16a4 4 0 0 0 2 -3v-3a7 7 0 0 1 4 -6" /> <path d="M9 17v1a3 3 0 0 0 6 0v-1" /> <path d="M21 6.727a11.05 11.05 0 0 0 -2.794 -3.727" /> <path d="M3 6.727a11.05 11.05 0 0 1 2.792 -3.727" /></symbol>
+<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3l0 7l6 0l-8 11l0 -7l-6 0l8 -11" /></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><path d="M3 19a9 9 0 0 1 9 0a9 9 0 0 1 9 0" /> <path d="M3 6a9 9 0 0 1 9 0a9 9 0 0 1 9 0" /> <path d="M3 6l0 13" /> <path d="M12 6l0 13" /> <path d="M21 6l0 13" /></symbol>
+<symbol id="i-brand-android" viewBox="0 0 24 24"><path d="M4 10l0 6" /> <path d="M20 10l0 6" /> <path d="M7 9h10v8a1 1 0 0 1 -1 1h-8a1 1 0 0 1 -1 -1v-8a5 5 0 0 1 10 0" /> <path d="M8 3l1 2" /> <path d="M16 3l-1 2" /> <path d="M9 18l0 3" /> <path d="M15 18l0 3" /></symbol>
+<symbol id="i-brand-apple" viewBox="0 0 24 24"><path d="M8.286 7.008c-3.216 0 -4.286 3.23 -4.286 5.92c0 3.229 2.143 8.072 4.286 8.072c1.165 -.05 1.799 -.538 3.214 -.538c1.406 0 1.607 .538 3.214 .538s4.286 -3.229 4.286 -5.381c-.03 -.011 -2.649 -.434 -2.679 -3.23c-.02 -2.335 2.589 -3.179 2.679 -3.228c-1.096 -1.606 -3.162 -2.113 -3.75 -2.153c-1.535 -.12 -3.032 1.077 -3.75 1.077c-.729 0 -2.036 -1.077 -3.214 -1.077" /> <path d="M12 4a2 2 0 0 0 2 -2a2 2 0 0 0 -2 2" /></symbol>
+<symbol id="i-brand-debian" viewBox="0 0 24 24"><path d="M12 17c-2.397 -.943 -4 -3.153 -4 -5.635c0 -2.19 1.039 -3.14 1.604 -3.595c2.646 -2.133 6.396 -.27 6.396 3.23c0 2.5 -2.905 2.121 -3.5 1.5c-.595 -.621 -1 -1.5 -.5 -2.5" /> <path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /></symbol>
+<symbol id="i-brand-ubuntu" viewBox="0 0 24 24"><path d="M10 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M17.723 7.41a7.992 7.992 0 0 0 -3.74 -2.162m-3.971 0a7.993 7.993 0 0 0 -3.789 2.216m-1.881 3.215a8 8 0 0 0 -.342 2.32c0 .738 .1 1.453 .287 2.132m1.96 3.428a7.993 7.993 0 0 0 3.759 2.19m4 0a7.993 7.993 0 0 0 3.747 -2.186m1.962 -3.43a8.008 8.008 0 0 0 .287 -2.131c0 -.764 -.107 -1.503 -.307 -2.203" /> <path d="M3 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M17 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /></symbol>
+<symbol id="i-brand-windows" viewBox="0 0 24 24"><path d="M17.8 20l-12 -1.5c-1 -.1 -1.8 -.9 -1.8 -1.9v-9.2c0 -1 .8 -1.8 1.8 -1.9l12 -1.5c1.2 -.1 2.2 .8 2.2 1.9v12.1c0 1.2 -1.1 2.1 -2.2 1.9l0 .1" /> <path d="M12 5l0 14" /> <path d="M4 12l16 0" /></symbol>
+<symbol id="i-bug" viewBox="0 0 24 24"><path d="M9 9v-1a3 3 0 0 1 6 0v1" /> <path d="M8 9h8a6 6 0 0 1 1 3v3a5 5 0 0 1 -10 0v-3a6 6 0 0 1 1 -3" /> <path d="M3 13l4 0" /> <path d="M17 13l4 0" /> <path d="M12 20l0 -6" /> <path d="M4 19l3.35 -2" /> <path d="M20 19l-3.35 -2" /> <path d="M4 7l3.75 2.4" /> <path d="M20 7l-3.75 2.4" /></symbol>
+<symbol id="i-building" viewBox="0 0 24 24"><path d="M3 21l18 0" /> <path d="M9 8l1 0" /> <path d="M9 12l1 0" /> <path d="M9 16l1 0" /> <path d="M14 8l1 0" /> <path d="M14 12l1 0" /> <path d="M14 16l1 0" /> <path d="M5 21v-16a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v16" /></symbol>
+<symbol id="i-building-warehouse" viewBox="0 0 24 24"><path d="M3 21v-13l9 -4l9 4v13" /> <path d="M13 13h4v8h-10v-6h6" /> <path d="M13 21v-9a1 1 0 0 0 -1 -1h-2a1 1 0 0 0 -1 1v3" /></symbol>
+<symbol id="i-calendar-event" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -12" /> <path d="M16 3l0 4" /> <path d="M8 3l0 4" /> <path d="M4 11l16 0" /> <path d="M8 15h2v2h-2l0 -2" /></symbol>
+<symbol id="i-calendar-week" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12" /> <path d="M16 3v4" /> <path d="M8 3v4" /> <path d="M4 11h16" /> <path d="M7 14h.013" /> <path d="M10.01 14h.005" /> <path d="M13.01 14h.005" /> <path d="M16.015 14h.005" /> <path d="M13.015 17h.005" /> <path d="M7.01 17h.005" /> <path d="M10.01 17h.005" /></symbol>
+<symbol id="i-certificate" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 6 0a3 3 0 1 0 -6 0" /> <path d="M13 17.5v4.5l2 -1.5l2 1.5v-4.5" /> <path d="M10 19h-5a2 2 0 0 1 -2 -2v-10c0 -1.1 .9 -2 2 -2h14a2 2 0 0 1 2 2v10a2 2 0 0 1 -1 1.73" /> <path d="M6 9l12 0" /> <path d="M6 12l3 0" /> <path d="M6 15l2 0" /></symbol>
+<symbol id="i-chart-bar" viewBox="0 0 24 24"><path d="M3 13a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -6" /> <path d="M15 9a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -10" /> <path d="M9 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v14a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -14" /> <path d="M4 20h14" /></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l5 5l10 -10" /></symbol>
+<symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6l6 -6" /></symbol>
+<symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6" /></symbol>
+<symbol id="i-circle-check" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /> <path d="M9 12l2 2l4 -4" /></symbol>
+<symbol id="i-circle-dot" viewBox="0 0 24 24"><path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /></symbol>
+<symbol id="i-circle-x" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /> <path d="M10 10l4 4m0 -4l-4 4" /></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0" /> <path d="M12 7v5l3 3" /></symbol>
+<symbol id="i-clock-exclamation" viewBox="0 0 24 24"><path d="M20.986 12.502a9 9 0 1 0 -5.973 7.98" /> <path d="M12 7v5l3 3" /> <path d="M19 16v3" /> <path d="M19 22v.01" /></symbol>
+<symbol id="i-clock-hour-4" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" /> <path d="M12 12l3 2" /> <path d="M12 7v5" /></symbol>
+<symbol id="i-cloud-download" viewBox="0 0 24 24"><path d="M19 18a3.5 3.5 0 0 0 0 -7h-1a5 4.5 0 0 0 -11 -2a4.6 4.4 0 0 0 -2.1 8.4" /> <path d="M12 13l0 9" /> <path d="M9 19l3 3l3 -3" /></symbol>
+<symbol id="i-cloud-upload" viewBox="0 0 24 24"><path d="M7 18a4.6 4.4 0 0 1 0 -9a5 4.5 0 0 1 11 2h1a3.5 3.5 0 0 1 0 7h-1" /> <path d="M9 15l3 -3l3 3" /> <path d="M12 12l0 9" /></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><path d="M7 9.667a2.667 2.667 0 0 1 2.667 -2.667h8.666a2.667 2.667 0 0 1 2.667 2.667v8.666a2.667 2.667 0 0 1 -2.667 2.667h-8.666a2.667 2.667 0 0 1 -2.667 -2.667l0 -8.666" /> <path d="M4.012 16.737a2.005 2.005 0 0 1 -1.012 -1.737v-10c0 -1.1 .9 -2 2 -2h10c.75 0 1.158 .385 1.5 1" /></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><path d="M5 6a1 1 0 0 1 1 -1h12a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-12a1 1 0 0 1 -1 -1l0 -12" /> <path d="M9 9h6v6h-6l0 -6" /> <path d="M3 10h2" /> <path d="M3 14h2" /> <path d="M10 3v2" /> <path d="M14 3v2" /> <path d="M21 10h-2" /> <path d="M21 14h-2" /> <path d="M14 21v-2" /> <path d="M10 21v-2" /></symbol>
+<symbol id="i-credit-card" viewBox="0 0 24 24"><path d="M3 8a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3l0 -8" /> <path d="M3 10l18 0" /> <path d="M7 15l.01 0" /> <path d="M11 15l2 0" /></symbol>
+<symbol id="i-database" viewBox="0 0 24 24"><path d="M4 6a8 3 0 1 0 16 0a8 3 0 1 0 -16 0" /> <path d="M4 6v6a8 3 0 0 0 16 0v-6" /> <path d="M4 12v6a8 3 0 0 0 16 0v-6" /></symbol>
+<symbol id="i-device-desktop" viewBox="0 0 24 24"><path d="M3 5a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1v-10" /> <path d="M7 20h10" /> <path d="M9 16v4" /> <path d="M15 16v4" /></symbol>
+<symbol id="i-device-laptop" viewBox="0 0 24 24"><path d="M3 19l18 0" /> <path d="M5 7a1 1 0 0 1 1 -1h12a1 1 0 0 1 1 1v8a1 1 0 0 1 -1 1h-12a1 1 0 0 1 -1 -1l0 -8" /></symbol>
+<symbol id="i-device-mobile" viewBox="0 0 24 24"><path d="M6 5a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2v-14" /> <path d="M11 4h2" /> <path d="M12 17v.01" /></symbol>
+<symbol id="i-devices" viewBox="0 0 24 24"><path d="M13 9a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-6a1 1 0 0 1 -1 -1v-10" /> <path d="M18 8v-3a1 1 0 0 0 -1 -1h-13a1 1 0 0 0 -1 1v12a1 1 0 0 0 1 1h9" /> <path d="M16 9h2" /></symbol>
+<symbol id="i-dots" viewBox="0 0 24 24"><path d="M4 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M18 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2" /> <path d="M7 11l5 5l5 -5" /> <path d="M12 4l0 12" /></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M7 7h-1a2 2 0 0 0 -2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2 -2v-1" /> <path d="M20.385 6.585a2.1 2.1 0 0 0 -2.97 -2.97l-8.415 8.385v3h3l8.385 -8.415" /> <path d="M16 5l3 3" /></symbol>
+<symbol id="i-external-link" viewBox="0 0 24 24"><path d="M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6" /> <path d="M11 13l9 -9" /> <path d="M15 4h5v5" /></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M21 12c-2.4 4 -5.4 6 -9 6c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6" /></symbol>
+<symbol id="i-file-download" viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4" /> <path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2" /> <path d="M12 17v-6" /> <path d="M9.5 14.5l2.5 2.5l2.5 -2.5" /></symbol>
+<symbol id="i-file-text" viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4" /> <path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2" /> <path d="M9 9l1 0" /> <path d="M9 13l6 0" /> <path d="M9 17l6 0" /></symbol>
+<symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 4h16v2.172a2 2 0 0 1 -.586 1.414l-4.414 4.414v7l-6 2v-8.5l-4.48 -4.928a2 2 0 0 1 -.52 -1.345v-2.227" /></symbol>
+<symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 5a5 5 0 0 1 7 0a5 5 0 0 0 7 0v9a5 5 0 0 1 -7 0a5 5 0 0 0 -7 0v-9" /> <path d="M5 21v-7" /></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2" /></symbol>
+<symbol id="i-git-branch" viewBox="0 0 24 24"><path d="M5 18a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M5 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M15 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /> <path d="M7 8l0 8" /> <path d="M9 18h6a2 2 0 0 0 2 -2v-5" /> <path d="M14 14l3 -3l3 3" /></symbol>
+<symbol id="i-grip-vertical" viewBox="0 0 24 24"><path d="M8 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M8 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M8 19a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M14 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M14 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M14 19a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /></symbol>
+<symbol id="i-hand-click" viewBox="0 0 24 24"><path d="M8 13v-8.5a1.5 1.5 0 0 1 3 0v7.5" /> <path d="M11 11.5v-2a1.5 1.5 0 0 1 3 0v2.5" /> <path d="M14 10.5a1.5 1.5 0 0 1 3 0v1.5" /> <path d="M17 11.5a1.5 1.5 0 0 1 3 0v4.5a6 6 0 0 1 -6 6h-2h.208a6 6 0 0 1 -5.012 -2.7l-.196 -.3c-.312 -.479 -1.407 -2.388 -3.286 -5.728a1.5 1.5 0 0 1 .536 -2.022a1.867 1.867 0 0 1 2.28 .28l1.47 1.47" /> <path d="M5 3l-1 -1" /> <path d="M4 7h-1" /> <path d="M14 3l1 -1" /> <path d="M15 6h1" /></symbol>
+<symbol id="i-heartbeat" viewBox="0 0 24 24"><path d="M19.5 13.572l-7.5 7.428l-2.896 -2.868m-6.117 -8.104a5 5 0 0 1 9.013 -3.022a5 5 0 1 1 7.5 6.572" /> <path d="M3 13h2l2 3l2 -6l1 3h3" /></symbol>
+<symbol id="i-help-circle" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0" /> <path d="M12 16v.01" /> <path d="M12 13a2 2 0 0 0 .914 -3.782a1.98 1.98 0 0 0 -2.414 .483" /></symbol>
+<symbol id="i-history" viewBox="0 0 24 24"><path d="M12 8l0 4l2 2" /> <path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5" /></symbol>
+<symbol id="i-id-badge-2" viewBox="0 0 24 24"><path d="M7 12h3v4h-3l0 -4" /> <path d="M10 6h-6a1 1 0 0 0 -1 1v12a1 1 0 0 0 1 1h16a1 1 0 0 0 1 -1v-12a1 1 0 0 0 -1 -1h-6" /> <path d="M10 4a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v3a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -3" /> <path d="M14 16h2" /> <path d="M14 12h4" /></symbol>
+<symbol id="i-info-circle" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0" /> <path d="M12 9h.01" /> <path d="M11 12h1v4h1" /></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><path d="M16.555 3.843l3.602 3.602a2.877 2.877 0 0 1 0 4.069l-2.643 2.643a2.877 2.877 0 0 1 -4.069 0l-.301 -.301l-6.558 6.558a2 2 0 0 1 -1.239 .578l-.175 .008h-1.172a1 1 0 0 1 -.993 -.883l-.007 -.117v-1.172a2 2 0 0 1 .467 -1.284l.119 -.13l.414 -.414h2v-2h2v-2l2.144 -2.144l-.301 -.301a2.877 2.877 0 0 1 0 -4.069l2.643 -2.643a2.877 2.877 0 0 1 4.069 0" /> <path d="M15 9h.01" /></symbol>
+<symbol id="i-layout-dashboard" viewBox="0 0 24 24"><path d="M5 4h4a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1v-6a1 1 0 0 1 1 -1" /> <path d="M5 16h4a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1v-2a1 1 0 0 1 1 -1" /> <path d="M15 12h4a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1v-6a1 1 0 0 1 1 -1" /> <path d="M15 4h4a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1v-2a1 1 0 0 1 1 -1" /></symbol>
+<symbol id="i-layout-grid" viewBox="0 0 24 24"><path d="M4 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -4" /> <path d="M14 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -4" /> <path d="M4 15a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -4" /> <path d="M14 15a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1l0 -4" /></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="M9 15l6 -6" /> <path d="M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464" /> <path d="M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463" /></symbol>
+<symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6l11 0" /> <path d="M9 12l11 0" /> <path d="M9 18l11 0" /> <path d="M5 6l0 .01" /> <path d="M5 12l0 .01" /> <path d="M5 18l0 .01" /></symbol>
+<symbol id="i-list-check" viewBox="0 0 24 24"><path d="M3.5 5.5l1.5 1.5l2.5 -2.5" /> <path d="M3.5 11.5l1.5 1.5l2.5 -2.5" /> <path d="M3.5 17.5l1.5 1.5l2.5 -2.5" /> <path d="M11 6l9 0" /> <path d="M11 12l9 0" /> <path d="M11 18l9 0" /></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><path d="M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-6" /> <path d="M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0" /> <path d="M8 11v-4a4 4 0 1 1 8 0v4" /></symbol>
+<symbol id="i-lock-open" viewBox="0 0 24 24"><path d="M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2l0 -6" /> <path d="M11 16a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M8 11v-5a4 4 0 0 1 8 0" /></symbol>
+<symbol id="i-logout" viewBox="0 0 24 24"><path d="M14 8v-2a2 2 0 0 0 -2 -2h-7a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2 -2v-2" /> <path d="M9 12h12l-3 -3" /> <path d="M18 15l3 -3" /></symbol>
+<symbol id="i-logs" viewBox="0 0 24 24"><path d="M4 12h.01" /> <path d="M4 6h.01" /> <path d="M4 18h.01" /> <path d="M8 18h2" /> <path d="M8 12h2" /> <path d="M8 6h2" /> <path d="M14 6h6" /> <path d="M14 12h6" /> <path d="M14 18h6" /></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-10" /> <path d="M3 7l9 6l9 -6" /></symbol>
+<symbol id="i-map-pin" viewBox="0 0 24 24"><path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" /> <path d="M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0" /></symbol>
+<symbol id="i-message-2" viewBox="0 0 24 24"><path d="M8 9h8" /> <path d="M8 13h6" /> <path d="M9 18h-3a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-3l-3 3l-3 -3" /></symbol>
+<symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12l14 0" /></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454l0 .008" /></symbol>
+<symbol id="i-network" viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 0 12 0a6 6 0 0 0 -12 0" /> <path d="M12 3c1.333 .333 2 2.333 2 6s-.667 5.667 -2 6" /> <path d="M12 3c-1.333 .333 -2 2.333 -2 6s.667 5.667 2 6" /> <path d="M6 9h12" /> <path d="M3 20h7" /> <path d="M14 20h7" /> <path d="M10 20a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M12 15v3" /></symbol>
+<symbol id="i-package" viewBox="0 0 24 24"><path d="M12 3l8 4.5l0 9l-8 4.5l-8 -4.5l0 -9l8 -4.5" /> <path d="M12 12l8 -4.5" /> <path d="M12 12l0 9" /> <path d="M12 12l-8 -4.5" /> <path d="M16 5.25l-8 4.5" /></symbol>
+<symbol id="i-paperclip" viewBox="0 0 24 24"><path d="M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3l6.5 -6.5a3 3 0 0 0 -6 -6l-6.5 6.5a4.5 4.5 0 0 0 9 9l6.5 -6.5" /></symbol>
+<symbol id="i-phone" viewBox="0 0 24 24"><path d="M5 4h4l2 5l-2.5 1.5a11 11 0 0 0 5 5l1.5 -2.5l5 2v4a2 2 0 0 1 -2 2a16 16 0 0 1 -15 -15a2 2 0 0 1 2 -2" /></symbol>
+<symbol id="i-photo" viewBox="0 0 24 24"><path d="M15 8h.01" /> <path d="M3 6a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-12" /> <path d="M3 16l5 -5c.928 -.893 2.072 -.893 3 0l5 5" /> <path d="M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3" /></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M15 4.5l-4 4l-4 1.5l-1.5 1.5l7 7l1.5 -1.5l1.5 -4l4 -4" /> <path d="M9 15l-4.5 4.5" /> <path d="M14.5 4l5.5 5.5" /></symbol>
+<symbol id="i-player-play" viewBox="0 0 24 24"><path d="M7 4v16l13 -8l-13 -8" /></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5l0 14" /> <path d="M5 12l14 0" /></symbol>
+<symbol id="i-printer" viewBox="0 0 24 24"><path d="M17 17h2a2 2 0 0 0 2 -2v-4a2 2 0 0 0 -2 -2h-14a2 2 0 0 0 -2 2v4a2 2 0 0 0 2 2h2" /> <path d="M17 9v-4a2 2 0 0 0 -2 -2h-6a2 2 0 0 0 -2 2v4" /> <path d="M7 15a2 2 0 0 1 2 -2h6a2 2 0 0 1 2 2v4a2 2 0 0 1 -2 2h-6a2 2 0 0 1 -2 -2l0 -4" /></symbol>
+<symbol id="i-progress" viewBox="0 0 24 24"><path d="M10 20.777a8.942 8.942 0 0 1 -2.48 -.969" /> <path d="M14 3.223a9.003 9.003 0 0 1 0 17.554" /> <path d="M4.579 17.093a8.961 8.961 0 0 1 -1.227 -2.592" /> <path d="M3.124 10.5c.16 -.95 .468 -1.85 .9 -2.675l.169 -.305" /> <path d="M6.907 4.579a8.954 8.954 0 0 1 3.093 -1.356" /></symbol>
+<symbol id="i-receipt" viewBox="0 0 24 24"><path d="M5 21v-16a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v16l-3 -2l-2 2l-2 -2l-2 2l-2 -2l-3 2m4 -14h6m-6 4h6m-2 4h2" /></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" /> <path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" /></symbol>
+<symbol id="i-repeat" viewBox="0 0 24 24"><path d="M4 12v-3a3 3 0 0 1 3 -3h13m-3 -3l3 3l-3 3" /> <path d="M20 12v3a3 3 0 0 1 -3 3h-13m3 3l-3 -3l3 -3" /></symbol>
+<symbol id="i-robot" viewBox="0 0 24 24"><path d="M6 6a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v4a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2l0 -4" /> <path d="M12 2v2" /> <path d="M9 12v9" /> <path d="M15 12v9" /> <path d="M5 16l4 -2" /> <path d="M15 14l4 2" /> <path d="M9 18h6" /> <path d="M10 8v.01" /> <path d="M14 8v.01" /></symbol>
+<symbol id="i-rocket" viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 7 7a6 6 0 0 0 3 -5a9 9 0 0 0 6 -8a3 3 0 0 0 -3 -3a9 9 0 0 0 -8 6a6 6 0 0 0 -5 3" /> <path d="M7 14a6 6 0 0 0 -3 6a6 6 0 0 0 6 -3" /> <path d="M14 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /></symbol>
+<symbol id="i-router" viewBox="0 0 24 24"><path d="M3 15a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v4a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2l0 -4" /> <path d="M17 17l0 .01" /> <path d="M13 17l0 .01" /> <path d="M15 13l0 -2" /> <path d="M11.75 8.75a4 4 0 0 1 6.5 0" /> <path d="M8.5 6.5a8 8 0 0 1 13 0" /></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0" /> <path d="M21 21l-6 -6" /></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M10 14l11 -11" /> <path d="M21 3l-6.5 18a.55 .55 0 0 1 -1 0l-3.5 -7l-7 -3.5a.55 .55 0 0 1 0 -1l18 -6.5" /></symbol>
+<symbol id="i-server-2" viewBox="0 0 24 24"><path d="M3 7a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-2" /> <path d="M3 15a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v2a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3l0 -2" /> <path d="M7 8l0 .01" /> <path d="M7 16l0 .01" /> <path d="M11 8h6" /> <path d="M11 16h6" /></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065" /> <path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0" /></symbol>
+<symbol id="i-shield-check" viewBox="0 0 24 24"><path d="M11.46 20.846a12 12 0 0 1 -7.96 -14.846a12 12 0 0 0 8.5 -3a12 12 0 0 0 8.5 3a12 12 0 0 1 -.09 7.06" /> <path d="M15 19l2 2l4 -4" /></symbol>
+<symbol id="i-shield-lock" viewBox="0 0 24 24"><path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3" /> <path d="M11 11a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M12 12l0 2.5" /></symbol>
+<symbol id="i-sort-descending" viewBox="0 0 24 24"><path d="M4 6l9 0" /> <path d="M4 12l7 0" /> <path d="M4 18l7 0" /> <path d="M15 15l3 3l3 -3" /> <path d="M18 6l0 12" /></symbol>
+<symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m0 -12a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m-7 12a6 6 0 0 1 6 -6a6 6 0 0 1 -6 -6a6 6 0 0 1 -6 6a6 6 0 0 1 6 6" /></symbol>
+<symbol id="i-stethoscope" viewBox="0 0 24 24"><path d="M6 4h-1a2 2 0 0 0 -2 2v3.5a5.5 5.5 0 0 0 11 0v-3.5a2 2 0 0 0 -2 -2h-1" /> <path d="M8 15a6 6 0 1 0 12 0v-3" /> <path d="M11 3v2" /> <path d="M6 3v2" /> <path d="M18 10a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24"><path d="M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" /> <path d="M3 12h1m8 -9v1m8 8h1m-9 8v1m-6.4 -15.4l.7 .7m12.1 -.7l-.7 .7m0 11.4l.7 .7m-12.1 -.7l-.7 .7" /></symbol>
+<symbol id="i-table" viewBox="0 0 24 24"><path d="M3 5a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-14" /> <path d="M3 10h18" /> <path d="M10 3v18" /></symbol>
+<symbol id="i-tag" viewBox="0 0 24 24"><path d="M6.5 7.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" /> <path d="M3 6v5.172a2 2 0 0 0 .586 1.414l7.71 7.71a2.41 2.41 0 0 0 3.408 0l5.592 -5.592a2.41 2.41 0 0 0 0 -3.408l-7.71 -7.71a2 2 0 0 0 -1.414 -.586h-5.172a3 3 0 0 0 -3 3" /></symbol>
+<symbol id="i-terminal-2" viewBox="0 0 24 24"><path d="M8 9l3 3l-3 3" /> <path d="M13 15l3 0" /> <path d="M3 6a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2l0 -12" /></symbol>
+<symbol id="i-ticket" viewBox="0 0 24 24"><path d="M15 5l0 2" /> <path d="M15 11l0 2" /> <path d="M15 17l0 2" /> <path d="M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-3a2 2 0 0 0 0 -4v-3a2 2 0 0 1 2 -2" /></symbol>
+<symbol id="i-topology-star-3" viewBox="0 0 24 24"><path d="M10 19a2 2 0 1 0 -4 0a2 2 0 0 0 4 0" /> <path d="M18 5a2 2 0 1 0 -4 0a2 2 0 0 0 4 0" /> <path d="M10 5a2 2 0 1 0 -4 0a2 2 0 0 0 4 0" /> <path d="M6 12a2 2 0 1 0 -4 0a2 2 0 0 0 4 0" /> <path d="M18 19a2 2 0 1 0 -4 0a2 2 0 0 0 4 0" /> <path d="M14 12a2 2 0 1 0 -4 0a2 2 0 0 0 4 0" /> <path d="M22 12a2 2 0 1 0 -4 0a2 2 0 0 0 4 0" /> <path d="M6 12h4" /> <path d="M14 12h4" /> <path d="M15 7l-2 3" /> <path d="M9 7l2 3" /> <path d="M11 14l-2 3" /> <path d="M13 14l2 3" /></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7l16 0" /> <path d="M10 11l0 6" /> <path d="M14 11l0 6" /> <path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /> <path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></symbol>
+<symbol id="i-unlink" viewBox="0 0 24 24"><path d="M17 22v-2" /> <path d="M9 15l6 -6" /> <path d="M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464" /> <path d="M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463" /> <path d="M20 17h2" /> <path d="M2 7h2" /> <path d="M7 2v2" /></symbol>
+<symbol id="i-upload" viewBox="0 0 24 24"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2" /> <path d="M7 9l5 -5l5 5" /> <path d="M12 4l0 12" /></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0" /> <path d="M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" /></symbol>
+<symbol id="i-user-screen" viewBox="0 0 24 24"><path d="M19.03 17.818a3 3 0 0 0 1.97 -2.818v-8a3 3 0 0 0 -3 -3h-12a3 3 0 0 0 -3 3v8c0 1.317 .85 2.436 2.03 2.84" /> <path d="M10 14a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M8 21a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2" /></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><path d="M5 7a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" /> <path d="M3 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" /> <path d="M16 3.13a4 4 0 0 1 0 7.75" /> <path d="M21 21v-2a4 4 0 0 0 -3 -3.85" /></symbol>
+<symbol id="i-users-group" viewBox="0 0 24 24"><path d="M10 13a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M8 21v-1a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v1" /> <path d="M15 5a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M17 10h2a2 2 0 0 1 2 2v1" /> <path d="M5 5a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" /> <path d="M3 13v-1a2 2 0 0 1 2 -2h2" /></symbol>
+<symbol id="i-wallet" viewBox="0 0 24 24"><path d="M17 8v-3a1 1 0 0 0 -1 -1h-10a2 2 0 0 0 0 4h12a1 1 0 0 1 1 1v3m0 4v3a1 1 0 0 1 -1 1h-12a2 2 0 0 1 -2 -2v-12" /> <path d="M20 12v4h-4a2 2 0 0 1 0 -4h4" /></symbol>
+<symbol id="i-wifi" viewBox="0 0 24 24"><path d="M12 18l.01 0" /> <path d="M9.172 15.172a4 4 0 0 1 5.656 0" /> <path d="M6.343 12.343a8 8 0 0 1 11.314 0" /> <path d="M3.515 9.515c4.686 -4.687 12.284 -4.687 17 0" /></symbol>
+<symbol id="i-world" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0" /> <path d="M3.6 9h16.8" /> <path d="M3.6 15h16.8" /> <path d="M11.5 3a17 17 0 0 0 0 18" /> <path d="M12.5 3a17 17 0 0 1 0 18" /></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6l-12 12" /> <path d="M6 6l12 12" /></symbol>
+</svg>
+<div class="shell"><nav class="rail" id="rail"></nav><div class="main"><header class="top" id="top"></header><main class="content" id="content"></main></div></div>
+<script>
+/* ============================================================ component kit
+   EVERY page below is composed from these and nothing else. That is the whole
+   harmony guarantee: a page cannot have a stray style because it cannot write
+   a style. The audit at the end of the file proves it by measurement. */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ic  = (n, s=16) => `<svg class="ic" style="width:${s}px;height:${s}px"><use href="#i-${n}"/></svg>`;
+const AVC = ['var(--av-1)','var(--av-2)','var(--av-3)','var(--av-4)','var(--av-5)','var(--av-6)']; /* tokens, so the console can name the same six */
+const avatar = (ini, i=0, s=24) => `<span class="av" style="background:${AVC[i%AVC.length]};width:${s}px;height:${s}px;font-size:${Math.round(s*.4)}px">${esc(ini)}</span>`;
+const btn = (label, icon='', pri=false, ghost=false) =>
+  `<button class="btn${pri?' pri':''}${ghost?' ghost':''}">${icon?ic(icon,14):''}${esc(label)}</button>`;
+const pill = (kind, text, icon='') => `<span class="pill p-${kind}">${icon?ic(icon,13):''}${esc(text)}</span>`;
+const KIND_ICON = {crit:'circle-x', warn:'alert-triangle', ok:'circle-check', run:'progress', mut:'minus', info:'info-circle'};
+const state = (kind, text) => pill(kind, text, KIND_ICON[kind]||'');
+const mono = v => `<span class="mono">${esc(v)}</span>`;
+
+function head(title, sub, actions=[], crumbs=null){
+  return `<div class="ph">${crumbs?`<div class="crumb">${crumbs.map(esc).join(ic('chevron-right',12))}</div>`:''}
+  <div class="ph-row"><div><h1>${esc(title)}</h1>${sub?`<p class="sub">${sub}</p>`:''}</div>
+  <div class="ph-act">${actions.join('')}</div></div></div>`;
+}
+function tabs(items, on=0){ return `<div class="tabs">${items.map((t,i)=>`<a class="${i===on?'on':''}" href="#">${esc(t)}</a>`).join('')}</div>`; }
+
+/* ---- stat tiles. `kind` colours the whole tile; only crit/warn ever do. ---- */
+function tiles(list){
+  return `<div class="tiles">${list.map(t=>`
+   <div class="tile ${t.kind||''}${t.spark?' has-sp':''}" style="grid-column:span ${t.span||3}">
+     <div class="k">${t.icon?ic(t.icon,14):''}${esc(t.k)}</div>
+     <div class="v">${t.v}${t.unit?`<small>${esc(t.unit)}</small>`:''}</div>
+     ${t.z?`<div class="z">${t.z}</div>`:''}
+     ${t.spark?spark(t.spark):''}</div>`).join('')}</div>`;
+}
+function spark(vals,w=104,h=26){
+  const lo=Math.min(...vals),hi=Math.max(...vals),r=(hi-lo)||1;
+  const pts=vals.map((v,i)=>[i*(w/(vals.length-1)),h-2-(v-lo)/r*(h-6)]);
+  const d='M'+pts.map(p=>p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' L');
+  const last=pts[pts.length-1];
+  return `<svg class="sp" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><path class="a" d="${d} L${w} ${h} L0 ${h} Z"/><path class="l" d="${d}"/><circle class="p" cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.4"/></svg>`;
+}
+function panel(title, sub, body, actions='', bare=false){
+  return `<section class="panel">${title?`<div class="panel-h"><div><h2>${esc(title)}</h2>${sub?`<p>${sub}</p>`:''}</div><div class="panel-a">${actions}</div></div>`:''}<div class="panel-b${bare?' bare':''}">${body}</div></section>`;
+}
+/* ---- THE list. Rows have a gutter, a lead glyph, a title/sub, then cells.
+   28 pages used to each draw their own table; this is the one they share. ---- */
+function rows(items, cols){
+  const tmpl = `3px 34px minmax(160px,1.6fr) ${cols.map(c=>c.w||'minmax(90px,1fr)').join(' ')}`;
+  const hdr = `<div class="lrow lhead" style="grid-template-columns:${tmpl}"><i></i><i></i><span>Name</span>${cols.map(c=>`<span>${esc(c.h)}</span>`).join('')}</div>`;
+  return `<div class="list">${hdr}${items.map(r=>`
+   <div class="lrow ${r.kind||'ok'}" style="grid-template-columns:${tmpl}">
+     <i class="gut"></i><span class="lead">${r.lead||''}</span>
+     <span class="ttl"><b>${esc(r.title)}</b>${r.sub?`<small>${r.sub}</small>`:''}</span>
+     ${r.cells.map(c=>`<span class="cell">${c}</span>`).join('')}</div>`).join('')}</div>`;
+}
+function bar(pct, kind='warn'){ return `<span class="bar"><i class="${kind}" style="width:${Math.min(100,pct)}%"></i></span>`; }
+function heat(n, counts){ /* counts: {crit,warn,run} rest ok */
+  const s=[]; for(const [k,c] of Object.entries(counts)) for(let i=0;i<c;i++) s.push(k);
+  while(s.length<n) s.push('ok');
+  for(let i=s.length-1;i>0;i--){const j=(i*7919+13)%(i+1);[s[i],s[j]]=[s[j],s[i]];}
+  return `<div class="heat">${s.map(k=>`<i class="h-${k}"></i>`).join('')}</div>`;
+}
+function donut(pct,kind,label,sub){
+  const c=2*Math.PI*26, col = kind==='mut'?'var(--muted)':`var(--sev-${kind})`;
+  const arc = kind==='mut' ? '' : `<circle cx="30" cy="30" r="26" class="arc" style="stroke:${col};stroke-dasharray:${(c*pct/100).toFixed(1)} ${c.toFixed(1)}"/>`;
+  const val = kind==='mut' ? 'n/a' : `${pct}<small>%</small>`;
+  return `<div class="don"><svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="26" class="trk"/>${arc}</svg><div class="don-v" style="color:${col}">${val}</div><div class="don-k">${esc(label)}</div><div class="don-z">${esc(sub)}</div></div>`;
+}
+function facts(list){ return `<div class="facts">${list.map(f=>`<div><span class="k">${esc(f.k)}</span><span class="v">${f.v}</span></div>`).join('')}</div>`; }
+function timeline(runs, ticks){
+  return `<div class="tl">${runs.map(r=>`<div class="tl-row"><div class="tl-k">${ic(KIND_ICON[r.kind],14)}<span class="mono">${esc(r.t)}</span><span class="tl-h">${esc(r.h)}</span></div><div class="tl-track"><span class="tl-bar b-${r.kind}" style="left:${r.x}%;width:${r.w}%"></span></div></div>`).join('')}
+  <div class="tl-axis">${ticks.map((t,i)=>`<i style="left:${i*100/(ticks.length-1)}%">${esc(t)}</i>`).join('')}</div></div>`;
+}
+function week(sel){ /* sel: {dayIndex:[hours]} */
+  const D=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const hh=`<div class="wk-row"><i class="wk-d"></i>${[...Array(24)].map((_,h)=>`<i class="wk-h">${h%6?'':h}</i>`).join('')}</div>`;
+  return `<div class="wk">${hh}${D.map((d,di)=>`<div class="wk-row"><i class="wk-d">${d}</i>${[...Array(24)].map((_,h)=>`<i class="wk-c${(sel[di]||[]).includes(h)?' on':''}"></i>`).join('')}</div>`).join('')}</div>`;
+}
+function steps(list){
+  return `<div class="steps">${list.map((s,i)=>`<div class="step ${s.kind||''}"><i class="sbar"></i><span class="six mono">${String(i+1).padStart(2,'0')}</span><div class="sbody"><b>${esc(s.t)}</b><p>${s.p}</p></div><div class="sgo">${s.go||''}</div></div>`).join('')}</div>`;
+}
+function field(label, control, help=''){ return `<div class="field"><label>${esc(label)}</label>${control}${help?`<p class="help">${help}</p>`:''}</div>`; }
+const input  = (v='', ph='') => `<div class="inp">${v?esc(v):`<span class="ph">${esc(ph)}</span>`}</div>`;
+const select = v => `<div class="inp sel">${esc(v)}${ic('chevron-down',14)}</div>`;
+const toggle = on => `<span class="tog${on?' on':''}"><i></i></span>`;
+const chips  = (list,on=0) => `<div class="chips">${list.map((c,i)=>`<span class="chip${i===on?' on':''}">${i===on?ic('circle-check',13):''}${esc(c)}</span>`).join('')}</div>`;
+function empty(icon,title,copy,action=''){ return `<div class="empty">${ic(icon,26)}<b>${esc(title)}</b><p>${copy}</p>${action}</div>`; }
+function search(ph){ return `<div class="inp srch">${ic('search',14)}<span class="ph">${esc(ph)}</span></div>`; }
+function toolbar(left, right=''){ return `<div class="tb"><div class="tb-l">${left}</div><div class="tb-r">${right}</div></div>`; }
+function grid2(a,b,ratio='1.4fr 1fr'){ return `<div class="g2" style="grid-template-columns:${ratio}">${a}${b}</div>`; }
+function kv(list){ return `<dl class="kv">${list.map(([k,v])=>`<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`; }
+function progress(pct,kind='ok',label=''){ return `<div class="prog"><div class="prog-l"><span>${esc(label)}</span><span class="mono">${pct}%</span></div>${bar(pct,kind)}</div>`; }
+const OS = {win:'brand-windows', mac:'brand-apple', ubuntu:'brand-ubuntu', debian:'brand-debian', linux:'brand-ubuntu'};
+const os = k => ic(OS[k]||'device-desktop',18);
+const person = (ini,i,name) => `<span class="who">${avatar(ini,i,22)}<span>${esc(name)}</span></span>`;
+
+/* ================================================================ pages
+   66 routed pages. Each is composition only. Data is plausible, not real. */
+const SP = {att:[4,5,4,6,9,8,6,5,7,11,9,8,7,7], al:[18,16,15,17,14,13,15,12,11,13,12,10,11,12],
+            jobs:[9,12,10,14,19,17,15,22,26,24,21,25,27,28], tix:[31,28,30,26,25,29,24,22,23,21,23,22,20,23]};
+const DEV = [
+ {kind:'crit',os:'ubuntu',t:'sentinel-db-02',ip:'10.20.4.31',st:['crit','Offline 3d'],who:['IC',0,'Ines Caetano'],seen:'4 Sep 06:25',out:41,ok:'crit'},
+ {kind:'crit',os:'win',t:'ws-holloway',ip:'10.20.9.114',st:['crit','Cert expires 2d'],who:['AO',1,'Adaeze Okonkwo'],seen:'7 Sep 09:41',out:12,ok:'warn'},
+ {kind:'warn',os:'debian',t:'build-runner-07',ip:'10.20.4.77',st:['warn','Agent behind'],who:['MR',2,'Mateus Ribeiro'],seen:'7 Sep 09:38',out:3,ok:'warn'},
+ {kind:'run',os:'mac',t:'mbp-okonkwo',ip:'10.20.11.8',st:['run','Patching'],who:['AO',1,'Adaeze Okonkwo'],seen:'7 Sep 09:42',out:6,ok:'warn'},
+ {kind:'ok',os:'win',t:'fs-archive-01',ip:'10.20.4.12',st:['ok','Healthy'],who:['TK',3,'Tomas Kalu'],seen:'7 Sep 09:42',out:0,ok:'ok'},
+ {kind:'ok',os:'win',t:'ws-reception',ip:'10.20.9.20',st:['ok','Healthy'],who:['LF',4,'Leila Farah'],seen:'7 Sep 09:40',out:1,ok:'ok'},
+];
+const devRows = list => rows(list.map(d=>({kind:d.kind,lead:os(d.os),title:d.t,sub:mono(d.ip),
+  cells:[state(...d.st), person(...d.who), mono(d.seen), `<span class="mono">${d.out}</span>${bar(d.out*2.4,d.ok)}`]})),
+  [{h:'State',w:'150px'},{h:'Owner',w:'170px'},{h:'Last seen',w:'110px'},{h:'Outstanding',w:'120px'}]);
+
+const P = {};
+
+/* ---------------- Overview ---------------- */
+P['dashboard'] = () => head('Dashboard','Composed from each module\'s own query. Only what this account may read.',[btn('Customize','adjustments')])
+ + tiles([{k:'Jobs needing attention',icon:'alert-triangle',v:'28',z:'21 failed · 7 stalled >1h',kind:'crit',spark:SP.jobs},
+          {k:'Open alerts',icon:'heartbeat',v:'12',z:'1 critical · 11 warning',kind:'warn',spark:SP.al},
+          {k:'Managed endpoints',icon:'devices',v:'286',z:'272 online now'},
+          {k:'Open tickets',icon:'ticket',v:'23',z:'4 breaching SLA today',spark:SP.tix}])
+ + grid2(panel('Fleet at a glance','7 need a person · 18 degraded · 4 working · 257 healthy',heat(286,{crit:7,warn:18,run:4})),
+         panel('Patch compliance','By operating system',`<div class="dons">${donut(94,'ok','Windows','168 of 179')}${donut(71,'warn','Linux','62 of 87')}${donut(0,'mut','macOS','never scanned')}</div>`))
+ + panel('Devices needing a person','',devRows(DEV.slice(0,2)),btn('View all','arrow-right',false,true),true);
+
+P['assistant'] = () => head('Assistant','Asks the platform, never the endpoint. Every action it proposes goes through the same signed-job gate you do.')
+ + grid2(panel('','',`<div class="empty">${ic('sparkles',26)}<b>What would you like to know?</b><p>Try “which devices are missing the September cumulative update” or “why did backup on fs-archive-01 fail”.</p>${search('Ask about the fleet')}</div>`),
+   panel('Recent questions','',rows([{title:'Devices offline more than 24 hours',sub:'Answered from GET /devices',cells:[mono('09:12')]},{title:'Failed patch applies this week',sub:'Answered from GET /patch/runs',cells:[mono('Yesterday')]}],[{h:'When',w:'90px'}]),'',true),'1fr 1fr');
+
+/* ---------------- Fleet ---------------- */
+P['devices'] = () => head('Devices & Inventory','286 endpoints, 272 with an agent reporting.',[btn('Export','download'),btn('Install agent','plus',true)])
+ + panel('Fleet at a glance','7 need a person · 18 degraded · 4 working · 257 healthy',heat(286,{crit:7,warn:18,run:4}))
+ + tiles([{k:'Needs a person',icon:'alert-triangle',v:'7',z:'4 offline, 3 certs',kind:'crit',spark:SP.att},{k:'Degraded',icon:'clock-exclamation',v:'18',z:'Agent behind or patch-stale',kind:'warn',spark:SP.al},{k:'Healthy',icon:'circle-check',v:'261',z:'Reporting and current'},{k:'Agent coverage',icon:'cpu',v:'95',unit:'%',z:'272 of 286'}])
+ + toolbar(search('Hostname, IP, serial, owner')+chips(['Needs a person','Windows','Linux','macOS'],0),'<span class="mono">7 of 286</span>')
+ + panel('','',devRows(DEV),'',true);
+
+P['devices/:deviceId'] = () => head('sentinel-db-02','Ubuntu 26.04 LTS · 10.20.4.31 · last contact 4 Sep 06:25',[btn('Run job','player-play'),btn('Remote session','user-screen',true)],['Devices','sentinel-db-02'])
+ + `<div style="margin:-8px 0 14px">${state('crit','Offline 3d')} ${pill('mut','Production · database','users-group')}</div>`
+ + facts([{k:'Agent',v:mono('1.8.2')+' current'},{k:'Certificate',v:'Valid to '+mono('14 Nov 2026')},{k:'Site server',v:'rack-b4-relay'},{k:'Outstanding',v:mono('41')+' · 3 critical'},{k:'Last backup',v:mono('3 Sep 01:14')+' verified'},{k:'Open alerts',v:mono('2')},{k:'Provenance',v:'Enrolled by agent'},{k:'Group',v:'Production · database'}])
+ + tabs(['Overview','Inventory','Patch','Jobs','Backup','Health','Sessions'])
+ + panel('Recent events','',rows([{kind:'crit',lead:ic('wifi',18),title:'Agent disconnected',sub:'No heartbeat; last job acknowledged 4 Sep 06:24',cells:[mono('4 Sep 06:25')]},{kind:'warn',lead:ic('shield-check',18),title:'Patch apply finished with failures',sub:'2 installed, 1 failed: <span class="mono">linux-image-6.14: dpkg was interrupted</span>',cells:[mono('3 Sep 22:40')]},{kind:'ok',lead:ic('database',18),title:'Backup verified',sub:'Restore test passed on 4 of 4 sampled chunks',cells:[mono('3 Sep 01:41')]}],[{h:'When',w:'120px'}]),'',true);
+
+P['devices/onboard'] = () => head('Add devices','From an unregistered network to an enrolled fleet. Each step opens the page that holds the act.')
+ + steps([{kind:'ok',t:'Register the network',p:'3 subnets recorded: 10.20.4.0/24, 10.20.9.0/24, 10.20.11.0/24.',go:state('ok','Done')},
+   {kind:'ok',t:'Authorize scanning',p:'All 3 authorized. This grant decides where the platform puts packets on somebody\'s wire.',go:state('ok','Done')},
+   {kind:'crit',t:'Sweep for what is out there',p:'2 of 3 swept. <b>10.20.11.0/24 could not be swept</b>: no site server on that segment, so nothing looked there.',go:btn('Fix','arrow-right')},
+   {kind:'now',t:'Review what answered',p:'41 addresses answered and were recorded as assets. A ping reply is not a machine.',go:btn('Review','arrow-right',true)},
+   {t:'Get the agent onto them',p:'Requires <span class="mono">agent.push</span>, which this account does not hold.',go:state('mut','Blocked')}]);
+
+P['discovered'] = () => head('Discovered','What the fleet has seen that the inventory cannot account for.',[btn('Scan a subnet','search',true)])
+ + tiles([{k:'Awaiting review',icon:'eye',v:'3',z:'Seen, not recorded'},{k:'Recorded by sweep',icon:'topology-star-3',v:'41',z:'Unconfirmed as machines'},{k:'Could not be swept',icon:'alert-triangle',v:'1',z:'10.20.11.0/24 has no site server',kind:'warn'}])
+ + panel('','',rows([{kind:'warn',lead:ic('printer',18),title:'10.20.9.201',sub:'Answers ping and 9100/tcp · likely a printer',cells:[pill('mut','Weak','help-circle'),mono('Today 08:14'),btn('Promote','plus')]},{lead:ic('device-mobile',18),title:'10.20.11.57',sub:'Answers ping only',cells:[pill('mut','Weak','help-circle'),mono('Today 08:14'),btn('Promote','plus')]}],[{h:'Evidence',w:'110px'},{h:'Seen',w:'120px'},{h:'',w:'110px'}]),'',true);
+
+P['device-groups'] = () => head('Device groups','A group is the fleet, carved up. Policies, deployments and permissions all take a group.',[btn('New group','plus',true)])
+ + panel('','',rows([{lead:ic('building',18),title:'Production · database',sub:'Rule: tag = db AND environment = prod',cells:[mono('34'),pill('info','2 policies'),mono('4 min ago')]},{lead:ic('building',18),title:'Workstations · Lisbon',sub:'Rule: site = LIS AND kind = workstation',cells:[mono('118'),pill('info','3 policies'),mono('4 min ago')]},{lead:ic('building',18),title:'Build runners',sub:'Manual membership',cells:[mono('9'),pill('mut','No policy'),mono('4 min ago')]}],[{h:'Devices',w:'90px'},{h:'Policies',w:'120px'},{h:'Re-evaluated',w:'120px'}]),'',true)
+ + `<p class="note">Membership is re-evaluated by a background sweep. The timestamp is the sweep's, not the page's.</p>`;
+
+P['health'] = () => head('Health & Alerts','Deduplicated and flap-suppressed. One row per condition, not per sample.',[btn('Profiles','adjustments'),btn('Mute','bell')])
+ + tiles([{k:'Critical',icon:'alert-triangle',v:'1',z:'sentinel-db-02 disk',kind:'crit'},{k:'Warning',icon:'clock-exclamation',v:'11',z:'8 CPU · 3 memory',kind:'warn',spark:SP.al},{k:'Acknowledged',icon:'check',v:'4',z:'By 2 people'},{k:'Muted',icon:'bell',v:'2',z:'Until Monday'}])
+ + panel('','',rows([{kind:'crit',lead:ic('database',18),title:'Disk free below 5%',sub:'sentinel-db-02 · /var/lib/postgresql · observed 3.1% against 5%',cells:[state('crit','Critical'),mono('2d 4h'),btn('Acknowledge','check')]},{kind:'warn',lead:ic('cpu',18),title:'CPU above 90% for 15 min',sub:'build-runner-07 · observed 96% against 90%',cells:[state('warn','Warning'),mono('41m'),btn('Acknowledge','check')]}],[{h:'Severity',w:'120px'},{h:'Open for',w:'90px'},{h:'',w:'130px'}]),'',true);
+
+P['security'] = () => head('Security logs','Append-only. Every row is hash-chained to the one before it.',[btn('Verify chain','shield-check'),btn('Export','download')])
+ + tiles([{k:'Events today',icon:'logs',v:'1,284'},{k:'Failed sign-ins',icon:'lock',v:'6',z:'2 accounts',kind:'warn'},{k:'Chain',icon:'shield-check',v:'Intact',z:'Verified 09:30'}])
+ + panel('','',rows([{kind:'warn',lead:ic('lock',18),title:'Sign-in failed',sub:'helgar@toeshee.com · wrong password · 185.12.4.9',cells:[mono('09:41:12')]},{lead:ic('key',18),title:'Credential decrypted at point of use',sub:'remote.control · ws-holloway · by Adaeze Okonkwo',cells:[mono('09:38:02')]},{lead:ic('shield-check',18),title:'Job signed and dispatched',sub:'patch.apply → mbp-okonkwo',cells:[mono('09:30:44')]}],[{h:'When',w:'110px'}]),'',true);
+
+P['patch'] = () => head('Patch management','Linux is approved per device. Windows and macOS follow rings, WSUS-style.',[btn('Policies','adjustments'),btn('Export evidence','download')])
+ + tabs(['Windows','Linux','macOS'],1)
+ + tiles([{k:'Outstanding critical',icon:'alert-triangle',v:'14',z:'On 9 devices',kind:'crit'},{k:'Outstanding important',icon:'clock-exclamation',v:'38',z:'On 22 devices',kind:'warn'},{k:'Compliance',icon:'shield-check',v:'71',unit:'%',z:'62 of 87 current'},{k:'Last scan',icon:'clock',v:'1h',z:'87 of 87 scanned'}])
+ + panel('Machines needing updates','One row per device. Open one to choose updates from its own list.',devRows(DEV.filter(d=>d.os!=='win'&&d.os!=='mac')),btn('Install approved','player-play',true),true);
+
+P['deploy'] = () => head('Software deployment','Signed packages and scripts, deployed to groups inside a window.',[btn('New deployment','plus',true)])
+ + tiles([{k:'Running',icon:'progress',v:'1',z:'Chrome 128 → Workstations'},{k:'Scheduled',icon:'calendar-event',v:'2',z:'Next: Sat 02:00'},{k:'Failed 7d',icon:'circle-x',v:'3',z:'All on build runners',kind:'warn'}])
+ + panel('','',rows([{kind:'run',lead:ic('package',18),title:'Google Chrome 128.0.6613',sub:'Workstations · Lisbon · 118 devices',cells:[state('run','Running'),`<span class="mono">64%</span>${bar(64,'run')}`,person('AO',1,'Adaeze Okonkwo')]},{kind:'warn',lead:ic('terminal-2',18),title:'Rotate local admin password',sub:'Build runners · 9 devices',cells:[state('warn','3 failed'),`<span class="mono">67%</span>${bar(67,'warn')}`,person('MR',2,'Mateus Ribeiro')]}],[{h:'State',w:'120px'},{h:'Progress',w:'130px'},{h:'By',w:'170px'}]),'',true);
+P['deploy/packages'] = () => head('Packages','Uploaded artefacts, hashed by the server on receipt. The hash you see is the one the agent verifies.',[btn('Upload','upload',true)],['Software deployment','Packages'])
+ + panel('','',rows([{lead:ic('package',18),title:'Google Chrome 128.0.6613',sub:mono('sha256 9f3a…c21e')+' · 104 MB',cells:[pill('info','Windows x64'),mono('2 Sep')]},{lead:ic('package',18),title:'7-Zip 24.08',sub:mono('sha256 41b0…7d90')+' · 1.6 MB',cells:[pill('info','Windows x64'),mono('14 Aug')]}],[{h:'Platform',w:'130px'},{h:'Uploaded',w:'90px'}]),'',true);
+P['deploy/scripts'] = () => head('Scripts','Every script is signed before dispatch and verified on the endpoint before it runs.',[btn('New script','plus',true)],['Software deployment','Scripts'])
+ + panel('','',rows([{lead:ic('terminal-2',18),title:'Rotate local admin password',sub:'PowerShell · runs as SYSTEM',cells:[pill('ok','Signed','shield-check'),mono('v4'),person('MR',2,'Mateus Ribeiro')]},{lead:ic('terminal-2',18),title:'Clear print spooler',sub:'PowerShell · runs as SYSTEM',cells:[pill('ok','Signed','shield-check'),mono('v2'),person('TK',3,'Tomas Kalu')]}],[{h:'Signature',w:'110px'},{h:'Ver',w:'60px'},{h:'Owner',w:'170px'}]),'',true);
+
+P['remote'] = () => head('Remote control','Sessions are recorded, credentials are decrypted at point of use, and every start and stop is audited.',[btn('New session','user-screen',true)])
+ + tiles([{k:'Live now',icon:'user-screen',v:'0',z:'Nobody is connected'},{k:'Sessions 7d',icon:'history',v:'14'},{k:'Recordings',icon:'archive',v:'14',z:'Retained 90 days'}])
+ + panel('Recent sessions','',rows([{lead:ic('user-screen',18),title:'ws-holloway',sub:'RDP · 18 min · recorded',cells:[person('AO',1,'Adaeze Okonkwo'),mono('Yesterday 16:02'),btn('Play','player-play')]}],[{h:'Operator',w:'170px'},{h:'When',w:'140px'},{h:'',w:'90px'}]),'',true);
+
+P['credentials'] = () => head('Credentials','Encrypted in the vault, decrypted only at point of use. Never returned by the API, never written to a log.',[btn('Add credential','plus',true)])
+ + panel('','',rows([{lead:ic('key',18),title:'Local administrator · workstations',sub:'Scoped to Workstations · Lisbon',cells:[pill('ok','In vault','lock'),mono('3 uses today'),mono('Rotated 12 Aug')]},{lead:ic('key',18),title:'Push install · rack B4',sub:'Scoped to 10.20.4.0/24',cells:[pill('ok','In vault','lock'),mono('0 uses'),mono('Rotated 1 Sep')]}],[{h:'State',w:'110px'},{h:'Usage',w:'110px'},{h:'Rotation',w:'120px'}]),'',true);
+
+/* ---------------- Continuity ---------------- */
+P['backup'] = () => head('Backup & Restore','Coverage, then success, then verification. A restore is only proven once tested.',[btn('Repositories','database'),btn('Run now','player-play',true)])
+ + tiles([{k:'Covered',icon:'shield-check',v:'96',unit:'%',z:'274 of 286 devices'},{k:'Run success 24h',icon:'circle-check',v:'99.1',unit:'%'},{k:'Awaiting verification',icon:'clock-exclamation',v:'11',z:'Oldest 4 days',kind:'warn'},{k:'Stored',icon:'database',v:'4.2',unit:'TB',z:'Dedup 3.1×'}])
+ + panel('Restore points','',rows([{lead:ic('database',18),title:'fs-archive-01',sub:'Full · 412 GB · 3 Sep 01:14',cells:[state('ok','Verified'),mono('4 of 4 chunks'),btn('Restore','history')]},{kind:'warn',lead:ic('database',18),title:'sentinel-db-02',sub:'Incremental · 18 GB · 3 Sep 01:31',cells:[state('warn','Unverified'),mono('Not sampled'),btn('Verify','check')]}],[{h:'Verification',w:'130px'},{h:'Sample',w:'120px'},{h:'',w:'100px'}]),'',true);
+P['backup/repositories'] = () => head('Repositories','Where backups land. Writes travel under a prefix-scoped grant; the agent never holds a bucket key.',[btn('Add repository','plus',true)],['Backup','Repositories'])
+ + panel('','',rows([{lead:ic('database',18),title:'MinIO · rack B4',sub:'s3://itms-backup/ · prefix per device',cells:[state('ok','Healthy'),`<span class="mono">61%</span>${bar(61,'ok')}`,mono('4.2 of 6.9 TB')]}],[{h:'State',w:'110px'},{h:'Used',w:'130px'},{h:'Capacity',w:'130px'}]),'',true);
+
+P['provisioning'] = () => head('Provisioning & Imaging','Bare metal to enrolled endpoint. Every run is a signed job chain.',[btn('Images','photo'),btn('Profiles','file-text'),btn('New run','plus',true)])
+ + tiles([{k:'Running',icon:'progress',v:'1'},{k:'Completed 7d',icon:'circle-check',v:'6'},{k:'Timed out',icon:'clock-exclamation',v:'1',z:'PXE never answered',kind:'warn'}])
+ + panel('','',rows([{kind:'run',lead:ic('device-laptop',18),title:'LIS-WS-0119',sub:'Windows 11 · Workstation standard · started 09:02',cells:[state('run','Installing OS'),`<span class="mono">38%</span>${bar(38,'run')}`,mono('Est. 22 min')]}],[{h:'Stage',w:'140px'},{h:'Progress',w:'130px'},{h:'Remaining',w:'100px'}]),'',true);
+P['provisioning/images'] = () => head('Images','',[btn('Upload image','upload',true)],['Provisioning','Images'])+panel('','',rows([{lead:ic('photo',18),title:'Windows 11 23H2 · Enterprise',sub:mono('sha256 7c1d…e0a2')+' · 5.8 GB',cells:[mono('6 runs'),mono('Aug 2026')]},{lead:ic('photo',18),title:'Ubuntu 26.04 LTS server',sub:mono('sha256 b83f…19c4')+' · 2.1 GB',cells:[mono('1 run'),mono('Aug 2026')]}],[{h:'Used by',w:'90px'},{h:'Added',w:'100px'}]),'',true);
+P['provisioning/profiles'] = () => head('Profiles','What a machine becomes: image, partitions, hostname pattern, group, first jobs.',[btn('New profile','plus',true)],['Provisioning','Profiles'])+panel('','',rows([{lead:ic('file-text',18),title:'Workstation standard',sub:'Windows 11 · LIS-WS-{seq} · Workstations · Lisbon',cells:[mono('6 runs')]},{lead:ic('file-text',18),title:'Build runner',sub:'Ubuntu 26.04 · build-runner-{seq} · Build runners',cells:[mono('1 run')]}],[{h:'Used',w:'90px'}]),'',true);
+
+P['site-servers'] = () => head('Site servers','A device the operator has declared for LAN-heavy work on its segment. Sweeps and push installs originate here, never from the control plane.',[btn('Declare site server','plus',true)])
+ + panel('','',rows([{lead:ic('server-2',18),title:'rack-b4-relay',sub:'10.20.4.0/24 · 10.20.9.0/24',cells:[state('ok','Online'),mono('2 segments'),mono('41 sweeps')]},{kind:'warn',lead:ic('server-2',18),title:'No site server',sub:'10.20.11.0/24',cells:[state('warn','Uncovered'),mono('1 segment'),mono('0 sweeps')]}],[{h:'State',w:'110px'},{h:'Covers',w:'110px'},{h:'Activity',w:'100px'}]),'',true);
+P['site-servers/:siteServerId'] = () => head('rack-b4-relay','10.20.4.31 · declared 2 Aug by Ines Caetano',[btn('Sweep now','search',true)],['Site servers','rack-b4-relay'])
+ + facts([{k:'State',v:state('ok','Online')},{k:'Segments',v:'2'},{k:'Last sweep',v:mono('Today 08:14')},{k:'Push installs',v:mono('3')+' this week'}])
+ + panel('Segments','',rows([{lead:ic('network',18),title:'10.20.4.0/24',sub:'Racks · 254 usable',cells:[mono('Today 08:14'),mono('28 answered')]},{lead:ic('network',18),title:'10.20.9.0/24',sub:'Workstations · 254 usable',cells:[mono('Today 08:14'),mono('119 answered')]}],[{h:'Last sweep',w:'120px'},{h:'Result',w:'120px'}]),'',true);
+
+/* ---------------- Service ---------------- */
+const TIX = [{kind:'crit',t:'#4127 VPN drops every 20 minutes',sub:'Adaeze Okonkwo · Network',st:['crit','Breach in 40m'],who:['MR',2,'Mateus Ribeiro'],age:'2h'},
+ {kind:'warn',t:'#4125 New laptop for hire starting Monday',sub:'Leila Farah · Hardware',st:['warn','Due today'],who:['TK',3,'Tomas Kalu'],age:'1d'},
+ {kind:'ok',t:'#4119 Printer offline on 3rd floor',sub:'Ines Caetano · Facilities',st:['ok','On track'],who:['TK',3,'Tomas Kalu'],age:'2d'}];
+const tixRows = l => rows(l.map(t=>({kind:t.kind,lead:ic('ticket',18),title:t.t,sub:t.sub,cells:[state(...t.st),person(...t.who),mono(t.age)]})),[{h:'SLA',w:'140px'},{h:'Assignee',w:'170px'},{h:'Age',w:'70px'}]);
+P['service-desk'] = () => head('Service desk','Open work, counted from the ticket list.',[btn('My work','user'),btn('New ticket','plus',true)])
+ + tiles([{k:'Breaching today',icon:'alert-triangle',v:'4',kind:'crit'},{k:'Open',icon:'ticket',v:'23',spark:SP.tix},{k:'Untriaged',icon:'help-circle',v:'2',kind:'warn'},{k:'Resolved 7d',icon:'circle-check',v:'41'}])
+ + toolbar(search('Search tickets')+chips(['All open','Mine','Untriaged','Breaching'],0),'<span class="mono">23 open</span>')
+ + panel('','',tixRows(TIX),'',true);
+P['service-desk/tickets/:ticketId'] = () => head('#4127 VPN drops every 20 minutes','Opened 2h ago by Adaeze Okonkwo · Network',[btn('Assign','user'),btn('Resolve','check',true)],['Service desk','#4127'])
+ + `<div style="margin:-8px 0 14px">${state('crit','SLA breach in 40m')} ${pill('info','P2')} ${pill('mut','Network')}</div>`
+ + grid2(panel('Conversation','',`<div class="kv" style="grid-template-columns:1fr"><div>${person('AO',1,'Adaeze Okonkwo')} <span class="note">2h ago</span><p style="margin-top:6px">Every ~20 minutes the VPN drops for about 30 seconds. Started after the update on Friday.</p></div><div style="margin-top:14px">${person('MR',2,'Mateus Ribeiro')} <span class="note">1h ago</span><p style="margin-top:6px">Seeing DHCP lease renewals at the same interval on ws-holloway. Checking the client config.</p></div></div>`+`<div style="margin-top:14px">${input('','Reply…')}</div>`),
+   panel('Details','',kv([['Requester',person('AO',1,'Adaeze Okonkwo')],['Assignee',person('MR',2,'Mateus Ribeiro')],['Device','<a href="#/devices/:deviceId">ws-holloway</a>'],['Priority','P2'],['SLA','Respond 1h · Resolve 4h'],['Linked change','CR-118']])),'1.5fr 1fr');
+P['service-desk/my-work'] = () => head('My work','Assigned to you, worst first.')+tiles([{k:'Assigned',icon:'ticket',v:'6'},{k:'Breaching',icon:'alert-triangle',v:'1',kind:'crit'},{k:'Waiting on requester',icon:'clock',v:'2'}])+panel('','',tixRows(TIX.slice(0,2)),'',true);
+P['service-desk/admin'] = () => head('Service desk settings','Queues, categories, priorities and automation.')+tabs(['Queues','Categories','Priorities','Automation'])+panel('','',rows([{lead:ic('list-check',18),title:'Network',sub:'4 open · SLA policy: Standard',cells:[person('MR',2,'Mateus Ribeiro'),toggle(true)]},{lead:ic('list-check',18),title:'Hardware',sub:'7 open · SLA policy: Standard',cells:[person('TK',3,'Tomas Kalu'),toggle(true)]}],[{h:'Lead',w:'170px'},{h:'Active',w:'70px'}]),btn('New queue','plus',true),true);
+
+P['portal'] = () => head('My tickets','Raise a request or check on one you already opened.',[btn('New request','plus',true)])
+ + panel('','',rows([{kind:'run',lead:ic('ticket',18),title:'VPN drops every 20 minutes',sub:'#4127 · opened 2h ago',cells:[state('run','Being worked on'),mono('Updated 1h ago')]},{lead:ic('ticket',18),title:'Access to the finance share',sub:'#4098 · opened 12 Aug',cells:[state('ok','Resolved'),mono('14 Aug')]}],[{h:'Status',w:'160px'},{h:'',w:'130px'}]),'',true);
+P['portal/new'] = () => head('New request','Tell us what is wrong. You do not need to know what category it belongs to.',[],['My tickets','New request'])
+ + panel('','',field('What is happening?',input('','VPN keeps dropping every few minutes'))+field('How urgent is it?',chips(['I can work around it','It is slowing me down','I cannot work'],1))+field('Which device?',select('ws-holloway (this computer)'))+field('Attach a screenshot',`<div class="inp" style="border-style:dashed;justify-content:center;color:var(--muted)">${ic('paperclip',14)} Drop a file or click</div>`)+btn('Send request','send',true));
+P['portal/tickets/:ticketId'] = () => head('VPN drops every 20 minutes','#4127 · opened 2h ago',[],['My tickets','#4127'])
+ + `<div style="margin:-8px 0 14px">${state('run','Being worked on')} <span class="note">Assigned to Mateus Ribeiro</span></div>`
+ + panel('Updates','',`<div>${person('MR',2,'Mateus Ribeiro')} <span class="note">1h ago</span><p style="margin-top:6px">Thanks. I can see the same pattern on your machine. Working on it now; you should not need to do anything.</p></div><div style="margin-top:14px">${input('','Add a comment…')}</div>`);
+
+P['notifications'] = () => head('Notifications','Who gets told, about what, and where.',[btn('New rule','plus',true)])
+ + tiles([{k:'Delivered 24h',icon:'bell',v:'142'},{k:'Failed',icon:'circle-x',v:'0'},{k:'Channels',icon:'send',v:'3',z:'Email · Teams · webhook'}])
+ + panel('','',rows([{lead:ic('bell-ringing',18),title:'Critical alerts → on-call',sub:'Teams #noc · immediately',cells:[toggle(true),mono('38 sent')]},{lead:ic('mail',18),title:'SLA breach warning → queue lead',sub:'Email · 30 min before',cells:[toggle(true),mono('4 sent')]},{lead:ic('link',18),title:'Every audit event → SIEM',sub:'Webhook · batched',cells:[toggle(true),mono('1,284 sent')]}],[{h:'On',w:'70px'},{h:'24h',w:'100px'}]),'',true);
+P['email-intake'] = () => head('Email intake','Mail to the support address becomes a ticket. Replies thread back.',[btn('Test delivery','send')])
+ + facts([{k:'Mailbox',v:mono('support@toeshee.com')},{k:'State',v:state('ok','Polling')},{k:'Last message',v:mono('09:31')},{k:'Created today',v:mono('7')+' tickets'}])
+ + panel('Rules','',rows([{lead:ic('mail',18),title:'Auto-reply on receipt',sub:'Sends the ticket number back within a minute',cells:[toggle(true)]},{lead:ic('mail',18),title:'Drop out-of-office replies',sub:'Matches common subject patterns',cells:[toggle(true)]}],[{h:'On',w:'70px'}]),'',true);
+P['sla'] = () => head('SLA engine','Response and resolution targets by priority, with business hours.',[btn('New policy','plus',true)])
+ + tiles([{k:'Met 30d',icon:'circle-check',v:'94',unit:'%'},{k:'Breached 30d',icon:'alert-triangle',v:'9',kind:'warn'},{k:'At risk now',icon:'clock-exclamation',v:'4',kind:'crit'}])
+ + panel('Standard policy','Mon–Fri 08:00–18:00, Europe/Lisbon',rows([{lead:pill('crit','P1'),title:'Respond 15 min',sub:'Resolve 4 h',cells:[mono('100%')]},{lead:pill('warn','P2'),title:'Respond 1 h',sub:'Resolve 8 h',cells:[mono('92%')]},{lead:pill('mut','P3'),title:'Respond 4 h',sub:'Resolve 3 days',cells:[mono('96%')]}],[{h:'Met',w:'80px'}]),btn('Edit','edit'),true);
+
+/* ---------------- Governance ---------------- */
+P['docs'] = () => head('IT documentation','Runbooks, configurations and passwords, linked to the devices they describe.',[btn('New article','plus',true)])
+ + toolbar(search('Search articles, hosts, IPs')+chips(['All','Runbooks','Network','Vendors'],0),'<span class="mono">84 articles</span>')
+ + panel('','',rows([{lead:ic('book',18),title:'Restoring sentinel-db-02 from backup',sub:'Runbook · linked to 1 device · updated 3 Sep',cells:[person('IC',0,'Ines Caetano'),pill('ok','Reviewed')]},{lead:ic('book',18),title:'Rack B4 network layout',sub:'Network · 2 subnets · updated 12 Aug',cells:[person('MR',2,'Mateus Ribeiro'),pill('warn','Review due')]}],[{h:'Owner',w:'170px'},{h:'',w:'110px'}]),'',true);
+P['changes'] = () => head('Change management','Planned changes, their risk, and what they touched.',[btn('Calendar','calendar-week'),btn('New change','plus',true)])
+ + tiles([{k:'Next 14 days',icon:'calendar-event',v:'6'},{k:'Awaiting approval',icon:'clock',v:'2',kind:'warn'},{k:'High risk',icon:'alert-triangle',v:'1',kind:'crit'}])
+ + panel('','',rows([{kind:'crit',lead:ic('git-branch',18),title:'CR-118 Upgrade core switch firmware',sub:'Sat 14 Sep 02:00 · 40 min window',cells:[pill('crit','High'),state('warn','Awaiting approval'),person('MR',2,'Mateus Ribeiro')]},{lead:ic('git-branch',18),title:'CR-117 Rotate VPN certificates',sub:'Sat 7 Sep 02:00 · done',cells:[pill('mut','Low'),state('ok','Completed'),person('IC',0,'Ines Caetano')]}],[{h:'Risk',w:'80px'},{h:'State',w:'160px'},{h:'Owner',w:'170px'}]),'',true);
+P['bcp'] = () => head('BCP / DR tests','A plan is only real once it has been exercised.',[btn('New plan','plus',true)])
+ + panel('','',rows([{lead:ic('shield-check',18),title:'Database failover',sub:'sentinel-db-02 → sentinel-db-03 · RTO 30 min',cells:[state('ok','Tested 12 Aug'),mono('22 min'),btn('Run test','player-play')]},{kind:'warn',lead:ic('shield-check',18),title:'File server restore',sub:'fs-archive-01 · RTO 4 h',cells:[state('warn','Untested 91d'),mono('—'),btn('Run test','player-play')]}],[{h:'Last test',w:'150px'},{h:'Achieved',w:'90px'},{h:'',w:'110px'}]).replace('—','not run'),'',true);
+P['reports'] = () => head('Reporting & evidence','Every report is a saved query over the same data the pages show. Export is what an auditor receives.')
+ + panel('','',rows([{lead:ic('chart-bar',18),title:'Patch compliance',sub:'By OS family, group and month',cells:[mono('Monthly'),btn('Open','arrow-right')]},{lead:ic('chart-bar',18),title:'Backup verification',sub:'Restore points and their proof',cells:[mono('Weekly'),btn('Open','arrow-right')]},{lead:ic('chart-bar',18),title:'Access review',sub:'Who holds which permission',cells:[mono('Quarterly'),btn('Open','arrow-right')]}],[{h:'Cadence',w:'100px'},{h:'',w:'90px'}]),'',true);
+P['reports/:reportKey'] = () => head('Patch compliance','August 2026 · all groups',[btn('Export CSV','file-download'),btn('Export PDF','download',true)],['Reports','Patch compliance'])
+ + tiles([{k:'Fleet',icon:'shield-check',v:'84',unit:'%'},{k:'Windows',v:'94',unit:'%',kind:'ok'},{k:'Linux',v:'71',unit:'%',kind:'warn'},{k:'macOS',v:'n/a',z:'Never scanned'}])
+ + panel('By group','',progress(98,'ok','Production · database')+progress(94,'ok','Workstations · Lisbon')+progress(61,'warn','Build runners'));
+P['audit'] = () => head('Immutable audit','Every privileged action, hash-chained. This page can prove the chain; it cannot edit it.',[btn('Verify chain','shield-check'),btn('Export','download')])
+ + tabs(['Events','Chain','Exports'])
+ + panel('','',rows([{lead:ic('shield-check',18),title:'patch.approved',sub:'KB5041585 → ring test · by Ines Caetano',cells:[mono('09:44:10'),mono('b91f…3a0e')]},{lead:ic('key',18),title:'credential.accessed',sub:'Local administrator · workstations · by Adaeze Okonkwo',cells:[mono('09:38:02'),mono('4c7d…19f2')]},{lead:ic('user',18),title:'auth.signed_in',sub:'helgar@toeshee.com · passkey',cells:[mono('09:02:51'),mono('e0a1…77b4')]}],[{h:'When',w:'110px'},{h:'Hash',w:'120px'}]),'',true);
+
+/* ---------------- Assets & Spend ---------------- */
+P['licenses'] = () => head('Licenses','What you own against what is installed.',[btn('Products','package'),btn('Vendors','building'),btn('Add license','plus',true)])
+ + tiles([{k:'Over-deployed',icon:'alert-triangle',v:'2',z:'Adobe, Visio',kind:'crit'},{k:'Expiring 30d',icon:'clock-exclamation',v:'3',kind:'warn'},{k:'Unused seats',icon:'wallet',v:'41',z:'€6,140 / yr'},{k:'Compliant',icon:'circle-check',v:'22'}])
+ + panel('','',rows([{kind:'crit',lead:ic('license',18),title:'Adobe Acrobat Pro',sub:'Per-seat · renews 1 Nov',cells:[`<span class="mono">58 / 50</span>${bar(116,'crit')}`,pill('crit','8 over')]},{lead:ic('license',18),title:'Microsoft 365 E3',sub:'Per-user · renews 1 Jan',cells:[`<span class="mono">241 / 280</span>${bar(86,'ok')}`,pill('ok','39 free')]}],[{h:'Used / owned',w:'170px'},{h:'',w:'100px'}]),'',true);
+P['licenses/products'] = () => head('Products','',[btn('Add product','plus',true)],['Licenses','Products'])+panel('','',rows([{lead:ic('package',18),title:'Adobe Acrobat Pro',sub:'Adobe · 2 detection rules',cells:[mono('58 installs')]},{lead:ic('package',18),title:'Microsoft Visio',sub:'Microsoft · 1 detection rule',cells:[mono('14 installs')]}],[{h:'Detected',w:'110px'}]),'',true);
+P['licenses/vendors'] = () => head('Vendors','',[btn('Add vendor','plus',true)],['Licenses','Vendors'])+panel('','',rows([{lead:ic('building',18),title:'Microsoft',sub:'4 products · account manager: Rui Pinto',cells:[mono('€48,200 / yr')]},{lead:ic('building',18),title:'Adobe',sub:'1 product',cells:[mono('€9,900 / yr')]}],[{h:'Spend',w:'130px'}]),'',true);
+P['subscriptions'] = () => head('Subscriptions','Recurring spend, who owns it, and when it renews.',[btn('Add subscription','plus',true)])
+ + tiles([{k:'Monthly run-rate',icon:'credit-card',v:'€11,480'},{k:'Renewing 30d',icon:'calendar-event',v:'4',z:'€3,120',kind:'warn'},{k:'No owner',icon:'help-circle',v:'2',kind:'warn'}])
+ + panel('','',rows([{kind:'warn',lead:ic('credit-card',18),title:'Figma Organization',sub:'12 seats · renews 21 Sep',cells:[mono('€540 / mo'),person('LF',4,'Leila Farah')]},{lead:ic('credit-card',18),title:'GitHub Enterprise',sub:'34 seats · renews 1 Jan',cells:[mono('€714 / mo'),person('MR',2,'Mateus Ribeiro')]}],[{h:'Cost',w:'110px'},{h:'Owner',w:'170px'}]),'',true);
+P['budget'] = () => head('IT budget','Plan against actuals, by cost centre.',[btn('Expenses','receipt'),btn('Approvals','check'),btn('Planner','edit',true)])
+ + tiles([{k:'FY26 budget',icon:'wallet',v:'€412k'},{k:'Committed',icon:'credit-card',v:'71',unit:'%'},{k:'Forecast variance',icon:'arrow-down',v:'-€8.2k',z:'Under, driven by licenses',kind:'ok'}])
+ + panel('By cost centre','',progress(82,'ok','Infrastructure')+progress(64,'ok','Software')+progress(97,'warn','Hardware refresh')+progress(38,'ok','Services'));
+P['budget/planner'] = () => head('Planner','',[btn('Save plan','check',true)],['IT budget','Planner'])+panel('FY26 lines','',rows([{lead:ic('wallet',18),title:'Hardware refresh',sub:'Q3–Q4 · 40 laptops',cells:[mono('€64,000'),mono('€62,100'),pill('ok','On plan')]},{lead:ic('wallet',18),title:'Cloud backup storage',sub:'Monthly',cells:[mono('€9,600'),mono('€11,200'),pill('warn','+17%')]}],[{h:'Planned',w:'100px'},{h:'Actual',w:'100px'},{h:'',w:'90px'}]),btn('Add line','plus'),true);
+P['budget/expenses'] = () => head('Expenses','',[btn('Log expense','plus',true)],['IT budget','Expenses'])+panel('','',rows([{lead:ic('receipt',18),title:'Dell Latitude 5550 × 10',sub:'Hardware refresh · PO-2291',cells:[mono('€15,900'),state('ok','Approved'),mono('2 Sep')]},{lead:ic('receipt',18),title:'MinIO support renewal',sub:'Infrastructure',cells:[mono('€4,200'),state('warn','Pending'),mono('5 Sep')]}],[{h:'Amount',w:'100px'},{h:'State',w:'120px'},{h:'Date',w:'80px'}]),'',true);
+P['budget/confirm'] = () => head('Approval queue','Expenses waiting on a decision.',[],['IT budget','Approvals'])+panel('','',rows([{kind:'warn',lead:ic('receipt',18),title:'MinIO support renewal',sub:'€4,200 · Infrastructure · logged by Mateus Ribeiro',cells:[btn('Reject','x'),btn('Approve','check',true)]}],[{h:'',w:'200px'}]),'',true);
+P['budget/admin'] = () => head('Budget settings','Cost centres, fiscal year and approvers.',[],['IT budget','Settings'])+panel('','',field('Fiscal year starts',select('1 January'))+field('Approval required above',input('€2,000'))+field('Approvers',`${person('IC',0,'Ines Caetano')} &nbsp; ${person('HP',5,'Helgar Palmieri')}`)+btn('Save','check',true));
+
+P['ipam'] = () => head('IP address management','Subnets, what is on them, and what the fleet actually saw.',[btn('Registry','list'),btn('Import','upload'),btn('New subnet','plus',true)])
+ + tiles([{k:'Subnets',icon:'network',v:'3'},{k:'Utilization',icon:'chart-bar',v:'58',unit:'%'},{k:'Drift',icon:'arrows-exchange',v:'6',z:'Seen but not registered',kind:'warn'},{k:'Unswept',icon:'alert-triangle',v:'1',z:'No site server',kind:'warn'}])
+ + panel('','',rows([{lead:ic('network',18),title:'10.20.4.0/24',sub:'Racks · VLAN 40',cells:[`<span class="mono">28 / 254</span>${bar(11,'ok')}`,state('ok','Swept today'),btn('Open','arrow-right')]},{lead:ic('network',18),title:'10.20.9.0/24',sub:'Workstations · VLAN 90',cells:[`<span class="mono">119 / 254</span>${bar(47,'ok')}`,state('ok','Swept today'),btn('Open','arrow-right')]},{kind:'warn',lead:ic('network',18),title:'10.20.11.0/24',sub:'Wireless · VLAN 110',cells:[`<span class="mono">? / 254</span>${bar(0,'warn')}`,state('warn','Cannot sweep'),btn('Open','arrow-right')]}],[{h:'Used',w:'150px'},{h:'Sweep',w:'140px'},{h:'',w:'90px'}]),'',true);
+P['ipam/subnets/:subnetId'] = () => head('10.20.9.0/24','Workstations · VLAN 90 · gateway 10.20.9.1',[btn('Edit','edit'),btn('Sweep now','search',true)],['IP address management','10.20.9.0/24'])
+ + facts([{k:'Usable',v:mono('254')},{k:'Registered',v:mono('119')},{k:'Seen by sweep',v:mono('121')},{k:'Drift',v:mono('2')+' unregistered'},{k:'Site server',v:'rack-b4-relay'},{k:'Scan authorized',v:state('ok','Yes')}])
+ + tabs(['Addresses','Ranges','Sweeps','Drift'])
+ + panel('','',`<div class="heat">${[...Array(254)].map((_,i)=>`<i class="${i<119?'h-run':i<121?'h-warn':''}"></i>`).join('')}</div><p class="note" style="margin-top:10px">Each square is one address. Blue is registered, amber was seen but is not registered, grey is free.</p>`);
+P['ipam/registry'] = () => head('Registry','Every address with a name.',[btn('Add address','plus',true)],['IP address management','Registry'])+panel('','',rows([{lead:ic('device-desktop',18),title:'10.20.9.114',sub:'ws-holloway · DHCP reservation',cells:[mono('a4:83:e7:2b:11:9c'),mono('Seen today')]},{lead:ic('printer',18),title:'10.20.9.201',sub:'3rd floor printer · static',cells:[mono('00:1e:8f:aa:03:41'),mono('Seen today')]}],[{h:'MAC',w:'170px'},{h:'',w:'100px'}]),'',true);
+P['ipam/scan-authorizations'] = () => head('Scan authorizations','This grant decides where the platform puts packets on somebody\'s wire. Admin-tier for that reason.',[btn('Authorize a subnet','plus',true)],['IP address management','Scan authorizations'])+panel('','',rows([{lead:ic('shield-check',18),title:'10.20.4.0/24',sub:'Authorized 2 Aug by Ines Caetano',cells:[state('ok','Active'),mono('41 sweeps')]},{lead:ic('shield-check',18),title:'10.20.9.0/24',sub:'Authorized 2 Aug by Ines Caetano',cells:[state('ok','Active'),mono('41 sweeps')]},{lead:ic('shield-check',18),title:'10.20.11.0/24',sub:'Authorized 26 Aug by Helgar Palmieri',cells:[state('warn','No site server'),mono('0 sweeps')]}],[{h:'State',w:'140px'},{h:'',w:'100px'}]),'',true);
+P['ipam/import'] = () => head('Import','From a spreadsheet, a DHCP export, or another IPAM.',[],['IP address management','Import'])+panel('','',field('Source',chips(['CSV','Windows DHCP','phpIPAM'],0))+field('File',`<div class="inp" style="border-style:dashed;justify-content:center;color:var(--muted)">${ic('upload',14)} Drop a CSV or click</div>`,'Columns: address, hostname, mac, note. Anything else is ignored and reported.')+btn('Preview import','eye',true));
+P['ipam/search'] = () => head('Search','An address, a hostname, a MAC.',[],['IP address management','Search'])+panel('','',search('10.20.9.114')+`<div style="margin-top:14px">${rows([{lead:ic('device-desktop',18),title:'10.20.9.114',sub:'ws-holloway · 10.20.9.0/24 · reserved',cells:[state('ok','Seen today')]}],[{h:'',w:'130px'}])}</div>`);
+P['ipam/drift'] = () => head('Drift','Addresses the fleet saw that the registry does not know, and the reverse.',[],['IP address management','Drift'])+panel('','',rows([{kind:'warn',lead:ic('arrows-exchange',18),title:'10.20.9.207',sub:'Seen by sweep · not registered',cells:[mono('Today 08:14'),btn('Register','plus')]},{kind:'warn',lead:ic('arrows-exchange',18),title:'10.20.4.99',sub:'Registered as “old-backup-01” · not seen for 40 days',cells:[mono('29 Jul'),btn('Retire','trash')]}],[{h:'Last seen',w:'110px'},{h:'',w:'110px'}]),'',true);
+
+/* ---------------- Platform ---------------- */
+P['jobs'] = () => head('Signed job engine','Every instruction sent to an endpoint is signed here and verified there.',[btn('Retry failed','refresh')])
+ + tiles([{k:'Failed',icon:'circle-x',v:'21',z:'18 patch.apply · 3 inventory',kind:'crit',spark:SP.jobs},{k:'Stalled >1h',icon:'clock-exclamation',v:'7',z:'Dispatched, never acknowledged',kind:'warn'},{k:'Running',icon:'progress',v:'4',z:'Longest 12m'},{k:'Succeeded 24h',icon:'circle-check',v:'1,284',z:'99.1%'}])
+ + panel('Last six hours','',timeline([{kind:'crit',t:'patch.apply',h:'sentinel-db-02',x:6,w:17},{kind:'warn',t:'inventory.collect',h:'build-runner-07',x:22,w:55},{kind:'run',t:'patch.apply',h:'mbp-okonkwo',x:64,w:11},{kind:'ok',t:'patch.scan',h:'fs-archive-01',x:30,w:4},{kind:'ok',t:'backup.run',h:'fs-archive-01',x:44,w:9}],['04:00','05:00','06:00','07:00','08:00','09:00','10:00']))
+ + toolbar(search('Job type, job id, device')+chips(['All','Failed','Stalled','Running'],0),'<span class="mono">47 jobs</span>')
+ + panel('','',rows([{kind:'crit',lead:ic('shield-check',18),title:'patch.apply',sub:'sentinel-db-02',cells:[state('crit','Failed'),mono('3'),mono('3 Sep 22:38'),btn('Retry','refresh')]},{kind:'warn',lead:ic('list-check',18),title:'inventory.collect',sub:'build-runner-07',cells:[state('warn','Stalled 4h'),mono('1'),mono('7 Sep 05:12'),btn('Cancel','x')]}],[{h:'State',w:'120px'},{h:'Attempts',w:'80px'},{h:'Issued',w:'120px'},{h:'',w:'120px'}]),'',true);
+P['enrollment'] = () => head('Enrollment & certificates','Tokens mint identities; certificates are the identity.',[btn('New token','plus',true)])
+ + tabs(['Tokens','Certificates','Revocations'])
+ + tiles([{k:'Active tokens',icon:'key',v:'2'},{k:'Certs expiring 30d',icon:'certificate',v:'3',kind:'warn'},{k:'Revoked',icon:'circle-x',v:'1'}])
+ + panel('','',rows([{lead:ic('key',18),title:'Workstations · Lisbon',sub:'Single-use · 14 of 40 used · expires 30 Sep',cells:[state('ok','Active'),`<span class="mono">14 / 40</span>${bar(35,'ok')}`,btn('Copy install command','copy')]},{lead:ic('key',18),title:'Build runners',sub:'Multi-use · expires 12 Sep',cells:[state('ok','Active'),`<span class="mono">2 / 10</span>${bar(20,'ok')}`,btn('Copy install command','copy')]}],[{h:'State',w:'110px'},{h:'Used',w:'150px'},{h:'',w:'200px'}]),'',true);
+P['agent-packages'] = () => head('Agent packages','Installers for each platform. The hash shown is the one the installer verifies.',[btn('Publish release','upload',true)])
+ + panel('Current release · 1.8.2','Published 2 Sep by Helgar Palmieri',rows([{lead:ic('brand-windows',18),title:'Windows x64',sub:mono('its-agent-windows-amd64.exe')+' · 18 MB',cells:[pill('ok','Signed','shield-check'),btn('Download','download'),btn('Copy install command','copy')]},{lead:ic('brand-ubuntu',18),title:'Linux x64',sub:mono('its-agent-linux-amd64')+' · 16 MB',cells:[pill('ok','Signed','shield-check'),btn('Download','download'),btn('Copy install command','copy')]},{lead:ic('brand-apple',18),title:'macOS arm64',sub:mono('its-agent-darwin-arm64')+' · 17 MB',cells:[pill('ok','Signed','shield-check'),btn('Download','download'),btn('Copy install command','copy')]}],[{h:'Signature',w:'100px'},{h:'',w:'110px'},{h:'',w:'200px'}]),'',true)
+ + panel('Managed distribution','Push the agent through what you already run.',rows([{lead:ic('building',18),title:'Group Policy',sub:'MSI + transform for a computer startup script',cells:[btn('Download bundle','download')]},{lead:ic('cloud-upload',18),title:'Intune',sub:'Win32 app package (.intunewin) with detection rule',cells:[btn('Download bundle','download')]}],[{h:'',w:'160px'}]),'',true);
+P['agent-push/authorizations'] = () => head('Push install','Cause an unenrolled machine to run this platform\'s own installer, from a site server on its own segment. Three authorizations, all required.',[btn('Credential scopes','key'),btn('New authorization','plus',true)])
+ + panel('','',rows([{lead:ic('shield-check',18),title:'10.20.4.0/24',sub:'Authorized 26 Aug by Helgar Palmieri · via rack-b4-relay',cells:[state('ok','Active'),mono('3 pushes'),mono('Expires 26 Nov')]}],[{h:'State',w:'110px'},{h:'Used',w:'90px'},{h:'',w:'130px'}]),'',true)
+ + `<p class="note">A push is refused unless the target is an asset a person vouched for, an authorization covers its address, and a credential is scoped to it. A refusal is recorded before any signature is produced.</p>`;
+P['agent-push/credential-scopes'] = () => head('Credential scopes','Which vaulted credential may be presented to which addresses.',[btn('New scope','plus',true)],['Push install','Credential scopes'])+panel('','',rows([{lead:ic('key',18),title:'Push install · rack B4',sub:'→ 10.20.4.0/24',cells:[state('ok','Active'),mono('3 uses')]}],[{h:'State',w:'110px'},{h:'',w:'90px'}]),'',true);
+P['assistant/autonomy'] = () => head('AI automation','How much the assistant may do on its own. Destructive actions are never reachable by it, at any setting.')
+ + panel('Autonomy',' ',field('Level',chips(['Answer only','Propose actions','Run low-risk actions'],1),'At “Propose”, every action lands in the queue below for a person to approve. Nothing runs by itself.')+field('Model provider',select('Local · openai-compatible · gpt-oss-120b')))
+ + panel('Actions waiting for approval','',rows([{kind:'warn',lead:ic('robot',18),title:'Approve KB5041585 into ring “test”',sub:'Proposed from “what is blocking Windows compliance”',cells:[btn('Reject','x'),btn('Approve','check',true)]}],[{h:'',w:'200px'}]),'',true);
+P['assistant/actions'] = () => head('Assistant actions','Everything the assistant proposed, and what happened to it.',[],['AI automation','Actions'])+panel('','',rows([{lead:ic('robot',18),title:'Approve KB5041585 into ring “test”',sub:'Proposed 09:12',cells:[state('warn','Awaiting approval')]},{lead:ic('robot',18),title:'Acknowledge alert: CPU on build-runner-07',sub:'Proposed yesterday · approved by Mateus Ribeiro',cells:[state('ok','Ran')]}],[{h:'Outcome',w:'160px'}]),'',true);
+P['assistant/actions/:actionId'] = () => head('Approve KB5041585 into ring “test”','Proposed 09:12 from “what is blocking Windows compliance”',[btn('Reject','x'),btn('Approve','check',true)],['AI automation','Actions','Approve KB5041585'])
+ + facts([{k:'Action',v:mono('patch.approve')},{k:'Target',v:'KB5041585 → test'},{k:'Affects',v:mono('12')+' devices'},{k:'Reversible',v:state('ok','Yes, revoke')}])
+ + panel('Why it was proposed','',`<p>Windows compliance in the test ring is 84% and KB5041585 is the single largest gap: missing on 12 of 14 devices. Approving it into “test” is the ring policy's next step; the assistant may not approve into “broad”.</p>`);
+P['platform-status'] = () => head('Platform status','The control plane about itself.',[btn('Refresh','refresh')])
+ + tiles([{k:'API',icon:'activity',v:'OK',kind:'ok'},{k:'Gateway',icon:'wifi',v:'272',z:'agents connected',kind:'ok'},{k:'Worker',icon:'bolt',v:'OK',z:'Beat 12s ago',kind:'ok'},{k:'Database',icon:'database',v:'OK',z:'RLS enforced'}])
+ + panel('Components','',rows([{lead:ic('activity',18),title:'API',sub:'3 replicas · p95 84 ms',cells:[state('ok','Healthy'),mono('v8b3421e')]},{lead:ic('wifi',18),title:'Agent gateway',sub:'272 connections · mTLS',cells:[state('ok','Healthy'),mono('v8b3421e')]},{lead:ic('bolt',18),title:'Worker',sub:'14 sweeps scheduled · queue empty',cells:[state('ok','Healthy'),mono('v8b3421e')]},{lead:ic('lock',18),title:'Vault',sub:'Unsealed · 3 of 5 shares',cells:[state('ok','Healthy'),mono('—')]}],[{h:'State',w:'110px'},{h:'Version',w:'110px'}]).replace('—','n/a'),'',true);
+P['settings'] = () => head('Settings','')
+ + grid2(`<nav class="panel" style="padding:8px">${['General','Identity','Patch','Backup','Health','Notifications','AI assistant'].map((s,i)=>`<a href="#" class="chip" style="display:flex;margin-bottom:4px;border:0${i===2?'':';background:transparent;color:var(--ink-2)'}">${esc(s)}</a>`).join('')}</nav>`,
+   panel('Patch policy','Production · database. Falls back to the org default where no group matches.',
+     `<div style="font-weight:500;margin-bottom:8px">${ic('calendar-week',14)} Maintenance window</div>${week({5:[2,3,4,5]})}<p class="help">${ic('hand-click',13)} Drag to paint. Selected: <b>Saturdays 02:00 to 06:00</b>. Next window opens in 2 days.</p>`
+     + field('Scan frequency',chips(['6 hours','12 hours','Daily','Weekly'],2),'The sweep ticks hourly, so a daily scan lands up to an hour after the interval elapses.')
+     + field('Reboot',chips(['If required','Never','Forced'],0))
+     + `<div class="facts" style="max-width:560px"><div><span class="k">Applies to</span><span class="v">${mono('34')} devices</span></div><div><span class="k">Would install</span><span class="v">${mono('212')} updates</span></div><div><span class="k">Would restart</span><span class="v">${mono('19')} devices</span></div></div>`,
+     btn('Save policy','check',true)),'220px 1fr');
+P['error-monitor'] = () => head('Error monitor','Grouped by fingerprint. A group is a bug, not a log line.',[btn('Resolved','archive')])
+ + tiles([{k:'Open groups',icon:'bug',v:'3'},{k:'Events 24h',icon:'logs',v:'41'},{k:'New today',icon:'sparkles',v:'1',kind:'warn'}])
+ + panel('','',rows([{kind:'warn',lead:ic('bug',18),title:'PatchValidationError: invalid patch scan document',sub:'app.modules.patch.handler · first seen today',cells:[mono('4'),mono('1 device'),btn('Resolve','check')]},{lead:ic('bug',18),title:'ConnectionResetError in gateway.recv',sub:'app.gateway.main · first seen 12 Aug',cells:[mono('37'),mono('9 devices'),btn('Resolve','check')]}],[{h:'Events',w:'80px'},{h:'Scope',w:'100px'},{h:'',w:'100px'}]),'',true);
+P['profile'] = () => head('Your profile','')+panel('','',field('Display name',input('Helgar Palmieri'))+field('Timezone',select('Europe/Lisbon'))+field('Sign-in',`${pill('ok','Passkey','shield-check')} ${pill('ok','MFA','shield-check')}`)+btn('Save','check',true));
+P['software'] = () => head('Software','What is installed across the fleet, from inventory.',[btn('Export','download')])+toolbar(search('Publisher, product, version'),'<span class="mono">1,142 products</span>')+panel('','',rows([{lead:ic('package',18),title:'Google Chrome',sub:'Google LLC · 4 versions',cells:[mono('264'),pill('warn','128 behind on 41')]},{lead:ic('package',18),title:'7-Zip',sub:'Igor Pavlov · 2 versions',cells:[mono('201'),pill('ok','Current')]}],[{h:'Installs',w:'90px'},{h:'',w:'150px'}]),'',true);
+
+/* ================================================================ shell + router
+   Hash-routed like docs/design/itms-prototype.html, so every page is a URL. */
+const NAV = [
+ ['Overview',[['dashboard','Dashboard','layout-dashboard'],['assistant','Assistant','sparkles']]],
+ ['Fleet',[['devices','Devices & Inventory','devices',286],['devices/onboard','Add Devices','topology-star-3'],['device-groups','Device Groups','building'],['health','Health & Alerts','heartbeat',12,'hot'],['security','Security Logs','logs'],['patch','Patch Management','shield-check'],['deploy','Software Deployment','package'],['remote','Remote Control','user-screen'],['credentials','Credentials','key']]],
+ ['Continuity',[['backup','Backup & Restore','database'],['provisioning','Provisioning & Imaging','photo'],['site-servers','Site Servers','server-2']]],
+ ['Service',[['service-desk','Service Desk','ticket',23],['portal','End-user Portal','world'],['notifications','Notifications','bell'],['email-intake','Email Intake','mail'],['sla','SLA Engine','clock']]],
+ ['Governance',[['docs','IT Documentation','book'],['changes','Change Management','git-branch'],['bcp','BCP / DR Tests','shield-lock'],['reports','Reporting & Evidence','chart-bar'],['audit','Immutable Audit','history']]],
+ ['Assets & Spend',[['licenses','Licenses','license'],['subscriptions','Subscriptions','credit-card'],['budget','IT Budget','wallet'],['ipam','IP Address Management','network']]],
+ ['Platform',[['jobs','Signed Job Engine','bolt'],['enrollment','Enrollment & Certificates','certificate'],['agent-packages','Agent Packages','rocket'],['agent-push/authorizations','Push Install','shield-check'],['assistant/autonomy','AI Automation','robot'],['platform-status','Platform Status','activity'],['settings','Settings','settings'],['error-monitor','Error Monitor','bug']]],
+];
+const ALL_ROUTES = Object.keys(P);
+function rail(cur){
+  return `<div class="brand"><i>${ic('shield-check',16)}</i>ITMS</div>` + NAV.map(([g,items])=>`<div class="grp">${esc(g)}</div>`+items.map(([r,l,i,ct,hot])=>
+    `<a href="#/${r}" class="${cur===r||cur.startsWith(r+'/')?'on':''}">${ic(i,17)}<span class="lbl">${esc(l)}</span>${ct?`<span class="ct${hot?' hot':''}">${ct}</span>`:''}</a>`).join('')).join('');
+}
+function topbar(){
+  return `<div class="srch">${search('Find a device, ticket, address, or ask a question')}</div>
+  ${btn('Install agent','download',true)}
+  <span class="ib" title="Health: 1 critical">${ic('heartbeat',17)}<i class="dot"></i></span>
+  <span class="ib ok" title="Platform: healthy">${ic('activity',17)}<i class="dot"></i></span>
+  <span class="ib" title="Notifications">${ic('bell',17)}<i class="dot"></i></span>
+  <span class="me">${avatar('HP',5,30)}<span>Helgar Palmieri<small>org-admin · Toeshee</small></span></span>`;
+}
+function render(){
+  const r = location.hash.replace(/^#\/?/,'') || 'dashboard';
+  const route = P[r] ? r : 'dashboard';
+  document.getElementById('rail').innerHTML = rail(route);
+  document.getElementById('top').innerHTML = topbar();
+  document.getElementById('content').innerHTML = P[route]();
+  document.body.dataset.route = route;
+  document.title = `${route} · ITMS prototype v3`;
+  window.scrollTo(0,0);
+}
+addEventListener('hashchange', render); render();
+
+</script></body></html>

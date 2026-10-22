@@ -1,0 +1,39 @@
+{
+  "additionalProperties": false,
+  "description": "`agent.push_probe` -- the credential-free first contact (spec \u00a74.4).\n\nOpens the transport, completes the key exchange, records the host-key\nfingerprint and the banner, and closes. **It never authenticates, so it\npresents no credential, and this model has no field that could carry one**\n(falsifier 22). Exactly one target, SSH, or WinRM for Windows (Kerberos only) (\u00a713).",
+  "properties": {
+    "dns_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The target's DNS name. Required for `winrm` (Kerberos needs `HTTP/<fqdn>`, not an IP); unused for `ssh`. Optional on the wire so the field is additive.",
+      "title": "Dns Name"
+    },
+    "target_address": {
+      "description": "Exactly one IP literal. Never a CIDR.",
+      "title": "Target Address",
+      "type": "string"
+    },
+    "transport": {
+      "default": "ssh",
+      "description": "`ssh` for Linux/macOS; `winrm` for Windows (Kerberos only). ADDITIVE: older control planes never send `winrm` and older agents never advertise the capability, so a mixed fleet is unaffected.",
+      "enum": [
+        "ssh",
+        "winrm"
+      ],
+      "title": "Transport",
+      "type": "string"
+    }
+  },
+  "required": [
+    "target_address"
+  ],
+  "title": "AgentPushProbeParams",
+  "type": "object"
+}

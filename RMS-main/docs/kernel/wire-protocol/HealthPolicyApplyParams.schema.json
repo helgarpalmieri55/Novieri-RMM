@@ -1,0 +1,109 @@
+{
+  "$defs": {
+    "HealthCheckSpec": {
+      "additionalProperties": false,
+      "description": "One threshold, as the agent receives it (\u00a75.2).\n\n`threshold` is a STRING for the same reason `health_report.value` and\n`health_alert.observed_value` are (\u00a72.4): it must carry \"95\", \"true\" and\n\"running\" without the wire acquiring a numeric type that invites\naggregation. `cadence` is emitted from the check-type REGISTRY and not from\nthe row -- `health_check` has no cadence column, which is what makes that\nstructural rather than a convention.\n\nCarries no device, no credential and no script body. The only strings that\ntravel are a check id, a registry type name, a selector and a threshold.",
+      "properties": {
+        "cadence": {
+          "enum": [
+            "tick",
+            "posture"
+          ],
+          "title": "Cadence",
+          "type": "string"
+        },
+        "check_id": {
+          "title": "Check Id",
+          "type": "string"
+        },
+        "check_type": {
+          "title": "Check Type",
+          "type": "string"
+        },
+        "comparator": {
+          "enum": [
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "eq",
+            "neq",
+            "is"
+          ],
+          "title": "Comparator",
+          "type": "string"
+        },
+        "for_ticks": {
+          "maximum": 60,
+          "minimum": 1,
+          "title": "For Ticks",
+          "type": "integer"
+        },
+        "selector": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Selector",
+          "type": "string"
+        },
+        "threshold": {
+          "maxLength": 64,
+          "title": "Threshold",
+          "type": "string"
+        }
+      },
+      "required": [
+        "check_id",
+        "check_type",
+        "comparator",
+        "threshold",
+        "for_ticks",
+        "cadence"
+      ],
+      "title": "HealthCheckSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "server -> agent: the device's whole check policy (\u00a75.2).\n\nAN EMPTY `checks` LIST IS A LEGAL POLICY AND MEANS \"RUN NOTHING\". It is how\na device whose profile was unassigned is DISARMED, rather than left running\nthe last policy it was given forever: a disarm must be an explicit\ninstruction, not the absence of one.\n\n`checks` is bounded at 32 to match \u00a70.11's database cap, and the three\nintervals are bounded to match `health_profile`'s CHECK constraints -- they\nare what make \u00a70.5's idle claim checkable, and a claim that depends on a\nvalue only the server validated is not a claim about the agent.",
+  "properties": {
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/HealthCheckSpec"
+      },
+      "maxItems": 32,
+      "title": "Checks",
+      "type": "array"
+    },
+    "policy_version": {
+      "minimum": 0,
+      "title": "Policy Version",
+      "type": "integer"
+    },
+    "posture_interval_s": {
+      "minimum": 900,
+      "title": "Posture Interval S",
+      "type": "integer"
+    },
+    "summary_interval_s": {
+      "maximum": 86400,
+      "minimum": 300,
+      "title": "Summary Interval S",
+      "type": "integer"
+    },
+    "tick_interval_s": {
+      "maximum": 3600,
+      "minimum": 60,
+      "title": "Tick Interval S",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "policy_version",
+    "tick_interval_s",
+    "posture_interval_s",
+    "summary_interval_s",
+    "checks"
+  ],
+  "title": "HealthPolicyApplyParams",
+  "type": "object"
+}

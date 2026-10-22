@@ -1,0 +1,101 @@
+{
+  "additionalProperties": false,
+  "description": "Server \u2192 agent for `app.deploy`.\n\n`artifact_ref` IS A PRESIGNED `https://` URL, not the `s3://` reference on\nthe `packages` row. The agent holds no object-store credential and must\nnot (invariant #3), so the control plane resolves the reference at\ndispatch time into a URL good for one GET of one object for the life of\nthe job. It rides inside the signature exactly like the hash does, and it\nis a BEARER CREDENTIAL for its lifetime: never logged, never audited,\nredacted out of every API read path\n(`app.modules.deploy.artifacts.redact_deploy_params`).\n\n`package_identifier` is the identifier a package MANAGER knows the package\nby \u2014 `Mozilla.Firefox`, `googlechrome` \u2014 and is meaningful only for\n`winget`/`choco`. It is ADDITIVE AND OPTIONAL, which is the whole\ncompatibility argument (`docs/kernel/wire-protocol/README.md`):\n\n* **New control plane \u2192 old agent.** An agent built before this field\n  exists ignores the unknown member (Go's `encoding/json` drops it) and\n  goes on deriving the identifier from `detection_rule.name`, which is\n  what `manager_package_identifier` falls back to when the catalog has no\n  explicit value \u2014 so the two sides compute the same string and nothing\n  changes in the field.\n* **New agent \u2192 old control plane.** The member is absent, which is\n  `null`, which is the state the agent already handles: it falls back to\n  `detection_rule.name` and refuses if that is unusable.\n\nA REQUIRED field would have been the outage: an old agent does not send\nit back, does not understand it, and a control plane that insisted on it\nwould break every deployed agent at once.",
+  "properties": {
+    "action": {
+      "enum": [
+        "install",
+        "update",
+        "uninstall"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "artifact_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Artifact Ref"
+    },
+    "artifact_sha256": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Artifact Sha256"
+    },
+    "deferral_hours": {
+      "default": 24,
+      "title": "Deferral Hours",
+      "type": "integer"
+    },
+    "detection_rule": {
+      "additionalProperties": true,
+      "default": {},
+      "title": "Detection Rule",
+      "type": "object"
+    },
+    "install_args": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Install Args"
+    },
+    "installer_type": {
+      "enum": [
+        "msi",
+        "exe",
+        "winget",
+        "choco",
+        "pkg",
+        "dmg",
+        "deb",
+        "rpm",
+        "script"
+      ],
+      "title": "Installer Type",
+      "type": "string"
+    },
+    "package_identifier": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Package Identifier"
+    },
+    "uninstall_rule": {
+      "additionalProperties": true,
+      "default": {},
+      "title": "Uninstall Rule",
+      "type": "object"
+    }
+  },
+  "required": [
+    "action",
+    "installer_type"
+  ],
+  "title": "AppDeployParams",
+  "type": "object"
+}

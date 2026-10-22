@@ -1,0 +1,20 @@
+{
+  "additionalProperties": false,
+  "description": "agent \u2192 server: confirmation that the endpoint swapped its identity.\n\n`cert_fingerprint` is checked against the fingerprint of the certificate the\nSERVER issued (`confirm_installed_cert`) \u2014 the agent's claim is never taken\nas the new identity, only as an acknowledgement of it. `not_after` is the\nagent's own reading of the leaf and is recorded, not trusted.",
+  "properties": {
+    "cert_fingerprint": {
+      "title": "Cert Fingerprint",
+      "type": "string"
+    },
+    "not_after": {
+      "title": "Not After",
+      "type": "string"
+    }
+  },
+  "required": [
+    "cert_fingerprint",
+    "not_after"
+  ],
+  "title": "AgentCertInstallResult",
+  "type": "object"
+}

@@ -1,0 +1,49 @@
+{
+  "description": "What the agent reports when a screen session is over, for any reason.\n\nThe agent reports the job ``succeeded`` for every outcome it can name;\n``failed`` means the handler could not run at all. ``outcome`` is read\nleniently by the server: an unknown value is stored as ``error``.",
+  "properties": {
+    "detail": {
+      "default": "",
+      "title": "Detail",
+      "type": "string"
+    },
+    "duration_s": {
+      "default": 0,
+      "title": "Duration S",
+      "type": "integer"
+    },
+    "outcome": {
+      "enum": [
+        "ended",
+        "denied",
+        "consent_timeout",
+        "no_user_session",
+        "capture_unavailable",
+        "permission_missing",
+        "unsupported_display",
+        "relay_refused",
+        "expired",
+        "error"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "platform_state": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Platform State"
+    }
+  },
+  "required": [
+    "outcome"
+  ],
+  "title": "RemoteScreenOpenResult",
+  "type": "object"
+}

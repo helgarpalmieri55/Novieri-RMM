@@ -1,0 +1,96 @@
+{
+  "$defs": {
+    "SecurityEventDoc": {
+      "additionalProperties": false,
+      "properties": {
+        "event_type": {
+          "enum": [
+            "logon_success",
+            "logon_failure",
+            "logoff",
+            "account_lockout",
+            "privilege_elevation",
+            "admin_group_change",
+            "policy_change"
+          ],
+          "title": "Event Type",
+          "type": "string"
+        },
+        "event_uid": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Event Uid",
+          "type": "string"
+        },
+        "outcome": {
+          "default": "n_a",
+          "enum": [
+            "success",
+            "failure",
+            "n_a"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "raw": {
+          "additionalProperties": true,
+          "title": "Raw",
+          "type": "object"
+        },
+        "source": {
+          "default": "",
+          "maxLength": 100,
+          "title": "Source",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "username": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Username",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_uid",
+        "ts",
+        "event_type"
+      ],
+      "title": "SecurityEventDoc",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "agent -> server: buffered security events (at-least-once; server dedupes\non (device, event_uid)).",
+  "properties": {
+    "events": {
+      "items": {
+        "$ref": "#/$defs/SecurityEventDoc"
+      },
+      "maxItems": 500,
+      "minItems": 1,
+      "title": "Events",
+      "type": "array"
+    },
+    "kind": {
+      "const": "security_events",
+      "title": "Kind",
+      "type": "string"
+    },
+    "v": {
+      "const": 1,
+      "title": "V",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "kind",
+    "events"
+  ],
+  "title": "SecurityEventsMsg",
+  "type": "object"
+}

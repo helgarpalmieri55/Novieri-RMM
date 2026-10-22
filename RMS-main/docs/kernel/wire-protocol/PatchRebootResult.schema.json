@@ -1,0 +1,41 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "scheduled_for": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Scheduled For"
+    },
+    "state": {
+      "enum": [
+        "scheduled",
+        "not_needed",
+        "window_too_short"
+      ],
+      "title": "State",
+      "type": "string"
+    },
+    "user_present": {
+      "default": false,
+      "title": "User Present",
+      "type": "boolean"
+    },
+    "workstation": {
+      "default": false,
+      "title": "Workstation",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "state"
+  ],
+  "title": "PatchRebootResult",
+  "type": "object"
+}

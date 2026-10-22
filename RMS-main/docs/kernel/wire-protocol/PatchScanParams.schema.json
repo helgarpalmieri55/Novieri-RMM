@@ -1,0 +1,12 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "result_version": {
+      "default": 2,
+      "title": "Result Version",
+      "type": "integer"
+    }
+  },
+  "title": "PatchScanParams",
+  "type": "object"
+}

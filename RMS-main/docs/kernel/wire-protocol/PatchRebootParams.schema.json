@@ -1,0 +1,30 @@
+{
+  "additionalProperties": false,
+  "description": "`patch.reboot`: restart inside the maintenance window. A signed-in user\non a workstation gets `deferral_hours` of notice; anything else restarts\nafter a short grace, and only if that lands before `not_after`.",
+  "properties": {
+    "deferral_hours": {
+      "default": 24,
+      "title": "Deferral Hours",
+      "type": "integer"
+    },
+    "not_after": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Not After"
+    },
+    "only_if_required": {
+      "default": true,
+      "title": "Only If Required",
+      "type": "boolean"
+    }
+  },
+  "title": "PatchRebootParams",
+  "type": "object"
+}

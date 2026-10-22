@@ -1,0 +1,1114 @@
+@import "./base.css";
+
+/* Page-level component styles -- TRANSCRIBED from
+ * `docs/design/itms-prototype-v3.html` (operator approved 2026-09-07), rule
+ * for rule, in the design's own vocabulary: five type sizes, one radius
+ * ladder (6 / 10 / 999), one palette, and no weight above 600.
+ *
+ * TWO KINDS OF SELECTOR LIVE HERE, and the comments say which is which.
+ *   v3's own (`.ph`, `.btn`, `.pill`, `.panel-h`, `.tb`, `.inp`, `.chip`,
+ *   `.empty`, `.kv`, ...) carry the design's declarations unchanged.
+ *   The console's hooks (`.stats-grid`, `.page-head`, `.input-field`,
+ *   `.tab.active`, `.panel-body`, `.empty-icon`, `.notice.gold`, ...) are the
+ *   class names 165 files already render. Each is either comma-joined onto
+ *   the v3 rule whose look it takes, or restated beside it with the same
+ *   declarations, so a module changes look without changing code and can
+ *   migrate to the v3 name when its page is ported.
+ *
+ * Rules the design lacked and the console needed (`.btn:disabled`, the
+ * notice family, `.form-grid`, `code.code`, the modal) were ADDED TO THE
+ * DESIGN FIRST, in its "console additions" block, and transcribed from there;
+ * `src/test/base-styles.test.ts` compares them declaration for declaration.
+ *
+ * Do not tidy these rules. If one looks wrong it is wrong in the design, and
+ * the design is where it gets fixed.
+ */
+
+/* ---------------------------------------------------------------- page head */
+
+/* v3 `.ph` / `.crumb` / `.ph-row` / `.ph h1` / `.ph .sub` / `.ph-act`. */
+.ph { margin-bottom: 18px;
+}
+.crumb { display: flex; align-items: center; gap: 4px; font-size: var(--t-sm); color: var(--muted); margin-bottom: 6px;
+}
+/* WRAPS: the action row drops below a long title on a narrow viewport. */
+.ph-row { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap;
+}
+.ph h1 { font-size: var(--t-h1); font-weight: 600; letter-spacing: -.015em;
+}
+.ph .sub { color: var(--muted); margin-top: 3px; max-width: 70ch;
+}
+/* May shrink and wrap within itself; the actions stay right-aligned. `flex: 0
+ * 1 auto` is the half that makes wrapping reachable at all: a row that refuses
+ * to shrink never receives a width small enough to fold at. */
+.ph-act { margin-left: auto; display: flex; gap: 8px; flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end;
+}
+/* Console hooks: one module still writes `.page-head` and `.head-actions`
+ * by hand. Same declarations as `.ph-row` and `.ph-act`. */
+.page-head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 18px;
+}
+.head-actions { margin-left: auto; display: flex; gap: 8px; flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end;
+}
+
+/* ----------------------------------------------------------------- buttons */
+
+/* v3 `.btn`. THE BORDER IS THE CONTROL: `.btn.ghost` paints no background, so
+ * on a white card this one line is the entire visual claim that there is a
+ * button here, which is what SC 1.4.11 means by "information required to
+ * identify a user interface component". `--line-control` clears 3:1 on every
+ * surface a button lands on; `contrast.test.ts` computes it. */
+.btn { display: inline-flex; align-items: center; gap: 6px; font: 500 var(--t-body)/1 var(--sans); padding: 9px 13px; border-radius: var(--r-ctl); border: 1px solid var(--line-control); background: var(--surface); color: var(--ink); cursor: pointer; white-space: nowrap;
+}
+/* Console addition (design first). Hover repaints the ground AND hardens the
+ * edge; a ground wash alone (`--surface-2` on `--surface`, 1.02:1) would be a
+ * change the eye does not register. Placed BEFORE the variants so a primary
+ * or danger button keeps its own edge under the pointer. */
+.btn:hover { background: var(--surface-2); border-color: var(--ink-2);
+}
+/* v3 `.btn.pri`; `.btn.primary` is the console's name for the same button
+ * (ten modules assert on it) and carries the same declarations. */
+.btn.pri { background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+}
+/* A FILLED BUTTON ANSWERS THE POINTER ON ITS FILL. `.btn:hover` above steps
+ * the ground for the white secondary; on a primary it changed only the
+ * border, 1.80:1 from the accent, which the hover-step guard in
+ * `contrast.test.ts` measured and refused. `--accent-2` is the deeper accent
+ * (design edit 8), and white on it is 7.57:1. */
+.btn.primary:hover, .btn.pri:hover { background: var(--accent-2); border-color: var(--accent-2);
+}
+/* v3 `.btn.ghost`: no edge, accent ink. */
+.btn.ghost { border-color: transparent; background: transparent; color: var(--accent);
+}
+.btn.ghost:hover { background: var(--accent-s);
+}
+/* Console addition: the destructive button keeps the secondary shape and
+ * takes the critical ink on its edge and label. */
+.btn.danger { border-color: var(--sev-crit); color: var(--sev-crit);
+}
+/* Design addition, `.btn.icon-only`'s neighbour: a destructive action that
+ * reads as text, set apart from a row's ordinary and quiet actions rather
+ * than a bordered button shouting alongside them (UsersTab's Delete). Three
+ * classes, not `.btn.ghost` alone -- `.btn.danger`'s border-color would still
+ * win at equal specificity on source order, redrawing the edge ghost removes. */
+.btn.ghost.danger { border-color: transparent; color: var(--sev-crit);
+}
+.btn.ghost.danger:hover { background: var(--sev-crit-s);
+}
+.btn.small { padding: 6px 10px; font-size: var(--t-sm);
+}
+.btn.icon-only { padding: 9px;
+}
+/* Console addition: a PRESSED button, drawn as `.chip.on` is drawn, because a
+ * pressed button and a selected chip are the same idea. `Btn`'s `pressed`
+ * emits `aria-pressed` beside it, so the state is not carried by colour
+ * alone. Before `:disabled` for the reason that rule records. */
+.btn.on { background: var(--accent-s); border-color: var(--accent); color: var(--accent);
+}
+.btn:active { transform: translateY(1px);
+}
+/* THE OFFSET IS LOAD-BEARING. v3 has one accent, so a ring drawn against
+ * `.btn.pri`'s own fill would be accent on accent, 1:1. Two pixels outside
+ * the button puts the ring on the page, where it is measured. */
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
+}
+/* LAST IN THE `.btn` BLOCK ON PURPOSE. `.btn:disabled` is (0,2,0), the same
+ * specificity as the variants and the hover, so source order is the entire
+ * mechanism by which a disabled primary stops being accent-filled: it
+ * flattens every variant to one inert surface without an `!important`.
+ * `base-styles.test.ts` pins the order. Not a contrast rule -- SC 1.4.11
+ * exempts inactive components -- but the state has to be distinguishable,
+ * and it is in four ways: edge, ink, fill and cursor. */
+.btn:disabled { cursor: not-allowed; transform: none; color: var(--muted); background: var(--surface-2); border-color: var(--line-2); box-shadow: none;
+}
+
+/* -------------------------------------------------------------------- tabs */
+
+/* v3 `.tabs` / `.tabs a` / `.tabs a.on`. The console's `Tabs` renders
+ * `<button class="tab">` (a real tablist with roving tabindex) and three
+ * module navs render `<a class="tab active">`; both hooks take the design's
+ * declarations. */
+.tabs { display: flex; flex-wrap: wrap; gap: 2px 0; border-bottom: 1px solid var(--line-2); margin-bottom: 18px;
+}
+/* EVERY FOLDED ROW GETS THE STRIP'S HAIRLINE, not just the last one.
+ * `.tabs` rules along its OWN bottom edge, which under a wrapped strip is the
+ * bottom of the last row: /budget folds to two rows at 390px, /devices/:id to
+ * three, and every row above the last had nothing under it, so the first row
+ * read as detached from the page. The line is painted by each tab, as a 1px
+ * background strip at the bottom of its BORDER box -- which is exactly where
+ * the container's line sits (`margin-bottom: -1px` overlaps them), so the last
+ * row is pixel-identical to what it was, and the rows above it now have the
+ * same rule.
+ *
+ * A BACKGROUND, NOT A BORDER, because a background paints UNDER the element's
+ * own border: `.on` / `.active` covers it with the 2px accent for free, where
+ * a border-bottom colour would need a second rule to unset and would double
+ * the container's line to 2px on the last row. The column gap is 0 for the
+ * same reason the line exists: 2px of gap chopped it into dashes. */
+.tabs a, .tabs .tab { padding: 9px 13px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; background: transparent; border-top: 0; border-left: 0; border-right: 0; font-size: var(--t-body); white-space: nowrap; background-image: linear-gradient(var(--line-2), var(--line-2)); background-origin: border-box; background-repeat: no-repeat; background-size: 100% 1px; background-position: 0 100%;
+}
+.tabs a:hover, .tabs .tab:hover { color: var(--ink);
+}
+.tabs a.on, .tabs .tab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 500;
+}
+.tab-count { color: var(--muted); font-size: var(--t-sm);
+}
+/* A strip that scrolls instead of folding (design file, console additions
+ * wave 10). The hairline is an inset shadow, because `overflow` clips the
+ * tabs' -1px overlap onto a border. */
+.tabs.scroll { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; border-bottom: 0; box-shadow: inset 0 -1px 0 var(--line-2); scrollbar-width: none; }
+.tabs.scroll > .tab { flex: none; margin-bottom: 0; }
+
+/* ------------------------------------------------------------------- tiles */
+
+/* v3 `.tiles` is a 12-column grid with each tile spanning 3. The console's
+ * `StatsGrid` takes a column COUNT and folds it through the media queries at
+ * the bottom of this file; the count is an ATTRIBUTE so those steps can
+ * outrank it (an inline style would beat every one of them). The per-count
+ * rules and the steps are all (0,2,0) -- source order decides, and the steps
+ * come last. `.tile` itself is in `viz.css` beside the component. */
+/* `align-items: start`: A TILE IS AS TALL AS WHAT IS IN IT. Grid stretches
+ * its items by default, so one tile carrying a two-line caption made every
+ * tile beside it that carries none 120px tall with the bottom 28px empty --
+ * /ipam (MANAGED SUBNETS and ASSIGNABLE against WITH DRIFT and NEVER SWEPT),
+ * /enrollment, /backup/repositories. `min-height: 92px` on `.tile` is what
+ * keeps the ordinary row -- every tile the same shape -- uniform. */
+.tiles { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; align-items: start;
+}
+/* The design spans each tile 3 of the 12 inline; a caller that wants another
+ * width sets it on the tile and this default yields to it. */
+.tiles > .tile { grid-column: span 3;
+}
+.stats-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; align-items: start;
+}
+.stats-grid[data-columns="1"] { grid-template-columns: minmax(0, 1fr);
+}
+.stats-grid[data-columns="2"] { grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.stats-grid[data-columns="3"] { grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.stats-grid[data-columns="4"] { grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.stats-grid[data-columns="5"] { grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.stats-grid[data-columns="6"] { grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+/* TWO TILES ARE TWO HALVES, whatever count the caller declared. The count is
+ * a track count, not a child count, and the two two-tile rows in the console
+ * were drawn by two different grids: /discovered declares four tracks and got
+ * ~280px tiles with the right half of the row empty, /service-desk/my-work
+ * declares two and got ~570px. One of them had to be wrong, and the rest of
+ * the console answers which: a three-tile row fills the width in thirds and a
+ * four-tile row in quarters, so a two-tile row fills it in halves.
+ *
+ * THE SPECIFICITY IS DELIBERATE, exactly as it is for the per-count rules
+ * above. `:where()` contributes nothing, so this is (0,2,0) -- the same as
+ * `[data-columns="4"]`, which it beats on source order -- and the folding
+ * steps at the foot of this file are (0,2,0) and later still, so a handset
+ * still gets one column. Raise it to `:has(...)` unwrapped, (0,3,0), and the
+ * two-tile row stops folding at 640px. */
+.stats-grid[data-columns]:not([data-keep-tracks]):where(:has(> :nth-child(2):last-child)) { grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* ------------------------------------------------------------------- grids */
+
+/* v3 `.g2`. The console's `.grid-2/3/4` and `.cards` are the same idea with a
+ * fixed ratio each; the asymmetric two-column row does not stretch its short
+ * side to the tall side's height, which is grid's default and read as
+ * "content failed to load" on the dashboard. */
+.g2 { display: grid; gap: 16px; align-items: start;
+}
+/* A grid item's default `min-width: auto` lets a wide child (the 414px week
+ * grid, a table) push its column past the viewport instead of scrolling
+ * inside it; measured as a 433px document at 390 on the preview. The design
+ * writes its `.g2` columns as `1.4fr 1fr` inline, so the floor goes on the
+ * items rather than in every ratio. */
+.g2 > * { min-width: 0;
+}
+.grid { display: grid; gap: 16px;
+}
+.grid-2 { grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr); align-items: start;
+}
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.span-2 { grid-column: span 2;
+}
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
+}
+
+/* ------------------------------------------------------------------- panel */
+
+/* v3 `.panel` / `.panel-h` / `.panel-h h2` / `.panel-h p` / `.panel-a` /
+ * `.panel-b` / `.panel-b.bare`. The console's `.panel-head`, `.panel-title`,
+ * `.panel-subtitle`, `.panel-actions` and `.panel-body` are the same five
+ * parts under the names three modules still write by hand. */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow); margin-bottom: 16px; overflow: hidden;
+}
+.panel.pad { padding: 16px 18px;
+}
+.panel-h, .panel-head { display: flex; align-items: flex-start; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line);
+}
+.panel-h h2, .panel-title { font-size: var(--t-h2); font-weight: 600;
+}
+.panel-h p, .panel-subtitle { color: var(--muted); font-size: var(--t-sm); margin-top: 2px;
+}
+.panel-a, .panel-actions { margin-left: auto; display: flex; gap: 8px; align-items: center;
+}
+.panel-b, .panel-body { padding: 16px 18px;
+}
+.panel-b.bare { padding: 0;
+}
+.panel-link { color: var(--accent); font-size: var(--t-sm); font-weight: 500; cursor: pointer;
+}
+.panel-link:hover { text-decoration: underline;
+}
+
+/* --------------------------------------------------------------- list rows */
+
+/* v3's `.list` / `.lrow` / `.lhead` family, transcribed whole. The console's
+ * tables take the same look through `th`/`td` in base.css; these rules are
+ * for the pages that adopt v3's grid rows directly. */
+.list { overflow-x: auto;
+}
+.lrow { display: grid; align-items: center; gap: 0 12px; min-width: 720px; border-bottom: 1px solid var(--line); background: var(--surface);
+}
+.lrow:last-child { border-bottom: 0;
+}
+.lrow:not(.lhead):hover { background: var(--surface-2);
+}
+.lhead { font-size: var(--t-cap); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); padding: 9px 0; border-bottom: 1px solid var(--line-2);
+}
+.lhead span { padding-right: 12px;
+}
+.lrow .gut { align-self: stretch; background: transparent;
+}
+.lrow.crit .gut { background: var(--sev-crit);
+}
+.lrow.warn .gut { background: var(--sev-warn);
+}
+.lrow.run .gut { background: var(--sev-run);
+}
+.lrow .lead { display: flex; align-items: center; justify-content: center; color: var(--muted); padding: 11px 0;
+}
+.lrow .ttl { padding: 10px 0; min-width: 0;
+}
+.lrow .ttl b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lrow .ttl small { display: block; font-size: var(--t-sm); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lrow .cell { padding: 10px 14px 10px 0; font-size: var(--t-body); min-width: 0; color: var(--ink-2);
+}
+.cell .mono { font-size: var(--t-sm);
+}
+
+/* THE TABLE SCROLLS, NOT THE PAGE. `.table-wrap`'s `overflow-x: auto` is one
+ * half; the floor on the table is the other -- an auto-layout table never
+ * becomes wider than its box, so without a floor it squashes instead of
+ * scrolling. 560px is modest: above ~600px `table { width: 100% }` governs,
+ * below it the columns keep their shape and the card scrolls (SC 1.4.10). */
+.table-wrap { overflow-x: auto;
+}
+/* THE FLOOR IS `fit-content(560px)`, NOT `560px`, AND THE DIFFERENCE IS A
+ * FALSE SCROLL AFFORDANCE ON EVERY NARROW CARD.
+ *
+ * A flat 560px floor asks the wrong question. It says "no table is ever
+ * narrower than 560px", when what the floor is for is "a table must not be
+ * squeezed below the width its columns need". Those agree on a full-width
+ * card and part company inside a half-width one: `/portal/tickets/tkt-1`'s
+ * Status history is three short columns that want about 380px, in a side card
+ * about 500px wide, and the floor pushed it to 560 and made the card scroll --
+ * with `SCROLL FOR MORE COLUMNS` under it -- at a 1440px viewport with room to
+ * spare. `/ipam/registry`'s Sites card was the same.
+ *
+ * `fit-content(560px)` is `min(max-content, max(min-content, 560px))`: a table
+ * whose columns fit in less than 560px floors at its own max-content and
+ * simply fits; a table that needs more floors at 560px exactly as before, so
+ * the handset behaviour this rule exists for is unchanged. The plain 560px
+ * above it is the fallback for an engine without `fit-content()`, which gets
+ * today's behaviour rather than none.
+ *
+ * `width: 100%` (base.css) still governs above the floor, so nothing here
+ * makes a table narrower than its card. */
+.table-wrap > table { min-width: 560px; min-width: fit-content(560px);
+}
+/* AND IT SAYS SO WHEN IT SCROLLS. The floor above is correct and invisible:
+ * on a handset the trailing columns of a five-column list are outside the
+ * card, the wrapper is a tab stop so a keyboard reaches them, and a sighted
+ * touch user had nothing on screen telling them to drag. `Table` measures
+ * `scrollWidth` against `clientWidth` and renders the chevron only while
+ * there is more to the right; it is `aria-hidden`, a restatement for the eye
+ * of what the keyboard already has. The fade is what makes it read as "the
+ * row continues" rather than as a control. */
+.table-scroll { display: block;
+}
+/* UNDER the scroller, not over it. Drawn as a right-edge gradient first, and
+ * the browser pass measured the cost: three avatars in the trailing column
+ * read 1.28:1, 1.31:1 and 1.53:1, because a white veil over a person's cell
+ * is a white veil over the person's initials. A cue that makes the content it
+ * points at unreadable is not a cue. */
+.table-scroll-hint { display: flex; align-items: center; justify-content: flex-end; gap: 4px; padding: 6px 18px 2px; font-size: var(--t-cap); text-transform: uppercase; letter-spacing: .1em; color: var(--muted);
+}
+/* v3's severity gutter, on a table cell: the 3px `.gut` column becomes a 3px
+ * inset edge on the row's first cell (`Td gutter`), painted with the row's
+ * kind. `run` and `ok` draw nothing, as in the design. */
+td.gut-crit { box-shadow: inset 3px 0 0 var(--sev-crit);
+}
+td.gut-warn { box-shadow: inset 3px 0 0 var(--sev-warn);
+}
+td.gut-run { box-shadow: inset 3px 0 0 var(--sev-run);
+}
+/* v3's lead glyph beside the row title, inside a cell (`Td lead`). */
+.cell-lead { display: flex; align-items: center; gap: 10px; min-width: 0;
+}
+.cell-lead > .lead { display: flex; align-items: center; justify-content: center; color: var(--muted); flex: none;
+}
+
+/* A CELL THAT STATES ITS OWN MEASURE (`Td clip`).
+ *
+ * v3 truncates the row title -- `.lrow .ttl b` is
+ * `white-space:nowrap;overflow:hidden;text-overflow:ellipsis` -- and the
+ * console's transcription of that look onto `.cell-title` kept the weight and
+ * the ink and dropped the clipping. The consequence was measured across the
+ * whole console at 390px: the first column of a horizontally scrolling table
+ * is the one thing that must stay legible, and it was the one thing allowed to
+ * shrink, so `CR-118 Upgrade core switch firmware` came out as six stacked
+ * one-word lines in a 65px column and the row stood 200px tall.
+ *
+ * The three clipping declarations are restored here rather than on
+ * `.cell-title` itself because they are only correct in a cell that has been
+ * given a measure. `nowrap` with no `max-width` does not truncate -- it makes
+ * the column as wide as the longest string in it. So the measure and the
+ * clipping arrive together, on the cells a page has opted in, and `.cell-title`
+ * outside a table keeps wrapping.
+ *
+ * The full value is on the cell's `title` (`Td` derives it from the cell's own
+ * text), so the ellipsis costs a hover and not the information. */
+td.cell-clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+td.cell-clip .cell-lead > *, td.cell-clip .cell-main > * { min-width: 0; overflow: hidden;
+}
+td.cell-clip .cell-title, td.cell-clip .cell-sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------- pills */
+
+/* v3 `.pill` and the six `.p-<kind>` tones. The base rule is GEOMETRY ONLY;
+ * a pill with no kind is colourless on purpose, so `StatusPill` cannot paint
+ * a state it has not classified. Every pill also carries its kind's icon
+ * (`kindOf` in components.tsx), because colour is never the only carrier. */
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); font-weight: 500; padding: 3px 9px 3px 7px; border-radius: var(--r-pill); white-space: nowrap;
+}
+.p-crit { background: var(--sev-crit-s); color: var(--sev-crit);
+}
+.p-warn { background: var(--sev-warn-s); color: var(--sev-warn);
+}
+.p-ok { background: var(--sev-ok-s); color: var(--sev-ok);
+}
+.p-run { background: var(--sev-run-s); color: var(--sev-run);
+}
+.p-mut { background: var(--sev-mut-s); color: var(--sev-mut);
+}
+.p-info { background: var(--accent-s); color: var(--accent);
+}
+
+/* ----------------------------------------------------------------- avatars */
+
+/* v3 `.av` / `.who`. The console's `.avatar` (two modules) takes the same
+ * shape at 30px on the first avatar tone. */
+.av { display: inline-grid; place-items: center; border-radius: 50%; color: var(--accent-ink); font-weight: 600; letter-spacing: .02em; flex: none;
+}
+.who { display: inline-flex; align-items: center; gap: 7px;
+}
+.avatar { width: 30px; height: 30px; display: inline-grid; place-items: center; border-radius: 50%; color: var(--accent-ink); font-size: var(--t-sm); font-weight: 600; letter-spacing: .02em; background: var(--av-1);
+}
+
+/* -------------------------------------------------------------------- bars */
+
+/* v3 `.bar` / `.bar i` / `.bar .<kind>` and the labelled `.prog`. The
+ * console's `Progress` renders `.bar.progress` with an `<i>` fill and keeps
+ * its `role="progressbar"`; `.progress` is the hook its tests query. */
+.bar { display: block; height: 5px; border-radius: var(--r-pill); background: var(--line); overflow: hidden; min-width: 70px;
+}
+.bar i { display: block; height: 100%;
+}
+.bar .crit { background: var(--sev-crit);
+}
+.bar .warn { background: var(--sev-warn);
+}
+.bar .ok { background: var(--sev-ok);
+}
+.bar .run { background: var(--sev-run);
+}
+/* THE NEUTRAL RUNG. A bar that is measuring something with no target to hit
+ * (a compliance split that nobody is held to) is not a running job, and
+ * painting it `--sev-run` said it was. Same rung `.pill.mut` uses. */
+.bar .mut { background: var(--sev-mut);
+}
+.prog { margin-bottom: 12px;
+}
+.prog-l { display: flex; justify-content: space-between; font-size: var(--t-sm); margin-bottom: 4px;
+}
+.prog .mono { color: var(--muted);
+}
+
+/* ------------------------------------------------------------------- forms */
+
+/* v3 `.field` / `.field label` / `.field .help`, plus the console's
+ * `.field > span` (design addition: `Field` wraps the control in the label
+ * and puts the caption in a span). */
+.field { margin-bottom: 16px; max-width: 560px; display: block;
+}
+.field label, .field > span { display: block; font-weight: 500; font-size: var(--t-sm); margin-bottom: 5px;
+}
+.field .help { font-size: var(--t-sm); color: var(--muted); margin-top: 5px;
+}
+/* Design addition (wave 5): the box that holds a field AND its help.
+ *
+ * `Field` wraps the control in the <label>, so anything rendered there joins
+ * the control's accessible NAME -- `/agent-push/authorizations` shipped a
+ * field announced as its whole help sentence. The help is a SIBLING of the
+ * label, wired with `aria-describedby`, and this is what makes caption /
+ * control / help one stack again.
+ *
+ * `.field-wrap > .help` EXISTS BECAUSE `.field .help` ABOVE IS A DESCENDANT
+ * SELECTOR. Outside the label the paragraph is no longer a descendant of
+ * `.field`, so it would draw at body size in full ink -- a second caption
+ * rather than a hint. Same two declarations, on the selector this markup has;
+ * no `margin-top`, because the 4px below the field already is the gap.
+ *
+ * THE 560px CAP LIVES ON THE WRAPPER, not on the label inside it. `.field`
+ * caps itself and `.form-grid > .field` lifts the cap so a field fills its
+ * cell -- and once the grid's child is `.field-wrap`, NEITHER of those
+ * matches the label. Left alone a field carrying help draws a 560px control
+ * beside a 670px one in the same page-level grid row, a `full` textarea in a
+ * modal loses 42px against the `.field.full` beside it, and the paragraph --
+ * capped only by being a descendant of `.field` -- goes unbounded the moment
+ * it leaves. The box owns the measure: the wrapper carries the 560px, both
+ * children fill it, and `.form-grid > .field-wrap` lifts it exactly as
+ * `.form-grid > .field` does. One number, one place, both children. */
+.field-wrap { margin-bottom: 14px; max-width: 560px;
+}
+.field-wrap > .field { margin-bottom: 4px; max-width: none;
+}
+.field-wrap.full { grid-column: 1 / -1;
+}
+.field-wrap > .help { font-size: var(--t-sm); color: var(--muted);
+}
+/* Design addition (wave 6): the sub-heading v3's own settings screen draws
+ * as a styled div (`<div style="font-weight:500"><icon> Maintenance
+ * window</div>`) -- an `h3` here instead, because a titled `Panel` has
+ * already spent the `h2` above it and a screen reader navigates by
+ * headings, not by font-weight. The glyph is decorative and stays out of
+ * the heading's accessible name; `Icon` renders it `aria-hidden="true"`
+ * unconditionally. */
+.field-group { margin-bottom: 22px;
+}
+.field-group > h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 10px; font-size: var(--t-body); font-weight: 500; color: var(--ink);
+}
+.field-group:last-child { margin-bottom: 0;
+}
+/* v3 `.inp`, on the console's real controls too. The design's `.inp` is a
+ * div; `.input-field`, `.select-field`, `.search-field` and `textarea` are the
+ * inputs 300 fields render, and they take the same box. Width is the
+ * caller's: a field in a form grid fills its cell, a search box in a toolbar
+ * has its own floor below. */
+.inp, .input-field, .select-field, .search-field, textarea.input-field { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line-control); border-radius: var(--r-ctl); padding: 8px 11px; background: var(--surface); color: var(--ink); min-height: 36px; width: 100%; max-width: 100%;
+}
+.inp .ph { color: var(--muted);
+}
+.inp.sel { justify-content: space-between;
+}
+.inp.srch { color: var(--muted);
+}
+.input-field::placeholder, .search-field::placeholder, .select-field::placeholder { color: var(--muted);
+}
+.input-field:focus, .select-field:focus, .search-field:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent);
+}
+.search-field { min-width: 260px; flex: 1;
+}
+.filter-spacer { flex: 1;
+}
+/* IN A TOOLBAR ROW, A SELECT IS NOT A FORM FIELD. `width: 100%` above is
+ * right for a field in a form grid and wrong inside `.filterbar` / `.tb`,
+ * where it made every select claim the whole flex line and wrap onto a row of
+ * its own -- v3 draws them inline, beside the search box. The floor keeps a
+ * select wide enough for its longest option name; the search field is the one
+ * control that grows. */
+.filterbar .select-field,
+.filterbar .input-field,
+.tb .select-field,
+.tb .input-field { width: auto; flex: 0 1 auto; min-width: 160px;
+}
+.filterbar > .search-field, .tb > .search-field,
+.filterbar > .srch-wrap, .tb > .srch-wrap { flex: 1 1 230px;
+}
+/* THE DESIGN DRAWS A SELECT AS `.inp.sel` -- a box with a Tabler
+ * chevron-down at 14px in `--muted`. A real `<select>` brings the user
+ * agent's own indicator instead: a different glyph on every engine, and none
+ * of them that one. `appearance: none` removes it; the design's glyph comes
+ * back as a background image. `#667080` IS `--muted`, written out because a
+ * `url()` cannot read a custom property -- the two must be changed together.
+ *
+ * TAG-QUALIFIED, AND BOTH CLASSES ARE NAMED. `inputClass` is `.input-field`
+ * and 63 of the console's 136 selects wear it, so a rule on `.select-field`
+ * alone would have left more than half of them with the browser's own arrow.
+ * An `<input>` or a search box under those same classes takes nothing: only
+ * a select has a drop arrow.
+ * `appearance: none` also drops the native focus ring, which is why
+ * `.select-field:focus` above draws its own 2px accent outline. */
+select.input-field, select.select-field { appearance: none; -webkit-appearance: none; padding-right: 30px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23667080' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6l6 -6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; background-size: 14px 14px;
+}
+/* `components/duration.tsx`'s number + unit control. Transcribed from
+ * `docs/design/itms-prototype-v3.html`'s "console additions, wave 9" --
+ * read that comment for why `.select-field`'s own `width: 100%` (also
+ * unlayered, above) needed an unlayered rule of HIGHER specificity to lose
+ * to honestly, rather than a Tailwind utility (`@layer utilities`) that can
+ * never beat it, and why `flex`/`min-width` are what actually move the
+ * pixels. `base-styles.test.ts` pins this identical to the design file. */
+.duration-field { display: flex; align-items: center; gap: 8px; min-width: 0;
+}
+.duration-field > .input-field { flex: 1 1 80px; min-width: 0;
+}
+.duration-field > .select-field { flex: none; width: auto; max-width: 100%;
+}
+/* THE DATE CONTROL'S INTERIOR, WHICH THE BOX AROUND IT NEVER REACHED.
+ * `<input type="date">` is drawn by the user agent inside the kit's `.inp`
+ * box: its own type size, its own ink, and a picker button in the browser's
+ * grey. These bring the interior onto the ramp and give the button the muted
+ * rung, so twelve date fields across eight modules stop carrying a second
+ * design inside this one.
+ *
+ * WHAT NO CSS CAN REACH, stated because it is the half of the finding that
+ * stays open: the FIELD ORDER is the reader's locale (mm/dd/yyyy in en-US).
+ * Replacing the control with a text field parsing and printing one chosen
+ * format was considered and refused -- the native input is the one date
+ * widget every keyboard, screen reader and locale already agrees on, and the
+ * pages that carry one read the chosen date back beside it in the console's
+ * own format ("27 Nov 2026"), where the mask cannot be misread. */
+.input-field::-webkit-calendar-picker-indicator { opacity: .55; cursor: pointer;
+}
+.input-field::-webkit-datetime-edit { font-size: var(--t-body); color: var(--ink);
+}
+.input-field::-webkit-datetime-edit-fields-wrapper { padding: 0;
+}
+/* v3 `.inp.srch`: the magnifier lives INSIDE the box. An `<input>` cannot
+ * hold a child, so the glyph is positioned over it and the field is padded
+ * clear of it -- the same three lines `.topbar-find` already uses. The
+ * wrapper takes the flex the bare field had under `.filterbar` / `.tb`, so a
+ * search box still grows and a select still does not. */
+.srch-wrap { position: relative; display: flex; align-items: center; flex: 1 1 230px; min-width: 0;
+}
+.srch-wrap > .ic { position: absolute; left: 11px; color: var(--muted); pointer-events: none;
+}
+.srch-wrap > .search-field { padding-left: 32px; min-width: 0;
+}
+/* v3 `.tog`. */
+.tog { display: inline-block; width: 34px; height: 20px; border-radius: var(--r-pill); background: var(--line-control); position: relative; vertical-align: middle;
+}
+.tog i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface);
+}
+.tog.on { background: var(--accent);
+}
+.tog.on i { left: 16px;
+}
+/* Console addition: the button `Toggle` renders around the design's `.tog`.
+ * The mock's switch is decoration; a switch a person can throw needs a hit
+ * area, a label beside it and a focus ring. No colour of its own. */
+/* `text-align: start` because the row is a <button>, and the user agent
+ * centres a button's text: a label long enough to wrap (Settings → AI
+ * connections, in Spanish on a phone) read as a centred paragraph beside a
+ * switch on its left. A one-line label is unchanged. */
+.toggle-row { display: inline-flex; align-items: center; gap: 9px; padding: 4px 0; border: 0; background: transparent; color: var(--ink); font: var(--t-body)/1.4 var(--sans); cursor: pointer; text-align: start;
+}
+.toggle-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-ctl);
+}
+.toggle-row:disabled { cursor: not-allowed; color: var(--muted);
+}
+/* v3 `.chips` / `.chip` / `.chip.on`. The console renders each chip as a
+ * button (`Chips` in viz.tsx), so the reset below is what keeps a button
+ * from bringing the user agent's own box along. */
+.chips { display: flex; gap: 7px; flex-wrap: wrap;
+}
+/* A CHOICE GROUP, not a filter strip. Wrapping is right for a row of filters
+ * across a page and wrong inside a table cell: /assistant/autonomy draws
+ * three options in each of nine cells and every cell wrapped 2 + 1, so
+ * `Needs approval` sat alone on a second line and no option lined up with the
+ * same option in the column beside it. One option per row lines the rows up
+ * across the columns, and `stretch` makes every option the width of the
+ * widest -- which is also what stops the cell being as wide as two of them,
+ * and is what the 390px horizontal scroll was made of. */
+.chips.stacked { flex-direction: column; align-items: stretch;
+}
+/* `font-family: inherit` is the button reset -- `Chips` renders each chip as
+ * a <button>, which would otherwise bring the user agent's font. No
+ * `line-height`: v3's `.chip` declares none, and stating 1.2 here drew every
+ * chip in the console 3px shorter than the design. */
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); padding: 6px 11px; border-radius: var(--r-pill); border: 1px solid var(--line-control); background: var(--surface); color: var(--ink-2); font-family: inherit;
+}
+.chip.on { background: var(--accent-s); border-color: var(--accent); color: var(--accent);
+}
+/* `disabled` (console addition, wave 8): genuinely inert, not merely dimmed
+ * -- `Chips` puts the real `disabled` attribute on each `<button>`, which is
+ * what drops it from the tab order; this rule is only the four properties
+ * that make it READ as inert too (fill, edge, ink, cursor), the same four
+ * `.btn:disabled` changes. No `transform`/`box-shadow` reset: `.chip` lifts
+ * or casts neither at rest, so there is nothing of either for this to undo.
+ * AFTER `.chip.on`, same (0,2,0) specificity -- a selected option that is
+ * also disabled has to flatten to this, not stay accent-filled, and source
+ * order is the entire mechanism by which it does (the same ordering
+ * `.btn:disabled` needs against `.btn.on`, just above). */
+.chip:disabled { cursor: not-allowed; color: var(--muted); background: var(--surface-2); border-color: var(--line-2);
+}
+/* Design additions: the dialog field container and the console's spanning
+ * children. `.field.full` declares `grid-column` and nothing else -- it
+ * exists to span the grid, and `base-styles.test.ts` holds the grid to it. */
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;
+}
+/* THE DIALOG'S TWO COLUMNS BECOME ONE. At 640px a modal is `90vw` and each
+ * cell is about 155px, where a tracked uppercase caption stops fitting above
+ * its control and a `datetime-local` is clipped mid-value. SC 1.4.10 asks the
+ * content to reflow rather than compress.
+ *
+ * IT LIVES HERE, IMMEDIATELY AFTER THE RULE IT OVERRIDES, AND THAT IS THE
+ * POINT. It was written in `shell.css`'s 640px block, which ties this rule on
+ * specificity (a media query adds none) and loses on source order, because
+ * `components.css` imports after `shell.css`. The breakpoint had therefore
+ * never fired anywhere in the product -- measured at 390x844, computed
+ * `grid-template-columns` was `155px 155px` -- and eleven review findings
+ * across nine modules were that one dead rule. Same file, after the base
+ * rule: no import order can undo it. */
+@media (max-width: 640px) {
+  .form-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.form-grid > .field { margin-bottom: 0; max-width: none;
+}
+/* Same decision as the row above, for the wrapper a field with help renders:
+ * in the grid the 14px gap does the spacing, and a wrapper that kept its own
+ * bottom margin would drop every field carrying help 14px below the ones
+ * beside it. And the same lift `.form-grid > .field` makes on the row above:
+ * in a grid the cell is the measure, so the wrapper's 560px comes off too. */
+.form-grid > .field-wrap { margin-bottom: 0; max-width: none;
+}
+.field.full { grid-column: 1 / -1;
+}
+/* What else a real dialog puts in that grid, and none of it is a field: an
+ * intro paragraph, a `.notice`, anything marked `.full`. Each spans, so it
+ * does not read as a caption for the field beside it. */
+.form-grid > p,
+.form-grid > .notice,
+.form-grid > .full { grid-column: 1 / -1;
+}
+/* `.picker` carries a 16px bottom margin for block flow; inside the grid the
+ * gap does that job. It spans because its sublabel is what tells two
+ * identically named machines apart, and a half-column is where it truncates. */
+.form-grid > .picker { grid-column: 1 / -1; margin-bottom: 0;
+}
+
+/* ----------------------------------------------------------------- toolbar */
+
+/* v3 `.tb` / `.tb-l` / `.tb-r` / `.tb .inp.srch`. The console's `.filterbar`
+ * is the same row, drawn flush inside a bare panel above its table. */
+.tb { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;
+}
+.tb-l { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.tb-r { margin-left: auto; display: flex; gap: 8px; align-items: center; font-size: var(--t-sm); color: var(--muted);
+}
+.tb .inp.srch { min-width: 260px;
+}
+/* 14px of vertical padding, not 12. A filter bar holds 36px controls, so at
+ * 12px the row was 60px with 12px of air -- "CRAMPED PADDING" in the overlay's
+ * reading of /devices, and it read that way beside the 18px panels above and
+ * below it. No design counterpart: `.filterbar` is a console addition; the
+ * design draws this row as `.tb`, which is a margin-bottom flex row with no
+ * ground of its own. */
+.filterbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 18px; border-bottom: 1px solid var(--line); background: var(--surface);
+}
+
+/* ---------------------------------------------------------------------- kv */
+
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 8px 18px; font-size: var(--t-body);
+}
+.kv dt { color: var(--muted);
+}
+
+/* ------------------------------------------------------------------- empty */
+
+/* v3 `.empty` / `.empty b` / `.empty p`. The console's `EmptyState` renders an
+ * `h3` where the design renders `b` (a heading is what a screen reader lands
+ * on), and six modules wrap their glyph in `.empty-icon`; both take the
+ * design's declarations. */
+.empty { text-align: center; padding: 36px 20px; color: var(--muted);
+}
+.empty b, .empty h3, .empty h2 { display: block; color: var(--ink); margin: 10px 0 4px; font-size: var(--t-body); font-weight: 600;
+}
+.empty p { max-width: 52ch; margin: 0 auto 12px;
+}
+.empty-icon { display: inline-grid; place-items: center; color: var(--muted);
+}
+.note { font-size: var(--t-sm); color: var(--muted);
+}
+/* The caption rung, UNSCOPED (design additions wave 2). `.tile .k` and
+ * `.facts .k` each add a layout on top of this and win on specificity; a
+ * caption over a plain card had nothing before this and pages used `.note`,
+ * which is body-sized and not a caption. */
+.k { display: block; font-size: var(--t-cap); text-transform: uppercase; letter-spacing: .1em; color: var(--muted);
+}
+
+/* -------------------------------------------------------------- table foot */
+
+/* The foot of a paged list. `.tb` / `.filterbar` is the HEAD of a list: it
+ * rules along its BOTTOM, which under a foot draws a hairline beneath a row
+ * that has nothing below it. Three pages drew a foot out of `FilterBar` for
+ * want of this. */
+.table-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 10px 18px; border-top: 1px solid var(--line); font-size: var(--t-sm); color: var(--muted);
+}
+/* THE RESULT COUNT IS PROSE, so it is set in the page's own face. It was
+ * `.mono`, and "Showing 1-14 of 14 devices." in the monospace face broke
+ * across THREE lines beside the pager buttons at 390px on /devices, where the
+ * comparable counts elsewhere ("7 of 7", "4 shown") sit inline. Only the
+ * figures keep the monospace face's one useful property here -- tabular
+ * widths, so the number does not jitter as the page changes under it. */
+.table-foot .count { font-variant-numeric: tabular-nums;
+}
+
+/* THE SAME PROPERTY, UNSCOPED (design additions wave 7). The Roles tab's own
+ * counts -- how many users hold a role, how many permission codes it carries
+ * -- sit in an ordinary table body, not a list foot, so `.table-foot .count`
+ * does not reach them. A count is prose with digits in it wherever it sits;
+ * only the tabular widths are worth keeping from `.mono`, so this is that
+ * one declaration on a selector any table cell can reach. */
+.count { font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------- row state */
+
+/* THE SELECTED ROW, and it is not `--surface-2`. Four pages painted it with
+ * `bg-[var(--surface-2)]`, which is exactly what a hovered row paints, so
+ * the row under the pointer and the row being read were the same colour.
+ * The accent wash is what v3 uses for "this is the one" (`.chip.on`,
+ * `.rail a.on`). `aria-current` is the preferred hook, because it announces
+ * the state; `.sel` is for a row that is selected but is not the current
+ * item of a set. */
+tr[aria-current="true"] > td, tr.sel > td { background: var(--accent-s);
+}
+/* A row whose CONTENT is alarming rather than selected. A separate name for a
+ * separate meaning: one class for both is how a selection came to be painted
+ * like a failure. */
+tr.wash-crit > td { background: var(--sev-crit-s);
+}
+
+/* -------------------------------------------------------------- cell parts */
+
+/* The console's `CellMain` (glyph, title, sub-line) in v3's `.lrow .lead` and
+ * `.ttl` look: a muted glyph with no chip behind it, a 600 title, a small
+ * muted sub-line. */
+.cell-main { display: flex; align-items: center; gap: 10px; min-width: 0;
+}
+.device-glyph, .row-glyph { display: grid; place-items: center; flex: none; color: var(--muted);
+}
+.row-glyph.gold { color: var(--sev-warn);
+}
+.cell-title { font-weight: 600; color: var(--ink);
+}
+.cell-sub { color: var(--muted); font-size: var(--t-sm); margin-top: 2px;
+}
+/* The mini list (four modules): v3's row look at a smaller pitch. */
+.mini-list { display: flex; flex-direction: column;
+}
+.mini-row { min-height: 44px; padding: 8px 0; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line);
+}
+.mini-row:last-child { border-bottom: 0;
+}
+.mini-icon { width: 24px; height: 24px; flex: none; display: grid; place-items: center; color: var(--muted);
+}
+.mini-icon.gold { color: var(--sev-warn);
+}
+.mini-icon.red { color: var(--sev-crit);
+}
+.mini-icon.green { color: var(--sev-ok);
+}
+.mini-copy { min-width: 0; flex: 1;
+}
+.mini-title { font-size: var(--t-body); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mini-sub { color: var(--muted); font-size: var(--t-sm); margin-top: 2px;
+}
+.mini-value { font-size: var(--t-body); font-weight: 600; white-space: nowrap;
+}
+
+/* ----------------------------------------------------------------- notices */
+
+/* Design additions. ONE FAMILY, THREE TONES, ONE SIZE: the base rule informs
+ * in the accent pair, `.gold` warns and `.red` alerts in the severity pairs,
+ * and the edge is `--line` for all three so a `role="status"` box does not
+ * shout as loudly as a `role="alert"` one. A notice is a sentence, so it
+ * takes the body rung. Every ink is graded on its own wash in
+ * `contrast.test.ts`; the two tones set colour only, so the family cannot
+ * split in three sizes. */
+.notice { display: flex; gap: 10px; align-items: flex-start; max-width: 76ch;
+/* A MEASURE, LIKE `.ph .sub` HAS. The page subtitle has been capped at 70ch
+ * since the port; a notice never was, so on a 1440px card its prose ran the
+ * full width of the panel -- the overlay tool the operator ran flagged
+ * "LINE LENGTH TOO LONG" on /devices, /add-devices and /device-groups, and it
+ * was right. 76ch on the box, not 70, because the box also carries the glyph,
+ * the 10px gap and 28px of horizontal padding: the TEXT lands at roughly the
+ * same 70ch the subtitle uses. Design file first. */
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--accent-s); color: var(--accent); font-size: var(--t-body);
+}
+.notice.gold { background: var(--sev-warn-s); color: var(--sev-warn);
+}
+.notice.red { background: var(--sev-crit-s); color: var(--sev-crit);
+}
+
+/* -------------------------------------------------------------------- code */
+
+/* Design addition. `.code` carries enrolment tokens, audit hashes and the
+ * JSON `Attributes` falls back to: somebody reads it and some of it they
+ * transcribe, so it is the small step and never below it. WRITTEN AS THE
+ * `font` SHORTHAND WITH A LITERAL, deliberately: 12px is `--t-sm`, and
+ * `chrome-responsive.test.ts` polices the shorthand spelling by requiring
+ * one to exist here to read. */
+.code { display: block; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--surface-2); color: var(--ink); font: 12px/1.7 var(--mono); overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+}
+/* A `<code class="code">` SITS IN A SENTENCE, AND AN INLINE BOX DOES NOT GROW
+ * FOR ITS OWN VERTICAL PADDING (CSS 2.1 §10.6.1): 12px of padding on an
+ * inline box bleeds over the lines above and below and paints the chip's
+ * background over the text. Scoped to `code.code`, not `.code`: every
+ * `<pre class="code">` is a full-width block and must stay one. */
+code.code { display: inline-block; max-width: 100%;
+}
+/* The keyboard hint beside the search field. */
+.kbd { min-width: 30px; padding: 2px 6px; border-radius: var(--r-ctl); border: 1px solid var(--line-2); background: var(--surface); color: var(--muted); font-family: var(--mono); font-size: var(--t-sm); text-align: center;
+}
+
+/* --------------------------------------------------------------- dashboard */
+
+/* THE CUSTOMIZABLE DASHBOARD GRID. One six-column grid for the whole page, so
+ * a widget's order is a property of the grid and its width a span within it:
+ * 2 (three per row), 3 (two per row) and 6. The folding steps mirror
+ * `.stats-grid`'s and are attribute-qualified for the same specificity
+ * reason: `.dash-grid > [data-size]` and `.dash-grid > [data-size="small"]`
+ * are both (0,2,0), so source order decides and the media queries come after
+ * the per-size rules. */
+.dash-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px;
+}
+.dash-grid > [data-size="small"] { grid-column: span 2;
+}
+.dash-grid > [data-size="medium"] { grid-column: span 3;
+}
+.dash-grid > [data-size="wide"] { grid-column: span 6;
+}
+/* A ROW IS AS TALL AS ITS TALLEST PANEL, AND THE SHORT ONE MUST FILL IT.
+ * A grid item stretches by default, so the widget FRAME already spanned the
+ * row -- but the `.panel` inside it is the frame's child, not the grid's, and
+ * sat at its own content height with bare `--bg` beneath it (~460px of it on
+ * the console's first row, ~58px after the panels were reordered). Making the
+ * frame and its body columns that grow hands the row's height down to the
+ * panel. The edit-mode bar stays a flex child above the body. */
+.dash-widget { position: relative; min-width: 0; display: flex; flex-direction: column;
+}
+.dash-widget-body { flex: 1; display: flex; flex-direction: column;
+}
+.dash-widget-body > * { flex: 1;
+}
+/* The dashed edge says "this is a thing you can move" without a legend. It is
+ * a non-text boundary of a control in edit mode, so it is `--line-control`
+ * (3:1) rather than a decorative hairline. */
+.dash-widget.editing { outline: 1px dashed var(--line-control); outline-offset: 3px; border-radius: var(--r-panel);
+}
+.dash-widget.dragging { opacity: .55;
+}
+.dash-widget.drop-target { outline: 2px solid var(--accent); outline-offset: 3px;
+}
+.dash-widget-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 0 8px;
+}
+.dash-widget-name { font-size: var(--t-sm); font-weight: 500; color: var(--muted); margin-right: auto;
+}
+.dash-widget.is-hidden > .dash-widget-body { display: none;
+}
+.dash-widget-hidden-note { font-size: var(--t-sm); color: var(--muted); padding: 10px 12px; border: 1px dashed var(--line-control); border-radius: var(--r-panel);
+}
+
+/* ---------------------------------------------------- confirm and picker */
+
+/* The subject line: WHICH thing is about to be acted on. It is the largest
+ * thing in the dialog because it is what somebody scans to notice they have
+ * the wrong row selected. */
+.confirm-subject { margin: 0 0 6px; font-size: var(--t-h2); font-weight: 600; color: var(--ink); word-break: break-word;
+}
+.confirm-body { margin: 0 0 16px; font-size: var(--t-body); line-height: 1.5; color: var(--muted);
+}
+.confirm-typing { display: grid; gap: 6px; margin-bottom: 16px; font-size: var(--t-sm); color: var(--muted);
+}
+.confirm-typing input { border: 1px solid var(--line-control); border-radius: var(--r-ctl); padding: 8px 11px; font: inherit; font-size: var(--t-body); background: var(--surface); color: var(--ink);
+}
+/* Cancel first in the DOM (it takes focus) and last in the reading order, so
+ * the destructive control is not where the eye rests. */
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px;
+}
+
+.picker { position: relative; display: grid; gap: 5px; margin-bottom: 16px;
+}
+.picker-label { font-size: var(--t-sm); font-weight: 500;
+}
+.picker input { width: 100%; box-sizing: border-box; border: 1px solid var(--line-control); border-radius: var(--r-ctl); padding: 8px 11px; font: inherit; font-size: var(--t-body); background: var(--surface); color: var(--ink); min-height: 36px;
+}
+.picker input:focus { outline: 2px solid var(--accent); outline-offset: 1px;
+}
+.picker-list { position: absolute; z-index: 40; top: 100%; left: 0; right: 0; margin: 4px 0 0; padding: 5px; max-height: 260px; overflow-y: auto; list-style: none; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); box-shadow: var(--shadow);
+}
+.picker-note { padding: 11px 10px; font-size: var(--t-sm); color: var(--muted);
+}
+.picker-option { display: grid; gap: 2px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--r-ctl); background: none; font: inherit; text-align: left; cursor: pointer;
+}
+/* HOVER TINTS, FOCUS OUTLINES, AND THEY ARE NOT THE SAME JOB. `--accent-s` on
+ * white is a hover hint; the outline is what tells a keyboard user which
+ * option they are on (SC 1.4.11, 2.4.7). */
+.picker-option:hover, .picker-option:focus-visible { background: var(--accent-s);
+}
+.picker-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
+}
+.picker-option-label { font-size: var(--t-body); color: var(--ink);
+}
+.picker-option-sub { font-size: var(--t-sm); color: var(--muted);
+}
+
+/* -------------------------------------------------- "nothing here", once */
+
+/* The dash stays as the visual token; the sentence beside it is what a
+ * screen reader hears (`NoValue`).
+ *
+ * `position: relative` IS LOAD-BEARING, and it belongs here rather than at
+ * every call site. The sentence is an `.sr-only` span, which is
+ * `position: absolute`; with no positioned ancestor its containing block is
+ * OUTSIDE the surrounding `.table-wrap`, so `overflow-x: auto` never clips
+ * it and the words laid out at their static position widen the DOCUMENT
+ * instead: 730>390 on /devices, 560/425 on /health and /platform-status,
+ * 841 on the IPAM address grid. Same trap `Th` in `components/ui.tsx` and
+ * `.wk-d`/`.wk-h` in `viz.css` record. `inline-block` is what gives the
+ * span a box to be the containing block of; the dash is inline content and
+ * lays out identically inside it. */
+.no-value { color: var(--muted); position: relative; display: inline-block;
+}
+
+/* ------------------------------------------------------------- attributes */
+
+.attributes { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px;
+}
+.attribute-key { color: var(--muted);
+}
+.attribute-sep { color: var(--muted);
+}
+.attribute-raw { margin-top: 6px;
+}
+.attribute-raw > summary { color: var(--muted); font-size: var(--t-sm); cursor: pointer;
+}
+.attribute-raw > pre { margin: 6px 0 0; max-width: 100%; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+}
+
+/* ------------------------------------------------------------------ charts */
+
+.chart { margin: 0;
+}
+.chart-title { font-weight: 600; font-size: var(--t-body); margin-bottom: 2px;
+}
+/* `fill: none` IS THE SAME REPAIR `svg.ic` MAKES in base.css. The user
+ * agent's initial fill is black and inherits into every child that does not
+ * state its own, so the root, its groups and its axis lines all measured
+ * `rgb(0, 0, 0)` -- 25 of them on /budget, a colour this palette does not
+ * contain. The bars, ticks, axis labels and target callout each state their
+ * own fill below or inline. */
+/* THE DRAWING IS AS WIDE AS THE BOX MEASURED, AND SCROLLS BELOW ITS FLOOR.
+ * `width: 100%` over a fixed 640-unit viewBox is what made every `<text>`
+ * inside the chart scale with the panel -- 21px at 1440, 6px at 390, with the
+ * computed font-size stubbornly 12px at both, which is why no gate could see
+ * it. `chart.tsx` now sets the width and the viewBox to the same measured
+ * number, so one user unit is one CSS pixel; this rule must NOT put a width
+ * back, or the scaling returns. `fill: none` on the root is the repair
+ * `svg.ic` makes: the user agent's initial fill is black and inherits. */
+.chart-scroll { overflow-x: auto;
+}
+.chart-canvas { display: block; height: auto; fill: none;
+}
+.chart-tick { fill: var(--muted); font-size: var(--t-sm);
+}
+/* `fill` for the SVG usages this class still has, `color` for the caption
+ * line under the title, which is HTML. */
+.chart-axis-label { fill: var(--muted); color: var(--muted); font-size: var(--t-sm); font-weight: 500;
+}
+.chart-unit { margin-bottom: 8px;
+}
+.chart-target { fill: var(--sev-crit); font-size: var(--t-sm); font-weight: 500;
+}
+.chart-legend { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: var(--t-sm); color: var(--ink-2);
+}
+.chart-legend li { display: flex; align-items: center; gap: 6px;
+}
+/* The swatch's own root, `fill: none` for the reason `.chart-canvas` above
+ * states: the user agent's initial black fill, measured on three legend
+ * swatches on /budget. The two rects inside each swatch state their own fill
+ * and their hatch. */
+.chart-legend li > svg { fill: none;
+}
+
+/* ---------------------------------------------------------- the folding */
+
+/* v3 stops at 1100px (`.shell` becomes one column, tiles span 6) and 640px
+ * (tiles span 12). The console is opened from a handset during an incident,
+ * so its grids keep folding: 1300px three of anything that was more, 1024px
+ * two, 640px one. The `.stats-grid` steps are attribute-qualified so they
+ * outrank the per-count rules above (same specificity, later in the file). */
+@media (max-width: 1300px) {
+  .stats-grid[data-columns] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* Two tiles are still two halves here: three tracks for two children is the
+   * empty-right-hand-track row this step's rule above would otherwise
+   * reintroduce between 1025 and 1300px. Same (0,2,0), later in the block. */
+  .stats-grid[data-columns]:not([data-keep-tracks]):where(:has(> :nth-child(2):last-child)) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-2 { grid-template-columns: minmax(0, 1fr) 320px; }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dash-grid > [data-size="small"] { grid-column: span 3; }
+}
+
+/* v3 folds `.tiles` and `.g2` at 1100px, where its rail disappears; the
+ * console's rail becomes a drawer at 1024px, so the same two steps land on
+ * that breakpoint and the sheet keeps the three widths it always had. */
+@media (max-width: 1024px) {
+  .tiles > .tile { grid-column: span 6 !important; }
+  .g2 { grid-template-columns: 1fr !important; }
+  .stats-grid[data-columns] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-2 { grid-template-columns: minmax(0, 1fr); }
+  .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .span-2 { grid-column: span 1; }
+  .dash-grid > [data-size="small"],
+  .dash-grid > [data-size="medium"] { grid-column: span 3; }
+}
+
+@media (max-width: 640px) {
+  .stats-grid[data-columns],
+  .grid-2,
+  .grid-3,
+  .grid-4,
+  .cards { grid-template-columns: minmax(0, 1fr); }
+  .tiles > .tile { grid-column: span 12 !important; }
+  .dash-grid > [data-size] { grid-column: span 6; }
+  .panel-h, .panel-head { flex-wrap: wrap; row-gap: 8px; }
+  /* `.panel` is `overflow: hidden`, so a second action on a full-width row
+   * with no wrap is not scrolled to -- it is silently cut, mid-word. */
+  .panel-a, .panel-actions { margin-left: 0; width: 100%; flex-wrap: wrap; }
+  /* A TOOLBAR CONTROL TAKES THE ROW ON A HANDSET. The `min-width: 160px`
+   * floor above keeps a select wide enough for its longest option name on a
+   * desktop toolbar; at 390px it makes a filter row ragged -- 342 / 166+166 /
+   * 342 -- because the floor is what decides where each control breaks.
+   * One control per line instead. */
+  .filterbar .select-field,
+  .filterbar .input-field,
+  .tb .select-field,
+  .tb .input-field { width: 100%; flex: 1 1 100%; min-width: 0; }
+  .field { max-width: none; }
+}

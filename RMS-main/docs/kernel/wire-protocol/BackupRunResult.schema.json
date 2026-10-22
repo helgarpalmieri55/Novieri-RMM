@@ -1,0 +1,203 @@
+{
+  "$defs": {
+    "BackupConsistency": {
+      "additionalProperties": false,
+      "properties": {
+        "crash_consistent": {
+          "title": "Crash Consistent",
+          "type": "boolean"
+        },
+        "databases": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Databases"
+        },
+        "files_changed_during_read": {
+          "default": 0,
+          "title": "Files Changed During Read",
+          "type": "integer"
+        },
+        "level": {
+          "enum": [
+            "application",
+            "snapshot",
+            "live",
+            "partial"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "non_transactional_tables": {
+          "default": 0,
+          "title": "Non Transactional Tables",
+          "type": "integer"
+        },
+        "snapshot": {
+          "default": "none",
+          "title": "Snapshot",
+          "type": "string"
+        },
+        "writers": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/BackupWriterStatus"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Writers"
+        }
+      },
+      "required": [
+        "level",
+        "crash_consistent"
+      ],
+      "title": "BackupConsistency",
+      "type": "object"
+    },
+    "BackupWriterStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "default": "",
+          "title": "At",
+          "type": "string"
+        },
+        "hr": {
+          "default": "",
+          "title": "Hr",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "state"
+      ],
+      "title": "BackupWriterStatus",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "bytes_protected": {
+      "title": "Bytes Protected",
+      "type": "integer"
+    },
+    "bytes_stored": {
+      "title": "Bytes Stored",
+      "type": "integer"
+    },
+    "chunk_count": {
+      "title": "Chunk Count",
+      "type": "integer"
+    },
+    "consistency": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BackupConsistency"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "dedup_stats": {
+      "additionalProperties": true,
+      "default": {},
+      "title": "Dedup Stats",
+      "type": "object"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "manifest_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Manifest Ref"
+    },
+    "state": {
+      "enum": [
+        "success",
+        "failed"
+      ],
+      "title": "State",
+      "type": "string"
+    },
+    "warnings": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Warnings"
+    },
+    "workload_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Workload Id"
+    }
+  },
+  "required": [
+    "state",
+    "bytes_protected",
+    "bytes_stored",
+    "chunk_count"
+  ],
+  "title": "BackupRunResult",
+  "type": "object"
+}

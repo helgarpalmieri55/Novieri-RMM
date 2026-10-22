@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# its-agent-enroll — hand this endpoint its control-plane URL and its
+# enrollment token, then start the service.
+#
+#   sudo ITS_AGENT_ENROLL_TOKEN=<token> its-agent-enroll --url https://its.example.com
+#   printf %s "<token>" | sudo its-agent-enroll --token-stdin --url https://its.example.com
+#
+# This is deliberately a SEPARATE STEP from installing the package.
+#
+# A .deb is a distributable artifact: it is copied to a file server, baked into
+# a golden image, cached by apt, and kept in a repository. A per-org enrollment
+# token inside one would be a credential in a distributable artifact, which
+# invariant #3 forbids — and the failure mode is not theoretical, it is one
+# image build away from every endpoint in the fleet sharing one token.
+#
+# The alternative we did NOT take was a debconf prompt. Interactive prompting
+# breaks unattended rollout, and the non-interactive form (preseeding with
+# debconf-set-selections) writes the token into /var/cache/debconf, where it
+# outlives its single use — the exact property this whole path exists to avoid.
+# Here the token lands in one 0600 file that the agent DELETES the moment it has
+# exchanged it for a certificate.
+#
+# THE TOKEN NEVER APPEARS IN ARGV. `--token` is refused.
+set -euo pipefail
+
+CONFDIR="/etc/its-agent"
+STATEDIR="/var/lib/its-agent"
+SERVICE="its-agent"
+URL="${ITS_AGENT_ENROLL_URL:-}"
+TOKEN_FROM_STDIN=0
+START=1
+
+usage() {
+  cat <<'USAGE'
+Usage: sudo ITS_AGENT_ENROLL_TOKEN=<token> its-agent-enroll --url <control-plane-url>
+
+  --url URL        Control-plane API base URL (e.g. https://its.example.com).
+                   Also accepted as ITS_AGENT_ENROLL_URL.
+  --token-stdin    Read the enrollment token from stdin instead of the
+                   environment. Preferred in pipelines.
+  --no-start       Write the configuration but do not (re)start the service.
+  -h, --help       This.
+
+The token is written to /var/lib/its-agent/enroll-token, mode 0600, root-owned.
+The agent reads it once and deletes it as soon as it has exchanged it for a
+certificate — so seeing that file gone is how you know enrollment succeeded.
+USAGE
+}
+
+die() { printf 'its-agent-enroll: %s\n' "$*" >&2; exit 1; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --url) URL="${2:-}"; shift 2 ;;
+    --url=*) URL="${1#*=}"; shift ;;
+    --token-stdin) TOKEN_FROM_STDIN=1; shift ;;
+    --no-start) START=0; shift ;;
+    -h|--help) usage; exit 0 ;;
+    --token|--token=*)
+      die 'the enrollment token must not be passed as an argument: argv is world-readable
+       through /proc/<pid>/cmdline and is kept in your shell history.
+       Use:  sudo ITS_AGENT_ENROLL_TOKEN=<token> its-agent-enroll --url ...
+       or:   printf %s "<token>" | sudo its-agent-enroll --token-stdin --url ...' ;;
+    *) die "unknown option: $1 (try --help)" ;;
+  esac
+done
+
+[ "$(id -u)" -eq 0 ] || die "must run as root"
+[ -n "$URL" ] || die "--url is required"
+
+TOKEN="${ITS_AGENT_ENROLL_TOKEN:-}"
+if [ "$TOKEN_FROM_STDIN" -eq 1 ]; then
+  [ -z "$TOKEN" ] || die "--token-stdin and ITS_AGENT_ENROLL_TOKEN are both set; pick one"
+  IFS= read -r TOKEN || true
+fi
+
+if [ -f "${STATEDIR}/identity.json" ]; then
+  # Enrolling twice is not possible and should not look possible: the token is
+  # single-use server-side, and a second enrollment would mint a duplicate
+  # device record with its own history.
+  printf 'this endpoint is already enrolled (%s exists); nothing to do\n' "${STATEDIR}/identity.json"
+  printf 'to re-enroll, remove the state directory first — and retire the old device in the console\n'
+  exit 0
+fi
+[ -n "$TOKEN" ] || die "no enrollment token: set ITS_AGENT_ENROLL_TOKEN or use --token-stdin"
+
+umask 077
+install -d -m 0700 -o root -g root "$STATEDIR"
+install -d -m 0700 -o root -g root "$CONFDIR"
+
+envfile="${CONFDIR}/agent.env"
+: > "$envfile"
+chmod 0600 "$envfile"
+cat > "$envfile" <<EOF
+# Written by its-agent-enroll. Not a secret — the enrollment token is NOT here,
+# it is ${STATEDIR}/enroll-token (0600) and the agent deletes it once spent.
+ITS_AGENT_ENROLL_URL=${URL}
+EOF
+
+tokenfile="${STATEDIR}/enroll-token"
+: > "$tokenfile"
+chmod 0600 "$tokenfile"
+chown root:root "$tokenfile" 2>/dev/null || true
+printf '%s' "$TOKEN" > "$tokenfile"
+TOKEN=""
+
+printf 'wrote %s (0600, root) and %s\n' "$tokenfile" "$envfile"
+
+if [ "$START" -eq 1 ] && [ -d /run/systemd/system ]; then
+  systemctl restart "${SERVICE}.service"
+  printf 'started %s — watch it enroll with:  journalctl -u %s -f\n' "$SERVICE" "$SERVICE"
+  printf 'enrolled when:  test -f %s/identity.json\n' "$STATEDIR"
+else
+  printf 'not started (no systemd, or --no-start)\n'
+fi

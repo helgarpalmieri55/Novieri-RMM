@@ -1,0 +1,220 @@
+{
+  "description": "rsp/1 test vectors (remote-screen-protocol.md). Every implementation -- the Go agent (internal/rsp), the server (app/modules/remote/rsp.py) and the browser viewer -- decodes each 'hex' to the stated type, seq and fields. Binary layouts must also ENCODE to exactly 'hex'. JSON bodies are compared after parsing: key order and whitespace are not part of the contract.",
+  "frames": [
+    {
+      "name": "hello",
+      "type": 1,
+      "seq": 1,
+      "json": {
+        "version": 1,
+        "capabilities": [
+          "tile",
+          "copyrect",
+          "cursor"
+        ],
+        "monitors": [
+          {
+            "id": 0,
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1080,
+            "dpi": 96,
+            "primary": true
+          }
+        ],
+        "codecs": [
+          "jpeg",
+          "fill"
+        ]
+      },
+      "hex": "01000000017b2276657273696f6e223a312c226361706162696c6974696573223a5b2274696c65222c22636f707972656374222c22637572736f72225d2c226d6f6e69746f7273223a5b7b226964223a302c2278223a302c2279223a302c227769647468223a313932302c22686569676874223a313038302c22647069223a39362c227072696d617279223a747275657d5d2c22636f64656373223a5b226a706567222c2266696c6c225d7d"
+    },
+    {
+      "name": "frame_begin",
+      "type": 2,
+      "seq": 2,
+      "hex": "0200000002"
+    },
+    {
+      "name": "tile_fill",
+      "type": 3,
+      "seq": 3,
+      "fields": {
+        "x": 16,
+        "y": 32,
+        "w": 64,
+        "h": 48,
+        "codec": 0,
+        "data_hex": "ff8000"
+      },
+      "hex": "0300000003001000200040003000ff8000"
+    },
+    {
+      "name": "copyrect",
+      "type": 4,
+      "seq": 4,
+      "fields": {
+        "src_x": 0,
+        "src_y": 0,
+        "x": 10,
+        "y": 20,
+        "w": 100,
+        "h": 50
+      },
+      "hex": "040000000400000000000a001400640032"
+    },
+    {
+      "name": "frame_end",
+      "type": 5,
+      "seq": 5,
+      "hex": "0500000005"
+    },
+    {
+      "name": "cursor_shape",
+      "type": 6,
+      "seq": 8,
+      "fields": {
+        "hot_x": 1,
+        "hot_y": 2,
+        "w": 16,
+        "h": 16,
+        "codec": 2,
+        "data_hex": "89504e47"
+      },
+      "hex": "060000000800010002001000100289504e47"
+    },
+    {
+      "name": "cursor_pos",
+      "type": 7,
+      "seq": 6,
+      "fields": {
+        "x": 640,
+        "y": 360,
+        "visible": 1
+      },
+      "hex": "07000000060280016801"
+    },
+    {
+      "name": "state_ended",
+      "type": 8,
+      "seq": 7,
+      "json": {
+        "state": "ended",
+        "reason": "ended_by_user"
+      },
+      "hex": "08000000077b227374617465223a22656e646564222c22726561736f6e223a22656e6465645f62795f75736572227d"
+    },
+    {
+      "name": "ack",
+      "type": 64,
+      "seq": 1,
+      "fields": {
+        "frame_seq": 5
+      },
+      "hex": "400000000100000005"
+    },
+    {
+      "name": "pointer",
+      "type": 65,
+      "seq": 2,
+      "fields": {
+        "x": 100,
+        "y": 200,
+        "buttons": 1
+      },
+      "hex": "4100000002006400c801"
+    },
+    {
+      "name": "wheel",
+      "type": 66,
+      "seq": 3,
+      "fields": {
+        "dx": 0,
+        "dy": -120
+      },
+      "hex": "42000000030000ff88"
+    },
+    {
+      "name": "key",
+      "type": 67,
+      "seq": 4,
+      "fields": {
+        "down": 1,
+        "code": "KeyA"
+      },
+      "hex": "4300000004014b657941"
+    },
+    {
+      "name": "text",
+      "type": 68,
+      "seq": 5,
+      "fields": {
+        "text": "héllo"
+      },
+      "hex": "440000000568c3a96c6c6f"
+    },
+    {
+      "name": "monitor_select",
+      "type": 69,
+      "seq": 8,
+      "fields": {
+        "monitor_id": 1
+      },
+      "hex": "450000000801"
+    },
+    {
+      "name": "quality",
+      "type": 70,
+      "seq": 9,
+      "fields": {
+        "level": 3
+      },
+      "hex": "460000000903"
+    },
+    {
+      "name": "refresh",
+      "type": 71,
+      "seq": 6,
+      "hex": "4700000006"
+    },
+    {
+      "name": "control_view_only",
+      "type": 73,
+      "seq": 7,
+      "fields": {
+        "mode": 0
+      },
+      "hex": "490000000700"
+    },
+    {
+      "name": "auth_agent",
+      "type": 240,
+      "seq": 1,
+      "json": {
+        "session_id": "01928c1e-0000-7000-8000-000000000001",
+        "token": "tok"
+      },
+      "hex": "f0000000017b2273657373696f6e5f6964223a2230313932386331652d303030302d373030302d383030302d303030303030303030303031222c22746f6b656e223a22746f6b227d"
+    },
+    {
+      "name": "auth_viewer",
+      "type": 240,
+      "seq": 1,
+      "json": {
+        "session_id": "01928c1e-0000-7000-8000-000000000001",
+        "ticket": "tic"
+      },
+      "hex": "f0000000017b2273657373696f6e5f6964223a2230313932386331652d303030302d373030302d383030302d303030303030303030303031222c227469636b6574223a22746963227d"
+    },
+    {
+      "name": "auth_ok",
+      "type": 241,
+      "seq": 1,
+      "json": {
+        "session_id": "01928c1e-0000-7000-8000-000000000001"
+      },
+      "hex": "f1000000017b2273657373696f6e5f6964223a2230313932386331652d303030302d373030302d383030302d303030303030303030303031227d"
+    }
+  ]
+}

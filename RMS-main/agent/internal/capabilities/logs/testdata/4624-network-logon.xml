@@ -1,0 +1,41 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Security-Auditing" Guid="{54849625-5478-4994-a5ba-3e3b0328c30d}"/>
+    <EventID>4624</EventID>
+    <Version>2</Version>
+    <Level>0</Level>
+    <Task>12544</Task>
+    <Opcode>0</Opcode>
+    <Keywords>0x8020000000000000</Keywords>
+    <TimeCreated SystemTime="2026-07-18T09:12:03.1234567Z"/>
+    <EventRecordID>184392</EventRecordID>
+    <Correlation/>
+    <Execution ProcessID="712" ThreadID="820"/>
+    <Channel>Security</Channel>
+    <Computer>WS-0142.corp.toeshee.local</Computer>
+    <Security/>
+  </System>
+  <EventData>
+    <Data Name="SubjectUserSid">S-1-5-18</Data>
+    <Data Name="SubjectUserName">WS-0142$</Data>
+    <Data Name="SubjectDomainName">TOESHEE</Data>
+    <Data Name="SubjectLogonId">0x3e7</Data>
+    <Data Name="TargetUserSid">S-1-5-21-1004336348-1177238915-682003330-1287</Data>
+    <Data Name="TargetUserName">jsmith</Data>
+    <Data Name="TargetDomainName">TOESHEE</Data>
+    <Data Name="TargetLogonId">0x14b9f2</Data>
+    <Data Name="LogonType">3</Data>
+    <Data Name="LogonProcessName">Kerberos</Data>
+    <Data Name="AuthenticationPackageName">Kerberos</Data>
+    <Data Name="WorkstationName">-</Data>
+    <Data Name="LogonGuid">{a1b2c3d4-0000-0000-0000-abcdefabcdef}</Data>
+    <Data Name="TransmittedServices">-</Data>
+    <Data Name="LmPackageName">-</Data>
+    <Data Name="KeyLength">0</Data>
+    <Data Name="ProcessId">0x0</Data>
+    <Data Name="ProcessName">-</Data>
+    <Data Name="IpAddress">10.20.7.42</Data>
+    <Data Name="IpPort">51422</Data>
+    <Data Name="ImpersonationLevel">%%1833</Data>
+  </EventData>
+</Event>

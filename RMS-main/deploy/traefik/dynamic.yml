@@ -1,0 +1,46 @@
+# TLS material for the OPERATOR-FACING entrypoint (:443) only.
+#
+# THIS IS NOT THE AGENT-FACING TLS. The gateway entrypoint (:8443) is TCP
+# passthrough -- the gateway process terminates mutual TLS itself so the
+# agent's client certificate reaches it, and its server certificate is issued
+# from the INTERNAL CA by deploy/scripts/issue-gateway-cert.py. Putting your
+# public certificate there would break every agent: agents pin the internal CA
+# at enrollment and would reject a publicly-issued chain. Public certificate
+# here, internal CA there, and the two never swap.
+#
+# WHERE THE FILES COME FROM. deploy/certs/ is a bind mount (gitignored, with a
+# .gitkeep so a fresh clone still has the directory). The operator drops the
+# certificate and key in as:
+#
+#     deploy/certs/fullchain.pem   leaf + intermediates, in that order
+#     deploy/certs/privkey.pem     the matching private key, chmod 600
+#
+# Those are certbot's own filenames, so
+# `cp /etc/letsencrypt/live/<host>/{fullchain,privkey}.pem deploy/certs/` is
+# the whole install step. A bind mount and not a named volume, deliberately:
+# this deployment is a `git pull` on the host, and you cannot `git pull`,
+# `scp` or `certbot renew` a file into a named volume without a container
+# round-trip.
+#
+# THE SILENT FALLBACK IS THE TRAP. If either file is missing or unreadable,
+# Traefik does NOT fail -- it logs once and serves its own self-signed
+# certificate, and every browser warning gets clicked through. Verify
+# explicitly after any change (see deploy/README.md, "Verify Traefik actually
+# picked up your certificate"):
+#
+#     echo | openssl s_client -connect itms.toeshee.com:443 \
+#         -servername itms.toeshee.com 2>/dev/null \
+#       | openssl x509 -noout -issuer -subject -dates
+#
+# An issuer of `CN=TRAEFIK DEFAULT CERT` means it fell back and your
+# certificate is NOT in use.
+
+tls:
+  certificates:
+    - certFile: /etc/traefik/certs/fullchain.pem
+      keyFile: /etc/traefik/certs/privkey.pem
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/certs/fullchain.pem
+        keyFile: /etc/traefik/certs/privkey.pem

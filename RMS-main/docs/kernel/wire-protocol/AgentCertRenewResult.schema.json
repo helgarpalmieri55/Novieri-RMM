@@ -1,0 +1,15 @@
+{
+  "additionalProperties": false,
+  "description": "agent \u2192 server: the CSR over the freshly generated device key.\n\nThe public half plus a proof of possession, and nothing else. The CSR's own\nsubject is ignored by the CA, which overwrites CN and O from the job row.",
+  "properties": {
+    "csr_pem": {
+      "title": "Csr Pem",
+      "type": "string"
+    }
+  },
+  "required": [
+    "csr_pem"
+  ],
+  "title": "AgentCertRenewResult",
+  "type": "object"
+}

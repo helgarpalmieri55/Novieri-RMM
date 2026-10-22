@@ -1,0 +1,50 @@
+#!/bin/sh
+# its-agent postinst — POSIX sh, as dpkg requires of a maintainer script.
+#
+# It does NOT enroll and it does NOT invent credentials. The package carries no
+# token by design (see its-agent-enroll's header, and invariant #3): an
+# enrollment token inside a .deb would be a credential in an artifact that gets
+# copied to file servers, baked into images and cached by apt.
+set -e
+
+STATEDIR=/var/lib/its-agent
+CONFDIR=/etc/its-agent
+SERVICE=its-agent.service
+
+case "$1" in
+  configure)
+    # 0700: the device private key lives here, and internal/config enforces the
+    # same mode from the other side. StateDirectory= in the unit would create it
+    # too, but the enrollment helper writes here BEFORE the first start.
+    install -d -m 0700 -o root -g root "$STATEDIR"
+    install -d -m 0700 -o root -g root "$CONFDIR"
+
+    # /run/systemd/system is the documented test for "systemd is the running
+    # init". In a container, a chroot or a debootstrap image it is absent, and
+    # calling systemctl there fails an otherwise fine install.
+    if [ -d /run/systemd/system ]; then
+      systemctl daemon-reload || true
+      systemctl enable "$SERVICE" >/dev/null 2>&1 || true
+
+      if [ -f "$STATEDIR/identity.json" ] || [ -f "$STATEDIR/enroll-token" ]; then
+        # An upgrade over an enrolled agent, or an endpoint whose credentials
+        # were staged by configuration management before the package landed.
+        systemctl restart "$SERVICE" || true
+      else
+        # Deliberately NOT started. An agent with no token and no identity exits
+        # 2 on every start, and Restart=always would turn a missing enrolment
+        # step into a restart loop that looks like a crash.
+        echo ""
+        echo "its-agent installed but NOT started: this endpoint is not enrolled."
+        echo ""
+        echo "  sudo ITS_AGENT_ENROLL_TOKEN=<token> its-agent-enroll --url https://<control-plane>"
+        echo ""
+        echo "The token is never a command-line argument; --token-stdin also works."
+      fi
+    fi
+    ;;
+  abort-upgrade|abort-remove|abort-deconfigure) ;;
+  *) ;;
+esac
+
+exit 0

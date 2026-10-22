@@ -1,0 +1,306 @@
+@import "tailwindcss";
+@import "./fonts.css";
+
+/* ITMS design tokens.
+ *
+ * TRANSCRIBED, NOT CHOSEN. Every value in the FIRST `:root` block below is
+ * copied verbatim from the `:root` block of `docs/design/itms-prototype-v3.html`
+ * -- the operator's approved design (2026-09-07), which this application
+ * reproduces rather than reinterprets. `src/test/tokens.test.ts` parses BOTH
+ * files and fails on any difference, so this block cannot drift from the
+ * reference by accident, and a deliberate change has to be made in the design
+ * first. The design file's own `:root` comment records every edit made to it
+ * during the port and the measured ratio behind each one; the numbers are not
+ * repeated here because a quoted number rots and the comment there is beside
+ * the value it describes.
+ *
+ * THE SHAPE OF v3. Five type sizes (`--t-h1..--t-cap`) plus one, `--t-kpi`,
+ * for the KPI figure; three radii (`--r-ctl`, `--r-panel`, `--r-pill`); one
+ * palette: a light page (`--bg`, `--surface`, `--surface-2`), three inks
+ * (`--ink`, `--ink-2`, `--muted`), two decorative hairlines (`--line`,
+ * `--line-2`) and one control boundary (`--line-control`), a dark rail with its
+ * own two grounds and two text tones, ONE accent, and five severities each with
+ * a wash. Anything the console paints is one of these or it is a stray, and
+ * the harmony gate (`scripts/harmony.mjs`) reads this block at runtime as its
+ * allowlist.
+ *
+ * `--line-control` IS THE BOUNDARY THAT IDENTIFIES A CONTROL -- the border of
+ * a text input, a select, a search field, a secondary or ghost button, an icon
+ * button, the track of a toggle. WCAG 2.2 SC 1.4.11 asks 3:1 of that boundary
+ * against the colour beside it, and `docs/product.md` §11 makes 2.2 AA a
+ * product requirement. A control must clear the floor on every surface it can
+ * land on, and `--bg` is the darkest of the three, so it is the one that
+ * binds. `--line` AND `--line-2` ARE NOT AFFECTED, and that is the point of a
+ * third token rather than a darker second one: separating table rows, closing
+ * a panel, ruling off a tab strip -- 1.4.11 exempts all of it as decoration.
+ * `src/test/contrast.test.ts` computes the ratios and asserts that neither
+ * decorative hairline ever draws a control.
+ *
+ * LIGHT ONLY, DELIBERATELY. The design has no dark palette, no
+ * `prefers-color-scheme` block and no `[data-theme]` hook. Declaring
+ * `light dark` here with no dark palette does not give you dark mode; it tells
+ * the browser to render form controls, scrollbars and spell-check underlines
+ * dark against a light page. See the 2026-08-16 UI port spec §3.1.
+ *
+ * INTER IS SELF-HOSTED (see `./fonts.css`, imported above). `--sans` names
+ * Inter first; the woff2 files ship in this bundle and are served same-origin
+ * -- no console load ever reaches a third party for them, per the product
+ * property that this platform does not phone home (`docs/product.md` §5) and
+ * the fact that deployments frequently have no egress at all. The system
+ * stack after it remains the fallback if those files are ever missing.
+ */
+:root {
+  --t-h1: 22px;
+  --t-h2: 15px;
+  --t-body: 13.5px;
+  --t-sm: 12px;
+  --t-cap: 10.5px;
+  --t-kpi: 26px;
+  --r-ctl: 6px;
+  --r-panel: 10px;
+  --r-pill: 999px;
+  --bg: #f5f6f9;
+  --surface: #ffffff;
+  --surface-2: #f9fafc;
+  --ink: #141619;
+  --ink-2: #3b4048;
+  --muted: #606a7a;
+  --line: #e5e8ee;
+  --line-2: #cfd4dc;
+  --line-control: #828895;
+  --rail: #0f1a20;
+  --rail-2: #182730;
+  --rail-ink: #9db0b8;
+  --rail-dim: #7f939c;
+  --rail-hot: #ff8d9a;
+  --accent: #1f5fd1;
+  --accent-2: #1a4fae;
+  --accent-s: #e8effd;
+  --accent-ink: #ffffff;
+  --sev-crit: #c1182f;
+  --sev-crit-s: #fdecee;
+  --sev-warn: #9a6100;
+  --sev-warn-s: #fdf3e2;
+  --sev-ok: #17703f;
+  --sev-ok-s: #e6f6ed;
+  --sev-run: #0f5f95;
+  --sev-run-s: #e7f1fa;
+  --sev-mut: #606a7a;
+  --sev-mut-s: #eef0f4;
+  --av-1: #5b3fb0;
+  --av-2: #0f5f95;
+  --av-3: #17703f;
+  --av-4: #9a6100;
+  --av-5: #b03a5b;
+  --av-6: #0f7a80;
+  --scrim: rgba(15,26,32,.38);
+  --hatch-ink: rgba(255,255,255,.55);
+  --shadow: 0 1px 2px rgba(15,26,32,.05),0 6px 20px rgba(15,26,32,.06);
+  --mono: ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans: Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  color-scheme: light;
+  font-family: var(--sans);
+}
+
+/* LEGACY ALIASES -- every name the previous design declared, pointed at the
+ * v3 token that now does its job, so the ~1,900 references across the modules
+ * (`text-[var(--muted-2)]`, `bg-red-soft`, `var(--radius)`) resolve to v3
+ * colours and radii on day one and nothing paints an undefined variable.
+ *
+ * NONE OF THESE IS A COLOUR OF ITS OWN: every value is a `var()` reference,
+ * and `tokens.test.ts` would fail this file if one were a literal. They are
+ * a compatibility surface, not a second palette. New code names the v3 token
+ * directly, and a module is finished migrating when nothing in it reads a
+ * name from this block. The mapping is by JOB, not by hue name: the retired
+ * palette had two accents ("azure informs, magenta commits") and nine status
+ * hues; v3 has one accent and five severities, so magenta, violet, orange and
+ * teal each land on the v3 tone that carries their meaning. Gold and orange
+ * both meant "warning"; violet, blue and teal all meant "informational".
+ *
+ * This is deliberately a SECOND `:root`, after the transcription: the guards
+ * that read "the first `:root` block" see only the design's tokens, and the
+ * harmony gate's allowlist is not widened by an alias. */
+:root {
+  --canvas: var(--bg);
+  --sidebar: var(--rail);
+  --sidebar-2: var(--rail-2);
+  --rail-label: var(--rail-ink);
+  --rail-eyebrow: var(--rail-dim);
+  --rail-glow: var(--accent);
+  --line-strong: var(--line-2);
+  --muted-2: var(--muted);
+  --primary: var(--accent);
+  --primary-2: var(--accent);
+  --primary-soft: var(--accent-s);
+  --primary-ink: var(--accent);
+  --action: var(--accent);
+  --action-2: var(--accent);
+  --action-soft: var(--accent-s);
+  --action-ink: var(--accent);
+  --violet: var(--sev-run);
+  --violet-soft: var(--sev-run-s);
+  --violet-ink: var(--sev-run);
+  --gold: var(--sev-warn);
+  --gold-2: var(--sev-warn);
+  --gold-soft: var(--sev-warn-s);
+  --gold-ink: var(--sev-warn);
+  --orange: var(--sev-warn);
+  --orange-soft: var(--sev-warn-s);
+  --orange-ink: var(--sev-warn);
+  --green: var(--sev-ok);
+  --green-soft: var(--sev-ok-s);
+  --green-ink: var(--sev-ok);
+  --red: var(--sev-crit);
+  --red-soft: var(--sev-crit-s);
+  --red-ink: var(--sev-crit);
+  --blue: var(--sev-run);
+  --blue-soft: var(--sev-run-s);
+  --blue-ink: var(--sev-run);
+  --shadow-soft: var(--shadow);
+  --radius-code: var(--r-ctl);
+  --radius-field: var(--r-ctl);
+  --radius-control: var(--r-ctl);
+  --radius-card-inner: var(--r-panel);
+  --radius-tile: var(--r-panel);
+  --radius: var(--r-panel);
+  /* Shell geometry, which v3 writes as literals (232px rail, 60px top bar). */
+  --sidebar-w: 232px;
+  --topbar-h: 60px;
+}
+
+/* Tailwind v4 utility namespace.
+ *
+ * These REFERENCE the blocks above rather than repeating their values -- two
+ * copies of `#1f5fd1` is two places to drift, and the token test would only
+ * be watching one of them. Utilities like `bg-accent` and `text-muted`
+ * resolve through the same variable the component CSS uses, and the legacy
+ * utilities (`text-red-ink`, `bg-primary-soft`) resolve through the alias
+ * block so a module that has not migrated still paints v3.
+ */
+@theme inline {
+  /* v3's own names. */
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-line-control: var(--line-control);
+  --color-rail: var(--rail);
+  --color-rail-2: var(--rail-2);
+  --color-rail-ink: var(--rail-ink);
+  --color-rail-dim: var(--rail-dim);
+  --color-rail-hot: var(--rail-hot);
+  --color-accent: var(--accent);
+  --color-accent-s: var(--accent-s);
+  --color-accent-ink: var(--accent-ink);
+  --color-sev-crit: var(--sev-crit);
+  --color-sev-crit-s: var(--sev-crit-s);
+  --color-sev-warn: var(--sev-warn);
+  --color-sev-warn-s: var(--sev-warn-s);
+  --color-sev-ok: var(--sev-ok);
+  --color-sev-ok-s: var(--sev-ok-s);
+  --color-sev-run: var(--sev-run);
+  --color-sev-run-s: var(--sev-run-s);
+  --color-sev-mut: var(--sev-mut);
+  --color-sev-mut-s: var(--sev-mut-s);
+  /* Legacy names, through the alias block. */
+  --color-canvas: var(--canvas);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-2: var(--sidebar-2);
+  --color-rail-label: var(--rail-label);
+  --color-rail-eyebrow: var(--rail-eyebrow);
+  --color-rail-glow: var(--rail-glow);
+  --color-line-strong: var(--line-strong);
+  --color-muted-2: var(--muted-2);
+  --color-primary: var(--primary);
+  --color-primary-2: var(--primary-2);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-ink: var(--primary-ink);
+  --color-action: var(--action);
+  --color-action-2: var(--action-2);
+  --color-action-soft: var(--action-soft);
+  --color-action-ink: var(--action-ink);
+  --color-violet: var(--violet);
+  --color-violet-soft: var(--violet-soft);
+  --color-violet-ink: var(--violet-ink);
+  --color-gold: var(--gold);
+  --color-gold-2: var(--gold-2);
+  --color-gold-soft: var(--gold-soft);
+  --color-gold-ink: var(--gold-ink);
+  --color-orange: var(--orange);
+  --color-orange-soft: var(--orange-soft);
+  --color-orange-ink: var(--orange-ink);
+  --color-green: var(--green);
+  --color-green-soft: var(--green-soft);
+  --color-green-ink: var(--green-ink);
+  --color-red: var(--red);
+  --color-red-soft: var(--red-soft);
+  --color-red-ink: var(--red-ink);
+  --color-blue: var(--blue);
+  --color-blue-soft: var(--blue-soft);
+  --color-blue-ink: var(--blue-ink);
+  /* TAILWIND'S TYPE SCALE, REMAPPED ONTO THE RAMP. Stock `text-xs` is 12px,
+     `text-sm` 14px, `text-base` 16px, `text-lg` 18px, `text-xl` 20px; the
+     ramp is 22 / 15 / 13.5 / 12 / 10.5 with 26 for the KPI figure, and
+     contains none of 14, 16, 18 or 20. Nine hundred and thirty-three
+     `text-sm`/`text-xs` utilities are in use across the modules, so the
+     remap is what puts them on the scale, and `radius.test.ts` pins it
+     because deleting a line here errors nowhere and drifts everywhere. The
+     named rungs (`text-section` and friends) were the previous ramp's
+     utilities; they stay as aliases so nothing goes unstyled mid-port. */
+  --text-xs: var(--t-sm);
+  --text-sm: var(--t-body);
+  --text-base: var(--t-body);
+  --text-lg: var(--t-h2);
+  --text-xl: var(--t-h1);
+  --text-2xl: var(--t-kpi);
+  --text-section: var(--t-h2);
+  --text-title: var(--t-h2);
+  --text-body: var(--t-body);
+  --text-label: var(--t-sm);
+  --text-cap: var(--t-cap);
+  --text-kpi: var(--t-kpi);
+  /* WEIGHT. v3 draws everything at 500 or 600 -- there is no 700, 800 or 850
+     anywhere in the design -- so the heavier utilities land on 600, which is
+     the design's heading weight, rather than on a weight the design never
+     shows. */
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 600;
+  --font-weight-extrabold: 600;
+  /* TAILWIND'S RADIUS SCALE, REMAPPED ONTO THE LADDER. Stock `rounded-sm` is
+     2px, `rounded-md` 6px, `rounded-lg` 8px, `rounded-xl` 12px and
+     `rounded-2xl` 16px; the ladder is 6 / 10 / 999 and nothing else (heat
+     cells at 2px and 3px, and avatars at 50%, are the two exceptions and are
+     written as literals where they occur). The small rungs are controls, the
+     large ones are panels. */
+  --radius-sm: var(--r-ctl);
+  --radius-md: var(--r-ctl);
+  --radius-lg: var(--r-panel);
+  --radius-xl: var(--r-panel);
+  --radius-2xl: var(--r-panel);
+  --radius-full: var(--r-pill);
+  --radius-card: var(--r-panel);
+  --shadow-card: var(--shadow);
+  --shadow-card-soft: var(--shadow-soft);
+}
+
+body {
+  margin: 0;
+  /* WAS `min-width: 1120px`, transcribed from the first design, which is a
+   * desktop mock. That floor is what made a phone render the desktop layout at
+   * device width with the browser's zoom-out fallback suppressed by
+   * `width=device-width` -- the worst of both, and the root of both auditors'
+   * responsive findings. The console is opened from a handset during an
+   * incident, so the layout folds instead (`shell.css`, cycle 10) and this
+   * floor is the narrowest viewport worth supporting. */
+  min-width: 320px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--t-body);
+  line-height: 1.5;
+  overflow-x: auto;
+}

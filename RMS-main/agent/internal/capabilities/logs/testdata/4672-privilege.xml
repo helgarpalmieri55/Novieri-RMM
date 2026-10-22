@@ -1,0 +1,19 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Microsoft-Windows-Security-Auditing"/>
+    <EventID>4672</EventID>
+    <TimeCreated SystemTime="2026-07-18T09:12:03.2000000Z"/>
+    <EventRecordID>184393</EventRecordID>
+    <Channel>Security</Channel>
+    <Computer>WS-0142.corp.toeshee.local</Computer>
+  </System>
+  <EventData>
+    <Data Name="SubjectUserSid">S-1-5-18</Data>
+    <Data Name="SubjectUserName">SYSTEM</Data>
+    <Data Name="SubjectDomainName">NT AUTHORITY</Data>
+    <Data Name="SubjectLogonId">0x3e7</Data>
+    <Data Name="PrivilegeList">SeAssignPrimaryTokenPrivilege
+			SeTcbPrivilege
+			SeSecurityPrivilege</Data>
+  </EventData>
+</Event>

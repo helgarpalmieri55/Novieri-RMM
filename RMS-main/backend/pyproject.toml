@@ -1,0 +1,103 @@
+[project]
+name = "it-suite-backend"
+version = "0.1.0"
+description = "Toeshee IT suite control plane"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy[asyncio]>=2.0,<2.1",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "uuid7>=0.1",
+    "cryptography>=42",
+    "httpx>=0.27",
+    "redis>=5",
+    "celery>=5.4",
+    "pyjwt[crypto]>=2.8",
+    "boto3>=1.34",
+    "blake3>=0.4",
+    "pyyaml>=6",
+    # The estate exports' .xlsx renderer (`app/modules/inventory/api.py`).
+    # Upper-bounded at the major: openpyxl decides on its own whether a
+    # string is a formula, and that inference is the thing the export's
+    # security guard takes out of the loop -- a major-version change to it
+    # is a change to a security-relevant default, so it gets reviewed rather
+    # than resolved.
+    "openpyxl>=3.1.5,<4",
+    # The platform's own MCP server (`app/mcp/`, mounted at /mcp). Pinned exactly:
+    # a 2.x SDK moves its transport and auth surface between minors.
+    "mcp==2.3.0",
+    # The MCP server validates a tool call's arguments against the tool's input
+    # schema before the route runs (`app/mcp/invoke.py`). The SDK depends on it
+    # already; imported directly, so declared directly, at the version the
+    # pinned SDK resolved.
+    "jsonschema==4.26.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-timeout>=2",
+    "pytest-asyncio>=0.23",
+    "mypy>=1.10",
+    "ruff>=0.5",
+    "moto[s3]>=5",
+    # Real stubs rather than an `ignore_missing_imports` override: the export
+    # renderer's whole guard is about which type openpyxl gives a cell, and a
+    # silenced import is a checker that cannot see it.
+    "types-openpyxl>=3.1",
+    # For `app/mcp/invoke.py`'s schema validation; jsonschema ships no
+    # `py.typed`.
+    "types-jsonschema==4.26.0.20260518",
+    "websockets>=12",
+    "greenlet>=3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+timeout = 120
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning:botocore.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# B008: Depends()/Query() in defaults is the idiomatic FastAPI DI pattern
+"app/api/**" = ["B008"]
+"app/modules/*/api.py" = ["B008"]
+# The documentation module's stored-document routes are a SECOND router in the
+# same package (the shipped `api.py` keeps articles and records). Same
+# idiomatic FastAPI DI pattern, different filename, so the glob above does not
+# reach it. Named explicitly rather than widening that glob to `*api.py`: an
+# ignore that grows by wildcard eventually covers a file nobody meant.
+"app/modules/documentation/documents_api.py" = ["B008"]
+# The backup module's off-site and recovery-key routes: a second router, same
+# pattern, named for the same reason.
+"app/modules/backup/offsite_api.py" = ["B008"]
+# principal.py is the portal's analogue of app/api/deps.py -- the same
+# idiomatic FastAPI DI pattern (Depends() in a dependency-factory closure).
+"app/modules/portal/principal.py" = ["B008"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["uuid_extensions.*", "celery.*", "boto3.*", "botocore.*", "moto.*", "yaml.*"]
+ignore_missing_imports = true

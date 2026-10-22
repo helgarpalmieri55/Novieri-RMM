@@ -1,0 +1,101 @@
+Package: adduser
+Status: install ok installed
+Priority: important
+Section: admin
+Installed-Size: 608
+Maintainer: Ubuntu Core Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+Architecture: all
+Multi-Arch: foreign
+Version: 3.137ubuntu1
+Depends: passwd (>= 1:4.5-1.1)
+Suggests: cron, quota, ecryptfs-utils
+Conffiles:
+ /etc/adduser.conf cc3493ecd2d09837ffdcc3e25fdfff18
+ /etc/deluser.conf 11a06baf8245fdd6d3b1c7e2b4b6d7a0
+Description: add and remove users and groups
+ This package includes the 'adduser' and 'deluser' commands for creating
+ and removing users.
+ .
+  - 'adduser' creates new users and groups and adds existing users to
+    existing groups;
+Original-Maintainer: Debian Adduser Developers <adduser@packages.debian.org>
+
+Package: openssh-server
+Status: install ok installed
+Priority: optional
+Section: net
+Installed-Size: 2040
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+Architecture: amd64
+Multi-Arch: foreign
+Source: openssh
+Version: 1:9.6p1-3ubuntu13.5
+Replaces: openssh-client (<< 1:7.9p1-8), ssh (<< 1:6.5p1-5), ssh-krb5 (<< 1:6.5p1-5)
+Provides: ssh-server
+Depends: libaudit1 (>= 1:2.2.1), libc6 (>= 2.38)
+Description: secure shell (SSH) server, for secure access from remote machines
+ This is the portable version of OpenSSH, a free implementation of
+ the Secure Shell protocol as specified by the IETF secsh working
+ group.
+Homepage: https://www.openssh.com/
+Original-Maintainer: Debian OpenSSH Maintainers <debian-ssh@lists.debian.org>
+
+Package: nginx-common
+Status: deinstall ok config-files
+Priority: optional
+Section: httpd
+Installed-Size: 199
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+Architecture: all
+Source: nginx
+Version: 1.24.0-2ubuntu7
+Config-Version: 1.24.0-2ubuntu7
+Description: small, powerful, scalable web/proxy server - common files
+
+Package: libc6
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 13361
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+Architecture: amd64
+Multi-Arch: same
+Source: glibc
+Version: 2.39-0ubuntu8.3
+Description: GNU C Library: Shared libraries
+
+Package: libc6
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 12400
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+Architecture: i386
+Multi-Arch: same
+Source: glibc
+Version: 2.39-0ubuntu8.3
+Description: GNU C Library: Shared libraries
+
+Package: docker-ce
+Status: hold ok installed
+Priority: optional
+Section: admin
+Installed-Size: 105543
+Maintainer: Docker <support@docker.com>
+Architecture: amd64
+Version: 5:27.3.1-1~ubuntu.24.04~noble
+Description: Docker: the open-source application container engine
+
+Package: cphalf-agent
+Status: install reinstreq half-installed
+Maintainer: Nobody
+Architecture: amd64
+Version: 0.1
+Description: a half-installed package is not installed
+
+Package: zabbix-agent2
+Status: install ok installed
+Maintainer: Zabbix LLC
+Architecture: amd64
+Version: 1:7.0.4-1+ubuntu24.04
+Description: Zabbix network monitoring solution - agent 2

@@ -1,0 +1,178 @@
+{
+  "$defs": {
+    "ComponentDoc": {
+      "properties": {
+        "attributes": {
+          "additionalProperties": true,
+          "title": "Attributes",
+          "type": "object"
+        },
+        "identifier": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Identifier",
+          "type": "string"
+        },
+        "type": {
+          "pattern": "^(cpu|memory|disk|nic|gpu|display|battery|bios|motherboard)$",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "identifier"
+      ],
+      "title": "ComponentDoc",
+      "type": "object"
+    },
+    "HardwareDoc": {
+      "properties": {
+        "components": {
+          "items": {
+            "$ref": "#/$defs/ComponentDoc"
+          },
+          "title": "Components",
+          "type": "array"
+        },
+        "cpu": {
+          "default": "",
+          "title": "Cpu",
+          "type": "string"
+        },
+        "ram_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ram Bytes"
+        }
+      },
+      "title": "HardwareDoc",
+      "type": "object"
+    },
+    "SoftwareDoc": {
+      "properties": {
+        "install_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Install Date"
+        },
+        "name": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "publisher": {
+          "default": "",
+          "title": "Publisher",
+          "type": "string"
+        },
+        "version": {
+          "default": "",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "SoftwareDoc",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "architecture": {
+      "default": "",
+      "title": "Architecture",
+      "type": "string"
+    },
+    "facts": {
+      "additionalProperties": true,
+      "title": "Facts",
+      "type": "object"
+    },
+    "fqdn": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fqdn"
+    },
+    "hardware": {
+      "$ref": "#/$defs/HardwareDoc"
+    },
+    "hostname": {
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Hostname",
+      "type": "string"
+    },
+    "os_build": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Os Build"
+    },
+    "os_family": {
+      "pattern": "^(windows|linux|macos)$",
+      "title": "Os Family",
+      "type": "string"
+    },
+    "os_version": {
+      "default": "",
+      "title": "Os Version",
+      "type": "string"
+    },
+    "serial": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Serial"
+    },
+    "software": {
+      "items": {
+        "$ref": "#/$defs/SoftwareDoc"
+      },
+      "title": "Software",
+      "type": "array"
+    }
+  },
+  "required": [
+    "hostname",
+    "os_family"
+  ],
+  "title": "InventoryDocument",
+  "type": "object"
+}

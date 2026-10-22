@@ -1,0 +1,53 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "artifact_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Artifact Ref"
+    },
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "kind": {
+      "const": "job_result",
+      "title": "Kind",
+      "type": "string"
+    },
+    "result": {
+      "additionalProperties": true,
+      "title": "Result",
+      "type": "object"
+    },
+    "state": {
+      "enum": [
+        "succeeded",
+        "failed",
+        "refused"
+      ],
+      "title": "State",
+      "type": "string"
+    },
+    "v": {
+      "const": 1,
+      "title": "V",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "v",
+    "kind",
+    "job_id",
+    "state"
+  ],
+  "title": "JobResultMsg",
+  "type": "object"
+}

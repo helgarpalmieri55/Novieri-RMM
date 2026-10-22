@@ -1,0 +1,23 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "frontend/src/modules/docs/markdown.ts"
+        ],
+        "createdAt": "2026-08-21T12:45:25.934Z",
+        "reason": "Claude: false positive by the rule's own preconditions. L59 is a <blockquote> left rule, not a card side-tab, and its colour is var(--line-strong) = #d9d7df \u2014 11% saturation at 86% lightness, i.e. the neutral hairline token, which the rule's 'non-neutral color' precondition excludes. The browser path filters it; the source path cannot resolve the var() and flagged conservatively. The treatment is the canonical HTML blockquote rule and was added to close auditor B's finding 'Markdown article headings, lists and links are rendered with no typographic styling', whose fix note asks for a styled blockquote by name. File-scoped because the finding carries no extractable value; markdown.ts holds only the sanitizer's tag-style map."
+      },
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "createdAt": "2026-08-21T21:02:33.956Z"
+      }
+    ]
+  },
+  "buildPath": "comp"
+}

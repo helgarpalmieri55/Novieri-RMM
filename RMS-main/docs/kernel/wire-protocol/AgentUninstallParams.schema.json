@@ -1,0 +1,7 @@
+{
+  "additionalProperties": false,
+  "description": "`agent.uninstall` -- server -> agent (install-link spec 2026-09-28 \u00a71.5).\n\nCARRIES NOTHING, AND THAT IS THE DESIGN. What to remove is the agent's own\nknowledge -- its service, its binary, its data directory -- so there is no\nfield an operator or a compromised control plane could point at a path.\n`extra=\"forbid\"`: a member added here is a second input to a command path\nthat deletes files, and needs a review that knows it.",
+  "properties": {},
+  "title": "AgentUninstallParams",
+  "type": "object"
+}

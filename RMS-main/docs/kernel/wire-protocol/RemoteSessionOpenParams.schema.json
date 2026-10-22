@@ -1,0 +1,63 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "consent_mode": {
+      "enum": [
+        "attended",
+        "unattended"
+      ],
+      "title": "Consent Mode",
+      "type": "string"
+    },
+    "consent_prompt": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Consent Prompt"
+    },
+    "local_port": {
+      "title": "Local Port",
+      "type": "integer"
+    },
+    "protocol": {
+      "enum": [
+        "rdp",
+        "vnc",
+        "ssh"
+      ],
+      "title": "Protocol",
+      "type": "string"
+    },
+    "relay_token": {
+      "title": "Relay Token",
+      "type": "string"
+    },
+    "relay_url": {
+      "title": "Relay Url",
+      "type": "string"
+    },
+    "session_id": {
+      "title": "Session Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_id",
+    "protocol",
+    "local_port",
+    "relay_url",
+    "relay_token",
+    "consent_mode"
+  ],
+  "title": "RemoteSessionOpenParams",
+  "type": "object"
+}

@@ -1,0 +1,20 @@
+{
+  "comment": "One offline release signature, checked by BOTH verifiers: agent/internal/update (TestReleaseSignatureVector) and backend app/modules/agent_distribution/msi.py (tests/test_release_signature_vector.py). The key is Ed25519 from the seed 00 01 02 ... 1f; it signs nothing real.",
+  "more_vectors": [
+    {
+      "comment": "A leading v on the version and upper-case hex. Both verifiers canonicalise before checking (1.7.0, lower-case hex), so the signature is over the canonical message and must verify as given. Same key as above.",
+      "public_key": "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=",
+      "version": "v1.7.0",
+      "os": "windows",
+      "arch": "arm64",
+      "sha256": "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
+      "signature": "0QuI5qvbNAdcIyTQLdp11WCvQT67Y/n8idFWE64SdP3bg/epLEGet/Gq0RV/sCi1gPf/gfUlBj3fNpvig3Q8Cw=="
+    }
+  ],
+  "public_key": "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=",
+  "version": "1.6.0",
+  "os": "windows",
+  "arch": "amd64",
+  "sha256": "abababababababababababababababababababababababababababababababab",
+  "signature": "5kFY5cSU+jX8861cnGZJ0WuAib24lex87BoZiPaDbx8aZDiwTYB4P0zlhNPAi4bBvlnL4uNRtYK5SCRKE1gKDA=="
+}

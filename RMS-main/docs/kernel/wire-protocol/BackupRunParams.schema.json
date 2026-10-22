@@ -1,0 +1,135 @@
+{
+  "$defs": {
+    "BackupVss": {
+      "additionalProperties": false,
+      "properties": {
+        "backup_type": {
+          "default": "copy",
+          "enum": [
+            "copy",
+            "full"
+          ],
+          "title": "Backup Type",
+          "type": "string"
+        },
+        "fail_on_writer": {
+          "default": true,
+          "title": "Fail On Writer",
+          "type": "boolean"
+        }
+      },
+      "title": "BackupVss",
+      "type": "object"
+    },
+    "BackupWorkload": {
+      "additionalProperties": false,
+      "properties": {
+        "config": {
+          "additionalProperties": true,
+          "default": {},
+          "title": "Config",
+          "type": "object"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "files",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "title": "BackupWorkload",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "dedup_params": {
+      "additionalProperties": true,
+      "default": {},
+      "title": "Dedup Params",
+      "type": "object"
+    },
+    "format": {
+      "default": 1,
+      "title": "Format",
+      "type": "integer"
+    },
+    "not_after_start": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Not After Start"
+    },
+    "repo_key": {
+      "title": "Repo Key",
+      "type": "string"
+    },
+    "repository_id": {
+      "title": "Repository Id",
+      "type": "string"
+    },
+    "snapshot": {
+      "enum": [
+        "vss",
+        "lvm",
+        "apfs",
+        "auto"
+      ],
+      "title": "Snapshot",
+      "type": "string"
+    },
+    "sources": {
+      "additionalProperties": true,
+      "default": {},
+      "title": "Sources",
+      "type": "object"
+    },
+    "storage_ref": {
+      "title": "Storage Ref",
+      "type": "string"
+    },
+    "vss": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BackupVss"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "workload": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BackupWorkload"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "repository_id",
+    "storage_ref",
+    "repo_key",
+    "snapshot"
+  ],
+  "title": "BackupRunParams",
+  "type": "object"
+}

@@ -1,0 +1,39 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "body": {
+      "title": "Body",
+      "type": "string"
+    },
+    "interpreter": {
+      "enum": [
+        "powershell",
+        "bash",
+        "python"
+      ],
+      "title": "Interpreter",
+      "type": "string"
+    },
+    "script_id": {
+      "title": "Script Id",
+      "type": "string"
+    },
+    "script_version": {
+      "title": "Script Version",
+      "type": "integer"
+    },
+    "timeout_s": {
+      "default": 3600,
+      "title": "Timeout S",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "interpreter",
+    "body",
+    "script_id",
+    "script_version"
+  ],
+  "title": "ScriptRunParams",
+  "type": "object"
+}

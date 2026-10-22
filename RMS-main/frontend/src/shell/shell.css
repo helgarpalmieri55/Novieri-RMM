@@ -1,0 +1,819 @@
+/* Shell styles -- TRANSCRIBED from `docs/design/itms-prototype-v3.html`
+ * (`.shell`, `.rail`, `.brand`, `.grp`, `.rail a`, `.ct`, `.top`, `.srch`,
+ * `.ib`, `.dot`, `.me`, `.content`, `.crumb`), 2026-09-07 port, task A3.
+ *
+ * WHAT IS THE DESIGN'S AND WHAT IS NOT. v3 is a static mock: its rail is a
+ * sticky grid column with no collapse, no drawer and no keyboard; its top bar
+ * has no hamburger, no session banner and a bell nothing is behind. The
+ * console keeps every function it had (`2026-09-07-redesign-v3-port-design.md`
+ * §1.1), so the rules for those live here too, painted in v3's vocabulary and
+ * from v3's tokens only. Where a value below is not v3's, the comment beside
+ * it says which measured floor moved it:
+ *
+ *   - `.ib` and every other control draw their border in `--line-control`,
+ *     not v3's `--line` (1.49:1): SC 1.4.11 asks 3:1 of the boundary that
+ *     identifies a control, and `contrast.test.ts` measures every one.
+ *   - the brand mark is `--r-ctl` (6px), not v3's literal 8px: the ladder is
+ *     6 / 10 / 999 plus 2px / 3px heat cells and 50% avatars, and the harmony
+ *     gate fails any other radius.
+ *   - the health pip is 10px, not v3's 7px: it carries a SILHOUETTE per state
+ *     (SC 1.4.1, colour is never the only carrier) and 7px minus a 2px ring
+ *     is 3px of fill, which is no shape at all.
+ *
+ * Every colour is a token. The harmony gate diffs the computed `color`,
+ * `background-color` and `border-color` of every element against the token
+ * list, so an rgba() wash on the rail is a stray, not a subtlety.
+ */
+
+.shell { min-height: 100vh; }
+
+/* ------------------------------------------------------------------ rail */
+
+/* v3 `.rail`: `--rail` ground, `--rail-ink` text, `padding: 14px 0 24px`. The
+ * console's rail is `position: fixed` rather than a sticky grid column so the
+ * desktop collapse (76px) and the sub-1024px drawer can move it without the
+ * page reflowing under them; the 24px bottom padding sits on `.nav-scroll`
+ * because the tenant card is the rail's foot. */
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: var(--sidebar-w);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 0 0;
+  color: var(--rail-ink);
+  background: var(--rail);
+  transition: width .22s ease;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 18px 18px;
+  color: #fff;
+  font-weight: 600;
+  font-size: var(--t-h2);
+  flex: 0 0 auto;
+}
+/* v3 `.brand i`: 28px, `--accent`, white glyph. Radius is the ladder's. */
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-ctl);
+  color: #fff;
+  background: var(--accent);
+}
+.brand-name { white-space: nowrap; }
+/* Not in v3. The collapse control the audit asked to be persisted; 30px on a
+ * mouse, 44px under a finger (the `pointer: coarse` block below). */
+.collapse-btn {
+  margin-left: auto;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-ctl);
+  color: var(--rail-ink);
+  background: transparent;
+  border: 1px solid transparent;
+}
+.collapse-btn:hover { color: #fff; background: var(--rail-2); }
+.collapse-btn:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+
+.nav-scroll {
+  padding: 0 0 24px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rail-2) transparent;
+}
+.nav-group { margin: 0; }
+/* v3 `.rail .grp`: the group caption, 10.5px uppercase in `--rail-dim`
+ * (lightened in the design file to 5.51:1 on `--rail`, 4.78:1 on `--rail-2`,
+ * because this is text). Scoped to the rail so `contrast.test.ts` grades it
+ * on both rail grounds. */
+.sidebar .grp {
+  padding: 14px 18px 5px;
+  font-size: var(--t-cap);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: .13em;
+  color: var(--rail-dim);
+  white-space: nowrap;
+}
+/* v3 `.rail a`: 7px 18px, 10px gap, body size, a 2px left edge that only the
+ * active item paints. */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 18px;
+  color: var(--rail-ink);
+  font-size: var(--t-body);
+  border-left: 2px solid transparent;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.nav-item:hover { color: #fff; background: var(--rail-2); }
+/* THE ACTIVE STATE HAS THREE CARRIERS: white text, the `--rail-2` ground and
+ * the accent edge. `--accent` on `--rail-2` is 2.64:1, so the edge is never
+ * the only one (v3's own note on its token block). */
+.nav-item.active { color: #fff; background: var(--rail-2); border-left-color: var(--accent); }
+.nav-item svg { opacity: .7; }
+.nav-item.active svg { opacity: 1; }
+.nav-item .lbl { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.nav-item:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+/* An open area's pages: the SAME size as every other item, with their own
+ * icons, indented one step under their section heading. The first version
+ * (console additions wave 10) drew them a size smaller with no glyph, and the
+ * operator read that as "without importance" (2026-09-23). Lit by ground, ink
+ * and weight, never the accent edge, so the parent keeps the rail's one. */
+.nav-item.sub { padding: 6px 18px 6px 32px; }
+.nav-item.sub.active { color: #fff; background: var(--rail-2); border-left-color: transparent; font-weight: 500; }
+/* An open area's section headings: the group caption, indented with its pages. */
+.sidebar .grp.sub { padding: 10px 18px 3px 32px; }
+/* v3 `.rail .ct`: the right-aligned mono count; `.hot` is the alert count in
+ * `--rail-hot` (8.01:1 on `--rail`). */
+.sidebar .ct {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--t-sm);
+  color: var(--rail-dim);
+}
+.sidebar .ct.hot { color: var(--rail-hot); }
+
+/* The tenant card -- identity, not a control (both auditors, cycle 2). Not in
+ * v3's rail, which names the tenant in the account chip instead; the spec (§3)
+ * keeps it here, the one place the tenant is named. */
+.sidebar-footer {
+  padding: 12px;
+  border-top: 1px solid var(--rail-2);
+  flex: 0 0 auto;
+}
+.tenant-card {
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: var(--r-panel);
+  background: var(--rail-2);
+  cursor: default;
+}
+.tenant-avatar {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-ctl);
+  color: #fff;
+  background: var(--accent);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+.tenant-meta { min-width: 0; }
+.tenant-name {
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tenant-plan { font-size: var(--t-sm); color: var(--rail-dim); margin-top: 1px; }
+
+/* --------------------------------------------------------------- top bar */
+
+.app-shell { margin-left: var(--sidebar-w); min-height: 100vh; transition: margin-left .22s ease; }
+/* v3 `.top`: 60px, 12px gap, 24px padding, `--surface`, a `--line` hairline. */
+.topbar {
+  display: flex;
+  align-items: center;
+  /* 16px, and the design file moved first. At 12px the bar read as one dense
+     run of controls -- "everything here looks too tight", the operator on the
+     deployed console. */
+  gap: 16px;
+  height: var(--topbar-h);
+  padding: 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+/* --- Find or ask: v3 `.top .srch` (flex 1, max 520px) drawn as a real field.
+ *
+ * "The search bar is a pop-up, it shouldn't be like that" -- the operator. The
+ * field is an `<input>` and `.palette` (overlays.css) hangs off this wrapper,
+ * the way `.picker-list` hangs off the entity picker. The wrapper owns the
+ * sizing because the panel measures itself against the same box. */
+.topbar-find {
+  position: relative;
+  flex: 1 1 auto;
+  max-width: 520px;
+  /* THE ACCOUNT BLOCK BELONGS IN THE CORNER, and this one property is what
+     puts it there. `.topbar` is a flex row in which the search is the only
+     child that grows, and it is capped at 520px -- so on any viewport wider
+     than about 1100px the whole bar packed left and the avatar floated in the
+     middle with ~600px of empty surface to its right. `margin-right: auto`
+     on the ONLY growable child hands the slack to the gap after it instead,
+     which pushes everything downstream flush right. The design file had the
+     same defect and was corrected first (`.top .srch`). */
+  margin-right: auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+/* The magnifier and the shortcut hint sit OVER the field: an input cannot hold
+ * children, and a flex row of their own would put the focus ring around a box
+ * that is not the thing taking focus. */
+.topbar-find-icon {
+  position: absolute;
+  left: 11px;
+  display: flex;
+  color: var(--muted);
+  pointer-events: none;
+}
+.topbar-find .kbd { position: absolute; right: 8px; pointer-events: none; }
+/* v3 `.inp.srch`: 36px, `--line-control` boundary, `--r-ctl`, `--surface`. */
+.topbar-search {
+  width: 100%;
+  height: 36px;
+  padding: 0 44px 0 32px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-control);
+  border-radius: var(--r-ctl);
+  font-family: var(--sans);
+  font-size: var(--t-body);
+}
+.topbar-search::placeholder { color: var(--muted); }
+.topbar-search:hover { border-color: var(--muted); background: var(--surface-2); }
+/* THE RING GOES ON THE ELEMENT THAT TAKES FOCUS, in the accent, outside the
+ * border, so the browser pass reads it off `document.activeElement`. */
+.topbar-search:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+  background: var(--surface);
+}
+/* The `/` and `Esc` hints: text, so `--muted` at 4.5:1, not a decoration. */
+.kbd {
+  min-width: 28px;
+  padding: 1px 6px;
+  border-radius: var(--r-ctl);
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  font-family: var(--mono);
+  font-size: var(--t-sm);
+  text-align: center;
+}
+
+/* 10px, not 8px: this cluster holds the action, the two live glyphs and the
+ * person, and at 8px they read as one undifferentiated strip. The account
+ * block sits inside it, so this gap plus `.profile-btn`'s own 6px padding is
+ * what separates the person from the controls. */
+.top-actions { display: flex; align-items: center; gap: 10px; }
+/* v3 `.top .ib`: 36px, `--r-ctl`, `--surface`, `--ink-2` glyph. The boundary
+ * is `--line-control` rather than v3's `--line` (see the file header). The
+ * hover repaints the ground as well as the edge, because a border-only step
+ * from `--line-control` to `--muted` is 1.54:1 and the eye does not see it. */
+.ib {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--line-control);
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+  position: relative;
+  text-decoration: none;
+}
+.ib:hover { background: var(--accent-s); border-color: var(--muted); }
+.ib:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* THE HEALTH AND PLATFORM GLYPHS' FOUR STATES -- v3's `.ib .dot` and
+ * `.ib.ok .dot`, extended to what the console can actually report.
+ *
+ * THREE CARRIERS, NEVER ONE. Hue here, SHAPE in the pip below, and the
+ * condition in words in the accessible name (`healthSignal.ts`). SC 1.4.1
+ * forbids colour being the only one, and green/amber/red is the worst trio
+ * for the eyes that criterion is about. `contrast.test.ts` reads these rules,
+ * resolves each token, and grades it at 3:1 on the button's resting white AND
+ * on the `--accent-s` the hover lifts to, on every run. */
+.ib.health-ok { color: var(--sev-ok); }
+.ib.health-alerts { color: var(--sev-warn); }
+.ib.health-down { color: var(--sev-crit); }
+/* Unknown keeps the cluster's own ink: no claim is a state too, and it must
+ * not be mistaken for the green one. */
+.ib.health-unknown { color: var(--ink-2); }
+.health-pip {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--surface);
+  background: currentColor;
+}
+/* A CIRCLE, A TRIANGLE, A SQUARE AND A RING. Four silhouettes an operator can
+ * tell apart with the colour taken away entirely, which is the test. */
+.ib.health-ok .health-pip { border-radius: 50%; }
+.ib.health-alerts .health-pip { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.ib.health-down .health-pip { border-radius: 2px; }
+.ib.health-unknown .health-pip { border-radius: 50%; background: var(--surface); border-color: var(--muted); }
+
+/* The count, only where the rail's own `.ct` is a shut drawer (below 1024px);
+ * see `HealthGlyph` in AppShell.tsx. */
+.counter-dot {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-radius: var(--r-pill);
+  border: 2px solid var(--surface);
+  font-family: var(--mono);
+  font-size: var(--t-sm);
+  line-height: 1;
+  font-weight: 600;
+}
+@media (min-width: 1025px) {
+  .ib .counter-dot { display: none; }
+}
+
+/* THE INSTALL ACTION, IN THE PRIMARY VOICE, as v3 draws it (`.btn.pri` in
+ * `topbar()`). Geometry is v3's `.btn` at 36px so it sits level with `.ib`.
+ *
+ * THE DEVIATION IS SETTLED. The port drew this secondary and
+ * `AppShell.test.tsx` held it there, reading DESIGN.md's one-primary rule as
+ * "one per screen". The rule is one per page BODY: this control lives in the
+ * chrome, on the same rung as the search field and the account menu, never
+ * on the page's own rung, so it does not compete with a page's primary for
+ * the first glance. It is also the one action the product is a promise
+ * about -- the operator could not find how to install an agent, which is why
+ * it is in the bar at all. DESIGN.md now records the exception, and the
+ * guard asserts the primary class rather than its absence. */
+.top-enrol {
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 13px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-radius: var(--r-ctl);
+  font-size: var(--t-body);
+  font-weight: 500;
+  white-space: nowrap;
+  text-decoration: none;
+}
+/* A FILLED BUTTON ANSWERS THE POINTER ON ITS FILL, not on a border 1.80:1
+ * from it -- which is what the hover-step guard in `contrast.test.ts`
+ * measured when this control became primary. `--accent-2` is the design's
+ * deeper accent (edit 8); `--accent-ink` clears 7.57:1 on it. */
+.top-enrol:hover { background: var(--accent-2); border-color: var(--accent-2); }
+.top-enrol:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* v3 `.top .me`: avatar, name, a `--t-sm` muted line. A button here because
+ * it opens the account menu (cycle 2); borderless like v3's chip, with a ring
+ * for the keyboard. */
+.profile-btn {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  /* 10px LEAD-IN, mirroring the design's `.top .me { padding-left }`, which
+     moved from 6px to 10px in the same pass that widened this row. The person
+     is not another control in the cluster: this is the step that separates who
+     you are from what you can press. */
+  padding: 0 6px 0 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  border-radius: var(--r-ctl);
+  text-align: left;
+}
+.profile-btn:hover { background: var(--accent-s); }
+.profile-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* v3 `.av` at 30px: a circle in one of the six `--av-*` tones, white initials
+ * (every tone clears 5.10:1 for white; the design's token note). */
+.avatar {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--av-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+.avatar.av-1 { background: var(--av-1); }
+.avatar.av-2 { background: var(--av-2); }
+.avatar.av-3 { background: var(--av-3); }
+.avatar.av-4 { background: var(--av-4); }
+.avatar.av-5 { background: var(--av-5); }
+.avatar.av-6 { background: var(--av-6); }
+.profile-copy { min-width: 0; }
+.profile-name { display: block; font-size: var(--t-body); font-weight: 500; line-height: 1.2; white-space: nowrap; }
+.profile-role { display: block; color: var(--muted); font-size: var(--t-sm); line-height: 1.2; }
+
+/* --------------------------------------------------------------- content */
+
+/* v3 `.content`: `22px 24px 40px`, max 1440. This is the `<main>` and the skip
+ * link's target; it must not draw a focus ring around the whole page. */
+.content { padding: 22px 24px 40px; max-width: 1440px; }
+.content:focus { outline: none; }
+/* v3 `.crumb`, the first line of `.content` above the page's own `PageHead`.
+ * A `<nav aria-label="Breadcrumb">` with a real link -- the move out of the
+ * top bar is a move, not a removal. */
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--t-sm);
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.crumb a { color: var(--muted); text-decoration: none; }
+.crumb a:hover { color: var(--accent); text-decoration: underline; }
+.crumb [aria-current="page"] { color: var(--ink); font-weight: 500; }
+
+/* The design's one wide-desktop step, kept where it was. */
+@media (max-width: 1300px) {
+  .profile-copy { display: none; }
+  }
+
+/* Collapsed rail. Driven by a class on <body>; the React shell sets the same
+ * class and persists it under `itms.sidebar.collapsed`. */
+body.sidebar-collapsed { --sidebar-w: 76px; }
+body.sidebar-collapsed .brand-name,
+body.sidebar-collapsed .sidebar .grp,
+body.sidebar-collapsed .nav-item .lbl,
+body.sidebar-collapsed .sidebar .ct,
+body.sidebar-collapsed .tenant-meta { display: none; }
+body.sidebar-collapsed .brand { padding: 6px 0 18px; justify-content: center; }
+/* Straddles the rail's edge, so it is drawn on the accent rather than on a
+ * ground it is half off. */
+body.sidebar-collapsed .collapse-btn {
+  position: absolute;
+  left: 61px;
+  top: 21px;
+  z-index: 2;
+  margin: 0;
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
+}
+body.sidebar-collapsed .nav-item { justify-content: center; padding: 7px 0; }
+/* A sub-page has its own glyph now, so a 76px rail shows it like any item. */
+body.sidebar-collapsed .nav-item.sub { padding: 6px 0; }
+body.sidebar-collapsed .nav-group + .nav-group { margin-top: 10px; }
+body.sidebar-collapsed .tenant-card { justify-content: center; padding: 8px; }
+
+/* --- Skip link, account menu, session notice (UX remediation cycle 2) ----- */
+
+/* Visible only when focused. Off-screen rather than `display:none`, because a
+ * hidden element is not focusable and a skip link that cannot be focused is
+ * not a skip link. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 8px;
+  z-index: 100;
+  padding: 10px 16px;
+  border-radius: var(--r-ctl);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: var(--t-body);
+  font-weight: 600;
+  text-decoration: none;
+}
+.skip-link:focus { left: 8px; }
+
+.account-menu-anchor { position: relative; }
+.account-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 60;
+  min-width: 232px;
+  padding: 6px;
+  border-radius: var(--r-panel);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+.account-menu-head {
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 6px;
+}
+.account-menu-name { font-size: var(--t-body); font-weight: 600; color: var(--ink); }
+/* Answers "which account am I signed in as" before someone acts on a whole
+ * fleet, so it is on the ramp and graded, not a 9px afterthought. */
+.account-menu-email { font-size: var(--t-sm); color: var(--muted); margin-top: 2px; word-break: break-all; }
+.menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  background: none;
+  text-align: left;
+  font: inherit;
+  font-size: var(--t-body);
+  color: var(--ink);
+  text-decoration: none;
+  cursor: pointer;
+}
+.menu-item:hover, .menu-item:focus-visible { background: var(--accent-s); }
+/* THE TINT IS NOT THE FOCUS INDICATOR: the outline answers SC 1.4.11 and
+ * 2.4.7; the wash is a hover pleasantry. */
+.menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Destructive, and visibly so, in the severity family's crit tone. */
+.menu-item-destructive { color: var(--sev-crit); }
+/* The language choices, indented under the row that opens them. The console
+ * has no spacing tokens (harmony checks type, radii and colour), so this is
+ * the menu item's own 10px inset. */
+.account-menu-sub { padding-left: 10px; }
+.menu-item-destructive:hover, .menu-item-destructive:focus-visible { background: var(--sev-crit-s); }
+
+/* The session-expiry notice. Sits above the content rather than over it: a
+ * warning that covers the work it is warning you to save is not a warning.
+ * The warn wash and ink are the severity family's own pair. */
+.session-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 16px 24px 0;
+  padding: 12px 16px;
+  border-radius: var(--r-panel);
+  background: var(--sev-warn-s);
+  border: 1px solid var(--sev-warn-s);
+  color: var(--ink);
+  font-size: var(--t-body);
+}
+.session-notice-action {
+  flex: 0 0 auto;
+  padding: 8px 13px;
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--sev-warn);
+  background: var(--surface);
+  color: var(--sev-warn);
+  font: inherit;
+  font-size: var(--t-body);
+  font-weight: 500;
+  cursor: pointer;
+}
+.session-notice-action:hover { background: var(--sev-warn); color: var(--accent-ink); }
+.session-notice-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The form kernel's actions row (UX remediation cycle 3). */
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+.form-hint { font-size: var(--t-sm); color: var(--muted); }
+/* A real red, on the ramp: this is the sentence telling somebody why their
+ * work did not save. */
+.form-error { font-size: var(--t-sm); color: var(--sev-crit); }
+.form-saved { font-size: var(--t-sm); color: var(--sev-ok); }
+
+/* --- Responsive layout (UX remediation cycle 10) ---------------------------
+ *
+ * TWO BREAKPOINTS, NOT FIVE. 1024px is where the rail stops being affordable
+ * and becomes a drawer (v3 hides its rail at 1100px; the console's breakpoint
+ * is unchanged by the port); 640px is where two columns stop fitting. The
+ * 1300px query the design already had is left where it was. */
+
+/* The hamburger. Hidden on desktop, where the rail is always present; a real
+ * 44px target below it, because it is the only way to reach navigation. */
+.nav-toggle {
+  display: none;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-control);
+  border-radius: var(--r-ctl);
+}
+.nav-toggle:hover { background: var(--accent-s); border-color: var(--muted); }
+.nav-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The scrim. Present in the DOM only while the drawer is open, so it cannot
+ * intercept a click on a desktop viewport that never renders the drawer. The
+ * rail's own tone at half strength, so the colour it paints is a token. */
+.nav-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: var(--rail);
+  opacity: .5;
+  border: 0;
+  padding: 0;
+}
+
+@media (max-width: 1024px) {
+  /* The drawer. `visibility: hidden` and not merely `translateX(-100%)`: an
+   * off-screen nav that is still in the tab order hands a keyboard user
+   * twenty-eight invisible stops before the page content, which is the same
+   * defect the skip link exists to fix. The visibility transition is delayed
+   * so it only takes effect once the slide-out has finished. */
+  .sidebar {
+    transform: translateX(-100%);
+    visibility: hidden;
+    /* The scrim carries the depth; the token shadow is enough for the edge. */
+    box-shadow: var(--shadow);
+    transition: transform .22s ease, visibility 0s linear .22s;
+  }
+  body.nav-open .sidebar {
+    transform: none;
+    visibility: visible;
+    transition: transform .22s ease, visibility 0s;
+  }
+
+  .app-shell { margin-left: 0; }
+  .nav-toggle { display: flex; }
+
+  /* Collapsing is a desktop affordance: in a drawer the choice is open or
+   * shut, and a 76px rail is neither. 232px is v3's rail. */
+  .collapse-btn { display: none; }
+  body.sidebar-collapsed { --sidebar-w: 232px; }
+  body.sidebar-collapsed .brand-name,
+  body.sidebar-collapsed .sidebar .grp,
+  body.sidebar-collapsed .nav-item .lbl,
+  body.sidebar-collapsed .sidebar .ct,
+  body.sidebar-collapsed .tenant-meta { display: revert; }
+  body.sidebar-collapsed .brand { padding: 6px 18px 18px; justify-content: flex-start; }
+  body.sidebar-collapsed .nav-item { justify-content: flex-start; padding: 7px 18px; }
+  body.sidebar-collapsed .nav-item.sub { padding: 6px 18px 6px 32px; }
+  body.sidebar-collapsed .nav-group + .nav-group { margin-top: 0; }
+
+  /* The drawer is modal over the page, so the page behind it must not scroll. */
+  body.nav-open { overflow: hidden; }
+
+  /* THE CRUMB'S TEXT HAS TO SHRINK WITH ITS BOX. `min-width: 0` lets a box go
+   * narrower than its content and does nothing about the content, which
+   * paints outside it and counts toward the document's scrollable overflow --
+   * SC 1.4.10 Reflow. A long section name is clipped rather than scrolled. */
+  .crumb { overflow: hidden; }
+  .crumb > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar { gap: 10px; padding: 0 14px; }
+
+  /* THE SEARCH COLLAPSES TO ITS GLYPH; IT DOES NOT LEAVE.
+   *
+   * It was `display: none`, and that removed three things at once: the field,
+   * the `/` shortcut (which asks the element `checkVisibility()` before it
+   * fires, exactly so it cannot open a panel anchored to something invisible)
+   * and the "Ask the Assistant" row -- so on a handset the console had no
+   * command palette and no way to reach the assistant from the chrome. Filed
+   * by five review groups across every route, and specification S1 lists the
+   * palette among the top-bar functions that must survive.
+   *
+   * A SEPARATE ICON BUTTON WOULD HAVE BEEN A SECOND CONTROL. `.palette` is
+   * anchored to this wrapper and `CommandPalette` renders the wrapper itself,
+   * so a button elsewhere in the bar would have to open a panel that hangs
+   * off a hidden box. Collapsing the same control to 36px keeps one control,
+   * one anchor, one open handler and one shortcut: the magnifier stays put
+   * and the field shrinks to a square behind it, which reads as an icon
+   * button and answers the pointer, the finger and the keyboard alike. It
+   * expands to the full bar the moment anything inside it takes focus. */
+  .topbar-find { flex: 0 0 36px; max-width: 36px; }
+  .topbar-search { width: 36px; padding: 0; }
+  /* THE PLACEHOLDER IS THE ONLY THING THAT SPILLS from a 36px box: the field
+   * itself is empty whenever it is collapsed, because the palette clears its
+   * query on close. Hidden with `opacity` and not with `color: transparent`
+   * so the rule keeps naming `--muted` -- `contrast.test.ts` grades every
+   * search-field ink against the surface and a literal there, even a
+   * transparent one, is the shape of the defect that guard exists for. */
+  .topbar-search::placeholder { opacity: 0; }
+  .topbar-find .kbd { display: none; }
+  .topbar-find:focus-within, .topbar-find:has(.palette.open) { flex: 1 1 auto; max-width: none; }
+  .topbar-find:focus-within .topbar-search,
+  .topbar-find:has(.palette.open) .topbar-search { width: 100%; padding: 0 12px 0 32px; }
+  .topbar-find:focus-within .topbar-search::placeholder { opacity: 1; }
+}
+
+@media (max-width: 640px) {
+  /* `.form-grid`'s single column WAS declared here and was inert: it ties on
+   * specificity with the unconditional rule in `components.css`, which is
+   * imported afterwards and therefore won. It now lives in that file
+   * immediately after the rule it overrides, with the reasoning. */
+  .topbar { gap: 8px; padding: 0 10px; }
+  /* NO `.top-shortcut` RULE ANY MORE, and the reason is worth keeping.
+   * Seven 44px targets did not fit in 390px -- measured, the bar ran 402px at
+   * a 390px coarse-pointer viewport, a horizontal page scroll on every route
+   * -- so one chrome link was hidden at this step. The operator then removed
+   * the /docs link outright (2026-09-09), which drops that target at EVERY
+   * width, so there is nothing left for this breakpoint to stand down. The
+   * search, the install action, the assistant, the two live glyphs and the
+   * account menu all stay; harmony re-measures the fit on every push. */
+  /* v3: `.content{padding:14px}` at this step. */
+  .content { padding: 14px; }
+  /* THE WORD GOES, THE NAME STAYS. There is no room for "Add a computer" beside
+   * a hamburger and three icons on a handset -- but the label IS the
+   * accessible name, and `display: none` would take it out of the
+   * accessibility tree. Geometry copied from `.sr-only` in `base.css`. */
+  .top-enrol { padding: 0; width: 36px; justify-content: center; }
+  .top-enrol-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border-width: 0;
+  }
+}
+
+/* Tap targets. WCAG 2.5.8 sets 24px as the AA minimum and 2.5.5 asks for 44px.
+ * The floor is applied where a finger is the pointer, which is the condition
+ * the guideline is about; mouse users keep the design's proportions. `.ib` and
+ * `.top-icon-btn` are one control (the JSX carries both names). */
+@media (pointer: coarse) {
+  .nav-item,
+  .ib,
+  .top-icon-btn,
+  .top-enrol,
+  .profile-btn,
+  .collapse-btn,
+  .btn,
+  .btn.small,
+  .tab,
+  /* `.chip` is a filter control the finger throws (the nine section tabs on
+   * /settings are chips), and `.panel-link` is a row action in a panel head.
+   * Both drew at ~28px. `.panel-link` is an inline anchor, so the floor only
+   * applies once it establishes a box of its own. */
+  .chip,
+  .panel-link,
+  /* The form controls are most of the 49 the auditors measured under 44px:
+   * `min-height` clamps the 36px `height` these carry rather than fighting it. */
+  .search-field,
+  .select-field,
+  .input-field,
+  textarea,
+  .menu-item,
+  .session-notice-action {
+    min-height: 44px;
+  }
+
+  .panel-link { display: inline-flex; align-items: center; }
+
+  /* The two square controls that would fail on BOTH axes under a height floor
+   * alone: the collapse chevron (30px) and the icon buttons (36px). */
+  .collapse-btn { min-width: 44px; }
+  .ib, .top-icon-btn { min-width: 44px; }
+
+  /* A 44px box around a 37px square button would letterbox the icon; grow
+   * both sides instead. */
+  .btn.icon-only { width: 44px; }
+}
+
+/* Reduced motion. WCAG 2.3.3: the drawer slides in over the page, the rail
+ * animates its width on collapse, and `.btn:hover` lifts.
+ *
+ * `0.01ms` RATHER THAN `none`. A transition removed outright never fires
+ * `transitionend`, and the drawer's `visibility` swap is sequenced off the
+ * transform's duration -- killing it would leave the closed drawer visible.
+ * An imperceptible duration keeps the sequencing and removes the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .app-shell,
+  .btn,
+  .nav-item,
+  body.nav-open .sidebar {
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+  }
+  .btn:hover, .nav-item:hover { transform: none; }
+}

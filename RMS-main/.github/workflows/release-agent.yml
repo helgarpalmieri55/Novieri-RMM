@@ -1,0 +1,141 @@
+name: release-agent
+
+# Builds and signs an agent release (spec-self-update.md, operator decision
+# 2026-09-23: "an Ed25519 key held by the release workflow and compiled into
+# the agent, checked in addition to the SHA-256").
+#
+# SECRET: AGENT_RELEASE_SIGNING_KEY -- a PKCS#8 PEM Ed25519 private key,
+# created offline with `go run ./cmd/release-sign genkey` and stored only as
+# the main-only `agent-release` environment. Main requires reviewed PRs and CI.
+# The control plane never holds it. The public half is derived
+# here and compiled into every binary; an agent built with it refuses any
+# self-update whose release signature does not verify.
+#
+# Windows stays Authenticode-unsigned until the pilot (operator decision); the
+# release signature above applies to every platform regardless.
+#
+# The result is a DRAFT GitHub release. Publishing it, and uploading each
+# binary plus its `.sig` to the console (`PUT /api/v1/agent/releases/{id}/
+# release-signature`), is a person's act.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Strict semver without a leading v, e.g. 1.4.0"
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-agent-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/github-script@v7
+        with:
+          script: await require('./release-gate.cjs')({ github, context, core });
+  release:
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    environment: agent-release
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: agent/go.sum
+
+      - name: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${INPUT_VERSION:-${GITHUB_REF_NAME#agent-v}}"
+          v="${v#v}"
+          # Agents only self-update between versions they can order.
+          if ! [[ "$v" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "::error::version '$v' is not strict semver"
+            exit 1
+          fi
+          # Versions are immutable; reject an existing tag before exposing the key.
+          if git ls-remote --exit-code --tags origin "refs/tags/agent-v$v" >/dev/null; then
+            echo "::error::agent-v$v already exists; choose a new version"
+            exit 1
+          else
+            status=$?
+            [ "$status" -eq 2 ] || exit "$status"
+          fi
+          # A DRAFT release has no git tag until it is published, so the tag
+          # check above does not see one -- and every release this workflow
+          # makes is a draft. Without this, a second run for the same version
+          # signs a second, different set of binaries under that version.
+          # Listed through the API (this job's token can read drafts); an API
+          # failure fails the step rather than reading as "no release".
+          releases="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '.[].tag_name')"
+          if grep -Fxq "agent-v$v" <<<"$releases"; then
+            echo "::error::a release (possibly a draft) named agent-v$v already exists; choose a new version or delete that draft first"
+            exit 1
+          fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: test
+        run: go test ./... -count=1
+
+      - name: derive the public key (refuses without the secret)
+        env:
+          AGENT_RELEASE_SIGNING_KEY: ${{ secrets.AGENT_RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$AGENT_RELEASE_SIGNING_KEY" ]; then
+            echo "::error::the AGENT_RELEASE_SIGNING_KEY secret is not set; an unsigned release is not built"
+            exit 1
+          fi
+          pub="$(go run ./cmd/release-sign pubkey)"
+          echo "RELEASE_SIGNING_PUBKEY=$pub" >> "$GITHUB_ENV"
+
+      - name: build, with the release key compiled in
+        run: VERSION="$VERSION" RELEASE_SIGNING_PUBKEY="$RELEASE_SIGNING_PUBKEY" ./packaging/build.sh
+
+      - name: sign
+        env:
+          AGENT_RELEASE_SIGNING_KEY: ${{ secrets.AGENT_RELEASE_SIGNING_KEY }}
+        run: |
+          files=()
+          for t in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64.exe windows-arm64.exe; do
+            files+=("dist/its-agent-$t")
+          done
+          go run ./cmd/release-sign sign -version "$VERSION" "${files[@]}" | tee dist/SIGNATURES
+          (cd dist && sha256sum its-agent-linux-* its-agent-darwin-* its-agent-windows-* | grep -v '\.sig$' > SHA256SUMS)
+          printf '%s\n' "$RELEASE_SIGNING_PUBKEY" > dist/release-signing-key.pub
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: its-agent-${{ env.VERSION }}
+          path: |
+            agent/dist/its-agent-*-*
+            agent/dist/SHA256SUMS
+            agent/dist/SIGNATURES
+            agent/dist/release-signing-key.pub
+
+      - name: draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "agent-v$VERSION" --draft --target "$GITHUB_SHA" \
+            --title "its-agent $VERSION" \
+            --notes "Signed with the offline release key (public half: $RELEASE_SIGNING_PUBKEY). Windows binaries are not Authenticode-signed. Self-update has been executed on Windows and macOS only where the agent-update-e2e job says so." \
+            dist/its-agent-*-* dist/SHA256SUMS dist/SIGNATURES dist/release-signing-key.pub

@@ -1,0 +1,14 @@
+{
+  "description": "agent -> server: the removal has been SCHEDULED, not done.\n\nA process cannot delete its own running service and then report, so the\ncapability starts a detached helper that waits, stops the service and\nremoves everything, and answers before it does (plan D7). `succeeded` on\nthis job is what `device_review.complete_due_rejections` reads as \"the\nagent confirmed\".\n\n`extra=\"ignore\"`, NOT `forbid`: this is an agent -> server message, and a\nfleet is always mixed-version -- an agent newer than this control plane\nmay report more, and refusing its whole result would leave the rejection\nwaiting out the 24-hour timeout. The `AgentUpdateResult` rule\n(`app/modules/agent_update/jobtypes.py`). The PARAMS stay `forbid`: that\ndirection is server -> agent, into a path that deletes files.",
+  "properties": {
+    "scheduled": {
+      "title": "Scheduled",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "scheduled"
+  ],
+  "title": "AgentUninstallResult",
+  "type": "object"
+}

@@ -1,0 +1,13 @@
+Software Update Tool
+
+Finding available software
+Software Update found the following new or updated software:
+* Label: macOS Sequoia 15.6.1-24G90
+	Title: macOS Sequoia 15.6.1, Version: 15.6.1, Size: 7473719KiB, Recommended: YES, Action: restart,
+* Label: Safari18.6MontereyAuto-18.6
+	Title: Safari, Version: 18.6, Size: 128383KiB, Recommended: YES,
+* Label: XProtectPlistConfigData_10_15-146
+	Title: XProtectPlistConfigData, Version: 146, Size: 8331KiB, Recommended: YES,
+* Label: Command Line Tools for Xcode-16.4
+	Title: Command Line Tools for Xcode, Version: 16.4, Size: 731472KiB, Recommended: NO,
+* Label: iTunesX-12.8.2
