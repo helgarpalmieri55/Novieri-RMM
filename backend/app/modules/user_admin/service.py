@@ -337,12 +337,18 @@ async def _grantable_client(session: AsyncSession, org_id: UUID, client_id: UUID
 
 
 async def _active_org_admins(session: AsyncSession, org_id: UUID) -> set[UUID]:
-    """Users in this org who hold `org-admin` AND can currently sign in.
+    """Users in this org who hold `org-admin` ON EVERY CLIENT AND can
+    currently sign in.
 
     STATUS MATTERS: a disabled or deleted `org-admin` cannot grant the role back,
     so counting them would let the rail be satisfied by an account that is no
     help at all. The role is matched by NAME, so an org that took a clone of the
     seeded role through the roles surface (spec §1.3) still counts.
+
+    SO DOES SCOPE (MSP clients spec §2.1). Managing users needs `users.manage`
+    on every client (`require_permission_on_every_client`), so an `org-admin`
+    grant on ONE client cannot grant the role back either: only
+    `client_id IS NULL` counts, as in `rbac_admin._holders_of`.
     """
     rows = await session.execute(
         select(User.id)
@@ -352,6 +358,7 @@ async def _active_org_admins(session: AsyncSession, org_id: UUID) -> set[UUID]:
             User.org_id == org_id,
             User.status == ACTIVE,
             Role.name == ORG_ADMIN,
+            UserRole.client_id.is_(None),
         )
     )
     return set(rows.scalars())
@@ -786,7 +793,10 @@ async def remove_role(
             ),
         )
 
-    if role_name == ORG_ADMIN:
+    # Only an every-client `org-admin` grant keeps the organization
+    # administrable (`_active_org_admins`), so only removing one can strand it,
+    # and only another one of the same person's means they keep the role.
+    if role_name == ORG_ADMIN and assignment.client_id is None:
         remaining = (
             await session.execute(
                 select(UserRole.id)
@@ -795,6 +805,7 @@ async def remove_role(
                     UserRole.user_id == user.id,
                     UserRole.org_id == org_id,
                     UserRole.id != assignment_id,
+                    UserRole.client_id.is_(None),
                     Role.name == ORG_ADMIN,
                 )
             )
