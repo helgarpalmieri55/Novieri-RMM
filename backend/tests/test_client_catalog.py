@@ -1,9 +1,10 @@
 """Spec §5 tests 1, 2 and 11: the client-scope catalog and its guards."""
 
 import ast
+import re
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import ForeignKeyConstraint, UniqueConstraint, text
 
 from app.core.client_scope import ALL_SCOPE_ALLOWLIST
 from app.core.client_scope_catalog import CATALOG, PENDING_PHASE_2, PHASE_1
@@ -322,3 +323,78 @@ async def test_h_tables_carry_the_inheritance_trigger(admin_engine) -> None:
     assert job.fn == "its_job_client"
     assert job.type & BEFORE_INSERT_OR_UPDATE_ROW == BEFORE_INSERT_OR_UPDATE_ROW
     assert {"target_id", "target_type", "client_id"} <= set(job.columns), job.columns
+
+
+# --------------------------------------------------------------------------- #
+# Migration 0231's constraints are declared on the models too.
+# --------------------------------------------------------------------------- #
+
+CLIENT_KEYS = {"uq_clients_id_org", "uq_sites_id_client"}
+CLIENT_FK = re.compile(r"fk_\w+_(client_org|site_client)")
+
+
+async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -> None:
+    """`alembic revision --autogenerate` proposes a bare DROP for any
+    constraint the metadata does not know -- the accident that deleted
+    `ix_doc_articles_fts` for a month (`test_migrations.py`). The org- and
+    site-consistency keys are the client boundary where a foreign key is the
+    only guard (RLS does not apply to FK checks), so each one in the database
+    must be declared on its model with the same columns and target, and vice
+    versa."""
+    async with admin_engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT c.conname AS name, t.relname AS tbl, r.relname AS ref, "
+                    "ARRAY(SELECT a.attname::text FROM unnest(c.conkey) WITH ORDINALITY "
+                    "      AS k(n, i) JOIN pg_attribute a "
+                    "      ON a.attrelid = c.conrelid AND a.attnum = k.n ORDER BY k.i) AS cols, "
+                    "ARRAY(SELECT a.attname::text FROM unnest(c.confkey) WITH ORDINALITY "
+                    "      AS k(n, i) JOIN pg_attribute a "
+                    "      ON a.attrelid = c.confrelid AND a.attnum = k.n ORDER BY k.i) "
+                    "      AS ref_cols "
+                    "FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid "
+                    "LEFT JOIN pg_class r ON r.oid = c.confrelid "
+                    "WHERE (c.contype = 'f' AND (c.conname LIKE 'fk\\_%\\_client\\_org' "
+                    "                       OR c.conname LIKE 'fk\\_%\\_site\\_client')) "
+                    "   OR (c.contype = 'u' AND c.conname IN ('uq_clients_id_org', "
+                    "                                         'uq_sites_id_client'))"
+                )
+            )
+        ).all()
+    live = {
+        r.name: (r.tbl, tuple(r.cols), r.ref, tuple(r.ref_cols)) for r in rows
+    }
+
+    declared: dict[str, tuple[str, tuple[str, ...], str | None, tuple[str, ...]]] = {}
+    for table in Base.metadata.tables.values():
+        for con in table.constraints:
+            name = str(con.name) if isinstance(con.name, str) else ""
+            if isinstance(con, ForeignKeyConstraint) and CLIENT_FK.fullmatch(name):
+                declared[name] = (
+                    table.name,
+                    tuple(con.column_keys),
+                    con.referred_table.name,
+                    tuple(e.column.name for e in con.elements),
+                )
+            elif isinstance(con, UniqueConstraint) and name in CLIENT_KEYS:
+                declared[name] = (table.name, tuple(c.name for c in con.columns), None, ())
+
+    # Not vacuous: the set is what the catalog says it must be. Every table
+    # whose client_id the application writes -- C but `sites`, every O, and
+    # the grants -- plus the three tables that name a site.
+    expected = (
+        {
+            f"fk_{t}_client_org"
+            for t, e in PHASE_1.items()
+            if e.kind == "O" or (e.kind == "C" and t != "sites")
+        }
+        | {"fk_user_roles_client_org"}
+        | {f"fk_{t}_site_client" for t in ("devices", "enrollment_tokens", "install_links")}
+        | CLIENT_KEYS
+    )
+    assert set(live) == expected, f"live vs catalog: {sorted(set(live) ^ expected)}"
+    assert sorted(set(live) - set(declared)) == [], "in the database, not on a model"
+    assert sorted(set(declared) - set(live)) == [], "on a model, not in the database"
+    differ = {n: (live[n], declared[n]) for n in live if live[n] != declared[n]}
+    assert not differ, f"declared differently from the database: {differ}"

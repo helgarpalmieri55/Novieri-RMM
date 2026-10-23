@@ -26,7 +26,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 
 def _utcnow() -> datetime:
@@ -130,6 +130,7 @@ class SlaPolicy(Base):
 
     __tablename__ = "sla_policy"
     __table_args__ = (
+        client_org_fk("sla_policy"),
         CheckConstraint(
             "response_target_minutes > 0", name="ck_sla_policy_response_positive"
         ),

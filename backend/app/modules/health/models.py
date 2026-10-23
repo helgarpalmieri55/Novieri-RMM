@@ -42,7 +42,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 __all__ = [
     "DeviceHealthCheckState",
@@ -237,6 +237,7 @@ class HealthProfileAssignment(Base):
 
     __tablename__ = "health_profile_assignment"
     __table_args__ = (
+        client_org_fk("health_profile_assignment"),
         Index(
             "uq_health_assignment_device",
             "org_id",

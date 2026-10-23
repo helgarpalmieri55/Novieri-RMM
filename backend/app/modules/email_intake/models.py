@@ -23,7 +23,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 
 def _utcnow() -> datetime:
@@ -100,6 +100,7 @@ class InboundMessage(Base):
 
     __tablename__ = "inbound_message"
     __table_args__ = (
+        client_org_fk("inbound_message"),
         # THIS CONSTRAINT IS THE IDEMPOTENCY MECHANISM (spec §4 rule 1).
         # IMAP has no transactions: the fetch, the ticket write and the \Seen
         # flag are three operations across two systems. A redelivered message

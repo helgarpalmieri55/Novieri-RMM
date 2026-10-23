@@ -24,7 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 
 class ChangeRequest(Base):
@@ -101,6 +101,7 @@ class ChangeGate(Base):
 
     __tablename__ = "change_gates"
     __table_args__ = (
+        client_org_fk("change_gates"),
         Index(
             "uq_change_gates_org_group",
             "org_id",

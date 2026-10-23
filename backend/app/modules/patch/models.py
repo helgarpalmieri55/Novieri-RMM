@@ -29,7 +29,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, uuid7_pk
+from app.models.base import Base, TimestampMixin, client_org_fk, uuid7_pk
 
 
 class Patch(TimestampMixin, Base):
@@ -81,6 +81,7 @@ class DevicePatchStatus(TimestampMixin, Base):
 class PatchPolicy(TimestampMixin, Base):
     __tablename__ = "patch_policies"
     __table_args__ = (
+        client_org_fk("patch_policies"),
         UniqueConstraint("org_id", "device_group_id", name="uq_patch_policies_org_group"),
     )
 
@@ -107,6 +108,7 @@ class PatchPolicy(TimestampMixin, Base):
 class PatchApproval(TimestampMixin, Base):
     __tablename__ = "patch_approvals"
     __table_args__ = (
+        client_org_fk("patch_approvals"),
         UniqueConstraint(
             "org_id", "patch_id", "ring_name", name="uq_patch_approvals_org_patch_ring"
         ),

@@ -84,7 +84,13 @@ class Client(TimestampMixin, Base):
 
 class Site(TimestampMixin, Base):
     __tablename__ = "sites"
-    __table_args__ = (Index("uq_sites_client_name", "client_id", text("lower(name)"), unique=True),)
+    __table_args__ = (
+        Index("uq_sites_client_name", "client_id", text("lower(name)"), unique=True),
+        # Migration 0231: the target of `fk_<table>_site_client` on devices,
+        # enrollment tokens and install links -- a row's site is one of the
+        # row's client's, and a site holding such a row cannot change client.
+        UniqueConstraint("id", "client_id", name="uq_sites_id_client"),
+    )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))

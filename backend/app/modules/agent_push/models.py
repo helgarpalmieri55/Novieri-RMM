@@ -66,7 +66,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import CIDR, INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 __all__ = [
     "PushAuthorization",
@@ -208,6 +208,7 @@ class PushHostKey(Base):
 
     __tablename__ = "push_host_key"
     __table_args__ = (
+        client_org_fk("push_host_key"),
         # One host-key record per (org, address): a target has one host key at a
         # time, and re-probing UPDATES the observed half rather than growing rows.
         Index("uq_push_host_key_address", "org_id", "address", unique=True),

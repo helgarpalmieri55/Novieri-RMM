@@ -29,6 +29,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.client_scope import ClientScope
+from app.core.events import publish
 from app.core.tenancy import org_session
 from app.models import (
     Client,
@@ -38,6 +39,8 @@ from app.models import (
     DocArticle,
     DocRecord,
     DocVersion,
+    EnrollmentToken,
+    InstallLink,
     Job,
     Organization,
     Role,
@@ -52,6 +55,7 @@ class TwoClients:
     org: UUID
     x: UUID  # the internal client: id = org id (plan Global Constraints)
     y: UUID  # a customer of the same org
+    site_y: UUID  # Y's one site, holding device_y
     unassigned: UUID
     device_x: UUID
     device_y: UUID
@@ -96,6 +100,7 @@ async def _two_clients(admin_engine: AsyncEngine) -> TwoClients:
         org=org.id,
         x=org.id,
         y=y.id,
+        site_y=site_y.id,
         unassigned=unassigned,
         device_x=device_x.id,
         device_y=device_y.id,
@@ -193,6 +198,101 @@ async def test_no_scope_guc_cannot_write(
                     ts=datetime.now(UTC),
                 )
             )
+            await s.flush()
+
+
+async def test_no_scope_guc_hides_global_rows_and_staff_too(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Strict fail-closed (spec §2.2): a NULL client means "every client", and
+    a session with no scope is not a client at all -- so it sees no NULL row
+    either, and cannot touch a staff row. The positive control is a list
+    scope, which must still read both."""
+    c = await _two_clients(admin_engine)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        article = DocArticle(org_id=c.org, title="global runbook")  # client_id NULL
+        staff = User(org_id=c.org, external_subject=uuid4().hex, email="s@test.local")
+        s.add_all([article, staff])
+        await s.commit()
+    probe = (
+        "SELECT (SELECT count(*) FROM doc_articles WHERE id = :a) "
+        "+ (SELECT count(*) FROM users WHERE id = :u)"
+    )
+    ids = {"a": article.id, "u": staff.id}
+    async with AsyncSession(app_engine) as s, s.begin():
+        await _org_only(s, c.org)
+        unscoped = (await s.execute(text(probe), ids)).scalar_one()
+        touched = await s.execute(
+            text("UPDATE users SET display_name = 'x' WHERE id = :u"), {"u": staff.id}
+        )
+    assert unscoped == 0
+    assert touched.rowcount == 0  # type: ignore[attr-defined]
+    async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
+        assert (await s.execute(text(probe), ids)).scalar_one() == 2
+
+
+async def test_a_narrowed_scope_publishes_a_domain_event(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """`events.publish` cannot name a client yet (phase 2 derives it from the
+    subject), so in phase 1 an event is written with NULL client from ANY
+    pinned scope -- or every route that publishes fails under a narrowed
+    one."""
+    c = await _two_clients(admin_engine)
+    subject = uuid4()
+    async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
+        await publish(
+            s, org_id=c.org, event_type="ticket.assigned", subject_type="ticket",
+            subject_id=subject, payload={}, actor_user_id=None,
+        )
+        await s.flush()
+    async with AsyncSession(admin_engine) as s:
+        stored = (
+            await s.execute(
+                text("SELECT client_id FROM domain_events WHERE subject_id = :s"),
+                {"s": subject},
+            )
+        ).scalars().all()
+    assert stored == [None]
+
+
+async def test_a_site_with_a_device_cannot_change_client(admin_engine: AsyncEngine) -> None:
+    """`fk_devices_site_client`: the device names (site, client), so the site
+    cannot leave the client while it holds the device. Through the admin
+    engine: the foreign key, not RLS, is what refuses."""
+    c = await _two_clients(admin_engine)
+    with pytest.raises(DBAPIError, match="fk_devices_site_client"):
+        async with AsyncSession(admin_engine) as s, s.begin():
+            await s.execute(
+                text("UPDATE sites SET client_id = :x WHERE id = :s"),
+                {"x": c.x, "s": c.site_y},
+            )
+
+
+def _token(org: UUID, client: UUID, site: UUID) -> Any:
+    return EnrollmentToken(
+        org_id=org, client_id=client, site_id=site, token_hash=uuid4().hex,
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+
+
+def _link(org: UUID, client: UUID, site: UUID) -> Any:
+    return InstallLink(org_id=org, client_id=client, site_id=site)
+
+
+@pytest.mark.parametrize(
+    ("table", "make"), [("enrollment_tokens", _token), ("install_links", _link)]
+)
+async def test_a_site_of_another_client_is_refused(
+    table: str, make: Any, admin_engine: AsyncEngine
+) -> None:
+    """Spec §1.5: an enrollment token or install link names a site of its own
+    client -- otherwise it would enroll a device into one client's site under
+    another client."""
+    c = await _two_clients(admin_engine)
+    with pytest.raises(DBAPIError, match=f"fk_{table}_site_client"):
+        async with AsyncSession(admin_engine) as s, s.begin():
+            s.add(make(c.org, c.x, c.site_y))
             await s.flush()
 
 

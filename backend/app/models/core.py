@@ -26,7 +26,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, CIDR, INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, uuid7_pk
+from app.models.base import Base, TimestampMixin, client_org_fk, site_client_fk, uuid7_pk
 
 
 class Organization(TimestampMixin, Base):
@@ -42,6 +42,7 @@ class Organization(TimestampMixin, Base):
 class User(TimestampMixin, Base):
     __tablename__ = "users"
     __table_args__ = (
+        client_org_fk("users"),
         UniqueConstraint("org_id", "external_subject"),
         # Migration 0032. Declared here as well as in the migration so
         # `alembic revision --autogenerate` is not one run away from proposing
@@ -138,6 +139,7 @@ class UserRole(Base):
 
     __tablename__ = "user_roles"
     __table_args__ = (
+        client_org_fk("user_roles"),
         UniqueConstraint("user_id", "role_id", "client_id"),
         Index(
             "uq_user_roles_user_role_org_wide",
@@ -170,6 +172,7 @@ class DeviceGroup(TimestampMixin, Base):
 
     __tablename__ = "device_groups"
     __table_args__ = (
+        client_org_fk("device_groups"),
         Index(
             "uq_device_groups_org_live_name",
             "org_id",
@@ -318,6 +321,8 @@ class DeviceGroupEvaluation(Base):
 class Device(TimestampMixin, Base):
     __tablename__ = "devices"
     __table_args__ = (
+        client_org_fk("devices"),
+        site_client_fk("devices"),
         Index("ix_devices_org_hostname", "org_id", "hostname"),
         # 0078 CREATED THIS AND DID NOT DECLARE IT, which is the same shape of
         # accident that deleted `ix_doc_articles_fts` for a month: an index the
@@ -336,9 +341,10 @@ class Device(TimestampMixin, Base):
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
     # MSP clients spec, Annex A (C). Set by the application (migration 0231).
     client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
-    # Spec §1.5: a site of the same client (devices: trigger
-    # its_device_client_guard).
-    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"))
+    # Spec §1.5: a site of the same client -- `fk_devices_site_client`, and
+    # trigger its_device_client_guard for the clearer message. Indexed: the
+    # console filters devices by site.
+    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"), index=True)
     # NULLABLE SINCE 0061, and the two are the same decision. A switch has a
     # name but no hostname in this sense and no OS family at all; a laptop in a
     # box has told us neither yet. Both were NOT NULL, which is exactly what
@@ -540,6 +546,7 @@ class Agent(TimestampMixin, Base):
 
 class Policy(TimestampMixin, Base):
     __tablename__ = "policies"
+    __table_args__ = (client_org_fk("policies"),)
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
@@ -562,6 +569,7 @@ class Credential(Base):
     """Credential METADATA only — the secret lives in the vault (docs/03-security-model.md)."""
 
     __tablename__ = "credentials"
+    __table_args__ = (client_org_fk("credentials"),)
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
@@ -730,6 +738,10 @@ class AuditEvent(Base):
 
 class EnrollmentToken(Base):
     __tablename__ = "enrollment_tokens"
+    __table_args__ = (
+        client_org_fk("enrollment_tokens"),
+        site_client_fk("enrollment_tokens"),
+    )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
@@ -759,6 +771,8 @@ class InstallLink(Base):
 
     __tablename__ = "install_links"
     __table_args__ = (
+        client_org_fk("install_links"),
+        site_client_fk("install_links"),
         # One link per SITE (spec §1.5, migration 0231), no longer one per org.
         UniqueConstraint("site_id", name="uq_install_links_site"),
         UniqueConstraint("code_hash", name="uq_install_links_code_hash"),
@@ -832,6 +846,7 @@ class DomainEvent(Base):
 
     __tablename__ = "domain_events"
     __table_args__ = (
+        client_org_fk("domain_events"),
         # Whole-branch review finding M11: this index cannot serve the drain
         # query (`app.worker.drain_outbox` filters `org_id, processed_at IS
         # NULL` -- neither `claimed_at` nor `occurred_at` appears in that

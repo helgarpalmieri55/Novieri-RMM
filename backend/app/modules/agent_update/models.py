@@ -20,7 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 __all__ = [
     "ACTIVE_ROLLOUT_STATES",
@@ -73,6 +73,7 @@ class AgentUpdateRollout(Base):
 class AgentUpdateRing(Base):
     __tablename__ = "agent_update_rings"
     __table_args__ = (
+        client_org_fk("agent_update_rings"),
         UniqueConstraint("rollout_id", "ordinal", name="uq_agent_update_rings_ordinal"),
     )
 

@@ -22,7 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 
 class Vendor(Base):
@@ -129,6 +129,7 @@ class LicenseComplianceSnapshot(Base):
 class SoftwareIgnore(Base):
     __tablename__ = "software_ignore"
     __table_args__ = (
+        client_org_fk("software_ignore"),
         UniqueConstraint("org_id", "name", name="uq_software_ignore_org_name"),
     )
 

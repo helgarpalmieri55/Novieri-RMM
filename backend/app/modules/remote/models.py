@@ -28,7 +28,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, uuid7_pk
+from app.models.base import Base, TimestampMixin, client_org_fk, uuid7_pk
 
 RECORDING_MAX_BYTES = 2 * 1024 * 1024 * 1024
 
@@ -78,6 +78,7 @@ class RemoteSession(TimestampMixin, Base):
 class RemotePolicy(TimestampMixin, Base):
     __tablename__ = "remote_policies"
     __table_args__ = (
+        client_org_fk("remote_policies"),
         UniqueConstraint("org_id", "device_group_id", name="uq_remote_policies_org_group"),
         CheckConstraint(
             "consent_timeout_s BETWEEN 15 AND 120", name="ck_remote_policies_consent_timeout"

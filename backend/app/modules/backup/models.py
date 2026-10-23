@@ -29,7 +29,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, uuid7_pk
+from app.models.base import Base, TimestampMixin, client_org_fk, uuid7_pk
 
 
 class BackupRepository(TimestampMixin, Base):
@@ -80,6 +80,7 @@ class BackupChunk(TimestampMixin, Base):
 
 class BackupPolicy(TimestampMixin, Base):
     __tablename__ = "backup_policies"
+    __table_args__ = (client_org_fk("backup_policies"),)
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
@@ -197,6 +198,7 @@ class BackupOffsiteTarget(Base):
 
     __tablename__ = "backup_offsite_targets"
     __table_args__ = (
+        client_org_fk("backup_offsite_targets"),
         UniqueConstraint("org_id", "name", name="uq_backup_offsite_targets_org_name"),
     )
 
@@ -289,6 +291,7 @@ class BackupRecoveryKey(Base):
 
     __tablename__ = "backup_recovery_keys"
     __table_args__ = (
+        client_org_fk("backup_recovery_keys"),
         Index(
             "uq_backup_recovery_keys_active",
             "org_id",

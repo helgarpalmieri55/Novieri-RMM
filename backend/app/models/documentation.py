@@ -23,12 +23,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, uuid7_pk
+from app.models.base import Base, TimestampMixin, client_org_fk, uuid7_pk
 
 
 class DocArticle(TimestampMixin, Base):
     __tablename__ = "doc_articles"
     __table_args__ = (
+        client_org_fk("doc_articles"),
         Index("ix_doc_articles_org_category", "org_id", "category"),
         # DECLARED HERE BECAUSE IT ONCE WAS NOT, and the index spent a month
         # not existing as a result. 0007 created it in raw SQL and left the
@@ -71,7 +72,10 @@ class DocArticle(TimestampMixin, Base):
 
 class DocRecord(TimestampMixin, Base):
     __tablename__ = "doc_records"
-    __table_args__ = (Index("ix_doc_records_org_type", "org_id", "record_type"),)
+    __table_args__ = (
+        Index("ix_doc_records_org_type", "org_id", "record_type"),
+        client_org_fk("doc_records"),
+    )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
@@ -90,7 +94,10 @@ class DocRecord(TimestampMixin, Base):
 
 class DocLink(Base):
     __tablename__ = "doc_links"
-    __table_args__ = (UniqueConstraint("article_id", "target_type", "target_id"),)
+    __table_args__ = (
+        UniqueConstraint("article_id", "target_type", "target_id"),
+        client_org_fk("doc_links"),
+    )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
@@ -108,6 +115,7 @@ class DocLink(Base):
 class DocVersion(Base):
     __tablename__ = "doc_versions"
     __table_args__ = (
+        client_org_fk("doc_versions"),
         CheckConstraint(
             "(article_id IS NULL) != (record_id IS NULL)", name="doc_versions_one_parent"
         ),
@@ -152,6 +160,7 @@ class DocDocument(TimestampMixin, Base):
 
     __tablename__ = "doc_documents"
     __table_args__ = (
+        client_org_fk("doc_documents"),
         Index("ix_doc_documents_org_category", "org_id", "category"),
         # DECLARED HERE AS WELL AS IN THE MIGRATION, and that is not
         # belt-and-braces -- it is the fix for an accident this module has
@@ -202,6 +211,7 @@ class DocDocumentVersion(Base):
 
     __tablename__ = "doc_document_versions"
     __table_args__ = (
+        client_org_fk("doc_document_versions"),
         UniqueConstraint("document_id", "version", name="uq_doc_document_versions_doc_version"),
         Index("ix_doc_document_versions_org_doc", "org_id", "document_id", "version"),
     )
@@ -258,6 +268,7 @@ class DocDocumentLink(Base):
 
     __tablename__ = "doc_document_links"
     __table_args__ = (
+        client_org_fk("doc_document_links"),
         UniqueConstraint(
             "document_id", "target_type", "target_id", name="uq_doc_document_links_target"
         ),

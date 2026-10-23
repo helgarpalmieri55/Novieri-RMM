@@ -1,7 +1,10 @@
 """Client scope at the database (MSP clients spec §2.2-2.4, plan Task 6).
 
 1. `its_client_visible(client)`: the scope predicate over the two GUCs that
-   `org_session` pins. Unset GUCs make it NULL -- no row, no write.
+   `org_session` pins. Unset GUCs make it NULL -- no row, no write. A NULL
+   client (O tables: "every client") is readable only under a pinned scope,
+   `all` or `list`: a session with no scope sees ZERO rows, global ones
+   included (spec §2.2, plan Global Constraints: RLS fails closed).
 2. `client_id` on every phase-1 table (C, H, O), backfilled for existing rows
    (C: the organization's internal client, whose id IS the org id; H: from
    the parent), then NOT NULL for C and H.
@@ -23,6 +26,14 @@ org_id)` (`fk_<table>_client_org`, over `uq_clients_id_org`): `users` and
 `its_site_client_check` already holds it there), and every O table. H tables
 and `jobs` need none: their trigger copies the client of a parent that tenant
 RLS already confines to the org.
+
+SITE CONSISTENCY IS A FOREIGN KEY TOO. `devices`, `enrollment_tokens` and
+`install_links` name a site AND a client, and `(site_id, client_id) REFERENCES
+sites (id, client_id)` (`fk_<table>_site_client`, over `uq_sites_id_client`)
+makes the site one of that client's. It also pins the site: a site that holds
+a device cannot change client, because the device's key would dangle (0230's
+`its_site_client_check` allows the UPDATE on its own). The devices guard
+trigger stays for its clearer message.
 
 TWO TABLES HAVE TWO PARENTS. `doc_versions` hangs from an article XOR a record
 (`doc_versions_one_parent`), `health_profile_assignment` from a device or a
@@ -124,25 +135,44 @@ CLIENT_ORG_FK_TABLES = ["users", "user_roles"] + C_TABLES[1:] + [
     t for t, _, _ in O_TABLES if t != "users"
 ]
 
+# Tables that name a site, and so carry the site-consistency foreign key.
+SITE_TABLES = ["devices", "enrollment_tokens", "install_links"]
+
 VISIBLE = "its_client_visible(client_id)"
+# A NULL client is "every client" (O tables). It is readable -- and, where a
+# table allows it, writable -- only under a PINNED scope: with no scope GUC
+# `IN` is NULL, so a scopeless session sees no global row either.
+NULL_PINNED = "(client_id IS NULL AND current_setting('app.client_scope', true) IN ('all', 'list'))"
+# Writing a global row is a change to every client's configuration: scope all.
+NULL_ALL = "(client_id IS NULL AND current_setting('app.client_scope', true) = 'all')"
+
+# O tables whose NULL rows any pinned scope may WRITE (see `_policy`).
+NULL_WRITABLE_FROM_ANY_SCOPE = {"users", "domain_events"}
 
 
 def _policy(table: str, kind: str) -> None:
-    if table == "users":
-        # `users` is O, with its own WITH CHECK. A staff row (client_id NULL)
-        # is written under NARROWED scopes -- `PATCH /me` and the login
-        # bookkeeping run with the person's own scope -- so the generic O
-        # check, which reserves NULL rows to scope `all`, would refuse a
-        # technician's own profile. Admin writes to staff rows already require
-        # a scope of every client at the API (`users.manage`, plan Task 4).
-        # A contact row (client_id set) needs its client to be visible.
-        using = check = f"client_id IS NULL OR {VISIBLE}"
+    if table in NULL_WRITABLE_FROM_ANY_SCOPE:
+        # Two O tables whose NULL rows any PINNED scope may write; with no
+        # scope, still nothing.
+        #
+        # `users`: a staff row (client_id NULL) is written under NARROWED
+        # scopes -- `PATCH /me` and the login bookkeeping run with the
+        # person's own scope -- so the generic O check, which reserves NULL
+        # rows to scope `all`, would refuse a technician's own profile. Admin
+        # writes to staff rows already require a scope of every client at the
+        # API (`users.manage`, plan Task 4). A contact row (client_id set)
+        # needs its client to be visible.
+        #
+        # `domain_events`: `app/core/events.publish` cannot yet name the
+        # client, so in phase 1 an event is written with NULL client from any
+        # scope -- under the generic check every route that publishes would
+        # fail for a narrowed technician. Phase 2 makes publish set client_id
+        # from the event's subject and returns `domain_events` to the generic
+        # O check.
+        using = check = f"{NULL_PINNED} OR {VISIBLE}"
     elif kind == "O":
-        using = f"client_id IS NULL OR {VISIBLE}"
-        check = (
-            "(client_id IS NULL AND current_setting('app.client_scope', true) = 'all') "
-            f"OR {VISIBLE}"
-        )
+        using = f"{NULL_PINNED} OR {VISIBLE}"
+        check = f"{NULL_ALL} OR {VISIBLE}"
     else:
         using = check = VISIBLE
     op.execute(
@@ -279,10 +309,18 @@ def upgrade() -> None:
         op.execute(f"UPDATE {table} SET client_id = org_id")  # the internal client
         op.execute(f"ALTER TABLE {table} ALTER COLUMN client_id SET NOT NULL")
         op.execute(f"CREATE INDEX ix_{table}_client_id ON {table} (client_id)")
-    for table in ("devices", "enrollment_tokens", "install_links"):
+    for table in SITE_TABLES:
         op.execute(f"ALTER TABLE {table} ADD COLUMN site_id uuid REFERENCES sites(id)")
         op.execute(f"UPDATE {table} SET site_id = org_id")  # the internal Principal site
         op.execute(f"ALTER TABLE {table} ALTER COLUMN site_id SET NOT NULL")
+    op.execute("CREATE INDEX ix_devices_site_id ON devices (site_id)")
+    # The target of every site-consistency foreign key (module docstring).
+    op.execute("ALTER TABLE sites ADD CONSTRAINT uq_sites_id_client UNIQUE (id, client_id)")
+    for table in SITE_TABLES:
+        op.execute(
+            f"ALTER TABLE {table} ADD CONSTRAINT fk_{table}_site_client "
+            "FOREIGN KEY (site_id, client_id) REFERENCES sites (id, client_id)"
+        )
     op.execute("ALTER TABLE install_links DROP CONSTRAINT uq_install_links_org")
     op.execute("ALTER TABLE install_links ADD CONSTRAINT uq_install_links_site UNIQUE (site_id)")
     op.execute(
@@ -381,9 +419,13 @@ def downgrade() -> None:
     op.execute("ALTER TABLE jobs DROP COLUMN client_id")
     op.execute("DROP TRIGGER IF EXISTS its_device_client_guard ON devices")
     op.execute("DROP TRIGGER IF EXISTS its_group_client_guard ON device_groups")
+    for table in SITE_TABLES:
+        op.execute(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS fk_{table}_site_client")
+    op.execute("ALTER TABLE sites DROP CONSTRAINT uq_sites_id_client")
+    op.execute("DROP INDEX IF EXISTS ix_devices_site_id")
     op.execute("ALTER TABLE install_links DROP CONSTRAINT uq_install_links_site")
     op.execute("ALTER TABLE install_links ADD CONSTRAINT uq_install_links_org UNIQUE (org_id)")
-    for table in ("devices", "enrollment_tokens", "install_links"):
+    for table in SITE_TABLES:
         op.execute(f"ALTER TABLE {table} DROP COLUMN site_id")
     for table in C_TABLES:
         op.execute(f"DROP POLICY IF EXISTS client_isolation ON {table}")

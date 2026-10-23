@@ -22,7 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 
 class OsImage(Base):
@@ -57,7 +57,10 @@ class ProvisionProfile(Base):
 
 class ProvisionRun(Base):
     __tablename__ = "provision_run"
-    __table_args__ = (Index("ix_provision_run_state", "org_id", "state"),)
+    __table_args__ = (
+        Index("ix_provision_run_state", "org_id", "state"),
+        client_org_fk("provision_run"),
+    )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
