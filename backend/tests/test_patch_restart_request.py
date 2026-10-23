@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     Agent,
@@ -283,7 +284,7 @@ async def _org(admin_engine: AsyncEngine) -> Organization:
 
 
 async def _operator_row(app_engine: AsyncEngine, org_id: UUID, device_id: UUID) -> None:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         session.add(
             PatchReboot(org_id=org_id, device_id=device_id, origin="operator", state="pending")
         )
@@ -297,7 +298,7 @@ async def test_the_sweep_restarts_it_in_the_window_even_if_the_os_does_not_ask(
     await _operator_row(app_engine, org.id, device_id)
     engine = _FakeJobEngine()
 
-    async with org_session(org.id, engine=app_engine) as session:
+    async with org_session(org.id, engine=app_engine, clients=ClientScope.all()) as session:
         closed = SAT - _dt.timedelta(days=1)
         assert await run_reboot_sweep(session, engine, org_id=org.id, now=closed) == []
         pending = await run_reboot_sweep(session, engine, org_id=org.id, now=SAT)
@@ -318,7 +319,7 @@ async def test_a_never_restart_policy_does_not_cancel_an_operators_restart(
     await _operator_row(app_engine, org.id, device_id)
     engine = _FakeJobEngine()
 
-    async with org_session(org.id, engine=app_engine) as session:
+    async with org_session(org.id, engine=app_engine, clients=ClientScope.all()) as session:
         await run_reboot_sweep(session, engine, org_id=org.id, now=SAT)
 
     [row] = await _rows(admin_engine, org.id)
@@ -332,7 +333,7 @@ async def test_a_scan_that_needs_no_restart_leaves_an_operators_restart_alone(
     org = await _org(admin_engine)
     device_id = await _device(admin_engine, org.id)
     await _operator_row(app_engine, org.id, device_id)
-    async with org_session(org.id, engine=app_engine) as session:
+    async with org_session(org.id, engine=app_engine, clients=ClientScope.all()) as session:
         await note_scan(
             session,
             org_id=org.id,

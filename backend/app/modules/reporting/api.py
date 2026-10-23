@@ -90,7 +90,9 @@ async def _catalogue(
     else -- `build_catalogue` takes a set of codes and returns platform data
     compiled into the image.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         # Org-wide grants only, `device_group_id` left at its `None` default --
         # the same question `require_report_sources` asks, so the catalogue can
         # never claim a report is runnable that the report itself would refuse
@@ -139,7 +141,9 @@ def _make_handler(definition: ReportDefinition) -> Callable[..., Any]:
         ctx: AuthContext = Depends(bound_auth_context),
     ) -> ReportPage[Any]:
         try:
-            async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+            async with org_session(
+                ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+            ) as session:
                 return await execute_report(
                     session, definition, params, org_id=ctx.org_id
                 )
@@ -178,7 +182,9 @@ def _make_export_handler(definition: ReportDefinition) -> Callable[..., Any]:
         ctx: AuthContext = Depends(bound_auth_context),
     ) -> PlainTextResponse:
         try:
-            async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+            async with org_session(
+                ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+            ) as session:
                 body = await export_report(
                     session, definition, params, org_id=ctx.org_id, actor_id=ctx.user_id
                 )

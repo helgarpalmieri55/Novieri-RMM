@@ -25,6 +25,7 @@ from uuid import UUID
 import websockets
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.modules.remote import rsp
@@ -119,7 +120,12 @@ async def run_screen_tunnel(
         logger.warning("screen session %s: relay leg failed", session_id, exc_info=True)
     finally:
         await _finish(
-            service, store, app_engine, org_id=org_id, session_id=session_id, recording=recording
+            service,
+            store,
+            app_engine,
+            org_id=org_id,
+            session_id=session_id,
+            recording=recording,
         )
 
 
@@ -179,13 +185,21 @@ async def _finish(
     recording: _Recording | None,
 ) -> None:
     """Upload the recording, then end the session, in separate transactions
-    so an upload failure can never leave the session open."""
+    so an upload failure can never leave the session open.
+
+    A SYSTEM ACT, under ``ClientScope.all()``, not the viewer's scope. The
+    recording is evidence and ending the session is cleanup; neither may fail
+    because the viewer's grants changed while the session ran (MSP clients
+    spec §2.3, reviewed in ``ALL_SCOPE_ALLOWLIST``). The viewer's own scope
+    already admitted them at the door (``authorize_tunnel``)."""
     if recording is not None:
         recording.close()
         try:
             if recording.frames > 0:
                 object_store = store()
-                async with org_session(org_id, engine=app_engine) as s:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as s:
                     await finalize_recording_file(
                         s,
                         object_store,
@@ -201,7 +215,7 @@ async def _finish(
         finally:
             recording.discard()
     try:
-        async with org_session(org_id, engine=app_engine) as s:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
             await service.end_session(s, session_id=session_id, reason="completed")
     except InvalidSessionState:
         pass  # the gateway (or a stop) ended it first, with the real reason

@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import BackupPoint, BackupRepository, BackupRun, Device, Organization
 from app.modules.backup.reporting import (
@@ -212,7 +213,7 @@ async def test_device_backup_status_covered_verified_and_restore_tested(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed_org(admin_engine, f"dbs-{uuid4().hex[:6]}")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         status = await device_backup_status(session, ids["org_id"], ids["d1"])
 
         assert status["device_id"] == ids["d1"]
@@ -231,7 +232,7 @@ async def test_device_backup_status_covered_but_not_verified_or_tested(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed_org(admin_engine, f"dbs-{uuid4().hex[:6]}")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         status = await device_backup_status(session, ids["org_id"], ids["d3"])
 
         assert status["last_good_point"] is not None
@@ -245,7 +246,7 @@ async def test_device_backup_status_uncovered_device(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed_org(admin_engine, f"dbs-{uuid4().hex[:6]}")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         status = await device_backup_status(session, ids["org_id"], ids["d5"])
 
         assert status["last_good_point"] is None
@@ -260,7 +261,7 @@ async def test_device_backup_status_only_failed_runs_no_point(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed_org(admin_engine, f"dbs-{uuid4().hex[:6]}")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         status = await device_backup_status(session, ids["org_id"], ids["d4"])
 
         assert status["last_good_point"] is None
@@ -272,7 +273,7 @@ async def test_fleet_backup_report_math_against_hand_computed_values(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed_org(admin_engine, f"frpt-{uuid4().hex[:6]}")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         report = await fleet_backup_report(session, ids["org_id"])
 
         assert report["devices_total"] == 5
@@ -308,7 +309,7 @@ async def test_fleet_backup_report_zero_devices_guards_divide_by_zero(
         org_id = org.id
         await session.commit()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         report = await fleet_backup_report(session, org_id)
         assert report["devices_total"] == 0
         assert report["devices_covered"] == 0
@@ -325,7 +326,7 @@ async def test_backup_evidence_rows_one_row_per_device_including_gaps(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed_org(admin_engine, f"evid-{uuid4().hex[:6]}")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         rows = await backup_evidence_rows(session, ids["org_id"])
 
         assert len(rows) == 5
@@ -362,7 +363,9 @@ async def test_a_second_orgs_rows_never_appear_in_any_output_under_rls(
     ids_a = await _seed_org(admin_engine, f"tenant-a-{uuid4().hex[:6]}")
     ids_b = await _seed_org(admin_engine, f"tenant-b-{uuid4().hex[:6]}")
 
-    async with org_session(ids_a["org_id"], engine=app_engine) as session:
+    async with org_session(
+        ids_a["org_id"], engine=app_engine, clients=ClientScope.all()
+    ) as session:
         fleet_a = await fleet_backup_report(session, ids_a["org_id"])
         assert fleet_a["devices_total"] == 5  # org A's own 5, not org B's
 
@@ -381,7 +384,9 @@ async def test_a_second_orgs_rows_never_appear_in_any_output_under_rls(
         assert status["last_good_point"] is None
         assert status["last_run_state"] is None
 
-    async with org_session(ids_b["org_id"], engine=app_engine) as session:
+    async with org_session(
+        ids_b["org_id"], engine=app_engine, clients=ClientScope.all()
+    ) as session:
         fleet_b = await fleet_backup_report(session, ids_b["org_id"])
         assert fleet_b["devices_total"] == 5  # org B's own 5, not org A's
 

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app import worker
 from app.core.audit import AuditService, audit_service
+from app.core.client_scope import ClientScope
 from app.core.config import Settings, override_settings
 from app.core.tenancy import org_session
 from app.models import Organization
@@ -54,7 +55,7 @@ async def _make_org(admin_engine: AsyncEngine, slug_prefix: str) -> UUID:
 async def _record_like_a_sweep(org_id: UUID, app_engine: AsyncEngine):
     """Append one event exactly the way worker.py's sweeps do -- through the
     process-wide `audit_service` singleton, system-attributed."""
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return await audit_service.record(
             session,
             org_id=org_id,
@@ -95,7 +96,7 @@ async def test_create_celery_keys_the_audit_chain(
             worker.create_celery()
         event = await _record_like_a_sweep(org_id, app_engine)
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             keyed = await AuditService(hmac_key=_KEY).verify(session, org_id)
             unkeyed = await AuditService().verify(session, org_id)
     finally:
@@ -129,7 +130,7 @@ async def test_create_celery_clears_a_stale_key_when_none_configured(
             worker.create_celery()
         event = await _record_like_a_sweep(org_id, app_engine)
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             unkeyed = await AuditService().verify(session, org_id)
             keyed = await AuditService(hmac_key=_KEY).verify(session, org_id)
     finally:

@@ -37,6 +37,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     SlaCalendar,
@@ -82,15 +83,15 @@ async def test_a_calendar_is_invisible_to_another_org(api_env) -> None:
     org_a = await api_env.create_org("a")
     org_b = await api_env.create_org("b")
     actor = await _seed_user(api_env, org_a)
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         session.add(
             SlaCalendar(
                 org_id=org_a, name="UK business", timezone="Europe/London", created_by=actor
             )
         )
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert len((await session.execute(select(SlaCalendar))).scalars().all()) == 1
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await session.execute(select(SlaCalendar))).scalars().all() == []
 
 
@@ -99,7 +100,9 @@ async def test_a_calendar_cannot_be_inserted_under_another_orgs_id(api_env) -> N
     org_b = await api_env.create_org("b")
     actor = await _seed_user(api_env, org_a)
     with pytest.raises(ProgrammingError):
-        async with org_session(org_a, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_a, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             session.add(
                 SlaCalendar(
                     org_id=org_b, name="theirs", timezone="Europe/London", created_by=actor
@@ -134,11 +137,11 @@ async def test_a_row_is_invisible_to_another_org(api_env, a_ticket_for, table: s
     org_a = await api_env.create_org("a")
     org_b = await api_env.create_org("b")
     model, build_row = _ROW_BUILDERS[table]
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         session.add(await build_row(api_env, a_ticket_for, org_a, org_a))
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert len((await session.execute(select(model))).scalars().all()) == 1
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await session.execute(select(model))).scalars().all() == []
 
 
@@ -153,7 +156,9 @@ async def test_a_row_cannot_be_inserted_under_another_orgs_id(
     # so `org_id` is the only thing the write can be rejected for.
     row = await build_row(api_env, a_ticket_for, org_a, org_b)
     with pytest.raises(ProgrammingError):
-        async with org_session(org_a, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_a, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             session.add(row)
 
 
@@ -164,7 +169,9 @@ async def test_a_zero_target_is_rejected(api_env) -> None:
     actor = await _seed_user(api_env, org_id)
     calendar_id = await _seed_calendar(api_env, org_id)
     with pytest.raises(IntegrityError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             session.add(
                 SlaPolicy(
                     org_id=org_id,
@@ -184,7 +191,9 @@ async def test_a_window_with_start_after_end_is_rejected(api_env) -> None:
     org_id = await api_env.create_org()
     calendar_id = await _seed_calendar(api_env, org_id, windows=[])
     with pytest.raises(IntegrityError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             session.add(
                 SlaCalendarWindow(
                     org_id=org_id,
@@ -216,7 +225,7 @@ async def test_a_window_ending_at_midnight_is_legal(api_env) -> None:
     execution check 1)."""
     org_id = await api_env.create_org()
     calendar_id = await _seed_calendar(api_env, org_id, windows=[])
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         session.add(
             SlaCalendarWindow(
                 org_id=org_id,
@@ -226,7 +235,7 @@ async def test_a_window_ending_at_midnight_is_legal(api_env) -> None:
                 end_time=time(0, 0),
             )
         )
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (
             await session.execute(
                 select(SlaCalendarWindow).where(SlaCalendarWindow.calendar_id == calendar_id)
@@ -244,7 +253,7 @@ async def test_one_sla_row_per_ticket(api_env, a_ticket_for) -> None:
     policy_id = await _seed_policy(api_env, org_id, calendar_id=calendar_id)
     now = datetime.now(UTC)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         session.add(
             TicketSla(
                 org_id=org_id,
@@ -258,7 +267,9 @@ async def test_one_sla_row_per_ticket(api_env, a_ticket_for) -> None:
         )
 
     with pytest.raises(IntegrityError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             session.add(
                 TicketSla(
                     org_id=org_id,
@@ -350,7 +361,7 @@ async def test_an_inactive_duplicate_policy_is_allowed_at_every_resolution_level
         api_env, org_id, calendar_id=calendar_id, queue_id=queue_id, priority=priority, active=False
     )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (await session.execute(select(SlaPolicy))).scalars().all()
     assert {r.id for r in rows} == {active_id, first_retired, second_retired}
     assert sum(1 for r in rows if r.active) == 1
@@ -366,7 +377,9 @@ async def test_a_weekday_outside_monday_to_sunday_is_rejected(api_env, weekday: 
     org_id = await api_env.create_org()
     calendar_id = await _seed_calendar(api_env, org_id, windows=[])
     with pytest.raises(IntegrityError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             session.add(
                 SlaCalendarWindow(
                     org_id=org_id,
@@ -485,7 +498,7 @@ async def _seed_calendar(
     if windows is None:
         windows = [(d, time(9, 0), time(17, 0)) for d in range(5)]
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         calendar = SlaCalendar(
             org_id=org_id,
             name=name if name is not None else f"calendar-{uuid4().hex[:10]}",
@@ -545,7 +558,7 @@ async def _seed_policy(
     actor = await _seed_user(
         api_env, org_id, email=f"sla-policy-actor-{uuid4().hex[:10]}@test.local"
     )
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         policy = SlaPolicy(
             org_id=org_id,
             queue_id=queue_id,

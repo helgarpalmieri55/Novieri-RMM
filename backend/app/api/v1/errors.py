@@ -255,7 +255,9 @@ async def resolve_error_group(
     """Sets `resolved_at` (spec §5). Idempotent: resolving an already-resolved
     group simply moves the timestamp forward rather than erroring, matching
     `app/modules/health/api.py`'s alert-lifecycle transitions."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             group = await resolve_group(
                 session,
@@ -289,7 +291,9 @@ async def unresolve_error_group(
     changed and the unchanged case -- `app.core.errors.triage` documents why
     the undo cannot be a silent blanking of `resolved_at`.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             group = await unresolve_group(
                 session,

@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     Device,
@@ -60,7 +61,7 @@ def _doc(sev="critical", installed=None):
 
 async def test_ingest_creates_catalog_and_missing_status(admin_engine, app_engine) -> None:
     org_id, device_id = await _dev(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         stats = await ingest_scan(s, await s.get(Device, device_id), _doc())
         assert stats.missing == 1 and stats.auto_approved == 0
         st = (await s.execute(select(DevicePatchStatus))).scalar_one()
@@ -69,7 +70,7 @@ async def test_ingest_creates_catalog_and_missing_status(admin_engine, app_engin
 
 async def test_auto_approve_security_into_test_ring(admin_engine, app_engine) -> None:
     org_id, device_id = await _dev(admin_engine, auto=True)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         stats = await ingest_scan(s, await s.get(Device, device_id), _doc(sev="critical"))
         assert stats.auto_approved == 1
         st = (await s.execute(select(DevicePatchStatus))).scalar_one()
@@ -80,7 +81,7 @@ async def test_auto_approve_security_into_test_ring(admin_engine, app_engine) ->
 
 async def test_auto_approve_skips_non_security(admin_engine, app_engine) -> None:
     org_id, device_id = await _dev(admin_engine, auto=True)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         stats = await ingest_scan(s, await s.get(Device, device_id), _doc(sev="low"))
         assert stats.auto_approved == 0
         assert (await s.execute(select(DevicePatchStatus))).scalar_one().state == "missing"
@@ -88,7 +89,7 @@ async def test_auto_approve_skips_non_security(admin_engine, app_engine) -> None
 
 async def test_installed_identifier_marks_installed(admin_engine, app_engine) -> None:
     org_id, device_id = await _dev(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await ingest_scan(
             s, await s.get(Device, device_id), _doc(installed=["windows_update:KB1"])
         )
@@ -121,7 +122,7 @@ def _doc_two(entry_a_superseded_by="KB2"):
 
 async def test_superseded_by_resolves_within_same_scan(admin_engine, app_engine) -> None:
     org_id, device_id = await _dev(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await ingest_scan(s, await s.get(Device, device_id), _doc_two())
         patch_a = (
             await s.execute(select(Patch).where(Patch.identifier == "KB1"))
@@ -134,7 +135,7 @@ async def test_superseded_by_resolves_within_same_scan(admin_engine, app_engine)
 
 async def test_superseded_by_cleared_when_no_longer_reported(admin_engine, app_engine) -> None:
     org_id, device_id = await _dev(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         device = await s.get(Device, device_id)
         await ingest_scan(s, device, _doc_two())
         # Re-scan: KB1 no longer reports a superseded_by.
@@ -147,7 +148,7 @@ async def test_superseded_by_cleared_when_no_longer_reported(admin_engine, app_e
 
 async def test_superseded_by_missing_from_catalog_stays_none(admin_engine, app_engine) -> None:
     org_id, device_id = await _dev(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await ingest_scan(s, await s.get(Device, device_id), _doc(sev="critical"))
         # KB1's scan reports superseded_by="KB99", which is not in the catalog.
         doc = PatchScanDocument(
@@ -173,7 +174,7 @@ async def test_superseded_by_missing_from_catalog_stays_none(admin_engine, app_e
 
 async def test_os_family_mismatch_raises_validation_error(admin_engine, app_engine) -> None:
     org_id, device_id = await _dev(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         device = await s.get(Device, device_id)
         doc = _doc()
         doc.os_family = "linux"

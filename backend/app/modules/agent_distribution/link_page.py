@@ -51,6 +51,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.client_address import client_address
+from app.core.client_scope import ClientScope
 from app.core.i18n import N_, locale_var, tr, tr_marked
 from app.core.tenancy import org_session
 from app.models.core import AgentRelease
@@ -243,7 +244,9 @@ async def _live_org(request: Request, code: str) -> UUID | None:
 
 
 async def _releases_for(request: Request, org_id: UUID) -> dict[tuple[str, str], LinkRelease]:
-    async with org_session(org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        org_id, engine=request.app.state.app_engine, clients=ClientScope.all()
+    ) as session:
         return await link_releases(session)
 
 
@@ -580,7 +583,9 @@ async def install_link_windows_signature(
         digest = sha256.lower()
         if not _SHA256_HEX.fullmatch(digest):
             return _not_found()
-        async with org_session(org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            org_id, engine=request.app.state.app_engine, clients=ClientScope.all()
+        ) as session:
             release = await link_release_by_digest(session, "windows", arch, digest)
     if release is None:
         return _not_found()

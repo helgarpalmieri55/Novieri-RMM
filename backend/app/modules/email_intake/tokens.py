@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.core.vault import VaultService
 from app.modules.email_intake import microsoft, oauth_app
@@ -129,11 +130,13 @@ async def access_token_for(
     *,
     engine: AsyncEngine,
     vault: VaultService,
+    clients: ClientScope,
     actor_id: UUID | None = None,
 ) -> str:
     """An access token for one IMAP connection. `actor_id` is the operator
-    who pressed Test; `None` for a scheduled poll."""
-    async with org_session(org_id, engine=engine) as session:
+    who pressed Test; `None` for a scheduled poll. `clients` is that caller's
+    scope: the operator's own, or `ClientScope.all()` for the poll."""
+    async with org_session(org_id, engine=engine, clients=clients) as session:
         mailbox = (
             await session.execute(
                 select(EmailMailbox).where(
@@ -183,7 +186,7 @@ async def access_token_for(
     rotated = payload.get("refresh_token")
     if isinstance(rotated, str) and rotated and rotated != refresh:
         # Stored before the access token leaves this function (module docstring).
-        async with org_session(org_id, engine=engine) as session:
+        async with org_session(org_id, engine=engine, clients=clients) as session:
             await _store_secret(
                 session,
                 org_id=org_id,

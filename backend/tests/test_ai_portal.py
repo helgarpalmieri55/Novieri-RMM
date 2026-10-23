@@ -26,6 +26,7 @@ import app.modules.ai_portal as portal_ai_package
 from app.core.ai.executor_portal import invoke_portal_tool
 from app.core.ai.providers import TextBlock, ToolCallBlock
 from app.core.ai.types import ReadTool
+from app.core.client_scope import ClientScope
 from app.models import AiSettings
 from app.modules.ai_portal import api as portal_ai_api
 from app.modules.ai_portal.profile import RESOLVER_PROFILE
@@ -536,7 +537,9 @@ async def test_the_portal_role_is_fail_closed_without_the_requester_guc(
         requester_id = (
             await session.execute(select(Ticket.requester_id).where(Ticket.org_id == org_id))
         ).scalars().first()
-    async with portal_session(org_id, requester_id, engine=portal_engine) as scoped:
+    async with portal_session(
+        org_id, requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as scoped:
         with_both = (
             await scoped.execute(sqltext("SELECT count(*) FROM ticket"))
         ).scalar_one()

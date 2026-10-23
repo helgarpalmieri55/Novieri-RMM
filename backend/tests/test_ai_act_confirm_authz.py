@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ai.act import ActForbidden, confirm_action, propose
 from app.core.ai.executor_staff import invoke_tool
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AiAction, Job
 from tests.ai_act_fixtures import build_world
@@ -45,7 +46,9 @@ async def _job_count(api_env: Any, org_id: Any) -> int:
 
 
 async def _preview(api_env: Any, world: Any) -> Any:
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         return await propose(
             session,
             org_id=world.org_id,
@@ -58,7 +61,9 @@ async def _preview(api_env: Any, world: Any) -> Any:
 
 
 async def _confirm(api_env: Any, world: Any, preview: Any, *, permissions: tuple[str, ...]) -> Any:
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         return await confirm_action(
             session,
             org_id=world.org_id,
@@ -246,7 +251,9 @@ async def test_a_job_type_with_no_human_dispatch_route_is_refused(api_env: Any) 
         await session.commit()
 
     before = await _job_count(api_env, world.org_id)
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         stored = await session.get(AiAction, action_id)
         assert stored is not None
         with pytest.raises(ActForbidden, match="no human dispatch route"):
@@ -302,7 +309,9 @@ async def test_a_confirmer_who_cannot_read_the_device_is_refused(api_env: Any) -
     spy = RecordingTransport(api_env.app)
     with pytest.MonkeyPatch.context() as monkeypatch:
         install_spy(monkeypatch, spy)
-        async with org_session(world.org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             with pytest.raises(ActForbidden, match="no such device"):
                 await confirm_action(
                     session,
@@ -331,7 +340,9 @@ async def test_a_cross_org_ai_action_is_a_404_never_another_orgs_row(api_env: An
     other = await build_world(api_env, tag="authz-xorg-b")
     theirs = await _preview(api_env, other)
 
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(AiNotFoundError):
             await confirm_action(
                 session,

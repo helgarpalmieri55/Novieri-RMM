@@ -12,6 +12,7 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import BackupPoint, BackupPolicy, BackupRepository, BackupRun
 from app.modules.backup.health import run_backup_health_sweep
@@ -88,7 +89,7 @@ async def _alerts(admin_engine: AsyncEngine, org_id: UUID) -> dict[str, HealthAl
 
 
 async def _sweep(app_engine: AsyncEngine, org_id: UUID, now: datetime) -> dict[str, int]:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return await run_backup_health_sweep(session, org_id, now=now)
 
 

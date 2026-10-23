@@ -8,6 +8,7 @@ import redis.asyncio as aioredis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.gateway.connections import ConnectionRegistry
@@ -114,7 +115,7 @@ async def test_job_result_completes_job_and_emits_ui_event(
 ) -> None:
     org_id, device_id = await _org_device(admin_engine)
     job_engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await job_engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )
@@ -153,7 +154,7 @@ async def test_job_result_completes_job_and_emits_ui_event(
         app_engine, job_engine, redis_client, result, device_id=device_id, org_id=org_id
     )
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         from app.models import Job
 
         refreshed = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
@@ -186,7 +187,7 @@ async def test_message_for_another_devices_job_is_refused_and_audited(
         device_b = device_b_row.id
 
     job_engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await job_engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_a, params={}
         )
@@ -205,7 +206,7 @@ async def test_message_for_another_devices_job_is_refused_and_audited(
         app_engine, job_engine, redis_client, forged, device_id=device_b, org_id=org_id
     )
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         from app.models import Job
 
         refreshed = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
@@ -289,7 +290,7 @@ async def test_on_delivered_reads_the_status_under_a_row_lock(
     org_id = await api_env.create_org("deliver-lock")
     device_id = await _device_in(api_env, org_id)
     job_engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         job = await job_engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )
@@ -310,7 +311,9 @@ async def test_on_delivered_reads_the_status_under_a_row_lock(
 
     async def competing_writer() -> None:
         """Holds the row lock, moves the job to a terminal state, commits."""
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             row = (
                 await session.execute(
                     select(Job).where(Job.id == job_id).with_for_update()
@@ -332,7 +335,7 @@ async def test_on_delivered_reads_the_status_under_a_row_lock(
     await writer
     await delivery
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         refreshed = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
     assert refreshed.status is JobStatus.expired
 
@@ -352,7 +355,7 @@ async def test_draining_a_reconnecting_agents_queue_locks_the_rows_it_marks(
     org_id = await api_env.create_org("drain-lock")
     device_id = await _device_in(api_env, org_id)
     job_engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         job = await job_engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )
@@ -362,7 +365,9 @@ async def test_draining_a_reconnecting_agents_queue_locks_the_rows_it_marks(
     released = asyncio.Event()
 
     async def competing_writer() -> None:
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             row = (
                 await session.execute(
                     select(Job).where(Job.id == job_id).with_for_update()
@@ -375,7 +380,9 @@ async def test_draining_a_reconnecting_agents_queue_locks_the_rows_it_marks(
             await session.flush()
 
     async def drain() -> list[UUID]:
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             return [j.id for j in await job_engine.queued_for_device(session, device_id)]
 
     writer = asyncio.create_task(competing_writer())
@@ -387,6 +394,6 @@ async def test_draining_a_reconnecting_agents_queue_locks_the_rows_it_marks(
     await writer
     assert await reader == []
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         refreshed = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
     assert refreshed.status is JobStatus.expired

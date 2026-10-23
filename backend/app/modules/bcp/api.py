@@ -168,7 +168,9 @@ async def list_plans_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.read")),
 ) -> list[PlanOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_plans(session, ctx.org_id)
         return [_plan_out(r) for r in rows]
 
@@ -179,7 +181,9 @@ async def create_plan_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.manage")),
 ) -> PlanOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             plan = await create_plan(
                 session,
@@ -210,7 +214,9 @@ async def plan_status_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.read")),
 ) -> list[PlanStatusOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         data = await bcp_plan_status(session, ctx.org_id, now=datetime.now(UTC))
         return [PlanStatusOut(**row) for row in data]
 
@@ -226,7 +232,9 @@ async def get_plan_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.read")),
 ) -> PlanOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         plan = await get_plan(session, ctx.org_id, plan_id)
         if plan is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such bcp plan"))
@@ -240,7 +248,9 @@ async def update_plan_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.manage")),
 ) -> PlanOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             plan = await update_plan(
                 session,
@@ -260,7 +270,9 @@ async def review_plan_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.approve")),
 ) -> PlanOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             plan = await review_plan(
                 session,
@@ -284,7 +296,9 @@ async def list_plan_tests_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.read")),
 ) -> list[TestOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         plan = await get_plan(session, ctx.org_id, plan_id)
         if plan is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such bcp plan"))
@@ -301,7 +315,9 @@ async def create_test_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.manage")),
 ) -> TestOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             test = await create_test(
                 session,
@@ -331,7 +347,9 @@ async def period_report_route(
     to: datetime = Query(...),
     ctx: AuthContext = Depends(require_permission("bcp.read")),
 ) -> PeriodReportOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         data = await bcp_period_report(session, ctx.org_id, frm=frm, to=to)
 
         await audit_service.record(
@@ -359,7 +377,9 @@ async def get_test_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.read")),
 ) -> TestOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         test = await get_test(session, ctx.org_id, test_id)
         if test is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such bcp test"))
@@ -373,7 +393,9 @@ async def record_test_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.manage")),
 ) -> TestOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             test = await record_test(
                 session,
@@ -398,7 +420,9 @@ async def upsert_step_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.manage")),
 ) -> StepOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             step = await upsert_step(
                 session,
@@ -427,7 +451,9 @@ async def test_report_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.read")),
 ) -> TestReportOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         data = await bcp_test_report(session, ctx.org_id, test_id)
         if data["test"] is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such bcp test"))
@@ -457,7 +483,9 @@ async def list_findings_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.read")),
 ) -> list[FindingOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         test = await get_test(session, ctx.org_id, test_id)
         if test is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such bcp test"))
@@ -474,7 +502,9 @@ async def create_finding_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.manage")),
 ) -> FindingOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             finding = await create_finding(
                 session,
@@ -496,7 +526,9 @@ async def update_finding_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("bcp.manage")),
 ) -> FindingOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             finding = await update_finding(
                 session,

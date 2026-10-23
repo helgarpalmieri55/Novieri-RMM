@@ -36,6 +36,7 @@ from sqlalchemy import select
 from sqlalchemy import text as sqltext
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -89,7 +90,7 @@ async def _jobs(api_env, org_id: UUID) -> list[Job]:
 
 
 async def _push(api_env, tmp_path, org_id: UUID, device: Device) -> tuple[UUID, dict] | None:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         return await push_policy(session, _engine(tmp_path), org_id, device)
 
 
@@ -120,7 +121,9 @@ async def test_the_policy_is_built_from_the_profile_and_the_registry(api_env) ->
     await seed_assignment(api_env, org.org_id, profile_id, device_id=org.device_id)
 
     device = await _device(api_env, org.device_id)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         resolved = await resolve_profile_for_device(session, org.org_id, device)
     assert resolved is not None
     params = build_policy_params(resolved)
@@ -156,7 +159,9 @@ async def test_an_enum_threshold_ships_the_member_name_not_a_boolean(api_env) ->
     await seed_assignment(api_env, org.org_id, profile_id, device_id=org.device_id)
 
     device = await _device(api_env, org.device_id)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         resolved = await resolve_profile_for_device(session, org.org_id, device)
     assert resolved is not None
     assert build_policy_params(resolved).checks[0].threshold == "running"
@@ -179,7 +184,9 @@ async def test_agent_offline_is_never_in_the_built_policy(api_env) -> None:
     await seed_assignment(api_env, org.org_id, profile_id, device_id=org.device_id)
 
     device = await _device(api_env, org.device_id)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         resolved = await resolve_profile_for_device(session, org.org_id, device)
     assert resolved is not None
     assert [c.check_type for c in build_policy_params(resolved).checks] == ["cpu.busy_pct"]
@@ -252,7 +259,9 @@ async def test_unassigning_a_device_pushes_an_explicit_disarm(api_env, tmp_path)
 
     first = await _push(api_env, tmp_path, org.org_id, device)
     assert first is not None
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         job = await session.get(Job, first[0])
         assert job is not None
         await record_policy_ack(session, job, {})
@@ -280,7 +289,9 @@ async def test_a_device_already_disarmed_is_not_told_again(api_env, tmp_path) ->
     the arithmetic §0.4 rejects."""
     org = await seed_org(api_env, "pp-disarm2")
     device = await _device(api_env, org.device_id)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         session.add(
             DeviceHealthPolicyAck(
                 org_id=org.org_id,
@@ -320,7 +331,9 @@ async def test_push_check_now_creates_a_signed_parameterless_job(api_env, tmp_pa
     remediation so an operator does not wait a tick interval to learn whether
     the fix worked."""
     org = await seed_org(api_env, "pp-now")
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         job_id, envelope = await push_check_now(
             session, _engine(tmp_path), org.org_id, await _device(api_env, org.device_id)
         )
@@ -370,7 +383,9 @@ async def _armed(api_env, tmp_path, tag: str) -> tuple[Any, UUID, UUID]:
 
 async def test_the_ack_handler_stamps_the_acknowledged_version(api_env, tmp_path) -> None:
     org, profile_id, job_id = await _armed(api_env, tmp_path, "ack-1")
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         job = await session.get(Job, job_id)
         assert job is not None
         await record_policy_ack(session, job, {})
@@ -388,7 +403,9 @@ async def test_the_ack_handler_is_idempotent_under_redelivery(api_env, tmp_path)
     error."""
     org, _, job_id = await _armed(api_env, tmp_path, "ack-2")
     for _ in range(5):
-        async with org_session(org.org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             job = await session.get(Job, job_id)
             assert job is not None
             await record_policy_ack(session, job, {})
@@ -410,7 +427,9 @@ async def test_a_stale_result_never_lowers_the_acknowledged_version(
     than a regression". A lowered version makes §12 re-push a policy the device
     already has, once per sweep, forever."""
     org, profile_id, _ = await _armed(api_env, tmp_path, "ack-3")
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         session.add(
             DeviceHealthPolicyAck(
                 org_id=org.org_id,
@@ -421,7 +440,9 @@ async def test_a_stale_result_never_lowers_the_acknowledged_version(
         )
 
     # A late result for the version-1 job.
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         job = (
             await session.execute(select(Job).where(Job.org_id == org.org_id))
         ).scalar_one()
@@ -439,7 +460,9 @@ async def test_a_disarm_ack_replaces_a_higher_version_from_another_profile(
     it must win -- otherwise a device disarmed after running a version-9 profile
     reads forever as still on version 9."""
     org, profile_id, _ = await _armed(api_env, tmp_path, "ack-4")
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         session.add(
             DeviceHealthPolicyAck(
                 org_id=org.org_id,
@@ -456,7 +479,9 @@ async def test_a_disarm_ack_replaces_a_higher_version_from_another_profile(
         )
     disarm = await _push(api_env, tmp_path, org.org_id, await _device(api_env, org.device_id))
     assert disarm is not None
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         job = await session.get(Job, disarm[0])
         assert job is not None
         await record_policy_ack(session, job, {})
@@ -473,7 +498,9 @@ async def test_the_ack_handler_ignores_a_result_for_an_unknown_device(
     a raise FAILS the job. A device deleted between dispatch and result must not
     turn an acknowledged policy into a failed one."""
     org, _, job_id = await _armed(api_env, tmp_path, "ack-5")
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         job = await session.get(Job, job_id)
         assert job is not None
         job.target_id = uuid4()
@@ -657,7 +684,9 @@ async def test_a_lost_result_converges_through_the_summary_and_the_reconcile(
         )
 
     for _ in range(5):
-        async with org_session(org.org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             assert (
                 await run_policy_reconcile(session, org.org_id, job_engine=_engine(tmp_path))
                 == []
@@ -680,7 +709,9 @@ async def test_a_lost_result_converges_through_the_summary_and_the_reconcile(
     row = await _ack(api_env, org.device_id)
     assert row is not None and row.policy_version == 1
 
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         pushes = await run_policy_reconcile(
             session, org.org_id, job_engine=_engine(tmp_path)
         )
@@ -732,7 +763,9 @@ async def test_the_disarm_that_follows_a_summary_ack_settles_and_stops_pushing(
         [_line(check_id, kind="summary", state="ok", value="4")],
         policy_version=1,
     )
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         assert (
             len(await run_policy_reconcile(session, org.org_id, job_engine=_engine(tmp_path)))
             == 1
@@ -755,7 +788,9 @@ async def test_the_disarm_that_follows_a_summary_ack_settles_and_stops_pushing(
     )
 
     for _ in range(3):
-        async with org_session(org.org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             assert (
                 await run_policy_reconcile(session, org.org_id, job_engine=_engine(tmp_path))
                 == []

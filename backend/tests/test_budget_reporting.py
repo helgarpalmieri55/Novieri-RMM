@@ -29,6 +29,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Expense, ExpenseCategory, User
 from app.modules.budget.budgets import create_budget, put_lines
@@ -122,7 +123,7 @@ async def test_variance_keeps_four_columns_separate(api_env) -> None:
     """planned / actual / committed / projected are never collapsed --
     collapsing committed and projected is how a forecast double-counts."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
@@ -156,7 +157,7 @@ async def test_variance_keeps_four_columns_separate(api_env) -> None:
 
 async def test_actual_counts_only_confirmed_and_committed_only_expected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
@@ -187,7 +188,7 @@ async def test_projected_excludes_periods_that_already_have_a_materialized_row(a
     the SAME period shows up as `committed` and `projected` drops to zero --
     never both at once."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
@@ -230,7 +231,7 @@ async def test_materialized_then_confirmed_renewal_is_actual_not_projected(api_e
     bug) loses track of the row the instant it is confirmed, and the same
     renewal reappears as `projected` on top of its own `actual`."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
@@ -280,7 +281,7 @@ async def test_editing_expense_date_does_not_resurrect_its_projection(api_env) -
     (moved) `committed` in period 4 -- inflating the fiscal-year total by
     $12,000."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
@@ -342,7 +343,7 @@ async def test_unmaterialized_renewal_still_projects_despite_a_sibling_materiali
     the bug's key -- or materializing ONE renewal blanks out every OTHER
     projection sharing its category and period, however large."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
@@ -398,7 +399,7 @@ async def test_manual_prerecorded_renewal_is_committed_not_projected(api_env) ->
     could never match this row: a manual row's `source` is always the
     literal `"manual"`, never `"subscription"`."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
@@ -445,7 +446,7 @@ async def test_manual_prerecorded_renewal_does_not_suppress_sibling_renewal(api_
     (now `(link_type, link_id, period_key)`), never on `(category_id,
     period_index)`."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
@@ -504,7 +505,7 @@ async def test_manual_expense_without_link_id_does_not_suppress_projection(api_e
     carries no materialization identity and must not suppress ANY sibling
     projection sharing its category/period."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
@@ -560,7 +561,7 @@ async def test_variance_voided_materialized_renewal_does_not_resurrect_as_projec
     so nothing would ever put it back in `committed` to keep suppressing
     it)."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
@@ -609,7 +610,7 @@ async def test_forecast_voided_materialized_renewal_does_not_resurrect(api_env) 
     what `forecast()`'s no-status-filter guard is for."""
     org_id, user_id = await _org_with_user(api_env)
     today = date.today()
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await seed_default_categories(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
@@ -651,7 +652,7 @@ async def test_voided_expenses_are_excluded_from_every_figure(api_env) -> None:
     against -- proving the voided rows contribute nothing, rather than the
     weaker (and vacuously-passable) claim that no row exists at all."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
@@ -698,7 +699,7 @@ async def test_unconvertible_rows_are_excluded_from_totals_and_disclosed(api_env
     converted -- it must not silently vanish from `unconvertible_count`/
     `unconvertible_by_currency`, and must not corrupt `ytd_actual`."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
@@ -734,7 +735,7 @@ async def test_variance_discloses_unconvertible_confirmed_expense(api_env) -> No
     so a variance row necessarily exists to check `actual` against, rather
     than the weaker claim that no row exists at all."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
@@ -757,7 +758,7 @@ async def test_variance_discloses_unconvertible_confirmed_expense(api_env) -> No
 
 async def test_variance_discloses_unconvertible_expected_expense(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
@@ -786,7 +787,7 @@ async def test_variance_discloses_unconvertible_projection(api_env) -> None:
     fiscal year end (10 occurrences, period_index 3..12) -- the budget's
     full-year window, not just the one period a naive read might expect."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
@@ -820,7 +821,7 @@ async def test_variance_discloses_unconvertible_projection(api_env) -> None:
 async def test_forecast_discloses_unconvertible_projection(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     today = date.today()
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await seed_default_categories(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
@@ -849,7 +850,7 @@ async def test_forecast_discloses_unconvertible_projection(api_env) -> None:
 
 async def test_variance_pct_with_zero_plan_is_none_not_infinity(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
@@ -868,7 +869,7 @@ async def test_variance_pct_with_zero_plan_is_none_not_infinity(api_env) -> None
 
 async def test_position_pct_of_plan_is_none_on_zero_plan(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
@@ -889,7 +890,7 @@ async def test_position_avg_burn_is_zero_before_any_period_has_elapsed(api_env) 
     any period has elapsed is meaningfully zero (mirrors
     `subscriptions.reporting.idle_seats`'s zero-seat guard)."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await seed_default_categories(session, org_id, user_id)
         budget = await _make_budget(session, org_id, user_id)
 
@@ -910,7 +911,7 @@ async def test_position_uses_the_fiscal_calendar_not_wall_clock_months(api_env) 
     (Jul..Jan), not `1 - 7 = -6` (the wall-clock-month-subtraction bug this
     test exists to catch)."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         # Set fiscal_year_start_month=7 before anything else touches settings.
         from app.modules.budget import fx as fx_module
 
@@ -935,7 +936,7 @@ async def test_position_avg_monthly_burn_on_quarterly_budget_is_truly_monthly(ap
     -- a straight-line doubling of $900 at the half-year mark -- must stay
     $1,800 either way."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id, granularity="quarter")
@@ -962,7 +963,7 @@ async def test_position_projected_year_end_rounds_once_not_after_avg_burn(api_en
     quantized only once, so it reads `400.00`, matching what a reader who
     hand-computes `ytd_actual / elapsed_months * 12` would get."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id, granularity="quarter")
@@ -990,7 +991,7 @@ async def test_forecast_separates_materialized_from_projected(api_env) -> None:
     occurrence for this test."""
     org_id, user_id = await _org_with_user(api_env)
     today = date.today()
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await seed_default_categories(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
@@ -1022,7 +1023,7 @@ async def test_forecast_separates_materialized_from_projected(api_env) -> None:
 
 async def test_forecast_rejects_non_positive_months(api_env) -> None:
     org_id, _user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(BudgetValidationError):
             await forecast(session, org_id, _user_id, months=0)
 
@@ -1040,7 +1041,7 @@ async def test_forecast_months_spans_exactly_n_calendar_months_including_current
     and the first/last `period_key` pin its exact ends."""
     org_id, user_id = await _org_with_user(api_env)
     today = date.today()
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await seed_default_categories(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
@@ -1073,7 +1074,7 @@ async def test_forecast_months_spans_exactly_n_calendar_months_including_current
 
 async def test_export_rows_money_is_a_string(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         await _make_expense(
@@ -1092,7 +1093,7 @@ async def test_export_rows_money_is_a_string(api_env) -> None:
 
 async def test_odoo_export_emits_the_pinned_column_contract(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         await _make_expense(
@@ -1121,7 +1122,7 @@ async def test_odoo_export_defaults_to_confirmed_only(api_env) -> None:
     must default to CONFIRMED rows only; the general `export_rows` (self-
     describing -- it carries `status` as a column) is unaffected."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         await _make_expense(
@@ -1153,7 +1154,7 @@ async def test_odoo_export_defaults_to_confirmed_only(api_env) -> None:
 
 async def test_export_date_range_filters(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         await _make_expense(
@@ -1182,7 +1183,7 @@ async def test_reports_write_no_audit_event(api_env) -> None:
     """Only the export ROUTES audit (Task 12) -- the reporting layer itself
     writes nothing."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
@@ -1200,7 +1201,7 @@ async def test_reports_write_no_audit_event(api_env) -> None:
             )
 
     before = await _audit_count()
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await variance(session, org_id, budget.id, user_id)
         await position(session, org_id, budget.id, as_of=date(2026, 6, 30))
         await forecast(session, org_id, user_id, months=3)
@@ -1240,7 +1241,7 @@ async def test_reports_write_no_user_audit_event_on_a_fresh_unseeded_org(api_env
                 .all()
             )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await forecast(session, org_id, user_id, months=3)
 
     assert await _events_of("budget.category_created") == []
@@ -1250,7 +1251,7 @@ async def test_reports_write_no_user_audit_event_on_a_fresh_unseeded_org(api_env
     assert seeded[0].actor_id is None
 
     # A second forecast call must not add anything -- the org is now seeded.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await forecast(session, org_id, user_id, months=3)
     assert await _events_of("budget.category_created") == []
     assert len(await _events_of("budget.categories_seeded")) == 1
@@ -1559,7 +1560,7 @@ async def test_export_suppresses_unresolvable_vendor_id_and_label(
 
 async def test_variance_unknown_budget_raises_not_found(api_env) -> None:
     org_id, _user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(BudgetNotFoundError):
             await variance(
                 session, org_id, UUID("00000000-0000-0000-0000-000000000000"), _user_id

@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
@@ -234,7 +235,9 @@ async def test_dispatch_withholds_a_gated_approval_whose_change_was_cancelled(ap
     assert ok.status_code == 201
 
     engine = _FakeJobEngine()
-    async with org_session(f["org_id"], engine=api_env.app_engine) as session:
+    async with org_session(
+        f["org_id"], engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         assert (
             len(await dispatch_apply(session, engine, org_id=f["org_id"], now=datetime.now(UTC)))
             == 1
@@ -247,7 +250,9 @@ async def test_dispatch_withholds_a_gated_approval_whose_change_was_cancelled(ap
         change.state = "cancelled"
         await s.commit()
     engine = _FakeJobEngine()
-    async with org_session(f["org_id"], engine=api_env.app_engine) as session:
+    async with org_session(
+        f["org_id"], engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         assert (
             await dispatch_apply(session, engine, org_id=f["org_id"], now=datetime.now(UTC)) == []
         )

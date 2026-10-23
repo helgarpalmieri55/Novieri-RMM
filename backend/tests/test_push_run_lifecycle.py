@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, EnrollmentToken, Job, User
 from app.modules.agent_push import run_list, runs
@@ -47,7 +48,9 @@ async def _count(admin_engine: AsyncEngine, model, org_id) -> int:
 
 
 async def _create(app_engine: AsyncEngine, world: RunWorld, digest: str):
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         return await runs.create_run(
             session,
             world.org.org_id,
@@ -61,7 +64,9 @@ async def _create(app_engine: AsyncEngine, world: RunWorld, digest: str):
 
 async def _control(app_engine: AsyncEngine, world: RunWorld, verb: str, run_id, actor=None):
     fn = {"pause": runs.pause_run, "resume": runs.resume_run, "cancel": runs.cancel_run}[verb]
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         return await fn(
             session, world.org.org_id, run_id=run_id, actor_id=actor or world.org.user_id
         )
@@ -104,7 +109,9 @@ async def test_a_changed_list_is_refused_before_anything_is_written(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     world = await run_world(admin_engine, "rc-chg", octet=92, count=2)
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         shown = await run_list.expand_prefix(
             session,
             world.org.org_id,
@@ -233,7 +240,9 @@ async def test_another_orgs_run_is_not_found(
     with pytest.raises(PushNotFoundError):
         await _control(app_engine, other, "pause", run_id)
     with pytest.raises(PushNotFoundError):
-        async with org_session(other.org.org_id, engine=app_engine) as session:
+        async with org_session(
+            other.org.org_id, engine=app_engine, clients=ClientScope.all()
+        ) as session:
             await runs.get_run(session, other.org.org_id, run_id)
 
 
@@ -242,7 +251,9 @@ async def test_counts_and_pages_are_read_in_position_order(
 ) -> None:
     world = await run_world(admin_engine, "rc-page", octet=98, count=3)
     run_id = await start_run(app_engine, world)
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         counts = await runs.run_counts(session, world.org.org_id, run_id)
         total, page = await runs.list_targets(session, world.org.org_id, run_id, offset=1, limit=1)
     assert counts == {

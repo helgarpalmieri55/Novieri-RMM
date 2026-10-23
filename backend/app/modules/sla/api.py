@@ -256,7 +256,9 @@ async def list_calendars_route(
     """Every calendar with its health flag -- see `views.py` on why a
     misconfigured calendar must be visible from the list rather than only
     discoverable by a ticket failing to get an SLA row."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_calendars(session, ctx.org_id)
         health = await calendar_health_by_id(session, ctx.org_id, rows)
         return [_calendar_out(row, health[row.id]) for row in rows]
@@ -271,7 +273,9 @@ async def create_calendar_route(
     try:
         # The error must escape the `org_session` block so the transaction
         # rolls back -- see the module docstring.
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             calendar = await create_calendar(
                 session,
                 ctx.org_id,
@@ -304,7 +308,9 @@ async def get_calendar_route(
     ctx: AuthContext = Depends(require_permission("sla.read")),
 ) -> CalendarDetail:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             calendar = await get_calendar(session, ctx.org_id, calendar_id)
             windows = await _load_windows(session, ctx.org_id, calendar_id)
             out = _calendar_detail(
@@ -328,7 +334,9 @@ async def update_calendar_route(
     (spec §7), inside this transaction -- `calendars.update_calendar` owns
     that, and it is why an error here must roll the whole thing back."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             calendar = await update_calendar(
                 session, ctx.org_id, ctx.user_id, calendar_id, body.supplied()
             )
@@ -352,7 +360,9 @@ async def delete_calendar_route(
     """A calendar referenced by a policy or by any `ticket_sla` row cannot be
     deleted; the 400 names them (spec §9)."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await delete_calendar(session, ctx.org_id, ctx.user_id, calendar_id)
     except SlaValidationError as exc:
         raise _http_error(exc) from None
@@ -377,7 +387,9 @@ async def replace_windows_route(
     touched, and every still-running deadline on this calendar is recomputed
     in the same transaction (spec §7)."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             rows = await replace_windows(
                 session,
                 ctx.org_id,
@@ -403,7 +415,9 @@ async def list_holidays_route(
     ctx: AuthContext = Depends(require_permission("sla.read")),
 ) -> list[HolidayOut]:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             # The calendar is loaded first so a cross-org id 404s instead of
             # returning an empty list -- "no holidays" and "not your calendar"
             # are different answers.
@@ -427,7 +441,9 @@ async def add_holiday_route(
     ctx: AuthContext = Depends(require_permission("sla.admin")),
 ) -> HolidayOut:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             holiday = await add_holiday(
                 session,
                 ctx.org_id,
@@ -458,7 +474,9 @@ async def remove_holiday_route(
     ctx: AuthContext = Depends(require_permission("sla.admin")),
 ) -> None:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await remove_holiday(session, ctx.org_id, ctx.user_id, calendar_id, holiday_id)
     except SlaValidationError as exc:
         raise _http_error(exc) from None
@@ -474,7 +492,9 @@ async def list_policies_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("sla.read")),
 ) -> list[PolicyOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_policies(session, ctx.org_id)
         return [PolicyOut.model_validate(row) for row in rows]
 
@@ -486,7 +506,9 @@ async def create_policy_route(
     ctx: AuthContext = Depends(require_permission("sla.admin")),
 ) -> PolicyOut:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             policy = await create_policy(
                 session,
                 ctx.org_id,
@@ -518,7 +540,9 @@ async def get_policy_route(
     ctx: AuthContext = Depends(require_permission("sla.read")),
 ) -> PolicyOut:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             out = PolicyOut.model_validate(await get_policy(session, ctx.org_id, policy_id))
     except SlaValidationError as exc:
         raise _http_error(exc) from None
@@ -538,7 +562,9 @@ async def update_policy_route(
     `sweep.recompute_for_policy_change` for that decision and for why it does
     not reopen §0.4's door."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             policy = await update_policy(
                 session, ctx.org_id, ctx.user_id, policy_id, body.supplied()
             )
@@ -560,7 +586,9 @@ async def delete_policy_route(
     `policies.delete_policy`). Rewriting history because an admin deleted a
     row would destroy the audit value of the record."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await delete_policy(session, ctx.org_id, ctx.user_id, policy_id)
     except SlaValidationError as exc:
         raise _http_error(exc) from None
@@ -604,7 +632,9 @@ async def get_settings_route(
     only if somebody happened to be reading. This number persists until the
     rows are actually recomputed, on the screen the fix is made from.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         row = await get_settings_row(session, ctx.org_id)
         return SettingsOut(
             auto_close_after_days=await get_auto_close_after_days(session, ctx.org_id),
@@ -621,7 +651,9 @@ async def update_settings_route(
     ctx: AuthContext = Depends(require_permission("sla.admin")),
 ) -> SettingsOut:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             row = await set_auto_close_after_days(
                 session, ctx.org_id, ctx.user_id, days=body.auto_close_after_days
             )
@@ -664,7 +696,9 @@ async def get_ticket_sla_route(
     or belongs to another org, is the 404.
     """
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             _, row = await ticket_sla_state(session, ctx.org_id, ticket_id)
             names = (
                 await policy_and_calendar_names(session, ctx.org_id, row)

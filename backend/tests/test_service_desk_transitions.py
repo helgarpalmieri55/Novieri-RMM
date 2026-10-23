@@ -46,6 +46,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from uuid_extensions import uuid7
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Ticket, TicketStatusHistory, User
 from app.modules.service_desk.errors import TicketNotFoundError, TicketValidationError
@@ -219,7 +220,7 @@ async def test_every_legal_incident_transition_moves_status_and_writes_one_histo
     api_env, from_status: str, to_status: str
 ) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         # Force the "from" state directly -- create_ticket only ever produces
         # "new"; every other from_status under test is reached the same way
@@ -248,7 +249,7 @@ async def test_every_legal_request_transition_moves_status_and_writes_one_histor
     api_env, from_status: str, to_status: str
 ) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_request(session, org_id, user_id)
         ticket.status = from_status
         await session.flush()
@@ -299,7 +300,7 @@ async def test_pending_approval_edges_are_legal_in_lifecycle_but_refused_via_gen
     assert can_transition("request", from_status, to_status)
 
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_request(session, org_id, user_id, requires_approval=True)
         ticket.status = from_status
         await session.flush()
@@ -325,7 +326,7 @@ async def test_decide_approval_private_keyword_still_drives_the_reserved_edges(a
     so a future reader can see both halves (refused without the keyword,
     allowed with it) in one place."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_request(session, org_id, user_id, requires_approval=True)
         assert ticket.status == "pending_approval"
 
@@ -361,7 +362,7 @@ async def test_illegal_transition_raises_and_leaves_ticket_unchanged(
     api_env, ticket_type: str, from_status: str, to_status: str
 ) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = (
             await _create_incident(session, org_id, user_id)
             if ticket_type == "incident"
@@ -404,11 +405,11 @@ async def test_illegal_transition_unchanged_on_a_fresh_session(
     second, independent session, so there is no identity map to be fooled by
     at all."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket_id = ticket.id
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(TicketValidationError):
             await change_status(session, org_id, ticket_id, to_status="closed", actor_id=user_id)
 
@@ -426,7 +427,7 @@ async def test_illegal_transition_unchanged_on_a_fresh_session(
 
 async def test_moving_to_resolved_stamps_resolved_at(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket.status = "open"
         await session.flush()
@@ -445,7 +446,7 @@ async def test_moving_to_fulfilled_stamps_resolved_at(api_env) -> None:
     `closed` is distinct from `resolved`/`fulfilled`"), and both columns are
     generic on `ticket`, not per-type."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_request(session, org_id, user_id)
         ticket.status = "in_progress"
         await session.flush()
@@ -458,7 +459,7 @@ async def test_moving_to_fulfilled_stamps_resolved_at(api_env) -> None:
 
 async def test_moving_to_closed_stamps_closed_at(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket.status = "open"
         await session.flush()
@@ -480,7 +481,7 @@ async def test_moving_to_closed_stamps_closed_at(api_env) -> None:
 
 async def test_reopen_from_resolved_clears_resolved_at(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket.status = "open"
         await session.flush()
@@ -502,7 +503,7 @@ async def test_reopen_from_closed_clears_both_closed_at_and_resolved_at(api_env)
     resolve" query reads. `closed_at` still clears unconditionally, as
     before."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket.status = "open"
         await session.flush()
@@ -520,7 +521,7 @@ async def test_reopen_from_closed_clears_both_closed_at_and_resolved_at(api_env)
 
 async def test_reopen_from_fulfilled_clears_resolved_at(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_request(session, org_id, user_id)
         ticket.status = "in_progress"
         await session.flush()
@@ -538,7 +539,7 @@ async def test_reopen_from_closed_request_clears_both_closed_at_and_resolved_at(
     `test_reopen_from_closed_clears_both_closed_at_and_resolved_at` (task 8's
     S2 fix)."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_request(session, org_id, user_id)
         ticket.status = "in_progress"
         await session.flush()
@@ -557,7 +558,7 @@ async def test_cancelling_a_resolved_ticket_does_not_clear_resolved_at(api_env) 
     historical fact and must not be erased just because the ticket was later
     cancelled outright."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket.status = "open"
         await session.flush()
@@ -584,7 +585,7 @@ async def test_system_actor_with_null_actor_id_is_recorded(api_env) -> None:
     reads as a technician's action" property (spec §3.3, §7.2) exactly where
     it matters."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket.status = "open"
         await session.flush()
@@ -622,7 +623,7 @@ async def test_system_actor_with_null_actor_id_is_recorded(api_env) -> None:
 
 async def test_system_actor_type_with_non_null_actor_id_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket.status = "open"
         await session.flush()
@@ -640,7 +641,7 @@ async def test_system_actor_type_with_non_null_actor_id_is_rejected(api_env) -> 
 
 async def test_user_actor_type_with_null_actor_id_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket.status = "open"
         await session.flush()
@@ -653,7 +654,7 @@ async def test_user_actor_type_with_null_actor_id_is_rejected(api_env) -> None:
 
 async def test_unknown_actor_type_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket.status = "open"
         await session.flush()
@@ -676,7 +677,7 @@ async def test_unknown_actor_type_is_rejected(api_env) -> None:
 
 async def test_change_status_audits_exactly_once(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket.status = "open"
         await session.flush()
@@ -715,7 +716,7 @@ async def test_assign_ticket_sets_assignee(api_env) -> None:
             await session.execute(select(User.id).where(User.external_subject == other_sub))
         ).scalar_one()
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         assigned = await assign_ticket(
@@ -732,7 +733,7 @@ async def test_assign_ticket_clears_assignee(api_env) -> None:
             await session.execute(select(User.id).where(User.external_subject == other_sub))
         ).scalar_one()
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         await assign_ticket(session, org_id, user_id, ticket.id, {"assigned_to": other_user_id})
 
@@ -757,7 +758,7 @@ async def test_assign_ticket_leaves_queue_alone_when_queue_id_omitted(
             await session.execute(select(User.id).where(User.external_subject == other_sub))
         ).scalar_one()
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         original_queue_id = ticket.queue_id
 
@@ -781,7 +782,7 @@ async def test_assign_ticket_rejects_explicit_null_queue_id(api_env) -> None:
     (`TicketNotFoundError`) rather than raising the typed 400 `assign_ticket`
     promises for this shape."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket_id = ticket.id
         original_queue_id = ticket.queue_id
@@ -801,7 +802,7 @@ async def test_assign_ticket_rejects_explicit_null_queue_id(api_env) -> None:
 
 async def test_assign_ticket_moves_queue_when_supplied(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         new_queue = await _queue(session, org_id, user_id, key="infrastructure")
 
@@ -829,7 +830,7 @@ async def test_assign_ticket_moves_queue_while_a_real_assignee_is_untouched(api_
             await session.execute(select(User.id).where(User.external_subject == other_sub))
         ).scalar_one()
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         new_queue = await _queue(session, org_id, user_id, key="infrastructure")
         await assign_ticket(session, org_id, user_id, ticket.id, {"assigned_to": other_user_id})
@@ -908,7 +909,7 @@ async def test_assign_ticket_audits_exactly_once(api_env) -> None:
             await session.execute(select(User.id).where(User.external_subject == other_sub))
         ).scalar_one()
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         await assign_ticket(session, org_id, user_id, ticket.id, {"assigned_to": other_user_id})
@@ -948,7 +949,7 @@ async def test_assign_ticket_system_actor_moves_queue_and_is_audited_with_no_act
     with `actor_id=None` must reach `audit_service.record` unchanged, never
     coerced back to a human who did nothing (invariant #4)."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         escalation_queue = await _queue(session, org_id, user_id, key="escalation")
 
@@ -982,7 +983,7 @@ async def test_assign_ticket_system_actor_moves_queue_and_is_audited_with_no_act
 
 async def test_assign_ticket_rejects_unknown_actor_type(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         with pytest.raises(TicketValidationError):
             await assign_ticket(
@@ -997,7 +998,7 @@ async def test_assign_ticket_rejects_unknown_actor_type(api_env) -> None:
 
 async def test_assign_ticket_rejects_system_actor_with_actor_id(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         with pytest.raises(TicketValidationError):
             await assign_ticket(
@@ -1012,7 +1013,7 @@ async def test_assign_ticket_rejects_system_actor_with_actor_id(api_env) -> None
 
 async def test_assign_ticket_rejects_user_actor_type_without_actor_id(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         with pytest.raises(TicketValidationError):
             await assign_ticket(
@@ -1043,7 +1044,7 @@ async def test_assign_ticket_permits_reassignment_of_a_closed_ticket(api_env) ->
             await session.execute(select(User.id).where(User.external_subject == other_sub))
         ).scalar_one()
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket.status = "closed"
         await session.flush()
@@ -1063,22 +1064,22 @@ async def test_get_ticket_used_for_unchanged_check_after_rejection(api_env) -> N
     """Belt-and-braces: `get_ticket` itself, used as the "second session"
     unchanged-check pattern the brief calls out, returns the untouched row."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket_id = ticket.id
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(TicketValidationError):
             await change_status(session, org_id, ticket_id, to_status="closed", actor_id=user_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as fresh:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as fresh:
         reloaded = await get_ticket(fresh, org_id, ticket_id)
     assert reloaded.status == "new"
 
 
 async def test_change_status_ticket_not_found_for_nonexistent_id(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(TicketNotFoundError):
             await change_status(
                 session, org_id, uuid7(), to_status="open", actor_id=user_id

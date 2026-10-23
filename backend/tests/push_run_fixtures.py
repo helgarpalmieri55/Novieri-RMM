@@ -16,6 +16,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.jobs.engine import JobEngine
 from tests.agent_push_fixtures import (
@@ -171,7 +172,9 @@ async def start_run(app_engine: AsyncEngine, world: RunWorld) -> UUID:
     from app.core.tenancy import org_session
     from app.modules.agent_push import run_list, runs
 
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         listed = await run_list.expand_prefix(
             session,
             world.org.org_id,

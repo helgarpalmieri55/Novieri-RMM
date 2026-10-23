@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
 from app.models import AuditEvent, BackupRepository, Organization
@@ -27,7 +28,7 @@ async def test_create_repository_sets_encryption_key_ref(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
             session, vault, org_id=org_id, actor_id=actor_id, name="primary"
         )
@@ -42,16 +43,16 @@ async def test_open_repo_key_roundtrips_the_sealed_master_key(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
             session, vault, org_id=org_id, actor_id=actor_id, name="primary"
         )
         repo_id = repo.id
         await session.commit()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         key1 = await open_repo_key(session, vault, org_id=org_id, repository_id=repo_id)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         key2 = await open_repo_key(session, vault, org_id=org_id, repository_id=repo_id)
 
     assert key1 == key2
@@ -63,14 +64,14 @@ async def test_db_column_holds_sealed_string_not_the_raw_key(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
             session, vault, org_id=org_id, actor_id=actor_id, name="primary"
         )
         repo_id = repo.id
         await session.commit()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         raw_key = await open_repo_key(session, vault, org_id=org_id, repository_id=repo_id)
         row = (
             await session.execute(
@@ -88,14 +89,14 @@ async def test_repository_created_audit_has_no_key_in_metadata(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
             session, vault, org_id=org_id, actor_id=actor_id, name="primary"
         )
         repo_id = repo.id
         await session.commit()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         raw_key = await open_repo_key(session, vault, org_id=org_id, repository_id=repo_id)
         event = (
             await session.execute(
@@ -122,7 +123,7 @@ async def test_org_b_cannot_open_org_as_repo_key_because_rls_hides_the_row(
     vault = LocalVaultService(tmp_path / "root.key")
     org_a, actor_a = await _org(admin_engine)
     org_b, _ = await _org(admin_engine)
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
             session, vault, org_id=org_a, actor_id=actor_a, name="primary"
         )
@@ -130,7 +131,7 @@ async def test_org_b_cannot_open_org_as_repo_key_because_rls_hides_the_row(
         await session.commit()
 
     with pytest.raises(Exception):  # noqa: B017 - org-scoped select finds no row (RLS+predicate)
-        async with org_session(org_b, engine=app_engine) as session:
+        async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
             await open_repo_key(session, vault, org_id=org_b, repository_id=repo_id)
 
 

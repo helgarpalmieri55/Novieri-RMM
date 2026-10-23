@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
 from app.models import AuditEvent, Organization
@@ -52,7 +53,7 @@ async def test_create_image_accepts_matching_kind(
     admin_engine: AsyncEngine, app_engine: AsyncEngine, os_family: str, kind: str
 ) -> None:
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await create_image(
             session,
             org_id=org_id,
@@ -77,7 +78,7 @@ async def test_create_image_rejects_mismatched_kind(
     admin_engine: AsyncEngine, app_engine: AsyncEngine, os_family: str, kind: str
 ) -> None:
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(ProvisioningValidationError):
             await create_image(
                 session,
@@ -94,7 +95,7 @@ async def test_create_image_rejects_unmapped_os_family(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(ProvisioningValidationError):
             await create_image(
                 session,
@@ -111,7 +112,7 @@ async def test_create_image_audits_without_secrets(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await create_image(
             session,
             org_id=org_id,
@@ -124,7 +125,7 @@ async def test_create_image_audits_without_secrets(
         )
         await session.commit()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         event = (
             await session.execute(
                 select(AuditEvent).where(
@@ -173,7 +174,7 @@ async def test_upsert_profile_seals_credential_fields(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await _make_image(session, org_id, actor_id)
         post_config = _post_config()
         profile = await upsert_profile(
@@ -191,7 +192,7 @@ async def test_upsert_profile_seals_credential_fields(
         await session.commit()
         profile_id = profile.id
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = (
             await session.execute(
                 select(type(profile)).where(
@@ -216,7 +217,7 @@ async def test_upsert_profile_secret_absence_in_audit_and_persisted_json(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await _make_image(session, org_id, actor_id)
         profile = await upsert_profile(
             session,
@@ -233,7 +234,7 @@ async def test_upsert_profile_secret_absence_in_audit_and_persisted_json(
         await session.commit()
         profile_id = profile.id
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         events = (
             await session.execute(
                 select(AuditEvent).where(AuditEvent.org_id == org_id)
@@ -260,7 +261,7 @@ async def test_upsert_profile_seal_roundtrips(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await _make_image(session, org_id, actor_id)
         profile = await upsert_profile(
             session,
@@ -279,7 +280,7 @@ async def test_upsert_profile_seal_roundtrips(
         dj_sealed = profile.post_config["domain_join"]["password"][SEALED_MARKER]
         la_sealed = profile.post_config["local_admin"]["password"][SEALED_MARKER]
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         dj_plain = await vault.open_bytes(
             session, org_id=org_id, key_id=profile_id, sealed=dj_sealed
         )
@@ -295,7 +296,7 @@ async def test_upsert_profile_does_not_mutate_caller_dict(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await _make_image(session, org_id, actor_id)
         original = _post_config()
         original_copy = copy.deepcopy(original)
@@ -323,7 +324,7 @@ async def test_upsert_profile_idempotent_reseal_on_already_sealed_marker(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await _make_image(session, org_id, actor_id)
         profile = await upsert_profile(
             session,
@@ -345,7 +346,7 @@ async def test_upsert_profile_idempotent_reseal_on_already_sealed_marker(
         # marker must be left as-is, not re-sealed.
         reloaded_post_config = copy.deepcopy(profile.post_config)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         updated = await upsert_profile(
             session,
             vault,
@@ -371,7 +372,7 @@ async def test_upsert_profile_rejects_non_string_credential_dict(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await _make_image(session, org_id, actor_id)
         with pytest.raises(ProvisioningValidationError):
             await upsert_profile(
@@ -388,7 +389,7 @@ async def test_upsert_profile_rejects_non_string_credential_dict(
             )
         await session.rollback()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await list_profiles(session, org_id) == []
 
 
@@ -397,7 +398,7 @@ async def test_upsert_profile_rejects_non_string_credential_int(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await _make_image(session, org_id, actor_id)
         with pytest.raises(ProvisioningValidationError):
             await upsert_profile(
@@ -414,7 +415,7 @@ async def test_upsert_profile_rejects_non_string_credential_int(
             )
         await session.rollback()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await list_profiles(session, org_id) == []
 
 
@@ -430,7 +431,7 @@ async def test_upsert_profile_edit_preserves_sealed_credential_when_password_not
     "clear it"."""
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await _make_image(session, org_id, actor_id)
         profile = await upsert_profile(
             session,
@@ -452,7 +453,7 @@ async def test_upsert_profile_edit_preserves_sealed_credential_when_password_not
 
     # Simulate the API+editor round-trip: sealed markers are redacted from
     # ProfileOut, so the PUT body has the containers present but no password.
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         updated = await upsert_profile(
             session,
             vault,
@@ -471,7 +472,7 @@ async def test_upsert_profile_edit_preserves_sealed_credential_when_password_not
         )
         await session.commit()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = (
             await session.execute(
                 select(type(updated)).where(
@@ -486,7 +487,7 @@ async def test_upsert_profile_edit_preserves_sealed_credential_when_password_not
     assert isinstance(la_pw, dict) and list(la_pw.keys()) == [SEALED_MARKER]
     assert row.post_config["domain_join"]["domain"] == "corp2"
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         dj_plain = await vault.open_bytes(
             session, org_id=org_id, key_id=profile_id, sealed=dj_pw[SEALED_MARKER]
         )
@@ -504,7 +505,7 @@ async def test_upsert_profile_edit_can_replace_credential_with_new_password(
     it does not preserve the old sealed credential."""
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await _make_image(session, org_id, actor_id)
         profile = await upsert_profile(
             session,
@@ -524,7 +525,7 @@ async def test_upsert_profile_edit_can_replace_credential_with_new_password(
         await session.commit()
         profile_id = profile.id
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         updated = await upsert_profile(
             session,
             vault,
@@ -544,7 +545,7 @@ async def test_upsert_profile_edit_can_replace_credential_with_new_password(
         await session.commit()
 
     dj_sealed = updated.post_config["domain_join"]["password"][SEALED_MARKER]
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         dj_plain = await vault.open_bytes(
             session, org_id=org_id, key_id=profile_id, sealed=dj_sealed
         )
@@ -559,7 +560,7 @@ async def test_upsert_profile_edit_dropping_container_does_not_resurrect_credent
     resurrected from the old stored config."""
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await _make_image(session, org_id, actor_id)
         profile = await upsert_profile(
             session,
@@ -579,7 +580,7 @@ async def test_upsert_profile_edit_dropping_container_does_not_resurrect_credent
         await session.commit()
         profile_id = profile.id
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         updated = await upsert_profile(
             session,
             vault,
@@ -597,7 +598,7 @@ async def test_upsert_profile_edit_dropping_container_does_not_resurrect_credent
         )
         await session.commit()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = (
             await session.execute(
                 select(type(updated)).where(
@@ -617,7 +618,7 @@ async def test_upsert_profile_update_missing_or_cross_org_raises(
     org_b, actor_b = await _org(admin_engine)
 
     # a random, wholly nonexistent profile_id
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         image = await _make_image(session, org_a, actor_a)
         with pytest.raises(ProvisioningValidationError):
             await upsert_profile(
@@ -636,7 +637,7 @@ async def test_upsert_profile_update_missing_or_cross_org_raises(
         await session.rollback()
 
     # a real profile_id, but belonging to a different org
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         image_a = await _make_image(session, org_a, actor_a)
         profile = await upsert_profile(
             session,
@@ -653,7 +654,7 @@ async def test_upsert_profile_update_missing_or_cross_org_raises(
         await session.commit()
         profile_id = profile.id
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         image_b = await _make_image(session, org_b, actor_b)
         with pytest.raises(ProvisioningValidationError):
             await upsert_profile(
@@ -684,7 +685,7 @@ async def test_another_orgs_image_and_profile_are_hidden_by_rls(
     org_a, actor_a = await _org(admin_engine)
     org_b, _ = await _org(admin_engine)
 
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         image = await _make_image(session, org_a, actor_a)
         profile = await upsert_profile(
             session,
@@ -702,13 +703,13 @@ async def test_another_orgs_image_and_profile_are_hidden_by_rls(
         image_id = image.id
         profile_id = profile.id
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         assert await get_image(session, org_b, image_id) is None
         assert await get_profile(session, org_b, profile_id) is None
         assert await list_images(session, org_b) == []
         assert await list_profiles(session, org_b) == []
 
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         assert await get_image(session, org_a, image_id) is not None
         assert await get_profile(session, org_a, profile_id) is not None
         assert len(await list_images(session, org_a)) == 1

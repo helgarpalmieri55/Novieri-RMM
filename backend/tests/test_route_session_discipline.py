@@ -73,8 +73,9 @@ RAW_SESSIONS_BY_DESIGN: dict[str, str] = {
         "admin_engine, READ-ONLY, one query: the ids of one version's catalogue "
         "rows, which carry no org_id. The removal itself is `_unpublish`."
     ),
-    "api/deps.py::auth_context": (
-        "admin_engine, and it is the ONE pre-tenant step in the request path: "
+    "api/deps.py::admit": (
+        "admin_engine, and it is the ONE pre-tenant step in the request path "
+        "(`auth_context` and the portal principal both admit through it): "
         "the org is looked up BY SLUG from the validated token, so there is no "
         "org_id to pin a tenant session with yet. Read-only, one column, and "
         "the very next statement opens `org_session(org_id)` for everything "

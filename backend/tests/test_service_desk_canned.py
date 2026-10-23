@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, User
 from tests.conftest import ApiEnv
@@ -26,7 +27,7 @@ async def _org(api_env: ApiEnv, slug: str) -> tuple[UUID, dict[str, str], dict[s
 
 
 async def _audit(api_env: ApiEnv, org_id: UUID, action: str) -> list[AuditEvent]:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         return list(
             (
                 await session.execute(select(AuditEvent).where(AuditEvent.action == action))
@@ -188,7 +189,9 @@ async def test_rls_refuses_a_row_written_for_another_org(api_env: ApiEnv) -> Non
         await session.commit()
         user_id = user.id
     with pytest.raises(Exception, match="row-level security"):
-        async with org_session(mine, engine=api_env.app_engine) as session:
+        async with org_session(
+            mine, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             session.add(
                 TicketCannedResponse(org_id=theirs, title="x", body="y", created_by=user_id)
             )

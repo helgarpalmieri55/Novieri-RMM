@@ -8,6 +8,7 @@ from app.models.ai import (
 )
 from app.models.approved_actions import ApprovedAction, ApprovedActionScriptExemption
 from app.models.base import Base
+from app.models.clients import Client, Site
 from app.models.core import (
     Agent,
     AuditEvent,
@@ -241,6 +242,7 @@ __all__ = [
     "ChangeGate",
     "ChangeLink",
     "ChangeRequest",
+    "Client",
     "CostCenter",
     "Credential",
     "PushAuthorization",
@@ -332,6 +334,7 @@ __all__ = [
     "ScriptRun",
     "SeatAssignment",
     "SecurityEvent",
+    "Site",
     "SiteServer",
     "SlaCalendar",
     "SlaCalendarHoliday",

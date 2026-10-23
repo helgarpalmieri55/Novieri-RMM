@@ -50,7 +50,8 @@ from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.identity import domain_refusal
 from app.core.wire_words import say
-from app.models import DeviceGroup, Permission, Role, RolePermission, User, UserRole
+from app.models import Client, Permission, Role, RolePermission, User, UserRole
+from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.user_admin import kc_client
 from app.modules.user_admin.kc_client import (
     ENROLMENT_ACTIONS,
@@ -132,15 +133,15 @@ class RoleAssignmentView:
     """One `user_roles` row.
 
     `assignment_id` is what DELETE addresses, and it has to be the row id rather
-    than the role id: `UniqueConstraint(user_id, role_id, device_group_id)`
-    permits the same role twice for different device groups, so "remove
-    technician" is ambiguous and "remove this assignment" is not.
+    than the role id: `UniqueConstraint(user_id, role_id, client_id)` permits
+    the same role twice for different clients, so "remove technician" is
+    ambiguous and "remove this assignment" is not.
     """
 
     assignment_id: UUID
     role_id: UUID
     role_name: str
-    device_group_id: UUID | None
+    client_id: UUID | None
 
 
 @dataclass(frozen=True)
@@ -156,15 +157,15 @@ class UserView:
 class CodeGrant:
     """One permission code, and how the user came to hold it.
 
-    `via_role` and `device_group_id` are the whole point (spec §1.5): an
+    `via_role` and `client_id` are the whole point (spec §1.5): an
     access-control screen whose result you have to simulate in your head is one
-    you will get wrong, and a view that flattened the group scope would report a
-    grant as org-wide when it applies to one group.
+    you will get wrong, and a view that flattened the client scope would report
+    a grant as every-client when it applies to one (MSP clients spec §2.1).
     """
 
     code: str
     via_role: str
-    device_group_id: UUID | None
+    client_id: UUID | None
 
 
 @dataclass(frozen=True)
@@ -303,34 +304,36 @@ async def _visible_role(session: AsyncSession, org_id: UUID, role_id: UUID) -> R
     return role
 
 
-async def _visible_group(
-    session: AsyncSession, org_id: UUID, group_id: UUID
-) -> DeviceGroup:
-    """A grant scoped to another tenant's device group is either meaningless or
-    a cross-tenant reference. Neither gets written.
+async def _grantable_client(session: AsyncSession, org_id: UUID, client_id: UUID) -> Client:
+    """The client a grant is scoped to (MSP clients spec §2.1-2.2).
 
-    AN ARCHIVED GROUP IS REFUSED TOO, and this is the one consumer-side refusal
-    the device-group archive design builds (spec §7.1). Deploy, patch, backup,
-    remote, health and bcp are deliberately NOT taught about `archived_at`,
-    because the archive is refused while the group holds anything at all -- so
-    an action aimed at an archived group hits an empty set, which is safe. A
-    role grant is the exception: `user_roles.device_group_id` narrows RBAC, and
-    a grant scoped to a group no surface can show is a permission nobody can
-    audit. It is also a WRITE that would newly reference the group, which is
-    precisely what "empty and unreferenced by construction" has to keep true.
+    UNKNOWN AND ANOTHER TENANT'S ARE THE SAME ANSWER, 422 "unknown client":
+    whether a client id exists in another organization is not this one's to
+    learn, and the `org_id` predicate mirrors RLS rather than relying on it.
+
+    THE UNASSIGNED CLIENT IS REFUSED (spec §2.2): it is visible only to an
+    every-client scope, by construction, and a grant on it would hand somebody
+    the tickets of unknown senders without that scope.
+
+    AN ARCHIVED CLIENT IS REFUSED TOO, for the reason an archived device group
+    was when groups were the scope: a grant on a client no selector shows is a
+    permission nobody can audit.
+
+    Device groups no longer scope a grant at all (spec §2.1: "los grupos de
+    equipos dejan de dar permisos") -- they organize devices and policies.
     """
-    group = (
+    client = (
         await session.execute(
-            select(DeviceGroup).where(
-                DeviceGroup.id == group_id, DeviceGroup.org_id == org_id
-            )
+            select(Client).where(Client.id == client_id, Client.org_id == org_id)
         )
     ).scalar_one_or_none()
-    if group is None:
-        raise UserAdminError(404, tr("no such device group"))
-    if group.archived_at is not None:
-        raise UserAdminError(409, tr("that device group is archived"))
-    return group
+    if client is None:
+        raise UserAdminError(422, tr("unknown client"))
+    if client.kind == CLIENT_KIND_UNASSIGNED:
+        raise UserAdminError(422, tr("a role cannot be granted on the unassigned client"))
+    if client.status == "archived":
+        raise UserAdminError(409, tr("that client is archived"))
+    return client
 
 
 async def _active_org_admins(session: AsyncSession, org_id: UUID) -> set[UUID]:
@@ -446,19 +449,19 @@ async def _assignments(
     if not user_ids:
         return {}
     rows = await session.execute(
-        select(UserRole.id, UserRole.user_id, Role.id, Role.name, UserRole.device_group_id)
+        select(UserRole.id, UserRole.user_id, Role.id, Role.name, UserRole.client_id)
         .join(Role, Role.id == UserRole.role_id)
         .where(UserRole.org_id == org_id, UserRole.user_id.in_(user_ids))
         .order_by(Role.name, UserRole.id)
     )
     grouped: dict[UUID, list[RoleAssignmentView]] = {uid: [] for uid in user_ids}
-    for assignment_id, user_id, role_id, role_name, group_id in rows:
+    for assignment_id, user_id, role_id, role_name, client_id in rows:
         grouped[user_id].append(
             RoleAssignmentView(
                 assignment_id=assignment_id,
                 role_id=role_id,
                 role_name=role_name,
-                device_group_id=group_id,
+                client_id=client_id,
             )
         )
     return grouped
@@ -501,13 +504,13 @@ async def effective_permissions(
     `rbac.PERMISSIONS`: that dict is the catalogue of what codes exist, not of
     what this person holds.
 
-    The same code granted twice -- by two roles, or by one role org-wide and
-    another scoped to a group -- appears once per grant, because "you have this
-    because of X" is the question the view answers.
+    The same code granted twice -- by two roles, or by one role for every
+    client and another for one client -- appears once per grant, because "you
+    have this because of X" is the question the view answers.
     """
     await _target(session, org_id, user_id)
     rows = await session.execute(
-        select(Permission.code, Role.name, UserRole.device_group_id)
+        select(Permission.code, Role.name, UserRole.client_id)
         .join(RolePermission, RolePermission.permission_id == Permission.id)
         .join(UserRole, UserRole.role_id == RolePermission.role_id)
         .join(Role, Role.id == UserRole.role_id)
@@ -515,8 +518,8 @@ async def effective_permissions(
         .order_by(Permission.code, Role.name)
     )
     return [
-        CodeGrant(code=code, via_role=role_name, device_group_id=group_id)
-        for code, role_name, group_id in rows
+        CodeGrant(code=code, via_role=role_name, client_id=client_id)
+        for code, role_name, client_id in rows
     ]
 
 
@@ -694,9 +697,10 @@ async def assign_role(
     actor_id: UUID,
     user_id: UUID,
     role_id: UUID,
-    device_group_id: UUID | None,
+    client_id: UUID | None,
 ) -> RoleAssignmentView:
-    """Grant a role, org-wide or scoped to one device group.
+    """Grant a role for every client (`client_id` None) or for one client
+    (MSP clients spec §2.1).
 
     NO KEYCLOAK CALL. Roles are an ITMS concept; Keycloak knows only that the
     identity exists. Which means this route keeps working on a deployment that
@@ -705,12 +709,10 @@ async def assign_role(
     user = await _target(session, org_id, user_id)
     _require_live(user)
     role = await _visible_role(session, org_id, role_id)
-    if device_group_id is not None:
-        await _visible_group(session, org_id, device_group_id)
+    if client_id is not None:
+        await _grantable_client(session, org_id, client_id)
 
-    assignment = UserRole(
-        org_id=org_id, user_id=user.id, role_id=role.id, device_group_id=device_group_id
-    )
+    assignment = UserRole(org_id=org_id, user_id=user.id, role_id=role.id, client_id=client_id)
     session.add(assignment)
     try:
         await session.flush()
@@ -728,14 +730,14 @@ async def assign_role(
         metadata={
             "role_id": str(role.id),
             "role_name": role.name,
-            "device_group_id": str(device_group_id) if device_group_id else None,
+            "client_id": str(client_id) if client_id else None,
         },
     )
     return RoleAssignmentView(
         assignment_id=assignment.id,
         role_id=role.id,
         role_name=role.name,
-        device_group_id=device_group_id,
+        client_id=client_id,
     )
 
 
@@ -812,9 +814,7 @@ async def remove_role(
         metadata={
             "role_id": str(assignment.role_id),
             "role_name": role_name,
-            "device_group_id": (
-                str(assignment.device_group_id) if assignment.device_group_id else None
-            ),
+            "client_id": str(assignment.client_id) if assignment.client_id else None,
         },
     )
 

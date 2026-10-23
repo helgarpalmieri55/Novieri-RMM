@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs import registry
@@ -81,7 +82,7 @@ async def test_every_registered_type_outside_the_list_is_refused_before_signing(
     assert len(refused_types) >= 15, refused_types
     for job_type in refused_types:
         with pytest.raises(DeviceAwaitingReview) as info:
-            async with org_session(org_id, engine=app_engine) as session:
+            async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
                 await engine.create(
                     session, org_id=org_id, type=job_type, target_device_id=device_id, params={}
                 )
@@ -102,7 +103,7 @@ async def test_a_type_registered_later_is_refused_by_default(
     try:
         org_id, device_id = await _device(admin_engine, "pending")
         with pytest.raises(DeviceAwaitingReview):
-            async with org_session(org_id, engine=app_engine) as session:
+            async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
                 await engine.create(
                     session,
                     org_id=org_id,
@@ -118,7 +119,7 @@ async def test_an_allowed_type_is_created_and_signed_for_a_pending_device(
     admin_engine: AsyncEngine, app_engine: AsyncEngine, engine: JobEngine
 ) -> None:
     org_id, device_id = await _device(admin_engine, "pending")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="inventory.collect", target_device_id=device_id, params={}
         )
@@ -134,7 +135,7 @@ async def test_approving_unblocks_and_rejecting_leaves_only_the_uninstall(
             update(Device).where(Device.id == device_id).values(review_state="approved")
         )
         await session.commit()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )
@@ -146,7 +147,7 @@ async def test_approving_unblocks_and_rejecting_leaves_only_the_uninstall(
         )
         await session.commit()
     with pytest.raises(DeviceAwaitingReview):
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await engine.create(
                 session,
                 org_id=org_id,
@@ -214,7 +215,7 @@ async def test_a_running_job_on_a_pending_device_can_still_be_cancelled(
     """`job.cancel` is itself a job born in `JobEngine.create`; refusing it
     would leave an allowed job on a pending machine impossible to stop."""
     org_id, device_id = await _device(admin_engine, "pending")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         running = await engine.create(
             session, org_id=org_id, type="inventory.collect", target_device_id=device_id, params={}
         )

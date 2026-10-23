@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
 from app.models import AuditEvent
@@ -79,7 +80,7 @@ async def test_register_prove_and_list(
     tool = load_recover_tool()
     org = await seed_org(admin_engine, app_engine, LocalVaultService(tmp_path / "k"), "rk")
     private_text, public_text = tool.keygen()
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row, challenge = await register_recovery_key(
             session, org_id=org.org_id, actor_id=org.user_id, public_key_text=public_text,
             now=NOW,
@@ -101,13 +102,13 @@ async def test_a_wrong_answer_is_refused_and_audited(
     org = await seed_org(admin_engine, app_engine, LocalVaultService(tmp_path / "k"), "rkw")
     _other_private, public_text = tool.keygen()
     wrong_private, _ = tool.keygen()
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row, challenge = await register_recovery_key(
             session, org_id=org.org_id, actor_id=org.user_id, public_key_text=public_text,
             now=NOW,
         )
         key_id = row.id
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = (await session.execute(select(type(row)).where(type(row).id == key_id))).scalar_one()
         # The wrong private key cannot even open the challenge.
         with pytest.raises(Exception):  # noqa: B017
@@ -128,7 +129,7 @@ async def test_an_expired_challenge_is_refused(
     tool = load_recover_tool()
     org = await seed_org(admin_engine, app_engine, LocalVaultService(tmp_path / "k"), "rke")
     private_text, public_text = tool.keygen()
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row, challenge = await register_recovery_key(
             session, org_id=org.org_id, actor_id=org.user_id, public_key_text=public_text,
             now=NOW,
@@ -145,7 +146,7 @@ async def test_the_same_key_cannot_be_registered_twice(
     tool = load_recover_tool()
     org = await seed_org(admin_engine, app_engine, LocalVaultService(tmp_path / "k"), "rkd")
     _p, public_text = tool.keygen()
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await register_recovery_key(session, org_id=org.org_id, actor_id=org.user_id,
                                     public_key_text=public_text, now=NOW)
         with pytest.raises(RecoveryKeyError):

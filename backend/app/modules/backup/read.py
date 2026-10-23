@@ -37,6 +37,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.gateway.protocol import (
@@ -363,7 +364,7 @@ async def handle_read_query(
     from app.modules.backup import dedup
 
     store = object_store or dedup.gateway_object_store()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         reply = await answer_read_query(
             session, store, msg, org_id=org_id, device_id=device_id
         )

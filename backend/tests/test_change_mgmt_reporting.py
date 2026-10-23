@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
@@ -115,7 +116,7 @@ async def _seed_patch_run(admin_engine: AsyncEngine, org_id: UUID) -> UUID:
 async def _audit_ids_for_change(
     app_engine: AsyncEngine, org_id: UUID, change_id: UUID
 ) -> set[UUID]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = (
             await s.execute(
                 select(AuditEvent.id).where(
@@ -139,7 +140,7 @@ async def test_change_evidence_returns_change_approvals_links_and_scoped_audit_r
     org_id, requester_id, approver_id = await _org_with_two_users(admin_engine)
     ticket = NullChangeTicketAdapter()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         change = await create_change(
             s,
             org_id=org_id,
@@ -156,19 +157,19 @@ async def test_change_evidence_returns_change_approvals_links_and_scoped_audit_r
         await s.commit()
         change_id = change.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await transition_change(
             s, ticket, org_id=org_id, actor_id=requester_id, change_id=change_id, action="submit"
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await transition_change(
             s, ticket, org_id=org_id, actor_id=approver_id, change_id=change_id, action="begin"
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         approval1 = await decide_change(
             s,
             ticket,
@@ -181,7 +182,7 @@ async def test_change_evidence_returns_change_approvals_links_and_scoped_audit_r
         await s.commit()
         approval1_id = approval1.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         approval2 = await decide_change(
             s,
             ticket,
@@ -197,7 +198,7 @@ async def test_change_evidence_returns_change_approvals_links_and_scoped_audit_r
     deployment_id = await _seed_deployment(admin_engine, org_id)
     patch_run_id = await _seed_patch_run(admin_engine, org_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         link1 = await add_link(
             s,
             org_id=org_id,
@@ -209,7 +210,7 @@ async def test_change_evidence_returns_change_approvals_links_and_scoped_audit_r
         await s.commit()
         link1_id = link1.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         link2 = await add_link(
             s,
             org_id=org_id,
@@ -223,7 +224,7 @@ async def test_change_evidence_returns_change_approvals_links_and_scoped_audit_r
 
     # A second, unrelated change in the same org -- its audit events must
     # never leak into the first change's evidence.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         other_change = await create_change(
             s,
             org_id=org_id,
@@ -240,7 +241,7 @@ async def test_change_evidence_returns_change_approvals_links_and_scoped_audit_r
         await s.commit()
         other_change_id = other_change.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await transition_change(
             s,
             ticket,
@@ -256,7 +257,7 @@ async def test_change_evidence_returns_change_approvals_links_and_scoped_audit_r
     assert expected_audit_ids  # create/submit/begin/approve/approve/link/link
     assert not (expected_audit_ids & other_audit_ids)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         evidence = await change_evidence(s, org_id, change_id)
 
     assert evidence["change"]["id"] == change_id
@@ -296,7 +297,7 @@ async def test_change_evidence_missing_change_returns_minimal_shape(
 ) -> None:
     org_id, _requester_id, _approver_id = await _org_with_two_users(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         evidence = await change_evidence(s, org_id, uuid4())
 
     assert evidence["change"] is None
@@ -316,7 +317,7 @@ async def test_fleet_change_evidence_returns_one_record_per_change(
     org_id, requester_id, _approver_id = await _org_with_two_users(admin_engine)
 
     change_ids = []
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         for i in range(3):
             change = await create_change(
                 s,
@@ -334,7 +335,7 @@ async def test_fleet_change_evidence_returns_one_record_per_change(
             change_ids.append(change.id)
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         fleet = await fleet_change_evidence(s, org_id)
 
     assert len(fleet) == 3
@@ -355,7 +356,7 @@ async def test_change_calendar_conflicts_and_range_filtering(
     async def _make(
         title: str, start: _dt.datetime, end: _dt.datetime, affected: list
     ) -> UUID:
-        async with org_session(org_id, engine=app_engine) as s:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
             change = await create_change(
                 s,
                 org_id=org_id,
@@ -404,7 +405,7 @@ async def test_change_calendar_conflicts_and_range_filtering(
         [{"kind": "device", "id": "dev-1"}],
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         calendar = await change_calendar(
             s,
             org_id,
@@ -425,7 +426,7 @@ async def test_change_calendar_excludes_another_orgs_change_under_rls(
     org_b, requester_b, _ = await _org_with_two_users(admin_engine)
     t0 = _dt.datetime(2026, 9, 1, 10, 0, tzinfo=_dt.UTC)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         change_a = await create_change(
             s,
             org_id=org_a,
@@ -441,7 +442,7 @@ async def test_change_calendar_excludes_another_orgs_change_under_rls(
         )
         await s.commit()
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         change_b = await create_change(
             s,
             org_id=org_b,
@@ -457,7 +458,7 @@ async def test_change_calendar_excludes_another_orgs_change_under_rls(
         )
         await s.commit()
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         calendar_b = await change_calendar(
             s,
             org_b,
@@ -482,7 +483,7 @@ async def test_change_evidence_is_empty_for_another_orgs_change_under_rls(
     org_b, _requester_b, _ = await _org_with_two_users(admin_engine)
     ticket = NullChangeTicketAdapter()
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         change = await create_change(
             s,
             org_id=org_a,
@@ -499,21 +500,21 @@ async def test_change_evidence_is_empty_for_another_orgs_change_under_rls(
         await s.commit()
         change_id = change.id
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         await transition_change(
             s, ticket, org_id=org_a, actor_id=requester_a, change_id=change_id, action="submit"
         )
         await s.commit()
 
     # From org_b's perspective the change simply doesn't exist.
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         evidence = await change_evidence(s, org_b, change_id)
     assert evidence["change"] is None
     assert evidence["approvals"] == []
     assert evidence["links"] == []
     assert evidence["audit_refs"] == []
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         fleet = await fleet_change_evidence(s, org_b)
     assert fleet == []
 

@@ -15,6 +15,7 @@ import boto3
 from blake3 import blake3
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -96,11 +97,11 @@ async def seed_org(
         s.add_all([user, device])
         await s.commit()
         org_id, user_id, device_id = org.id, user.id, device.id
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(session, vault, org_id=org_id, actor_id=user_id,
                                        name="primary")
         repo_id = repo.id
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         key = await open_repo_key(session, vault, org_id=org_id, repository_id=repo_id)
     return OffsiteOrg(org_id, user_id, device_id, repo_id, key, b"")
 
@@ -110,7 +111,7 @@ async def add_proven_key(app_engine: AsyncEngine, org: OffsiteOrg) -> None:
     private_text, public_text = tool.keygen()
     org.private_key = tool.load_private_key(private_text)
     now = datetime.now(UTC)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row, challenge = await register_recovery_key(
             session, org_id=org.org_id, actor_id=org.user_id, public_key_text=public_text, now=now
         )
@@ -123,7 +124,7 @@ async def add_target(
     bucket: str = LOCK_BUCKET, state: str = "ok", retention_gfs: dict[str, int] | None = None,
     attach: bool = True,
 ) -> UUID:
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         target = await create_target(
             session, vault, org_id=org.org_id, actor_id=org.user_id,
             settings={"name": f"t-{uuid4().hex[:6]}", "bucket": bucket, "prefix": "itms",
@@ -170,7 +171,7 @@ async def add_point(
     ref = await store.put_backup_object(org.org_id, org.repository_id,
                                         f"manifests/{uuid4().hex}",
                                         seal_manifest(org.repo_key, manifest))
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         run = BackupRun(org_id=org.org_id, device_id=org.device_id,
                         repository_id=org.repository_id, state="success", actor_type="system")
         session.add(run)

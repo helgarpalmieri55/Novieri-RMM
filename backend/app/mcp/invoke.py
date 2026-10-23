@@ -242,6 +242,12 @@ async def invoke(
     headers = {"Authorization": principal.bearer, "Accept": "application/json"}
     if principal.accept_language:
         headers["Accept-Language"] = principal.accept_language
+    # THE SAME CLIENT NARROWING THE MCP REQUEST CARRIED (MSP clients spec
+    # §2.2). Without it the route would re-admit the person un-narrowed: never
+    # wider than their grants, but wider than the scope this call was listed,
+    # checked and audited under.
+    if principal.requested_client is not None:
+        headers["X-Client-Id"] = str(principal.requested_client)
     body = args["body"] if tool.has_body and "body" in args else None
     marked = _marked(app, McpCall(azp=principal.claims.azp, tool=tool.name), tool)
 

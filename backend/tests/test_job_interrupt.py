@@ -23,6 +23,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.cancel import (
@@ -384,7 +385,7 @@ async def test_a_failed_result_on_a_cancelled_job_is_stored_cancelled_with_the_b
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
 
     body = {"error": "context canceled", "partial_output": "3 of 40 hosts"}
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         await engine.complete(session, job, state="failed", result=body)
 
@@ -416,7 +417,7 @@ async def test_a_succeeded_result_on_a_cancelled_job_is_stored_succeeded(
     )
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         await engine.complete(session, job, state="succeeded", result={"exit_code": 0})
 
@@ -447,7 +448,7 @@ async def test_a_refusal_distinguishes_never_started_from_stopped_mid_flight(
     job_id = await _job(api_env, org_id, device_id, cancel_requested=True)
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         await engine.refuse(session, job, reason=reason)
 
@@ -474,7 +475,7 @@ async def test_a_refusal_on_a_job_nobody_cancelled_is_still_a_refusal(
     job_id = await _job(api_env, org_id, device_id)
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         await engine.refuse(session, job, reason="unknown_type: no capability")
 
@@ -539,7 +540,7 @@ async def test_the_cancel_result_closes_the_target_only_when_nothing_else_will_s
         api_env, org_id, device_id, target_status=JobStatus.running
     )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cancel = (await session.execute(select(Job).where(Job.id == cancel_id))).scalar_one()
         await handle_cancel_result(
             session, cancel, {"target_job_id": str(target), "outcome": outcome}
@@ -575,7 +576,7 @@ async def test_a_late_cancel_result_does_not_downgrade_better_evidence(api_env: 
         row.cancel_outcome = "dropped"
         await session.commit()
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cancel = (await session.execute(select(Job).where(Job.id == cancel_id))).scalar_one()
         await handle_cancel_result(
             session, cancel, {"target_job_id": str(target), "outcome": "unknown"}
@@ -599,7 +600,7 @@ async def test_the_target_comes_from_the_signed_params_and_never_the_result(
     )
     victim = await _job(api_env, org_id, device_id, status=JobStatus.running)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cancel = (await session.execute(select(Job).where(Job.id == cancel_id))).scalar_one()
         await handle_cancel_result(
             session,
@@ -640,7 +641,7 @@ async def test_a_cancel_result_cannot_reach_another_device(api_env: Any) -> None
         await session.commit()
         cancel_id = cancel.id
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         row = (await session.execute(select(Job).where(Job.id == cancel_id))).scalar_one()
         await handle_cancel_result(
             session, row, {"target_job_id": str(victim), "outcome": "dropped_before_start"}
@@ -723,7 +724,7 @@ async def test_an_old_agent_refusing_unknown_type_marks_the_target_unsupported(
     )
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cancel = (await session.execute(select(Job).where(Job.id == cancel_id))).scalar_one()
         await engine.refuse(
             session, cancel, reason="unknown_type: no capability is registered for this job type"
@@ -762,7 +763,7 @@ async def test_any_other_refusal_leaves_the_request_standing(
     )
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cancel = (await session.execute(select(Job).where(Job.id == cancel_id))).scalar_one()
         await engine.refuse(session, cancel, reason="queue_full: too many queued jobs")
 
@@ -798,7 +799,7 @@ async def test_handle_cancel_refusal_ignores_a_cancel_with_no_reachable_target(
         await session.commit()
         cancel_id = cancel.id
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         row = (await session.execute(select(Job).where(Job.id == cancel_id))).scalar_one()
         await handle_cancel_refusal(session, row, reason="unknown_type: nope")
 
@@ -823,7 +824,7 @@ async def test_a_cancelled_job_that_expires_in_silence_is_expired_not_cancelled(
         await session.commit()
 
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await engine.expire_due(session) == 1
 
     assert (await _row(api_env, job_id)).status is JobStatus.expired

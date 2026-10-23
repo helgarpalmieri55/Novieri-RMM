@@ -32,6 +32,7 @@ import pytest
 from sqlalchemy import text as sqltext
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import HealthFlapState
 from app.modules.health.flap import AlertKey, FlapDecision, note_open
@@ -56,7 +57,9 @@ async def _fixture(env, tag: str, **settings: int) -> _Key:
 
 
 async def _open(api_env, fx: _Key, *, now: datetime) -> FlapDecision:
-    async with org_session(fx.org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        fx.org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         return await note_open(session, fx.org.org_id, fx.key, now=now)
 
 
@@ -210,7 +213,9 @@ async def test_two_selectors_on_one_check_are_two_windows(api_env) -> None:
     fx = await _fixture(api_env, "flap-sel")
     key_c = AlertKey(device_id=fx.key.device_id, check_id=fx.key.check_id, selector="C:")
     key_d = AlertKey(device_id=fx.key.device_id, check_id=fx.key.check_id, selector="D:")
-    async with org_session(fx.org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        fx.org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         for i in range(5):
             await note_open(session, fx.org.org_id, key_c, now=T0 + timedelta(seconds=i))
         on_d = await note_open(session, fx.org.org_id, key_d, now=T0 + timedelta(seconds=5))

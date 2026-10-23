@@ -33,6 +33,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Permission, Role, RolePermission, User, UserRole
 from app.modules.budget.budgets import (
@@ -146,7 +147,7 @@ async def _create_expense(
 
 
 async def _audit_count(api_env: ApiEnv, org_id: UUID, action: str) -> int:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (
             await session.execute(select(AuditEvent).where(AuditEvent.action == action))
         ).scalars().all()
@@ -580,7 +581,7 @@ async def test_read_only_user_seeding_categories_is_not_attributed_to_them(
     assert first.status_code == 200, first.text
     assert len(first.json()) == len(DEFAULT_CATEGORIES) == 7
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         created = (
             await session.execute(
                 select(AuditEvent).where(
@@ -605,7 +606,7 @@ async def test_read_only_user_seeding_categories_is_not_attributed_to_them(
 
     second = await api_env.client.get(f"{API}/categories", headers=reader_headers)
     assert second.status_code == 200, second.text
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         seeded_after = (
             await session.execute(
                 select(AuditEvent).where(

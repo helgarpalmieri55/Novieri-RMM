@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
@@ -115,7 +116,7 @@ async def test_approved_status_with_valid_approval_and_open_window_dispatches_on
 ) -> None:
     org_id, device_id, patch_id = await _setup(admin_engine, maintenance_window=None)
     now = _dt.datetime(2026, 7, 19, 3, 0)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         session.add(
             DevicePatchStatus(
                 org_id=org_id, device_id=device_id, patch_id=patch_id, state="approved"
@@ -171,7 +172,7 @@ async def test_missing_status_with_ring_approval_is_dispatched(
     it must NOT be skipped just because the status snapshot lags."""
     org_id, device_id, patch_id = await _setup(admin_engine, maintenance_window=None)
     now = _dt.datetime(2026, 7, 19, 3, 0)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         session.add(
             DevicePatchStatus(
                 org_id=org_id, device_id=device_id, patch_id=patch_id, state="missing"
@@ -193,7 +194,7 @@ async def test_closed_window_dispatches_nothing(
         admin_engine, maintenance_window="0 2 * * *"
     )
     now = _dt.datetime(2026, 7, 19, 10, 0)  # outside the 02:00 window
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         session.add(
             DevicePatchStatus(
                 org_id=org_id, device_id=device_id, patch_id=patch_id, state="approved"
@@ -219,7 +220,7 @@ async def test_revoked_approval_is_not_dispatched(
     dispatch even though the status row still reads 'approved'."""
     org_id, device_id, patch_id = await _setup(admin_engine, maintenance_window=None)
     now = _dt.datetime(2026, 7, 19, 3, 0)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         session.add(
             DevicePatchStatus(
                 org_id=org_id, device_id=device_id, patch_id=patch_id, state="approved"
@@ -244,7 +245,7 @@ async def test_installed_status_is_never_dispatched(
 ) -> None:
     org_id, device_id, patch_id = await _setup(admin_engine, maintenance_window=None)
     now = _dt.datetime(2026, 7, 19, 3, 0)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         session.add(
             DevicePatchStatus(
                 org_id=org_id, device_id=device_id, patch_id=patch_id, state="installed"
@@ -268,7 +269,7 @@ async def test_multiple_eligible_patches_batched_into_one_job(
     batching described in the module docstring."""
     org_id, device_id, patch_id = await _setup(admin_engine, maintenance_window=None)
     now = _dt.datetime(2026, 7, 19, 3, 0)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         patch2 = Patch(
             org_id=org_id,
             os_family="windows",

@@ -29,6 +29,7 @@ from moto import mock_aws
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings, override_settings
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -113,7 +114,7 @@ async def _make_windowed_device(
         await session.commit()
         device_id, group_id, user_id = device.id, group.id, user.id
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
             session, vault, org_id=org_id, actor_id=user_id, name="primary"
         )
@@ -242,7 +243,7 @@ async def test_closed_window_device_dispatches_nothing(
             total = await worker.backup_window_sweep_all_orgs(now)
 
     assert total == 0  # our device's window is closed -> nothing dispatched
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         runs = (
             await session.execute(select(BackupRun).where(BackupRun.org_id == org_id))
         ).scalars().all()
@@ -366,7 +367,7 @@ async def test_retention_gc_is_per_device_and_collects_orphan_chunks(
     with mock_aws():
         object_store = ObjectStore(_settings(pg_cluster, tmp_path))
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             repo = await create_repository(
                 session, vault, org_id=org_id, actor_id=user_id, name="primary"
             )
@@ -446,7 +447,7 @@ async def test_retention_gc_is_per_device_and_collects_orphan_chunks(
         assert pruned_total == 2
 
         # Per-device pruning: only A's 2 oldest are pruned; A keeps 3; B keeps 2.
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             states = {
                 pid: (
                     await session.execute(
@@ -500,7 +501,7 @@ async def test_verification_sweep_verifies_never_verified_points(
 
     with mock_aws():
         object_store = ObjectStore(_settings(pg_cluster, tmp_path))
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             repo = await create_repository(
                 session, vault, org_id=org_id, actor_id=user_id, name="primary"
             )
@@ -538,7 +539,7 @@ async def test_verification_sweep_verifies_never_verified_points(
     # skipped, contributing nothing -- so exactly our one point is counted.
     assert verified == 1
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         fp = (
             await session.execute(select(BackupPoint).where(BackupPoint.id == fresh_point))
         ).scalar_one()

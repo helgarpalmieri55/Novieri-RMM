@@ -150,7 +150,9 @@ async def me(request: Request, ctx: AuthContext = Depends(bound_auth_context)) -
     (`app/api/deps.py`, §7.2) -- before that fix the row was the stale source
     and this would have been the bug rather than the fix.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         user = await _load(session, ctx.user_id)
         codes = await user_permission_codes(session, ctx.user_id)
         return _response(user, codes, await user_role_names(session, ctx.user_id))
@@ -169,7 +171,9 @@ async def update_me(
     if "display_name" in supplied and body.display_name is None:
         raise _reject(tr("display_name cannot be null; send \"\" to clear it"))
 
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         user = await _load(session, ctx.user_id)
         previous_locale = user.locale
         # WRITTEN OUT, not `setattr(user, field, ...)` over `supplied`. The
@@ -226,7 +230,9 @@ async def update_me(
         # has moved on, write that instead. Whichever request finishes last
         # reads the latest committed value, so Keycloak ends on it.
         if response.identity_locale_synced:
-            async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+            async with org_session(
+                ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+            ) as session:
                 current = (await _load(session, ctx.user_id)).locale
             if current != body.locale:
                 response.identity_locale_synced = await _mirror_locale(

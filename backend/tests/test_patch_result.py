@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.jobs.registry import get_job_type
 from app.models import (
@@ -89,7 +90,7 @@ async def test_installed_outcome_marks_status_installed_and_finishes_run(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id, patch_id, job_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         result = PatchApplyResult(
             results=[
@@ -137,7 +138,7 @@ async def test_failed_outcome_marks_status_failed_with_error(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id, patch_id, job_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         result = PatchApplyResult(
             results=[
@@ -188,7 +189,7 @@ async def test_outcome_for_patch_not_in_catalog_is_skipped_gracefully(
     must not blow up ingestion — it's skipped, but the run still finishes and
     the audit still records the outcome counts."""
     org_id, device_id, patch_id, job_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         result = PatchApplyResult(
             results=[
@@ -221,7 +222,7 @@ async def test_outcome_with_no_status_row_is_skipped_gracefully(
     dispatched to it) must not blow up ingestion — it's skipped, but the run
     still finishes and no spurious status row is created."""
     org_id, device_id, patch_id, job_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         other_patch = Patch(
             org_id=org_id,
             os_family="windows",

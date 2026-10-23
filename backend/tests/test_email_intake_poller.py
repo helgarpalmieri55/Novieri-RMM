@@ -37,6 +37,7 @@ from moto import mock_aws
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings, override_settings
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -196,7 +197,9 @@ class PollEnv:
     # -- state -------------------------------------------------------------
 
     async def ticket_count(self) -> int:
-        async with org_session(self.org_id, engine=self.engine) as session:
+        async with org_session(
+            self.org_id, engine=self.engine, clients=ClientScope.all()
+        ) as session:
             return (
                 await session.execute(
                     select(func.count()).select_from(Ticket).where(Ticket.org_id == self.org_id)
@@ -204,7 +207,9 @@ class PollEnv:
             ).scalar_one()
 
     async def inbound_count(self) -> int:
-        async with org_session(self.org_id, engine=self.engine) as session:
+        async with org_session(
+            self.org_id, engine=self.engine, clients=ClientScope.all()
+        ) as session:
             return (
                 await session.execute(
                     select(func.count())
@@ -249,7 +254,9 @@ class PollEnv:
             await session.commit()
 
     async def add_mailbox(self, address: str) -> UUID:
-        async with org_session(self.org_id, engine=self.engine) as session:
+        async with org_session(
+            self.org_id, engine=self.engine, clients=ClientScope.all()
+        ) as session:
             mailbox = EmailMailbox(
                 org_id=self.org_id,
                 address=address,
@@ -276,7 +283,9 @@ async def poll_env(api_env: Any) -> Any:
         category_id = await _seed_category(api_env, org_id)
         actor_id = await _seed_user(api_env, org_id, "alice@acme.test")
 
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             mailbox = EmailMailbox(
                 org_id=org_id,
                 address="helpdesk@acme.test",
@@ -610,7 +619,9 @@ async def test_a_locked_mailbox_row_is_skipped_rather_than_waited_on(poll_env) -
     immediately, anything else BLOCKS until the lock is released, which the
     timeout turns into a failure rather than a hang.
     """
-    async with org_session(poll_env.org_id, engine=poll_env.engine) as blocker:
+    async with org_session(
+        poll_env.org_id, engine=poll_env.engine, clients=ClientScope.all()
+    ) as blocker:
         await blocker.execute(
             select(EmailMailbox)
             .where(
@@ -726,7 +737,9 @@ async def test_the_credential_checkout_is_audited_and_outside_the_claim(poll_env
         "the claim must be committed before the vault round trip starts"
     )
 
-    async with org_session(poll_env.org_id, engine=poll_env.engine) as session:
+    async with org_session(
+        poll_env.org_id, engine=poll_env.engine, clients=ClientScope.all()
+    ) as session:
         events = list(
             (
                 await session.execute(
@@ -826,6 +839,7 @@ async def test_the_connection_test_succeeds_without_reading_any_mail(poll_env) -
         actor_id=poll_env.actor_id,
         engine=poll_env.engine,
         vault=poll_env.vault,
+        clients=ClientScope.all(),
         client_factory=factory,
     )
 
@@ -860,10 +874,13 @@ async def test_the_connection_test_audits_the_operator_who_ran_it(poll_env) -> N
         actor_id=poll_env.actor_id,
         engine=poll_env.engine,
         vault=poll_env.vault,
+        clients=ClientScope.all(),
         client_factory=lambda **_: RecordingImapClient(),
     )
 
-    async with org_session(poll_env.org_id, engine=poll_env.engine) as session:
+    async with org_session(
+        poll_env.org_id, engine=poll_env.engine, clients=ClientScope.all()
+    ) as session:
         events = {
             event.action: event
             for event in (

@@ -384,7 +384,9 @@ async def list_packages(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.read")),
 ) -> list[PackageOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = (
             (
                 await session.execute(
@@ -403,7 +405,9 @@ async def create_package_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.package.manage")),
 ) -> PackageOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             package = await create_package(
                 session,
@@ -455,7 +459,9 @@ async def upload_package_artifact(
     # plane with one request.
     reject_oversized_content_length(request, _MAX_ARTIFACT_BYTES)
     data = await read_bounded_body(request, _MAX_ARTIFACT_BYTES)
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             package = await store_artifact(
                 session,
@@ -477,7 +483,9 @@ async def delete_package_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.package.manage")),
 ) -> None:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         deleted = await delete_package(
             session, org_id=ctx.org_id, actor_id=ctx.user_id, package_id=package_id
         )
@@ -495,7 +503,9 @@ async def list_deployments(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.read")),
 ) -> list[DeploymentOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = (
             (
                 await session.execute(
@@ -518,7 +528,9 @@ async def create_deployment(
 ) -> DeploymentOut:
     refusal: str | None = None
     out: DeploymentOut | None = None
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         package = (
             await session.execute(
                 select(Package).where(
@@ -632,7 +644,7 @@ async def execute_deployment(
     state = request.app.state
     refusal: str | None = None
     pending: list[tuple[UUID, UUID, dict[str, Any]]] = []
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         deployment = (
             await session.execute(
                 select(Deployment).where(
@@ -677,7 +689,9 @@ async def get_deployment(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.read")),
 ) -> DeploymentDetailOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         report = await deployment_report(session, ctx.org_id, deployment_id)
         if report["state"] is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such deployment"))
@@ -694,7 +708,9 @@ async def list_scripts(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.read")),
 ) -> list[ScriptListItemOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = (
             (
                 await session.execute(
@@ -713,7 +729,9 @@ async def create_script(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.script.manage")),
 ) -> ScriptOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             script = await author_script(
                 session,
@@ -736,7 +754,9 @@ async def update_script(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.script.manage")),
 ) -> ScriptOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             script = await edit_script(
                 session,
@@ -756,7 +776,9 @@ async def get_script(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.read")),
 ) -> ScriptOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         script = (
             await session.execute(
                 select(Script).where(Script.org_id == ctx.org_id, Script.id == script_id)
@@ -775,7 +797,7 @@ async def run_script_route(
     ctx: AuthContext = Depends(require_permission("deploy.script.run")),
 ) -> ScriptRunResponse:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         pending = await run_script(
             session,
             state.job_engine,
@@ -816,7 +838,9 @@ async def list_script_policies(
     ctx: AuthContext = Depends(require_permission("deploy.read")),
 ) -> list[ScriptPolicyOut]:
     """Every scheduled script in this organization."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         return [ScriptPolicyOut(**row) for row in await policy_summaries(session, ctx.org_id)]
 
 
@@ -828,7 +852,9 @@ async def create_script_policy(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.script.schedule")),
 ) -> ScriptPolicyOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             row = await create_policy(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, **body.model_dump()
@@ -845,7 +871,9 @@ async def update_script_policy(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.script.schedule")),
 ) -> ScriptPolicyOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await update_policy(
                 session,
@@ -865,7 +893,9 @@ async def delete_script_policy(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.script.schedule")),
 ) -> None:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await delete_policy(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, policy_id=policy_id
@@ -882,7 +912,9 @@ async def list_script_policy_runs(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> list[ScriptPolicyRunOut]:
     """The schedule's latest runs, newest first, with their output."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await get_policy(session, ctx.org_id, policy_id)
         except DeployValidationError as exc:
@@ -901,7 +933,9 @@ async def report(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.read")),
 ) -> FleetDeployReportOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         data = await fleet_deploy_report(session, ctx.org_id)
         return FleetDeployReportOut(**data)
 
@@ -914,7 +948,9 @@ async def device_deployment_history(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.read")),
 ) -> list[DeviceDeploymentHistoryOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         device = (
             await session.execute(
                 select(Device.id).where(Device.org_id == ctx.org_id, Device.id == device_id)

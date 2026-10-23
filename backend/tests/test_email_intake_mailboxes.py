@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.core.vault import get_vault
 from app.models import AuditEvent, Credential
@@ -63,13 +64,13 @@ async def test_create_stores_the_password_in_the_vault_and_never_on_the_row(api_
     category_id = await _seed_category(api_env, org_id)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         mailbox = await create_mailbox(
             session, org_id, actor_id, _payload(category_id), vault=vault
         )
         mailbox_id = mailbox.id
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         row = await get_mailbox(session, org_id, mailbox_id)
         # Invariant #3: the plaintext appears in NO column of this row.
         assert SECRET not in " ".join(
@@ -88,18 +89,18 @@ async def test_rotating_the_password_reuses_the_same_credential_row(api_env) -> 
     category_id = await _seed_category(api_env, org_id)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         mailbox = await create_mailbox(
             session, org_id, actor_id, _payload(category_id), vault=vault
         )
         mailbox_id, credential_id = mailbox.id, mailbox.credential_id
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await update_mailbox(
             session, org_id, actor_id, mailbox_id, MailboxUpdate(password="new-secret"), vault=vault
         )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         row = await get_mailbox(session, org_id, mailbox_id)
         assert row.credential_id == credential_id
         secret = await vault.checkout(session, org_id=org_id, credential_id=credential_id)
@@ -112,7 +113,7 @@ async def test_no_audit_metadata_contains_the_password(api_env) -> None:
     category_id = await _seed_category(api_env, org_id)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         mailbox = await create_mailbox(
             session, org_id, actor_id, _payload(category_id), vault=vault
         )
@@ -146,11 +147,13 @@ async def test_a_duplicate_address_is_a_typed_error_not_an_integrity_error(api_e
     category_id = await _seed_category(api_env, org_id)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_mailbox(session, org_id, actor_id, _payload(category_id), vault=vault)
 
     with pytest.raises(MailboxValidationError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await create_mailbox(session, org_id, actor_id, _payload(category_id), vault=vault)
 
 
@@ -179,14 +182,16 @@ async def test_concurrent_creates_of_the_same_address_yield_one_row(api_env) -> 
     # Pre-warm the org DEK (see docstring). `store` writes only
     # `org_vault_keys`; the credential id is AAD, so no `Credential` row is
     # created and this leaves nothing else behind for the racers to see.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await vault.store(session, org_id=org_id, credential_id=uuid4(), plaintext="warm-the-dek")
 
     barrier = asyncio.Barrier(2)
 
     async def attempt() -> bool:
         try:
-            async with org_session(org_id, engine=api_env.app_engine) as session:
+            async with org_session(
+                org_id, engine=api_env.app_engine, clients=ClientScope.all()
+            ) as session:
                 # Take the connection and open the transaction BEFORE the
                 # rendezvous so neither attempt pays connection latency after
                 # the barrier releases. `wait_for` so a failure on one side
@@ -203,7 +208,7 @@ async def test_concurrent_creates_of_the_same_address_yield_one_row(api_env) -> 
     # Exactly one winner and one loser -- not two winners, not two losers.
     assert sorted(results) == [False, True], results
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (await session.execute(select(EmailMailbox))).scalars().all()
     assert len(rows) == 1
 
@@ -223,10 +228,10 @@ async def test_losing_a_create_race_leaves_no_orphan_credential(api_env) -> None
     category_id = await _seed_category(api_env, org_id)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_mailbox(session, org_id, actor_id, _payload(category_id), vault=vault)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(MailboxValidationError):
             await create_mailbox(session, org_id, actor_id, _payload(category_id), vault=vault)
 
@@ -242,7 +247,7 @@ async def test_updating_to_an_address_already_used_in_the_org_is_a_typed_error(a
     category_id = await _seed_category(api_env, org_id)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_mailbox(
             session, org_id, actor_id, _payload(category_id, address="a@acme.test"), vault=vault
         )
@@ -252,7 +257,9 @@ async def test_updating_to_an_address_already_used_in_the_org_is_a_typed_error(a
         second_id = second.id
 
     with pytest.raises(MailboxValidationError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await update_mailbox(
                 session,
                 org_id,
@@ -263,7 +270,7 @@ async def test_updating_to_an_address_already_used_in_the_org_is_a_typed_error(a
             )
 
     # The rejected rename applied nothing.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await get_mailbox(session, org_id, second_id)).address == "b@acme.test"
 
 
@@ -278,7 +285,9 @@ async def test_a_category_from_another_org_is_rejected(api_env) -> None:
     vault = get_vault(api_env.settings)
 
     with pytest.raises(MailboxValidationError, match="default_category_id"):
-        async with org_session(org_a, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_a, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await create_mailbox(
                 session, org_a, actor_id, _payload(foreign_category), vault=vault
             )
@@ -293,17 +302,17 @@ async def test_list_mailboxes_returns_only_this_orgs_rows_ordered(api_env) -> No
     category_b = await _seed_category(api_env, org_b)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         for address in ("zulu@a.test", "alpha@a.test", "mike@a.test"):
             await create_mailbox(
                 session, org_a, actor_a, _payload(category_a, address=address), vault=vault
             )
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_mailbox(
             session, org_b, actor_b, _payload(category_b, address="alpha@b.test"), vault=vault
         )
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = await list_mailboxes(session, org_a)
     assert [r.address for r in rows] == ["alpha@a.test", "mike@a.test", "zulu@a.test"]
 
@@ -323,12 +332,14 @@ async def test_get_mailbox_from_another_org_is_not_found(api_env) -> None:
     category_id = await _seed_category(api_env, org_a)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         mailbox = await create_mailbox(session, org_a, actor_id, _payload(category_id), vault=vault)
         mailbox_id = mailbox.id
 
     with pytest.raises(MailboxNotFoundError):
-        async with org_session(org_b, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_b, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await get_mailbox(session, org_b, mailbox_id)
 
 
@@ -345,7 +356,7 @@ async def test_get_mailbox_rejects_another_orgs_row_without_relying_on_rls(api_e
     category_id = await _seed_category(api_env, org_a)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         mailbox = await create_mailbox(session, org_a, actor_id, _payload(category_id), vault=vault)
         mailbox_id = mailbox.id
 
@@ -365,22 +376,26 @@ async def test_update_and_delete_from_another_org_are_not_found(api_env) -> None
     category_id = await _seed_category(api_env, org_a)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         mailbox = await create_mailbox(session, org_a, actor_a, _payload(category_id), vault=vault)
         mailbox_id = mailbox.id
 
     with pytest.raises(MailboxNotFoundError):
-        async with org_session(org_b, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_b, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await update_mailbox(
                 session, org_b, actor_b, mailbox_id, MailboxUpdate(active=False), vault=vault
             )
 
     with pytest.raises(MailboxNotFoundError):
-        async with org_session(org_b, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_b, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await delete_mailbox(session, org_b, actor_b, mailbox_id, vault=vault)
 
     # Neither foreign call touched org_a's row.
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await get_mailbox(session, org_a, mailbox_id)).active is True
 
 
@@ -390,16 +405,16 @@ async def test_delete_removes_the_mailbox_and_audits(api_env) -> None:
     category_id = await _seed_category(api_env, org_id)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         mailbox = await create_mailbox(
             session, org_id, actor_id, _payload(category_id), vault=vault
         )
         mailbox_id = mailbox.id
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await delete_mailbox(session, org_id, actor_id, mailbox_id, vault=vault)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await session.execute(select(EmailMailbox))).scalars().all() == []
 
     # Invariant #4 for the delete path, asserted on the action and the target
@@ -420,14 +435,14 @@ async def test_delete_removes_the_mailboxs_credential_too(api_env) -> None:
     category_id = await _seed_category(api_env, org_id)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         mailbox = await create_mailbox(
             session, org_id, actor_id, _payload(category_id), vault=vault
         )
         mailbox_id = mailbox.id
     assert len(await _credentials(api_env, org_id)) == 1
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await delete_mailbox(session, org_id, actor_id, mailbox_id, vault=vault)
 
     assert await _credentials(api_env, org_id) == []
@@ -442,13 +457,13 @@ async def test_delete_refuses_when_the_mailbox_has_processed_messages(api_env) -
     category_id = await _seed_category(api_env, org_id)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         mailbox = await create_mailbox(
             session, org_id, actor_id, _payload(category_id), vault=vault
         )
         mailbox_id = mailbox.id
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         session.add(
             InboundMessage(
                 org_id=org_id,
@@ -461,12 +476,14 @@ async def test_delete_refuses_when_the_mailbox_has_processed_messages(api_env) -
         )
 
     with pytest.raises(MailboxValidationError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await delete_mailbox(session, org_id, actor_id, mailbox_id, vault=vault)
 
     # The mailbox and its message both still exist -- the delete refused
     # rather than partially applying.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await session.execute(select(EmailMailbox))).scalars().all() != []
         assert (await session.execute(select(InboundMessage))).scalars().all() != []
     # ...and so does the credential it would have dropped.

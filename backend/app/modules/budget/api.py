@@ -381,7 +381,9 @@ async def forecast_route(
     months: int = Query(default=12, ge=1, le=60),
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> dict[str, Any]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             return await forecast(session, ctx.org_id, ctx.user_id, months=months)
         except BudgetValidationError as exc:
@@ -398,7 +400,9 @@ async def get_settings_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> SettingsOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         settings = await get_settings(session, ctx.org_id)
         return _settings_out(settings)
 
@@ -409,7 +413,9 @@ async def update_settings_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.manage")),
 ) -> SettingsOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             if body.base_currency is not None:
                 await set_base_currency(
@@ -440,7 +446,9 @@ async def list_categories_route(
     include_inactive: bool = Query(default=False),
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> list[CategoryOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_categories(
             session, ctx.org_id, ctx.user_id, include_inactive=include_inactive
         )
@@ -455,7 +463,9 @@ async def create_category_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.manage")),
 ) -> CategoryOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             cat = await create_category(
                 session, ctx.org_id, ctx.user_id, key=body.key, name=body.name
@@ -482,7 +492,9 @@ async def update_category_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.manage")),
 ) -> CategoryOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             cat = await update_category(
                 session,
@@ -507,7 +519,9 @@ async def list_cost_centers_route(
     include_inactive: bool = Query(default=False),
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> list[CostCenterOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_cost_centers(session, ctx.org_id, include_inactive=include_inactive)
         return [_cost_center_out(r) for r in rows]
 
@@ -520,7 +534,9 @@ async def create_cost_center_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.manage")),
 ) -> CostCenterOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             cc = await create_cost_center(
                 session,
@@ -542,7 +558,9 @@ async def update_cost_center_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.manage")),
 ) -> CostCenterOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             cc = await update_cost_center(
                 session,
@@ -567,7 +585,9 @@ async def list_fx_rates_route(
     from_currency: str | None = Query(default=None, min_length=3, max_length=3),
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> list[FxRateOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_rates(session, ctx.org_id, from_currency=from_currency)
         return [_fx_rate_out(r) for r in rows]
 
@@ -580,7 +600,9 @@ async def create_fx_rate_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.manage")),
 ) -> FxRateOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             fx = await create_rate(
                 session,
@@ -602,7 +624,9 @@ async def update_fx_rate_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.manage")),
 ) -> FxRateOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             fx = await update_rate(
                 session, ctx.org_id, ctx.user_id, fx_rate_id, body.model_dump(exclude_unset=True)
@@ -623,7 +647,9 @@ async def list_budgets_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> list[BudgetOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_budgets(session, ctx.org_id)
         return [_budget_out(r) for r in rows]
 
@@ -634,7 +660,9 @@ async def create_budget_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.manage")),
 ) -> BudgetOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             budget = await create_budget(
                 session,
@@ -655,7 +683,9 @@ async def get_budget_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> BudgetOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             budget = await get_budget(session, ctx.org_id, budget_id)
         except BudgetValidationError as exc:
@@ -670,7 +700,9 @@ async def update_budget_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.manage")),
 ) -> BudgetOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             budget = await update_budget(
                 session, ctx.org_id, ctx.user_id, budget_id, body.model_dump(exclude_unset=True)
@@ -686,7 +718,9 @@ async def close_budget_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.manage")),
 ) -> BudgetOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             budget = await close_budget(session, ctx.org_id, ctx.user_id, budget_id)
         except BudgetValidationError as exc:
@@ -706,7 +740,9 @@ async def list_lines_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> list[BudgetLineOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await get_budget(session, ctx.org_id, budget_id)  # 404 if cross-org/missing
         except BudgetValidationError as exc:
@@ -732,7 +768,9 @@ async def put_lines_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.manage")),
 ) -> list[BudgetLineOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             lines = await put_lines(session, ctx.org_id, ctx.user_id, budget_id, body.lines)
         except BudgetValidationError as exc:
@@ -749,7 +787,9 @@ async def delete_line_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.manage")),
 ) -> None:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await delete_line(session, ctx.org_id, ctx.user_id, budget_id, line_id)
         except BudgetValidationError as exc:
@@ -767,7 +807,9 @@ async def variance_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> dict[str, Any]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             return await variance(session, ctx.org_id, budget_id, ctx.user_id)
         except BudgetValidationError as exc:
@@ -781,7 +823,9 @@ async def position_route(
     as_of: date | None = Query(default=None),
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> dict[str, Any]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             return await position(session, ctx.org_id, budget_id, as_of=as_of or date.today())
         except BudgetValidationError as exc:
@@ -802,7 +846,9 @@ async def export_expenses_route(
     date_to: date | None = Query(default=None),
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> PlainTextResponse:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await export_rows(session, ctx.org_id, date_from=date_from, date_to=date_to)
 
         # An explicit, audited export (invariant #4) -- one of this module's
@@ -836,7 +882,9 @@ async def export_expenses_odoo_route(
     include_unconfirmed: bool = Query(default=False),
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> PlainTextResponse:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await odoo_export_rows(
             session,
             ctx.org_id,
@@ -865,7 +913,9 @@ async def materialize_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("expense.record")),
 ) -> dict[str, int]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             return await materialize(
                 session, ctx.org_id, ctx.user_id, from_date=body.from_date, to_date=body.to_date
@@ -892,7 +942,9 @@ async def list_expenses_route(
     date_to: date | None = Query(default=None),
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> list[ExpenseOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_expenses(
             session,
             ctx.org_id,
@@ -915,7 +967,9 @@ async def create_expense_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("expense.record")),
 ) -> ExpenseOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             expense = await create_expense(session, ctx.org_id, ctx.user_id, body)
         except BudgetValidationError as exc:
@@ -929,7 +983,9 @@ async def get_expense_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> ExpenseOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             expense = await get_expense(session, ctx.org_id, expense_id)
         except BudgetValidationError as exc:
@@ -949,7 +1005,9 @@ async def update_expense_route(
     # omitted" and "field explicitly set to null" are indistinguishable.
     # `update_expense` relies on key PRESENCE to decide what to touch, and
     # rejects an explicit `null` on a non-nullable column with a typed 400.
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             expense = await update_expense(
                 session,
@@ -970,7 +1028,9 @@ async def confirm_expense_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("expense.confirm")),
 ) -> ExpenseOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             expense = await confirm_expense(
                 session, ctx.org_id, ctx.user_id, expense_id, amount=body.amount
@@ -986,7 +1046,9 @@ async def void_expense_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("expense.confirm")),
 ) -> ExpenseOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             expense = await void_expense(session, ctx.org_id, ctx.user_id, expense_id)
         except BudgetValidationError as exc:
@@ -1061,7 +1123,9 @@ async def upload_attachment_route(
     except BudgetValidationError as exc:
         raise _http_error(exc) from None
 
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             expense = await get_expense(session, ctx.org_id, expense_id)
         except BudgetValidationError as exc:
@@ -1115,7 +1179,9 @@ async def download_attachment_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> Response:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             expense = await get_expense(session, ctx.org_id, expense_id)
         except BudgetValidationError as exc:

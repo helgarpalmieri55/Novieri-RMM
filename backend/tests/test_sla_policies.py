@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent
 from app.modules.sla.errors import SlaNotFoundError, SlaValidationError
@@ -56,7 +57,7 @@ async def test_create_policy_stores_the_row_and_audits(api_env) -> None:
     calendar_id = await _seed_calendar(api_env, org_id)
     queue_id = await _seed_queue(api_env, org_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         policy = await create_policy(
             session,
             org_id,
@@ -100,7 +101,7 @@ async def test_create_policy_persists_every_non_default_field(api_env) -> None:
     queue_id = await _seed_queue(api_env, org_id)
     escalation_queue_id = await _seed_queue(api_env, org_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         created = await create_policy(
             session,
             org_id,
@@ -115,7 +116,7 @@ async def test_create_policy_persists_every_non_default_field(api_env) -> None:
             active=False,
         )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         stored = (
             await session.execute(select(SlaPolicy).where(SlaPolicy.id == created.id))
         ).scalar_one()
@@ -130,7 +131,7 @@ async def test_create_policy_persists_every_non_default_field(api_env) -> None:
     assert stored.active is False
 
     # `active=False` must MEAN inactive: resolution must not return it.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await resolve_policy(session, org_id, queue_id=queue_id, priority="urgent") is None
 
 
@@ -140,7 +141,7 @@ async def test_create_policy_allows_all_four_wildcard_shapes(api_env) -> None:
     calendar_id = await _seed_calendar(api_env, org_id)
     queue_id = await _seed_queue(api_env, org_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         specific = await create_policy(
             session, org_id, actor_id, queue_id=queue_id, priority="high",
             calendar_id=calendar_id, response_target_minutes=30, resolution_target_minutes=240,
@@ -163,7 +164,7 @@ async def test_create_policy_allows_all_four_wildcard_shapes(api_env) -> None:
     # (Task 4 review F4: this assertion used to compare a set to itself.)
     assert len({specific.id, queue_only.id, priority_only.id, fallback.id}) == 4
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (await session.execute(select(SlaPolicy))).scalars().all()
     assert {(r.queue_id, r.priority) for r in rows} == {
         (queue_id, "high"),
@@ -179,21 +180,21 @@ async def test_create_policy_rejects_a_zero_or_negative_target(api_env) -> None:
     actor_id = await _seed_user(api_env, org_id)
     calendar_id = await _seed_calendar(api_env, org_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(SlaValidationError, match="response_target_minutes"):
             await create_policy(
                 session, org_id, actor_id, calendar_id=calendar_id,
                 response_target_minutes=0, resolution_target_minutes=480,
             )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(SlaValidationError, match="resolution_target_minutes"):
             await create_policy(
                 session, org_id, actor_id, calendar_id=calendar_id,
                 response_target_minutes=60, resolution_target_minutes=-1,
             )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await session.execute(select(SlaPolicy))).scalars().all() == []
 
 
@@ -203,13 +204,15 @@ async def test_create_policy_rejects_an_invalid_priority(api_env) -> None:
     calendar_id = await _seed_calendar(api_env, org_id)
 
     with pytest.raises(SlaValidationError, match="priority"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await create_policy(
                 session, org_id, actor_id, priority="critical", calendar_id=calendar_id,
                 response_target_minutes=60, resolution_target_minutes=480,
             )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await session.execute(select(SlaPolicy))).scalars().all() == []
 
 
@@ -220,7 +223,9 @@ async def test_create_policy_rejects_a_cross_org_calendar(api_env) -> None:
     calendar_b = await _seed_calendar(api_env, org_b)
 
     with pytest.raises(SlaValidationError, match="does not resolve in this org"):
-        async with org_session(org_a, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_a, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await create_policy(
                 session, org_a, actor_a, calendar_id=calendar_b,
                 response_target_minutes=60, resolution_target_minutes=480,
@@ -235,7 +240,9 @@ async def test_create_policy_rejects_a_cross_org_queue(api_env) -> None:
     queue_b = await _seed_queue(api_env, org_b)
 
     with pytest.raises(SlaValidationError, match="does not resolve in this org"):
-        async with org_session(org_a, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_a, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await create_policy(
                 session, org_a, actor_a, queue_id=queue_b, calendar_id=calendar_a,
                 response_target_minutes=60, resolution_target_minutes=480,
@@ -250,7 +257,9 @@ async def test_create_policy_rejects_a_cross_org_escalate_to_queue(api_env) -> N
     queue_b = await _seed_queue(api_env, org_b)
 
     with pytest.raises(SlaValidationError, match="does not resolve in this org"):
-        async with org_session(org_a, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_a, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await create_policy(
                 session, org_a, actor_a, calendar_id=calendar_a, escalate_to_queue_id=queue_b,
                 response_target_minutes=60, resolution_target_minutes=480,
@@ -274,17 +283,19 @@ async def test_create_policy_rejects_an_inactive_calendar_for_an_active_policy(a
     retired_calendar_id = await _seed_calendar(api_env, org_id, active=False)
 
     with pytest.raises(SlaValidationError, match="is not active"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await create_policy(
                 session, org_id, actor_id, calendar_id=retired_calendar_id,
                 response_target_minutes=60, resolution_target_minutes=480,
             )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await session.execute(select(SlaPolicy))).scalars().all() == []
 
     # An inactive policy against the same calendar is allowed.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         retired = await create_policy(
             session, org_id, actor_id, calendar_id=retired_calendar_id,
             response_target_minutes=60, resolution_target_minutes=480, active=False,
@@ -306,16 +317,18 @@ async def test_update_policy_rejects_an_inactive_calendar_for_an_active_policy(a
 
     # Repointing an active policy at a retired calendar is refused.
     with pytest.raises(SlaValidationError, match="is not active"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await update_policy(
                 session, org_id, actor_id, policy_id, {"calendar_id": retired_calendar_id}
             )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await get_policy(session, org_id, policy_id)).calendar_id == calendar_id
 
     # Retiring the policy AND repointing it in one edit is allowed...
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await update_policy(
             session, org_id, actor_id, policy_id,
             {"calendar_id": retired_calendar_id, "active": False},
@@ -324,10 +337,12 @@ async def test_update_policy_rejects_an_inactive_calendar_for_an_active_policy(a
     # ... but reactivating it while its calendar is still retired is not --
     # this edit supplies no `calendar_id` at all.
     with pytest.raises(SlaValidationError, match="is not active"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await update_policy(session, org_id, actor_id, policy_id, {"active": True})
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await get_policy(session, org_id, policy_id)).active is False
 
 
@@ -346,20 +361,22 @@ async def test_create_policy_duplicate_at_the_same_level_is_a_typed_error(
     calendar_id = await _seed_calendar(api_env, org_id)
     queue_id = await _seed_queue(api_env, org_id) if queue_kw == "same" else None
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_policy(
             session, org_id, actor_id, queue_id=queue_id, priority=priority,
             calendar_id=calendar_id, response_target_minutes=60, resolution_target_minutes=480,
         )
 
     with pytest.raises(SlaValidationError, match="already exists"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await create_policy(
                 session, org_id, actor_id, queue_id=queue_id, priority=priority,
                 calendar_id=calendar_id, response_target_minutes=90, resolution_target_minutes=600,
             )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (await session.execute(select(SlaPolicy))).scalars().all()
     assert len(rows) == 1
 
@@ -377,7 +394,9 @@ async def test_concurrent_creates_at_the_same_level_yield_one_row(api_env) -> No
 
     async def attempt() -> bool:
         try:
-            async with org_session(org_id, engine=api_env.app_engine) as session:
+            async with org_session(
+                org_id, engine=api_env.app_engine, clients=ClientScope.all()
+            ) as session:
                 await session.execute(select(SlaPolicy.id))
                 await asyncio.wait_for(barrier.wait(), timeout=30)
                 await create_policy(
@@ -392,7 +411,7 @@ async def test_concurrent_creates_at_the_same_level_yield_one_row(api_env) -> No
     assert all(not isinstance(r, BaseException) for r in results), results
     assert sorted(results) == [False, True], results
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (await session.execute(select(SlaPolicy))).scalars().all()
     assert len(rows) == 1
 
@@ -405,7 +424,9 @@ async def test_concurrent_creates_at_the_same_level_yield_one_row(api_env) -> No
 async def test_get_policy_raises_not_found_for_a_missing_id(api_env) -> None:
     org_id = await api_env.create_org()
     with pytest.raises(SlaNotFoundError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await get_policy(session, org_id, uuid4())
 
 
@@ -418,7 +439,7 @@ async def test_list_policies_shows_only_this_orgs_rows_under_rls(api_env) -> Non
     p2 = await _seed_policy(api_env, org_id, calendar_id=calendar_id, priority="high")
     await _seed_policy(api_env, other_org, calendar_id=other_calendar_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         policies = await list_policies(session, org_id)
 
     assert {p.id for p in policies} == {p1, p2}
@@ -435,7 +456,7 @@ async def test_update_policy_applies_supplied_fields_and_audits(api_env) -> None
     calendar_id = await _seed_calendar(api_env, org_id)
     policy_id = await _seed_policy(api_env, org_id, calendar_id=calendar_id, priority="low")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         updated = await update_policy(
             session, org_id, actor_id, policy_id,
             {"priority": "urgent", "response_target_minutes": 15},
@@ -488,17 +509,21 @@ async def test_update_policy_persists_every_editable_field(api_env) -> None:
     assert {field for field, _ in edits} == set(_POLICY_EDITABLE_FIELDS)
 
     for field, value in edits:
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await update_policy(session, org_id, actor_id, policy_id, {field: value})
 
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             stored = (
                 await session.execute(select(SlaPolicy).where(SlaPolicy.id == policy_id))
             ).scalar_one()
         assert getattr(stored, field) == value, f"{field} did not round-trip"
 
     # And every earlier edit is still there -- no field clobbered a previous one.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         final = (
             await session.execute(select(SlaPolicy).where(SlaPolicy.id == policy_id))
         ).scalar_one()
@@ -516,7 +541,9 @@ async def test_update_policy_rejects_an_unknown_field(api_env) -> None:
     policy_id = await _seed_policy(api_env, org_id, calendar_id=calendar_id)
 
     with pytest.raises(SlaValidationError, match="respones_target_minutes"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await update_policy(
                 session, org_id, actor_id, policy_id, {"respones_target_minutes": 5}
             )
@@ -524,7 +551,9 @@ async def test_update_policy_rejects_an_unknown_field(api_env) -> None:
     # A non-editable REAL column is refused the same way, and no audit event
     # was written for either attempt.
     with pytest.raises(SlaValidationError, match="org_id"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await update_policy(session, org_id, actor_id, policy_id, {"org_id": uuid4()})
 
     assert [e.action for e in await _audit(api_env, org_id)] == []
@@ -542,7 +571,7 @@ async def test_update_policy_stores_the_coerced_value(api_env) -> None:
         api_env, org_id, calendar_id=calendar_id, response_minutes=60, resolution_minutes=480
     )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         updated = await update_policy(
             session,
             org_id,
@@ -557,7 +586,7 @@ async def test_update_policy_stores_the_coerced_value(api_env) -> None:
     assert isinstance(updated.resolution_target_minutes, int)
 
     # And a string equal to the CURRENT value is not reported as a change.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await update_policy(session, org_id, actor_id, policy_id, {"response_target_minutes": "15"})
     events = await _audit(api_env, org_id)
     assert events[-1].meta["changed"] == []
@@ -575,7 +604,7 @@ async def test_update_policy_can_set_a_nullable_field_to_none(api_env) -> None:
         api_env, org_id, calendar_id=calendar_id, queue_id=queue_id, priority="high"
     )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         updated = await update_policy(session, org_id, actor_id, policy_id, {"priority": None})
 
     assert updated.priority is None
@@ -589,7 +618,9 @@ async def test_update_policy_rejects_null_for_a_non_nullable_field(api_env) -> N
     policy_id = await _seed_policy(api_env, org_id, calendar_id=calendar_id)
 
     with pytest.raises(SlaValidationError, match="cannot be null"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await update_policy(session, org_id, actor_id, policy_id, {"active": None})
 
 
@@ -620,7 +651,7 @@ async def test_update_policy_colliding_with_another_level_is_a_typed_error(api_e
         api_env, org_id, calendar_id=calendar_id, queue_id=queue_id, priority="low"
     )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(SlaValidationError, match="already exists"):
             await update_policy(session, org_id, actor_id, victim_id, {"priority": "high"})
 
@@ -633,7 +664,7 @@ async def test_update_policy_colliding_with_another_level_is_a_typed_error(api_e
 
     # The outer transaction committed: the recovery write landed, the
     # colliding one did not.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         victim = await get_policy(session, org_id, victim_id)
     assert victim.priority == "low"
     assert victim.response_target_minutes == 42
@@ -648,7 +679,9 @@ async def test_update_policy_rejects_a_cross_org_calendar(api_env) -> None:
     policy_id = await _seed_policy(api_env, org_a, calendar_id=calendar_a)
 
     with pytest.raises(SlaValidationError, match="does not resolve in this org"):
-        async with org_session(org_a, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_a, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await update_policy(session, org_a, actor_a, policy_id, {"calendar_id": calendar_b})
 
 
@@ -663,10 +696,10 @@ async def test_delete_policy_removes_the_row_and_audits(api_env) -> None:
     calendar_id = await _seed_calendar(api_env, org_id)
     policy_id = await _seed_policy(api_env, org_id, calendar_id=calendar_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await delete_policy(session, org_id, actor_id, policy_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(SlaNotFoundError):
             await get_policy(session, org_id, policy_id)
 
@@ -707,16 +740,18 @@ async def test_delete_policy_referenced_by_ticket_sla_is_refused_and_the_row_sur
         await session.commit()
 
     with pytest.raises(SlaValidationError, match=str(ticket.id)) as excinfo:
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await delete_policy(session, org_id, actor_id, policy_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         # The policy row survives, untouched.
         survivor = await get_policy(session, org_id, policy_id)
     assert survivor.id == policy_id
 
     # The escape hatch: deactivate instead.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         deactivated = await update_policy(session, org_id, actor_id, policy_id, {"active": False})
     assert deactivated.active is False
 
@@ -755,13 +790,13 @@ async def test_a_referenced_policy_can_be_retired_and_replaced_at_the_same_level
     queue_id = await _seed_queue(api_env, org_id)
 
     # 1. The original policy, and it is what resolution returns.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         original = await create_policy(
             session, org_id, actor_id, queue_id=queue_id, priority="high",
             calendar_id=calendar_id, response_target_minutes=30, resolution_target_minutes=240,
         )
         original_id = original.id
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         resolved = await resolve_policy(session, org_id, queue_id=queue_id, priority="high")
     assert resolved is not None and resolved.id == original_id
 
@@ -786,15 +821,17 @@ async def test_a_referenced_policy_can_be_retired_and_replaced_at_the_same_level
 
     # 3. Deleting it is refused -- the history must survive (spec §9).
     with pytest.raises(SlaValidationError, match="cannot be deleted"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await delete_policy(session, org_id, actor_id, original_id)
 
     # 4. Retire it instead, exactly as that message instructs.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await update_policy(session, org_id, actor_id, original_id, {"active": False})
 
     # 5. The replacement at the SAME level now succeeds (pre-0036: refused).
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         replacement = await create_policy(
             session, org_id, actor_id, queue_id=queue_id, priority="high",
             calendar_id=calendar_id, response_target_minutes=5, resolution_target_minutes=60,
@@ -803,14 +840,14 @@ async def test_a_referenced_policy_can_be_retired_and_replaced_at_the_same_level
     assert replacement_id != original_id
 
     # 6. Resolution returns the REPLACEMENT, not the retired policy.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         resolved = await resolve_policy(session, org_id, queue_id=queue_id, priority="high")
     assert resolved is not None
     assert resolved.id == replacement_id
     assert resolved.response_target_minutes == 5
 
     # 7. The retired policy and the ticket's SLA record both survive intact.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         retired = await get_policy(session, org_id, original_id)
         assert retired.active is False
         assert retired.response_target_minutes == 30
@@ -820,7 +857,9 @@ async def test_a_referenced_policy_can_be_retired_and_replaced_at_the_same_level
     # And a SECOND active policy at that level is still refused -- 0036
     # loosened uniqueness to "one ACTIVE policy per level", not to nothing.
     with pytest.raises(SlaValidationError, match="already exists"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await create_policy(
                 session, org_id, actor_id, queue_id=queue_id, priority="high",
                 calendar_id=calendar_id, response_target_minutes=7, resolution_target_minutes=70,
@@ -829,7 +868,9 @@ async def test_a_referenced_policy_can_be_retired_and_replaced_at_the_same_level
     # ... and reactivating the retired one while the replacement is active is
     # refused too, by the same guard on the update path.
     with pytest.raises(SlaValidationError, match="already exists"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await update_policy(session, org_id, actor_id, original_id, {"active": True})
 
 
@@ -846,13 +887,13 @@ async def test_resolve_policy_returns_none_when_nothing_matches(api_env) -> None
     other_queue_id = await _seed_queue(api_env, org_id)
     await _seed_policy(api_env, org_id, calendar_id=calendar_id, queue_id=other_queue_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await resolve_policy(session, org_id, queue_id=queue_id, priority="high")
 
     assert result is None
 
     # And no ticket_sla row was created -- resolve_policy is read-only.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await session.execute(select(TicketSla))).scalars().all() == []
 
 
@@ -867,7 +908,7 @@ async def test_resolve_policy_only_considers_active_policies(api_env) -> None:
         api_env, org_id, calendar_id=calendar_id, queue_id=queue_id, priority="high", active=False
     )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await resolve_policy(session, org_id, queue_id=queue_id, priority="high")
 
     assert result is None
@@ -882,7 +923,7 @@ async def test_resolve_policy_inactive_specific_falls_through_to_active_fallback
     )
     fallback_id = await _seed_policy(api_env, org_id, calendar_id=calendar_id, active=True)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await resolve_policy(session, org_id, queue_id=queue_id, priority="high")
 
     assert result is not None
@@ -919,7 +960,9 @@ async def test_resolve_policy_order_the_most_specific_wins_and_the_fallback_walk
     )
 
     async def resolved_id():
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             result = await resolve_policy(session, org_id, queue_id=queue_id, priority="high")
         return result.id if result else None
 
@@ -927,22 +970,22 @@ async def test_resolve_policy_order_the_most_specific_wins_and_the_fallback_walk
     assert await resolved_id() == level1
 
     # Remove level 1 -> level 2 (queue, NULL) wins, not level 3 or 4.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await delete_policy(session, org_id, await _seed_user(api_env, org_id), level1)
     assert await resolved_id() == level2
 
     # Remove level 2 -> level 3 (NULL, priority) wins, not level 4.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await delete_policy(session, org_id, await _seed_user(api_env, org_id), level2)
     assert await resolved_id() == level3
 
     # Remove level 3 -> level 4 (NULL, NULL) is the last resort.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await delete_policy(session, org_id, await _seed_user(api_env, org_id), level3)
     assert await resolved_id() == level4
 
     # Remove level 4 -> nothing left, None.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await delete_policy(session, org_id, await _seed_user(api_env, org_id), level4)
     assert await resolved_id() is None
 
@@ -962,7 +1005,7 @@ async def test_resolve_policy_queue_only_level_wins_over_priority_only(api_env) 
     )
     await _seed_policy(api_env, org_id, calendar_id=calendar_id, queue_id=None, priority="high")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await resolve_policy(session, org_id, queue_id=queue_id, priority="high")
 
     assert result is not None

@@ -2,7 +2,7 @@
 
 WHAT A DEVICE GROUP IS FOR, because the shape of this query follows from it
 rather than from what is easiest to select. `device_groups` is the platform's
-targeting and scoping primitive, and five subsystems take a group id:
+targeting and scoping primitive, and four subsystems take a group id:
 
   * `deploy` -- a deployment or a script run with `target_type="group"`
     resolves to `Device.device_group_id == target_id`
@@ -12,9 +12,11 @@ targeting and scoping primitive, and five subsystems take a group id:
   * `health` -- a profile assignment binds to a group and inherits UP
     `parent_group_id` (`app/modules/health/resolution.py`);
   * `inventory` -- a group carrying `rules` claims devices automatically on
-    every ingest (`app/modules/inventory/rules.py`);
-  * `rbac` -- `user_roles.device_group_id` narrows a role grant to one group
-    (`app/core/rbac.py`).
+    every ingest (`app/modules/inventory/rules.py`).
+
+A fifth, `rbac`, ended with migration 0230: a role grant is scoped to a CLIENT
+now (`user_roles.client_id`, MSP clients spec §2.1), so a group no longer gives
+or limits permissions and no grant can name one.
 
 Not one of them could be addressed from the console, because no route had ever
 returned a group id -- so the only scope expressible was the org default, which
@@ -55,7 +57,6 @@ from app.models import (
     PatchPolicy,
     Policy,
     RemotePolicy,
-    UserRole,
 )
 from app.modules.inventory.rules import (
     claim_group,
@@ -422,15 +423,17 @@ async def _assert_parent_is_legal(
 #: Every live reference the archive refusal counts, as
 #: `response key -> (model, column)`.
 #:
-#: THE LIST IS THE NINE FOREIGN KEYS ONTO `device_groups.id`, MINUS THE ROW
+#: THE LIST IS THE EIGHT FOREIGN KEYS ONTO `device_groups.id`, MINUS THE ROW
 #: ITSELF, read out of the schema rather than out of the spec: `devices` and
-#: `credentials` and `policies` and `user_roles` (migration 0001),
+#: `credentials` and `policies` (migration 0001),
 #: `device_groups.parent_group_id` (0001, the self-FK, counted as
 #: `child_groups`), `remote_policies` (0010), `patch_policies` (0011),
-#: `backup_policies` (0014), `health_profile_assignment` (0042). Every one is
-#: `NO ACTION` -- no migration writes an `ON DELETE` clause anywhere -- which is
-#: why a hard `DELETE` has two failure modes and no success mode and this is a
-#: soft archive instead.
+#: `backup_policies` (0014), `health_profile_assignment` (0042). A ninth,
+#: `user_roles.device_group_id`, went with migration 0230: a role grant names a
+#: client now, so it can no longer reference a group and cannot block one.
+#: Every one is `NO ACTION` -- no migration writes an `ON DELETE` clause
+#: anywhere -- which is why a hard `DELETE` has two failure modes and no
+#: success mode and this is a soft archive instead.
 #:
 #: FOUR MORE REFERENCES ARE DELIBERATELY NOT COUNTED, because they are not
 #: countable: `deployments.target_id` and `script_runs.target_id`
@@ -455,7 +458,6 @@ _BLOCKERS: tuple[tuple[str, Any, Any], ...] = (
         HealthProfileAssignment.device_group_id,
     ),
     ("credentials", Credential, Credential.device_group_id),
-    ("role_grants", UserRole, UserRole.device_group_id),
 )
 
 

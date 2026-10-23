@@ -23,6 +23,7 @@ from uuid import UUID
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import User
 from app.modules.email_intake.models import EmailMailbox
@@ -237,7 +238,7 @@ async def _mint_email_token_committed(
     if not isinstance(engine, AsyncEngine):
         return None
 
-    async with org_session(org_id, engine=engine) as mint_session:
+    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as mint_session:
         token = (
             await mint_session.execute(
                 update(Ticket)

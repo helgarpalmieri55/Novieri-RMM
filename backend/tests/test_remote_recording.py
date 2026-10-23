@@ -15,6 +15,7 @@ from moto import mock_aws
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -55,7 +56,7 @@ async def test_finalize_uploads_and_links(
     store: ObjectStore, admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id, user_id = await _org_device_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = RemoteSession(
             org_id=org_id, device_id=device_id, technician_id=user_id,
             protocol="rdp", consent_mode="attended", state="active",
@@ -69,7 +70,7 @@ async def test_finalize_uploads_and_links(
         assert size == 8 and ref.endswith(f"{sid}.guac")
     assert await store.get_remote_recording(ref) == b"GUAC-REC"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         got = (
             await s.execute(select(RemoteSession).where(RemoteSession.id == sid))
         ).scalar_one()
@@ -80,7 +81,7 @@ async def test_retention_deletes_expired(
     store: ObjectStore, admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id, user_id = await _org_device_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         s.add(RemotePolicy(org_id=org_id, device_group_id=None, recording_retention_days=30))
         old = RemoteSession(
             org_id=org_id, device_id=device_id, technician_id=user_id,
@@ -95,7 +96,7 @@ async def test_retention_deletes_expired(
     deleted = await apply_recording_retention(org_id, admin_engine, app_engine, store)
     assert deleted == 1
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = (
             await s.execute(
                 select(RemoteSession.recording_ref, RemoteSession.recording_bytes).where(
@@ -113,7 +114,7 @@ async def test_retention_ignores_recent_sessions_and_defaults_to_90_days(
     store: ObjectStore, admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id, user_id = await _org_device_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         recent = RemoteSession(
             org_id=org_id, device_id=device_id, technician_id=user_id,
             protocol="rdp", consent_mode="attended", state="ended",
@@ -128,7 +129,7 @@ async def test_retention_ignores_recent_sessions_and_defaults_to_90_days(
     deleted = await apply_recording_retention(org_id, admin_engine, app_engine, store)
     assert deleted == 0
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = (
             await s.execute(
                 select(RemoteSession.recording_ref).where(RemoteSession.id == sid)
@@ -163,7 +164,7 @@ async def test_retention_does_not_expire_a_neighbour_orgs_recording(
     other_id, other_device, other_user = await _org_device_user(admin_engine)
     old = datetime.now(UTC) - timedelta(days=40)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         s.add(RemotePolicy(org_id=org_id, device_group_id=None, recording_retention_days=30))
         mine = RemoteSession(
             org_id=org_id, device_id=device_id, technician_id=user_id,
@@ -176,7 +177,7 @@ async def test_retention_does_not_expire_a_neighbour_orgs_recording(
 
     # No policy for the neighbour: its own window is the 90-day default, so this
     # recording is NOT expired for them -- only for the org being swept.
-    async with org_session(other_id, engine=app_engine) as s:
+    async with org_session(other_id, engine=app_engine, clients=ClientScope.all()) as s:
         theirs = RemoteSession(
             org_id=other_id, device_id=other_device, technician_id=other_user,
             protocol="rdp", consent_mode="attended", state="ended", ended_at=old,
@@ -191,7 +192,7 @@ async def test_retention_does_not_expire_a_neighbour_orgs_recording(
     deleted = await apply_recording_retention(org_id, admin_engine, app_engine, store)
     assert deleted == 1
 
-    async with org_session(other_id, engine=app_engine) as s:
+    async with org_session(other_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = (
             await s.execute(
                 select(RemoteSession.recording_ref, RemoteSession.recording_bytes).where(
@@ -203,7 +204,7 @@ async def test_retention_does_not_expire_a_neighbour_orgs_recording(
     assert row.recording_bytes == 6
     assert await store.get_remote_recording(their_ref) == b"THEIRS"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         cleared = (
             await s.execute(
                 select(RemoteSession.recording_ref).where(RemoteSession.id == mine_id)

@@ -15,6 +15,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.client_scope import ClientScope
 from app.core.i18n import CATALOG_ES, use_locale
 from tests.test_backup_offsite import aws, vault  # noqa: F401  (fixtures)
 from tests.test_backup_result import object_store  # noqa: F401  (a fixture)
@@ -332,7 +333,7 @@ async def test_backup_a_failed_off_site_copy_is_stored_in_english_whatever_the_l
     point_id, _ = await add_point(app_engine, store, org, {"/a": [b"x" * 10]})
     with use_locale("es"):
         assert await _replicate_all(app_engine, vault, store, org, datetime.now(UTC)) == [False]
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         copy = (
             await session.execute(
                 select(BackupPointCopy).where(BackupPointCopy.point_id == point_id)
@@ -365,7 +366,7 @@ async def test_backup_an_unusable_manifest_ref_is_stored_in_english_whatever_the
         chunk_count=1,
         dedup_stats={},
     )
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with use_locale("es"):
             await ingest_backup_result(session, lambda: object_store, job, result)
         run = (

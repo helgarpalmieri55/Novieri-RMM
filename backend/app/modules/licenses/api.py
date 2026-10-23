@@ -186,7 +186,9 @@ async def list_vendors_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.read")),
 ) -> list[VendorOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_vendors(session, ctx.org_id)
         return [_vendor_out(r) for r in rows]
 
@@ -197,7 +199,9 @@ async def create_vendor_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.manage")),
 ) -> VendorOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         vendor = await create_vendor(
             session,
             org_id=ctx.org_id,
@@ -215,7 +219,9 @@ async def get_vendor_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.read")),
 ) -> VendorOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         vendor = await get_vendor(session, ctx.org_id, vendor_id)
         if vendor is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such vendor"))
@@ -229,7 +235,9 @@ async def update_vendor_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.manage")),
 ) -> VendorOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             vendor = await update_vendor(
                 session,
@@ -253,7 +261,9 @@ async def list_products_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.read")),
 ) -> list[ProductOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_products(session, ctx.org_id)
         return [_product_out(r) for r in rows]
 
@@ -266,7 +276,9 @@ async def create_product_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.manage")),
 ) -> ProductOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             product = await create_product(
                 session,
@@ -292,7 +304,9 @@ async def compliance_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.read")),
 ) -> list[ComplianceRow]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await compliance_summary(session, ctx.org_id)
         return [ComplianceRow(**row) for row in rows]
 
@@ -302,7 +316,9 @@ async def review_queue_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.read")),
 ) -> list[ReviewQueueRow]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await review_queue(session, ctx.org_id)
         return [ReviewQueueRow(**row) for row in rows]
 
@@ -313,7 +329,9 @@ async def review_queue_map_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.manage")),
 ) -> ProductOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             product = await map_software(
                 session,
@@ -333,7 +351,9 @@ async def review_queue_ignore_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.manage")),
 ) -> dict[str, Any]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             ignore = await ignore_software(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, name=body.name
@@ -349,7 +369,9 @@ async def renewals_route(
     within_days: int = Query(default=30),
     ctx: AuthContext = Depends(require_permission("licenses.read")),
 ) -> list[RenewalRow]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await renewal_calendar(
             session, ctx.org_id, now=datetime.now(UTC), within_days=within_days
         )
@@ -361,7 +383,9 @@ async def costs_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.read")),
 ) -> list[CostRow]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await cost_view(session, ctx.org_id)
         return [CostRow(**row) for row in rows]
 
@@ -371,7 +395,9 @@ async def export_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.read")),
 ) -> list[dict[str, Any]]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await export_rows(session, ctx.org_id)
 
         # An explicit, audited export (invariant #4) -- the ONLY report route
@@ -402,7 +428,9 @@ async def get_product_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.read")),
 ) -> ProductOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         product = await get_product(session, ctx.org_id, product_id)
         if product is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such product"))
@@ -416,7 +444,9 @@ async def update_product_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.manage")),
 ) -> ProductOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             product = await update_product(
                 session,
@@ -440,7 +470,9 @@ async def list_licenses_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.read")),
 ) -> list[LicenseOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_licenses(session, ctx.org_id)
         return [_license_out(r) for r in rows]
 
@@ -452,7 +484,7 @@ async def create_license_route(
     ctx: AuthContext = Depends(require_permission("licenses.manage")),
 ) -> LicenseOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             license_ = await create_license(
                 session,
@@ -484,7 +516,9 @@ async def get_license_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.read")),
 ) -> LicenseOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         license_ = await get_license(session, ctx.org_id, license_id)
         if license_ is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such license"))
@@ -499,7 +533,7 @@ async def update_license_route(
     ctx: AuthContext = Depends(require_permission("licenses.manage")),
 ) -> LicenseOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             license_ = await update_license(
                 session,
@@ -520,7 +554,9 @@ async def delete_license_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.manage")),
 ) -> None:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await delete_license(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, license_id=license_id
@@ -542,7 +578,7 @@ async def reveal_license_key_route(
     ctx: AuthContext = Depends(require_permission("licenses.keys.read")),
 ) -> LicenseKeyOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             key = await reveal_key(
                 session,
@@ -572,7 +608,9 @@ async def allocate_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.manage")),
 ) -> AllocationOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             allocation = await allocate(
                 session,
@@ -593,7 +631,9 @@ async def list_allocations_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.read")),
 ) -> list[AllocationOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         license_ = await get_license(session, ctx.org_id, license_id)
         if license_ is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such license"))
@@ -607,7 +647,9 @@ async def release_allocation_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.manage")),
 ) -> AllocationOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             allocation = await release_allocation(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, allocation_id=allocation_id

@@ -25,6 +25,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
@@ -297,7 +298,7 @@ async def test_both_acts_and_their_relationship_are_on_the_chain(api_env: Any) -
     # gateway marks delivery.
     from app.jobs.engine import JobEngine
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == retry_id))).scalar_one()
         engine: JobEngine = api_env.app.state.job_engine
         await engine.mark_dispatched(session, job)
@@ -312,7 +313,7 @@ async def test_both_acts_and_their_relationship_are_on_the_chain(api_env: Any) -
         json={"type": "inventory.collect", "device_id": str(device_id)},
     )
     assert ordinary.status_code == 201, ordinary.text
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         job = (
             await session.execute(select(Job).where(Job.id == UUID(ordinary.json()["id"])))
         ).scalar_one()
@@ -705,6 +706,6 @@ async def test_rls_hides_a_neighbours_job_from_an_unfiltered_select(
     mine = await api_env.create_org("retry-rls-mine")
     victim_job = await _job(api_env, victim, await _device(api_env, victim, "v-2"))
 
-    async with org_session(mine, engine=app_engine) as session:
+    async with org_session(mine, engine=app_engine, clients=ClientScope.all()) as session:
         visible = {row.id for row in (await session.execute(select(Job))).scalars()}
     assert victim_job not in visible

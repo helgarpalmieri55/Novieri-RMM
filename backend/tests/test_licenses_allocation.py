@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
 from app.models import AuditEvent, Device, License, Organization, User
@@ -60,7 +61,7 @@ async def _license(
     entitlements: int,
     vault: LocalVaultService,
 ) -> UUID:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         product = await create_product(
             s,
             org_id=org_id,
@@ -95,7 +96,7 @@ async def _license(
 async def _audit_actions(
     app_engine: AsyncEngine, org_id: UUID, target_type: str, target_id: str
 ) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -123,7 +124,7 @@ async def test_allocate_fills_pool_then_exhausts(
     vault = _vault(tmp_path)
     license_id = await _license(app_engine, org_id, actor_id, entitlements=2, vault=vault)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         alloc1 = await allocate(
             s,
             org_id=org_id,
@@ -134,7 +135,7 @@ async def test_allocate_fills_pool_then_exhausts(
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         alloc2 = await allocate(
             s,
             org_id=org_id,
@@ -153,7 +154,7 @@ async def test_allocate_fills_pool_then_exhausts(
     assert alloc2.released_at is None
 
     other_device_id = await _seed_device(admin_engine, org_id, "device-b")
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseValidationError, match="license pool exhausted"):
             await allocate(
                 s,
@@ -164,7 +165,7 @@ async def test_allocate_fills_pool_then_exhausts(
                 target_id=other_device_id,
             )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         allocations = await list_allocations(s, org_id, license_id)
         assert len(allocations) == 2
 
@@ -207,7 +208,7 @@ async def test_allocate_concurrent_calls_cannot_exceed_pool(
     outcome: dict[str, str | None] = {}
 
     async def attempt_b() -> None:
-        async with org_session(org_id, engine=app_engine) as session_b:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session_b:
             try:
                 await allocate(
                     session_b,
@@ -223,7 +224,7 @@ async def test_allocate_concurrent_calls_cannot_exceed_pool(
                 outcome["error"] = None
                 await session_b.commit()
 
-    async with org_session(org_id, engine=app_engine) as session_a:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session_a:
         # Session A takes the pool's only entitlement. Its transaction (and
         # the `FOR UPDATE` lock it holds on the license row) stays open
         # until the explicit commit below.
@@ -256,7 +257,7 @@ async def test_allocate_concurrent_calls_cannot_exceed_pool(
     # B lost the race: the typed error, never a raw IntegrityError.
     assert outcome["error"] == "license pool exhausted"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         allocations = await list_allocations(s, org_id, license_id)
         # The pool was never overfilled: exactly one allocation exists, not two.
         assert len(allocations) == 1
@@ -271,14 +272,14 @@ async def test_available_pool_reflects_allocations_and_release(
     vault = _vault(tmp_path)
     license_id = await _license(app_engine, org_id, actor_id, entitlements=2, vault=vault)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = (
             await s.execute(select(License).where(License.id == license_id))
         ).scalar_one()
         pool = await available_pool(s, org_id, license_)
         assert pool == 2
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         alloc = await allocate(
             s,
             org_id=org_id,
@@ -290,14 +291,14 @@ async def test_available_pool_reflects_allocations_and_release(
         await s.commit()
         alloc_id = alloc.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = (
             await s.execute(select(License).where(License.id == license_id))
         ).scalar_one()
         pool = await available_pool(s, org_id, license_)
         assert pool == 1
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await allocate(
             s,
             org_id=org_id,
@@ -308,7 +309,7 @@ async def test_available_pool_reflects_allocations_and_release(
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = (
             await s.execute(select(License).where(License.id == license_id))
         ).scalar_one()
@@ -316,14 +317,14 @@ async def test_available_pool_reflects_allocations_and_release(
         assert pool == 0
 
     # release frees a slot
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         released = await release_allocation(
             s, org_id=org_id, actor_id=actor_id, allocation_id=alloc_id
         )
         await s.commit()
         assert released.released_at is not None
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = (
             await s.execute(select(License).where(License.id == license_id))
         ).scalar_one()
@@ -332,7 +333,7 @@ async def test_available_pool_reflects_allocations_and_release(
 
     # and a new allocate now succeeds again
     other_device_id = await _seed_device(admin_engine, org_id, "device-b")
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         new_alloc = await allocate(
             s,
             org_id=org_id,
@@ -353,7 +354,7 @@ async def test_double_release_raises_validation_error(
     vault = _vault(tmp_path)
     license_id = await _license(app_engine, org_id, actor_id, entitlements=1, vault=vault)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         alloc = await allocate(
             s,
             org_id=org_id,
@@ -365,11 +366,11 @@ async def test_double_release_raises_validation_error(
         await s.commit()
         alloc_id = alloc.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await release_allocation(s, org_id=org_id, actor_id=actor_id, allocation_id=alloc_id)
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseValidationError, match="already released"):
             await release_allocation(
                 s, org_id=org_id, actor_id=actor_id, allocation_id=alloc_id
@@ -385,7 +386,7 @@ async def test_allocate_cross_org_target_raises_validation_error(
     vault = _vault(tmp_path)
     license_id = await _license(app_engine, org_a, actor_a, entitlements=5, vault=vault)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseValidationError):
             await allocate(
                 s,
@@ -443,7 +444,7 @@ async def test_allocate_unknown_target_type_raises_validation_error(
     vault = _vault(tmp_path)
     license_id = await _license(app_engine, org_id, actor_id, entitlements=5, vault=vault)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseValidationError):
             await allocate(
                 s,
@@ -462,7 +463,7 @@ async def test_allocate_unknown_target_raises_validation_error(
     vault = _vault(tmp_path)
     license_id = await _license(app_engine, org_id, actor_id, entitlements=5, vault=vault)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseValidationError):
             await allocate(
                 s,
@@ -485,7 +486,7 @@ async def test_allocate_missing_license_raises_not_found(
     org_id, actor_id = await _org_with_user(admin_engine)
     device_id = await _seed_device(admin_engine, org_id, "device-a")
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseNotFoundError):
             await allocate(
                 s,
@@ -502,7 +503,7 @@ async def test_release_allocation_missing_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseNotFoundError):
             await release_allocation(
                 s, org_id=org_id, actor_id=actor_id, allocation_id=uuid4()
@@ -522,7 +523,7 @@ async def test_allocate_and_release_audit_actions(
     vault = _vault(tmp_path)
     license_id = await _license(app_engine, org_id, actor_id, entitlements=1, vault=vault)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         alloc = await allocate(
             s,
             org_id=org_id,
@@ -537,7 +538,7 @@ async def test_allocate_and_release_audit_actions(
     actions = await _audit_actions(app_engine, org_id, "license", str(license_id))
     assert "license.allocated" in actions
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         event = (
             await s.execute(
                 select(AuditEvent)
@@ -550,7 +551,7 @@ async def test_allocate_and_release_audit_actions(
         assert event.target_id == str(license_id)
         assert event.meta == {"target_type": "device", "target_id": str(device_id)}
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await release_allocation(s, org_id=org_id, actor_id=actor_id, allocation_id=alloc_id)
         await s.commit()
 
@@ -568,7 +569,7 @@ async def test_list_allocations_and_available_pool_write_no_audit(
     vault = _vault(tmp_path)
     license_id = await _license(app_engine, org_id, actor_id, entitlements=2, vault=vault)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await allocate(
             s,
             org_id=org_id,
@@ -581,7 +582,7 @@ async def test_list_allocations_and_available_pool_write_no_audit(
 
     before = await _audit_actions(app_engine, org_id, "license", str(license_id))
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await list_allocations(s, org_id, license_id)
         license_ = (
             await s.execute(select(License).where(License.id == license_id))

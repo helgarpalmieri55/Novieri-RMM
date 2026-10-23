@@ -3,8 +3,9 @@
 
 A KERNEL ROUTE, NOT A MODULE ONE. `DeviceGroup` lives in `app/models/core.py`
 and is read by `deploy`, `patch`, `backup`, `remote`, `health`, `inventory`,
-`bcp`, `documentation` and the RBAC grant table. Putting the list in any one of
-those modules would make eight others depend on it, which is the thing
+`bcp` and `documentation` (and, until migration 0230, the RBAC grant table).
+Putting the list in any one of those modules would make seven others depend on
+it, which is the thing
 `CLAUDE.md`'s "modules register into the kernel; they do not fork it" is about.
 
 TWO CODES, AND NEITHER IS NEW. Reads take `devices.read` (see the list
@@ -19,8 +20,9 @@ roles hold it, no new row in the matrix.
 `assets.manage` on the reasoning that "recording the switch you are standing in
 front of is the ordinary work of the role". Creating or renaming a group
 re-binds patch, backup and remote policy for machines the technician is not
-standing in front of, and a group is an RBAC scope (`user_roles.
-device_group_id`). That is a different class of act from writing an asset row.
+standing in front of (and, before migration 0230, a group was an RBAC scope --
+`user_roles.device_group_id`; a grant names a client now). That is a different
+class of act from writing an asset row.
 
 CYCLE 2 ADDED THE RULES DOCUMENT, AND WITH IT THE ONE ROUTE HERE THAT IS NOT
 CRUD. `POST /device-groups/preview` answers "which machines would this rule
@@ -117,8 +119,7 @@ class DeviceGroupOut(BaseModel):
 
     `id` is the value every group-scoped write in the platform takes -- a
     deployment's `target_id`, a patch/backup/remote policy's
-    `device_group_id`, a health profile assignment's group, and the scope on a
-    `user_roles` grant.
+    `device_group_id` and a health profile assignment's group.
 
     `parent_group_id` is here because the hierarchy means different things to
     different consumers and the console has to be able to show it: health
@@ -258,7 +259,7 @@ async def list_groups(
     which membership rule wins.
 
     WHY THIS ROUTE EXISTS. A group id is what `deploy`, `patch`, `backup`,
-    `remote`, `health` and the RBAC grant table all take to scope an action to
+    `remote` and `health` all take to scope an action to
     part of the fleet, and no route had ever returned one. The console could
     therefore express exactly one scope -- the org default -- which is the one
     that has no id.
@@ -273,7 +274,9 @@ async def list_groups(
     code would need a migration and a decision about which seeded roles hold
     it, to gate a smaller fact than the route beside it.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         page = await list_device_groups(
             session,
             org_id=ctx.org_id,
@@ -322,10 +325,11 @@ class LiveReferencesOut(BaseModel):
     is a dead end; each count below is a place the operator has to go, so the
     console renders it as a link rather than as a blob.
 
-    Nine foreign keys point at `device_groups.id` and every one of them is `NO
+    Eight foreign keys point at `device_groups.id` and every one of them is `NO
     ACTION` -- there is no `ON DELETE` clause in any migration -- so a hard
     `DELETE` raises where one holds and dangles where none does. That is why
-    the archive is soft and why this model exists.
+    the archive is soft and why this model exists. (A ninth, the role grants of
+    `user_roles`, ended with migration 0230: a grant names a client now.)
     """
 
     devices: int = Field(description="Devices whose device_group_id is this group")
@@ -338,9 +342,6 @@ class LiveReferencesOut(BaseModel):
         description="Health profile assignments bound to this group"
     )
     credentials: int = Field(description="Stored credentials scoped to this group")
-    role_grants: int = Field(
-        description="user_roles grants narrowed to this group -- these are RBAC"
-    )
 
 
 class DeviceGroupDetailOut(BaseModel):
@@ -468,7 +469,9 @@ async def create_group(
     `device_count` is 0 by construction: nothing is in a group that has just
     been created.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             group = await create_device_group(
                 session,
@@ -571,7 +574,9 @@ async def preview_group_rules(
     all unmatchable. An operator who writes a rule for a fleet, receives half
     of it, and is not told why concludes the rule is wrong.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             preview = await preview_rules(
                 session,
@@ -615,7 +620,9 @@ async def get_group(
     `user.role_assigned` event naming a group must still resolve to a name in
     five years.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             group = await get_device_group(session, ctx.org_id, group_id)
         except DeviceGroupError as exc:
@@ -662,7 +669,9 @@ async def update_group(
     # column JSON-native regardless.
     fields = body.model_dump(exclude_unset=True)
     envelopes: list[Any] = []
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             group, reparented = await update_device_group(
                 session,
@@ -691,7 +700,7 @@ async def archive_group(
 
     SOFT, NOT HARD, on `15ed5de`'s argument and `devices.py:427`'s: a delete
     would take the group's job history, its documentation links and its audit
-    trail's target with it, and nine `NO ACTION` foreign keys mean it would
+    trail's target with it, and eight `NO ACTION` foreign keys mean it would
     not even succeed. Retirement leaves all of that answerable.
 
     REFUSED WHILE OCCUPIED, with a `blocked_by` body, because `NULL` is not an
@@ -705,7 +714,9 @@ async def archive_group(
     NO health reconcile: the refusal guarantees the group holds no devices and
     no health assignment, so no device's effective profile can move.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await archive_device_group(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, group_id=group_id
@@ -742,7 +753,9 @@ async def unarchive_group(
     partial unique index makes possible, and refused when the parent was
     archived after this group was, which is the one way an orphan could appear.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             group = await unarchive_device_group(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, group_id=group_id
@@ -778,7 +791,9 @@ async def add_members(
     edit on a screen whose whole job is bulk is the job storm §12 of the health
     spec exists to avoid. The device's next tick picks it up.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             results = await add_group_members(
                 session,
@@ -816,7 +831,9 @@ async def remove_member(
     org-wide fallback. The console says so before it happens; the API records
     it either way.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await remove_group_member(
                 session,

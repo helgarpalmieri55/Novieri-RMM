@@ -119,7 +119,9 @@ async def list_security_events(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> SecurityEventsPage:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         query = _filtered_query(
             ctx.org_id, device_id, username, event_type, from_ts, to_ts
         )
@@ -142,7 +144,9 @@ async def get_security_event(
     request: Request,
     ctx: AuthContext = Depends(require_permission("audit.read")),
 ) -> SecurityEventDetailOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         row = (
             await session.execute(
                 select(SecurityEvent, Device.hostname)
@@ -186,7 +190,9 @@ async def access_evidence_csv(
     it could not be taken back. The filters are the half this route needs most:
     without them the log can say a CSV was taken and cannot say of what.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = (
             await session.execute(
                 _filtered_query(

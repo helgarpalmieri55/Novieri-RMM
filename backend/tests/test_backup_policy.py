@@ -2,6 +2,7 @@ from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import BackupPolicy, BackupRepository, Device, DeviceGroup, Organization
 from app.modules.backup.policy import resolve_backup_policy
@@ -27,7 +28,7 @@ async def _setup(admin_engine: AsyncEngine):
 
 async def test_no_policy_returns_none(admin_engine: AsyncEngine, app_engine: AsyncEngine) -> None:
     org_id, _, device_id, _ = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         pol = await resolve_backup_policy(s, org_id, device_id)
     assert pol is None
 
@@ -36,7 +37,7 @@ async def test_group_policy_wins_over_org_default(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, group_id, device_id, repo_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         s.add(
             BackupPolicy(
                 org_id=org_id,
@@ -66,7 +67,7 @@ async def test_org_default_resolves_when_duplicate_null_rows_exist(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _, device_id, repo_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         first = BackupPolicy(
             org_id=org_id, repository_id=repo_id, device_group_id=None,
             window_cron="first", retention_gfs={"daily": 1},
@@ -89,7 +90,7 @@ async def test_disabled_policy_is_not_returned(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, group_id, device_id, repo_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         s.add(
             BackupPolicy(
                 org_id=org_id,

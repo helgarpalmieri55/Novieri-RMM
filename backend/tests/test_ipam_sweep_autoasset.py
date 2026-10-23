@@ -31,6 +31,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.models import AuditEvent, Device, JobStatus
 from tests.ipam_fixtures import (
     complete_sweep,
@@ -384,7 +385,7 @@ async def test_an_arp_sighting_keeps_the_mac_that_lets_enrolment_join_it(
         hostname = "reception-pc"
         macs = ["00:1B:21:AA:BB:CC"]
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         outcome = await resolve_enrolment_target(session, org.org_id, _Facts())
     assert outcome.device_id == row.id
     assert outcome.matched_on == "mac"

@@ -121,7 +121,9 @@ async def get_layout(
     same as an empty one, which cannot be stored (see `LayoutBody`), so the
     absent value says exactly one thing.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         row = (
             await session.execute(
                 select(DashboardLayout).where(
@@ -154,7 +156,9 @@ async def put_layout(
     meaning anyone could define. Returns what was stored.
     """
     widgets = [entry.model_dump() for entry in body.widgets]
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         # UPSERT on the composite primary key, not read-then-write. Two tabs
         # arranging the same dashboard is an ordinary thing to do, and the
         # read-then-write version of this loses one of them to a race for no
@@ -182,7 +186,9 @@ async def reset_layout(
     make the console's Reset button fail for exactly the operators for whom it
     has the least to do.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         await session.execute(
             delete(DashboardLayout).where(
                 DashboardLayout.org_id == ctx.org_id,

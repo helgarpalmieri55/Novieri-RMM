@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from moto import mock_aws
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.vault import get_vault
 from app.modules.email_intake import poller
@@ -170,6 +171,7 @@ async def test_the_manual_test_uses_the_token_and_names_the_operator(env: OAuthE
         actor_id=env.user_id,
         engine=env.api_env.app_engine,
         vault=get_vault(env.api_env.settings),
+        clients=ClientScope.all(),
         client_factory=factory,
     )
 
@@ -190,6 +192,7 @@ async def test_the_manual_test_reports_a_revoked_sign_in_without_changing_state(
         actor_id=env.user_id,
         engine=env.api_env.app_engine,
         vault=get_vault(env.api_env.settings),
+        clients=ClientScope.all(),
         client_factory=_Factory(),
     )
 
@@ -209,6 +212,7 @@ async def test_an_unconnected_mailbox_test_says_so(env: OAuthEnv) -> None:
         actor_id=env.user_id,
         engine=env.api_env.app_engine,
         vault=get_vault(env.api_env.settings),
+        clients=ClientScope.all(),
         client_factory=_Factory(),
     )
 

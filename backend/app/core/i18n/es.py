@@ -1014,6 +1014,16 @@ CATALOG: dict[str, str] = {
     "missing bearer token": "falta el token de portador",
     "unknown organization": "organización desconocida",
     "requires {code}": "requiere {code}",
+    "X-Client-Id must be one client id": "X-Client-Id debe ser el id de un solo cliente",
+    "this account can only use the portal": "esta cuenta solo puede usar el portal",
+    "only a technician with access to every client can do this": (
+        "solo un técnico con acceso a todos los clientes puede hacer esto"
+    ),
+    "unknown client": "cliente desconocido",
+    "a role cannot be granted on the unassigned client": (
+        "no se puede asignar un rol sobre el cliente «Sin asignar»"
+    ),
+    "that client is archived": "ese cliente está archivado",
     "no such credential": "no existe esa credencial",
     "This credential is used only by the backup service and cannot be revealed.": (
         "Esta credencial solo la usa el servicio de copias de seguridad y no se puede revelar."
@@ -4186,7 +4196,6 @@ CATALOG: dict[str, str] = {
         "{role} es administración de la plataforma entre organizaciones y no se puede conceder "
         "desde una organización"
     ),
-    "that device group is archived": "ese grupo de dispositivos está archivado",
     "this is the organization's last active {role} and cannot be {verb}; grant {grant_role} "
     "to somebody else first": (
         "esta cuenta es el último {role} activo de la organización y no se puede {verb}; "

@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Patch, PatchApproval, User
 
@@ -376,7 +377,7 @@ async def test_change_evidence_writes_audit_and_404s_unknown(api_env) -> None:
     assert body["approvals"] == []
     assert body["links"] == []
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         event = (
             await session.execute(
                 select(AuditEvent).where(AuditEvent.action == "change.evidence_exported")
@@ -449,7 +450,9 @@ async def test_list_approvals_returns_history_without_audit(api_env) -> None:
     assert second.status_code == 200, second.text
 
     async def _evidence_export_count() -> int:
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             rows = (
                 await session.execute(
                     select(AuditEvent).where(AuditEvent.action == "change.evidence_exported")

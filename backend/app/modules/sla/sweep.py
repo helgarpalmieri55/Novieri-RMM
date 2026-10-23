@@ -196,6 +196,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Organization
 
@@ -825,7 +826,7 @@ async def sweep_all_orgs(
     total = 0
     for org_id in org_ids:
         try:
-            async with org_session(org_id, engine=engine) as session:
+            async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
                 counts = await sweep_org(session, org_id, now=now)
         except Exception:  # noqa: BLE001
             logger.error(

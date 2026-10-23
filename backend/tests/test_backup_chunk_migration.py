@@ -21,6 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
 from tests.backup_dedup_fixtures import all_index_rows, chunk_id, seed_dedup_org
@@ -74,13 +75,13 @@ async def test_a_row_is_invisible_to_another_org(
         await _insert(session, a.org_id, a.repository_id, secret)
         await session.commit()
 
-    async with org_session(b.org_id, engine=app_engine) as session:
+    async with org_session(b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         seen = (
             (await session.execute(text("SELECT chunk_id FROM backup_chunks"))).scalars().all()
         )
     assert list(seen) == []
 
-    async with org_session(a.org_id, engine=app_engine) as session:
+    async with org_session(a.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         own = (
             (await session.execute(text("SELECT chunk_id FROM backup_chunks"))).scalars().all()
         )
@@ -99,7 +100,7 @@ async def test_a_row_cannot_be_inserted_under_another_orgs_id(
 
     refused = False
     try:
-        async with org_session(a.org_id, engine=app_engine) as session:
+        async with org_session(a.org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await _insert(session, b.org_id, b.repository_id, chunk_id(0xA2))
     except (DBAPIError, ProgrammingError):
         refused = True

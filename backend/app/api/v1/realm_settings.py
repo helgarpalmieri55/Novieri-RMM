@@ -531,7 +531,9 @@ async def write_email_settings(
     _refuse_unusable(body)
     provisioning = _provisioning(config)
     supplied = sorted(body.model_fields_set)
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await set_smtp(provisioning, _as_realm_block(body))
         except httpx.HTTPStatusError as exc:
@@ -585,7 +587,9 @@ async def send_test_message(
     platform's own runbook warns about.
     """
     provisioning = _provisioning(config)
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             recipient = await send_test_email(
                 provisioning,

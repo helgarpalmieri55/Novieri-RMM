@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.schedule import last_fire
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
@@ -181,7 +182,7 @@ async def _seed(
         await session.commit()
         org_id, device_id, user_id = org.id, device.id, user.id
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(session, vault, org_id=org_id, actor_id=user_id,
                                        name="primary")
         policy = BackupPolicy(
@@ -211,7 +212,7 @@ async def test_a_sweep_seven_minutes_after_the_fire_dispatches_once(
         admin_engine, app_engine, vault, window_cron="0 2 * * *", created_at=_t(0, day=1)
     )
     engine = _FakeJobEngine()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         first = await dispatch_due_backup(
             session, engine, vault, org_id=org_id, device_id=device_id, now=_t(2, 7)
         )
@@ -237,7 +238,7 @@ async def test_a_null_schedule_never_dispatches_from_the_sweep(
         admin_engine, app_engine, vault, window_cron=None, created_at=_t(0, day=1)
     )
     engine = _FakeJobEngine()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         for minute in (0, 15, 30, 45):
             assert await dispatch_due_backup(
                 session, engine, vault, org_id=org_id, device_id=device_id, now=_t(2, minute)
@@ -255,7 +256,7 @@ async def test_a_run_in_progress_blocks_the_next_fire(
         admin_engine, app_engine, vault, window_cron="0 * * * *", created_at=_t(0, day=1)
     )
     engine = _FakeJobEngine()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert len(await dispatch_due_backup(
             session, engine, vault, org_id=org_id, device_id=device_id, now=_t(2, 5)
         )) == 1
@@ -277,7 +278,7 @@ async def test_a_missed_deadline_writes_one_missed_row_and_an_audit_event(
     )
     engine = _FakeJobEngine()
     late = _t(9)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await dispatch_due_backup(
             session, engine, vault, org_id=org_id, device_id=device_id, now=late
         ) == []
@@ -319,7 +320,7 @@ async def test_manual_run_ignores_the_schedule_but_not_a_run_in_progress(
         admin_engine, app_engine, vault, window_cron="0 2 * * *", created_at=_t(0, day=1)
     )
     engine = _FakeJobEngine()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         first = await dispatch_backup(
             session, engine, vault, org_id=org_id, device_id=device_id, now=_t(14, 3)
         )

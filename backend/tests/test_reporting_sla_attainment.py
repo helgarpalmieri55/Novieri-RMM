@@ -34,6 +34,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import admin_session, org_session
 from app.modules.reporting.definitions.sla_attainment import (
     _RETRIAGE,
@@ -80,7 +81,7 @@ def _query(days_back: int = 30, window: dict[str, Any] | None = None, **extra: A
 
 async def _run(api_env: Any, org_id: UUID, **overrides: Any) -> Any:
     params = {**_window(), **overrides}
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         return await execute_report(
             session, _definition(), SlaAttainmentParams(**params), org_id=org_id
         )

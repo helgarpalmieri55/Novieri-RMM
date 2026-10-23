@@ -27,6 +27,7 @@ from uuid import UUID
 from openpyxl import load_workbook
 from sqlalchemy import select
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Device
 from app.modules.inventory.ingest import ingest_inventory
@@ -53,7 +54,7 @@ def _rows(body: bytes) -> list[list[str]]:
 
 
 async def _poison(api_env, org_id: UUID, device_id: UUID) -> None:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one()
@@ -255,7 +256,7 @@ async def test_every_estate_export_writes_one_audit_event(api_env) -> None:
     ):
         assert (await api_env.client.get(path, headers=headers)).status_code == 200, path
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         events = [
             e
             for e in (

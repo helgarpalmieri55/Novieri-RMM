@@ -34,6 +34,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, PushAuthorization
 from app.modules.agent_push.authorization import (
@@ -64,7 +65,7 @@ async def test_a_grant_is_created_canonicalised_and_audited(
     not have to convert a mask length in their head to see how far the grant
     went."""
     org = await seed_org(admin_engine, "push-create")
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = await create_authorization(
             session,
             org.org_id,
@@ -97,7 +98,7 @@ async def test_a_grant_with_no_actor_is_refused_before_the_database(
     """There is no system-authorized push scope. The service refuses first so
     the message names the rule rather than a constraint name."""
     org = await seed_org(admin_engine, "push-noactor-svc")
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushValidationError) as exc:
             await create_authorization(
                 session, org.org_id, actor_id=None, prefix="10.0.0.0/24"
@@ -112,7 +113,7 @@ async def test_a_malformed_prefix_is_refused(
     admin_engine: AsyncEngine, app_engine: AsyncEngine, prefix: str
 ) -> None:
     org = await seed_org(admin_engine, "push-badprefix")
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushValidationError):
             await create_authorization(
                 session, org.org_id, actor_id=org.user_id, prefix=prefix
@@ -126,11 +127,11 @@ async def test_a_second_active_grant_for_one_prefix_is_a_conflict(
     naming the remedy. Without uniqueness, revoking "the" grant for a prefix
     leaves a second one nobody was looking at still authorizing it."""
     org = await seed_org(admin_engine, "push-dupe-svc")
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await create_authorization(
             session, org.org_id, actor_id=org.user_id, prefix="10.5.0.0/24"
         )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushConflictError) as exc:
             await create_authorization(
                 session, org.org_id, actor_id=org.user_id, prefix="10.5.0.0/24"
@@ -152,16 +153,16 @@ async def test_a_revoked_prefix_may_be_authorized_again(
     # THREE SEPARATE TRANSACTIONS, deliberately: `org_session` commits on exit,
     # and the sequence being tested is grant -> revoke -> grant as three
     # operator acts, not three statements one operator ran without leaving.
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         first = await create_authorization(
             session, org.org_id, actor_id=org.user_id, prefix="10.6.0.0/24"
         )
         first_id = first.id
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await revoke_authorization(
             session, org.org_id, actor_id=org.user_id, authorization_id=first_id
         )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await create_authorization(
             session, org.org_id, actor_id=org.user_id, prefix="10.6.0.0/24"
         )
@@ -192,7 +193,7 @@ async def test_revocation_stamps_and_the_row_stays(
     stay answerable, which a DELETE destroys."""
     org = await seed_org(admin_engine, "push-revoke")
     row_id = await seed_push_authorization(admin_engine, org, "10.7.0.0/24")
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await revoke_authorization(
             session, org.org_id, actor_id=org.user_id, authorization_id=row_id
         )
@@ -221,7 +222,7 @@ async def test_revoking_twice_is_a_conflict(
 ) -> None:
     org = await seed_org(admin_engine, "push-revoke2")
     row_id = await seed_push_authorization(admin_engine, org, "10.8.0.0/24", revoked=True)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushConflictError):
             await revoke_authorization(
                 session, org.org_id, actor_id=org.user_id, authorization_id=row_id
@@ -247,7 +248,7 @@ async def test_an_expired_grant_is_listed_and_a_revoked_one_is_not(
     )
     await seed_push_authorization(admin_engine, org, "10.22.0.0/24", revoked=True)
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         active = {str(r.prefix) for r in await list_authorizations(session, org.org_id)}
         everything = {
             str(r.prefix)
@@ -334,7 +335,7 @@ async def test_a_uuid_that_does_not_exist_is_not_found(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org = await seed_org(admin_engine, "push-missing")
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushNotFoundError):
             await revoke_authorization(
                 session, org.org_id, actor_id=org.user_id, authorization_id=uuid4()

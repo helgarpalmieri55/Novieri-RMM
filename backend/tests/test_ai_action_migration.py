@@ -28,6 +28,7 @@ import pytest
 from sqlalchemy import text as sqltext
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from tests.health_action_fixtures import seed_approved_action
 from tests.health_fixtures import seed_org
@@ -135,7 +136,7 @@ async def test_cross_org_read_is_isolated(
     await _seed_ai_action(admin_engine, a, approved_action_key="theirs")
     mine = await _seed_ai_action(admin_engine, b)
 
-    async with org_session(b.org_id, engine=app_engine) as session:
+    async with org_session(b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         seen = [r[0] for r in (await session.execute(sqltext("SELECT id FROM ai_action"))).all()]
     assert seen == [mine], seen
 

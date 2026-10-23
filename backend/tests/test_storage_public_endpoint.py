@@ -45,6 +45,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.signing import LocalEd25519Signer
 from app.core.storage import ObjectStore, PublicEndpointError, resolve_presign_endpoint
@@ -259,7 +260,7 @@ async def test_a_dispatched_deploy_job_carries_a_resolvable_artifact_url(
         await session.commit()
 
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "sign.key"), default_ttl_s=900)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pending = await dispatch_deployment(
             session,
             engine,

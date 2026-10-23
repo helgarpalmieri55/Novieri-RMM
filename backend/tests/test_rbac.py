@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.api.deps import require_permission
+from app.core.client_scope import ClientScope
 from app.core.rbac import (
     PERMISSIONS,
     PLATFORM_OPERATOR_CODES,
@@ -13,14 +14,14 @@ from app.core.rbac import (
     user_permission_codes,
 )
 from app.core.tenancy import org_session
-from app.models import DeviceGroup, Organization, Permission, Role, RolePermission, User, UserRole
+from app.models import Client, Organization, Permission, Role, RolePermission, User, UserRole
 
 
 async def _seed_user_with_role(
     admin_engine: AsyncEngine,
     role_name: str,
     slug_prefix: str,
-    device_group: bool = False,
+    client: bool = False,
 ) -> tuple[UUID, UUID, UUID | None]:
     slug = f"{slug_prefix}-{uuid4().hex[:6]}"
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
@@ -32,18 +33,16 @@ async def _seed_user_with_role(
         role = (
             await session.execute(select(Role).where(Role.name == role_name, Role.org_id.is_(None)))
         ).scalar_one()
-        group_id: UUID | None = None
-        if device_group:
-            group = DeviceGroup(org_id=org.id, name="helpdesk-fleet")
-            session.add(group)
+        client_id: UUID | None = None
+        if client:
+            customer = Client(org_id=org.id, name="helpdesk-customer")
+            session.add(customer)
             await session.flush()
-            group_id = group.id
+            client_id = customer.id
         await session.flush()
-        session.add(
-            UserRole(org_id=org.id, user_id=user.id, role_id=role.id, device_group_id=group_id)
-        )
+        session.add(UserRole(org_id=org.id, user_id=user.id, role_id=role.id, client_id=client_id))
         await session.commit()
-        return org.id, user.id, group_id
+        return org.id, user.id, client_id
 
 
 async def test_permission_registry_complete() -> None:
@@ -206,13 +205,13 @@ async def test_notification_admin_is_not_technician_grant(
     org_id, tech_id, _ = await _seed_user_with_role(
         admin_engine, "technician", "rbac-notif-t"
     )
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert not await has_permission(session, tech_id, "notification.admin")
 
     org_id, admin_id, _ = await _seed_user_with_role(
         admin_engine, "org-admin", "rbac-notif-a"
     )
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await has_permission(session, admin_id, "notification.read")
         assert await has_permission(session, admin_id, "notification.admin")
 
@@ -228,12 +227,12 @@ async def test_sla_permissions_are_not_technician_grants(
     # adding `technician` to ROLE_GRANTS for convenience is exactly what this
     # test exists to fail on.
     org_id, tech_id, _ = await _seed_user_with_role(admin_engine, "technician", "rbac-sla-t")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert not await has_permission(session, tech_id, "sla.read")
         assert not await has_permission(session, tech_id, "sla.admin")
 
     org_id, admin_id, _ = await _seed_user_with_role(admin_engine, "org-admin", "rbac-sla-a")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await has_permission(session, admin_id, "sla.read")
         assert await has_permission(session, admin_id, "sla.admin")
 
@@ -242,7 +241,7 @@ async def test_technician_can_dispatch_but_not_manage_enrollment(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, user_id, _ = await _seed_user_with_role(admin_engine, "technician", "rbac-tech")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await has_permission(session, user_id, "jobs.dispatch")
         assert not await has_permission(session, user_id, "enrollment.manage")
 
@@ -251,7 +250,7 @@ async def test_auditor_reads_audit_but_cannot_dispatch(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, user_id, _ = await _seed_user_with_role(admin_engine, "auditor", "rbac-aud")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await has_permission(session, user_id, "audit.read")
         assert not await has_permission(session, user_id, "jobs.dispatch")
 
@@ -279,7 +278,7 @@ async def test_org_admin_has_every_permission_except_the_platform_operator_codes
     a red test to grant it to every tenant.
     """
     org_id, user_id, _ = await _seed_user_with_role(admin_engine, "org-admin", "rbac-adm")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         codes = await user_permission_codes(session, user_id)
     assert codes == set(PERMISSIONS) - PLATFORM_OPERATOR_CODES
     assert codes & PLATFORM_OPERATOR_CODES == set()
@@ -294,12 +293,12 @@ async def test_the_platform_operator_codes_are_held_by_super_admin_and_nobody_el
     console surface (`app/core/rbac_admin.py`), which is exactly the property a
     cross-tenant read needs behind it."""
     org_id, admin_id, _ = await _seed_user_with_role(admin_engine, "org-admin", "rbac-plat-a")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         for code in sorted(PLATFORM_OPERATOR_CODES):
             assert not await has_permission(session, admin_id, code), code
 
     org_id, su_id, _ = await _seed_user_with_role(admin_engine, "super-admin", "rbac-plat-s")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         for code in sorted(PLATFORM_OPERATOR_CODES):
             assert await has_permission(session, su_id, code), code
 
@@ -359,12 +358,12 @@ async def test_an_org_admin_reads_the_release_catalogue_but_cannot_publish_to_it
     both. 0060's own docstring says read "is needed by anyone who installs an
     agent"; an org that cannot list the catalogue cannot onboard a machine."""
     org_id, admin_id, _ = await _seed_user_with_role(admin_engine, "org-admin", "rbac-rel-a")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await has_permission(session, admin_id, "agent.release.read")
         assert not await has_permission(session, admin_id, "agent.release.manage")
 
     org_id, su_id, _ = await _seed_user_with_role(admin_engine, "super-admin", "rbac-rel-s")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         # BOTH on the operator, not just the one that moved. Publishing without
         # being able to list what is published is a console page the publisher
         # cannot open (`frontend/src/shell/nav.ts` gates Agent Packages on
@@ -420,48 +419,75 @@ async def test_user_without_roles_has_nothing(
         session.add(user)
         await session.commit()
         org_id, user_id = org.id, user.id
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await user_permission_codes(session, user_id) == set()
         assert not await has_permission(session, user_id, "devices.read")
 
 
-async def test_group_scoped_role_limits_to_that_group(
+async def test_client_scoped_role_limits_to_that_client(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
-    org_id, user_id, group_id = await _seed_user_with_role(
-        admin_engine, "technician", "rbac-scope", device_group=True
+    org_id, user_id, client_id = await _seed_user_with_role(
+        admin_engine, "technician", "rbac-scope", client=True
     )
-    assert group_id is not None
-    async with org_session(org_id, engine=app_engine) as session:
-        # granted within the scoped group
-        assert await has_permission(session, user_id, "jobs.dispatch", device_group_id=group_id)
-        # not granted org-wide, nor for a different group
+    assert client_id is not None
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
+        # granted within the scoped client
+        assert await has_permission(session, user_id, "jobs.dispatch", client_id=client_id)
+        # not granted for every client, nor for a different client
         assert not await has_permission(session, user_id, "jobs.dispatch")
-        assert not await has_permission(
-            session, user_id, "jobs.dispatch", device_group_id=uuid4()
+        assert not await has_permission(session, user_id, "jobs.dispatch", client_id=uuid4())
+
+
+async def test_an_all_clients_grant_counts_when_a_client_is_named(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """A grant with `client_id IS NULL` is every client, including this one.
+
+    THE HALF OF THE RULE THE SCOPED TEST CANNOT SEE. Asking about one client
+    must still count the user's all-clients grants, and a filter written as
+    `scoped_client == client_id` passes every test that asks about no client
+    (None == None) while silently dropping an org-wide technician from every
+    request that names a client -- which is how a per-client console would lock
+    out the very people who administer all of them.
+    """
+    org_id, user_id, _ = await _seed_user_with_role(admin_engine, "technician", "rbac-allcl")
+    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
+        customer = Client(org_id=org_id, name="some-customer")
+        session.add(customer)
+        await session.commit()
+        client_id = customer.id
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
+        assert await has_permission(session, user_id, "jobs.dispatch", client_id=client_id)
+        assert "jobs.dispatch" in await user_permission_codes(
+            session, user_id, client_id=client_id
+        )
+        # Naming no client, and naming one, give an all-clients grant the same answer.
+        assert await user_permission_codes(session, user_id) <= await user_permission_codes(
+            session, user_id, client_id=client_id
         )
 
 
 async def test_docs_permission_grants(admin_engine, app_engine) -> None:
     org_id, tech_id, _ = await _seed_user_with_role(admin_engine, "technician", "rbac-docs-t")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await has_permission(session, tech_id, "docs.read")
         assert await has_permission(session, tech_id, "docs.manage")
 
     org_id, ro_id, _ = await _seed_user_with_role(admin_engine, "read-only", "rbac-docs-r")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await has_permission(session, ro_id, "docs.read")
         assert not await has_permission(session, ro_id, "docs.manage")
 
 
 async def test_remote_permission_grants(admin_engine, app_engine) -> None:
     org_id, tech_id, _ = await _seed_user_with_role(admin_engine, "technician", "rbac-remote-t")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await has_permission(session, tech_id, "remote.control")
         assert not await has_permission(session, tech_id, "remote.recordings.read")
 
     org_id, aud_id, _ = await _seed_user_with_role(admin_engine, "auditor", "rbac-remote-a")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await has_permission(session, aud_id, "remote.recordings.read")
         assert not await has_permission(session, aud_id, "remote.control")
 

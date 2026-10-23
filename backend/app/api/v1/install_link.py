@@ -101,7 +101,9 @@ async def get_install_link(
     ctx: AuthContext = Depends(require_permission("enrollment.link.manage")),
 ) -> InstallLinkOut:
     """The install link's settings: whether it is on, where it answers, its limit."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         return _out(await svc.view(session, ctx.org_id, datetime.now(UTC)))
 
 
@@ -112,7 +114,9 @@ async def put_install_link(
     ctx: AuthContext = Depends(require_permission("enrollment.link.manage")),
 ) -> InstallLinkSaved:
     now = datetime.now(UTC)
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             minted = await svc.save(
                 session,
@@ -137,7 +141,9 @@ async def regenerate_install_link(
     ctx: AuthContext = Depends(require_permission("enrollment.link.manage")),
 ) -> InstallLinkSaved:
     now = datetime.now(UTC)
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         code = await svc.regenerate(session, org_id=ctx.org_id, actor_id=ctx.user_id, now=now)
         view = await svc.view(session, ctx.org_id, now)
     return _saved(view, svc.link_url(_base(request), code))
@@ -163,7 +169,7 @@ async def download_install_link_msi(
     state = request.app.state
     try:
         built = await msi_svc.msi_for_link(
-            lambda: org_session(ctx.org_id, engine=state.app_engine),
+            lambda: org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients),
             _object_store(request),
             org_id=ctx.org_id,
             actor_id=ctx.user_id,

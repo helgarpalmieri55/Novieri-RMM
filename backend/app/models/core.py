@@ -69,6 +69,11 @@ class User(TimestampMixin, Base):
     phone: Mapped[str | None] = mapped_column(String(40), default=None)
     timezone: Mapped[str | None] = mapped_column(String(64), default=None)
     locale: Mapped[str | None] = mapped_column(String(16), default=None)
+    # Spec §1.3. `staff` is a Novieri technician (console); `contact` is a
+    # person of one client (portal only, refused by `auth_context`). The CHECK
+    # `ck_users_kind_client` (migration 0230) ties the two columns together.
+    kind: Mapped[str] = mapped_column(String(10), default="staff", server_default="staff")
+    client_id: Mapped[UUID | None] = mapped_column(ForeignKey("clients.id"), default=None)
 
 
 class Role(Base):
@@ -98,7 +103,7 @@ class RolePermission(Base):
 
 
 class UserRole(Base):
-    """One grant of one role to one user, org-wide or scoped to a device group.
+    """One grant of one role to one user, for every client or for one client (spec §2.1).
 
     IT TAKES BOTH ENTRIES BELOW TO SAY "ONCE", and the constraint alone said it
     only for the half that matters least. `UNIQUE (user_id, role_id,
@@ -128,13 +133,13 @@ class UserRole(Base):
 
     __tablename__ = "user_roles"
     __table_args__ = (
-        UniqueConstraint("user_id", "role_id", "device_group_id"),
+        UniqueConstraint("user_id", "role_id", "client_id"),
         Index(
             "uq_user_roles_user_role_org_wide",
             "user_id",
             "role_id",
             unique=True,
-            postgresql_where=text("device_group_id IS NULL"),
+            postgresql_where=text("client_id IS NULL"),
         ),
     )
 
@@ -142,9 +147,8 @@ class UserRole(Base):
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     role_id: Mapped[UUID] = mapped_column(ForeignKey("roles.id"))
-    device_group_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("device_groups.id"), default=None
-    )
+    # Spec §2.1: NULL is "every client, including ones created later".
+    client_id: Mapped[UUID | None] = mapped_column(ForeignKey("clients.id"), default=None)
 
 
 class DeviceGroup(TimestampMixin, Base):

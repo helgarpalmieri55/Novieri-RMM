@@ -38,6 +38,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import GENESIS_HASH, AuditEntry, AuditService
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Organization
 
@@ -100,13 +101,13 @@ async def test_a_batch_takes_one_lock_and_writes_one_unbroken_chain(
     """
     org_id = await _make_org(admin_engine, "audit-batch")
     audit = AuditService()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         counter = _LockCountingSession(session)
         written = await audit.record_many(counter, org_id=org_id, entries=_entries(50))
     assert counter.locks == 1
     assert len(written) == 50
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rows = list(
             (
                 await session.execute(select(AuditEvent).order_by(AuditEvent.id))
@@ -131,7 +132,7 @@ async def test_a_batch_continues_an_existing_chain_and_leaves_it_continuable(
     """
     org_id = await _make_org(admin_engine, "audit-mixed")
     audit = AuditService()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         first = await audit.record(
             session, org_id=org_id, actor_type="user", actor_id=None,
             action="test.before", target_type="thing", target_id="before",
@@ -145,7 +146,7 @@ async def test_a_batch_continues_an_existing_chain_and_leaves_it_continuable(
     assert batch[0].prev_hash == first.hash
     assert last.prev_hash == batch[-1].hash
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = await audit.verify(session, org_id)
     assert result.ok and result.count == 7
 
@@ -160,12 +161,12 @@ async def test_an_empty_batch_writes_nothing_and_locks_nothing(
     """
     org_id = await _make_org(admin_engine, "audit-empty")
     audit = AuditService()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         counter = _LockCountingSession(session)
         assert await audit.record_many(counter, org_id=org_id, entries=[]) == []
     assert counter.locks == 0
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert (await audit.verify(session, org_id)).count == 0
 
 
@@ -183,16 +184,16 @@ async def test_two_orgs_batches_do_not_join_each_others_chains(
     org_a = await _make_org(admin_engine, "audit-two-a")
     org_b = await _make_org(admin_engine, "audit-two-b")
     audit = AuditService()
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         await audit.record_many(session, org_id=org_a, entries=_entries(3))
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         b_batch = await audit.record_many(session, org_id=org_b, entries=_entries(3))
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         await audit.record_many(session, org_id=org_a, entries=_entries(3))
 
     assert b_batch[0].prev_hash == GENESIS_HASH
     for org_id, expected in ((org_a, 6), (org_b, 3)):
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             result = await audit.verify(session, org_id)
         assert result.ok and result.count == expected, org_id
 
@@ -210,12 +211,12 @@ async def test_a_keyed_batch_is_hmac_linked_like_a_keyed_single_append(
     """
     org_id = await _make_org(admin_engine, "audit-keyed")
     keyed = AuditService(hmac_key=_KEY)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await keyed.record_many(session, org_id=org_id, entries=_entries(4))
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert (await keyed.verify(session, org_id)).ok
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert not (await AuditService().verify(session, org_id)).ok
 
 
@@ -232,7 +233,7 @@ async def test_the_verify_route_still_passes_over_a_batched_chain(api_env) -> No
     from app.modules.ipam.candidates import SweepSighting, auto_create_from_sweep
 
     org_id = await api_env.create_org("audit-verify")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await AuditService().record(
             session, org_id=org_id, actor_type="user", actor_id=None,
             action="test.before", target_type="thing", target_id="before",

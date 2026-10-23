@@ -39,6 +39,7 @@ from app.core.ai.executor_staff import ToolError, invoke_tool
 from app.core.ai.providers import TextBlock, ToolCallBlock
 from app.core.ai.tools.registry import _FORBIDDEN_GATES
 from app.core.ai.types import ReadTool, ToolResult
+from app.core.client_scope import ClientScope
 from app.models import AiInjectionFlag, AuditEvent
 from app.modules.ai_admin import api as api_module
 from app.modules.ai_admin.profile import ADMIN_PROFILE
@@ -640,7 +641,9 @@ async def _seed_injected_ticket(email_env: Any) -> UUID:
         subject="Printer trouble",
         body=INJECTION_BODY,
     )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )

@@ -31,6 +31,7 @@ from moto import mock_aws
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.signing import LocalEd25519Signer
 from app.core.storage import ObjectStore
@@ -136,7 +137,7 @@ async def test_success_result_flips_run_and_creates_backup_point(
     admin_engine: AsyncEngine, app_engine: AsyncEngine, object_store: ObjectStore
 ) -> None:
     org_id, repo_id, device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRunResult(
             state="success",
             manifest_ref="manifests/x",
@@ -182,7 +183,7 @@ async def test_failed_result_fails_run_with_no_backup_point(
     admin_engine: AsyncEngine, app_engine: AsyncEngine, object_store: ObjectStore
 ) -> None:
     org_id, _repo_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRunResult(
             state="failed",
             error="disk full",
@@ -218,7 +219,7 @@ async def test_failed_result_does_not_construct_object_store(
     factory below raises if it is ever called, and this test asserts it
     is not."""
     org_id, _repo_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRunResult(
             state="failed",
             error="disk full",
@@ -252,7 +253,7 @@ async def test_out_of_domain_state_coerced_to_failed(
     run, never create a `BackupPoint` — with the original value recorded in
     the audit metadata."""
     org_id, _repo_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRunResult.model_construct(
             state="running",  # type: ignore[arg-type]  # deliberately out-of-domain
             manifest_ref=None,
@@ -298,7 +299,7 @@ async def test_success_without_manifest_ref_coerced_to_failed(
     crash or wedge the job (the Task-8-deploy coercion lesson applied to
     this success-without-manifest case)."""
     org_id, _repo_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRunResult(
             state="success",
             manifest_ref=None,
@@ -339,7 +340,7 @@ async def test_success_derives_the_full_manifest_ref_from_the_suffix(
     server owns key construction -- the same derived-never-accepted rule
     `presign_backup_object` is built on."""
     org_id, repo_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRunResult(
             state="success",
             manifest_ref="manifests/deadbeef",
@@ -381,7 +382,7 @@ async def test_an_unsafe_suffix_fails_the_run_and_writes_no_point(
     """A suffix is endpoint-supplied. Rejecting it here is what stops an
     endpoint naming another tenant's key."""
     org_id, _repo_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRunResult(
             state="success",
             manifest_ref=suffix,
@@ -430,7 +431,7 @@ async def test_a_control_character_in_the_suffix_fails_the_run_and_writes_no_poi
     hand-rolled version of `_resolve_manifest_ref` omitted this check
     entirely, and a suffix like this one would have passed straight through."""
     org_id, _repo_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRunResult(
             state="success",
             manifest_ref="manifests/x\ty",
@@ -466,7 +467,7 @@ async def test_an_absolute_ref_from_an_older_agent_is_refused(
     """An agent that sends a full s3:// ref is naming a bucket, which is the
     thing the endpoint is not allowed to choose."""
     org_id, _repo_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRunResult(
             state="success",
             manifest_ref="s3://someone-elses-bucket/k",
@@ -502,7 +503,7 @@ async def test_no_matching_run_row_is_a_graceful_no_op(
     must never raise — the agent's report should never be able to fail the
     job over server-side bookkeeping."""
     org_id, _repo_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         # Detach the row from this job so there's nothing to match.
         run = (
             await session.execute(select(BackupRun).where(BackupRun.job_id == job.id))
@@ -536,7 +537,7 @@ async def test_another_orgs_job_row_is_invisible_to_the_result_session_under_rls
     org_a, _repo_a, _device_a, job_a = await _setup_job(admin_engine)
     org_b, _repo_b, _device_b, _job_b = await _setup_job(admin_engine)
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRunResult(
             state="success",
             manifest_ref="s3://x",
@@ -553,7 +554,7 @@ async def test_another_orgs_job_row_is_invisible_to_the_result_session_under_rls
         ).scalars().all()
         assert rows == []  # org B's RLS-scoped session cannot see org A's row
 
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         run = (
             await session.execute(select(BackupRun).where(BackupRun.job_id == job_a.id))
         ).scalar_one()
@@ -585,7 +586,7 @@ async def test_valid_result_through_job_engine_reconciles_and_queues_ui_event(
 
     org_id, repo_id, device_id, job = await _setup_job(admin_engine)
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job.id))).scalar_one()
         await engine.mark_dispatched(session, job)
         await engine.complete(

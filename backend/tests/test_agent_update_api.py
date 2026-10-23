@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.approved_actions import NON_APPROVABLE_REASONS, non_approvable_reason
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore, agent_release_suffix
 from app.core.tenancy import org_session
 from app.jobs.direct_dispatch import MODULE_GOVERNED_REASONS
@@ -265,7 +266,7 @@ async def test_start_materializes_targets_and_activates_the_pilot(api_env: ApiEn
     assert by_device[str(eligible)]["state"] == "pending"
     assert by_device[str(eligible)]["from_version"] == "1.0.0"
 
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         actions = [
             e.action
             for e in (
@@ -317,7 +318,7 @@ async def test_a_non_pilot_ring_needs_a_stable_release(api_env: ApiEnv) -> None:
         f"{BASE}/update-rollouts/{out['id']}/rings/{pilot_id}/close", headers=headers
     )
     assert closed.status_code == 200, closed.text
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         ring = await s.get_one(AgentUpdateRing, UUID(pilot_id))
         ring.state = "done"
 
@@ -357,7 +358,7 @@ async def test_pause_resume_cancel(api_env: ApiEnv) -> None:
     ).json()["state"] == "running"
     cancelled = await api_env.client.post(f"{BASE}/update-rollouts/{rid}/cancel", headers=headers)
     assert cancelled.json()["state"] == "cancelled"
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         states = set(
             (
                 await s.execute(

@@ -47,6 +47,7 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Agent, Device, Job, Organization
 from app.modules.health.actions import ActionOutcome, execute_pending_actions
@@ -874,7 +875,7 @@ async def _for_each_org(
     total = 0
     for org_id in await _org_ids(admin_engine):
         try:
-            async with org_session(org_id, engine=engine) as session:
+            async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
                 count, envelopes = await body(session, org_id)
         except Exception:  # noqa: BLE001
             logger.error(

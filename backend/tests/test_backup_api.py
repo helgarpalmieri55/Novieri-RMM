@@ -19,6 +19,7 @@ from moto import mock_aws
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.models import AuditEvent, BackupPoint, BackupRun, Device, User
@@ -71,7 +72,7 @@ async def _seed_point(api_env, org_id: UUID, device_id: UUID, actor_id: UUID) ->
     object storage. Requires `api_env.app.state.object_store` already pinned
     to a moto-backed `ObjectStore` (see `mock_aws()` in the calling test).
     Returns `(repository_id, backup_point_id)`."""
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
             session, api_env.app.state.vault, org_id=org_id, actor_id=actor_id,
             name=f"repo-{uuid4().hex[:8]}",
@@ -79,7 +80,7 @@ async def _seed_point(api_env, org_id: UUID, device_id: UUID, actor_id: UUID) ->
         await session.commit()
         repo_id = repo.id
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         key = await open_repo_key(
             session, api_env.app.state.vault, org_id=org_id, repository_id=repo_id
         )
@@ -269,7 +270,7 @@ async def test_run_dispatches_signed_job_and_audits_user_actor(api_env) -> None:
     assert published["job"]["id"] == job_ids[0]
     assert published["sig"]
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         event = (
             await session.execute(
                 select(AuditEvent).where(AuditEvent.action == "backup.dispatched")
@@ -396,7 +397,7 @@ async def test_restore_dispatches_signed_job_and_audits_user_actor(api_env) -> N
         assert published is not None, "expected a backup.restore job to be published"
         assert published["job"]["id"] == job_ids[0]
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         event = (
             await session.execute(
                 select(AuditEvent).where(AuditEvent.action == "backup.restore_dispatched")
@@ -436,7 +437,7 @@ async def test_verify_dispatches_signed_job(api_env) -> None:
     assert len(resp.json()["job_ids"]) == 1
     _assert_no_secrets(resp)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         event = (
             await session.execute(
                 select(AuditEvent).where(AuditEvent.action == "backup.restore_dispatched")
@@ -487,7 +488,7 @@ async def test_report_export_audits_evidence_exported(api_env) -> None:
     _assert_no_secrets(resp)
     assert "device_id" in resp.text  # CSV header row
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         event = (
             await session.execute(
                 select(AuditEvent).where(AuditEvent.action == "backup.evidence_exported")

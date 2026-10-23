@@ -8,6 +8,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -44,7 +45,7 @@ async def test_handler_invoked_on_success(admin_engine, app_engine, job_engine) 
 
     register(JobType("test.handled", _NoParams, result_handler=handler))
     org_id, device_id = await _org_device(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await job_engine.create(
             session, org_id=org_id, type="test.handled", target_device_id=device_id, params={}
         )
@@ -64,7 +65,7 @@ async def test_handler_not_invoked_on_failure(admin_engine, app_engine, job_engi
 
     register(JobType("test.handled2", _NoParams, result_handler=handler))
     org_id, device_id = await _org_device(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await job_engine.create(
             session, org_id=org_id, type="test.handled2", target_device_id=device_id, params={}
         )
@@ -81,7 +82,7 @@ async def test_raising_handler_fails_job_without_escaping(
 
     register(JobType("test.raises", _NoParams, result_handler=handler))
     org_id, device_id = await _org_device(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await job_engine.create(
             session, org_id=org_id, type="test.raises", target_device_id=device_id, params={}
         )

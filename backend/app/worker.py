@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from app.core.ai import retention as ai_retention_module
 from app.core.ai import sweep as ai_action_sweep_module
 from app.core.audit import MissingAuditKeyError, audit_service, load_audit_hmac_key
+from app.core.client_scope import ClientScope
 from app.core.config import get_settings
 from app.core.errors.capture import capture_exception
 from app.core.errors.store import DRAIN_INTERVAL_S, drain_once
@@ -271,7 +272,7 @@ async def sweep_org(
     scan over a set bounded by ten minutes of dispatches, so no index moves.
     """
     redispatch: list[tuple[UUID, dict[str, Any]]] = []
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         expired = await job_engine.expire_due(session)
         cutoff = datetime.now(UTC) - STUCK_DISPATCH_AFTER
         stuck = (
@@ -360,7 +361,7 @@ async def drain_outbox(org_id: UUID, app_engine: AsyncEngine) -> int:
     """
     now = datetime.now(UTC)
     processed = 0
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         events = (
             (
                 await session.execute(
@@ -470,7 +471,7 @@ async def deliver_pending(
     """
     now = datetime.now(UTC)
     claimed_ids: list[UUID] = []
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         cutoff = now - STUCK_NOTIFICATION_CLAIM_AFTER
         stuck = (
             (
@@ -515,7 +516,7 @@ async def deliver_pending(
 
     delivered = 0
     for delivery_id in claimed_ids:
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             claimed_delivery = (
                 await session.execute(
                     select(NotificationDelivery).where(
@@ -705,7 +706,9 @@ async def ai_action_expiry_all_orgs(now: datetime | None = None) -> int:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as scoped:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as scoped:
                     total += await ai_action_sweep_module.expire_stale_actions(
                         scoped, org_id=org_id, now=now
                     )
@@ -771,7 +774,7 @@ async def patch_scan_sweep_org(
     `POST /scan` handler does: create + sign inside the tenant transaction,
     publish after commit. Returns the count dispatched."""
     pending: list[tuple[UUID, dict[str, Any]]] = []
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         # ONLY DEVICES WHOSE AGENT IS CONNECTED, and this is the fix for a
         # storm observed on the operator's deployment on 2026-08-20: 29
         # `patch.scan` jobs, one an hour, every one `expired` with 0 attempts,
@@ -924,7 +927,7 @@ async def inventory_collect_sweep_org(
     """Dispatch the daily signed `inventory.collect` to this org's due devices
     (`app/modules/inventory/schedule.py`). Create + sign in the tenant
     transaction, publish after commit. Returns the count dispatched."""
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pending = await inventory_schedule_module.dispatch_scheduled(
             session, job_engine, org_id, now=now
         )
@@ -943,7 +946,7 @@ async def logs_ship_sweep_org(
 ) -> int:
     """Dispatch signed `logs.ship` jobs at the org policy's interval
     (`app/modules/security_logs/schedule.py`). Publishes after commit."""
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pending = await logs_ship_schedule_module.dispatch_due(
             session, job_engine, org_id, now=now
         )
@@ -1022,7 +1025,7 @@ async def ipam_sweep_dispatch_org(
     that rolled back. Returns the count dispatched.
     """
     pending: list[tuple[UUID, dict[str, Any]]] = []
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         subnet_ids = await ipam_sweep_module.due_subnet_ids(session, org_id, now=now)
         for subnet_id in subnet_ids:
             try:
@@ -1116,7 +1119,9 @@ async def patch_apply_sweep_all_orgs(now: datetime) -> int:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     pending = await dispatch_apply(session, job_engine, org_id=org_id, now=now)
                 # Transaction committed: safe to publish the signed jobs.
                 for _job_id, device_id, envelope in pending:
@@ -1148,7 +1153,9 @@ async def patch_reboot_sweep_all_orgs(now: datetime) -> int:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     pending = await run_reboot_sweep(session, job_engine, org_id=org_id, now=now)
                 for device_id, envelope in pending:
                     await publish_job(redis, device_id, envelope)
@@ -1179,7 +1186,9 @@ async def script_policy_sweep_all_orgs(now: datetime) -> int:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     pending = await run_policy_sweep(session, job_engine, org_id=org_id, now=now)
                 for _job_id, device_id, envelope in pending:
                     await publish_job(redis, device_id, envelope)
@@ -1230,7 +1239,9 @@ async def deploy_window_sweep_all_orgs(now: datetime) -> int:
         for org_id in org_ids:
             pending: list[tuple[UUID, UUID, dict[str, Any]]] = []
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     deployment_ids = (
                         await session.execute(
                             select(Deployment.id).where(
@@ -1302,7 +1313,9 @@ async def backup_window_sweep_all_orgs(now: datetime) -> int:
         for org_id in org_ids:
             pending: list[tuple[UUID, UUID, dict[str, Any]]] = []
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     device_ids = (
                         await session.execute(select(Device.id).where(Device.org_id == org_id))
                     ).scalars().all()
@@ -1344,7 +1357,9 @@ async def backup_reconcile_all_orgs(now: datetime) -> int:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     counts = await reconcile_stuck(session, org_id, now=now)
                 total += counts["runs"] + counts["restores"]
             except Exception as exc:  # noqa: BLE001 - contained, see `_OrgCycleFailures`
@@ -1390,13 +1405,15 @@ async def backup_replication_all_orgs(now: datetime) -> int:
             try:
                 if time.monotonic() > deadline:
                     break
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     work = await pending_copies(session, org_id)
                 for item in work:
                     if time.monotonic() > deadline:
                         break
                     done = await replicate_point(
-                        partial(org_session, org_id, engine=app_engine),
+                        partial(org_session, org_id, engine=app_engine, clients=ClientScope.all()),
                         vault=vault,
                         local_store=local_store,
                         client_factory=build_client,
@@ -1434,7 +1451,9 @@ async def backup_offsite_test_all_orgs(now: datetime) -> int:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     targets = (
                         await session.execute(
                             select(BackupOffsiteTarget).where(
@@ -1472,7 +1491,9 @@ async def backup_offsite_gc_all_orgs(now: datetime) -> int:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     counts = await offsite_gc(
                         session,
                         vault=vault,
@@ -1511,7 +1532,9 @@ async def backup_test_restore_all_orgs(now: datetime) -> int:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     pending = await dispatch_due_test_restores(
                         session, job_engine, vault, object_store, org_id=org_id, now=now
                     )
@@ -1543,7 +1566,9 @@ async def backup_health_all_orgs(now: datetime) -> int:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     counts = await run_backup_health_sweep(session, org_id, now=now)
                 opened += counts["opened"]
             except Exception as exc:  # noqa: BLE001 - contained, see `_OrgCycleFailures`
@@ -1604,7 +1629,9 @@ async def backup_retention_gc_all_orgs(now: datetime) -> int:
         for org_id in org_ids:
             org_pruned = 0
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     device_ids = (
                         await session.execute(select(Device.id).where(Device.org_id == org_id))
                     ).scalars().all()
@@ -1701,7 +1728,9 @@ async def backup_verification_sweep_all_orgs(now: datetime) -> int:
         for org_id in org_ids:
             org_verified = 0
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     point_ids = (
                         await session.execute(
                             select(BackupPoint.id).where(
@@ -1781,7 +1810,9 @@ async def provision_enroll_dispatch_sweep_all_orgs(now: datetime) -> int:
         for org_id in org_ids:
             pending: list[tuple[UUID, UUID, dict[str, Any]]] = []
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     run_ids = (
                         await session.execute(
                             select(ProvisionRun.id).where(
@@ -1864,7 +1895,9 @@ async def provision_timeout_sweep_all_orgs(now: datetime) -> int:
         for org_id in org_ids:
             org_failed = 0
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     stale = (
                         await session.execute(
                             select(ProvisionRun).where(
@@ -1965,7 +1998,9 @@ async def licenses_compliance_sweep_all_orgs(now: datetime) -> int:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     summary = await compliance_summary(session, org_id)
                     for row in summary:
                         session.add(
@@ -2079,7 +2114,9 @@ async def push_run_tick_all_orgs(now: datetime | None = None) -> int:
         org_ids = await push_runs_module.org_ids_with_live_runs(admin_engine)
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     envelopes = await push_runs_module.tick(
                         session, org_id, dispatcher=dispatcher, now=now
                     )
@@ -2267,7 +2304,9 @@ async def device_group_reevaluate_all_orgs() -> int:
         for org_id in org_ids:
             pending: list[tuple[UUID, dict[str, Any]]] = []
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     result = await reevaluate_org_membership(session, org_id=org_id)
                     if result.devices_moved:
                         pending = await run_policy_reconcile(
@@ -2697,7 +2736,9 @@ async def platform_health_notify_all_orgs(now: datetime) -> int:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     total += await notify.notify_org(session, org_id, verdicts, now=now)
             except Exception as exc:  # noqa: BLE001 - contained, see `_OrgCycleFailures`
                 failures.contain(org_id, exc)
@@ -2722,7 +2763,9 @@ async def subscription_alerts_all_orgs(now: datetime) -> int:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     total += await subscription_alerts_module.emit_due_alerts(
                         session,
                         org_id,
@@ -2755,7 +2798,9 @@ async def install_link_auto_off_all_orgs(now: datetime) -> int:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     if await install_link_module.switch_off_due(session, org_id, now):
                         total += 1
             except Exception as exc:  # noqa: BLE001 - contained, see `_OrgCycleFailures`
@@ -2791,7 +2836,9 @@ async def review_rejections_all_orgs(now: datetime) -> int:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
             try:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     done = await device_review_module.complete_due_rejections(
                         session, org_id, now=now
                     )

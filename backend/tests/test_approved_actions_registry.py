@@ -39,6 +39,7 @@ from app.core.approved_actions import (
     get_approved_action,
     get_script_exemption,
 )
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 
 TABLES = ("approved_action", "approved_action_script_exemption")
@@ -129,11 +130,11 @@ async def test_approved_action_cross_org_read_returns_nothing(
         session.add(_action(a, key="secret-remediation"))
         await session.commit()
 
-    async with org_session(b.org_id, engine=app_engine) as session:
+    async with org_session(b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rows = (await session.execute(sqltext("SELECT key FROM approved_action"))).all()
     assert [r.key for r in rows] == []
 
-    async with org_session(a.org_id, engine=app_engine) as session:
+    async with org_session(a.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rows = (await session.execute(sqltext("SELECT key FROM approved_action"))).all()
     assert [r.key for r in rows] == ["secret-remediation"]
 
@@ -146,7 +147,7 @@ async def test_approved_action_cross_org_insert_is_rejected(
     a = await _seed_org(admin_engine, "aa-ins-a")
     b = await _seed_org(admin_engine, "aa-ins-b")
     with pytest.raises((DBAPIError, ProgrammingError)):
-        async with org_session(b.org_id, engine=app_engine) as session:
+        async with org_session(b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
             session.add(_action(a, key="planted"))
             await session.flush()
 
@@ -168,7 +169,7 @@ async def test_exemption_cross_org_read_returns_nothing(
         )
         await session.commit()
 
-    async with org_session(b.org_id, engine=app_engine) as session:
+    async with org_session(b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rows = (
             await session.execute(
                 sqltext("SELECT script_version FROM approved_action_script_exemption")
@@ -176,7 +177,7 @@ async def test_exemption_cross_org_read_returns_nothing(
         ).all()
     assert rows == []
 
-    async with org_session(a.org_id, engine=app_engine) as session:
+    async with org_session(a.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rows = (
             await session.execute(
                 sqltext("SELECT script_version FROM approved_action_script_exemption")
@@ -193,7 +194,7 @@ async def test_exemption_cross_org_insert_is_rejected(
     a = await _seed_org(admin_engine, "aa-exi-a")
     b = await _seed_org(admin_engine, "aa-exi-b")
     with pytest.raises((DBAPIError, ProgrammingError)):
-        async with org_session(b.org_id, engine=app_engine) as session:
+        async with org_session(b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
             session.add(
                 ApprovedActionScriptExemption(
                     org_id=a.org_id,

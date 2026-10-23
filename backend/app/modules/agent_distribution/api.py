@@ -109,7 +109,9 @@ async def list_releases_route(
     test_agent_release_api.py::test_the_catalogue_is_shared_across_orgs_by_design`
     pins what follows from that.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         return [_out(release) for release in await svc.list_releases(session)]
 
 
@@ -121,7 +123,9 @@ async def create_release_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("agent.release.manage")),
 ) -> ReleaseOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             release = await svc.create_release(
                 session,
@@ -171,7 +175,9 @@ async def upload_artifact_route(
     data = await read_bounded_body(request, _MAX_ARTIFACT_BYTES)
     if not data:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, tr("artifact body is empty"))
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             release = await svc.store_artifact(
                 session,
@@ -282,7 +288,9 @@ async def install_command_route(
     # this grants no capability they lacked; it only makes it convenient.
     ctx: AuthContext = Depends(require_permission("enrollment.manage")),
 ) -> InstallCommandOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             release = await svc.get_release(session, release_id)
         except NoResultFound as exc:
@@ -383,7 +391,9 @@ async def deployment_package_route(
     # separation cosmetic.
     ctx: AuthContext = Depends(require_permission("agent.release.read")),
 ) -> DeploymentPackageOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             release = await svc.get_release(session, release_id)
         except NoResultFound as exc:
@@ -463,7 +473,9 @@ async def deployment_token_route(
     # machines rather than one.
     ctx: AuthContext = Depends(require_permission("enrollment.manage")),
 ) -> DeploymentTokenOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             release = await svc.get_release(session, release_id)
         except NoResultFound as exc:

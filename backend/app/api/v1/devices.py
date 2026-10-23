@@ -382,7 +382,9 @@ async def list_devices(
     to a caller who also holds `people.read`: this route is gated
     `devices.read`, and who holds a machine is a fact about a person.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         with_holder = await has_permission(session, ctx.user_id, "people.read")
         page = await device_page(
             session,
@@ -495,7 +497,9 @@ async def list_asset_candidates(
     Gated `devices.read` rather than a new code: this is the fleet list's
     other half, and anyone who may see the fleet may see what is beside it.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         page = await candidates_svc.list_candidates(session, ctx.org_id, limit=limit)
         return CandidateListResponse(
             items=[CandidateOut(**vars(candidate)) for candidate in page.items],
@@ -518,7 +522,9 @@ async def promote_asset_candidates(
     an error -- two operators looking at the same list is the normal case.
     """
     overrides = body.model_dump(exclude_unset=True, exclude={"addresses"})
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         results = await candidates_svc.promote(
             session,
             ctx.org_id,
@@ -603,7 +609,9 @@ async def list_asset_suggestions(
     not a wider privilege than seeing the records. Resolving them is, and that
     route is gated `assets.manage`.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = list(
             (
                 await session.execute(
@@ -668,7 +676,9 @@ async def resolve_asset_suggestion(
     states for assets generally: deleting a record with history is a
     destructive act on evidence.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         suggestion = await session.get(SuggestedAssetMatch, suggestion_id)
         if suggestion is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such suggestion"))
@@ -749,7 +759,9 @@ async def get_device(
     request: Request,
     ctx: AuthContext = Depends(require_permission("devices.read")),
 ) -> DeviceOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         row = (
             await session.execute(
                 select(
@@ -855,7 +867,9 @@ async def approve_all_devices(
 ) -> ApproveAllOut:
     """Approve every listed computer that is still waiting for review. A
     computer that joined after the list was shown is left waiting."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             outcome = await review_svc.approve_all(
                 session,
@@ -883,7 +897,9 @@ async def approve_device(
 ) -> DeviceOut:
     """Approve a computer that joined through the install link. From now on it
     is an ordinary device and receives every job its organisation sends."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await review_svc.approve(
                 session,
@@ -908,7 +924,7 @@ async def reject_device(
     """Reject a computer that joined through the install link: its agent is told
     to uninstall itself and its certificate is revoked (spec §1.5)."""
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             outcome = await review_svc.reject(
                 session,
@@ -946,7 +962,9 @@ async def acknowledge_removal(
     """Say the agent of a rejected computer has been removed by hand. Only for
     a rejection that may have left it behind (the agent did not confirm, or is
     too old to remove itself); the row then leaves *Waiting for review*."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await review_svc.acknowledge_removal(
                 session,
@@ -977,7 +995,9 @@ async def create_asset(
     fields = body.model_dump(exclude_none=True)
     if body.primary_ip is not None:
         fields["primary_ip"] = str(body.primary_ip)
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         device = Device(
             org_id=ctx.org_id,
             # STAMPED, never taken from the body -- see AssetCreateRequest.
@@ -1019,7 +1039,9 @@ async def update_asset(
     if "architecture" in changes and changes["architecture"] is None:
         # `devices.architecture` is NOT NULL, default "" -- "unknown" is empty.
         changes["architecture"] = ""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         row = (
             await session.execute(
                 select(

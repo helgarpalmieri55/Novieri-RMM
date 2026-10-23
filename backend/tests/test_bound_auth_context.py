@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from app.api.deps import AuthContext, bound_auth_context
+from app.core.client_scope import ClientScope
 from app.core.logging import org_id_var, user_id_var
 
 
@@ -42,7 +43,9 @@ async def test_it_binds_org_and_user_for_the_duration_and_unbinds_after(
     org_id, user_id = uuid4(), uuid4()
 
     async def _fake_auth_context(request: object) -> AuthContext:
-        return AuthContext(org_id=org_id, user_id=user_id, claims=_Claims())
+        return AuthContext(
+            org_id=org_id, user_id=user_id, claims=_Claims(), clients=ClientScope.all()
+        )
 
     monkeypatch.setattr(deps, "auth_context", _fake_auth_context)
 
@@ -85,7 +88,9 @@ async def test_a_log_line_emitted_inside_carries_both_ids(monkeypatch) -> None:
     org_id, user_id = uuid4(), uuid4()
 
     async def _fake_auth_context(request: object) -> AuthContext:
-        return AuthContext(org_id=org_id, user_id=user_id, claims=_Claims())
+        return AuthContext(
+            org_id=org_id, user_id=user_id, claims=_Claims(), clients=ClientScope.all()
+        )
 
     monkeypatch.setattr(deps, "auth_context", _fake_auth_context)
 

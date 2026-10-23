@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from app.core.client_scope import ClientScope
 from app.core.vault import get_vault
 from app.modules.email_intake import tokens
 from app.modules.email_intake.tokens import TokenRevoked, TokenTransportError
@@ -40,6 +41,7 @@ async def _token(env: OAuthEnv) -> str:
         env.mailbox_id,
         engine=env.api_env.app_engine,
         vault=get_vault(env.api_env.settings),
+        clients=ClientScope.all(),
     )
 
 

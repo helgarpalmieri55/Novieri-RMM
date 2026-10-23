@@ -32,6 +32,7 @@ from botocore.config import Config as BotoConfig
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings, override_settings
 from app.core.signing import LocalEd25519Signer, verify_signature
 from app.core.storage import ObjectStore
@@ -106,7 +107,7 @@ async def _seed(admin_engine: AsyncEngine, app_engine: AsyncEngine, vault: Local
         s.add_all([user, device])
         await s.commit()
         org_id, user_id, device_id = org.id, user.id, device.id
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(session, vault, org_id=org_id, actor_id=user_id,
                                        name="primary")
         session.add(BackupPolicy(org_id=org_id, repository_id=repo.id, sources={"paths": ["/srv"]},
@@ -136,7 +137,7 @@ async def test_dispatch_upload_replicate_and_restore_compare_bytes(
     now = datetime.now(UTC)
 
     # ---- 1. The server dispatches a signed backup.run ------------------------
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         ((job_id, _dev, envelope),) = await dispatch_backup(
             session, engine, vault, org_id=org_id, device_id=device_id, now=now,
             actor_id=user_id, actor_type="user",
@@ -168,10 +169,10 @@ async def test_dispatch_upload_replicate_and_restore_compare_bytes(
         entries.append(ManifestEntry(path=path, kind="file", mode=0o644, size=len(data),
                                      mtime=1.0, chunk_ids=ids))
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         await engine.mark_running(session, job)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         grant = await answer_chunk_query(
             session, store,
             BackupChunkQueryMsg(v=1, kind="backup_chunk_query", job_id=str(job_id),
@@ -203,7 +204,7 @@ async def test_dispatch_upload_replicate_and_restore_compare_bytes(
         )
         assert outside.status_code == 403
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await answer_chunk_query(
             session, store,
             BackupChunkQueryMsg(v=1, kind="backup_chunk_query", job_id=str(job_id),
@@ -215,10 +216,10 @@ async def test_dispatch_upload_replicate_and_restore_compare_bytes(
                              bytes_stored=sum(len(v) for v in sealed.values()),
                              chunk_count=len(sealed))
     with override_settings(settings):
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
             await engine.complete(session, job, state="succeeded", result=result.model_dump())
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         point = (await session.execute(select(BackupPoint).where(
             BackupPoint.org_id == org_id))).scalar_one()
     assert point.state == "complete"
@@ -228,7 +229,7 @@ async def test_dispatch_upload_replicate_and_restore_compare_bytes(
     _s3(OFFSITE).create_bucket(Bucket=offsite_bucket, ObjectLockEnabledForBucket=True)
     key_file = tmp_path / "recovery.key"
     public_text = _tool("keygen", "--out", str(key_file))
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row, challenge = await register_recovery_key(
             session, org_id=org_id, actor_id=user_id, public_key_text=public_text, now=now)
         answer = _tool("prove", "--key", str(key_file), "--challenge", challenge)
@@ -240,17 +241,19 @@ async def test_dispatch_upload_replicate_and_restore_compare_bytes(
             secret=OffsiteSecret(ACCESS, SECRET),
         )
         target_id = target.id
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         target = await get_target(session, org_id, target_id)
         assert target is not None
         tested = await run_target_test(session, vault, target, build_client, now=now)
         assert target.state == "ok", tested
         await set_repository_target(session, org_id=org_id, repository_id=repo_id,
                                     target_id=target_id, actor_id=user_id)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         (item,) = await pending_copies(session, org_id)
     assert await replicate_point(
-        lambda: org_session(org_id, engine=app_engine), vault=vault, local_store=store,
+        lambda: org_session(
+            org_id, engine=app_engine, clients=ClientScope.all()
+        ), vault=vault, local_store=store,
         client_factory=build_client, item=item, org_id=org_id, now=now,
     )
     # A replicated object is locked: MinIO refuses to delete its version.
@@ -264,20 +267,20 @@ async def test_dispatch_upload_replicate_and_restore_compare_bytes(
                                  VersionId=version["VersionId"])
 
     # ---- 4. Restore read through the server's read exchange -----------------
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         ((restore_job_id, _d, renvelope),) = await dispatch_restore(
             session, engine, vault, org_id=org_id, backup_point_id=point.id,
             selection=list(source), target={"path": "/restore"}, mode="restore", now=now,
             actor_id=user_id, actor_type="user",
         )
     assert verify_signature(public_pem, canonical_bytes(renvelope["job"]), renvelope["sig"])
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rjob = (await session.execute(select(Job).where(Job.id == restore_job_id))).scalar_one()
         await engine.mark_running(session, rjob)
     rkey = base64.b64decode(renvelope["job"]["params"]["repo_key"])
 
     async def fetch(suffixes: list[str]) -> dict[str, bytes]:
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             reply = await answer_read_query(
                 session, store,
                 BackupReadQueryMsg(v=1, kind="backup_read_query", job_id=str(restore_job_id),

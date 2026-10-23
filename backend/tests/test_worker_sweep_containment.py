@@ -49,6 +49,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings, override_settings
 from app.core.tenancy import org_session
 from app.jobs.registry import UnknownJobType
@@ -247,11 +248,11 @@ async def test_inline_transaction_shell_one_orgs_failure_does_not_abort_the_cycl
     # but reading it back off the module after monkeypatching would be circular.
     real_org_session = org_session
 
-    def fake_org_session(org_id: UUID, *, engine: AsyncEngine) -> Any:
+    def fake_org_session(org_id: UUID, *, clients: ClientScope, engine: AsyncEngine) -> Any:
         visited.append(org_id)
         if len(visited) == 1:
             raise ConnectionError("asyncpg: connection was closed in the middle of operation")
-        return real_org_session(org_id, engine=engine)
+        return real_org_session(org_id, clients=clients, engine=engine)
 
     escaped: BaseException | None = None
     with pytest.MonkeyPatch.context() as mp:
@@ -288,7 +289,7 @@ async def _org_with_product(admin_engine: AsyncEngine, app_engine: AsyncEngine) 
         await session.commit()
         org_id, user_id = org.id, user.id
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await create_product(
             session,
             org_id=org_id,
@@ -304,7 +305,7 @@ async def _org_with_product(admin_engine: AsyncEngine, app_engine: AsyncEngine) 
 async def _snapshot_count(
     app_engine: AsyncEngine, org_id: UUID, stamp: datetime = NOW
 ) -> int:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rows = (
             await session.execute(
                 select(LicenseComplianceSnapshot.id).where(
@@ -423,8 +424,8 @@ async def test_licenses_compliance_total_counts_only_committed_snapshots(
             await self._inner.__aexit__(type(boom), boom, boom.__traceback__)
             raise boom
 
-    def fake_org_session(target: UUID, *, engine: AsyncEngine) -> Any:
-        inner = real_org_session(target, engine=engine)
+    def fake_org_session(target: UUID, *, clients: ClientScope, engine: AsyncEngine) -> Any:
+        inner = real_org_session(target, clients=clients, engine=engine)
         return _FailingCommit(inner) if target == org_id else inner
 
     with pytest.MonkeyPatch.context() as mp:

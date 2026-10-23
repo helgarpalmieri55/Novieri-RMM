@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, EnrollmentToken, Job
 from app.modules.agent_push import run_list
@@ -28,7 +29,9 @@ from tests.push_run_fixtures import CONSOLE, RunWorld, run_world
 async def _expand(
     app_engine: AsyncEngine, world: RunWorld, *, prefix: str | None = None, actor=None
 ):
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         return await run_list.expand_prefix(
             session,
             world.org.org_id,

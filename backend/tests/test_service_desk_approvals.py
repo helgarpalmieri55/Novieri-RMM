@@ -43,6 +43,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
@@ -204,7 +205,7 @@ async def test_create_ticket_creates_pending_approval_row_when_category_requires
     api_env,
 ) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _category = await _create_request(
             session, org_id, user_id, user_id, requires_approval=True
         )
@@ -222,7 +223,7 @@ async def test_create_ticket_creates_no_approval_row_when_category_does_not_requ
     api_env,
 ) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _category = await _create_request(
             session, org_id, user_id, user_id, requires_approval=False
         )
@@ -242,7 +243,7 @@ async def test_approve_moves_pending_approval_to_in_progress_and_stamps_row(api_
     requester_id = await _second_user(api_env, org_id, "technician")
     approver_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _category = await _create_request(
             session, org_id, requester_id, admin_id, requires_approval=True
         )
@@ -263,7 +264,7 @@ async def test_approve_does_not_require_a_reason(api_env) -> None:
     requester_id = await _second_user(api_env, org_id, "technician")
     approver_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _category = await _create_request(
             session, org_id, requester_id, admin_id, requires_approval=True
         )
@@ -282,7 +283,7 @@ async def test_reject_moves_to_rejected_and_stamps_row(api_env) -> None:
     requester_id = await _second_user(api_env, org_id, "technician")
     approver_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _category = await _create_request(
             session, org_id, requester_id, admin_id, requires_approval=True
         )
@@ -304,7 +305,7 @@ async def test_reject_requires_a_non_empty_reason(api_env, reason: str) -> None:
     requester_id = await _second_user(api_env, org_id, "technician")
     approver_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _category = await _create_request(
             session, org_id, requester_id, admin_id, requires_approval=True
         )
@@ -342,7 +343,7 @@ async def test_requester_cannot_approve_their_own_request(
     org_id, admin_id = await _org_with_user(api_env)
     requester_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _category = await _create_request(
             session, org_id, requester_id, admin_id, requires_approval=True
         )
@@ -368,7 +369,7 @@ async def test_requester_cannot_reject_their_own_request_either(api_env) -> None
     org_id, admin_id = await _org_with_user(api_env)
     requester_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _category = await _create_request(
             session, org_id, requester_id, admin_id, requires_approval=True
         )
@@ -390,7 +391,7 @@ async def test_deciding_twice_raises(api_env) -> None:
     requester_id = await _second_user(api_env, org_id, "technician")
     approver_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _category = await _create_request(
             session, org_id, requester_id, admin_id, requires_approval=True
         )
@@ -419,7 +420,7 @@ async def test_deciding_twice_raises_even_when_the_second_decision_differs(api_e
     requester_id = await _second_user(api_env, org_id, "technician")
     approver_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _category = await _create_request(
             session, org_id, requester_id, admin_id, requires_approval=True
         )
@@ -502,7 +503,7 @@ async def test_deciding_an_incident_raises(api_env) -> None:
     org_id, admin_id = await _org_with_user(api_env)
     approver_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, admin_id)
 
         with pytest.raises(TicketValidationError):
@@ -566,7 +567,7 @@ async def test_deciding_a_request_whose_category_does_not_require_approval_raise
     requester_id = await _second_user(api_env, org_id, "technician")
     approver_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _category = await _create_request(
             session, org_id, requester_id, admin_id, requires_approval=False
         )
@@ -603,7 +604,7 @@ async def test_flipping_category_requires_approval_off_does_not_strand_a_pending
     requester_id = await _second_user(api_env, org_id, "technician")
     approver_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         # Built by hand, not `_create_request` (which would try to create a
         # second "requests" queue and collide with `uq_ticket_queue_org_key`
         # on a second call) -- both tickets need to share the SAME category
@@ -678,7 +679,7 @@ async def test_deciding_without_the_required_role_raises(api_env) -> None:
     requester_id = await _second_user(api_env, org_id, "technician")
     non_member_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         role = Role(org_id=org_id, name="access-approver")
         session.add(role)
         await session.flush()
@@ -701,7 +702,7 @@ async def test_deciding_with_the_required_role_succeeds(api_env) -> None:
     requester_id = await _second_user(api_env, org_id, "technician")
     member_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         role = Role(org_id=org_id, name="access-approver")
         session.add(role)
         await session.flush()
@@ -729,7 +730,7 @@ async def test_null_approver_role_id_lets_any_actor_decide(api_env) -> None:
     requester_id = await _second_user(api_env, org_id, "technician")
     approver_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, category = await _create_request(
             session, org_id, requester_id, admin_id, requires_approval=True
         )
@@ -868,7 +869,7 @@ async def test_approve_audits_exactly_once(api_env) -> None:
     requester_id = await _second_user(api_env, org_id, "technician")
     approver_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _category = await _create_request(
             session, org_id, requester_id, admin_id, requires_approval=True
         )
@@ -910,7 +911,7 @@ async def test_reject_audits_exactly_once_and_never_carries_the_reason_text(api_
     requester_id = await _second_user(api_env, org_id, "technician")
     approver_id = await _second_user(api_env, org_id, "org-admin")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _category = await _create_request(
             session, org_id, requester_id, admin_id, requires_approval=True
         )

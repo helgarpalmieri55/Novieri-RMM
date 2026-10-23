@@ -11,6 +11,7 @@ from uuid import UUID
 import websockets
 from sqlalchemy import select
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.gateway.agent_headers import (
     HEADER_CAPABILITIES,
@@ -64,7 +65,9 @@ async def test_the_gateway_records_version_and_capabilities(
     ctx = _client_ssl(tmp_path, enrolled, "hdr")
 
     async def recorded_version() -> str | None:
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             agent = (
                 await session.execute(select(Agent).where(Agent.device_id == device_id))
             ).scalar_one()
@@ -85,7 +88,7 @@ async def test_the_gateway_records_version_and_capabilities(
     await connect("1.6.0", "agent.update,hello")
     await connect("1.7.0", "Not A Capability")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         agent = (
             await session.execute(select(Agent).where(Agent.device_id == device_id))
         ).scalar_one()
@@ -123,7 +126,9 @@ async def test_a_reconnect_with_new_capabilities_replaces_the_enrolled_set(
     ctx = _client_ssl(tmp_path, enrolled, "caps")
 
     async def stored() -> tuple[str, dict[str, object]]:
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             agent = (
                 await session.execute(select(Agent).where(Agent.device_id == device_id))
             ).scalar_one()

@@ -30,6 +30,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Device
 from tests.conftest import ApiEnv
@@ -59,7 +60,7 @@ async def _observe(api_env: ApiEnv, org_id: UUID, address: str, **kw: Any) -> No
 
 
 async def _device_count(api_env: ApiEnv, org_id: UUID) -> int:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         return int(
             (await session.execute(select(func.count()).select_from(Device))).scalar_one()
         )
@@ -108,7 +109,7 @@ async def test_a_sweep_alone_creates_the_devices_it_found(
     )
     assert job.status.value == "succeeded", job.result
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = list(
             (await session.execute(select(Device).order_by(Device.primary_ip)))
             .scalars()
@@ -176,7 +177,7 @@ async def test_a_promoted_candidate_is_marked_discovery(api_env: ApiEnv) -> None
     [result] = resp.json()["results"]
     assert result["created"] is True
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         device = (await session.execute(select(Device))).scalar_one()
     assert device.source == "discovery"
     # AND A PERSON STOOD BEHIND IT. Since the sweep began recording rows on its
@@ -207,7 +208,7 @@ async def test_promotion_carries_what_the_operator_supplied_on_top(
         headers=await api_env.headers(org_id, admin),
     )
     assert resp.status_code == 200, resp.text
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         device = (await session.execute(select(Device))).scalar_one()
     assert device.asset_type == "printer"
     assert device.lifecycle == "unmanageable"
@@ -282,7 +283,7 @@ async def test_promotion_is_audited_naming_the_address(api_env: ApiEnv) -> None:
         json={"addresses": ["172.22.104.26"]},
         headers=await api_env.headers(org_id, admin),
     )
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = list(
             (
                 await session.execute(
@@ -461,7 +462,7 @@ async def test_a_promoted_row_carries_the_mac_that_identified_it(
     device_id = UUID(resp.json()["results"][0]["device_id"])
 
     # The agent installs and enrols a week later, reporting the same address.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         outcome = await resolve_enrolment_target(
             session,
             org_id,
@@ -492,7 +493,7 @@ async def test_a_candidate_with_no_mac_promotes_without_inventing_one(
         headers=await api_env.headers(org_id, admin),
     )
     assert resp.status_code == 200, resp.text
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(
                 select(Device).where(Device.primary_ip == "172.22.104.32")

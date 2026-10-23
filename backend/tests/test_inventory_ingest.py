@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -47,7 +48,7 @@ async def _org_device(admin_engine: AsyncEngine) -> tuple[UUID, UUID]:
 
 
 async def _ingest(app_engine: AsyncEngine, org_id: UUID, device_id: UUID, doc_dict: dict):
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one()
@@ -61,7 +62,7 @@ async def test_first_sweep_populates_everything(admin_engine, app_engine) -> Non
     assert stats.software_added == 2
     assert stats.changes == 0  # first sweep is a baseline, not a change
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one()
@@ -107,7 +108,7 @@ async def test_second_sweep_records_exact_changes(admin_engine, app_engine) -> N
     assert (stats.software_added, stats.software_removed, stats.software_updated) == (1, 1, 1)
     assert stats.changes == 5  # install + removal + update + os_updated + fact_changed
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         changes = (
             (await session.execute(select(InventoryChange).order_by(InventoryChange.id)))
             .scalars()
@@ -153,7 +154,7 @@ async def test_first_software_list_after_softwareless_sweeps_is_a_baseline(
     }
     stats = await _ingest(app_engine, org_id, device_id, third)
     assert (stats.software_added, stats.changes) == (1, 1)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         changes = (await session.execute(select(InventoryChange))).scalars().all()
         assert [(c.change_type, c.subject) for c in changes] == [("software_installed", "Slack")]
 
@@ -163,7 +164,7 @@ async def test_snapshot_pruning_keeps_ten(admin_engine, app_engine) -> None:
     for n in range(11):
         doc = {**FULL_DOC, "os_build": f"build-{n}"}
         await _ingest(app_engine, org_id, device_id, doc)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         snapshots = (
             (await session.execute(select(InventorySnapshot).order_by(InventorySnapshot.id)))
             .scalars()
@@ -265,7 +266,7 @@ async def test_malformed_result_fails_job_and_ingests_nothing(
     register_job_type()  # ensure the handler is bound to inventory.collect
     org_id, device_id = await _org_device(admin_engine)
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="inventory.collect", target_device_id=device_id, params={}
         )
@@ -275,7 +276,7 @@ async def test_malformed_result_fails_job_and_ingests_nothing(
         )
         assert job.status is JobStatus.failed
         assert "error" in (job.result or {})
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         count = (
             await session.execute(select(func.count()).select_from(InventorySnapshot))
         ).scalar_one()
@@ -288,7 +289,7 @@ async def test_valid_result_through_job_engine_ingests(
     register_job_type()
     org_id, device_id = await _org_device(admin_engine)
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="inventory.collect", target_device_id=device_id, params={}
         )
@@ -299,7 +300,7 @@ async def test_valid_result_through_job_engine_ingests(
         queued = session.info.get("ui_events", [])
         assert [e["kind"] for _, e in queued] == ["inventory_updated"]
         assert queued[0][1]["device_id"] == str(device_id)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one()
@@ -344,7 +345,7 @@ async def _collect(
     path that runs result handlers, and therefore hooks."""
     register_job_type()
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="inventory.collect", target_device_id=device_id, params={}
         )
@@ -354,7 +355,7 @@ async def _collect(
 
 
 async def _ingested_rows(app_engine: AsyncEngine, org_id: UUID, device_id: UUID) -> tuple[int, int]:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         software = (
             await session.execute(
                 select(func.count())
@@ -440,7 +441,7 @@ async def test_a_failing_hook_rolls_back_only_its_own_writes(
 
     assert status is JobStatus.succeeded
     assert await _ingested_rows(app_engine, org_id, device_id) == (2, 2)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         probes = (
             await session.execute(
                 select(func.count()).select_from(Policy).where(Policy.module == "hook-probe")
@@ -532,7 +533,7 @@ async def test_a_collect_writes_ipam_observations(
     status = await _collect(app_engine, org_id, device_id, tmp_path, FULL_DOC)
 
     assert status is JobStatus.succeeded
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rows = (
             (await session.execute(select(IpamObservation))).scalars().all()
         )
@@ -584,7 +585,7 @@ async def test_a_malformed_nic_leaves_the_job_succeeded_with_zero_observations(
 
     assert status is JobStatus.succeeded
     assert await _ingested_rows(app_engine, org_id, device_id) == (2, 2)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         observations = (
             await session.execute(select(func.count()).select_from(IpamObservation))
         ).scalar_one()

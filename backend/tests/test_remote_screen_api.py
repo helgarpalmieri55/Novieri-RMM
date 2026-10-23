@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Agent, AuditEvent, Device, Job, RemotePolicy, RemoteSession, User
 from app.modules.remote.jobtypes import RemoteScreenOpenParams, handle_screen_result
@@ -56,7 +57,7 @@ async def _tech(api_env, org_id: UUID, *roles: str) -> dict[str, str]:
 
 
 async def _job_for(api_env, org_id: UUID, session_id: str) -> Job:
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         jobs = (
             (await s.execute(select(Job).where(Job.type == "remote.screen.open"))).scalars().all()
         )
@@ -74,7 +75,7 @@ async def test_screen_is_the_default_protocol(api_env) -> None:
     assert body["state"] == "awaiting_consent" and body["consent_mode"] == "attended"
     assert "relay_token" not in resp.text and "ticket" not in resp.text
 
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         row = (
             await s.execute(
                 select(RemoteSession).where(RemoteSession.id == UUID(body["session_id"]))
@@ -163,7 +164,7 @@ async def test_a_session_whose_agent_never_came_does_not_block_the_device(api_en
         await s.commit()
 
     assert (await _start(api_env, headers, device_id)).status_code == 201
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         row = (
             await s.execute(select(RemoteSession).where(RemoteSession.id == UUID(old)))
         ).scalar_one()
@@ -205,7 +206,7 @@ async def test_unattended_needs_policy_and_permission(
     org_id = await api_env.create_org("scr")
     headers = await _tech(api_env, org_id, *roles)
     device_id = await _device(api_env, org_id, capabilities=SCREEN)
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         s.add(RemotePolicy(org_id=org_id, allow_unattended=policy_allows))
 
     resp = await _start(api_env, headers, device_id, mode="unattended")
@@ -219,7 +220,7 @@ async def test_policy_bounds_reach_the_signed_params(api_env) -> None:
     org_id = await api_env.create_org("scr")
     headers = await _tech(api_env, org_id)
     device_id = await _device(api_env, org_id, capabilities=SCREEN)
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         s.add(
             RemotePolicy(
                 org_id=org_id, consent_timeout_s=45, allow_input=False, record_sessions=False
@@ -262,9 +263,9 @@ async def test_result_ends_a_session_the_relay_never_ended(api_env) -> None:
     sid = (await _start(api_env, headers, device_id)).json()["session_id"]
     job = await _job_for(api_env, org_id, sid)
 
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         await handle_screen_result(s, job, {"outcome": "no_user_session", "duration_s": 0})
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         row = (
             await s.execute(select(RemoteSession).where(RemoteSession.id == UUID(sid)))
         ).scalar_one()
@@ -282,7 +283,7 @@ async def test_result_ends_a_session_the_relay_never_ended(api_env) -> None:
 
         # A second result (or one for a session the relay already ended) is a no-op.
         await handle_screen_result(s, job, {"outcome": "bogus"})
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         row = (
             await s.execute(select(RemoteSession).where(RemoteSession.id == UUID(sid)))
         ).scalar_one()
@@ -297,7 +298,7 @@ async def test_result_for_another_device_is_ignored(api_env) -> None:
     job = await _job_for(api_env, org_id, sid)
     job.target_id = uuid4()
 
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         await handle_screen_result(s, job, {"outcome": "error"})
         row = (
             await s.execute(select(RemoteSession).where(RemoteSession.id == UUID(sid)))

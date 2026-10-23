@@ -17,6 +17,7 @@ the shape that breaks the naive version.
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Device
 from app.modules.ipam.candidates import list_candidates
@@ -28,7 +29,7 @@ async def _managed_device(api_env: ApiEnv, org_id: UUID) -> UUID:
     """A device with an `agents` row: what "the inventory knows this" means."""
     from app.models import Agent
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         device = Device(org_id=org_id, hostname="ws-01", os_family="linux")
         session.add(device)
         await session.flush()
@@ -60,7 +61,7 @@ async def test_a_swept_address_nobody_owns_is_a_candidate(api_env: ApiEnv) -> No
         method="arp",
         confidence="medium",
     )
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         found = (await list_candidates(session, org_id)).items
     assert [c.address for c in found] == ["172.22.104.55"]
     # The vendor is the single most useful hint for "what is this" when an
@@ -98,7 +99,7 @@ async def test_a_managed_device_is_not_a_candidate_even_though_the_sweep_saw_it(
         method="arp",
         confidence="medium",
     )
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         found = (await list_candidates(session, org_id)).items
     assert found == [], [c.address for c in found]
 
@@ -140,7 +141,7 @@ async def test_a_managed_device_seen_only_by_ICMP_is_not_a_candidate_either(
         method="icmp",
         confidence="low",
     )
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         found = (await list_candidates(session, org_id)).items
     assert found == [], [c.address for c in found]
 
@@ -175,7 +176,7 @@ async def test_a_machine_that_moved_address_is_not_a_candidate_at_its_new_one(
         method="arp",
         confidence="medium",
     )
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         found = (await list_candidates(session, org_id)).items
     assert found == [], [c.address for c in found]
 
@@ -188,7 +189,7 @@ async def test_an_asset_an_operator_already_typed_in_is_not_a_candidate(
     whose entire point is that a human curated it."""
     org_id = await api_env.create_org("cand")
     vrf_id = await seed_vrf(api_env, org_id)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         session.add(
             Device(
                 org_id=org_id,
@@ -212,7 +213,7 @@ async def test_an_asset_an_operator_already_typed_in_is_not_a_candidate(
         source="sweep",
         method="icmp",
     )
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         found = (await list_candidates(session, org_id)).items
     assert found == [], [c.address for c in found]
 
@@ -234,7 +235,7 @@ async def test_something_nobody_has_seen_for_months_is_not_a_candidate(
         method="icmp",
         now=datetime.now(UTC) - timedelta(days=400),
     )
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         found = (await list_candidates(session, org_id)).items
     assert found == [], [c.address for c in found]
 
@@ -248,14 +249,14 @@ async def test_another_orgs_candidates_are_hidden_by_rls(api_env: ApiEnv) -> Non
     await upsert_observation_row(
         api_env, org_a, vrf_id=vrf_a, address="172.22.104.55", source="sweep", method="icmp"
     )
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         page_b = await list_candidates(session, org_b)
     assert page_b.items == []
     assert page_b.total == 0
 
     # Non-vacuity: org A DOES see it, so the empty result above is scoping
     # rather than a query that returns nothing for anybody.
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         page = await list_candidates(session, org_a)
         assert [c.address for c in page.items] == ["172.22.104.55"]
 
@@ -276,7 +277,7 @@ async def test_the_list_is_bounded_and_says_when_it_was_cut(api_env: ApiEnv) -> 
             source="sweep",
             method="icmp",
         )
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         page = await list_candidates(session, org_id, limit=3)
     assert len(page.items) == 3
     # The COUNT is separate from the page, so the console can say "3 of 7"

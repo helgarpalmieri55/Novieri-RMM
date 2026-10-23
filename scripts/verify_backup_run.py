@@ -535,6 +535,7 @@ async def run(  # noqa: PLR0915, PLR0912, C901
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
     from app.core.ca import LocalCA
+    from app.core.client_scope import ClientScope
     from app.core.config import Settings, override_settings
     from app.core.signing import LocalEd25519Signer
     from app.core.storage import ObjectStore
@@ -710,7 +711,7 @@ async def run(  # noqa: PLR0915, PLR0912, C901
                 )
                 await session.commit()
 
-            async with org_session(org_id, engine=app_engine) as session:
+            async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
                 repo = await create_repository(
                     session, vault, org_id=org_id, actor_id=user_id, name="verify-repo"
                 )
@@ -1083,7 +1084,9 @@ async def run(  # noqa: PLR0915, PLR0912, C901
 
             restore_job: dict = {"status": "not_dispatched"}
             if point_id is not None:
-                async with org_session(org_id, engine=app_engine) as session:
+                async with org_session(
+                    org_id, engine=app_engine, clients=ClientScope.all()
+                ) as session:
                     restore_pending = await dispatch_restore(
                         session,
                         job_engine,
@@ -1254,7 +1257,7 @@ async def run(  # noqa: PLR0915, PLR0912, C901
             await pubsub.unsubscribe(channel)
             await pubsub.aclose()
 
-            async with org_session(org_id, engine=app_engine) as session:
+            async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
                 runs = (
                     (
                         await session.execute(
@@ -1385,11 +1388,12 @@ async def _dispatch_and_wait(
     """
     from datetime import UTC, datetime
 
+    from app.core.client_scope import ClientScope
     from app.core.tenancy import org_session
     from app.gateway.dispatch import publish_job
     from app.modules.backup.dispatch import dispatch_backup
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pending = await dispatch_backup(
             session,
             job_engine,

@@ -23,6 +23,7 @@ import logging
 from types import SimpleNamespace
 from uuid import uuid4
 
+from app.core.client_scope import ClientScope
 from app.core.logging import JsonFormatter, org_id_var, user_id_var
 from app.modules.portal.principal import (
     PortalContext,
@@ -47,7 +48,7 @@ async def test_it_binds_org_and_requester_and_unbinds_after(monkeypatch) -> None
     one requester's identity into whatever the worker handles next, which for
     a portal principal -- an end user, not staff -- is worse than having none.
     """
-    ctx = PortalContext(org_id=uuid4(), requester_user_id=uuid4())
+    ctx = PortalContext(org_id=uuid4(), requester_user_id=uuid4(), clients=ClientScope.all())
     _patch_resolver(monkeypatch, ctx)
 
     assert org_id_var.get() is None
@@ -81,7 +82,7 @@ async def test_a_log_line_emitted_inside_carries_both_ids(monkeypatch) -> None:
     that never happened, which is the mistake the staff-side version of this
     test made first.
     """
-    ctx = PortalContext(org_id=uuid4(), requester_user_id=uuid4())
+    ctx = PortalContext(org_id=uuid4(), requester_user_id=uuid4(), clients=ClientScope.all())
     _patch_resolver(monkeypatch, ctx)
 
     record = logging.LogRecord(

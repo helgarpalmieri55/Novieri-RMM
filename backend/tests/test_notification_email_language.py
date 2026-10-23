@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_extensions import uuid7
 
 import app.modules.notification.delivery as delivery_module
+from app.core.client_scope import ClientScope
 from app.core.i18n import locale_var, use_locale
 from app.core.vault import LocalVaultService
 from app.models import DomainEvent, NotificationChannel, NotificationDelivery, User
@@ -280,7 +281,7 @@ async def test_recipient_language_under_row_level_security(api_env) -> None:
     org_b, _ = await _org_and_admin(api_env, "mail-lang-rls-b")
     await _add_user(api_env, org_a, email="own@example.com", locale="es")
     await _add_user(api_env, org_b, email="other@example.com", locale="es")
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await _recipient_language(session, org_a, "own@example.com") == "es"
         assert await _recipient_language(session, org_a, "other@example.com") == "en"
         # Even asked with the other org's id, RLS yields no row: English.

@@ -11,6 +11,7 @@ import pytest
 from moto import mock_aws
 from sqlalchemy import select
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings, override_settings
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -61,7 +62,7 @@ async def test_the_worker_tests_the_target_then_replicates_a_point(
         org = await seed_org(admin_engine, app_engine, vault, "osw")
         await add_proven_key(app_engine, org)
         target_id = await add_target(app_engine, vault, org, state="testing", attach=False)
-        async with org_session(org.org_id, engine=app_engine) as session:
+        async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
             target = (await session.execute(select(BackupOffsiteTarget).where(
                 BackupOffsiteTarget.id == target_id))).scalar_one()
             target.test_requested_at = datetime.now(UTC)
@@ -69,7 +70,7 @@ async def test_the_worker_tests_the_target_then_replicates_a_point(
         with override_settings(settings):
             await worker.backup_offsite_test_all_orgs(datetime.now(UTC))
 
-        async with org_session(org.org_id, engine=app_engine) as session:
+        async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
             target = (await session.execute(select(BackupOffsiteTarget).where(
                 BackupOffsiteTarget.id == target_id))).scalar_one()
             assert target.state == "ok", target.last_test
@@ -84,7 +85,7 @@ async def test_the_worker_tests_the_target_then_replicates_a_point(
         with override_settings(settings):
             await worker.backup_replication_all_orgs(datetime.now(UTC))
 
-        async with org_session(org.org_id, engine=app_engine) as session:
+        async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
             copy = (await session.execute(select(BackupPointCopy).where(
                 BackupPointCopy.point_id == point_id))).scalar_one()
     assert copy.state == "complete"

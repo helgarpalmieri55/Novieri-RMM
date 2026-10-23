@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Device, DeviceGroup, Organization
 from app.modules.inventory.rules import (
@@ -31,7 +32,7 @@ async def _org(admin_engine: AsyncEngine) -> UUID:
 async def _group(
     app_engine, org_id: UUID, name: str, rules: dict | None, precedence: int = 0
 ) -> UUID:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         group = DeviceGroup(
             org_id=org_id, name=name, rules=rules, precedence=precedence
         )
@@ -41,7 +42,7 @@ async def _group(
 
 
 async def _device(app_engine, org_id: UUID, group_id: UUID | None = None) -> UUID:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = Device(
             org_id=org_id, hostname="r1", os_family="windows", device_group_id=group_id
         )
@@ -51,7 +52,7 @@ async def _device(app_engine, org_id: UUID, group_id: UUID | None = None) -> UUI
 
 
 async def _evaluate(app_engine, org_id: UUID, device_id: UUID, doc_dict: dict) -> UUID | None:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one()
@@ -103,7 +104,7 @@ async def test_no_match_preserves_manual_placement(admin_engine, app_engine) -> 
     await _group(app_engine, org_id, "linux-only", linux_rule)
     device_id = await _device(app_engine, org_id, group_id=manual)
     assert await _evaluate(app_engine, org_id, device_id, FULL_DOC) is None
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one()
@@ -179,7 +180,7 @@ async def test_a_rename_no_longer_decides_which_rule_wins(admin_engine, app_engi
 
     # The rename that used to re-segment a fleet: "0-other" sorts before
     # "a-fallback" in every collation this database could be running.
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         group = (
             await session.execute(select(DeviceGroup).where(DeviceGroup.id == other))
         ).scalar_one()
@@ -191,7 +192,7 @@ async def test_a_rename_no_longer_decides_which_rule_wins(admin_engine, app_engi
 
     # And the column that IS supposed to decide, does -- so the assertion above
     # is not passing because nothing can move this device.
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         group = (
             await session.execute(select(DeviceGroup).where(DeviceGroup.id == other))
         ).scalar_one()
@@ -276,7 +277,7 @@ async def test_an_archived_rule_group_claims_nothing(admin_engine, app_engine) -
     windows = {"all": [{"fact": "os_family", "op": "eq", "value": "windows"}]}
     live = await _group(app_engine, org_id, "live-rule", windows, precedence=10)
     archived = await _group(app_engine, org_id, "archived-rule", windows, precedence=0)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         group = (
             await session.execute(select(DeviceGroup).where(DeviceGroup.id == archived))
         ).scalar_one()

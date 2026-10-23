@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent
 from tests.conftest import ApiEnv
@@ -59,7 +60,7 @@ async def _create_finding(api_env: ApiEnv, test_id: str, headers: dict[str, str]
 
 
 async def _audit_count(api_env: ApiEnv, org_id: UUID, action: str) -> int:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (
             await session.execute(select(AuditEvent).where(AuditEvent.action == action))
         ).scalars().all()
@@ -431,7 +432,7 @@ async def test_test_report_ok_and_writes_audit(api_env: ApiEnv) -> None:
     after = await _audit_count(api_env, org_id, "bcp.report_exported")
     assert after == before + 1
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         event = (
             await session.execute(
                 select(AuditEvent).where(AuditEvent.action == "bcp.report_exported")
@@ -496,7 +497,7 @@ async def test_list_plans_writes_no_audit(api_env: ApiEnv) -> None:
 async def _user_id(api_env: ApiEnv, org_id: UUID, sub: str) -> UUID:
     from app.models import User
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         return (
             await session.execute(select(User.id).where(User.external_subject == sub))
         ).scalar_one()

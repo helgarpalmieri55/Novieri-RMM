@@ -15,6 +15,7 @@ import redis.asyncio as aioredis
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -90,7 +91,7 @@ async def test_logs_ship_is_not_due_on_a_pending_device(
     from app.modules.security_logs.schedule import due_device_ids
 
     org_id, approved, pending = await _pair(admin_engine, "rs-logs", os_family="windows")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         due = await due_device_ids(session, org_id, now=NOW, interval_s=3600)
     assert due == [approved]
 
@@ -109,7 +110,7 @@ async def test_the_reboot_sweep_does_not_count_a_pending_device_as_online(
             )
         )
         await session.commit()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         sent = await run_reboot_sweep(session, _RefusingEngine(), org_id=org_id, now=NOW)
     assert sent == []
 
@@ -141,7 +142,7 @@ async def test_a_pending_device_is_never_chosen_to_sweep_a_subnet(
         prefix = "10.44.0.0/24"
         sweep_device_id: UUID | None = pending  # designated, too
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         chosen = await select_sweeper(session, org.org_id, _Subnet(), now=NOW)  # type: ignore[arg-type]
     assert chosen is None
 
@@ -152,7 +153,7 @@ async def test_a_pending_device_is_not_in_the_self_update_fleet(
     from app.modules.agent_update.service import load_fleet
 
     org_id, approved, pending = await _pair(admin_engine, "rs-upd")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         fleet = await load_fleet(session)
     ids = {d.device_id for d in fleet}
     assert approved in ids and pending not in ids
@@ -194,7 +195,7 @@ async def test_a_scheduled_backup_is_due_only_on_an_approved_device(
 
     org_id, device_id, vault = await _backup_setup(admin_engine, app_engine, tmp_path, review_state)
     job_engine = _FakeJobEngine()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         sent = await dispatch_due_backup(
             session,
             job_engine,
@@ -217,7 +218,7 @@ async def test_the_inventory_schedule_passes_over_a_rejected_device(
     org_id, approved, rejected = await _pair(admin_engine, "rs-inv", held="rejected")
     pending = await seed_device(admin_engine, org_id, review_state="pending")
     await seed_agent(admin_engine, org_id, pending, status="online", last_seen_at=NOW)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         due = set(await due_device_ids(session, org_id, now=NOW))
     assert approved in due and pending in due
     assert rejected not in due
@@ -237,7 +238,7 @@ async def test_the_health_policy_push_passes_over_a_rejected_device(
     for device_id in (approved, rejected):
         await seed_assignment(admin_engine, org_id, profile_id, device_id=device_id)
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pushes = await run_policy_reconcile(session, org_id, job_engine=engine, now=NOW)
     assert len(pushes) == 1
 
@@ -258,7 +259,7 @@ async def test_an_operator_restart_of_a_pending_device_is_refused(
         capabilities={"patch.reboot": True},
     )
     with pytest.raises(RestartUnavailable, match="waiting for review"):
-        async with org_session(org.org_id, engine=app_engine) as session:
+        async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await request_operator_restart(
                 session, org_id=org.org_id, device_id=pending, actor_id=org.user_id
             )

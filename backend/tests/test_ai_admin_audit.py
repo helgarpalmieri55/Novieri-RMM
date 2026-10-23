@@ -39,6 +39,7 @@ from app.core.ai.store import (
     question_sha256,
 )
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AiInjectionFlag, AiSession, AuditEvent
 from app.modules.ai_admin.profile import ADMIN_PROFILE
@@ -469,9 +470,9 @@ async def test_settings_write_through_an_org_session_under_rls(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, user_id = await seed_org_and_user(admin_engine, "settings-rls")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await update_settings(session, org_id, user_id, transcript_retention_days=99)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         effective = await get_settings(session, org_id)
     assert effective.transcript_retention_days == 99
     assert effective.configured is True

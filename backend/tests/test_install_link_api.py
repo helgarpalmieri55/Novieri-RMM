@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.models import AuditEvent, InstallLink
 from tests.install_link_fixtures import switch_on
 
@@ -231,10 +232,10 @@ async def test_two_first_saves_at_once_do_not_collide(admin_engine, app_engine) 
     }
 
     async def second() -> str | None:
-        async with org_session(org.org_id, engine=app_engine) as session:
+        async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
             return await svc.save(session, **kwargs)
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         first = await svc.save(session, **kwargs)
         racing = asyncio.create_task(second())
         # Let the second save reach its INSERT and block on the first's row.
@@ -279,7 +280,7 @@ async def test_after_the_automatic_switch_off_the_settings_save_again(api_env) -
         row.disable_at = passed
         await session.commit()
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await svc.switch_off_due(session, org_id, datetime.now(UTC))
 
     async with AsyncSession(api_env.admin_engine) as session:

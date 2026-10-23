@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.tenancy import org_session
 from app.models import ChangeExternalRef, ChangeRequest, Organization, User
@@ -78,11 +79,11 @@ async def test_null_adapter_push_change_returns_empty_ref_and_writes_nothing(
 ) -> None:
     org_id, _user_id, change = await _org_user_change(admin_engine)
     adapter = NullChangeTicketAdapter()
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await adapter.push_change(s, org_id=org_id, change=change)
         assert result == ""
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = (
             await s.execute(select(ChangeExternalRef).where(ChangeExternalRef.org_id == org_id))
         ).scalars().all()
@@ -94,7 +95,7 @@ async def test_null_adapter_update_and_close_are_noop(
 ) -> None:
     org_id, _user_id, change = await _org_user_change(admin_engine)
     adapter = NullChangeTicketAdapter()
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         update_result = await adapter.update_change(
             s, org_id=org_id, external_id="ext-1", change=change
         )
@@ -102,7 +103,7 @@ async def test_null_adapter_update_and_close_are_noop(
         close_result = await adapter.close_change(s, org_id=org_id, external_id="ext-1")
         assert close_result is None
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = (
             await s.execute(select(ChangeExternalRef).where(ChangeExternalRef.org_id == org_id))
         ).scalars().all()

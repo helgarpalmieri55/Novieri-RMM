@@ -50,6 +50,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 import app.modules.agent_push.preflight as preflight_module
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Job, Role, UserRole
 from app.modules.agent_push.errors import (
@@ -160,7 +161,9 @@ async def _world(
 async def _decide(
     app_engine: AsyncEngine, world: World, address: str = TARGET, now: datetime | None = None
 ):
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         decisions = await evaluate_targets(
             session,
             world.org.org_id,
@@ -435,7 +438,9 @@ async def _request(app_engine: AsyncEngine, world: World, targets: object):
     that raised inside would silently discard the `push.refused` rows and every
     audit assertion below would pass against a service that recorded nothing.
     """
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         outcome = await request_push_batch(
             session,
             world.org.org_id,
@@ -591,7 +596,7 @@ async def test_a_caller_without_credentials_checkout_is_refused_first(
     org = await seed_org(admin_engine, "pf-nocheckout")
     credential_id = await seed_credential(admin_engine, org)
     world = World(org, credential_id)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushPermissionError) as exc:
             await request_push_batch(
                 session,
@@ -624,7 +629,9 @@ async def test_a_fully_authorized_push_is_a_clean_preflight_and_the_ladder_signs
     a signature for a target the ladder was still evaluating.
     """
     world = await _world(admin_engine, "pf-clean")
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         outcome = await request_push_batch(
             session,
             world.org.org_id,

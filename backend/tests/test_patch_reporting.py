@@ -16,6 +16,7 @@ from uuid import UUID
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Device, DevicePatchStatus, Job, JobStatus, Organization, Patch, PatchRun
 from app.modules.patch.reporting import device_report, export_rows, fleet_report
@@ -160,7 +161,7 @@ async def test_device_report_counts_by_state_and_severity_and_pending_reboot(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed(admin_engine, "rpt-dev")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         report = await device_report(session, ids["org_id"], ids["d1"])
 
         assert report["counts_by_state"] == {
@@ -187,7 +188,7 @@ async def test_device_report_compliant_device_has_no_outstanding_severity(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed(admin_engine, "rpt-dev2")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         report = await device_report(session, ids["org_id"], ids["d2"])
 
         assert report["counts_by_state"] == {
@@ -211,7 +212,7 @@ async def test_fleet_report_compliant_pct_math(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed(admin_engine, "rpt-fleet")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         report = await fleet_report(session, ids["org_id"])
 
         # windows: d1 non-compliant, d2 compliant -> 1/2 = 50.0%
@@ -251,7 +252,7 @@ async def test_export_rows_one_row_per_device_patch_pair(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed(admin_engine, "rpt-export")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         rows = await export_rows(session, ids["org_id"])
 
         assert len(rows) == 6  # one row per (device, patch) status pair seeded
@@ -277,7 +278,9 @@ async def test_a_second_orgs_rows_never_appear_under_rls(
     ids_a = await _seed(admin_engine, "rpt-tenant-a")
     ids_b = await _seed(admin_engine, "rpt-tenant-b")
 
-    async with org_session(ids_a["org_id"], engine=app_engine) as session:
+    async with org_session(
+        ids_a["org_id"], engine=app_engine, clients=ClientScope.all()
+    ) as session:
         rows = await export_rows(session, ids_a["org_id"])
         assert all(r["device_id"] in {ids_a["d1"], ids_a["d2"], ids_a["d3"]} for r in rows)
 
@@ -290,7 +293,9 @@ async def test_a_second_orgs_rows_never_appear_under_rls(
         # rows, never org_b's rows even though org_b was seeded identically.
         assert len([r for r in rows if r["os_family"] == "windows"]) == 5
 
-    async with org_session(ids_b["org_id"], engine=app_engine) as session:
+    async with org_session(
+        ids_b["org_id"], engine=app_engine, clients=ClientScope.all()
+    ) as session:
         report = await device_report(session, ids_b["org_id"], ids_a["d1"])
         # device_id belongs to org_a; org_b's RLS-scoped session must not see it.
         assert report["counts_by_state"] == {
@@ -326,7 +331,7 @@ async def test_the_fleet_report_counts_devices_and_findings_separately(
     rows and counting devices cannot both be right.
     """
     ids = await _seed(admin_engine, "rpt-counts")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         report = await fleet_report(session, ids["org_id"])
 
         assert len(report["exposures"]) == 3, "three (device, patch) findings"
@@ -346,7 +351,7 @@ async def test_a_device_with_many_findings_is_still_one_device(
     its own: ONE machine, MANY missing patches. Row-counting reports the
     patch count; device-counting reports one."""
     ids = await _seed(admin_engine, "rpt-one-device")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         report = await fleet_report(session, ids["org_id"])
         only = [e for e in report["exposures"] if e["hostname"] == "d1-win"]
 
@@ -398,7 +403,7 @@ async def test_fleet_report_reports_never_scanned_rather_than_a_clean_zero(
     so in three ways at once -- no timestamp, no scanned device, and a device
     total that proves the fleet is not empty either."""
     ids = await _seed(admin_engine, "rpt-neverscanned")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         report = await fleet_report(session, ids["org_id"])
 
         assert report["last_scan_at"] is None
@@ -439,7 +444,7 @@ async def test_fleet_report_last_scan_at_is_the_most_recent_scan_that_succeeded(
         finished_at=base + timedelta(hours=4),
     )
 
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         report = await fleet_report(session, ids["org_id"])
 
         assert report["last_scan_at"] == base + timedelta(hours=1)
@@ -473,7 +478,7 @@ async def test_fleet_report_scan_coverage_counts_devices_not_scans(
         finished_at=now - timedelta(hours=1),
     )
 
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         report = await fleet_report(session, ids["org_id"])
 
         assert report["devices_scanned"] == 1
@@ -497,7 +502,7 @@ async def test_device_report_last_scan_at_is_that_devices_own_scan(
         finished_at=when,
     )
 
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         assert (await device_report(session, ids["org_id"], ids["d1"]))["last_scan_at"] == when
         assert (await device_report(session, ids["org_id"], ids["d2"]))["last_scan_at"] is None
 
@@ -519,7 +524,7 @@ async def test_another_orgs_scan_does_not_date_this_orgs_report(
         finished_at=datetime.now(UTC),
     )
 
-    async with org_session(mine["org_id"], engine=app_engine) as session:
+    async with org_session(mine["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         report = await fleet_report(session, mine["org_id"])
         assert report["last_scan_at"] is None
         assert report["devices_scanned"] == 0
@@ -528,5 +533,7 @@ async def test_another_orgs_scan_does_not_date_this_orgs_report(
 
     # ...and the other org still sees its own, so the assertions above are not
     # passing merely because nothing was written.
-    async with org_session(theirs["org_id"], engine=app_engine) as session:
+    async with org_session(
+        theirs["org_id"], engine=app_engine, clients=ClientScope.all()
+    ) as session:
         assert (await fleet_report(session, theirs["org_id"]))["last_scan_at"] is not None

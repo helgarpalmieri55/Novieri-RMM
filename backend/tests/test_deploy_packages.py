@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -59,7 +60,7 @@ async def test_create_package_persists_and_audits(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, user_id = await _org_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         pkg = await create_package(
             s,
             org_id=org_id,
@@ -90,7 +91,7 @@ async def test_create_package_rejects_invalid_detection_rule(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, user_id = await _org_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(DeployValidationError):
             await create_package(
                 s,
@@ -109,7 +110,7 @@ async def test_create_package_rejects_invalid_os_family_and_installer_type(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, user_id = await _org_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(DeployValidationError):
             await create_package(
                 s,
@@ -143,7 +144,7 @@ async def test_store_artifact_computes_sha256_and_audits(
     data = b"MZfake-installer"
     expected_sha = hashlib.sha256(data).hexdigest()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         pkg = await create_package(
             s,
             org_id=org_id,
@@ -192,7 +193,7 @@ async def test_store_artifact_defaults_to_system_actor_when_unspecified(
     org_id, user_id = await _org_user(admin_engine)
     data = b"MZfake-installer-2"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         pkg = await create_package(
             s,
             org_id=org_id,
@@ -227,7 +228,7 @@ async def test_a_second_org_cannot_delete_or_store_an_artifact_on_org_as_package
     org_a, user_a = await _org_user(admin_engine)
     org_b, user_b = await _org_user(admin_engine)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         pkg = await create_package(
             s,
             org_id=org_a,
@@ -242,27 +243,27 @@ async def test_a_second_org_cannot_delete_or_store_an_artifact_on_org_as_package
         pkg_id = pkg.id
 
     # org_b's delete against org_a's package returns False and does not delete it.
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         deleted = await delete_package(
             s, org_id=org_b, actor_id=user_b, package_id=pkg_id
         )
         assert deleted is False
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         still_there = (
             await s.execute(select(Package).where(Package.id == pkg_id))
         ).scalar_one_or_none()
         assert still_there is not None
 
     # org_b's store_artifact against org_a's package should not find the row.
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(NoResultFound):  # RLS + explicit predicate both exclude it
             await store_artifact(
                 s, store, org_id=org_b, package_id=pkg_id, data=b"x"
             )
 
     # org_a can still delete its own package, and it is gone afterward + audited.
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         deleted = await delete_package(
             s, org_id=org_a, actor_id=user_a, package_id=pkg_id
         )
@@ -275,7 +276,7 @@ async def test_a_second_org_cannot_delete_or_store_an_artifact_on_org_as_package
         ).scalar_one()
         assert event.target_id == str(pkg_id)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         gone = (
             await s.execute(select(Package).where(Package.id == pkg_id))
         ).scalar_one_or_none()

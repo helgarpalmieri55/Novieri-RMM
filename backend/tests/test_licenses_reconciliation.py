@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Device, InstalledSoftware, Organization, User
 from app.modules.licenses.errors import LicenseNotFoundError
@@ -70,7 +71,7 @@ async def _seed_installed(
 async def _audit_actions(
     app_engine: AsyncEngine, org_id: UUID, target_type: str, target_id: UUID | str
 ) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -88,7 +89,7 @@ async def _audit_actions(
 async def _seed_product(
     app_engine: AsyncEngine, org_id: UUID, actor_id: UUID, match_rules: list[dict]
 ):
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         product = await create_product(
             s,
             org_id=org_id,
@@ -140,11 +141,11 @@ async def test_review_queue_excludes_matched_and_ignored_ordered_by_device_count
 ) -> None:
     org_id, actor_id, product = await _seed_scenario(admin_engine, app_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await ignore_software(s, org_id=org_id, actor_id=actor_id, name="OsThing")
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         queue = await review_queue(s, org_id)
 
     assert [(row["name"], row["device_count"]) for row in queue] == [
@@ -161,17 +162,17 @@ async def test_review_queue_writes_no_audit(
 ) -> None:
     org_id, actor_id, product = await _seed_scenario(admin_engine, app_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events_before = (
             await s.execute(select(AuditEvent)
                 .where(AuditEvent.org_id == org_id))
         ).scalars().all()
         count_before = len(events_before)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await review_queue(s, org_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events_after = (
             await s.execute(select(AuditEvent)
                 .where(AuditEvent.org_id == org_id))
@@ -189,7 +190,7 @@ async def test_review_queue_foreign_org_unmatched_install_never_appears(
     foreign_device = await _seed_device(admin_engine, other_org_id, "foreign-device")
     await _seed_installed(admin_engine, other_org_id, foreign_device, "ForeignApp")
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         queue = await review_queue(s, org_id)
 
     names = {row["name"] for row in queue}
@@ -226,13 +227,13 @@ async def test_map_software_appends_exact_rule_and_leaves_queue(
     org_id, actor_id, product = await _seed_scenario(admin_engine, app_engine)
     product_id = product.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await map_software(
             s, org_id=org_id, actor_id=actor_id, name="Widget", product_id=product_id
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         refetched = await _load_product(s, org_id, product_id)
         assert {"type": "exact", "pattern": "Widget", "publisher": None} in refetched.match_rules
 
@@ -249,19 +250,19 @@ async def test_map_software_is_dedupe_safe(
     org_id, actor_id, product = await _seed_scenario(admin_engine, app_engine)
     product_id = product.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await map_software(
             s, org_id=org_id, actor_id=actor_id, name="Widget", product_id=product_id
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await map_software(
             s, org_id=org_id, actor_id=actor_id, name="Widget", product_id=product_id
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         refetched = await _load_product(s, org_id, product_id)
         widget_rules = [
             r
@@ -277,7 +278,7 @@ async def test_map_software_cross_org_product_raises_not_found(
     org_id, actor_id, product = await _seed_scenario(admin_engine, app_engine)
     other_org_id, other_actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(other_org_id, engine=app_engine) as s:
+    async with org_session(other_org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseNotFoundError):
             await map_software(
                 s,
@@ -293,7 +294,7 @@ async def test_map_software_missing_product_raises_not_found(
 ) -> None:
     org_id, actor_id, product = await _seed_scenario(admin_engine, app_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseNotFoundError):
             await map_software(
                 s, org_id=org_id, actor_id=actor_id, name="Widget", product_id=uuid4()
@@ -306,7 +307,7 @@ async def test_map_software_audits(
     org_id, actor_id, product = await _seed_scenario(admin_engine, app_engine)
     product_id = product.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await map_software(
             s, org_id=org_id, actor_id=actor_id, name="Widget", product_id=product_id
         )
@@ -326,11 +327,11 @@ async def test_ignore_software_removes_from_queue(
 ) -> None:
     org_id, actor_id, product = await _seed_scenario(admin_engine, app_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await ignore_software(s, org_id=org_id, actor_id=actor_id, name="Gadget")
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         queue = await review_queue(s, org_id)
 
     names = {row["name"] for row in queue}
@@ -343,17 +344,17 @@ async def test_ignore_software_is_idempotent(
 ) -> None:
     org_id, actor_id, product = await _seed_scenario(admin_engine, app_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         first = await ignore_software(s, org_id=org_id, actor_id=actor_id, name="Gadget")
         await s.commit()
         first_id = first.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         second = await ignore_software(s, org_id=org_id, actor_id=actor_id, name="Gadget")
         await s.commit()
         assert second.id == first_id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         from app.models import SoftwareIgnore
 
         rows = (
@@ -371,7 +372,7 @@ async def test_ignore_software_audits(
 ) -> None:
     org_id, actor_id, product = await _seed_scenario(admin_engine, app_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         ignored = await ignore_software(s, org_id=org_id, actor_id=actor_id, name="Gadget")
         await s.commit()
         ignored_id = ignored.id

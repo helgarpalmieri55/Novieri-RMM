@@ -216,7 +216,9 @@ def _settings(body: _TargetSettings) -> dict[str, Any]:
 async def list_targets(
     request: Request, ctx: AuthContext = Depends(require_permission("backup.read"))
 ) -> list[TargetOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = (
             await session.execute(
                 select(BackupOffsiteTarget)
@@ -234,7 +236,7 @@ async def create_target_route(
     ctx: AuthContext = Depends(require_permission("backup.offsite.manage")),
 ) -> TargetOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         exists = (
             await session.execute(
                 select(BackupOffsiteTarget.id).where(
@@ -271,7 +273,7 @@ async def update_target_route(
             tr("Give both the access key and the secret, or neither to keep the stored ones."),
         )
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         target = await get_target(session, ctx.org_id, target_id)
         if target is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such off-site target"))
@@ -298,7 +300,9 @@ async def test_target_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("backup.offsite.manage")),
 ) -> TargetOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         target = await get_target(session, ctx.org_id, target_id)
         if target is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such off-site target"))
@@ -313,7 +317,9 @@ async def set_repository_offsite(
     request: Request,
     ctx: AuthContext = Depends(require_permission("backup.offsite.manage")),
 ) -> RepositoryOffsiteOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             repo = await set_repository_target(
                 session,
@@ -335,7 +341,9 @@ async def list_point_copies(
     request: Request,
     ctx: AuthContext = Depends(require_permission("backup.read")),
 ) -> list[PointCopyOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         point = (
             await session.execute(
                 select(BackupPoint.id).where(
@@ -374,7 +382,9 @@ async def list_point_copies(
 async def list_keys(
     request: Request, ctx: AuthContext = Depends(require_permission("backup.read"))
 ) -> list[RecoveryKeyOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         return [_key_out(k) for k in await list_recovery_keys(session, ctx.org_id)]
 
 
@@ -393,7 +403,9 @@ async def register_key(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             tr("Confirm the private key is stored safely before adding the recovery key."),
         )
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             row, challenge = await register_recovery_key(
                 session,
@@ -431,7 +443,9 @@ async def new_challenge(
     request: Request,
     ctx: AuthContext = Depends(require_permission("backup.recovery.manage")),
 ) -> RecoveryKeyChallengeOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         row = await _key_or_404(session, ctx.org_id, key_id)
         try:
             challenge = await reissue_challenge(session, row, now=datetime.now(UTC))
@@ -450,7 +464,9 @@ async def prove_key(
     # The failure is audited inside `prove_recovery_key`; commit it before
     # answering 422, so a wrong answer leaves its record.
     error: str | None = None
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         row = await _key_or_404(session, ctx.org_id, key_id)
         try:
             await prove_recovery_key(

@@ -25,6 +25,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.core.wire import InstallOutcome
@@ -118,7 +119,7 @@ async def test_author_script_creates_version_1_and_audits(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _device_id, _group_id, user_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         script = await author_script(
             session,
             org_id=org_id,
@@ -146,7 +147,7 @@ async def test_edit_script_bumps_version_and_updates_body(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _device_id, _group_id, user_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         script = await author_script(
             session,
             org_id=org_id,
@@ -184,7 +185,7 @@ async def test_run_script_dispatches_signed_job_with_body_in_envelope(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id, _group_id, user_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         script = await author_script(
             session,
             org_id=org_id,
@@ -261,7 +262,7 @@ async def test_run_script_group_target_resolves_devices(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id, group_id, user_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         script = await author_script(
             session,
             org_id=org_id,
@@ -289,7 +290,7 @@ async def test_author_script_rejects_unknown_os_family_and_interpreter(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _device_id, _group_id, user_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(DeployValidationError):
             await author_script(
                 session,
@@ -321,7 +322,7 @@ async def _setup_dispatched_run(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> tuple[UUID, UUID, UUID, Job]:
     org_id, device_id, _group_id, user_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         script = await author_script(
             session,
             org_id=org_id,
@@ -353,7 +354,7 @@ async def test_succeeded_outcome_flips_script_run_state(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id, _script_id, job = await _setup_dispatched_run(admin_engine, app_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = ScriptRunResult(
             outcome=InstallOutcome(identifier="script", state="succeeded", exit_code=0)
         )
@@ -381,7 +382,7 @@ async def test_failed_outcome_flips_script_run_state(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _device_id, _script_id, job = await _setup_dispatched_run(admin_engine, app_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = ScriptRunResult(
             outcome=InstallOutcome(identifier="script", state="failed", exit_code=1)
         )
@@ -402,7 +403,7 @@ async def test_out_of_domain_state_coerced_to_failed(
     (`succeeded|failed`). It must be coerced to `failed` with the original
     value recorded in the audit metadata."""
     org_id, _device_id, _script_id, job = await _setup_dispatched_run(admin_engine, app_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = ScriptRunResult(
             outcome=InstallOutcome(identifier="script", state="installed", exit_code=0)
         )
@@ -425,7 +426,7 @@ async def test_no_matching_run_row_is_a_graceful_no_op(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _device_id, _script_id, job = await _setup_dispatched_run(admin_engine, app_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         run = (
             await session.execute(select(ScriptRun).where(ScriptRun.job_id == job.id))
         ).scalar_one()
@@ -456,7 +457,7 @@ async def test_another_orgs_script_is_neither_runnable_nor_visible_under_rls(
     org_a, device_a, _group_a, user_a = await _setup(admin_engine)
     org_b, _device_b, _group_b, user_b = await _setup(admin_engine)
 
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         script = await author_script(
             session,
             org_id=org_a,
@@ -469,7 +470,7 @@ async def test_another_orgs_script_is_neither_runnable_nor_visible_under_rls(
         script_id = script.id
         await session.commit()
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         # org A's script is invisible under org B's RLS-scoped session.
         found = (
             await session.execute(select(Script).where(Script.id == script_id))
@@ -506,7 +507,7 @@ async def test_valid_script_result_through_job_engine_reconciles_and_queues_ui_e
 ) -> None:
     org_id, device_id, _group_id, user_id = await _setup(admin_engine)
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         script = await author_script(
             session,
             org_id=org_id,
@@ -654,7 +655,7 @@ async def test_a_group_script_run_passes_over_a_device_waiting_for_review(
             update(Device).where(Device.id == device_id).values(review_state="pending")
         )
         await session.commit()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         script = await author_script(
             session, org_id=org_id, actor_id=user_id, name="ping",
             os_family="linux", interpreter="bash", body="echo hi",
@@ -685,7 +686,7 @@ async def test_a_single_device_script_run_on_a_device_waiting_for_review_is_refu
         await session.commit()
     job_engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
     with pytest.raises(DeviceAwaitingReview):
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             script = await author_script(
                 session, org_id=org_id, actor_id=user_id, name="ping",
                 os_family="linux", interpreter="bash", body="echo hi",

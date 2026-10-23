@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Device, DeviceGroup, Organization
 from app.services.device_groups import list_device_groups
@@ -372,17 +373,17 @@ async def test_rls_hides_another_orgs_group_from_an_unfiltered_select(
             session.add(org)
             await session.commit()
             orgs[key] = org.id
-        async with org_session(orgs[key], engine=app_engine) as session:
+        async with org_session(orgs[key], engine=app_engine, clients=ClientScope.all()) as session:
             group = DeviceGroup(org_id=orgs[key], name=f"group-{key}")
             session.add(group)
             await session.flush()
             ids[key] = group.id
 
-    async with org_session(orgs["mine"], engine=app_engine) as session:
+    async with org_session(orgs["mine"], engine=app_engine, clients=ClientScope.all()) as session:
         visible = {row.id for row in (await session.execute(select(DeviceGroup))).scalars()}
     assert visible == {ids["mine"]}, "an unfiltered SELECT must still be tenant-scoped"
 
-    async with org_session(orgs["theirs"], engine=app_engine) as session:
+    async with org_session(orgs["theirs"], engine=app_engine, clients=ClientScope.all()) as session:
         visible = {row.id for row in (await session.execute(select(DeviceGroup))).scalars()}
     assert visible == {ids["theirs"]}
 

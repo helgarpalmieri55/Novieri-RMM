@@ -32,6 +32,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, PushCredentialScope
 from app.modules.agent_push.credential_scope import (
@@ -69,7 +70,7 @@ async def test_only_a_push_install_credential_may_be_bound(
         admin_engine, org, credential_type="windows_admin"
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await bind_scope(
             session,
             org.org_id,
@@ -77,7 +78,7 @@ async def test_only_a_push_install_credential_may_be_bound(
             credential_id=push_cred,
             prefix="10.40.0.0/24",
         )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushValidationError) as exc:
             await bind_scope(
                 session,
@@ -110,7 +111,7 @@ async def test_the_type_is_rechecked_on_resolve_not_only_at_bind(
         )
         await session.commit()
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushValidationError):
             await resolve_push_credential(session, org.org_id, credential)
 
@@ -127,7 +128,7 @@ async def test_a_push_credential_is_refused_by_remote_control(
         admin_engine, org, credential_type="windows_admin"
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         # The ordinary remote-control credential passes straight through.
         await refuse_push_install_credential(
             session, org_id=org.org_id, credential_id=remote_cred
@@ -180,7 +181,7 @@ async def test_a_credential_that_does_not_exist_is_not_found(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org = await seed_org(admin_engine, "push-cred-missing")
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushNotFoundError):
             await resolve_push_credential(session, org.org_id, uuid4())
 
@@ -197,7 +198,7 @@ async def test_binding_is_audited_with_the_name_and_never_the_secret(
     What an auditor needs is the id and the label a human chose."""
     org = await seed_org(admin_engine, "push-bind-audit")
     credential = await seed_credential(admin_engine, org, name="branch-installer")
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await bind_scope(
             session,
             org.org_id,
@@ -229,7 +230,7 @@ async def test_binding_the_same_prefix_twice_is_a_conflict(
 ) -> None:
     org = await seed_org(admin_engine, "push-bind-dupe")
     credential = await seed_credential(admin_engine, org)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await bind_scope(
             session,
             org.org_id,
@@ -237,7 +238,7 @@ async def test_binding_the_same_prefix_twice_is_a_conflict(
             credential_id=credential,
             prefix="10.43.0.0/24",
         )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushConflictError):
             await bind_scope(
                 session,
@@ -258,7 +259,7 @@ async def test_two_credentials_may_be_bound_to_the_same_prefix(
     first = await seed_credential(admin_engine, org)
     second = await seed_credential(admin_engine, org)
     for credential in (first, second):
-        async with org_session(org.org_id, engine=app_engine) as session:
+        async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await bind_scope(
                 session,
                 org.org_id,
@@ -266,7 +267,7 @@ async def test_two_credentials_may_be_bound_to_the_same_prefix(
                 credential_id=credential,
                 prefix="10.44.0.0/24",
             )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rows = await list_scopes(session, org.org_id)
     assert {r.credential_id for r in rows} == {first, second}
 
@@ -282,7 +283,7 @@ async def test_unbinding_stamps_and_the_row_stays(
     scope_id = await seed_push_credential_scope(
         admin_engine, org, credential, "10.45.0.0/24"
     )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await unbind_scope(
             session, org.org_id, actor_id=org.user_id, scope_id=scope_id
         )
@@ -314,7 +315,7 @@ async def test_unbinding_twice_is_a_conflict(
     scope_id = await seed_push_credential_scope(
         admin_engine, org, credential, "10.46.0.0/24", unbound=True
     )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushConflictError):
             await unbind_scope(
                 session, org.org_id, actor_id=org.user_id, scope_id=scope_id
@@ -334,7 +335,7 @@ async def test_listing_filters_by_credential_and_by_bound_state(
     )
     await seed_push_credential_scope(admin_engine, org, second, "10.49.0.0/24")
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         active = {str(r.prefix) for r in await list_scopes(session, org.org_id)}
         for_first = {
             str(r.prefix)

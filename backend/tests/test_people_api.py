@@ -8,6 +8,7 @@ from fastapi.routing import APIRoute
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.rbac import route_permission
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Device, Permission, Role, RolePermission, User, UserRole
@@ -16,7 +17,7 @@ from tests.conftest import ApiEnv
 
 
 async def _actions(api_env: ApiEnv, org_id: UUID) -> list[str]:
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         return list(
             (
                 await s.execute(

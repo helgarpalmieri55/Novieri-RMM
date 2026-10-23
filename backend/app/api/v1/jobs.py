@@ -207,7 +207,7 @@ async def dispatch_job(
         raise HTTPException(status.HTTP_403_FORBIDDEN, tr_marked(governed))
 
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         device = (
             await session.execute(select(Device).where(Device.id == body.device_id))
         ).scalar_one_or_none()
@@ -264,7 +264,9 @@ async def list_jobs(
     default: a caller told "oldest" and handed "newest" with a 200 would
     reproduce the deception in a different place.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         query = select(Job)
         if device_id:
             query = query.where(Job.target_id == device_id)
@@ -296,7 +298,9 @@ async def get_job(
     response the console's job detail panel renders, and B43's complaint was
     that it had nothing about a signature to render.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         job = (
             await session.execute(select(Job).where(Job.id == job_id))
         ).scalar_one_or_none()
@@ -364,7 +368,7 @@ async def cancel_job(
     409 the job is not in a state that can be withdrawn.
     """
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             outcome = await request_cancellation(
                 session,
@@ -429,7 +433,7 @@ async def retry_job_route(
     rather than a retry.
     """
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             outcome = await retry_job(
                 session,

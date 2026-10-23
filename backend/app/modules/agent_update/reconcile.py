@@ -17,6 +17,7 @@ from sqlalchemy import exists, func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Agent, Job, JobStatus
 from app.models.core import AgentRelease
@@ -461,7 +462,7 @@ async def tick_all_orgs(
     total = 0
     for org_id in await _org_ids(admin_engine):
         try:
-            async with org_session(org_id, engine=engine) as session:
+            async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
                 envelopes = await tick(session, org_id, job_engine=job_engine, presign=presign)
         except Exception:  # noqa: BLE001 - one org must not stop the others
             logger.error("agent_update.tick: org %s failed; others continue", org_id, exc_info=True)

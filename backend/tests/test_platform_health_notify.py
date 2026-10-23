@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import override_settings
 from app.core.health import notify
 from app.core.health.notify import ProbeVerdict, notify_org, probe_verdicts
@@ -47,12 +48,12 @@ def _verdict(probe: str, state: str, at: datetime) -> dict[str, ProbeVerdict]:
 
 
 async def _apply(app_engine: AsyncEngine, org_id: UUID, verdicts: Any, now: datetime) -> int:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return await notify_org(session, org_id, verdicts, now=now)
 
 
 async def _events(app_engine: AsyncEngine, org_id: UUID) -> list[DomainEvent]:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return list(
             (
                 await session.execute(select(DomainEvent).order_by(DomainEvent.created_at))

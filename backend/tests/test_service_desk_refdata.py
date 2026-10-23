@@ -22,6 +22,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Role, TicketCategory, TicketQueue, User
 from app.modules.service_desk.errors import TicketNotFoundError, TicketValidationError
@@ -62,7 +63,7 @@ async def _org_with_user(api_env) -> tuple[UUID, UUID]:
 
 async def test_ensure_default_queues_creates_exactly_three(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queues = await ensure_default_queues(session, org_id, user_id)
     assert {q.key for q in queues} == {key for key, _name in DEFAULT_QUEUES}
     assert {q.name for q in queues} == {name for _key, name in DEFAULT_QUEUES}
@@ -73,14 +74,14 @@ async def test_ensure_default_queues_is_idempotent_by_construction(api_env) -> N
     """Running it twice must not duplicate: the org's existing keys are
     selected first, so a second call inserts nothing."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         first = await ensure_default_queues(session, org_id, user_id)
         second = await ensure_default_queues(session, org_id, user_id)
     assert len(first) == 3
     assert len(second) == 3
     assert {q.id for q in first} == {q.id for q in second}
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (
             await session.execute(select(TicketQueue).where(TicketQueue.org_id == org_id))
         ).scalars().all()
@@ -97,7 +98,7 @@ async def test_seed_emits_one_system_event_and_nothing_on_second_call(api_env) -
     read-only user opening a page became, in the immutable audit log, the
     creator of the org's reference data."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await ensure_default_queues(session, org_id, user_id)
 
         seeded_events = (
@@ -115,7 +116,7 @@ async def test_seed_emits_one_system_event_and_nothing_on_second_call(api_env) -
     assert event.actor_id is None
     assert set(event.meta["keys"]) == {key for key, _name in DEFAULT_QUEUES}
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await ensure_default_queues(session, org_id, user_id)
         seeded_events_after = (
             await session.execute(
@@ -133,7 +134,7 @@ async def test_seed_backfills_only_the_missing_queues(api_env) -> None:
     adds only what is missing and audits only the keys it actually
     inserted."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         pre_existing = TicketQueue(
             org_id=org_id, key="helpdesk", name="Custom Helpdesk Name", created_by=user_id
         )
@@ -166,7 +167,7 @@ async def test_seed_backfills_only_the_missing_queues(api_env) -> None:
 
 async def test_duplicate_queue_key_in_one_org_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_queue(session, org_id, user_id, key="ops", name="Ops")
         with pytest.raises(TicketValidationError):
             await create_queue(session, org_id, user_id, key="ops", name="Ops 2")
@@ -236,9 +237,9 @@ async def test_create_queue_concurrent_duplicate_raises_typed_error_not_integrit
 async def test_same_queue_key_in_two_orgs_is_fine(api_env) -> None:
     org_a, user_a = await _org_with_user(api_env)
     org_b, user_b = await _org_with_user(api_env)
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue_a = await create_queue(session, org_a, user_a, key="ops", name="Ops")
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue_b = await create_queue(session, org_b, user_b, key="ops", name="Ops")
     assert queue_a.key == queue_b.key == "ops"
     assert queue_a.id != queue_b.id
@@ -246,7 +247,7 @@ async def test_same_queue_key_in_two_orgs_is_fine(api_env) -> None:
 
 async def test_create_queue_audits(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await create_queue(
             session, org_id, user_id, key="ops", name="Ops", description="Operations"
         )
@@ -273,7 +274,7 @@ async def test_create_queue_with_nonzero_sort_order_writes_exactly_one_audit_eve
     write exactly one audit event, never `ticket.queue_created` immediately
     followed by a spurious `ticket.queue_updated`."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await create_queue(session, org_id, user_id, key="ops", name="Ops", sort_order=5)
 
         created_events = (
@@ -318,14 +319,14 @@ async def test_resolve_queue_raises_not_found_for_nonexistent_id(api_env) -> Non
     from uuid_extensions import uuid7
 
     org_id, _user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(TicketNotFoundError):
             await resolve_queue(session, org_id, uuid7())
 
 
 async def test_update_queue_reports_only_changed_field_names(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await create_queue(session, org_id, user_id, key="ops", name="Ops")
         await update_queue(
             session, org_id, user_id, queue.id, {"name": "Ops", "sort_order": 5}
@@ -348,7 +349,7 @@ async def test_update_queue_reports_only_changed_field_names(api_env) -> None:
 
 async def test_update_queue_rejects_null_name(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await create_queue(session, org_id, user_id, key="ops", name="Ops")
         with pytest.raises(TicketValidationError):
             await update_queue(session, org_id, user_id, queue.id, {"name": None})
@@ -356,7 +357,7 @@ async def test_update_queue_rejects_null_name(api_env) -> None:
 
 async def test_update_queue_never_touches_key(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await create_queue(session, org_id, user_id, key="ops", name="Ops")
         updated = await update_queue(session, org_id, user_id, queue.id, {"key": "renamed"})
     assert updated.key == "ops"
@@ -364,7 +365,7 @@ async def test_update_queue_never_touches_key(api_env) -> None:
 
 async def test_list_queues_excludes_inactive_by_default_and_is_ordered(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         z_queue = await create_queue(session, org_id, user_id, key="zulu", name="Zulu")
         a_queue = await create_queue(session, org_id, user_id, key="alpha", name="Alpha")
         await update_queue(session, org_id, user_id, z_queue.id, {"active": False})
@@ -386,7 +387,7 @@ async def test_list_queues_does_not_seed(api_env) -> None:
     itself (it has no actor to attribute a fallback `created_by` to) -- an
     org that never called `ensure_default_queues` simply has no queues."""
     org_id, _user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queues = await list_queues(org_id=org_id, session=session)
     assert queues == []
 
@@ -401,7 +402,7 @@ async def test_list_categories_does_not_seed(api_env) -> None:
     person to add self-seeding only trips one of them.
     """
     org_id, _user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         categories = await list_categories(org_id=org_id, session=session)
     assert categories == []
 
@@ -415,7 +416,7 @@ async def test_ensure_default_categories_creates_all_nine_with_correct_fields(ap
     """The nine defaults land with the exact `type`/`requires_approval`/
     `default_queue_id` the spec's table pins -- not re-derived, copied."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         categories = await ensure_default_categories(session, org_id, user_id)
         queues = {
             q.key: q.id
@@ -439,14 +440,14 @@ async def test_ensure_default_categories_creates_all_nine_with_correct_fields(ap
 
 async def test_ensure_default_categories_is_idempotent_by_construction(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         first = await ensure_default_categories(session, org_id, user_id)
         second = await ensure_default_categories(session, org_id, user_id)
     assert len(first) == 9
     assert len(second) == 9
     assert {c.id for c in first} == {c.id for c in second}
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (
             await session.execute(select(TicketCategory).where(TicketCategory.org_id == org_id))
         ).scalars().all()
@@ -457,7 +458,7 @@ async def test_ensure_default_categories_emits_one_system_event_and_nothing_on_s
     api_env,
 ) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await ensure_default_categories(session, org_id, user_id)
 
         seeded_events = (
@@ -475,7 +476,7 @@ async def test_ensure_default_categories_emits_one_system_event_and_nothing_on_s
     assert event.actor_id is None
     assert set(event.meta["keys"]) == {key for key, *_ in DEFAULT_CATEGORIES}
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await ensure_default_categories(session, org_id, user_id)
         seeded_events_after = (
             await session.execute(
@@ -494,7 +495,7 @@ async def test_ensure_default_categories_alone_on_a_fresh_org_seeds_both(api_env
     end up with a usable desk -- both the three queues and the nine
     categories, each category wired to the correct queue by key."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         categories = await ensure_default_categories(session, org_id, user_id)
 
         queue_rows = (
@@ -525,7 +526,7 @@ async def test_ensure_default_categories_second_call_does_not_reseed_queues(api_
     cheap existence check on the queue side -- no second
     `ticket.queues_seeded` event."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await ensure_default_queues(session, org_id, user_id)
         await ensure_default_categories(session, org_id, user_id)
 
@@ -541,7 +542,7 @@ async def test_ensure_default_categories_second_call_does_not_reseed_queues(api_
 
 async def test_incident_category_with_requires_approval_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(TicketValidationError):
             await create_category(
                 session,
@@ -556,7 +557,7 @@ async def test_incident_category_with_requires_approval_is_rejected(api_env) -> 
 
 async def test_incident_category_without_requires_approval_is_fine(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         category = await create_category(
             session,
             org_id,
@@ -572,7 +573,7 @@ async def test_incident_category_without_requires_approval_is_fine(api_env) -> N
 
 async def test_request_category_with_requires_approval_is_fine(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         category = await create_category(
             session,
             org_id,
@@ -593,7 +594,7 @@ async def test_update_category_to_requires_approval_true_on_incident_is_rejected
     -- flipping an existing incident category's `requires_approval` to True
     is rejected the same way."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         category = await create_category(
             session,
             org_id,
@@ -611,7 +612,7 @@ async def test_update_category_to_requires_approval_true_on_incident_is_rejected
 
 async def test_duplicate_category_key_in_one_org_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_category(
             session, org_id, user_id, key="hardware", name="Hardware", type="request"
         )
@@ -682,11 +683,11 @@ async def test_create_category_concurrent_duplicate_raises_typed_error_not_integ
 async def test_same_category_key_in_two_orgs_is_fine(api_env) -> None:
     org_a, user_a = await _org_with_user(api_env)
     org_b, user_b = await _org_with_user(api_env)
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat_a = await create_category(
             session, org_a, user_a, key="hardware", name="Hardware", type="request"
         )
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat_b = await create_category(
             session, org_b, user_b, key="hardware", name="Hardware", type="request"
         )
@@ -696,7 +697,7 @@ async def test_same_category_key_in_two_orgs_is_fine(api_env) -> None:
 
 async def test_create_category_audits(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         category = await create_category(
             session, org_id, user_id, key="hardware", name="Hardware", type="request"
         )
@@ -719,7 +720,7 @@ async def test_create_category_with_nonzero_sort_order_writes_exactly_one_audit_
 ) -> None:
     """The category-side counterpart of the identical queue fix above."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         category = await create_category(
             session, org_id, user_id, key="hardware", name="Hardware", type="request",
             sort_order=5,
@@ -771,7 +772,7 @@ async def test_resolve_category_raises_not_found_for_nonexistent_id(api_env) -> 
     from uuid_extensions import uuid7
 
     org_id, _user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(TicketNotFoundError):
             await resolve_category(session, org_id, uuid7())
 
@@ -965,7 +966,7 @@ async def test_update_category_rejects_cross_org_approver_role_id(
 
 async def test_update_category_never_touches_key_or_type(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         category = await create_category(
             session, org_id, user_id, key="hardware", name="Hardware", type="request"
         )
@@ -978,7 +979,7 @@ async def test_update_category_never_touches_key_or_type(api_env) -> None:
 
 async def test_update_category_rejects_null_name(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         category = await create_category(
             session, org_id, user_id, key="hardware", name="Hardware", type="request"
         )
@@ -988,7 +989,7 @@ async def test_update_category_rejects_null_name(api_env) -> None:
 
 async def test_update_category_reports_only_changed_field_names(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         category = await create_category(
             session, org_id, user_id, key="hardware", name="Hardware", type="request"
         )
@@ -1014,7 +1015,7 @@ async def test_update_category_reports_only_changed_field_names(api_env) -> None
 
 async def test_list_categories_excludes_inactive_by_default_and_is_ordered(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         z_cat = await create_category(
             session, org_id, user_id, key="zulu", name="Zulu", type="request"
         )

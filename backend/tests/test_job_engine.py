@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer, verify_signature
 from app.core.tenancy import org_session
 from app.jobs.canonical import canonical_bytes
@@ -64,12 +65,12 @@ async def test_create_validates_type_and_params(
     org_id, device_id = await _org_and_device(admin_engine)
     engine = engine_factory()
     with pytest.raises(UnknownJobType):
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await engine.create(
                 session, org_id=org_id, type="bogus.type", target_device_id=device_id, params={}
             )
     with pytest.raises(ValueError):
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await engine.create(
                 session,
                 org_id=org_id,
@@ -84,7 +85,7 @@ async def test_envelope_signature_verifies_and_tamper_fails(
 ) -> None:
     org_id, device_id = await _org_and_device(admin_engine)
     engine = engine_factory()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session,
             org_id=org_id,
@@ -115,7 +116,7 @@ async def test_lifecycle_transitions_enforced(
 ) -> None:
     org_id, device_id = await _org_and_device(admin_engine)
     engine = engine_factory()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )
@@ -144,7 +145,7 @@ async def test_refusal_and_audit_trail(
 ) -> None:
     org_id, device_id = await _org_and_device(admin_engine)
     engine = engine_factory()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )
@@ -168,7 +169,7 @@ async def test_expire_due_and_resign_for_retry(
 ) -> None:
     org_id, device_id = await _org_and_device(admin_engine)
     engine = engine_factory()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         stale = await engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}, ttl_s=1
         )
@@ -214,7 +215,7 @@ async def test_withdraw_takes_a_queued_job_to_a_terminal_cancelled(
     org_id, device_id = await _org_and_device(admin_engine)
     engine = engine_factory()
     actor = await _actor_in(admin_engine, org_id)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )
@@ -247,7 +248,7 @@ async def test_withdraw_refuses_a_job_that_already_left_the_server(
     """
     org_id, device_id = await _org_and_device(admin_engine)
     engine = engine_factory()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )
@@ -273,14 +274,14 @@ async def test_withdraw_writes_both_halves_of_the_record(
     org_id, device_id = await _org_and_device(admin_engine)
     engine = engine_factory()
     actor = await _actor_in(admin_engine, org_id)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )
         job_id = job.id
         await engine.withdraw(session, job, requested_by=actor)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         events = {
             r.action: r
             for r in (
@@ -314,7 +315,7 @@ async def test_a_withdrawn_job_is_never_drained_to_a_reconnecting_agent(
     org_id, device_id = await _org_and_device(admin_engine)
     engine = engine_factory()
     actor = await _actor_in(admin_engine, org_id)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         withdrawn = await engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )
@@ -336,7 +337,7 @@ async def test_the_expiry_sweep_leaves_a_cancelled_job_alone(
     org_id, device_id = await _org_and_device(admin_engine)
     engine = engine_factory()
     actor = await _actor_in(admin_engine, org_id)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )

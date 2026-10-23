@@ -22,6 +22,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Device
 from tests.conftest import ApiEnv
@@ -29,7 +30,7 @@ from tests.conftest import ApiEnv
 
 async def _bare_asset(api_env: ApiEnv, org_id: UUID) -> UUID:
     """A switch: no hostname, no OS, no agent. The row this feature exists for."""
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         device = Device(
             org_id=org_id,
             hostname=None,
@@ -102,7 +103,7 @@ async def test_a_managed_device_still_reports_what_it_always_did(
     """
     org_id = await api_env.create_org("assets")
     admin = await api_env.create_user(org_id, "org-admin")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         device = Device(org_id=org_id, hostname="ws-01", os_family="linux")
         session.add(device)
         await session.commit()

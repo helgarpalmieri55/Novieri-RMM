@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     Device,
@@ -58,7 +59,7 @@ async def _scan(app_engine: AsyncEngine, org_id: UUID, device_id: UUID, *patches
         patches=list(patches),  # type: ignore[arg-type]
         scanned_at="2026-09-23T10:00:00Z",
     )
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = (await session.execute(select(Device).where(Device.id == device_id))).scalar_one()
         await ingest_scan(session, device, doc)
 
@@ -119,7 +120,7 @@ async def test_an_approved_app_is_dispatched_by_id_like_an_os_update(
         session.add(PatchApproval(org_id=org_id, patch_id=chrome.id, ring_name="broad"))
         await session.commit()
     engine = _FakeJobEngine()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await dispatch_apply(session, engine, org_id=org_id, now=datetime.now(UTC))
     [created] = engine.created
     # Only the approved app travels; the unapproved KB does not.
@@ -131,7 +132,7 @@ async def test_the_update_list_separates_apps_from_os_updates(
 ) -> None:
     org_id, device_id = await _org_device(admin_engine)
     await _scan(app_engine, org_id, device_id, CHROME, KB)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         apps = await update_rollup(session, org_id, kind="apps")
         os_only = await update_rollup(session, org_id, kind="os")
         both = await update_rollup(session, org_id)
@@ -168,7 +169,7 @@ async def test_app_source_status_is_read_from_the_latest_scan(
                 )
             )
         await session.commit()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         report = await device_report(session, org_id, device_id)
         summary = await app_source_summary(session, org_id, "windows")
         other = await app_source_summary(session, org_id, "macos")

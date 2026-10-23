@@ -35,6 +35,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
@@ -125,7 +126,7 @@ async def _placement(admin_engine: AsyncEngine, device_id: UUID) -> UUID | None:
 async def _sweep(app_engine: AsyncEngine, org_id: UUID) -> Any:
     """Run one org's re-evaluation exactly as the worker task does: inside that
     org's own `org_session`, never on the admin engine."""
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return await reevaluate_org_membership(session, org_id=org_id)
 
 
@@ -157,7 +158,7 @@ async def test_the_sweep_replays_the_snapshot_and_agrees_with_the_ingest_path(
     assert await _placement(admin_engine, device_id) == windows
 
     # The ingest path, on the same document, reaches the same group.
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one()
@@ -603,7 +604,7 @@ async def test_a_group_whose_rules_column_holds_jsonb_null_is_not_rule_bearing(
 async def _evaluation_row(app_engine: AsyncEngine, org_id: UUID) -> Any:
     from app.models import DeviceGroupEvaluation
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return (
             await session.execute(
                 select(DeviceGroupEvaluation).where(

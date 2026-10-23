@@ -22,6 +22,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
@@ -96,7 +97,7 @@ async def test_unattended_requires_policy_and_never_stores_secret(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id, user_id = await _org_device_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         s.add(RemotePolicy(org_id=org_id, device_group_id=None, allow_unattended=True))
         cred = Credential(org_id=org_id, name="win", type="windows_admin", vault_ref="v")
         s.add(cred)
@@ -104,7 +105,7 @@ async def test_unattended_requires_policy_and_never_stores_secret(
         cred_id = cred.id
     engine, vault, redis = _FakeJobEngine(), _FakeVault(), _FakeRedis()
     svc = RemoteSessionService(engine, SessionRelay(), vault)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = await svc.start_session(
             s,
             org_id=org_id,
@@ -145,14 +146,14 @@ async def test_unattended_start_audits_credential_used(
     ``remote.session.credential_used`` referencing the credential — and the
     plaintext secret must NEVER appear in the audit metadata."""
     org_id, device_id, user_id = await _org_device_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         s.add(RemotePolicy(org_id=org_id, device_group_id=None, allow_unattended=True))
         cred = Credential(org_id=org_id, name="win", type="windows_admin", vault_ref="v")
         s.add(cred)
         await s.flush()
         cred_id = cred.id
     svc = RemoteSessionService(_FakeJobEngine(), SessionRelay(), _FakeVault())
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = await svc.start_session(
             s,
             org_id=org_id,
@@ -188,7 +189,7 @@ async def test_attended_start_does_not_audit_credential_used(
     ``remote.session.credential_used`` (only ``remote.session.requested``)."""
     org_id, device_id, user_id = await _org_device_user(admin_engine)
     svc = RemoteSessionService(_FakeJobEngine(), SessionRelay(), _FakeVault())
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await svc.start_session(
             s,
             org_id=org_id,
@@ -215,7 +216,7 @@ async def test_unattended_downgraded_when_policy_forbids(
     org_id, device_id, user_id = await _org_device_user(admin_engine)
     vault = _FakeVault()
     svc = RemoteSessionService(_FakeJobEngine(), SessionRelay(), vault)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = await svc.start_session(
             s,
             org_id=org_id,
@@ -237,7 +238,7 @@ async def test_attended_dispatches_signed_job_and_registers_relay(
     org_id, device_id, user_id = await _org_device_user(admin_engine)
     engine, relay, redis = _FakeJobEngine(), SessionRelay(), _FakeRedis()
     svc = RemoteSessionService(engine, relay, _FakeVault())
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = await svc.start_session(
             s,
             org_id=org_id,
@@ -277,7 +278,7 @@ async def test_rollback_leaves_no_relay_registration_or_publish(
 
     sid: UUID | None = None
     with pytest.raises(_Boom):
-        async with org_session(org_id, engine=app_engine) as s:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
             row = await svc.start_session(
                 s,
                 org_id=org_id,
@@ -299,7 +300,7 @@ async def test_rollback_leaves_no_relay_registration_or_publish(
     # no in-memory params leaked
     assert svc.connection_params(sid) is None
     # and the row itself was rolled back — it never persisted
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         gone = (
             await s.execute(select(RemoteSession).where(RemoteSession.id == sid))
         ).scalar_one_or_none()
@@ -312,7 +313,7 @@ async def test_consent_reject_ends_and_unregisters_relay(
     org_id, device_id, user_id = await _org_device_user(admin_engine)
     relay, redis = SessionRelay(), _FakeRedis()
     svc = RemoteSessionService(_FakeJobEngine(), relay, _FakeVault())
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = await svc.start_session(
             s,
             org_id=org_id,
@@ -327,7 +328,7 @@ async def test_consent_reject_ends_and_unregisters_relay(
         pending = list(s.info.get("remote_pending", []))
     # register the relay post-commit, then reject consent and prove cleanup
     await svc.dispatch_pending(pending, redis)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await svc.on_consent(s, session_id=sid, accepted=False)
         got = (
             await s.execute(select(RemoteSession).where(RemoteSession.id == sid))
@@ -352,7 +353,7 @@ async def test_full_lifecycle_and_end_unregisters_relay(
     org_id, device_id, user_id = await _org_device_user(admin_engine)
     relay, redis = SessionRelay(), _FakeRedis()
     svc = RemoteSessionService(_FakeJobEngine(), relay, _FakeVault())
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = await svc.start_session(
             s,
             org_id=org_id,
@@ -369,7 +370,7 @@ async def test_full_lifecycle_and_end_unregisters_relay(
     # the session is registered and its in-memory params installed
     assert svc.connection_params(sid) is not None
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await svc.on_consent(s, session_id=sid, accepted=True)
         assert (
             await s.execute(select(RemoteSession.state).where(RemoteSession.id == sid))
@@ -414,7 +415,7 @@ async def test_illegal_transition_raises(
 ) -> None:
     org_id, device_id, user_id = await _org_device_user(admin_engine)
     svc = RemoteSessionService(_FakeJobEngine(), SessionRelay(), _FakeVault())
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await svc.start_session(
             s,
             org_id=org_id,
@@ -437,12 +438,12 @@ async def test_unattended_requires_credential(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id, user_id = await _org_device_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         s.add(RemotePolicy(org_id=org_id, device_group_id=None, allow_unattended=True))
         await s.flush()
     svc = RemoteSessionService(_FakeJobEngine(), SessionRelay(), _FakeVault())
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(ValueError):
             await svc.start_session(
                 s,

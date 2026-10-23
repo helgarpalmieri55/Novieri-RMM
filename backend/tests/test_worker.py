@@ -9,6 +9,7 @@ import redis.asyncio as aioredis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -37,7 +38,7 @@ async def test_sweep_expires_overdue_and_leaves_fresh(
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         overdue = await engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )
@@ -53,7 +54,7 @@ async def test_sweep_expires_overdue_and_leaves_fresh(
     assert expired == 1
     assert redispatched == 0
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         jobs = {
             j.id: j.status
             for j in (await session.execute(select(Job))).scalars()
@@ -70,7 +71,7 @@ async def test_sweep_redispatches_stuck_dispatched_job_with_fresh_nonce(
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
     await redis.flushdb()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )
@@ -95,7 +96,7 @@ async def test_sweep_redispatches_stuck_dispatched_job_with_fresh_nonce(
     assert published is not None
     assert published["job"]["nonce"] != old_nonce
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         refreshed = (
             await session.execute(select(Job).where(Job.id == job_id))
         ).scalar_one()
@@ -134,7 +135,7 @@ async def test_sweep_never_redispatches_a_job_whose_cancel_was_requested(
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
     await redis.flushdb()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )
@@ -152,7 +153,7 @@ async def test_sweep_never_redispatches_a_job_whose_cancel_was_requested(
     await pubsub.aclose()
     await redis.aclose()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         assert row.status is JobStatus.dispatched
         assert row.nonce == nonce_before
@@ -182,7 +183,7 @@ async def test_sweep_leaves_a_withdrawn_job_alone(
         await session.commit()
         actor = user.id
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="hello", target_device_id=device_id, params={}
         )
@@ -196,7 +197,7 @@ async def test_sweep_leaves_a_withdrawn_job_alone(
     await redis.aclose()
     assert (expired, redispatched) == (0, 0)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
     assert row.status is JobStatus.cancelled
     assert row.cancel_outcome == "withdrawn"

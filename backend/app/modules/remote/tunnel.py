@@ -14,9 +14,9 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
-from app.core.identity import domain_refusal, log_admission_refusal, status_refusal
-from app.core.identity.policy import resolve_console_domain
+from app.core.identity.door import read_door_identity
 from app.core.rbac import has_permission
 from app.core.security import (
     JwksCache,
@@ -25,12 +25,15 @@ from app.core.security import (
     validate_token,
 )
 from app.core.tenancy import org_session
-from app.models import Organization, RemoteSession, User
+from app.models import Organization, RemoteSession
 
 # --------------------------------------------------------------------------- #
 # Auth/ownership gate (factored out of the WS route so it is testable without a
 # live socket). Raises TunnelAuthError with the WebSocket close code to use.
 # --------------------------------------------------------------------------- #
+
+#: The code this door guards; the caller's scope is where they hold it.
+REMOTE_CONTROL = "remote.control"
 
 
 class TunnelAuthError(Exception):
@@ -66,15 +69,21 @@ async def authorize_tunnel(
     jwks: JwksCache,
     admin_engine: AsyncEngine,
     app_engine: AsyncEngine,
-) -> tuple[UUID, UUID]:
+) -> tuple[UUID, UUID, ClientScope]:
     """Authenticate the token and authorize this caller for ``session_id``.
 
-    Returns ``(org_id, user_id)`` on success. Requires the ``remote.control``
-    permission AND that the caller either owns the session (is its technician)
-    or holds ``orgs.manage`` (org-admin). Raises ``TunnelAuthError`` otherwise:
+    Returns ``(org_id, user_id, clients)`` on success -- ``clients`` is the
+    caller's client scope, which the screen tunnel's own sessions run under
+    (MSP clients spec §2.3), exactly as a route passes ``ctx.clients``.
+
+    Requires the ``remote.control`` permission on at least one client -- the
+    session is then looked up under the clients where it is held -- AND that
+    the caller either owns the session (is its technician) or holds
+    ``orgs.manage`` (org-admin). Raises ``TunnelAuthError`` otherwise:
       * 4401 — bad/absent token, unknown org, or unknown user;
-      * 4403 — not admitted (email domain, or a non-active account), lacks
-        remote.control, or not the owner and not an org-admin;
+      * 4403 — not admitted (email domain, a non-active account, or a
+        contact), lacks remote.control everywhere, or not the owner and not an
+        org-admin;
       * 4404 — no such session in the caller's tenant.
 
     ADMISSION, DOOR 3 OF 3 (spec §3.2). This door is the one with real teeth:
@@ -102,53 +111,51 @@ async def authorize_tunnel(
             4401, "unknown organization"
         )
 
-    async with org_session(org_id, engine=app_engine) as s:
-        # 4403, matching this door's existing vocabulary (4401 bad token / 4403
-        # authenticated-but-refused / 4404 no such session) rather than
-        # inventing a fourth code, so "the allowlist turned you away" is
-        # legible to the same client-side handling that already distinguishes
-        # the other three.
-        #
-        # Read from the ORG's setting (invisible-identity-layer design §2.2)
-        # inside the tenant session, so it is RLS-scoped and resolved per
-        # request — a console change applies to the next tunnel, not after a
-        # restart. It stays FIRST inside this block, ahead of `users.status`,
-        # `remote.control` and ownership: a refusal must not depend on which of
-        # several reasons the caller happens to also trip.
-        domain_reason = domain_refusal(
-            claims.email, await resolve_console_domain(s, org_id, settings)
+    # IDENTITY: the org's email-domain rule, then the `users` row and its
+    # status (`read_door_identity`). It runs before the person's client scope
+    # exists -- the scope is computed from those rows -- and it is the only
+    # part of this gate that does (MSP clients spec §2.2-2.3).
+    #
+    # 4403, matching this door's existing vocabulary (4401 bad token / 4403
+    # authenticated-but-refused / 4404 no such session) rather than inventing
+    # a fourth code, so "the allowlist turned you away" is legible to the same
+    # client-side handling that already distinguishes the other three. The
+    # domain rule stays FIRST, ahead of `users.status`, `remote.control` and
+    # ownership: a refusal must not depend on which of several reasons the
+    # caller happens to also trip.
+    #
+    # `users.status`: a disabled or deleted account stops driving a remote
+    # session immediately, not when its access token happens to expire.
+    #
+    # THE SCOPE IS WHERE THE PERSON HOLDS `remote.control` -- the code this
+    # door guards, exactly as `require_permission("remote.control")` scopes a
+    # route (spec §2.1-2.2). Holding it on SOME client passes; the session
+    # lookup below then runs under that scope, so a session on a device of a
+    # client where they lack it does not exist for them (spec §2.6).
+    identity = await read_door_identity(
+        door="remote-tunnel",
+        org_id=org_id,
+        claims=claims,
+        settings=settings,
+        engine=app_engine,
+        code=REMOTE_CONTROL,
+    )
+    if identity.refusal is not None:
+        raise TunnelAuthError(4403, identity.refusal)
+    if identity.user_id is None:
+        raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
+            4401, "unknown user"
         )
-        if domain_reason is not None:
-            log_admission_refusal(
-                "remote-tunnel", sub=claims.sub, email=claims.email, reason=domain_reason
-            )
-            raise TunnelAuthError(4403, domain_reason)
+    user_id, clients = identity.user_id, identity.clients
+    if clients.is_empty:
+        raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
+            4403, "requires remote.control"
+        )
 
-        user_row = (
-            await s.execute(
-                select(User.id, User.status).where(User.external_subject == claims.sub)
-            )
-        ).one_or_none()
-        if user_row is None:
-            raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
-                4401, "unknown user"
-            )
-        user_id, user_status = user_row
-        # `users.status`: a disabled or deleted account stops driving a remote
-        # session immediately, not when its access token happens to expire.
-        # The write path for this column ships with the user-lifecycle
-        # surface; this is the enforcement, landed first on purpose, because a
-        # disable button whose enforcement is still in review disables nobody.
-        status_reason = status_refusal(user_status)
-        if status_reason is not None:
-            log_admission_refusal(
-                "remote-tunnel", sub=claims.sub, email=claims.email, reason=status_reason
-            )
-            raise TunnelAuthError(4403, status_reason)
-        if not await has_permission(s, user_id, "remote.control"):
-            raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
-                4403, "requires remote.control"
-            )
+    # AUTHORIZATION, as the person: the session row and ownership are read
+    # under the person's `remote.control` scope, so the session lookup
+    # inherits the client RLS (spec §2.6) instead of seeing every client.
+    async with org_session(org_id, engine=app_engine, clients=clients) as s:
         row = (
             await s.execute(
                 select(RemoteSession.technician_id).where(RemoteSession.id == session_id)
@@ -162,4 +169,4 @@ async def authorize_tunnel(
             raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
                 4403, "not the session owner"
             )
-    return org_id, user_id
+    return org_id, user_id, clients

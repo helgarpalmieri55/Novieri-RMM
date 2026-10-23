@@ -131,7 +131,7 @@ async def create_resolver_session(
         )
     provider = _provider_for()
 
-    async with org_session(ctx.org_id, engine=engine) as session:
+    async with org_session(ctx.org_id, engine=engine, clients=ctx.clients) as session:
         row = await create_session(
             session,
             org_id=ctx.org_id,
@@ -162,7 +162,7 @@ async def create_resolver_turn(
     failure below: invariant #4 does not care that the caller was a customer.
     """
     engine = request.app.state.app_engine
-    async with org_session(ctx.org_id, engine=engine) as session:
+    async with org_session(ctx.org_id, engine=engine, clients=ctx.clients) as session:
         try:
             ai_session, messages = await load_session(
                 session,
@@ -218,7 +218,7 @@ async def create_resolver_turn(
 
     outcome.findings = [*replayed, *outcome.findings]
 
-    async with org_session(ctx.org_id, engine=engine) as session:
+    async with org_session(ctx.org_id, engine=engine, clients=ctx.clients) as session:
         row = await session.get(AiSession, session_row_id)
         if row is None:  # pragma: no cover - deleted mid-turn
             raise _http_error(

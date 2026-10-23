@@ -29,6 +29,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ai.providers import TextBlock, ToolCallBlock
+from app.core.client_scope import ClientScope
 from app.models import (
     AiAction,
     AiAutonomyCeiling,
@@ -93,7 +94,9 @@ async def _seed_injected_ticket(
     parsed = email_env.parsed(
         sender="alice@acme.test", subject="Printer trouble", body=INJECTION_BODY
     )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )

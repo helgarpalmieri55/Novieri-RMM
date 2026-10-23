@@ -55,6 +55,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
 from app.core.ca import AGENT_CERT_TTL_DAYS, CAService, fingerprint_sha256
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
 from app.models import Agent, Job, JobStatus
@@ -417,7 +418,7 @@ async def advance_for_device(
     those callers may be taken down by it.
     """
     try:
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             agent = (
                 await session.execute(select(Agent).where(Agent.device_id == device_id))
             ).scalar_one_or_none()

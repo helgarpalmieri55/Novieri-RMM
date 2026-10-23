@@ -3,6 +3,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     ChangeApproval,
@@ -29,7 +30,7 @@ async def test_change_mgmt_models_roundtrip(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, user_id = await _org_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         # Test ChangeRequest
         change_req = ChangeRequest(
             org_id=org_id,
@@ -83,7 +84,7 @@ async def test_change_mgmt_models_roundtrip(
         assert ext_ref.synced_at is None
 
     # Verify round-trip with fresh session
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         got_req = (
             await s.execute(select(ChangeRequest).where(ChangeRequest.id == change_req.id))
         ).scalar_one()

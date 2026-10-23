@@ -27,6 +27,7 @@ from moto import mock_aws
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings, override_settings
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -86,7 +87,7 @@ async def _make_device(admin_engine: AsyncEngine, org_id: UUID, hostname: str) -
 async def _make_profile(
     app_engine: AsyncEngine, vault: LocalVaultService, org_id: UUID, actor_id: UUID
 ) -> UUID:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await create_image(
             session,
             org_id=org_id,
@@ -122,7 +123,7 @@ async def _make_enrolled_run(
     *,
     job_id: UUID | None = None,
 ) -> UUID:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         run = ProvisionRun(
             org_id=org_id,
             profile_id=profile_id,
@@ -147,7 +148,7 @@ async def _make_awaiting_run(
     started_at: datetime,
     answer_ref: str | None,
 ) -> UUID:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         run = ProvisionRun(
             org_id=org_id,
             profile_id=profile_id,
@@ -171,7 +172,7 @@ async def _make_terminal_run(
     state: str,
     answer_ref: str | None,
 ) -> UUID:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         run = ProvisionRun(
             org_id=org_id,
             profile_id=profile_id,
@@ -191,7 +192,7 @@ async def _make_stub_job(app_engine: AsyncEngine, org_id: UUID, device_id: UUID)
     """A bare, already-dispatched `provision.enroll` job row -- stands in for
     a job a previous sweep run created, so a run carrying this id as its
     `job_id` must not be re-dispatched."""
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = Job(
             org_id=org_id,
             type="provision.enroll",
@@ -256,7 +257,9 @@ async def test_enroll_dispatch_sweep_dispatches_one_job_per_enrolled_run_and_pub
         # -- re-querying in a brand-new session proves the run's job_id is
         # already durable at the moment publish_job is called.
         org_id, run_id = run_by_device[device_id]
-        async with org_session(org_id, engine=app_engine) as check_session:
+        async with org_session(
+            org_id, engine=app_engine, clients=ClientScope.all()
+        ) as check_session:
             job_id = (
                 await check_session.execute(
                     select(ProvisionRun.job_id).where(ProvisionRun.id == run_id)
@@ -289,7 +292,7 @@ async def test_enroll_dispatch_sweep_dispatches_one_job_per_enrolled_run_and_pub
     assert total == 2
     assert set(published_device_ids) == {device_a, device_b}
 
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         reloaded_a = (
             await session.execute(select(ProvisionRun).where(ProvisionRun.id == run_a))
         ).scalar_one()
@@ -317,7 +320,7 @@ async def test_enroll_dispatch_sweep_dispatches_one_job_per_enrolled_run_and_pub
         assert awaiting.job_id is None
         assert awaiting.state == "awaiting_enrollment"
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         reloaded_b = (
             await session.execute(select(ProvisionRun).where(ProvisionRun.id == run_b))
         ).scalar_one()
@@ -384,7 +387,7 @@ async def test_timeout_sweep_fails_stale_runs_and_cleans_up_terminal_answer_refs
         # the terminal cleanup pass doesn't change any run's state.
         assert failed == 1
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             stale = (
                 await session.execute(select(ProvisionRun).where(ProvisionRun.id == stale_run))
             ).scalar_one()

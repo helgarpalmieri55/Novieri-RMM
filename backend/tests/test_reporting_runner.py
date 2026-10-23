@@ -18,6 +18,7 @@ from fastapi.routing import APIRoute
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from app.core.client_scope import ClientScope
 from app.core.rbac import _walk_dependant, route_permission
 from app.core.tenancy import org_session
 
@@ -51,7 +52,6 @@ from app.modules.reporting.sources import verify_registry
 from tests.reporting_fixtures import (
     report_query,
     reporting_user,
-    seed_device,
     seed_reportable_org,
     uncovered_required_params,
 )
@@ -391,36 +391,33 @@ async def test_a_caller_without_reporting_read_is_a_403(api_env: Any, key: str) 
 
 
 @pytest.mark.parametrize("key", sorted(REGISTRY))
-async def test_a_group_scoped_grant_is_a_403(api_env: Any, key: str) -> None:
+async def test_a_client_scoped_grant_is_a_403(api_env: Any, key: str) -> None:
     """§0.6, §12.4. A fleet aggregate computed for someone entitled to part of
     the fleet is either wrong (the denominator includes devices they may not
     see) or a leak (it tells them how many there are).
 
-    THE CONTROL USER HOLDS THE SAME CODES ORG-WIDE, in the same org, over the
-    same data -- so the ONLY observable difference between the 200 and the 403
-    is the scoping. A test that only asserted the group-scoped 403 could not
-    tell "group scoping is refused" from "these codes never work".
-    """
-    from app.models import DeviceGroup
+    THE CONTROL USER HOLDS THE SAME CODES ON EVERY CLIENT, in the same org,
+    over the same data -- so the ONLY observable difference between the 200
+    and the 403 is the scoping. A test that only asserted the client-scoped 403
+    could not tell "client scoping is refused" from "these codes never work".
 
+    The scoped grant names the internal client (the org's own id), which is
+    where every device this org seeds lives: entitled to the very devices the
+    report counts, and still refused, because the grant is not every client.
+    """
     definition = REGISTRY[key]
     org_id = await _seeded_org(api_env)
     codes = ["reporting.read", *sorted(definition.requires)]
     path = f"/api/v1/reports/{key}{report_query(key)}"
 
-    async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
-        group = DeviceGroup(org_id=org_id, name=f"g-{uuid4().hex[:8]}")
-        session.add(group)
-        await session.commit()
-        group_id = group.id
-    await seed_device(api_env.admin_engine, org_id, hostname="gamma", device_group_id=group_id)
-
-    _, org_wide = await reporting_user(api_env, org_id, *codes)
-    allowed = await api_env.client.get(path, headers=await api_env.headers(org_id, org_wide))
+    _, every_client = await reporting_user(api_env, org_id, *codes)
+    allowed = await api_env.client.get(
+        path, headers=await api_env.headers(org_id, every_client)
+    )
     assert allowed.status_code == 200, allowed.text
     assert allowed.json()["rows"]
 
-    _, scoped = await reporting_user(api_env, org_id, *codes, device_group_id=group_id)
+    _, scoped = await reporting_user(api_env, org_id, *codes, client_id=org_id)
     refused = await api_env.client.get(path, headers=await api_env.headers(org_id, scoped))
     assert refused.status_code == 403, refused.text
 
@@ -440,7 +437,9 @@ async def test_the_statement_timeout_applies(api_env: Any) -> None:
     """
     org_id = await api_env.create_org("rep-timeout")
     with pytest.raises(ReportTimeout) as exc:
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await run_bounded(
                 session,
                 select(func.pg_sleep(2)),
@@ -459,7 +458,9 @@ async def test_a_non_timeout_database_error_is_not_reported_as_a_timeout(
     window while the real defect sat in the SQL."""
     org_id = await api_env.create_org("rep-error")
     with pytest.raises(Exception) as exc:  # noqa: PT011
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await run_bounded(session, select(func.no_such_function_at_all()))
     assert not isinstance(exc.value, ReportTimeout)
 
@@ -478,7 +479,7 @@ async def test_the_statement_timeout_does_not_leak_to_the_next_checkout(
     engine = create_async_engine(pg_cluster.app_url, pool_size=1, max_overflow=0)
     try:
         org_id = uuid4()
-        async with org_session(org_id, engine=engine) as session:
+        async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
             await run_bounded(session, select(func.now()), timeout_ms=50)
             inside = (await session.execute(text("SHOW statement_timeout"))).scalar_one()
         assert inside == "50ms", inside

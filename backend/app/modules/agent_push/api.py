@@ -290,7 +290,7 @@ async def list_push_authorizations(
     list needs to see the grant that lapsed last night as much as the one that
     never existed.
     """
-    async with org_session(ctx.org_id, engine=_engine(request)) as session:
+    async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
         rows = await authorization_service.list_authorizations(
             session, ctx.org_id, include_revoked=include_revoked
         )
@@ -316,7 +316,7 @@ async def create_push_authorization(
     not authorizing an administrative login.
     """
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await authorization_service.create_authorization(
                 session,
                 ctx.org_id,
@@ -342,7 +342,7 @@ async def revoke_push_authorization(
     """Revocation STAMPS; the row stays, so "who authorized presenting
     credentials on that segment in March" remains answerable."""
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             await authorization_service.revoke_authorization(
                 session,
                 ctx.org_id,
@@ -373,7 +373,7 @@ async def list_push_credential_scopes(
 
     Names each credential; carries no secret, no `vault_ref` and no ciphertext.
     """
-    async with org_session(ctx.org_id, engine=_engine(request)) as session:
+    async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
         rows = await scope_service.list_scopes(
             session,
             ctx.org_id,
@@ -404,7 +404,7 @@ async def bind_push_credential_scope(
     at once (spec §6.2).
     """
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await scope_service.bind_scope(
                 session,
                 ctx.org_id,
@@ -431,7 +431,7 @@ async def unbind_push_credential_scope(
     """Unbinding STAMPS; the row stays, so "which addresses was this credential
     bound to when it was used" survives somebody narrowing the scope."""
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             await scope_service.unbind_scope(
                 session, ctx.org_id, actor_id=ctx.user_id, scope_id=scope_id
             )
@@ -479,7 +479,7 @@ async def request_push_install(
     """
     result: dispatch_service.PushDispatchResult | None = None
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             result = await dispatch_service.dispatch_push_batch(
                 session,
                 request.app.state.job_engine,
@@ -550,7 +550,7 @@ async def list_push_host_keys(
     of running a push (§4.4), and the operator who probes and pushes is the one
     who must see and confirm the fingerprint. Carries public key material only.
     """
-    async with org_session(ctx.org_id, engine=_engine(request)) as session:
+    async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
         rows = await host_key_service.list_host_keys(session, ctx.org_id)
         return [_host_key_out(row) for row in rows]
 
@@ -574,7 +574,7 @@ async def confirm_push_host_key(
     probe observed -- confirming anything else is refused.
     """
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await host_key_service.confirm_host_key(
                 session,
                 ctx.org_id,
@@ -685,7 +685,7 @@ async def list_push_run_prefixes(
     `credentials.checkout` is required too, checked in the service, as for
     every use of this list."""
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             rows = await run_list_service.authorized_prefixes(
                 session, ctx.org_id, actor_id=ctx.user_id
             )
@@ -712,7 +712,7 @@ async def preview_push_run(
     """Expand an authorized subnet into the named list a person confirms.
     Reads only: nothing is written, decrypted or signed."""
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             listed = await run_list_service.expand_prefix(
                 session,
                 ctx.org_id,
@@ -763,7 +763,7 @@ async def start_push_run(
     commits."""
     envelopes: list[Envelope] = []
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             run = await runs_service.create_run(
                 session,
                 ctx.org_id,
@@ -788,7 +788,7 @@ async def list_push_runs(
     request: Request,
     ctx: AuthContext = Depends(require_permission("agent.push.run")),
 ) -> list[RunOut]:
-    async with org_session(ctx.org_id, engine=_engine(request)) as session:
+    async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
         rows = await runs_service.list_runs(session, ctx.org_id)
         return [await _run_out(session, ctx.org_id, row) for row in rows]
 
@@ -800,7 +800,7 @@ async def get_push_run(
     ctx: AuthContext = Depends(require_permission("agent.push.run")),
 ) -> RunOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             run = await runs_service.get_run(session, ctx.org_id, run_id)
             out = await _run_out(session, ctx.org_id, run)
     except PushError as exc:
@@ -817,7 +817,7 @@ async def list_push_run_targets(
     ctx: AuthContext = Depends(require_permission("agent.push.run")),
 ) -> RunTargetPageOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             total, rows = await runs_service.list_targets(
                 session, ctx.org_id, run_id, offset=offset, limit=limit
             )
@@ -839,7 +839,7 @@ async def pause_push_run(
 ) -> RunOut:
     """A person's act. New dispatches stop; installs in flight finish."""
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             run = await runs_service.pause_run(
                 session, ctx.org_id, run_id=run_id, actor_id=ctx.user_id
             )
@@ -861,7 +861,7 @@ async def resume_push_run(
     each target re-checked as it goes."""
     envelopes: list[Envelope] = []
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             run = await runs_service.resume_run(
                 session, ctx.org_id, run_id=run_id, actor_id=ctx.user_id
             )
@@ -884,7 +884,7 @@ async def cancel_push_run(
     """A person's act, and final. Waiting targets are cancelled; installs in
     flight finish and are still recorded."""
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             run = await runs_service.cancel_run(
                 session, ctx.org_id, run_id=run_id, actor_id=ctx.user_id
             )

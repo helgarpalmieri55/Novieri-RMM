@@ -90,7 +90,9 @@ async def device_inventory(
     request: Request,
     ctx: AuthContext = Depends(require_permission("devices.read")),
 ) -> DeviceInventoryOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one_or_none()
@@ -165,7 +167,9 @@ async def device_changes(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> ChangesPage:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         base = select(InventoryChange).where(InventoryChange.device_id == device_id)
         total = (
             await session.execute(select(func.count()).select_from(base.subquery()))
@@ -203,7 +207,9 @@ async def software_search(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> SoftwarePage:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         base = select(
             InstalledSoftware.name,
             InstalledSoftware.version,
@@ -240,7 +246,9 @@ async def software_devices(
     request: Request,
     ctx: AuthContext = Depends(require_permission("devices.read")),
 ) -> list[SoftwareDeviceOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = (
             await session.execute(
                 select(InstalledSoftware, Device.hostname)
@@ -487,7 +495,9 @@ async def export_devices_csv(
     request: Request,
     ctx: AuthContext = Depends(require_permission("devices.read")),
 ) -> PlainTextResponse:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await _device_export_rows(session)
         await _record_export(session, ctx, dataset="devices", fmt="csv", row_count=len(rows))
     body = _render_csv(DEVICE_EXPORT_COLUMNS, DEVICE_FREE_TEXT, rows)
@@ -499,7 +509,9 @@ async def export_devices_xlsx(
     request: Request,
     ctx: AuthContext = Depends(require_permission("devices.read")),
 ) -> Response:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await _device_export_rows(session)
         await _record_export(session, ctx, dataset="devices", fmt="xlsx", row_count=len(rows))
     body = _render_xlsx("Devices", DEVICE_EXPORT_COLUMNS, DEVICE_FREE_TEXT, rows)
@@ -511,7 +523,9 @@ async def export_software_csv(
     request: Request,
     ctx: AuthContext = Depends(require_permission("devices.read")),
 ) -> PlainTextResponse:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await _software_export_rows(session)
         await _record_export(session, ctx, dataset="software", fmt="csv", row_count=len(rows))
     body = _render_csv(SOFTWARE_EXPORT_COLUMNS, SOFTWARE_FREE_TEXT, rows)
@@ -523,7 +537,9 @@ async def export_software_xlsx(
     request: Request,
     ctx: AuthContext = Depends(require_permission("devices.read")),
 ) -> Response:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await _software_export_rows(session)
         await _record_export(session, ctx, dataset="software", fmt="xlsx", row_count=len(rows))
     body = _render_xlsx("Software", SOFTWARE_EXPORT_COLUMNS, SOFTWARE_FREE_TEXT, rows)

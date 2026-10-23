@@ -29,6 +29,7 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.models import DashboardLayout
 
 LAYOUT = {
@@ -206,7 +207,7 @@ async def test_the_rls_policy_holds_where_the_route_filter_is_not_the_thing_bein
 
     from app.core.tenancy import org_session
 
-    async with org_session(mine, engine=api_env.app_engine) as session:
+    async with org_session(mine, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         visible = (
             await session.execute(text("SELECT org_id FROM dashboard_layouts"))
         ).scalars().all()

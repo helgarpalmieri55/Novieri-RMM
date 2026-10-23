@@ -19,6 +19,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Expense, FxRate, User
 from app.modules.budget.errors import BudgetNotFoundError, BudgetValidationError
@@ -81,7 +82,7 @@ async def test_create_rate_takes_to_currency_from_settings_not_caller(api_env) -
     the persisted row's `to_currency` matches the org's actual base
     currency, which only `get_settings` can supply."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         settings = await get_settings(session, org_id)
         assert settings.base_currency == "USD"
         rate = await create_rate(
@@ -103,7 +104,7 @@ async def test_create_rate_uses_the_currently_set_base_currency(api_env) -> None
     """After the base currency changes, a NEW rate must target the NEW
     base -- never a value baked in at some earlier point."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await set_base_currency(session, org_id, user_id, base_currency="COP")
         rate = await create_rate(
             session,
@@ -118,7 +119,7 @@ async def test_create_rate_uses_the_currently_set_base_currency(api_env) -> None
 
 async def test_create_rate_audits(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rate = await create_rate(
             session,
             org_id,
@@ -146,7 +147,7 @@ async def test_create_rate_audits(api_env) -> None:
 
 async def test_duplicate_rate_in_one_org_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_rate(
             session,
             org_id,
@@ -250,7 +251,7 @@ async def test_create_rate_concurrent_duplicate_raises_typed_error_not_integrity
 async def test_same_rate_pair_and_date_in_two_orgs_is_fine(api_env) -> None:
     org_a, user_a = await _org_with_user(api_env)
     org_b, user_b = await _org_with_user(api_env)
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rate_a = await create_rate(
             session,
             org_a,
@@ -259,7 +260,7 @@ async def test_same_rate_pair_and_date_in_two_orgs_is_fine(api_env) -> None:
             rate=Decimal("1.10000000"),
             effective_date=date(2026, 1, 1),
         )
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rate_b = await create_rate(
             session,
             org_b,
@@ -275,7 +276,7 @@ async def test_same_rate_pair_and_date_in_two_orgs_is_fine(api_env) -> None:
 
 async def test_a_different_effective_date_is_not_a_duplicate(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_rate(
             session,
             org_id,
@@ -303,12 +304,12 @@ async def test_a_different_effective_date_is_not_a_duplicate(api_env) -> None:
 async def test_list_rates_returns_only_this_orgs_rates(api_env) -> None:
     org_a, user_a = await _org_with_user(api_env)
     org_b, user_b = await _org_with_user(api_env)
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_rate(
             session, org_a, user_a,
             from_currency="EUR", rate=Decimal("1.10000000"), effective_date=date(2026, 1, 1),
         )
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_rate(
             session, org_b, user_b,
             from_currency="EUR", rate=Decimal("1.20000000"), effective_date=date(2026, 1, 1),
@@ -320,7 +321,7 @@ async def test_list_rates_returns_only_this_orgs_rates(api_env) -> None:
 
 async def test_list_rates_filters_by_from_currency(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_rate(
             session, org_id, user_id,
             from_currency="EUR", rate=Decimal("1.10000000"), effective_date=date(2026, 1, 1),
@@ -339,7 +340,7 @@ async def test_list_rates_is_ordered_by_currency_then_effective_date_desc(api_en
     prior-task lesson) -- `list_rates` has an explicit ORDER BY, and this
     test asserts against that exact order rather than insertion order."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_rate(
             session, org_id, user_id,
             from_currency="GBP", rate=Decimal("1.30000000"), effective_date=date(2026, 1, 1),
@@ -367,7 +368,7 @@ async def test_list_rates_is_ordered_by_currency_then_effective_date_desc(api_en
 
 async def test_update_rate_changes_the_rate_value(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rate = await create_rate(
             session, org_id, user_id,
             from_currency="EUR", rate=Decimal("1.10000000"), effective_date=date(2026, 1, 1),
@@ -386,7 +387,7 @@ async def test_update_rate_ignores_from_currency_and_effective_date(api_env) -> 
     """`fields` may carry extra keys (e.g. a caller passing the whole
     payload back); only `rate` is ever applied."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rate = await create_rate(
             session, org_id, user_id,
             from_currency="EUR", rate=Decimal("1.10000000"), effective_date=date(2026, 1, 1),
@@ -409,7 +410,7 @@ async def test_update_rate_ignores_from_currency_and_effective_date(api_env) -> 
 
 async def test_update_rate_rejects_null_rate(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rate = await create_rate(
             session, org_id, user_id,
             from_currency="EUR", rate=Decimal("1.10000000"), effective_date=date(2026, 1, 1),
@@ -420,7 +421,7 @@ async def test_update_rate_rejects_null_rate(api_env) -> None:
 
 async def test_update_rate_on_unknown_id_raises_not_found(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         from uuid_extensions import uuid7
 
         with pytest.raises(BudgetNotFoundError):
@@ -429,7 +430,7 @@ async def test_update_rate_on_unknown_id_raises_not_found(api_env) -> None:
 
 async def test_update_rate_audits_only_the_changed_field_names(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rate = await create_rate(
             session, org_id, user_id,
             from_currency="EUR", rate=Decimal("1.10000000"), effective_date=date(2026, 1, 1),
@@ -456,7 +457,7 @@ async def test_update_rate_audits_only_the_changed_field_names(api_env) -> None:
 
 async def test_update_rate_reports_the_changed_field(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rate = await create_rate(
             session, org_id, user_id,
             from_currency="EUR", rate=Decimal("1.10000000"), effective_date=date(2026, 1, 1),
@@ -483,7 +484,7 @@ async def test_update_rate_reports_the_changed_field(api_env) -> None:
 
 async def test_base_currency_change_is_free_before_any_converted_expense(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         settings = await set_base_currency(session, org_id, user_id, base_currency="COP")
     assert settings.base_currency == "COP"
     assert settings.updated_by == user_id
@@ -491,7 +492,7 @@ async def test_base_currency_change_is_free_before_any_converted_expense(api_env
 
 async def test_base_currency_change_is_blocked_once_an_expense_is_converted(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await _seed_converted_expense(session, org_id, user_id)
         with pytest.raises(BudgetValidationError):
             await set_base_currency(session, org_id, user_id, base_currency="COP")
@@ -503,7 +504,7 @@ async def test_base_currency_change_is_blocked_once_an_expense_is_converted(api_
 
 async def test_base_currency_change_proceeds_with_explicit_acknowledgement(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await _seed_converted_expense(session, org_id, user_id)
         settings = await set_base_currency(
             session, org_id, user_id, base_currency="COP", acknowledge_mixed_basis=True
@@ -515,7 +516,7 @@ async def test_base_currency_change_proceeds_with_explicit_acknowledgement(api_e
 async def test_base_currency_change_does_not_retro_convert_history(api_env) -> None:
     """Spec §3: stored rows keep the basis they were converted at."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         exp = await _seed_converted_expense(session, org_id, user_id)
         before_rate, before_base = exp.fx_rate, exp.amount_base
         await set_base_currency(
@@ -531,7 +532,7 @@ async def test_a_voided_expense_does_not_block_the_change(api_env) -> None:
     """The rule says NON-void -- a voided converted expense must not
     trigger the guard even without the acknowledgement."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await _seed_converted_expense(session, org_id, user_id, status="void")
         settings = await set_base_currency(session, org_id, user_id, base_currency="COP")
     assert settings.base_currency == "COP"
@@ -541,7 +542,7 @@ async def test_an_expected_expense_with_amount_base_still_blocks(api_env) -> Non
     """"non-void" includes both "expected" and "confirmed" -- only "void"
     is exempt."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await _seed_converted_expense(session, org_id, user_id, status="expected")
         with pytest.raises(BudgetValidationError):
             await set_base_currency(session, org_id, user_id, base_currency="COP")
@@ -549,7 +550,7 @@ async def test_an_expected_expense_with_amount_base_still_blocks(api_env) -> Non
 
 async def test_base_currency_change_audits_old_and_new_codes(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await set_base_currency(session, org_id, user_id, base_currency="COP")
         event = (
             await session.execute(
@@ -572,7 +573,7 @@ async def test_base_currency_change_audits_old_and_new_codes(api_env) -> None:
 
 async def test_set_fiscal_year_start_updates_settings(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         settings = await set_fiscal_year_start(session, org_id, user_id, start_month=4)
     assert settings.fiscal_year_start_month == 4
     assert settings.updated_by == user_id
@@ -580,7 +581,7 @@ async def test_set_fiscal_year_start_updates_settings(api_env) -> None:
 
 async def test_set_fiscal_year_start_audits_old_and_new_months(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await set_fiscal_year_start(session, org_id, user_id, start_month=7)
         event = (
             await session.execute(

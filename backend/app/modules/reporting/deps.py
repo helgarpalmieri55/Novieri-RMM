@@ -35,12 +35,12 @@ read routes; both are genuinely gated and both return `None` from
 is a finding about the remote module and belongs in its cycle. Reporting's rule:
 never fork `require_permission`, never hide a gate from the router.
 
-**ORG-WIDE GRANTS ONLY (§0.6).** `user_permission_codes` is called with
-`device_group_id` at its `None` default, so a `user_roles` row scoped to one
-device group does not count. That is not an oversight: a fleet aggregate
-computed for someone entitled to part of the fleet is either wrong (the
-denominator includes devices they may not see) or a leak (it tells them how many
-there are).
+**ALL-CLIENTS GRANTS ONLY (§0.6).** `user_permission_codes` is called with
+`client_id` at its `None` default, so a `user_roles` row scoped to one client
+does not count. That is not an oversight: a fleet aggregate computed for
+someone entitled to part of the fleet is either wrong (the denominator
+includes devices they may not see) or a leak (it tells them how many there
+are).
 
 **IT RUNS BEFORE THE HANDLER OPENS A DATA SESSION (§4.1).** FastAPI resolves
 route-level `dependencies=[...]` before the endpoint body, so no report query
@@ -69,7 +69,9 @@ def require_report_sources(key: str) -> Callable[..., Coroutine[Any, Any, AuthCo
         request: Request, ctx: Annotated[AuthContext, Depends(bound_auth_context)]
     ) -> AuthContext:
         definition = REGISTRY[key]
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             granted = await user_permission_codes(session, ctx.user_id)
         missing = sorted(definition.requires - granted)
         if missing:

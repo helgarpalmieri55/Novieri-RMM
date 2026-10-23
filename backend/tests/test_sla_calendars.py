@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent
 from app.modules.sla.calendar import CalendarSpec, working_minutes_between
@@ -92,7 +93,7 @@ async def test_create_calendar_stores_the_row_and_audits(api_env) -> None:
     org_id = await api_env.create_org()
     actor_id = await _seed_user(api_env, org_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         calendar = await create_calendar(
             session, org_id, actor_id, name="UK Business", timezone=LONDON
         )
@@ -116,10 +117,12 @@ async def test_create_calendar_rejects_an_invalid_timezone(api_env, bad_tz: str)
     actor_id = await _seed_user(api_env, org_id)
 
     with pytest.raises(SlaValidationError, match=re.escape(repr(bad_tz))):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await create_calendar(session, org_id, actor_id, name="Bad TZ", timezone=bad_tz)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await session.execute(select(SlaCalendar))).scalars().all() == []
 
 
@@ -134,12 +137,14 @@ async def test_create_calendar_rejects_a_non_string_timezone(api_env) -> None:
     actor_id = await _seed_user(api_env, org_id)
 
     with pytest.raises(SlaValidationError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await create_calendar(
                 session, org_id, actor_id, name="Bad TZ", timezone=None  # type: ignore[arg-type]
             )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await session.execute(select(SlaCalendar))).scalars().all() == []
 
 
@@ -149,11 +154,13 @@ async def test_create_calendar_duplicate_name_is_a_typed_error_not_an_integrity_
     org_id = await api_env.create_org()
     actor_id = await _seed_user(api_env, org_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_calendar(session, org_id, actor_id, name="Ops", timezone=LONDON)
 
     with pytest.raises(SlaValidationError, match="already exists"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await create_calendar(session, org_id, actor_id, name="Ops", timezone="UTC")
 
 
@@ -163,9 +170,9 @@ async def test_the_same_name_is_allowed_in_a_different_org(api_env) -> None:
     actor_a = await _seed_user(api_env, org_a)
     actor_b = await _seed_user(api_env, org_b)
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_calendar(session, org_a, actor_a, name="Ops", timezone=LONDON)
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_calendar(session, org_b, actor_b, name="Ops", timezone=LONDON)
 
 
@@ -181,7 +188,9 @@ async def test_concurrent_creates_of_the_same_name_yield_one_row(api_env) -> Non
 
     async def attempt() -> bool:
         try:
-            async with org_session(org_id, engine=api_env.app_engine) as session:
+            async with org_session(
+                org_id, engine=api_env.app_engine, clients=ClientScope.all()
+            ) as session:
                 # Take the connection and open the transaction BEFORE the
                 # rendezvous so neither attempt pays connection latency after
                 # the barrier releases.
@@ -197,7 +206,7 @@ async def test_concurrent_creates_of_the_same_name_yield_one_row(api_env) -> Non
     # Exactly one winner and one loser -- not two winners, not two losers.
     assert sorted(results) == [False, True], results
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (
             await session.execute(select(SlaCalendar).where(SlaCalendar.name == "Race"))
         ).scalars().all()
@@ -212,7 +221,9 @@ async def test_concurrent_creates_of_the_same_name_yield_one_row(api_env) -> Non
 async def test_get_calendar_raises_not_found_for_a_missing_id(api_env) -> None:
     org_id = await api_env.create_org()
     with pytest.raises(SlaNotFoundError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await get_calendar(session, org_id, uuid4())
 
 
@@ -225,7 +236,7 @@ async def test_list_calendars_is_sorted_by_name_and_shows_only_this_orgs_rows_un
     await _seed_calendar(api_env, org_id, name="Alpha")
     await _seed_calendar(api_env, other_org, name="Not Mine")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         calendars = await list_calendars(session, org_id)
 
     assert [c.name for c in calendars] == ["Alpha", "Zebra"]
@@ -241,7 +252,7 @@ async def test_update_calendar_applies_supplied_fields_and_audits(api_env) -> No
     actor_id = await _seed_user(api_env, org_id)
     calendar_id = await _seed_calendar(api_env, org_id, name="Ops")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         updated = await update_calendar(
             session, org_id, actor_id, calendar_id, {"active": False}
         )
@@ -268,10 +279,12 @@ async def test_update_calendar_rejects_an_invalid_timezone(api_env, bad_tz: str)
     calendar_id = await _seed_calendar(api_env, org_id)
 
     with pytest.raises(SlaValidationError, match=re.escape(repr(bad_tz))):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await update_calendar(session, org_id, actor_id, calendar_id, {"timezone": bad_tz})
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         calendar = await get_calendar(session, org_id, calendar_id)
     assert calendar.timezone == LONDON  # unchanged
 
@@ -283,7 +296,9 @@ async def test_update_calendar_rename_to_an_existing_name_is_a_typed_error(api_e
     calendar_id = await _seed_calendar(api_env, org_id, name="Mine")
 
     with pytest.raises(SlaValidationError, match="already exists") as excinfo:
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await update_calendar(session, org_id, actor_id, calendar_id, {"name": "Taken"})
 
     # `from exc`, not `from None`: the typed error is a better DIAGNOSIS of the
@@ -347,7 +362,7 @@ async def test_update_calendar_re_raises_an_unrelated_integrity_error(api_env) -
 
     assert "uq_sla_calendar_holiday_cal_date" in str(excinfo.value)
     # Nothing was committed: no rename, no audit row.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await get_calendar(session, org_id, calendar_id)).name == "Mine"
     assert await _audit(api_env, org_id) == []
 
@@ -358,7 +373,9 @@ async def test_update_calendar_rejects_null_for_a_non_nullable_field(api_env) ->
     calendar_id = await _seed_calendar(api_env, org_id)
 
     with pytest.raises(SlaValidationError, match="cannot be null"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await update_calendar(session, org_id, actor_id, calendar_id, {"name": None})
 
 
@@ -374,10 +391,10 @@ async def test_delete_calendar_removes_windows_and_holidays(api_env) -> None:
         api_env, org_id, holidays=[date(2026, 12, 25)]
     )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await delete_calendar(session, org_id, actor_id, calendar_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await session.execute(select(SlaCalendar))).scalars().all() == []
         assert (await session.execute(select(SlaCalendarWindow))).scalars().all() == []
         assert (await session.execute(select(SlaCalendarHoliday))).scalars().all() == []
@@ -394,10 +411,12 @@ async def test_delete_calendar_blocked_by_an_active_policy_names_it(api_env) -> 
     policy_id = await _seed_policy(api_env, org_id, calendar_id=calendar_id, active=True)
 
     with pytest.raises(SlaValidationError, match=str(policy_id)):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await delete_calendar(session, org_id, actor_id, calendar_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await get_calendar(session, org_id, calendar_id) is not None
 
 
@@ -413,7 +432,9 @@ async def test_delete_calendar_blocked_by_an_inactive_only_policy(api_env) -> No
     policy_id = await _seed_policy(api_env, org_id, calendar_id=calendar_id, active=False)
 
     with pytest.raises(SlaValidationError, match=str(policy_id)):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await delete_calendar(session, org_id, actor_id, calendar_id)
 
 
@@ -451,13 +472,15 @@ async def test_delete_calendar_blocked_by_a_same_org_ticket_sla_reference(
         await session.commit()
 
     with pytest.raises(SlaValidationError, match=str(ticket.id)) as excinfo:
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await delete_calendar(session, org_id, actor_id, calendar_id)
     # It must NOT be the generic cross-org fallback message -- that message
     # is false for a same-org reference.
     assert "cannot see" not in str(excinfo.value)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await get_calendar(session, org_id, calendar_id) is not None
 
 
@@ -493,12 +516,14 @@ async def test_delete_calendar_blocked_by_a_cross_org_policy_reference(
         policy_b_id = str(policy_b.id)
 
     with pytest.raises(SlaValidationError) as excinfo:
-        async with org_session(org_a, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_a, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await delete_calendar(session, org_a, actor_a, calendar_a)
     assert policy_b_id not in str(excinfo.value)
     assert "another record this organization cannot see" in str(excinfo.value)
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await get_calendar(session, org_a, calendar_a) is not None
 
 
@@ -506,7 +531,9 @@ async def test_delete_calendar_raises_not_found_for_a_missing_id(api_env) -> Non
     org_id = await api_env.create_org()
     actor_id = await _seed_user(api_env, org_id)
     with pytest.raises(SlaNotFoundError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await delete_calendar(session, org_id, actor_id, uuid4())
 
 
@@ -520,7 +547,7 @@ async def test_replace_windows_replaces_the_whole_set(api_env) -> None:
     actor_id = await _seed_user(api_env, org_id)
     calendar_id = await _seed_calendar(api_env, org_id)  # Mon-Fri 09:00-17:00
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await replace_windows(
             session, org_id, actor_id, calendar_id, [(5, time(10, 0), time(14, 0))]
         )
@@ -529,7 +556,7 @@ async def test_replace_windows_replaces_the_whole_set(api_env) -> None:
         (5, time(10, 0), time(14, 0))
     ]
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (
             await session.execute(
                 select(SlaCalendarWindow).where(SlaCalendarWindow.calendar_id == calendar_id)
@@ -547,7 +574,7 @@ async def test_replace_windows_permits_a_midnight_end_time(api_env) -> None:
     actor_id = await _seed_user(api_env, org_id)
     calendar_id = await _seed_calendar(api_env, org_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await replace_windows(
             session,
             org_id,
@@ -568,7 +595,9 @@ async def test_replace_windows_rejects_start_after_end(api_env) -> None:
     calendar_id = await _seed_calendar(api_env, org_id, windows=[])
 
     with pytest.raises(SlaValidationError, match="start"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await replace_windows(
                 session, org_id, actor_id, calendar_id, [(0, time(17, 0), time(9, 0))]
             )
@@ -580,7 +609,9 @@ async def test_replace_windows_rejects_overlapping_windows_on_the_same_weekday(a
     calendar_id = await _seed_calendar(api_env, org_id, windows=[])
 
     with pytest.raises(SlaValidationError, match="overlap"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await replace_windows(
                 session,
                 org_id,
@@ -597,7 +628,7 @@ async def test_replace_windows_permits_touching_windows(api_env) -> None:
     actor_id = await _seed_user(api_env, org_id)
     calendar_id = await _seed_calendar(api_env, org_id, windows=[])
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await replace_windows(
             session,
             org_id,
@@ -614,7 +645,9 @@ async def test_replace_windows_rejects_an_invalid_weekday(api_env) -> None:
     calendar_id = await _seed_calendar(api_env, org_id, windows=[])
 
     with pytest.raises(SlaValidationError, match="weekday"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await replace_windows(
                 session, org_id, actor_id, calendar_id, [(7, time(9, 0), time(17, 0))]
             )
@@ -629,7 +662,9 @@ async def test_replace_windows_validates_before_writing_anything(api_env) -> Non
     calendar_id = await _seed_calendar(api_env, org_id)  # Mon-Fri 09:00-17:00
 
     with pytest.raises(SlaValidationError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await replace_windows(
                 session,
                 org_id,
@@ -638,7 +673,7 @@ async def test_replace_windows_validates_before_writing_anything(api_env) -> Non
                 [(0, time(9, 0), time(13, 0)), (0, time(12, 0), time(17, 0))],
             )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (
             await session.execute(
                 select(SlaCalendarWindow).where(SlaCalendarWindow.calendar_id == calendar_id)
@@ -657,15 +692,15 @@ async def test_add_and_remove_holiday(api_env) -> None:
     actor_id = await _seed_user(api_env, org_id)
     calendar_id = await _seed_calendar(api_env, org_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         holiday = await add_holiday(
             session, org_id, actor_id, calendar_id, holiday_date=date(2026, 12, 25), name="Xmas"
         )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await remove_holiday(session, org_id, actor_id, calendar_id, holiday.id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await session.execute(select(SlaCalendarHoliday))).scalars().all() == []
 
     events = await _audit(api_env, org_id)
@@ -680,13 +715,15 @@ async def test_add_holiday_duplicate_date_is_a_typed_error(api_env) -> None:
     actor_id = await _seed_user(api_env, org_id)
     calendar_id = await _seed_calendar(api_env, org_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await add_holiday(
             session, org_id, actor_id, calendar_id, holiday_date=date(2026, 12, 25), name="Xmas"
         )
 
     with pytest.raises(SlaValidationError, match="already has a holiday"):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await add_holiday(
                 session,
                 org_id,
@@ -703,7 +740,9 @@ async def test_remove_holiday_raises_not_found_for_a_missing_id(api_env) -> None
     calendar_id = await _seed_calendar(api_env, org_id)
 
     with pytest.raises(SlaNotFoundError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await remove_holiday(session, org_id, actor_id, calendar_id, uuid4())
 
 
@@ -715,13 +754,15 @@ async def test_remove_holiday_is_scoped_to_its_own_calendar(api_env) -> None:
     calendar_a = await _seed_calendar(api_env, org_id, name="A")
     calendar_b = await _seed_calendar(api_env, org_id, name="B")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         holiday = await add_holiday(
             session, org_id, actor_id, calendar_a, holiday_date=date(2026, 12, 25), name="Xmas"
         )
 
     with pytest.raises(SlaNotFoundError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await remove_holiday(session, org_id, actor_id, calendar_b, holiday.id)
 
 
@@ -767,7 +808,7 @@ async def test_load_calendar_spec_builds_a_spec_the_clock_can_use(api_env) -> No
     # This week's Wednesday, plus an unrelated one:
     holidays = [date(2026, 3, 4), date(2026, 12, 25)]
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await replace_windows(session, org_id, actor_id, calendar_id, windows)
         for holiday_date in holidays:
             await add_holiday(
@@ -779,7 +820,7 @@ async def test_load_calendar_spec_builds_a_spec_the_clock_can_use(api_env) -> No
                 name=f"holiday-{holiday_date.isoformat()}",
             )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         spec = await load_calendar_spec(session, org_id, calendar_id)
 
     assert spec.timezone == LONDON
@@ -813,7 +854,9 @@ async def test_load_calendar_spec_builds_a_spec_the_clock_can_use(api_env) -> No
 async def test_load_calendar_spec_raises_not_found_for_a_missing_calendar(api_env) -> None:
     org_id = await api_env.create_org()
     with pytest.raises(SlaNotFoundError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await load_calendar_spec(session, org_id, uuid4())
 
 

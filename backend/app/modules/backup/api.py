@@ -238,7 +238,9 @@ async def list_repositories(
     request: Request,
     ctx: AuthContext = Depends(require_permission("backup.read")),
 ) -> list[RepositoryOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = (
             (
                 await session.execute(
@@ -260,7 +262,7 @@ async def create_repository_route(
     ctx: AuthContext = Depends(require_permission("backup.policy.manage")),
 ) -> RepositoryOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         repo = await create_repository(
             session,
             state.vault,
@@ -282,7 +284,9 @@ async def list_policies(
     request: Request,
     ctx: AuthContext = Depends(require_permission("backup.read")),
 ) -> list[PolicyOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = (
             (
                 await session.execute(
@@ -303,7 +307,9 @@ async def upsert_policy(
     request: Request,
     ctx: AuthContext = Depends(require_permission("backup.policy.manage")),
 ) -> PolicyOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         repository = (
             await session.execute(
                 select(BackupRepository.id).where(
@@ -371,7 +377,7 @@ async def run_backup(
     ctx: AuthContext = Depends(require_permission("backup.run")),
 ) -> RunResponse:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         pending = await dispatch_backup(
             session,
             state.job_engine,
@@ -398,7 +404,9 @@ async def list_points(
     request: Request,
     ctx: AuthContext = Depends(require_permission("backup.read")),
 ) -> list[BackupPointOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = (
             (
                 await session.execute(
@@ -420,7 +428,7 @@ async def get_manifest(
     ctx: AuthContext = Depends(require_permission("backup.read")),
 ) -> BackupManifest:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             return await browse_manifest(
                 session,
@@ -439,7 +447,9 @@ async def device_backup_status_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("backup.read")),
 ) -> DeviceBackupStatusOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         data = await device_backup_status(session, ctx.org_id, device_id)
         return DeviceBackupStatusOut(**data)
 
@@ -457,7 +467,7 @@ async def restore_point(
     ctx: AuthContext = Depends(require_permission("backup.restore")),
 ) -> RestoreResponse:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         pending = await dispatch_restore(
             session,
             state.job_engine,
@@ -489,7 +499,7 @@ async def verify_point(
     never landing files at any caller-chosen destination (`dispatch_restore`'s
     `mode="verify"` contract)."""
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         pending = await dispatch_restore(
             session,
             state.job_engine,
@@ -519,7 +529,9 @@ async def report(
     request: Request,
     ctx: AuthContext = Depends(require_permission("backup.read")),
 ) -> FleetBackupReportOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         data = await fleet_backup_report(session, ctx.org_id)
         return FleetBackupReportOut(**data)
 
@@ -570,7 +582,9 @@ async def report_export(
     request: Request,
     ctx: AuthContext = Depends(require_permission("backup.read")),
 ) -> StreamingResponse:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await backup_evidence_rows(session, ctx.org_id)
         # An evidence export is itself a privileged action (invariant #4):
         # someone pulled SOC 2/BCP proof of coverage out of the system.

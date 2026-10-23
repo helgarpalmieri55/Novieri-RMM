@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Device, Organization
 
@@ -30,7 +31,7 @@ async def test_org_session_sees_only_own_rows_even_raw_sql(
     org_a, dev_a = await _make_org_with_device(admin_engine, "rls-a")
     org_b, _ = await _make_org_with_device(admin_engine, "rls-b")
 
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         rows = (await session.execute(text("SELECT id, org_id FROM devices"))).all()
     assert {r.org_id for r in rows} == {org_a}
     assert dev_a in {r.id for r in rows}
@@ -43,7 +44,7 @@ async def test_insert_with_foreign_org_id_rejected(
     org_b, _ = await _make_org_with_device(admin_engine, "rls-d")
 
     with pytest.raises((DBAPIError, ProgrammingError)):
-        async with org_session(org_a, engine=app_engine) as session:
+        async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
             session.add(Device(org_id=org_b, hostname="evil", os_family="linux"))
             await session.flush()
 

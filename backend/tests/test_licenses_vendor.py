@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Organization, User
 from app.modules.licenses.errors import LicenseNotFoundError
@@ -39,7 +40,7 @@ async def _org_with_user(admin_engine: AsyncEngine) -> tuple[UUID, UUID]:
 async def _audit_actions(
     app_engine: AsyncEngine, org_id: UUID, target_type: str, target_id: UUID
 ) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -64,7 +65,7 @@ async def test_create_vendor_succeeds_and_audits(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         vendor = await create_vendor(
             s,
             org_id=org_id,
@@ -79,7 +80,7 @@ async def test_create_vendor_succeeds_and_audits(
     assert vendor.name == "Acme Corp"
     assert vendor.created_by == actor_id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_vendor(s, org_id, vendor_id)
         assert fetched is not None
         assert fetched.name == "Acme Corp"
@@ -90,7 +91,7 @@ async def test_create_vendor_succeeds_and_audits(
     actions = await _audit_actions(app_engine, org_id, "vendor", vendor_id)
     assert actions == ["license.vendor_created"]
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         event = (
             await s.execute(
                 select(AuditEvent)
@@ -115,7 +116,7 @@ async def test_update_vendor_applies_fields_and_audits(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         vendor = await create_vendor(
             s,
             org_id=org_id,
@@ -127,7 +128,7 @@ async def test_update_vendor_applies_fields_and_audits(
         await s.commit()
         vendor_id = vendor.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         updated = await update_vendor(
             s,
             org_id=org_id,
@@ -148,7 +149,7 @@ async def test_update_vendor_missing_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseNotFoundError):
             await update_vendor(
                 s, org_id=org_id, actor_id=actor_id, vendor_id=uuid4(), name="nope"
@@ -165,7 +166,7 @@ async def test_get_and_list_vendor_write_no_audit(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         vendor = await create_vendor(
             s, org_id=org_id, actor_id=actor_id, name="Vendor", website=None, contacts=[]
         )
@@ -174,7 +175,7 @@ async def test_get_and_list_vendor_write_no_audit(
 
     before = await _audit_actions(app_engine, org_id, "vendor", vendor_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await get_vendor(s, org_id, vendor_id)
         await list_vendors(s, org_id)
 
@@ -186,7 +187,7 @@ async def test_get_vendor_missing_returns_none(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _actor_id = await _org_with_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await get_vendor(s, org_id, uuid4())
         assert result is None
 
@@ -202,14 +203,14 @@ async def test_another_orgs_vendor_is_hidden_by_rls(
     org_a, actor_a = await _org_with_user(admin_engine)
     org_b, actor_b = await _org_with_user(admin_engine)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         vendor = await create_vendor(
             s, org_id=org_a, actor_id=actor_a, name="Vendor A", website=None, contacts=[]
         )
         await s.commit()
         vendor_id = vendor.id
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_vendor(s, org_b, vendor_id)
         assert fetched is None
 

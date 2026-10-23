@@ -149,7 +149,9 @@ async def list_changes_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("change.read")),
 ) -> list[ChangeOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_changes(session, ctx.org_id)
         return [_change_out(r) for r in rows]
 
@@ -160,7 +162,9 @@ async def create_change_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("change.request")),
 ) -> ChangeOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             change = await create_change(
                 session,
@@ -194,7 +198,9 @@ async def calendar_route(
     to: datetime = Query(...),
     ctx: AuthContext = Depends(require_permission("change.read")),
 ) -> CalendarOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         data = await change_calendar(session, ctx.org_id, frm=frm, to=to)
         return CalendarOut(
             entries=[CalendarEntryOut(**e) for e in data["entries"]],
@@ -207,7 +213,9 @@ async def fleet_evidence_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("change.read")),
 ) -> list[EvidenceOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         records = await fleet_change_evidence(session, ctx.org_id)
         results: list[EvidenceOut] = []
         for data in records:
@@ -237,7 +245,9 @@ async def list_gates_route(
     ctx: AuthContext = Depends(require_permission("change.read")),
 ) -> list[GateOut]:
     """Where patch approvals and deployments need an approved change."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         return [GateOut(**row) for row in await list_gates(session, ctx.org_id)]
 
 
@@ -247,7 +257,9 @@ async def set_gate_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("change.gate.manage")),
 ) -> GateOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             gate = await set_gate(
                 session,
@@ -271,7 +283,9 @@ async def remove_gate_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("change.gate.manage")),
 ) -> None:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await remove_gate(session, org_id=ctx.org_id, actor_id=ctx.user_id, gate_id=gate_id)
         except ChangeValidationError as exc:
@@ -289,7 +303,9 @@ async def get_change_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("change.read")),
 ) -> ChangeOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         change = await get_change(session, ctx.org_id, change_id)
         if change is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such change"))
@@ -303,7 +319,9 @@ async def update_change_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("change.request")),
 ) -> ChangeOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             change = await update_change(
                 session,
@@ -336,7 +354,7 @@ async def submit_change_route(
     ctx: AuthContext = Depends(require_permission("change.request")),
 ) -> ChangeOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             change = await transition_change(
                 session,
@@ -359,7 +377,7 @@ async def approve_change_route(
     ctx: AuthContext = Depends(require_permission("change.approve")),
 ) -> ApprovalOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             approval = await decide_change(
                 session,
@@ -383,7 +401,7 @@ async def reject_change_route(
     ctx: AuthContext = Depends(require_permission("change.approve")),
 ) -> ApprovalOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             approval = await decide_change(
                 session,
@@ -407,7 +425,7 @@ async def transition_change_route(
     ctx: AuthContext = Depends(require_permission("change.request")),
 ) -> ChangeOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             change = await transition_change(
                 session,
@@ -433,7 +451,9 @@ async def list_links_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("change.read")),
 ) -> list[LinkOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         change = await get_change(session, ctx.org_id, change_id)
         if change is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such change"))
@@ -448,7 +468,9 @@ async def add_link_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("change.manage")),
 ) -> LinkOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             link = await add_link(
                 session,
@@ -470,7 +492,9 @@ async def remove_link_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("change.manage")),
 ) -> None:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await remove_link(
                 session,
@@ -496,7 +520,9 @@ async def list_approvals_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("change.read")),
 ) -> list[ApprovalOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             approvals = await list_change_approvals(session, ctx.org_id, change_id)
         except ChangeValidationError as exc:
@@ -516,7 +542,9 @@ async def change_evidence_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("change.read")),
 ) -> EvidenceOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         data = await change_evidence(session, ctx.org_id, change_id)
         if data["change"] is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such change"))

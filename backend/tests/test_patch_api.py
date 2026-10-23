@@ -17,6 +17,7 @@ import redis.asyncio as aioredis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
@@ -159,7 +160,7 @@ async def test_apply_audits_dispatching_user_not_system(api_env) -> None:
             )
         ).scalar_one()
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         session.add(
             DevicePatchStatus(
                 org_id=org_id, device_id=device_id, patch_id=patch_id, state="approved"
@@ -175,7 +176,7 @@ async def test_apply_audits_dispatching_user_not_system(api_env) -> None:
     job_ids = resp.json()["job_ids"]
     assert len(job_ids) >= 1
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         event = (
             await session.execute(
                 select(AuditEvent).where(AuditEvent.action == "patch.apply_dispatched")
@@ -247,7 +248,7 @@ async def test_an_untargeted_scan_passes_over_devices_waiting_for_review(api_env
     assert resp.status_code == 202, resp.text
     job_ids = resp.json()["job_ids"]
     assert len(job_ids) == 1
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         target = (
             await session.execute(select(Job.target_id).where(Job.id == UUID(job_ids[0])))
         ).scalar_one()
@@ -347,7 +348,7 @@ async def test_report_export_streams_and_audits(api_env) -> None:
     resp = await api_env.client.get("/api/v1/patch/report/export", headers=headers)
     assert resp.status_code == 200, resp.text
 
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         actions = {
             a.action
             for a in (

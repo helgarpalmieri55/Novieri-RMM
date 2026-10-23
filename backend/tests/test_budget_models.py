@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Budget, Expense, ExpenseCategory, FxRate
 
@@ -12,7 +13,7 @@ from app.models import Budget, Expense, ExpenseCategory, FxRate
 async def test_expense_round_trips_with_decimal_money(api_env) -> None:
     org_id = await api_env.create_org("budget")
     sub = await api_env.create_user(org_id, "org-admin")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         user_id = (
             await session.execute(
                 select(__import__("app.models", fromlist=["User"]).User.id).where(
@@ -50,7 +51,7 @@ async def test_expense_round_trips_with_decimal_money(api_env) -> None:
 async def test_budget_round_trips(api_env) -> None:
     org_id = await api_env.create_org("budget")
     sub = await api_env.create_user(org_id, "org-admin")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         user_id = (
             await session.execute(
                 select(__import__("app.models", fromlist=["User"]).User.id).where(
@@ -79,7 +80,7 @@ async def test_budget_round_trips(api_env) -> None:
 async def test_fx_rate_round_trips_with_8dp_scale(api_env) -> None:
     org_id = await api_env.create_org("budget")
     sub = await api_env.create_user(org_id, "org-admin")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         user_id = (
             await session.execute(
                 select(__import__("app.models", fromlist=["User"]).User.id).where(

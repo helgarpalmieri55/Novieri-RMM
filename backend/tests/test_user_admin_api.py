@@ -73,7 +73,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.core.audit import audit_service
 from app.core.rbac import route_permission
 from app.core.router_inspect import flatten
-from app.models import AuditEvent, DeviceGroup, Role, User, UserRole
+from app.models import AuditEvent, Client, Role, User, UserRole
 from app.modules.user_admin.api import keycloak_config
 from app.modules.user_admin.api import router as users_router
 from app.modules.user_admin.kc_client import KeycloakAdminConfig
@@ -227,26 +227,38 @@ async def _assign(
     org_id: UUID,
     user_id: UUID,
     role_id: UUID,
-    device_group_id: UUID | None = None,
+    client_id: UUID | None = None,
 ) -> UUID:
     async with AsyncSession(engine, expire_on_commit=False) as session:
         row = UserRole(
             org_id=org_id,
             user_id=user_id,
             role_id=role_id,
-            device_group_id=device_group_id,
+            client_id=client_id,
         )
         session.add(row)
         await session.commit()
         return row.id
 
 
-async def _device_group(engine: AsyncEngine, org_id: UUID, name: str) -> UUID:
+async def _client(
+    engine: AsyncEngine, org_id: UUID, name: str, *, status: str = "active"
+) -> UUID:
     async with AsyncSession(engine, expire_on_commit=False) as session:
-        group = DeviceGroup(org_id=org_id, name=name)
-        session.add(group)
+        client = Client(org_id=org_id, name=name, kind="customer", status=status)
+        session.add(client)
         await session.commit()
-        return group.id
+        return client.id
+
+
+async def _unassigned_client(engine: AsyncEngine, org_id: UUID) -> UUID:
+    """The org's `unassigned` system client (migration 0230's trigger)."""
+    async with AsyncSession(engine) as session:
+        return (
+            await session.execute(
+                select(Client.id).where(Client.org_id == org_id, Client.kind == "unassigned")
+            )
+        ).scalar_one()
 
 
 async def _assignments(engine: AsyncEngine, user_id: UUID) -> list[UserRole]:
@@ -550,9 +562,9 @@ async def test_the_list_carries_each_users_roles_and_the_assignment_id(
     users_env: Any,
 ) -> None:
     """`assignment_id` is what DELETE addresses. Without it the console would
-    have to reconstruct which of a user's rows to remove from (role, group),
+    have to reconstruct which of a user's rows to remove from (role, client),
     which is exactly the ambiguity `UniqueConstraint(user_id, role_id,
-    device_group_id)` allows to exist twice over."""
+    client_id)` allows to exist twice over."""
     org = await users_env.create_org("list")
     _sub, headers, _id = await _admin(users_env, org)
     tech = await users_env.create_user(org)
@@ -570,7 +582,7 @@ async def test_the_list_carries_each_users_roles_and_the_assignment_id(
             "assignment_id": str(assignment_id),
             "role_id": str(role_id),
             "role_name": "technician",
-            "device_group_id": None,
+            "client_id": None,
         }
     ]
 
@@ -597,24 +609,23 @@ async def test_effective_permissions_names_the_role_that_granted_each_code(
     ).json()
 
     assert body["user_id"] == str(tech_id)
-    granted = {(c["code"], c["via_role"], c["device_group_id"]) for c in body["codes"]}
+    granted = {(c["code"], c["via_role"], c["client_id"]) for c in body["codes"]}
     assert ("devices.read", "technician", None) in granted
     assert ("jobs.dispatch", "technician", None) in granted
     assert not any(c["code"] == "credentials.checkout" for c in body["codes"])
 
 
-async def test_a_group_scoped_grant_reports_its_device_group(users_env: Any) -> None:
-    """`user_roles.device_group_id` has meant "this grant applies only to that
-    group" since the kernel shipped (`app/core/rbac.py`'s docstring), and no
-    surface has ever shown it. A view that flattened it would tell an operator a
-    technician has `jobs.dispatch` org-wide when they have it for one group."""
+async def test_a_client_scoped_grant_reports_its_client(users_env: Any) -> None:
+    """`user_roles.client_id` means "this grant applies only to that client"
+    (MSP clients spec §2.1). A view that flattened it would tell an operator a
+    technician has `jobs.dispatch` on every client when they have it for one."""
     org = await users_env.create_org("eff-scoped")
     _sub, headers, _id = await _admin(users_env, org)
     tech = await users_env.create_user(org)
     tech_id = await _user_id(users_env.admin_engine, tech)
-    group = await _device_group(users_env.admin_engine, org, "branch-office")
+    client = await _client(users_env.admin_engine, org, "branch-office")
     role_id = await _global_role_id(users_env.admin_engine, "technician")
-    await _assign(users_env.admin_engine, org, tech_id, role_id, group)
+    await _assign(users_env.admin_engine, org, tech_id, role_id, client)
 
     body = (
         await users_env.client.get(
@@ -622,8 +633,8 @@ async def test_a_group_scoped_grant_reports_its_device_group(users_env: Any) -> 
         )
     ).json()
 
-    scoped = {c["device_group_id"] for c in body["codes"]}
-    assert scoped == {str(group)}
+    scoped = {c["client_id"] for c in body["codes"]}
+    assert scoped == {str(client)}
 
 
 # --------------------------------------------------------------------------- #
@@ -1047,47 +1058,106 @@ async def test_assigning_a_role_writes_the_row_and_an_audit_event(users_env: Any
     assert events[0].meta["role_name"] == "technician"
 
 
-async def test_a_grant_can_be_scoped_to_a_device_group(users_env: Any) -> None:
+async def test_a_grant_can_be_scoped_to_a_client(users_env: Any) -> None:
     org = await users_env.create_org("assign-scoped")
     _sub, headers, _id = await _admin(users_env, org)
     tech = await users_env.create_user(org)
     tech_id = await _user_id(users_env.admin_engine, tech)
     role_id = await _global_role_id(users_env.admin_engine, "technician")
-    group = await _device_group(users_env.admin_engine, org, "site-a")
+    client = await _client(users_env.admin_engine, org, "site-a")
 
     response = await users_env.client.post(
         f"/api/v1/users/{tech_id}/roles",
         headers=headers,
-        json={"role_id": str(role_id), "device_group_id": str(group)},
+        json={"role_id": str(role_id), "client_id": str(client)},
     )
 
     assert response.status_code == 201, response.text
+    assert response.json()["client_id"] == str(client)
     assignments = await _assignments(users_env.admin_engine, tech_id)
-    assert assignments[0].device_group_id == group
+    assert assignments[0].client_id == client
+    (event,) = [
+        e for e in await _audit(users_env.admin_engine, org) if e.action == "user.role_assigned"
+    ]
+    assert event.meta["client_id"] == str(client)
 
 
-async def test_assigning_refuses_another_orgs_device_group(users_env: Any) -> None:
-    """A grant scoped to a group in another tenant is either meaningless or a
-    cross-tenant reference; either way it must not be written."""
+async def test_assigning_refuses_another_orgs_client(users_env: Any) -> None:
+    """A grant scoped to a client of another tenant is either meaningless or a
+    cross-tenant reference; either way it must not be written -- and the answer
+    is the one an id that exists nowhere gets."""
     org = await users_env.create_org("scope-mine")
     theirs = await users_env.create_org("scope-theirs")
     _sub, headers, _id = await _admin(users_env, org)
     tech = await users_env.create_user(org)
     tech_id = await _user_id(users_env.admin_engine, tech)
     role_id = await _global_role_id(users_env.admin_engine, "technician")
-    group = await _device_group(users_env.admin_engine, theirs, "their-site")
+    client = await _client(users_env.admin_engine, theirs, "their-site")
 
     users_env.app.state.app_engine = users_env.admin_engine
     try:
-        response = await users_env.client.post(
-            f"/api/v1/users/{tech_id}/roles",
-            headers=headers,
-            json={"role_id": str(role_id), "device_group_id": str(group)},
-        )
+        responses = [
+            await users_env.client.post(
+                f"/api/v1/users/{tech_id}/roles",
+                headers=headers,
+                json={"role_id": str(role_id), "client_id": str(target)},
+            )
+            for target in (client, uuid4())
+        ]
     finally:
         users_env.app.state.app_engine = users_env.app_engine
 
-    assert response.status_code == 404, response.text
+    for response in responses:
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"] == "unknown client"
+    assert await _assignments(users_env.admin_engine, tech_id) == []
+
+
+async def test_assigning_refuses_the_unassigned_and_an_archived_client(users_env: Any) -> None:
+    """Spec §2.2: the unassigned client is visible only to an every-client
+    scope, so no grant may name it. An archived client is a scope no selector
+    shows, so a grant on it is one nobody could audit."""
+    org = await users_env.create_org("scope-system")
+    _sub, headers, _id = await _admin(users_env, org)
+    tech = await users_env.create_user(org)
+    tech_id = await _user_id(users_env.admin_engine, tech)
+    role_id = await _global_role_id(users_env.admin_engine, "technician")
+    unassigned = await _unassigned_client(users_env.admin_engine, org)
+    archived = await _client(users_env.admin_engine, org, "gone", status="archived")
+
+    async def assign(client: UUID) -> Any:
+        return await users_env.client.post(
+            f"/api/v1/users/{tech_id}/roles",
+            headers=headers,
+            json={"role_id": str(role_id), "client_id": str(client)},
+        )
+
+    refused = await assign(unassigned)
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["detail"] == "a role cannot be granted on the unassigned client"
+    gone = await assign(archived)
+    assert gone.status_code == 409, gone.text
+    assert gone.json()["detail"] == "that client is archived"
+    assert await _assignments(users_env.admin_engine, tech_id) == []
+
+
+async def test_a_device_group_no_longer_scopes_a_grant(users_env: Any) -> None:
+    """Spec §2.1: "los grupos de equipos dejan de dar permisos". The old field
+    is not quietly ignored -- which would turn a grant meant for one group into
+    one for every client -- it is refused."""
+    org = await users_env.create_org("scope-group")
+    _sub, headers, _id = await _admin(users_env, org)
+    tech = await users_env.create_user(org)
+    tech_id = await _user_id(users_env.admin_engine, tech)
+    role_id = await _global_role_id(users_env.admin_engine, "technician")
+
+    response = await users_env.client.post(
+        f"/api/v1/users/{tech_id}/roles",
+        headers=headers,
+        json={"role_id": str(role_id), "device_group_id": str(uuid4())},
+    )
+
+    assert response.status_code == 422, response.text
     assert await _assignments(users_env.admin_engine, tech_id) == []
 
 

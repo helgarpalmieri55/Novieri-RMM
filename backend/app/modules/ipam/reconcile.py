@@ -84,6 +84,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.sql import text
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.events import publish
 from app.core.i18n import tr
 from app.core.tenancy import org_session
@@ -1060,7 +1061,7 @@ async def reconcile_sweep_all_orgs(
     total = 0
     for org_id in org_ids:
         try:
-            async with org_session(org_id, engine=engine) as session:
+            async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
                 stats = await evaluate_org(session, org_id, now=stamp)
         except Exception:  # noqa: BLE001 - contained by design, see the docstring
             logger.error(

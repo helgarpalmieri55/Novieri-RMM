@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.storage import MAX_PRESIGNED_TTL_S, ObjectStore
 from app.core.tenancy import org_session
@@ -542,7 +543,7 @@ async def test_forget_chunks_removes_only_the_named_ids_in_the_named_repository(
     )
     await seed_index_rows(admin_engine, b.org_id, b.repository_id, [chunk_id(70)])
 
-    async with org_session(a.org_id, engine=app_engine) as session:
+    async with org_session(a.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         removed = await forget_chunks(
             session, org_id=a.org_id, repository_id=a.repository_id,
             chunk_ids=[chunk_id(70), chunk_id(99)],
@@ -769,7 +770,7 @@ async def test_gc_drops_index_rows_for_chunks_it_swept_and_for_chunks_never_writ
     from app.modules.backup.schema import BackupManifest, FiletreeStream, ManifestEntry
 
     a, _ = await seed_dedup_org(admin_engine, app_engine, vault, "ddg-c")
-    async with org_session(a.org_id, engine=app_engine) as session:
+    async with org_session(a.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo_key = await open_repo_key(
             session, vault, org_id=a.org_id, repository_id=a.repository_id
         )
@@ -816,7 +817,7 @@ async def test_gc_drops_index_rows_for_chunks_it_swept_and_for_chunks_never_writ
         )
         await session.commit()
 
-    async with org_session(a.org_id, engine=app_engine) as session:
+    async with org_session(a.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         deleted = await gc_repository(
             session, object_store, vault,
             org_id=a.org_id, repository_id=a.repository_id, now=_NOW,

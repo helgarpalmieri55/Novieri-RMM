@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import License, Organization, User
 from app.modules.licenses.reporting import (
@@ -55,7 +56,7 @@ async def _seed_product(
     name: str = "Acme Suite",
     match_rules: list[dict] | None = None,
 ):
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         product = await create_product(
             s,
             org_id=org_id,
@@ -153,7 +154,7 @@ async def test_compliance_summary_hand_computed(
     await _seed_installed(admin_engine, org_id, device2, "Acme App")
     await _seed_installed(admin_engine, org_id, device3, "Acme App")
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await compliance_summary(s, org_id)
 
     assert len(rows) == 1
@@ -182,7 +183,7 @@ async def test_compliance_summary_breach_when_installed_exceeds_entitled(
     await _seed_installed(admin_engine, org_id, device1, "Solo App")
     await _seed_installed(admin_engine, org_id, device2, "Solo App")
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await compliance_summary(s, org_id)
 
     row = next(r for r in rows if r["product_id"] == product.id)
@@ -198,7 +199,7 @@ async def test_compliance_summary_product_with_no_licenses_is_zero_entitled(
     org_id, actor_id = await _org_with_user(admin_engine)
     product = await _seed_product(app_engine, org_id, actor_id, name="No License Product")
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await compliance_summary(s, org_id)
 
     row = next(r for r in rows if r["product_id"] == product.id)
@@ -259,7 +260,7 @@ async def test_renewal_calendar_hand_computed(
         maintenance_expires_at=_dt.date(2026, 1, 15),
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await renewal_calendar(s, org_id, now=now)
 
     by_license: dict[UUID, list[dict]] = {}
@@ -307,7 +308,7 @@ async def test_renewal_calendar_within_days_boundary_is_inclusive(
         renews_at=_dt.date(2026, 1, 31),  # exactly 30 days out
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await renewal_calendar(s, org_id, now=now, within_days=30)
 
     assert any(row["license_id"] == lic_boundary and row["due_in_days"] == 30 for row in rows)
@@ -365,7 +366,7 @@ async def test_cost_view_groups_by_product_and_currency_no_cross_currency_sum(
         currency=None,
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await cost_view(s, org_id)
 
     by_currency = {row["currency"]: row for row in rows}
@@ -399,7 +400,7 @@ async def test_export_rows_has_no_key_material_and_carries_expected_fields(
         notes="some notes",
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await export_rows(s, org_id)
 
     assert len(rows) == 1
@@ -427,7 +428,7 @@ async def test_export_rows_ordered_deterministically_by_product_name(
     await _seed_license(admin_engine, org_id, actor_id, product_z.id, entitlements=1)
     await _seed_license(admin_engine, org_id, actor_id, product_a.id, entitlements=1)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await export_rows(s, org_id)
 
     names = [row["product_name"] for row in rows]
@@ -477,7 +478,7 @@ async def test_a_second_orgs_rows_are_excluded_from_all_four_reports_by_rls(
         admin_engine, org_b, actor_b, product_b.id, entitlements=1, renews_at=_dt.date(2026, 1, 5)
     )
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         compliance = await compliance_summary(s, org_a)
         renewals = await renewal_calendar(s, org_a, now=now)
         costs = await cost_view(s, org_a)

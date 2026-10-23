@@ -11,6 +11,14 @@ three identical rows in the console. Migration 0073 adds the partial unique
 index `(user_id, role_id) WHERE device_group_id IS NULL` that the constraint
 could not express.
 
+MIGRATION 0230 MOVED THE SCOPE FROM A DEVICE GROUP TO A CLIENT. The column is
+`client_id` now (MSP clients spec §2.1; NULL is "every client"), with
+`UNIQUE (user_id, role_id, client_id)` and the partial index over
+`WHERE client_id IS NULL`, and the argument above holds unchanged for it. The
+tests that run at head are therefore written against `client_id`; the two that
+migrate a database through 0072 -> 0073 at the bottom of this file still speak
+`device_group_id`, because that is the schema 0073 acted on.
+
 WHY EVERY ASSERTION BELOW IS A RAW `INSERT` ON `admin_engine`. The rule has to
 hold against SQL, not merely against `assign_role`: the duplicates in
 production were written by hand, and a service-layer check is not a constraint.
@@ -40,8 +48,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 _INSERT_GRANT = text(
-    "INSERT INTO user_roles (id, org_id, user_id, role_id, device_group_id) "
-    "VALUES (:id, :org_id, :user_id, :role_id, :device_group_id)"
+    "INSERT INTO user_roles (id, org_id, user_id, role_id, client_id) "
+    "VALUES (:id, :org_id, :user_id, :role_id, :client_id)"
 )
 
 
@@ -78,17 +86,19 @@ async def _seed_org_and_user(engine: AsyncEngine) -> tuple[UUID, UUID, UUID]:
     return org_id, user_id, role_id
 
 
-async def _seed_group(engine: AsyncEngine, org_id: UUID) -> UUID:
-    group_id = uuid4()
+async def _seed_client(engine: AsyncEngine, org_id: UUID) -> UUID:
+    """A customer client of the org, besides the two system clients every
+    organization is born with (the internal one has `id = org_id`)."""
+    client_id = uuid4()
     async with engine.begin() as conn:
         await conn.execute(
             text(
-                "INSERT INTO device_groups (id, org_id, name, description) "
-                "VALUES (:id, :org_id, :name, '')"
+                "INSERT INTO clients (id, org_id, name, kind) "
+                "VALUES (:id, :org_id, :name, 'customer')"
             ),
-            {"id": group_id, "org_id": org_id, "name": f"grp-{uuid4().hex[:8]}"},
+            {"id": client_id, "org_id": org_id, "name": f"client-{uuid4().hex[:8]}"},
         )
-    return group_id
+    return client_id
 
 
 async def _grant(
@@ -96,7 +106,7 @@ async def _grant(
     org_id: UUID,
     user_id: UUID,
     role_id: UUID,
-    device_group_id: UUID | None = None,
+    client_id: UUID | None = None,
 ) -> UUID:
     grant_id = uuid4()
     async with engine.begin() as conn:
@@ -107,7 +117,7 @@ async def _grant(
                 "org_id": org_id,
                 "user_id": user_id,
                 "role_id": role_id,
-                "device_group_id": device_group_id,
+                "client_id": client_id,
             },
         )
     return grant_id
@@ -136,7 +146,7 @@ async def test_a_second_identical_org_wide_grant_is_refused_by_the_database(
                 text(
                     "SELECT count(*) FROM user_roles "
                     "WHERE user_id = :user_id AND role_id = :role_id "
-                    "AND device_group_id IS NULL"
+                    "AND client_id IS NULL"
                 ),
                 {"user_id": user_id, "role_id": role_id},
             )
@@ -144,22 +154,22 @@ async def test_a_second_identical_org_wide_grant_is_refused_by_the_database(
     assert held == 1
 
 
-async def test_a_second_identical_group_scoped_grant_is_still_refused(
+async def test_a_second_identical_client_scoped_grant_is_still_refused(
     admin_engine: AsyncEngine,
 ) -> None:
     """The half of the rule that always worked, kept honest.
 
-    0073 does not replace the 0001 constraint, it completes it -- so the
-    group-scoped duplicate it already caught must still be caught. If a later
-    change drops the constraint on the theory that the new index covers the
-    table, this goes red.
+    The partial index does not replace the table constraint, it completes
+    it -- so the client-scoped duplicate the constraint already catches must
+    still be caught. If a later change drops the constraint on the theory that
+    the index covers the table, this goes red.
     """
     org_id, user_id, role_id = await _seed_org_and_user(admin_engine)
-    group_id = await _seed_group(admin_engine, org_id)
-    await _grant(admin_engine, org_id, user_id, role_id, group_id)
+    client_id = await _seed_client(admin_engine, org_id)
+    await _grant(admin_engine, org_id, user_id, role_id, client_id)
 
     with pytest.raises(IntegrityError):
-        await _grant(admin_engine, org_id, user_id, role_id, group_id)
+        await _grant(admin_engine, org_id, user_id, role_id, client_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -167,17 +177,17 @@ async def test_a_second_identical_group_scoped_grant_is_still_refused(
 # --------------------------------------------------------------------------- #
 
 
-async def test_the_same_role_org_wide_and_scoped_to_a_group_both_stand(
+async def test_the_same_role_org_wide_and_scoped_to_a_client_both_stand(
     admin_engine: AsyncEngine,
 ) -> None:
-    """Two DIFFERENT grants, not a duplicate: one covers the fleet, one covers a
-    group. The partial index only ranges over rows with a NULL group, so the
-    scoped row is outside it entirely."""
+    """Two DIFFERENT grants, not a duplicate: one covers every client, one
+    covers a single client. The partial index only ranges over rows with a NULL
+    client, so the scoped row is outside it entirely."""
     org_id, user_id, role_id = await _seed_org_and_user(admin_engine)
-    group_id = await _seed_group(admin_engine, org_id)
+    client_id = await _seed_client(admin_engine, org_id)
 
     await _grant(admin_engine, org_id, user_id, role_id)
-    await _grant(admin_engine, org_id, user_id, role_id, group_id)
+    await _grant(admin_engine, org_id, user_id, role_id, client_id)
 
     async with admin_engine.connect() as conn:
         rows = (
@@ -189,12 +199,12 @@ async def test_the_same_role_org_wide_and_scoped_to_a_group_both_stand(
     assert rows == 2
 
 
-async def test_the_same_role_in_two_different_groups_both_stand(
+async def test_the_same_role_on_two_different_clients_both_stand(
     admin_engine: AsyncEngine,
 ) -> None:
     org_id, user_id, role_id = await _seed_org_and_user(admin_engine)
-    first = await _seed_group(admin_engine, org_id)
-    second = await _seed_group(admin_engine, org_id)
+    first = await _seed_client(admin_engine, org_id)
+    second = await _seed_client(admin_engine, org_id)
 
     await _grant(admin_engine, org_id, user_id, role_id, first)
     await _grant(admin_engine, org_id, user_id, role_id, second)
@@ -257,10 +267,10 @@ async def test_the_partial_unique_index_exists_with_the_right_predicate(
                 {"name": "uq_user_roles_user_role_org_wide"},
             )
         ).scalar_one_or_none()
-    assert definition is not None, "migration 0073's partial unique index is missing"
+    assert definition is not None, "migration 0230's partial unique index is missing"
     assert "UNIQUE INDEX" in definition
     assert "(user_id, role_id)" in definition
-    assert "WHERE (device_group_id IS NULL)" in definition
+    assert "WHERE (client_id IS NULL)" in definition
 
 
 # --------------------------------------------------------------------------- #

@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Device
 from app.modules.inventory.ingest import ingest_inventory
@@ -18,7 +19,7 @@ async def _seed_inventory(api_env, org_id: UUID, hostname: str = "wks-042") -> U
         session.add(device)
         await session.commit()
         device_id = device.id
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         loaded = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one()
@@ -60,7 +61,7 @@ async def test_changes_endpoint_newest_first(api_env) -> None:
     org_id = await api_env.create_org("iapi")
     device_id = await _seed_inventory(api_env, org_id)
     # trigger changes with a second sweep
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one()
@@ -218,7 +219,7 @@ async def test_csv_exports_escape_formula_injection_in_free_text_columns(api_env
         # `_seed_inventory` doesn't expose overriding serial/software, so
         # seed directly with a doctored document.
     )
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one()

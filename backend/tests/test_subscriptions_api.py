@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent
 from tests.conftest import ApiEnv
@@ -61,7 +62,7 @@ async def _create_subscription(
 
 
 async def _audit_count(api_env: ApiEnv, org_id: UUID, action: str) -> int:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (
             await session.execute(select(AuditEvent).where(AuditEvent.action == action))
         ).scalars().all()

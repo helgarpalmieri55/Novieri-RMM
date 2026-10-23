@@ -5,13 +5,14 @@ from uuid import UUID
 
 from sqlalchemy import select
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Person
 from tests.conftest import ApiEnv
 
 
 async def _person(api_env: ApiEnv, org_id: UUID, name: str, email: str | None) -> UUID:
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         person = Person(org_id=org_id, display_name=name, email=email, source="operator")
         s.add(person)
         await s.flush()
@@ -128,7 +129,7 @@ async def test_a_licence_for_an_account_is_carried_to_its_person(api_env: ApiEnv
     # The people list mirrors accounts, so the technician now has a person.
     listing = await api_env.client.get("/api/v1/people", headers=headers)
     assert listing.status_code == 200, listing.text
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         person = (
             await s.execute(select(Person).where(Person.email == f"{tech}@test.local"))
         ).scalar_one()

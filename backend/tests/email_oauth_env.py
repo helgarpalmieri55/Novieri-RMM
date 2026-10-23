@@ -18,6 +18,7 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.core.vault import get_vault
 from app.models import AuditEvent
@@ -124,7 +125,9 @@ class OAuthEnv:
         row = await self.mailbox(mailbox_id)
         assert row.credential_id is not None
         vault = get_vault(self.api_env.settings)
-        async with org_session(self.org_id, engine=self.api_env.app_engine) as session:
+        async with org_session(
+            self.org_id, engine=self.api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             return await vault.checkout(
                 session, org_id=self.org_id, credential_id=row.credential_id
             )
@@ -164,7 +167,7 @@ async def build_oauth_env(api_env: Any, monkeypatch: pytest.MonkeyPatch) -> OAut
     actor = await _seed_user(api_env, org_id)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await set_app(
             session,
             org_id=org_id,

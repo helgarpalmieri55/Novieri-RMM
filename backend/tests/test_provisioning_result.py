@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -113,7 +114,7 @@ async def test_success_result_flips_run_to_complete(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _profile_id, device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = ProvisionEnrollResult(
             state="success",
             hostname_set=True,
@@ -146,7 +147,7 @@ async def test_failed_result_fails_run_with_error(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _profile_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = ProvisionEnrollResult(
             state="failed",
             hostname_set=False,
@@ -181,7 +182,7 @@ async def test_out_of_domain_state_coerced_to_failed(
     `failed` state -- never raise, never wedge the run -- with the original
     value recorded in the audit metadata."""
     org_id, _profile_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = ProvisionEnrollResult.model_construct(
             state="running",  # type: ignore[arg-type]  # deliberately out-of-domain
             hostname_set=False,
@@ -214,7 +215,7 @@ async def test_no_matching_run_row_is_a_graceful_no_op(
     never raise -- the agent's report should never be able to fail the job
     over server-side bookkeeping."""
     org_id, _profile_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         # Detach the row from this job so there's nothing to match.
         run = (
             await session.execute(select(ProvisionRun).where(ProvisionRun.job_id == job.id))
@@ -258,7 +259,7 @@ async def test_valid_result_through_job_engine_reconciles_and_queues_ui_event(
 ) -> None:
     org_id, _profile_id, device_id, job = await _setup_job(admin_engine)
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job.id))).scalar_one()
         await engine.mark_dispatched(session, job)
         await engine.complete(

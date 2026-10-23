@@ -81,6 +81,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 
 # `app.models` first, before any `app.modules.*` import -- importing an SLA
@@ -244,7 +245,7 @@ async def _org_with_policy(
 
 
 async def _start(api_env, org_id: UUID, ticket: Ticket) -> None:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await tracking.start_tracking(session, org_id, ticket)
 
 
@@ -260,7 +261,7 @@ async def _comment_at(
     """`note_public_comment` with the clock frozen at `when`, through the
     RLS-constrained app engine (the ordinary caller's path)."""
     monkeypatch.setattr(tracking, "_utcnow", lambda: when)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await note_public_comment(session, org_id, ticket_id, author_id=author_id)
 
 
@@ -269,7 +270,7 @@ async def _resolve_at(
 ) -> None:
     """`note_resolved` with the clock frozen at `when`."""
     monkeypatch.setattr(tracking, "_utcnow", lambda: when)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await note_resolved(session, org_id, ticket_id)
 
 
@@ -532,7 +533,9 @@ async def test_a_portal_requesters_public_comment_never_touches_ticket_sla(
     from app.modules.portal.schema import PortalCommentCreate
     from app.modules.portal.tickets import add_my_comment
 
-    async with portal_session(org_id, actors.requester, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, actors.requester, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         await add_my_comment(
             s,
             org_id=org_id,
@@ -681,7 +684,7 @@ async def _add_comment_through_core(
     when: datetime,
 ) -> None:
     monkeypatch.setattr(tracking, "_utcnow", lambda: when)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await add_comment(
             session,
             org_id,
@@ -789,7 +792,7 @@ async def test_negative_assigning_the_ticket_does_not_stop_the_response_clock(
     await _start(api_env, org_id, ticket)
     monkeypatch.setattr(tracking, "_utcnow", lambda: MONDAY_0930)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         updated = await assign_ticket(
             session, org_id, actors.creator, ticket.id, {"assigned_to": actors.bystander}
         )
@@ -813,7 +816,7 @@ async def test_negative_a_status_change_out_of_new_does_not_stop_the_response_cl
     await _start(api_env, org_id, ticket)
     monkeypatch.setattr(tracking, "_utcnow", lambda: MONDAY_0930)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         updated = await change_status(
             session, org_id, ticket.id, to_status="open", actor_id=actors.creator
         )
@@ -835,7 +838,7 @@ async def test_resolving_an_incident_through_the_ticket_core_stops_both_clocks(
     await _start(api_env, org_id, ticket)
     monkeypatch.setattr(tracking, "_utcnow", lambda: MONDAY_1100)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await change_status(
             session, org_id, ticket.id, to_status="resolved", actor_id=actors.creator
         )
@@ -860,7 +863,7 @@ async def test_fulfilling_a_request_through_the_ticket_core_stops_both_clocks(
     await _start(api_env, org_id, ticket)
     monkeypatch.setattr(tracking, "_utcnow", lambda: MONDAY_1100)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await change_status(
             session, org_id, ticket.id, to_status="fulfilled", actor_id=actors.creator
         )
@@ -883,11 +886,11 @@ async def test_reopening_a_resolved_ticket_leaves_both_met_stamps_alone(
     await _start(api_env, org_id, ticket)
     monkeypatch.setattr(tracking, "_utcnow", lambda: MONDAY_1100)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await change_status(
             session, org_id, ticket.id, to_status="resolved", actor_id=actors.creator
         )
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         reopened = await change_status(
             session, org_id, ticket.id, to_status="open", actor_id=actors.creator
         )

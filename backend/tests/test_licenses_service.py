@@ -20,6 +20,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
 from app.models import AuditEvent, Organization, SoftwareProduct, User, Vendor
@@ -74,7 +75,7 @@ def _vault(tmp_path: Path) -> LocalVaultService:
 async def _audit_actions(
     app_engine: AsyncEngine, org_id: UUID, target_type: str, target_id: UUID
 ) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -102,7 +103,7 @@ async def test_create_license_with_key_seals_it_and_audits(
     vault = _vault(tmp_path)
     plaintext_key = "XXXX-YYYY-ZZZZ-1234"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = await create_license(
             s,
             vault,
@@ -130,7 +131,7 @@ async def test_create_license_with_key_seals_it_and_audits(
     assert license_.key_sealed != plaintext_key
     assert plaintext_key not in license_.key_sealed
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_license(s, org_id, license_id)
         assert fetched is not None
         # ORM-level access exposes key_sealed (there's no response mapping in
@@ -138,7 +139,7 @@ async def test_create_license_with_key_seals_it_and_audits(
         assert fetched.key_sealed is not None
         assert fetched.key_sealed != plaintext_key
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         revealed = await reveal_key(
             s, vault, org_id=org_id, actor_id=actor_id, license_id=license_id
         )
@@ -148,7 +149,7 @@ async def test_create_license_with_key_seals_it_and_audits(
     actions = await _audit_actions(app_engine, org_id, "license", license_id)
     assert actions == ["license.created", "license.key_revealed"]
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         created_event = (
             await s.execute(
                 select(AuditEvent)
@@ -182,7 +183,7 @@ async def test_create_license_without_key_leaves_key_sealed_none(
     product_id = await _product(admin_engine, org_id, actor_id)
     vault = _vault(tmp_path)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = await create_license(
             s,
             vault,
@@ -214,7 +215,7 @@ async def test_create_license_cross_org_product_raises_validation_error(
     product_b = await _product(admin_engine, org_b, actor_b)
     vault = _vault(tmp_path)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseValidationError):
             await create_license(
                 s,
@@ -246,7 +247,7 @@ async def test_create_license_cross_org_vendor_raises_validation_error(
     vendor_b = await _vendor(admin_engine, org_b, actor_b)
     vault = _vault(tmp_path)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseValidationError):
             await create_license(
                 s,
@@ -281,7 +282,7 @@ async def test_reveal_key_on_keyless_license_raises_validation_error(
     product_id = await _product(admin_engine, org_id, actor_id)
     vault = _vault(tmp_path)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = await create_license(
             s,
             vault,
@@ -304,7 +305,7 @@ async def test_reveal_key_on_keyless_license_raises_validation_error(
         await s.commit()
         license_id = license_.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseValidationError):
             await reveal_key(s, vault, org_id=org_id, actor_id=actor_id, license_id=license_id)
 
@@ -321,7 +322,7 @@ async def test_update_license_key_empty_string_clears_key(
     product_id = await _product(admin_engine, org_id, actor_id)
     vault = _vault(tmp_path)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = await create_license(
             s,
             vault,
@@ -344,14 +345,14 @@ async def test_update_license_key_empty_string_clears_key(
         await s.commit()
         license_id = license_.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         updated = await update_license(
             s, vault, org_id=org_id, actor_id=actor_id, license_id=license_id, key=""
         )
         await s.commit()
         assert updated.key_sealed is None
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseValidationError):
             await reveal_key(s, vault, org_id=org_id, actor_id=actor_id, license_id=license_id)
 
@@ -366,7 +367,7 @@ async def test_update_license_new_key_reseals_and_reveals_new_plaintext(
     product_id = await _product(admin_engine, org_id, actor_id)
     vault = _vault(tmp_path)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = await create_license(
             s,
             vault,
@@ -389,13 +390,13 @@ async def test_update_license_new_key_reseals_and_reveals_new_plaintext(
         await s.commit()
         license_id = license_.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await update_license(
             s, vault, org_id=org_id, actor_id=actor_id, license_id=license_id, key="new-key"
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         revealed = await reveal_key(
             s, vault, org_id=org_id, actor_id=actor_id, license_id=license_id
         )
@@ -409,7 +410,7 @@ async def test_update_license_key_absent_leaves_existing_key_untouched(
     product_id = await _product(admin_engine, org_id, actor_id)
     vault = _vault(tmp_path)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = await create_license(
             s,
             vault,
@@ -432,13 +433,13 @@ async def test_update_license_key_absent_leaves_existing_key_untouched(
         await s.commit()
         license_id = license_.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await update_license(
             s, vault, org_id=org_id, actor_id=actor_id, license_id=license_id, notes="updated notes"
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         revealed = await reveal_key(
             s, vault, org_id=org_id, actor_id=actor_id, license_id=license_id
         )
@@ -457,7 +458,7 @@ async def test_update_license_explicit_key_none_leaves_existing_key_untouched(
     product_id = await _product(admin_engine, org_id, actor_id)
     vault = _vault(tmp_path)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = await create_license(
             s,
             vault,
@@ -480,7 +481,7 @@ async def test_update_license_explicit_key_none_leaves_existing_key_untouched(
         await s.commit()
         license_id = license_.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await update_license(
             s,
             vault,
@@ -492,7 +493,7 @@ async def test_update_license_explicit_key_none_leaves_existing_key_untouched(
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         revealed = await reveal_key(
             s, vault, org_id=org_id, actor_id=actor_id, license_id=license_id
         )
@@ -508,7 +509,7 @@ async def test_update_license_cross_org_product_raises_validation_error(
     product_b = await _product(admin_engine, org_b, actor_b)
     vault = _vault(tmp_path)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = await create_license(
             s,
             vault,
@@ -531,7 +532,7 @@ async def test_update_license_cross_org_product_raises_validation_error(
         await s.commit()
         license_id = license_.id
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseValidationError):
             await update_license(
                 s,
@@ -555,7 +556,7 @@ async def test_delete_license_removes_row_and_audits(
     product_id = await _product(admin_engine, org_id, actor_id)
     vault = _vault(tmp_path)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = await create_license(
             s,
             vault,
@@ -578,11 +579,11 @@ async def test_delete_license_removes_row_and_audits(
         await s.commit()
         license_id = license_.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await delete_license(s, org_id=org_id, actor_id=actor_id, license_id=license_id)
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_license(s, org_id, license_id)
         assert fetched is None
 
@@ -594,7 +595,7 @@ async def test_delete_license_missing_raises_not_found(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseNotFoundError):
             await delete_license(s, org_id=org_id, actor_id=actor_id, license_id=uuid4())
 
@@ -611,7 +612,7 @@ async def test_get_and_list_license_write_no_audit(
     product_id = await _product(admin_engine, org_id, actor_id)
     vault = _vault(tmp_path)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = await create_license(
             s,
             vault,
@@ -636,7 +637,7 @@ async def test_get_and_list_license_write_no_audit(
 
     before = await _audit_actions(app_engine, org_id, "license", license_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await get_license(s, org_id, license_id)
         all_licenses = await list_licenses(s, org_id)
         assert [lic.id for lic in all_licenses] == [license_id]
@@ -649,7 +650,7 @@ async def test_get_license_missing_returns_none(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _actor_id = await _org_with_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await get_license(s, org_id, uuid4())
         assert result is None
 
@@ -667,7 +668,7 @@ async def test_another_orgs_license_is_hidden_by_rls(
     product_a = await _product(admin_engine, org_a, actor_a)
     vault = _vault(tmp_path)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         license_ = await create_license(
             s,
             vault,
@@ -690,7 +691,7 @@ async def test_another_orgs_license_is_hidden_by_rls(
         await s.commit()
         license_id = license_.id
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_license(s, org_b, license_id)
         assert fetched is None
 

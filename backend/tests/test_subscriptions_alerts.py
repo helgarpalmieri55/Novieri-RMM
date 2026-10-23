@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import DomainEvent, Organization, Subscription, SubscriptionAlertSent, User
 from app.modules.subscriptions import alerts
@@ -61,12 +62,12 @@ async def _sub(
 
 
 async def _emit(app_engine: AsyncEngine, org_id: UUID, today: date, window: int = 30) -> int:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return await emit_due_alerts(session, org_id, today=today, window_days=window)
 
 
 async def _events(app_engine: AsyncEngine, org_id: UUID) -> list[DomainEvent]:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return list(
             (
                 await session.execute(

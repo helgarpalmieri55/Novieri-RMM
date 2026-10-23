@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import BudgetSettings, FxRate, User
 from app.modules.budget.errors import BudgetValidationError
@@ -71,7 +72,7 @@ def test_convert_raises_over_the_numeric_14_2_boundary() -> None:
 
 async def test_settings_are_created_lazily_with_documented_defaults(api_env) -> None:
     org_id = await api_env.create_org("fx")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         settings = await get_settings(session, org_id)
     assert settings.base_currency == "USD"
     assert settings.fiscal_year_start_month == 1
@@ -82,7 +83,7 @@ async def test_resolve_picks_greatest_effective_date_not_later_than_target(
     api_env,
 ) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await _seed_rate(session, org_id, user_id, "COP", "4000", date(2026, 1, 1))
         await _seed_rate(session, org_id, user_id, "COP", "4200", date(2026, 6, 1))
         await _seed_rate(session, org_id, user_id, "COP", "4500", date(2026, 9, 1))
@@ -94,7 +95,7 @@ async def test_no_backward_extrapolation_from_a_later_rate(api_env) -> None:
     """A rate effective AFTER the date must not be used -- returning 4200 here
     would silently value a January expense at a June rate."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await _seed_rate(session, org_id, user_id, "COP", "4200", date(2026, 6, 1))
         rate = await resolve_rate(session, org_id, "COP", date(2026, 1, 15))
     assert rate is None
@@ -104,7 +105,7 @@ async def test_pair_is_not_inverted(api_env) -> None:
     """Only USD->? is seeded; COP->USD must stay unresolvable rather than
     silently using 1/rate."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         session.add(
             FxRate(
                 org_id=org_id, from_currency="USD", to_currency="COP",
@@ -119,7 +120,7 @@ async def test_pair_is_not_inverted(api_env) -> None:
 
 async def test_base_to_base_is_one_without_a_lookup(api_env) -> None:
     org_id, _ = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rate, base = await convert_for(
             session, org_id, Decimal("50.00"), "USD", date(2026, 1, 1)
         )
@@ -129,7 +130,7 @@ async def test_base_to_base_is_one_without_a_lookup(api_env) -> None:
 
 async def test_unresolvable_currency_yields_none_none(api_env) -> None:
     org_id, _ = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rate, base = await convert_for(
             session, org_id, Decimal("50.00"), "COP", date(2026, 1, 1)
         )

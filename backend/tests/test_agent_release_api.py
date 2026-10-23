@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, FastAPI
 from sqlalchemy import select
 
 from app.api.deps import AuthContext, require_permission
+from app.core.client_scope import ClientScope
 from app.core.rbac import route_permission
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -289,7 +290,7 @@ async def test_publishing_writes_an_audit_event(api_env: ApiEnv) -> None:
     admin = await api_env.create_user(org_id, "super-admin")
     await _publish(api_env, await api_env.headers(org_id, admin))
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         actions = [
             row
             for row in (
@@ -428,7 +429,7 @@ async def _publish_with_artifact(
     from app.models.core import AgentRelease
 
     created = await _publish(api_env, headers, **overrides)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         release = await session.get(AgentRelease, UUID(created["id"]))
         assert release is not None
         release.sha256 = "a" * 64
@@ -464,7 +465,7 @@ async def test_an_install_command_mints_a_single_use_token(api_env: ApiEnv) -> N
     admin = await api_env.create_user(org_id, "super-admin")
     body = await _mint(api_env, org_id, await api_env.headers(org_id, admin))
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = list(
             (await session.execute(select(EnrollmentToken))).scalars()
         )

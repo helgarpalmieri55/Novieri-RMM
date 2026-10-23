@@ -520,9 +520,9 @@ async def _seed_blocker(
     """Exactly one row of `kind` pointing at `group_id`, and nothing else.
 
     Each branch carries whatever its own table demands (a repository for a
-    backup policy, a profile for a health assignment, a user for a role grant)
-    and nothing that would also reference the group -- the test's whole claim
-    is that each reference blocks ALONE.
+    backup policy, a profile for a health assignment) and nothing that would
+    also reference the group -- the test's whole claim is that each reference
+    blocks ALONE.
     """
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
         if kind == "devices":
@@ -581,41 +581,26 @@ async def _seed_blocker(
                     vault_ref="vault://nothing",
                 )
             )
-        elif kind == "role_grants":
-            role = (
-                await session.execute(
-                    select(Role).where(Role.name == "read-only", Role.org_id.is_(None))
-                )
-            ).scalar_one()
-            scoped_user = User(
-                org_id=org_id,
-                external_subject=f"scoped-{uuid4().hex[:8]}",
-                email=f"scoped-{uuid4().hex[:8]}@test.local",
-            )
-            session.add(scoped_user)
-            await session.flush()
-            session.add(
-                UserRole(
-                    org_id=org_id,
-                    user_id=scoped_user.id,
-                    role_id=role.id,
-                    device_group_id=group_id,
-                )
-            )
         else:  # pragma: no cover -- a typo in the list below
             raise AssertionError(kind)
         await session.commit()
 
 
 async def test_each_live_reference_blocks_the_archive_on_its_own(api_env: Any) -> None:
-    """NINE FOREIGN KEYS POINT AT `device_groups.id` AND EVERY ONE IS `NO
+    """EIGHT FOREIGN KEYS POINT AT `device_groups.id` AND EVERY ONE IS `NO
     ACTION` -- there is no `ON DELETE` clause in any migration. So a hard
     `DELETE` raises where one holds and dangles where none does, which is why
     the archive is soft and why it is refused while any of them holds.
 
     Each kind is proven to block ON ITS OWN: seed exactly that reference,
     watch the 409 name it, remove it, watch the archive succeed. A single
-    combined fixture would pass with eight of the nine counts wired to zero.
+    combined fixture would pass with seven of the eight counts wired to zero.
+
+    A NINTH, THE ROLE GRANT, IS GONE BY DESIGN. Migration 0230 replaced
+    `user_roles.device_group_id` with `client_id` (MSP clients spec §2.1), so a
+    grant cannot name a group and cannot block one:
+    `test_a_role_grant_no_longer_names_a_group` pins that the list does not
+    quietly grow it back.
 
     RE-HOMING THE MEMBERS TO `NULL` WAS THE REJECTED ALTERNATIVE, and the
     reason is that `NULL` is not an absence: `patch/policy.py`,
@@ -633,7 +618,6 @@ async def test_each_live_reference_blocks_the_archive_on_its_own(api_env: Any) -
         "remote_policies",
         "health_assignments",
         "credentials",
-        "role_grants",
     )
     for kind in kinds:
         org_id = await api_env.create_org("dgw")
@@ -677,9 +661,46 @@ def _clear(kind: str, group_id: UUID) -> Any:
         "remote_policies": RemotePolicy,
         "health_assignments": HealthProfileAssignment,
         "credentials": Credential,
-        "role_grants": UserRole,
     }[kind]
     return table.__table__.delete().where(table.device_group_id == group_id)
+
+
+async def test_a_role_grant_no_longer_names_a_group(api_env: Any) -> None:
+    """Role grants are scoped to a client (migration 0230, spec §2.1), so
+    `user_roles` has no `device_group_id` and the archive refusal has no
+    `role_grants` count. A client-scoped grant on the org's internal client
+    does not block archiving a group, and the refusal body does not name it.
+    """
+    assert not hasattr(UserRole, "device_group_id")
+
+    org_id = await api_env.create_org("dgw")
+    headers = await _admin(api_env, org_id)
+    group = await _create(api_env, headers, name="target")
+    async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
+        role = (
+            await session.execute(
+                select(Role).where(Role.name == "read-only", Role.org_id.is_(None))
+            )
+        ).scalar_one()
+        scoped_user = User(
+            org_id=org_id,
+            external_subject=f"scoped-{uuid4().hex[:8]}",
+            email=f"scoped-{uuid4().hex[:8]}@test.local",
+        )
+        session.add(scoped_user)
+        await session.flush()
+        # The internal client has the organization's own id.
+        session.add(
+            UserRole(org_id=org_id, user_id=scoped_user.id, role_id=role.id, client_id=org_id)
+        )
+        await session.commit()
+
+    detail = await api_env.client.get(f"{GROUPS}/{group['id']}", headers=headers)
+    assert detail.status_code == 200, detail.text
+    assert "role_grants" not in detail.json()["references"]
+
+    archived = await api_env.client.delete(f"{GROUPS}/{group['id']}", headers=headers)
+    assert archived.status_code == 204, archived.text
 
 
 async def test_an_archived_group_leaves_the_list_stays_readable_and_frees_its_name(
@@ -789,33 +810,44 @@ async def test_a_group_targeted_job_aimed_at_an_archived_group_finds_no_devices(
 
 
 async def test_an_archived_group_cannot_become_a_new_rbac_scope(api_env: Any) -> None:
-    """`user_admin::_visible_group` is the codebase's one existing "does this
-    group resolve" check, and it is the ONLY consumer-side refusal this design
-    builds.
+    """A `user_roles` row scoped to an archived group would be a permission
+    nobody can audit, and it would newly reference a group the archive refusal
+    has just guaranteed is unreferenced. `user_admin::_visible_group` used to
+    refuse it.
 
-    A `user_roles` row scoped to a group is RBAC. Granting one against an
-    archived group would leave a permission scoped to a group no surface can
-    show, which is a permission nobody can audit -- and it would newly
-    reference a group the archive refusal has just guaranteed is unreferenced.
+    NOW NO GROUP CAN BE A SCOPE AT ALL (MSP clients spec §2.1: "los grupos de
+    equipos dejan de dar permisos"), archived or not: the grant API takes a
+    `client_id`, and a body still naming a `device_group_id` is refused rather
+    than quietly read as a grant on every client.
     """
-    from app.core.tenancy import org_session
-    from app.modules.user_admin.service import UserAdminError, _visible_group
-
     org_id = await api_env.create_org("dgw")
     headers = await _admin(api_env, org_id)
     group = await _create(api_env, headers, name="retired")
     assert (
         await api_env.client.delete(f"{GROUPS}/{group['id']}", headers=headers)
     ).status_code == 204
+    sub = await api_env.create_user(org_id)
+    async with AsyncSession(api_env.admin_engine) as session:
+        user_id = (
+            await session.execute(select(User.id).where(User.external_subject == sub))
+        ).scalar_one()
+        role_id = (
+            await session.execute(
+                select(Role.id).where(Role.name == "read-only", Role.org_id.is_(None))
+            )
+        ).scalar_one()
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
-        try:
-            await _visible_group(session, org_id, UUID(group["id"]))
-        except UserAdminError as exc:
-            assert exc.status_code == 409, exc
-            assert "archived" in str(exc)
-        else:  # pragma: no cover -- the refusal is the point of the test
-            raise AssertionError("an archived group was accepted as a role scope")
+    refused = await api_env.client.post(
+        f"/api/v1/users/{user_id}/roles",
+        headers=headers,
+        json={"role_id": str(role_id), "device_group_id": group["id"]},
+    )
+
+    assert refused.status_code == 422, refused.text
+    async with AsyncSession(api_env.admin_engine) as session:
+        assert (
+            await session.execute(select(UserRole.id).where(UserRole.user_id == user_id))
+        ).first() is None
 
 
 # --------------------------------------------------------------------------- #

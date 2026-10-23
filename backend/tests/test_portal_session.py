@@ -10,13 +10,16 @@ from uuid import uuid4
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session, portal_session
 
 
 async def test_portal_session_sets_both_gucs(api_env, portal_engine) -> None:
     org_id = await api_env.create_org("portal-guc")
     requester_id = uuid4()
-    async with portal_session(org_id, requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         got = await s.execute(
             text(
                 "SELECT current_setting('app.current_org', true), "
@@ -37,7 +40,9 @@ async def test_portal_session_sees_only_the_requesters_own_tickets(
     mine = await a_ticket_for(org_id, "me")
     theirs = await a_ticket_for(org_id, "them")
 
-    async with portal_session(org_id, mine.requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, mine.requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         rows = (await s.execute(text("SELECT id FROM ticket"))).scalars().all()
     ids = {str(r) for r in rows}
     assert str(mine.id) in ids
@@ -71,7 +76,7 @@ async def test_staff_sessions_are_unaffected(api_env, app_engine, a_ticket_for) 
     org_id = await api_env.create_org("portal-staff")
     await a_ticket_for(org_id, "me")
     await a_ticket_for(org_id, "them")
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = (await s.execute(text("SELECT id FROM ticket"))).scalars().all()
     assert len(rows) == 2
 
