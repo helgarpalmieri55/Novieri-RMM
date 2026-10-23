@@ -88,7 +88,11 @@ class BackupPolicy(TimestampMixin, Base):
     # device_group_id is set, trigger its_client_from_parent copies its client
     # (migration 0231), so the value is read back after the INSERT.
     client_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     repository_id: Mapped[UUID] = mapped_column(ForeignKey("backup_repositories.id"))
     device_group_id: Mapped[UUID | None] = mapped_column(
@@ -111,7 +115,11 @@ class BackupRun(TimestampMixin, Base):
     # the devices row named by device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     repository_id: Mapped[UUID] = mapped_column(ForeignKey("backup_repositories.id"))
@@ -143,7 +151,11 @@ class BackupPoint(TimestampMixin, Base):
     # the devices row named by device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     repository_id: Mapped[UUID] = mapped_column(ForeignKey("backup_repositories.id"))
@@ -174,7 +186,11 @@ class RestoreJob(TimestampMixin, Base):
     # the devices row named by device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     backup_point_id: Mapped[UUID] = mapped_column(ForeignKey("backup_points.id"))
@@ -244,7 +260,11 @@ class BackupPointCopy(Base):
     # the backup_points row named by point_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     point_id: Mapped[UUID] = mapped_column(ForeignKey("backup_points.id"))
     target_id: Mapped[UUID] = mapped_column(ForeignKey("backup_offsite_targets.id"))

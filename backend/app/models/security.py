@@ -30,7 +30,11 @@ class SecurityEvent(Base):
     # the devices row named by device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     event_uid: Mapped[str] = mapped_column(String(64))

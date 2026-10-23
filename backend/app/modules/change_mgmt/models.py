@@ -117,7 +117,11 @@ class ChangeGate(Base):
     # device_group_id is set, trigger its_client_from_parent copies its client
     # (migration 0231), so the value is read back after the INSERT.
     client_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     device_group_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("device_groups.id"), default=None

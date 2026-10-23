@@ -3,6 +3,7 @@
 import ast
 import re
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import ForeignKeyConstraint, UniqueConstraint, text
 
@@ -230,34 +231,133 @@ def test_the_optional_parent_exception_has_not_rotted() -> None:
 # Spec §5 test 2: the catalog agrees with the database (migration 0231).
 # --------------------------------------------------------------------------- #
 
+# THE EXPECTED POLICIES, WRITTEN ONCE. Spec §2.2 in SQL. Postgres deparses
+# both these and the live policies (`_deparse`), so the comparison is exact
+# and canonical: casts, parentheses and spelling come from the same deparser
+# on both sides. Like `test_schema_drift.py`'s index comparison, a predicate
+# that says the same thing in a different SHAPE fails -- a false failure,
+# never a false pass.
+_SCOPE = "current_setting('app.client_scope', true)"
+_VISIBLE = "its_client_visible(client_id)"
+# A NULL client is "every client": readable under a scope that names at
+# least one client (spec §2.2: no scope, or an empty one, sees zero rows) ...
+_NULL_PINNED = (
+    f"(client_id IS NULL AND ({_SCOPE} = 'all' OR ({_SCOPE} = 'list' AND "
+    "nullif(current_setting('app.current_clients', true), '') IS NOT NULL)))"
+)
+# ... and written, changed or deleted only under scope all.
+_NULL_ALL = f"(client_id IS NULL AND {_SCOPE} = 'all')"
+
+#: THE EXCEPTION, NAMED: the two O tables whose NULL rows any pinned scope may
+#: INSERT -- staff rows written by their own person (`PATCH /me`, login), and
+#: phase 1's client-less domain events. Anything else here is a finding.
+NULL_WRITABLE_FROM_ANY_SCOPE = frozenset({"users", "domain_events"})
+
+Shape = tuple[str, str, str | None]  # (cmd, USING, WITH CHECK) as written
+
+
+def _expected_client_policies(table: str) -> dict[str, Shape]:
+    if table == "clients":
+        return {
+            "client_isolation": (
+                "ALL",
+                f"its_client_visible(id) AND (kind <> 'unassigned' OR {_SCOPE} = 'all')",
+                f"{_SCOPE} = 'all' OR its_client_visible(id)",
+            )
+        }
+    entry = PHASE_1[table]
+    if entry.kind in {"C", "H"}:
+        return {"client_isolation": ("ALL", _VISIBLE, _VISIBLE)}
+    read = f"{_NULL_PINNED} OR {_VISIBLE}"
+    modify = f"{_NULL_ALL} OR {_VISIBLE}"
+    insert = read if table in NULL_WRITABLE_FROM_ANY_SCOPE else modify
+    policies: dict[str, Shape] = {
+        "client_isolation": ("ALL", read, insert),
+        "client_isolation_delete": ("DELETE", modify, None),
+    }
+    # `users` has no UPDATE policy: a staff row is updated by its own person
+    # under a narrowed scope, and `its_user_identity_guard` holds what must
+    # not change there (kind, external_subject).
+    if table != "users":
+        policies["client_isolation_update"] = ("UPDATE", modify, None)
+    return policies
+
+
+# Policies other modules put on these tables. The full set per table is
+# asserted, so a new one has to be added here on purpose.
+OTHER_POLICIES: dict[str, set[str]] = {
+    "users": {"portal_isolation"},
+    "doc_articles": {"portal_isolation"},
+}
+
+
+async def _deparse(conn, shapes: set[Shape]) -> dict[Shape, tuple[str, str | None]]:
+    """Each shape's (qual, with_check) as `pg_policies` prints it, from a
+    policy built on a temporary table with the columns the predicates name.
+    The caller rolls the transaction back."""
+    await conn.execute(
+        text("CREATE TEMP TABLE policy_probe (id uuid, client_id uuid, kind varchar(20))")
+    )
+    names: dict[str, Shape] = {}
+    for n, (cmd, using, check) in enumerate(sorted(shapes, key=repr)):
+        names[f"p{n}"] = (cmd, using, check)
+        with_check = f" WITH CHECK ({check})" if check is not None else ""
+        await conn.execute(
+            text(
+                f"CREATE POLICY p{n} ON policy_probe AS RESTRICTIVE FOR {cmd} "
+                f"USING ({using}){with_check}"
+            )
+        )
+    rows = (
+        await conn.execute(
+            text(
+                "SELECT policyname, qual, with_check FROM pg_policies "
+                "WHERE tablename = 'policy_probe' AND schemaname LIKE 'pg_temp%'"
+            )
+        )
+    ).all()
+    return {names[r.policyname]: (r.qual, r.with_check) for r in rows}
+
 
 async def test_phase_1_tables_carry_the_restrictive_policy(admin_engine) -> None:
+    tables = [*PHASE_1, "clients"]
+    expected = {t: _expected_client_policies(t) for t in tables}
     async with admin_engine.connect() as conn:
         rows = (
             await conn.execute(
                 text(
-                    "SELECT tablename, permissive, roles, cmd, qual, with_check FROM pg_policies "
-                    "WHERE policyname = 'client_isolation'"
-                )
+                    "SELECT tablename, policyname, permissive, roles, cmd, qual, with_check "
+                    "FROM pg_policies WHERE schemaname = 'public' AND tablename = ANY(:t)"
+                ),
+                {"t": tables},
             )
         ).all()
-    by_table = {r.tablename: r for r in rows}
-    for table, entry in PHASE_1.items():
-        row = by_table.get(table)
-        assert row is not None, f"{table}: no client_isolation policy (spec §5 test 2)"
-        assert row.permissive == "RESTRICTIVE", table
-        # A restrictive policy bound to one role leaves every other role
-        # (portal_user, a future one) unfiltered; one bound to SELECT leaves
-        # writes unfiltered.
-        assert list(row.roles) == ["public"], f"{table}: policy bound to {row.roles}"
-        assert row.cmd == "ALL", f"{table}: policy covers {row.cmd} only"
-        assert "its_client_visible" in row.qual, table
-        # USING scopes reads; WITH CHECK is what stops a write landing in a
-        # client outside the scope.
-        assert row.with_check is not None, f"{table}: no WITH CHECK"
-        assert "its_client_visible" in row.with_check, f"{table}: WITH CHECK ignores the scope"
-        if entry.kind == "O":
-            assert "IS NULL" in row.qual, f"{table}: O tables must read NULL rows"
+        deparsed = await _deparse(conn, {s for p in expected.values() for s in p.values()})
+        await conn.rollback()
+
+    live: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        live.setdefault(r.tablename, {})[r.policyname] = r
+    for table in tables:
+        want = expected[table]
+        have = live.get(table, {})
+        # The FULL set: a missing policy and an extra one both fail.
+        assert set(have) == set(want) | {"tenant_isolation"} | OTHER_POLICIES.get(table, set()), (
+            f"{table}: policies {sorted(have)}"
+        )
+        for name, shape in want.items():
+            row = have[name]
+            assert row.permissive == "RESTRICTIVE", (table, name)
+            # Bound to one role, a restrictive policy leaves every other role
+            # (portal_user, a future one) unfiltered.
+            assert list(row.roles) == ["public"], (table, name, row.roles)
+            assert row.cmd == shape[0], (table, name, row.cmd)
+            assert (row.qual, row.with_check) == deparsed[shape], (
+                f"{table}.{name}: live\n  USING {row.qual}\n  CHECK {row.with_check}\n"
+                f"expected\n  USING {deparsed[shape][0]}\n  CHECK {deparsed[shape][1]}"
+            )
+        if table in PHASE_1 and PHASE_1[table].kind == "O":
+            assert "IS NULL" in have["client_isolation"].qual, f"{table}: O reads NULL rows"
 
 
 # The second parent of the two O tables that have two (migration 0231): a
@@ -269,60 +369,109 @@ EXTRA_PARENT_TRIGGERS: dict[tuple[str, str], tuple[str, str]] = {
     ("health_profile_assignment", "its_client_from_group"): ("device_groups", "device_group_id"),
 }
 
-# pg_trigger.tgtype bits: ROW (1), BEFORE (2), INSERT (4), UPDATE (16).
+# pg_trigger.tgtype bits: ROW (1), BEFORE (2), INSERT (4), DELETE (8),
+# UPDATE (16), TRUNCATE (32), INSTEAD (64).
 BEFORE_INSERT_OR_UPDATE_ROW = 1 | 2 | 4 | 16
+AFTER_UPDATE_ROW = 1 | 16
+
+
+def _edges() -> dict[tuple[str, str], tuple[str, str]]:
+    """(child, trigger) -> (parent, fk) for every inheritance edge: the
+    catalog's parent of each H and O table but `jobs` (whose target is a
+    device OR a group, its own trigger), plus the second parents."""
+    edges = {
+        (t, "its_client_from_parent"): (e.parent, e.fk)
+        for t, e in PHASE_1.items()
+        if e.parent is not None and e.fk is not None and t != "jobs"
+    }
+    edges.update(EXTRA_PARENT_TRIGGERS)
+    return edges
+
+
+async def _client_triggers(admin_engine) -> list[Any]:
+    async with admin_engine.connect() as conn:
+        return list(
+            (
+                await conn.execute(
+                    text(
+                        "SELECT c.relname AS tbl, t.tgname AS name, t.tgargs AS args, "
+                        "t.tgtype AS type, t.tgfoid::regproc::text AS fn, "
+                        "pg_get_triggerdef(t.oid) AS triggerdef, "
+                        "ARRAY(SELECT a.attname::text FROM pg_attribute a "
+                        "      WHERE a.attrelid = t.tgrelid "
+                        "        AND a.attnum = ANY (t.tgattr::int2[])) AS columns "
+                        "FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid "
+                        "WHERE NOT t.tgisinternal AND (t.tgname LIKE 'its\\_client\\_%' "
+                        "OR t.tgname = 'its_job_client')"
+                    )
+                )
+            ).all()
+        )
+
+
+def _args(row: Any) -> tuple[str, ...]:
+    # tgargs is the arguments' bytes, each one NUL-terminated.
+    return tuple(a.decode() for a in bytes(row.args).split(b"\x00")[:-1])
 
 
 async def test_h_tables_carry_the_inheritance_trigger(admin_engine) -> None:
     """Existence is not enough: a literal copy of the catalog with the wrong
     parent or fk would still create a trigger of the right name. So each
-    trigger's ARGUMENTS are held to the catalog's `(parent, fk)`, and its
-    column list must hold the fk -- a trigger that does not fire when the fk
-    changes lets a row keep the client of the parent it no longer has."""
-    async with admin_engine.connect() as conn:
-        rows = (
-            await conn.execute(
-                text(
-                    "SELECT c.relname AS tbl, t.tgname AS name, t.tgargs AS args, "
-                    "t.tgtype AS type, t.tgfoid::regproc::text AS fn, "
-                    "ARRAY(SELECT a.attname::text FROM pg_attribute a "
-                    "      WHERE a.attrelid = t.tgrelid "
-                    "        AND a.attnum = ANY (t.tgattr::int2[])) AS columns "
-                    "FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid "
-                    "WHERE NOT t.tgisinternal AND t.tgname IN "
-                    "('its_client_from_parent', 'its_client_from_record', "
-                    "'its_client_from_group', 'its_job_client')"
-                )
-            )
-        ).all()
-    found = {(r.tbl, r.name): r for r in rows}
-    expected: dict[tuple[str, str], tuple[str, str]] = {
-        (t, "its_client_from_parent"): (e.parent, e.fk)
-        for t, e in PHASE_1.items()
-        if e.parent is not None and e.fk is not None and t != "jobs"
+    trigger's ARGUMENTS are held to the catalog's `(parent, fk)`, its column
+    list must hold the fk, and the SET is exact -- a trigger the catalog does
+    not name (on a G table, say) fails too."""
+    rows = await _client_triggers(admin_engine)
+    found = {
+        (r.tbl, r.name): r for r in rows if r.name.startswith("its_client_from_")
     }
-    expected.update(EXTRA_PARENT_TRIGGERS)
-    missing = sorted(set(expected) - set(found))
-    assert not missing, f"missing triggers: {missing}"
-
+    expected = _edges()
+    assert set(found) == set(expected), (
+        f"missing {sorted(set(expected) - set(found))}, extra {sorted(set(found) - set(expected))}"
+    )
     for key, (parent, fk) in sorted(expected.items()):
         row = found[key]
-        # tgargs is the arguments' bytes, each one NUL-terminated.
-        args = tuple(a.decode() for a in bytes(row.args).split(b"\x00")[:-1])
-        assert args == (parent, fk), f"{key}: arguments {args}, catalog says {(parent, fk)}"
+        assert _args(row) == (parent, fk), f"{key}: arguments {_args(row)}, catalog {(parent, fk)}"
         assert row.fn == "its_client_from_parent", f"{key}: executes {row.fn}"
-        assert row.type & BEFORE_INSERT_OR_UPDATE_ROW == BEFORE_INSERT_OR_UPDATE_ROW, key
+        assert row.type == BEFORE_INSERT_OR_UPDATE_ROW, f"{key}: tgtype {row.type}"
         # The fk, and client_id itself: an UPDATE that rewrites client_id
-        # alone must meet the trigger too (spec §2.4: a client_id that differs
-        # from the parent's raises).
-        assert {fk, "client_id"} <= set(row.columns), f"{key}: fires on {row.columns}"
+        # alone must meet the trigger too (spec §2.4).
+        assert set(row.columns) == {fk, "client_id"}, f"{key}: fires on {row.columns}"
 
     # jobs: its own function, keyed on what the target is.
-    job = found.get(("jobs", "its_job_client"))
-    assert job is not None, "jobs: no its_job_client trigger"
-    assert job.fn == "its_job_client"
-    assert job.type & BEFORE_INSERT_OR_UPDATE_ROW == BEFORE_INSERT_OR_UPDATE_ROW
-    assert {"target_id", "target_type", "client_id"} <= set(job.columns), job.columns
+    jobs = [r for r in rows if r.name == "its_job_client"]
+    assert [r.tbl for r in jobs] == ["jobs"], "its_job_client belongs on jobs alone"
+    assert jobs[0].fn == "its_job_client"
+    assert jobs[0].type == BEFORE_INSERT_OR_UPDATE_ROW
+    assert set(jobs[0].columns) == {"target_id", "target_type", "client_id"}, jobs[0].columns
+
+
+async def test_a_parents_client_change_reaches_every_child(admin_engine) -> None:
+    """The other direction of every edge (spec §2.4): when a parent's client
+    changes -- an article moved, a job retargeted, an alert's device
+    corrected -- its children follow in the same statement, or they keep the
+    old client and stay readable where the parent no longer is. One
+    `its_client_to_<child>` trigger per edge, and no other."""
+    rows = await _client_triggers(admin_engine)
+    found = {(r.tbl, r.name): r for r in rows if r.name.startswith("its_client_to_")}
+    expected = {
+        (parent, f"its_client_to_{child}"): (child, fk)
+        for (child, _), (parent, fk) in _edges().items()
+    }
+    assert len(expected) == len(_edges()), "two edges share a trigger name"
+    assert set(found) == set(expected), (
+        f"missing {sorted(set(expected) - set(found))}, extra {sorted(set(found) - set(expected))}"
+    )
+    for key, (child, fk) in sorted(expected.items()):
+        row = found[key]
+        assert _args(row) == (child, fk), f"{key}: arguments {_args(row)}"
+        assert row.fn == "its_client_to_children", f"{key}: executes {row.fn}"
+        # AFTER UPDATE, with NO column list: a parent's client changes inside
+        # its own BEFORE trigger (a job retargeted, an alert's device moved),
+        # and `UPDATE OF client_id` fires only when the statement names it.
+        assert row.type == AFTER_UPDATE_ROW, f"{key}: tgtype {row.type}"
+        assert list(row.columns) == [], f"{key}: limited to {row.columns}"
+        when = "WHEN ((old.client_id IS DISTINCT FROM new.client_id))"
+        assert when in row.triggerdef, row.triggerdef
 
 
 # --------------------------------------------------------------------------- #

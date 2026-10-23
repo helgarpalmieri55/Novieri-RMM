@@ -220,7 +220,11 @@ class PushHostKey(Base):
     # device_id is set, trigger its_client_from_parent copies its client
     # (migration 0231), so the value is read back after the INSERT.
     client_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     #: The promoted asset this key belongs to, resolved at probe time. Nullable
     #: because a probe records what it saw even if the asset row is later removed;
@@ -279,7 +283,11 @@ class PushBatchTarget(Base):
     # the jobs row named by job_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     #: A uuid minted per push request. Not a FK: there is no batch-header row,
     #: because there is no batch-level state worth a row (see the docstring).

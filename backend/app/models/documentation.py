@@ -105,7 +105,11 @@ class DocLink(Base):
     # article_id is set, trigger its_client_from_parent copies its client
     # (migration 0231), so the value is read back after the INSERT.
     client_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     article_id: Mapped[UUID] = mapped_column(ForeignKey("doc_articles.id", ondelete="CASCADE"))
     target_type: Mapped[str] = mapped_column(String(20))  # device|device_group|credential|record
@@ -130,7 +134,11 @@ class DocVersion(Base):
     # article's client, its_client_from_record the record's -- whichever of
     # the two is set. The value is read back after the INSERT.
     client_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     article_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("doc_articles.id", ondelete="CASCADE"), default=None
@@ -222,7 +230,11 @@ class DocDocumentVersion(Base):
     # document_id is set, trigger its_client_from_parent copies its client
     # (migration 0231), so the value is read back after the INSERT.
     client_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     document_id: Mapped[UUID] = mapped_column(
         ForeignKey("doc_documents.id", ondelete="CASCADE")
@@ -283,7 +295,11 @@ class DocDocumentLink(Base):
     # document_id is set, trigger its_client_from_parent copies its client
     # (migration 0231), so the value is read back after the INSERT.
     client_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     document_id: Mapped[UUID] = mapped_column(
         ForeignKey("doc_documents.id", ondelete="CASCADE")

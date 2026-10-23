@@ -481,7 +481,11 @@ class SuggestedAssetMatch(Base):
     # the devices row named by device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     #: The row enrolment just created.
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
@@ -510,7 +514,11 @@ class DeviceTag(Base):
     # the devices row named by device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     key: Mapped[str] = mapped_column(String(100))
@@ -526,7 +534,11 @@ class Agent(TimestampMixin, Base):
     # the devices row named by device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"), unique=True)
     cert_fingerprint: Mapped[str] = mapped_column(String(64), unique=True)
@@ -554,7 +566,11 @@ class Policy(TimestampMixin, Base):
     # device_group_id is set, trigger its_client_from_parent copies its client
     # (migration 0231), so the value is read back after the INSERT.
     client_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     device_group_id: Mapped[UUID | None] = mapped_column(  # NULL = org-wide scope
         ForeignKey("device_groups.id"), default=None
@@ -577,7 +593,11 @@ class Credential(Base):
     # device_group_id is set, trigger its_client_from_parent copies its client
     # (migration 0231), so the value is read back after the INSERT.
     client_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     name: Mapped[str] = mapped_column(String(200))
     type: Mapped[str] = mapped_column(String(50))  # windows_admin | ssh_key | domain_join | ...
@@ -629,7 +649,11 @@ class Job(TimestampMixin, Base):
     # device or group named by target_type/target_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     type: Mapped[str] = mapped_column(String(100))
     target_type: Mapped[str] = mapped_column(String(10), default="device")  # device | group
@@ -694,7 +718,11 @@ class JobLog(Base):
     # the jobs row named by job_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     job_id: Mapped[UUID] = mapped_column(ForeignKey("jobs.id"))
     ts: Mapped[datetime] = mapped_column()
@@ -747,9 +775,10 @@ class EnrollmentToken(Base):
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
     # MSP clients spec, Annex A (C). Set by the application (migration 0231).
     client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
-    # Spec §1.5: a site of the same client (devices: trigger
-    # its_device_client_guard).
-    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"))
+    # Spec §1.5: a site of the same client (`fk_enrollment_tokens_site_client`).
+    # Indexed: the referencing side of that key, so a site's change of client
+    # does not scan every token.
+    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"), index=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     name: Mapped[str] = mapped_column(String(200), default="")
     expires_at: Mapped[datetime] = mapped_column()

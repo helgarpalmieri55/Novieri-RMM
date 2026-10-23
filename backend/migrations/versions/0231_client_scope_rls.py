@@ -2,9 +2,10 @@
 
 1. `its_client_visible(client)`: the scope predicate over the two GUCs that
    `org_session` pins. Unset GUCs make it NULL -- no row, no write. A NULL
-   client (O tables: "every client") is readable only under a pinned scope,
-   `all` or `list`: a session with no scope sees ZERO rows, global ones
-   included (spec §2.2, plan Global Constraints: RLS fails closed).
+   client (O tables: "every client") is readable only under a scope that
+   names a client -- `all`, or a NON-EMPTY `list`: a session with no scope,
+   or with the empty intersection a refused `X-Client-Id` yields, sees ZERO
+   rows, global ones included (spec §2.2; plan Global Constraints).
 2. `client_id` on every phase-1 table (C, H, O), backfilled for existing rows
    (C: the organization's internal client, whose id IS the org id; H: from
    the parent), then NOT NULL for C and H.
@@ -12,9 +13,20 @@
    parent's client; a different explicit value raises. SECURITY INVOKER, so a
    parent the session cannot see yields NULL and NOT NULL refuses the write.
    It fires on the fk AND on `client_id` itself, so an UPDATE that rewrites
-   `client_id` alone meets the same check as an INSERT does (spec §2.4).
-4. A RESTRICTIVE `client_isolation` policy on each, ANDed with the existing
-   permissive `tenant_isolation`, which is not touched.
+   `client_id` alone meets the same check as an INSERT does (spec §2.4). A
+   `client_id` merely carried over from the old row is not a claim: a row
+   moved to another parent takes the new parent's client.
+4. `its_client_to_children`, the other direction of every edge: when a
+   parent's client changes (an article moved, a job retargeted, an alert's
+   device corrected), an AFTER UPDATE trigger on the parent moves its
+   children in the same statement. Without it they keep the old client and
+   stay readable where the parent no longer is (spec §2.4).
+5. A RESTRICTIVE `client_isolation` policy on each, ANDed with the existing
+   permissive `tenant_isolation`, which is not touched. On O tables a NULL
+   row is global configuration: readable by a limited scope, but changed or
+   deleted only under scope all (spec §2.2) -- hence `client_isolation_update`
+   and `client_isolation_delete`, because a DELETE checks no WITH CHECK and a
+   FOR ALL policy's USING has to admit the NULL rows a limited scope reads.
 
 ORG CONSISTENCY IS A FOREIGN KEY, NOT A POLICY. A foreign key check ignores
 RLS: under scope `all` the client policy passes any client id and the tenant
@@ -139,21 +151,42 @@ CLIENT_ORG_FK_TABLES = ["users", "user_roles"] + C_TABLES[1:] + [
 SITE_TABLES = ["devices", "enrollment_tokens", "install_links"]
 
 VISIBLE = "its_client_visible(client_id)"
-# A NULL client is "every client" (O tables). It is readable -- and, where a
-# table allows it, writable -- only under a PINNED scope: with no scope GUC
-# `IN` is NULL, so a scopeless session sees no global row either.
-NULL_PINNED = "(client_id IS NULL AND current_setting('app.client_scope', true) IN ('all', 'list'))"
-# Writing a global row is a change to every client's configuration: scope all.
-NULL_ALL = "(client_id IS NULL AND current_setting('app.client_scope', true) = 'all')"
+SCOPE = "current_setting('app.client_scope', true)"
+# A scope that names at least one client: `all`, or a non-empty `list`. With
+# no scope GUC every comparison is NULL; an empty list is the intersection a
+# refused `X-Client-Id` yields, and it sees nothing either (spec §2.2).
+SCOPE_PINNED = (
+    f"({SCOPE} = 'all' OR ({SCOPE} = 'list' AND "
+    "nullif(current_setting('app.current_clients', true), '') IS NOT NULL))"
+)
+# A NULL client is "every client" (O tables): readable under a pinned scope.
+NULL_PINNED = f"(client_id IS NULL AND {SCOPE_PINNED})"
+# Writing, changing or deleting a global row is a change to every client's
+# configuration: scope all.
+NULL_ALL = f"(client_id IS NULL AND {SCOPE} = 'all')"
 
-# O tables whose NULL rows any pinned scope may WRITE (see `_policy`).
+# O tables whose NULL rows any pinned scope may INSERT (see `_policies`).
 NULL_WRITABLE_FROM_ANY_SCOPE = {"users", "domain_events"}
 
 
-def _policy(table: str, kind: str) -> None:
+def _create_policy(table: str, name: str, cmd: str, using: str, check: str | None) -> None:
+    with_check = f" WITH CHECK ({check})" if check is not None else ""
+    op.execute(
+        f"CREATE POLICY {name} ON {table} AS RESTRICTIVE FOR {cmd} USING ({using}){with_check}"
+    )
+
+
+def _policies(table: str, kind: str) -> None:
+    if kind in ("C", "H"):
+        _create_policy(table, "client_isolation", "ALL", VISIBLE, VISIBLE)
+        return
+    read = f"{NULL_PINNED} OR {VISIBLE}"
+    modify = f"{NULL_ALL} OR {VISIBLE}"
     if table in NULL_WRITABLE_FROM_ANY_SCOPE:
-        # Two O tables whose NULL rows any PINNED scope may write; with no
-        # scope, still nothing.
+        # Two O tables whose NULL rows any PINNED scope may INSERT; with no
+        # scope, still nothing. Changing or deleting one is still scope all
+        # (the two policies below), and on `users` the identity columns are
+        # held by `its_user_identity_guard`.
         #
         # `users`: a staff row (client_id NULL) is written under NARROWED
         # scopes -- `PATCH /me` and the login bookkeeping run with the
@@ -169,16 +202,31 @@ def _policy(table: str, kind: str) -> None:
         # fail for a narrowed technician. Phase 2 makes publish set client_id
         # from the event's subject and returns `domain_events` to the generic
         # O check.
-        using = check = f"{NULL_PINNED} OR {VISIBLE}"
-    elif kind == "O":
-        using = f"{NULL_PINNED} OR {VISIBLE}"
-        check = f"{NULL_ALL} OR {VISIBLE}"
+        write = read
     else:
-        using = check = VISIBLE
-    op.execute(
-        f"CREATE POLICY client_isolation ON {table} AS RESTRICTIVE "
-        f"USING ({using}) WITH CHECK ({check})"
-    )
+        write = modify
+    _create_policy(table, "client_isolation", "ALL", read, write)
+    # The FOR ALL policy's USING admits the global rows a limited scope may
+    # READ, and a DELETE checks USING only -- so changing or deleting a global
+    # row needs these too. `users` has no UPDATE one: a staff row is updated
+    # by its own person under a narrowed scope (`PATCH /me`, login).
+    if table != "users":
+        _create_policy(table, "client_isolation_update", "UPDATE", modify, None)
+    _create_policy(table, "client_isolation_delete", "DELETE", modify, None)
+
+
+# (parent, child, fk): every inheritance edge above. A parent's change of
+# client reaches its children through `its_client_to_children` (spec §2.4).
+EDGES: list[tuple[str, str, str]] = (
+    [(parent, table, fk) for table, parent, fk in H_TABLES]
+    + [(p, table, f) for table, p, f in O_TABLES if p is not None and f is not None]
+    + [(parent, table, fk) for table, _, parent, fk in SECOND_PARENTS]
+)
+
+
+def _to_children(parent: str, child: str, fk: str) -> str:
+    twice = sum(1 for p, c, _ in EDGES if (p, c) == (parent, child)) > 1
+    return f"its_client_to_{child}" + (f"_{fk}" if twice else "")
 
 
 def _inherit(table: str, trigger: str, parent: str, fk: str) -> None:
@@ -204,7 +252,7 @@ def upgrade() -> None:
         """
         CREATE FUNCTION its_client_from_parent() RETURNS trigger
         LANGUAGE plpgsql AS $$
-        DECLARE parent_id uuid; parent_client uuid;
+        DECLARE parent_id uuid; parent_client uuid; claimed boolean;
         BEGIN
             EXECUTE format('SELECT ($1).%I', TG_ARGV[1]) USING NEW INTO parent_id;
             IF parent_id IS NULL THEN
@@ -212,7 +260,15 @@ def upgrade() -> None:
             END IF;
             EXECUTE format('SELECT client_id FROM %I WHERE id = $1', TG_ARGV[0])
                 USING parent_id INTO parent_client;
-            IF NEW.client_id IS NOT NULL AND parent_client IS NOT NULL
+            -- A client the statement supplies: any on INSERT, a CHANGED one on
+            -- UPDATE. One carried over from the old row claims nothing.
+            IF TG_OP = 'INSERT' THEN
+                claimed := NEW.client_id IS NOT NULL;
+            ELSE
+                claimed := NEW.client_id IS NOT NULL
+                    AND NEW.client_id IS DISTINCT FROM OLD.client_id;
+            END IF;
+            IF claimed AND parent_client IS NOT NULL
                AND NEW.client_id <> parent_client THEN
                 RAISE EXCEPTION '%.client_id % differs from its %''s client %',
                     TG_TABLE_NAME, NEW.client_id, TG_ARGV[0], parent_client
@@ -231,7 +287,7 @@ def upgrade() -> None:
         """
         CREATE FUNCTION its_job_client() RETURNS trigger
         LANGUAGE plpgsql AS $$
-        DECLARE target_client uuid;
+        DECLARE target_client uuid; claimed boolean;
         BEGIN
             IF NEW.target_type = 'device' THEN
                 SELECT client_id INTO target_client FROM devices WHERE id = NEW.target_id;
@@ -242,7 +298,14 @@ def upgrade() -> None:
                     NEW.target_type
                     USING ERRCODE = 'check_violation';
             END IF;
-            IF NEW.client_id IS NOT NULL AND target_client IS NOT NULL
+            -- As in its_client_from_parent: a carried-over client claims nothing.
+            IF TG_OP = 'INSERT' THEN
+                claimed := NEW.client_id IS NOT NULL;
+            ELSE
+                claimed := NEW.client_id IS NOT NULL
+                    AND NEW.client_id IS DISTINCT FROM OLD.client_id;
+            END IF;
+            IF claimed AND target_client IS NOT NULL
                AND NEW.client_id <> target_client THEN
                 RAISE EXCEPTION 'jobs.client_id differs from its target''s client'
                     USING ERRCODE = 'check_violation';
@@ -300,6 +363,46 @@ def upgrade() -> None:
         """
     )
 
+    # SECURITY INVOKER, like the trigger it feeds: it moves the children the
+    # session can see. Every child of a parent shares the parent's old client,
+    # which the session could see -- it just changed that parent.
+    op.execute(
+        """
+        CREATE FUNCTION its_client_to_children() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+            EXECUTE format('UPDATE %I SET client_id = $1 WHERE %I = $2', TG_ARGV[0], TG_ARGV[1])
+                USING NEW.client_id, NEW.id;
+            RETURN NULL;
+        END $$
+        """
+    )
+    # What a `users` row IS -- staff or contact (and with it, through
+    # `ck_users_kind_client`, its client) and the identity it logs in as --
+    # changes only under scope all: the auth door and the every-client user
+    # administration. A narrowed scope may write the rest of a staff row
+    # (`PATCH /me`, login bookkeeping). A role that bypasses RLS (the admin
+    # session) is not held to a client scope here either.
+    op.execute(
+        """
+        CREATE FUNCTION its_user_identity_guard() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+            IF (NEW.kind IS DISTINCT FROM OLD.kind
+                OR NEW.external_subject IS DISTINCT FROM OLD.external_subject)
+               AND current_setting('app.client_scope', true) IS DISTINCT FROM 'all'
+               AND NOT (SELECT rolbypassrls OR rolsuper FROM pg_roles
+                        WHERE rolname = current_user) THEN
+                RAISE EXCEPTION
+                    'users.kind and users.external_subject change only under the '
+                    'every-client scope'
+                    USING ERRCODE = 'check_violation';
+            END IF;
+            RETURN NEW;
+        END $$
+        """
+    )
+
     # The target of every org-consistency foreign key below.
     op.execute("ALTER TABLE clients ADD CONSTRAINT uq_clients_id_org UNIQUE (id, org_id)")
 
@@ -314,6 +417,7 @@ def upgrade() -> None:
         op.execute(f"UPDATE {table} SET site_id = org_id")  # the internal Principal site
         op.execute(f"ALTER TABLE {table} ALTER COLUMN site_id SET NOT NULL")
     op.execute("CREATE INDEX ix_devices_site_id ON devices (site_id)")
+    op.execute("CREATE INDEX ix_enrollment_tokens_site_id ON enrollment_tokens (site_id)")
     # The target of every site-consistency foreign key (module docstring).
     op.execute("ALTER TABLE sites ADD CONSTRAINT uq_sites_id_client UNIQUE (id, client_id)")
     for table in SITE_TABLES:
@@ -375,6 +479,21 @@ def upgrade() -> None:
         )
         _inherit(table, trigger, parent, fk)
 
+    # AFTER UPDATE with no column list: a parent's client often changes inside
+    # its own BEFORE trigger (a job retargeted, an alert's device corrected),
+    # and `UPDATE OF client_id` fires only when the statement names it.
+    for parent, child, fk in EDGES:
+        op.execute(
+            f"CREATE TRIGGER {_to_children(parent, child, fk)} AFTER UPDATE ON {parent} "
+            "FOR EACH ROW WHEN (OLD.client_id IS DISTINCT FROM NEW.client_id) "
+            f"EXECUTE FUNCTION its_client_to_children('{child}', '{fk}')"
+        )
+
+    op.execute(
+        "CREATE TRIGGER its_user_identity_guard BEFORE UPDATE OF kind, external_subject "
+        "ON users FOR EACH ROW EXECUTE FUNCTION its_user_identity_guard()"
+    )
+
     for table in CLIENT_ORG_FK_TABLES:
         op.execute(
             f"ALTER TABLE {table} ADD CONSTRAINT fk_{table}_client_org "
@@ -382,9 +501,9 @@ def upgrade() -> None:
         )
 
     for table in C_TABLES + ["jobs"] + [t for t, _, _ in H_TABLES]:
-        _policy(table, "C")
+        _policies(table, "C")
     for table, _, _ in O_TABLES:
-        _policy(table, "O")
+        _policies(table, "O")
 
     # `clients` itself: a list scope sees its own clients; never `unassigned`
     # unless the scope is all (spec §1.1).
@@ -397,6 +516,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("DROP TRIGGER IF EXISTS its_user_identity_guard ON users")
+    for parent, child, fk in EDGES:
+        op.execute(f"DROP TRIGGER IF EXISTS {_to_children(parent, child, fk)} ON {parent}")
     op.execute("DROP POLICY IF EXISTS client_isolation ON clients")
     for table, trigger, _, _ in SECOND_PARENTS:
         op.execute(f"DROP TRIGGER IF EXISTS {trigger} ON {table}")
@@ -405,6 +527,8 @@ def downgrade() -> None:
     op.execute("ALTER TABLE clients DROP CONSTRAINT uq_clients_id_org")
     for table, parent, _ in O_TABLES:
         op.execute(f"DROP POLICY IF EXISTS client_isolation ON {table}")
+        op.execute(f"DROP POLICY IF EXISTS client_isolation_update ON {table}")
+        op.execute(f"DROP POLICY IF EXISTS client_isolation_delete ON {table}")
         if parent is not None:
             op.execute(f"DROP TRIGGER IF EXISTS its_client_from_parent ON {table}")
         op.execute(f"DROP INDEX IF EXISTS ix_{table}_client_id")
@@ -423,6 +547,7 @@ def downgrade() -> None:
         op.execute(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS fk_{table}_site_client")
     op.execute("ALTER TABLE sites DROP CONSTRAINT uq_sites_id_client")
     op.execute("DROP INDEX IF EXISTS ix_devices_site_id")
+    op.execute("DROP INDEX IF EXISTS ix_enrollment_tokens_site_id")
     op.execute("ALTER TABLE install_links DROP CONSTRAINT uq_install_links_site")
     op.execute("ALTER TABLE install_links ADD CONSTRAINT uq_install_links_org UNIQUE (org_id)")
     for table in SITE_TABLES:
@@ -432,6 +557,8 @@ def downgrade() -> None:
     for table in C_TABLES[1:]:
         op.execute(f"ALTER TABLE {table} DROP COLUMN client_id")
     for fn in (
+        "its_user_identity_guard()",
+        "its_client_to_children()",
         "its_group_client_guard()",
         "its_device_client_guard()",
         "its_job_client()",

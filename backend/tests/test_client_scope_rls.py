@@ -24,6 +24,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -33,6 +34,7 @@ from app.core.events import publish
 from app.core.tenancy import org_session
 from app.models import (
     Client,
+    Credential,
     Device,
     DeviceGroup,
     DeviceTag,
@@ -40,14 +42,20 @@ from app.models import (
     DocRecord,
     DocVersion,
     EnrollmentToken,
+    HealthAlert,
+    HealthAlertAction,
     InstallLink,
     Job,
+    JobLog,
     Organization,
+    Permission,
     Role,
+    RolePermission,
     Site,
     User,
     UserRole,
 )
+from tests.health_fixtures import seed_check, seed_profile
 
 
 @dataclass(frozen=True)
@@ -454,3 +462,348 @@ async def test_a_job_with_an_unknown_target_type_is_refused(
         async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
             s.add(_job(c.org, c.device_y, target_type="site"))
             await s.flush()
+
+
+# --------------------------------------------------------------------------- #
+# Review round 1 (Task 6): global rows, propagation, identity, empty scopes.
+# --------------------------------------------------------------------------- #
+
+
+async def _ids(s: AsyncSession, sql: str, **params: Any) -> set[UUID]:
+    return set((await s.execute(text(sql), params)).scalars())
+
+
+async def _rowcount(s: AsyncSession, sql: str, **params: Any) -> int:
+    result = await s.execute(text(sql), params)
+    return int(result.rowcount)  # type: ignore[attr-defined]
+
+
+@dataclass(frozen=True)
+class OptionalRows:
+    article_global: UUID
+    article_x: UUID
+    credential_global: UUID
+    credential_x: UUID
+
+
+async def _optional_rows(admin_engine: AsyncEngine, c: TwoClients) -> OptionalRows:
+    """A global row and one of X's in two O tables: an article (no parent) and
+    a credential (parent device_groups, unset)."""
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        rows = [
+            DocArticle(org_id=c.org, title="global"),
+            DocArticle(org_id=c.org, client_id=c.x, title="x"),
+            Credential(org_id=c.org, name="global", type="ssh_key", vault_ref="v"),
+            Credential(org_id=c.org, client_id=c.x, name="x", type="ssh_key", vault_ref="v"),
+        ]
+        s.add_all(rows)
+        await s.commit()
+    return OptionalRows(*(r.id for r in rows))
+
+
+async def test_a_narrowed_scope_cannot_change_or_delete_global_rows(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Spec §2.2 and §5 test 3: a limited technician reads global
+    configuration but cannot change it -- not by UPDATE, not by claiming it
+    for their client, and not by DELETE, which checks no WITH CHECK at all."""
+    c = await _two_clients(admin_engine)
+    r = await _optional_rows(admin_engine, c)
+    async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
+        global_deleted = [
+            await _rowcount(s, "DELETE FROM doc_articles WHERE id = :i", i=r.article_global),
+            await _rowcount(s, "DELETE FROM credentials WHERE id = :i", i=r.credential_global),
+        ]
+        claimed = await _rowcount(
+            s, "UPDATE doc_articles SET client_id = :x WHERE id = :i", x=c.x, i=r.article_global
+        )
+        edited = await _rowcount(
+            s, "UPDATE credentials SET name = 'n' WHERE id = :i", i=r.credential_global
+        )
+        # X's own rows are X's to change.
+        own = [
+            await _rowcount(s, "UPDATE doc_articles SET title = 't' WHERE id = :i", i=r.article_x),
+            await _rowcount(s, "DELETE FROM doc_articles WHERE id = :i", i=r.article_x),
+            await _rowcount(s, "DELETE FROM credentials WHERE id = :i", i=r.credential_x),
+        ]
+    assert global_deleted == [0, 0]
+    assert claimed == 0
+    assert edited == 0
+    assert own == [1, 1, 1]
+    async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
+        assert await _rowcount(
+            s, "UPDATE doc_articles SET client_id = :x WHERE id = :i", x=c.x, i=r.article_global
+        ) == 1
+        assert await _rowcount(
+            s, "DELETE FROM credentials WHERE id = :i", i=r.credential_global
+        ) == 1
+
+
+async def test_a_narrowed_scope_cannot_change_or_delete_a_global_event(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """`domain_events` takes a NULL row from any pinned scope (phase 1), but
+    changing or deleting one is a change to every client's outbox."""
+    c = await _two_clients(admin_engine)
+    subject = uuid4()
+    async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
+        await publish(
+            s, org_id=c.org, event_type="ticket.assigned", subject_type="ticket",
+            subject_id=subject, payload={}, actor_user_id=None,
+        )
+    by_subject = "WHERE subject_id = :subj"
+    async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
+        assert len(await _ids(s, f"SELECT id FROM domain_events {by_subject}", subj=subject)) == 1
+        updated = await _rowcount(
+            s, f"UPDATE domain_events SET processed_at = now() {by_subject}", subj=subject
+        )
+        deleted = await _rowcount(s, f"DELETE FROM domain_events {by_subject}", subj=subject)
+    assert (updated, deleted) == (0, 0)
+    async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
+        assert await _rowcount(
+            s, f"UPDATE domain_events SET processed_at = now() {by_subject}", subj=subject
+        ) == 1
+        assert await _rowcount(s, f"DELETE FROM domain_events {by_subject}", subj=subject) == 1
+
+
+async def test_a_narrowed_scope_cannot_rewrite_who_a_user_is(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """`users` lets a narrowed scope write a staff row -- its own person's
+    profile and login bookkeeping. It does not let it change what the row IS:
+    `kind` and `external_subject` (and with `kind`, via `ck_users_kind_client`,
+    the client) change only under scope all. Nor may it delete a staff row."""
+    c = await _two_clients(admin_engine)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        staff = User(org_id=c.org, external_subject=uuid4().hex, email="s@test.local")
+        contact = User(
+            org_id=c.org, external_subject=uuid4().hex, email="c@test.local",
+            kind="contact", client_id=c.x,
+        )
+        s.add_all([staff, contact])
+        await s.commit()
+    probes = [
+        # The reviewer's probe: an admin's staff row turned into X's contact,
+        # its login subject replaced, in one statement.
+        (
+            "UPDATE users SET kind = 'contact', client_id = :x, external_subject = 'taken' "
+            "WHERE id = :u",
+            {"x": c.x, "u": staff.id},
+        ),
+        ("UPDATE users SET kind = 'staff', client_id = NULL WHERE id = :u", {"u": contact.id}),
+        ("UPDATE users SET external_subject = 'taken' WHERE id = :u", {"u": staff.id}),
+    ]
+    for sql, params in probes:
+        with pytest.raises(DBAPIError, match="only under the every-client scope"):
+            async with org_session(
+                c.org, clients=ClientScope.only([c.x]), engine=app_engine
+            ) as s:
+                await s.execute(text(sql), params)
+    async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
+        profile = await _rowcount(
+            s,
+            "UPDATE users SET display_name = 'Me', phone = '+57', timezone = 'America/Bogota', "
+            "locale = 'es', last_login_at = now() WHERE id = :u",
+            u=staff.id,
+        )
+        deleted = await _rowcount(s, "DELETE FROM users WHERE id = :u", u=staff.id)
+    assert (profile, deleted) == (1, 0)
+    async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
+        assert await _rowcount(
+            s, "UPDATE users SET external_subject = :n WHERE id = :u", n=uuid4().hex, u=staff.id
+        ) == 1
+
+
+async def test_an_empty_scope_sees_no_global_row(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Spec §2.2: an `X-Client-Id` the person may not use narrows to the EMPTY
+    list, which sees zero rows -- global ones and staff included."""
+    c = await _two_clients(admin_engine)
+    r = await _optional_rows(admin_engine, c)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        staff = User(org_id=c.org, external_subject=uuid4().hex, email="s@test.local")
+        s.add(staff)
+        await s.commit()
+    async with org_session(c.org, clients=ClientScope.only([]), engine=app_engine) as s:
+        seen = await _ids(
+            s,
+            "SELECT id FROM doc_articles WHERE id = :a UNION ALL "
+            "SELECT id FROM users WHERE id = :u",
+            a=r.article_global, u=staff.id,
+        )
+    assert seen == set()
+
+
+async def test_a_device_cannot_join_another_clients_group(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    c = await _two_clients(admin_engine)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        group_y = DeviceGroup(org_id=c.org, client_id=c.y, name="gy")
+        s.add(group_y)
+        await s.commit()
+    with pytest.raises(DBAPIError, match="device group belongs to another client"):
+        async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
+            await s.execute(
+                text("UPDATE devices SET device_group_id = :g WHERE id = :d"),
+                {"g": group_y.id, "d": c.device_x},
+            )
+
+
+async def test_a_group_cannot_hang_from_another_clients_group(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    c = await _two_clients(admin_engine)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        group_y = DeviceGroup(org_id=c.org, client_id=c.y, name="gy")
+        s.add(group_y)
+        await s.commit()
+    with pytest.raises(DBAPIError, match="parent group belongs to another client"):
+        async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
+            s.add(
+                DeviceGroup(org_id=c.org, client_id=c.x, name="gx", parent_group_id=group_y.id)
+            )
+            await s.flush()
+
+
+async def _client_of(admin_engine: AsyncEngine, table: str, row: UUID) -> UUID | None:
+    async with AsyncSession(admin_engine) as s:
+        got: UUID | None = (
+            await s.execute(text(f"SELECT client_id FROM {table} WHERE id = :i"), {"i": row})
+        ).scalar_one()
+        return got
+
+
+async def test_an_articles_versions_follow_it_to_another_client(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """The reviewer's probe: a global article's version stayed global -- and
+    readable by every scope -- after the article became Y's."""
+    c = await _two_clients(admin_engine)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        article = DocArticle(org_id=c.org, title="runbook")
+        s.add(article)
+        await s.flush()
+        version = DocVersion(
+            org_id=c.org, article_id=article.id, version=1,
+            snapshot={"body": "secret-of-Y"}, ts=datetime.now(UTC),
+        )
+        s.add(version)
+        await s.commit()
+    async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
+        await s.execute(
+            text("UPDATE doc_articles SET client_id = :y WHERE id = :a"),
+            {"y": c.y, "a": article.id},
+        )
+    assert await _client_of(admin_engine, "doc_versions", version.id) == c.y
+    async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
+        assert await _ids(s, "SELECT id FROM doc_versions WHERE id = :v", v=version.id) == set()
+
+
+async def test_a_retargeted_jobs_logs_follow_it(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    c = await _two_clients(admin_engine)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        job = _job(c.org, c.device_x)
+        s.add(job)
+        await s.flush()
+        log = JobLog(org_id=c.org, job_id=job.id, ts=datetime.now(UTC), message="m")
+        s.add(log)
+        await s.commit()
+    assert log.client_id == c.x
+    async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
+        await s.execute(
+            text("UPDATE jobs SET target_id = :d WHERE id = :j"), {"d": c.device_y, "j": job.id}
+        )
+    assert await _client_of(admin_engine, "jobs", job.id) == c.y
+    assert await _client_of(admin_engine, "job_logs", log.id) == c.y
+
+
+async def test_an_alerts_actions_follow_its_device(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Two levels: the alert takes the device's client in its BEFORE trigger,
+    and its action follows from the alert's AFTER trigger -- the action's own
+    BEFORE trigger then sees a consistent parent and does not raise."""
+    c = await _two_clients(admin_engine)
+    profile = await seed_profile(admin_engine, c.org)
+    check = await seed_check(admin_engine, c.org, profile)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        alert = HealthAlert(
+            org_id=c.org, device_id=c.device_x, check_id=check, profile_id=profile,
+            check_type="cpu.busy_pct", severity="warning",
+        )
+        s.add(alert)
+        await s.flush()
+        action = HealthAlertAction(org_id=c.org, alert_id=alert.id, kind="notify")
+        s.add(action)
+        await s.commit()
+    assert action.client_id == c.x
+    async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
+        await s.execute(
+            text("UPDATE health_alert SET device_id = :d WHERE id = :a"),
+            {"d": c.device_y, "a": alert.id},
+        )
+    assert await _client_of(admin_engine, "health_alert", alert.id) == c.y
+    assert await _client_of(admin_engine, "health_alert_action", action.id) == c.y
+
+
+async def test_an_inherited_client_is_not_left_stale_in_memory(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """After an ORM UPDATE of the fk the trigger has changed `client_id`;
+    the ORM must not keep answering the old one. It expires the attribute
+    (`server_onupdate`), and a refresh reads the new client."""
+    c = await _two_clients(admin_engine)
+    async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
+        tag = DeviceTag(org_id=c.org, device_id=c.device_x, key="k")
+        s.add(tag)
+        await s.flush()
+        assert tag.client_id == c.x
+        tag.device_id = c.device_y
+        await s.flush()
+        assert "client_id" in sa_inspect(tag).unloaded
+        await s.refresh(tag, ["client_id"])
+        assert tag.client_id == c.y
+
+
+async def test_the_credential_delete_route_cannot_delete_a_global_credential(
+    api_env: Any,
+) -> None:
+    """The reviewer's ⚠️, through the API: a technician holding
+    `credentials.manage` on client X only. `DELETE /credentials/{id}` loads
+    the row in the person's scope (a global credential is readable) and
+    deletes it -- the database refuses the global one and allows X's."""
+    env = api_env
+    org = await env.create_org("cred")
+    sub = await env.create_user(org)
+    async with AsyncSession(env.admin_engine, expire_on_commit=False) as s:
+        user_id = (
+            await s.execute(select(User.id).where(User.external_subject == sub))
+        ).scalar_one()
+        role = Role(org_id=org, name=f"everything-{uuid4().hex[:8]}")
+        s.add(role)
+        await s.flush()
+        for permission_id in (await s.execute(select(Permission.id))).scalars():
+            s.add(RolePermission(role_id=role.id, permission_id=permission_id))
+        s.add(UserRole(org_id=org, user_id=user_id, role_id=role.id, client_id=org))
+        rows = [
+            Credential(org_id=org, name="global", type="ssh_key", vault_ref="v"),
+            Credential(org_id=org, client_id=org, name="x", type="ssh_key", vault_ref="v"),
+        ]
+        s.add_all(rows)
+        await s.commit()
+    headers = await env.headers(org, sub)
+    for row in rows:
+        await env.client.delete(f"/api/v1/credentials/{row.id}", headers=headers)
+    async with AsyncSession(env.admin_engine) as s:
+        left = set(
+            (
+                await s.execute(
+                    select(Credential.id).where(Credential.id.in_([r.id for r in rows]))
+                )
+            ).scalars()
+        )
+    assert left == {rows[0].id}

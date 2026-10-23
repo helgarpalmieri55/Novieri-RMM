@@ -442,7 +442,11 @@ class AiAction(Base):
     # the devices row named by target_device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     session_id: Mapped[UUID] = mapped_column(ForeignKey("ai_session.id", ondelete="RESTRICT"))
     message_seq: Mapped[int] = mapped_column(Integer)

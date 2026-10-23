@@ -68,7 +68,11 @@ class ProvisionRun(Base):
     # device_id is set, trigger its_client_from_parent copies its client
     # (migration 0231), so the value is read back after the INSERT.
     client_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     profile_id: Mapped[UUID] = mapped_column(ForeignKey("provision_profile.id"))
     job_id: Mapped[UUID | None] = mapped_column(ForeignKey("jobs.id"), default=None)

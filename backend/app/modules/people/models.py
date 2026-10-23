@@ -102,7 +102,11 @@ class DevicePerson(Base):
     # the devices row named by device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     person_id: Mapped[UUID | None] = mapped_column(ForeignKey("person.id"), default=None)
     source: Mapped[str] = mapped_column(String(12), default="inventory")

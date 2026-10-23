@@ -40,7 +40,11 @@ class InventorySnapshot(Base):
     # the devices row named by device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     taken_at: Mapped[datetime] = mapped_column()
@@ -62,7 +66,11 @@ class InstalledSoftware(Base):
     # the devices row named by device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     name: Mapped[str] = mapped_column(String(300))
@@ -81,7 +89,11 @@ class InventoryChange(Base):
     # the devices row named by device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     ts: Mapped[datetime] = mapped_column()
@@ -101,7 +113,11 @@ class HardwareComponent(Base):
     # the devices row named by device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     type: Mapped[str] = mapped_column(String(20))

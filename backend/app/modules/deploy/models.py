@@ -87,7 +87,11 @@ class DeploymentResult(TimestampMixin, Base):
     # the devices row named by device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     deployment_id: Mapped[UUID] = mapped_column(ForeignKey("deployments.id"))
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
@@ -135,7 +139,11 @@ class ScriptRun(TimestampMixin, Base):
     # the devices row named by device_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     script_id: Mapped[UUID] = mapped_column(ForeignKey("scripts.id"))
     script_version: Mapped[int] = mapped_column(Integer)
@@ -177,7 +185,11 @@ class ScriptPolicy(TimestampMixin, Base):
     # the device_groups row named by device_group_id (migration 0231): never
     # sent; the INSERT reads it back.
     client_id: Mapped[UUID] = mapped_column(
-        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
     )
     name: Mapped[str] = mapped_column(String(200))
     script_id: Mapped[UUID] = mapped_column(ForeignKey("scripts.id"))
