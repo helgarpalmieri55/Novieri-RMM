@@ -360,7 +360,7 @@ async def test_the_first_administrator_is_an_org_admin(setup_env: Any) -> None:
         rows = list(
             (
                 await session.execute(
-                    select(Role.name, Role.org_id, UserRole.device_group_id).join(
+                    select(Role.name, Role.org_id, UserRole.client_id).join(
                         UserRole, UserRole.role_id == Role.id
                     )
                 )
@@ -368,8 +368,9 @@ async def test_the_first_administrator_is_an_org_admin(setup_env: Any) -> None:
         )
 
     assert [r[0] for r in rows] == ["org-admin"]
-    # The seeded platform-wide role, granted org-wide rather than scoped to a
-    # device group that does not exist yet.
+    # The seeded platform-wide role, granted on every client (MSP clients spec
+    # §2.1): the first administrator must also be able to reach the clients
+    # created after them, and the unassigned one.
     assert rows[0][1] is None
     assert rows[0][2] is None
 

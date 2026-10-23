@@ -52,7 +52,6 @@ from app.modules.reporting.sources import verify_registry
 from tests.reporting_fixtures import (
     report_query,
     reporting_user,
-    seed_device,
     seed_reportable_org,
     uncovered_required_params,
 )
@@ -392,36 +391,33 @@ async def test_a_caller_without_reporting_read_is_a_403(api_env: Any, key: str) 
 
 
 @pytest.mark.parametrize("key", sorted(REGISTRY))
-async def test_a_group_scoped_grant_is_a_403(api_env: Any, key: str) -> None:
+async def test_a_client_scoped_grant_is_a_403(api_env: Any, key: str) -> None:
     """§0.6, §12.4. A fleet aggregate computed for someone entitled to part of
     the fleet is either wrong (the denominator includes devices they may not
     see) or a leak (it tells them how many there are).
 
-    THE CONTROL USER HOLDS THE SAME CODES ORG-WIDE, in the same org, over the
-    same data -- so the ONLY observable difference between the 200 and the 403
-    is the scoping. A test that only asserted the group-scoped 403 could not
-    tell "group scoping is refused" from "these codes never work".
-    """
-    from app.models import DeviceGroup
+    THE CONTROL USER HOLDS THE SAME CODES ON EVERY CLIENT, in the same org,
+    over the same data -- so the ONLY observable difference between the 200
+    and the 403 is the scoping. A test that only asserted the client-scoped 403
+    could not tell "client scoping is refused" from "these codes never work".
 
+    The scoped grant names the internal client (the org's own id), which is
+    where every device this org seeds lives: entitled to the very devices the
+    report counts, and still refused, because the grant is not every client.
+    """
     definition = REGISTRY[key]
     org_id = await _seeded_org(api_env)
     codes = ["reporting.read", *sorted(definition.requires)]
     path = f"/api/v1/reports/{key}{report_query(key)}"
 
-    async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
-        group = DeviceGroup(org_id=org_id, name=f"g-{uuid4().hex[:8]}")
-        session.add(group)
-        await session.commit()
-        group_id = group.id
-    await seed_device(api_env.admin_engine, org_id, hostname="gamma", device_group_id=group_id)
-
-    _, org_wide = await reporting_user(api_env, org_id, *codes)
-    allowed = await api_env.client.get(path, headers=await api_env.headers(org_id, org_wide))
+    _, every_client = await reporting_user(api_env, org_id, *codes)
+    allowed = await api_env.client.get(
+        path, headers=await api_env.headers(org_id, every_client)
+    )
     assert allowed.status_code == 200, allowed.text
     assert allowed.json()["rows"]
 
-    _, scoped = await reporting_user(api_env, org_id, *codes, device_group_id=group_id)
+    _, scoped = await reporting_user(api_env, org_id, *codes, client_id=org_id)
     refused = await api_env.client.get(path, headers=await api_env.headers(org_id, scoped))
     assert refused.status_code == 403, refused.text
 

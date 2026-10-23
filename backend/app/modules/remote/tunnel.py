@@ -32,6 +32,9 @@ from app.models import Organization, RemoteSession
 # live socket). Raises TunnelAuthError with the WebSocket close code to use.
 # --------------------------------------------------------------------------- #
 
+#: The code this door guards; the caller's scope is where they hold it.
+REMOTE_CONTROL = "remote.control"
+
 
 class TunnelAuthError(Exception):
     """Authorization failure for the tunnel WS. ``code`` is the WS close code."""
@@ -73,12 +76,14 @@ async def authorize_tunnel(
     caller's client scope, which the screen tunnel's own sessions run under
     (MSP clients spec §2.3), exactly as a route passes ``ctx.clients``.
 
-    Requires the ``remote.control`` permission AND that the caller either owns
-    the session (is its technician) or holds ``orgs.manage`` (org-admin).
-    Raises ``TunnelAuthError`` otherwise:
+    Requires the ``remote.control`` permission on at least one client -- the
+    session is then looked up under the clients where it is held -- AND that
+    the caller either owns the session (is its technician) or holds
+    ``orgs.manage`` (org-admin). Raises ``TunnelAuthError`` otherwise:
       * 4401 — bad/absent token, unknown org, or unknown user;
-      * 4403 — not admitted (email domain, or a non-active account), lacks
-        remote.control, or not the owner and not an org-admin;
+      * 4403 — not admitted (email domain, a non-active account, or a
+        contact), lacks remote.control everywhere, or not the owner and not an
+        org-admin;
       * 4404 — no such session in the caller's tenant.
 
     ADMISSION, DOOR 3 OF 3 (spec §3.2). This door is the one with real teeth:
@@ -121,12 +126,19 @@ async def authorize_tunnel(
     #
     # `users.status`: a disabled or deleted account stops driving a remote
     # session immediately, not when its access token happens to expire.
+    #
+    # THE SCOPE IS WHERE THE PERSON HOLDS `remote.control` -- the code this
+    # door guards, exactly as `require_permission("remote.control")` scopes a
+    # route (spec §2.1-2.2). Holding it on SOME client passes; the session
+    # lookup below then runs under that scope, so a session on a device of a
+    # client where they lack it does not exist for them (spec §2.6).
     identity = await read_door_identity(
         door="remote-tunnel",
         org_id=org_id,
         claims=claims,
         settings=settings,
         engine=app_engine,
+        code=REMOTE_CONTROL,
     )
     if identity.refusal is not None:
         raise TunnelAuthError(4403, identity.refusal)
@@ -135,15 +147,15 @@ async def authorize_tunnel(
             4401, "unknown user"
         )
     user_id, clients = identity.user_id, identity.clients
+    if clients.is_empty:
+        raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
+            4403, "requires remote.control"
+        )
 
-    # AUTHORIZATION, as the person: `remote.control`, the session row and
-    # ownership are read under the person's own client scope, so the session
-    # lookup inherits the client RLS (spec §2.6) instead of seeing every client.
+    # AUTHORIZATION, as the person: the session row and ownership are read
+    # under the person's `remote.control` scope, so the session lookup
+    # inherits the client RLS (spec §2.6) instead of seeing every client.
     async with org_session(org_id, engine=app_engine, clients=clients) as s:
-        if not await has_permission(s, user_id, "remote.control"):
-            raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
-                4403, "requires remote.control"
-            )
         row = (
             await s.execute(
                 select(RemoteSession.technician_id).where(RemoteSession.id == session_id)

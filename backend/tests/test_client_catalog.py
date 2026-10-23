@@ -86,7 +86,7 @@ def test_the_allowlist_has_not_rotted() -> None:
 
 def test_the_allowlist_guard_is_not_vacuous() -> None:
     found = _calls_to_all(_app_sources())
-    assert "app/api/deps.py::auth_context" in found
+    assert "app/api/deps.py::admit" in found
     # Function granularity, not file: the route-reachable function next to
     # the scheduled poll is held to the caller's scope.
     assert "app/modules/email_intake/poller.py::poll_mailbox" in ALL_SCOPE_ALLOWLIST

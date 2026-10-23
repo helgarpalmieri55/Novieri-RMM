@@ -143,6 +143,12 @@ def _probe_router() -> APIRouter:
     ) -> list[dict[str, int]]:
         return [{"a": 1}, {"a": 2}]
 
+    @router.get("/mcp-probe/scope")
+    async def scope(
+        ctx: AuthContext = _DEVICES_READ,
+    ) -> dict[str, Any]:
+        return {"all": ctx.clients.is_all, "ids": sorted(str(i) for i in ctx.clients.ids)}
+
     @router.get("/mcp-probe/empty", status_code=204)
     async def empty(
         ctx: AuthContext = _DEVICES_READ,
@@ -213,12 +219,20 @@ async def _events(env: Any, org_id: UUID, action: str) -> list[AuditEvent]:
 
 @asynccontextmanager
 async def _session(
-    env: Any, token: str, *, query: str = "", language: str | None = None
+    env: Any,
+    token: str,
+    *,
+    query: str = "",
+    language: str | None = None,
+    client: str | None = None,
 ) -> AsyncIterator[ClientSession]:
-    """The SDK's own client, initialised, over an in-process transport."""
+    """The SDK's own client, initialised, over an in-process transport.
+    `client` is sent as `X-Client-Id` on every MCP request."""
     headers = {"Authorization": f"Bearer {token}"}
     if language is not None:
         headers["Accept-Language"] = language
+    if client is not None:
+        headers["X-Client-Id"] = client
     http = httpx2.AsyncClient(
         transport=httpx2.ASGITransport(app=env.app), base_url=BASE, headers=headers
     )
@@ -362,6 +376,46 @@ async def test_a_read_call_returns_the_apis_own_json_and_is_audited(mcp_env) -> 
     # The tool-call event is itself written on the MCP channel.
     assert event.meta["via"] == "mcp"
     assert event.meta["mcp_app"] == "claude"
+
+
+async def test_the_route_runs_under_the_scope_the_call_was_admitted_with(
+    mcp_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MSP clients spec §2.2. `X-Client-Id` on the MCP request narrows the
+    principal; the in-process call forwards it, so the route a tool reaches
+    sees exactly `principal.clients` -- not the person's un-narrowed scope,
+    which the route would re-admit without the header."""
+    import app.mcp.server as server
+
+    seen: list[ClientScope] = []
+    real_invoke = server._invoke.invoke
+
+    async def spy(**kwargs: Any) -> Any:
+        seen.append(kwargs["principal"].clients)
+        return await real_invoke(**kwargs)
+
+    monkeypatch.setattr(server._invoke, "invoke", spy)
+    org_id, _, token = await _admin(mcp_env)  # an org-admin: every client
+    async with running_mcp(mcp_env):
+        async with _session(mcp_env, token, client=str(org_id)) as session:
+            narrowed = await session.call_tool(_probe_tool(mcp_env, "scope"), {})
+        async with _session(mcp_env, token) as session:
+            whole = await session.call_tool(_probe_tool(mcp_env, "scope"), {})
+    assert seen == [ClientScope.only([org_id]), ClientScope.all()]
+    assert narrowed.structured_content == {"all": False, "ids": [str(org_id)]}
+    assert whole.structured_content == {"all": True, "ids": []}
+
+
+async def test_a_malformed_x_client_id_is_refused_at_the_mcp_door(mcp_env) -> None:
+    _, _, token = await _admin(mcp_env)
+    async with mcp_client(mcp_env) as http:
+        r = await http.post(
+            "/mcp",
+            headers={"Authorization": f"Bearer {token}", "X-Client-Id": "nope"},
+            json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+        )
+    assert r.status_code == 400
+    assert r.json()["detail"] == "X-Client-Id must be one client id"
 
 
 async def test_a_list_payload_is_wrapped_and_a_204_is_an_empty_object(mcp_env) -> None:

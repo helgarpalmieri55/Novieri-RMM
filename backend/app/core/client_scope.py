@@ -34,6 +34,21 @@ class ClientScope:
             return ClientScope.only([client_id])
         return ClientScope.only([])
 
+    def intersect(self, other: "ClientScope") -> "ClientScope":
+        """The clients both scopes allow: never wider than either. How a door
+        combines the person's (already narrowed) scope with the clients where
+        they hold one particular code."""
+        if self.is_all:
+            return other
+        if other.is_all:
+            return self
+        return ClientScope.only(self.ids & other.ids)
+
+    @property
+    def is_empty(self) -> bool:
+        """No client at all: RLS answers such a session with zero rows."""
+        return not self.is_all and not self.ids
+
     def allows(self, client_id: UUID) -> bool:
         return self.is_all or client_id in self.ids
 
@@ -74,15 +89,22 @@ _RELAY = (
 # it says why.
 ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     # -- (c) identity resolution: the scope is computed from what these read --
-    "app/api/deps.py::auth_context": (
-        "door 1: resolves the user and their grants before the scope exists (spec §2.2)"
-    ),
-    "app/modules/portal/principal.py::resolve_portal_principal": (
-        "resolves the portal user before the scope exists"
+    "app/api/deps.py::admit": (
+        "door 1 (HTTP, MCP and the portal's sign-in): resolves the user and their grants "
+        "before the scope exists (spec §2.2)"
     ),
     "app/core/identity/door.py::read_door_identity": (
-        "doors 2 and 3 (console WebSocket, remote tunnel): the domain rule and users.status, "
-        "read before the scope exists (spec §2.2, §2.6)"
+        "doors 2 and 3 (console WebSocket, remote tunnel): the domain rule, users.status and "
+        "users.kind, and the grants the scope is computed from (spec §2.2, §2.6)"
+    ),
+    "app/core/identity/door.py::person_scope": (
+        "an admitted person's grants for one code (require_permission, the portal's gate, "
+        "MCP): read before the scope they define exists, and only ever intersected with "
+        "the person's own scope (spec §2.2)"
+    ),
+    "app/core/rbac.py::clients_holding": (
+        "COMPUTES a person's scope rather than using one: an all-clients grant "
+        "(user_roles.client_id NULL) is the every-client scope (spec §2.1-2.2)"
     ),
     # -- (a) processes with no person behind them --------------------------
     **_reviewed(

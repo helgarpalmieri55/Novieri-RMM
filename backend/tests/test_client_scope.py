@@ -26,6 +26,22 @@ def test_narrowing_never_widens() -> None:
     assert ClientScope.only([A]).narrow(None) == ClientScope.only([A])
 
 
+def test_intersect_is_never_wider_than_either_side() -> None:
+    assert ClientScope.all().intersect(ClientScope.all()) == ClientScope.all()
+    assert ClientScope.all().intersect(ClientScope.only([A])) == ClientScope.only([A])
+    assert ClientScope.only([A]).intersect(ClientScope.all()) == ClientScope.only([A])
+    assert ClientScope.only([A, B]).intersect(ClientScope.only([B, C])) == ClientScope.only([B])
+    assert ClientScope.only([A]).intersect(ClientScope.only([C])) == ClientScope.only([])
+    # A narrowed-to-nothing scope stays nothing, whatever it meets.
+    assert ClientScope.only([]).intersect(ClientScope.all()) == ClientScope.only([])
+
+
+def test_is_empty() -> None:
+    assert ClientScope.only([]).is_empty
+    assert not ClientScope.only([A]).is_empty
+    assert not ClientScope.all().is_empty
+
+
 def test_allows() -> None:
     assert ClientScope.all().allows(C)
     assert ClientScope.only([A]).allows(A)

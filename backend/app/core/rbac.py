@@ -14,6 +14,7 @@ from fastapi.routing import APIRoute
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.models import Permission, Role, RolePermission, UserRole
 
 # code -> human description; seeded by migration 0003. Format: "<module>.<action>".
@@ -410,25 +411,73 @@ PLATFORM_OPERATOR_CODES: frozenset[str] = frozenset(
 )
 
 
+async def _grants(session: AsyncSession, user_id: UUID) -> list[tuple[str, UUID | None]]:
+    """Every `(code, client_id)` the user's grants carry: one row per code per
+    grant, `client_id` NULL for an all-clients grant (spec §2.1)."""
+    return [
+        (code, client_id)
+        for code, client_id in (
+            await session.execute(
+                select(Permission.code, UserRole.client_id)
+                .join(RolePermission, RolePermission.permission_id == Permission.id)
+                .join(UserRole, UserRole.role_id == RolePermission.role_id)
+                .where(UserRole.user_id == user_id)
+            )
+        ).all()
+    ]
+
+
 async def user_permission_codes(
     session: AsyncSession, user_id: UUID, *, client_id: UUID | None = None
 ) -> set[str]:
     """Permission codes granted to the user: all-clients grants always count; a
     client grant counts only when asking about that same client (MSP clients
     spec §2.1)."""
-    rows = (
-        await session.execute(
-            select(Permission.code, UserRole.client_id)
-            .join(RolePermission, RolePermission.permission_id == Permission.id)
-            .join(UserRole, UserRole.role_id == RolePermission.role_id)
-            .where(UserRole.user_id == user_id)
+    return {
+        code
+        for code, scoped in await _grants(session, user_id)
+        if scoped is None or (client_id is not None and scoped == client_id)
+    }
+
+
+async def codes_held_anywhere(session: AsyncSession, user_id: UUID) -> set[str]:
+    """Every code the user holds in at least one client -- exactly the codes
+    whose `require_permission` gate admits them (`clients_holding` non-empty).
+    What a surface that lists "what can I call" must show, or a technician
+    whose grants are all per client would be shown nothing they can do."""
+    return {code for code, _ in await _grants(session, user_id)}
+
+
+async def clients_holding(session: AsyncSession, user_id: UUID, code: str | None) -> ClientScope:
+    """The client scope in which the user holds `code` -- or any role at all
+    when `code` is None (an ungated route). An all-clients grant makes it
+    `ClientScope.all()`; no grant at all is the empty scope.
+
+    THIS IS THE REQUEST'S RLS SCOPE (spec §2.2): `require_permission(code)`
+    hands it to the route, so a record of a client where the person lacks the
+    code does not exist for that request -- the rule is enforced by the
+    database, not re-checked record by record."""
+    if code is not None and code not in PERMISSIONS:
+        raise ValueError(  # i18n-exempt: programmer error, unhandled 500
+            f"unknown permission code {code!r}"
         )
-    ).all()
-    granted: set[str] = set()
-    for code, scoped_client in rows:
-        if scoped_client is None or (client_id is not None and scoped_client == client_id):
-            granted.add(code)
-    return granted
+    scoped: set[UUID] = set()
+    if code is None:
+        rows = (
+            await session.execute(select(UserRole.client_id).where(UserRole.user_id == user_id))
+        ).scalars()
+        for client_id in rows:
+            if client_id is None:
+                return ClientScope.all()
+            scoped.add(client_id)
+        return ClientScope.only(scoped)
+    for held, client_id in await _grants(session, user_id):
+        if held != code:
+            continue
+        if client_id is None:
+            return ClientScope.all()
+        scoped.add(client_id)
+    return ClientScope.only(scoped)
 
 
 async def user_role_names(session: AsyncSession, user_id: UUID) -> list[str]:

@@ -30,7 +30,6 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from app.core.client_scope import ClientScope
 from app.models import (
     AuditEvent,
     BackupPolicy,
@@ -811,33 +810,44 @@ async def test_a_group_targeted_job_aimed_at_an_archived_group_finds_no_devices(
 
 
 async def test_an_archived_group_cannot_become_a_new_rbac_scope(api_env: Any) -> None:
-    """`user_admin::_visible_group` is the codebase's one existing "does this
-    group resolve" check, and it is the ONLY consumer-side refusal this design
-    builds.
+    """A `user_roles` row scoped to an archived group would be a permission
+    nobody can audit, and it would newly reference a group the archive refusal
+    has just guaranteed is unreferenced. `user_admin::_visible_group` used to
+    refuse it.
 
-    A `user_roles` row scoped to a group is RBAC. Granting one against an
-    archived group would leave a permission scoped to a group no surface can
-    show, which is a permission nobody can audit -- and it would newly
-    reference a group the archive refusal has just guaranteed is unreferenced.
+    NOW NO GROUP CAN BE A SCOPE AT ALL (MSP clients spec §2.1: "los grupos de
+    equipos dejan de dar permisos"), archived or not: the grant API takes a
+    `client_id`, and a body still naming a `device_group_id` is refused rather
+    than quietly read as a grant on every client.
     """
-    from app.core.tenancy import org_session
-    from app.modules.user_admin.service import UserAdminError, _visible_group
-
     org_id = await api_env.create_org("dgw")
     headers = await _admin(api_env, org_id)
     group = await _create(api_env, headers, name="retired")
     assert (
         await api_env.client.delete(f"{GROUPS}/{group['id']}", headers=headers)
     ).status_code == 204
+    sub = await api_env.create_user(org_id)
+    async with AsyncSession(api_env.admin_engine) as session:
+        user_id = (
+            await session.execute(select(User.id).where(User.external_subject == sub))
+        ).scalar_one()
+        role_id = (
+            await session.execute(
+                select(Role.id).where(Role.name == "read-only", Role.org_id.is_(None))
+            )
+        ).scalar_one()
 
-    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        try:
-            await _visible_group(session, org_id, UUID(group["id"]))
-        except UserAdminError as exc:
-            assert exc.status_code == 409, exc
-            assert "archived" in str(exc)
-        else:  # pragma: no cover -- the refusal is the point of the test
-            raise AssertionError("an archived group was accepted as a role scope")
+    refused = await api_env.client.post(
+        f"/api/v1/users/{user_id}/roles",
+        headers=headers,
+        json={"role_id": str(role_id), "device_group_id": group["id"]},
+    )
+
+    assert refused.status_code == 422, refused.text
+    async with AsyncSession(api_env.admin_engine) as session:
+        assert (
+            await session.execute(select(UserRole.id).where(UserRole.user_id == user_id))
+        ).first() is None
 
 
 # --------------------------------------------------------------------------- #

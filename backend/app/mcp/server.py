@@ -62,12 +62,12 @@ from starlette.datastructures import Headers
 from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
-from app.api.deps import AuthContext, auth_context
+from app.api.deps import AuthContext, auth_context, requested_client
 from app.core.audit import audit_service
 from app.core.client_scope import ClientScope
 from app.core.i18n import parse_accept_language, tr, use_locale
 from app.core.mcp_channel import EXTENSION_KEY, McpCall, mcp_resource, use_mcp_call
-from app.core.rbac import has_permission, user_permission_codes
+from app.core.rbac import codes_held_anywhere
 from app.core.router_inspect import flatten
 from app.core.security import TokenClaims
 from app.core.tenancy import org_session
@@ -124,6 +124,11 @@ class McpPrincipal:
     #: The person's client scope, from the admitted `AuthContext` -- every
     #: session a handler opens is held to it (MSP clients spec §2.3).
     clients: ClientScope
+    #: The client the MCP request's `X-Client-Id` named, if any. `clients` is
+    #: already narrowed by it; the in-process call forwards the same header
+    #: (`app.mcp.invoke`), so the route a tool reaches runs under the same
+    #: scope as the listing, the gate and the audit row here.
+    requested_client: UUID | None = None
     #: `(count, seconds left in the window)` when this request was over the
     #: per-person limit at the door, else None. Counted there, once; the
     #: handlers only read it (`tools/call` to word and audit its refusal).
@@ -257,7 +262,9 @@ async def _gate(fastapi_app: FastAPI, ctx: AuthContext) -> tuple[int, str] | Non
                 "MCP is turned off for this organization. An org-admin turns it on in "
                 "Settings → AI connections."
             )
-        if not await has_permission(session, ctx.user_id, "mcp.use"):
+        # Held on SOME client, as `require_permission` admits a route (spec
+        # §2.1): what the person may then reach is their scope's business.
+        if "mcp.use" not in await codes_held_anywhere(session, ctx.user_id):
             return 403, tr("requires {code}", code="mcp.use")
         # A row with no `user_id` revokes the app for everyone in THIS org; the
         # `org_id` predicate and RLS both keep another org's row out. Strictly
@@ -384,6 +391,8 @@ class McpAsgi:
             areas=areas or None,
             accept_language=request.headers.get("accept-language", ""),
             clients=ctx.clients,
+            # Already validated by `auth_context` (a malformed one was a 400).
+            requested_client=requested_client(request),
             limited=limited,
         )
         await self._sm.handle_request(scope, receive, send)
@@ -554,10 +563,12 @@ class _ToolHandlers:
                     {"status": 429, "retry_after": seconds},
                 )
         catalog = _catalog(self._app)
+        # Every code held on at least one client: exactly the tools whose
+        # route gate (`require_permission`) would admit this person.
         async with org_session(
             principal.org_id, engine=self._app.state.app_engine, clients=principal.clients
         ) as session:
-            held = await user_permission_codes(session, principal.user_id)
+            held = await codes_held_anywhere(session, principal.user_id)
         return ListToolsResult(
             tools=[_sdk_tool(t) for t in catalog.values() if _visible(t, held, principal.areas)]
         )
@@ -633,7 +644,9 @@ class _ToolHandlers:
             async with org_session(
                 principal.org_id, engine=self._app.state.app_engine, clients=principal.clients
             ) as session:
-                allowed = await has_permission(session, principal.user_id, tool.permission)
+                allowed = tool.permission in await codes_held_anywhere(
+                    session, principal.user_id
+                )
             if not allowed:
                 return _invoke.InvokeOutcome(403, None, tr("requires {code}", code=tool.permission))
         return await _invoke.invoke(

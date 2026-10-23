@@ -308,6 +308,77 @@ async def test_read_routes_require_the_read_permission(api_env) -> None:
             assert route_permission(route) == "email_intake.read", path
 
 
+async def _org_admin_on_one_client(api_env: Any, org_id: UUID) -> dict[str, str]:
+    """An `org-admin` whose grant is on one customer only (MSP clients spec
+    §2.1): it holds `email_intake.admin`, but not with every client."""
+    from app.models import Client, Role, User, UserRole
+
+    sub = await api_env.create_user(org_id)
+    async with AsyncSession(api_env.admin_engine) as session:
+        client = Client(org_id=org_id, name=f"customer-{uuid4().hex[:6]}")
+        session.add(client)
+        await session.flush()
+        user_id = (
+            await session.execute(select(User.id).where(User.external_subject == sub))
+        ).scalar_one()
+        role_id = (
+            await session.execute(
+                select(Role.id).where(Role.name == "org-admin", Role.org_id.is_(None))
+            )
+        ).scalar_one()
+        session.add(UserRole(org_id=org_id, user_id=user_id, role_id=role_id, client_id=client.id))
+        await session.commit()
+    return await api_env.headers(org_id, sub)
+
+
+async def test_every_admin_route_needs_a_scope_of_every_client(api_env) -> None:
+    """T23-M2. Mailboxes and their credentials are Novieri-global
+    configuration: the credentials `oauth.complete` and the refresh-token
+    rotation write carry no client, and only an all-clients scope may write
+    such a row (spec §2.2). Derived from the router: every `email_intake.admin`
+    route refuses a per-client admin, before its body is even read."""
+    org_id = await api_env.create_org()
+    headers = await _org_admin_on_one_client(api_env, org_id)
+    admin_routes = [
+        (method, path)
+        for path, route in _app_routes(api_env.app)
+        if route_permission(route) == "email_intake.admin"
+        for method in getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}
+    ]
+    assert len(admin_routes) >= 9, admin_routes  # non-vacuity: every admin route
+    for method, path in admin_routes:
+        url = path.replace("{mailbox_id}", str(uuid4()))
+        response = await api_env.client.request(method, url, headers=headers, json={})
+        assert response.status_code == 403, (method, path, response.text)
+        assert response.json()["detail"] == (
+            "only a technician with access to every client can do this"
+        ), (method, path)
+
+
+async def test_a_narrowed_request_cannot_create_a_mailbox_either(api_env) -> None:
+    """An all-clients admin who narrowed the request with X-Client-Id is not
+    acting for every client: refused, and nothing is written."""
+    env = await _seed_mailbox(api_env)
+    narrowed = {**env.admin_headers, "X-Client-Id": str(env.org_id)}
+    body = {
+        "address": "second@acme.test",
+        "host": "imap.acme.test",
+        "port": 993,
+        "use_ssl": True,
+        "username": "second@acme.test",
+        "password": "x" * 12,
+        "default_category_id": str(env.category_id),
+    }
+    response = await api_env.client.post(
+        f"{EMAIL_INTAKE_PREFIX}/mailboxes", json=body, headers=narrowed
+    )
+    assert response.status_code == 403, response.text
+    listed = await api_env.client.get(
+        f"{EMAIL_INTAKE_PREFIX}/mailboxes", headers=env.admin_headers
+    )
+    assert [m["address"] for m in listed.json()] == ["helpdesk@acme.test"]
+
+
 async def test_a_reader_cannot_create_or_test_a_mailbox(api_env) -> None:
     """Server-side, not UI-side (invariant #6). The caller holds
     `email_intake.read` and NOTHING else, so this proves the read/admin split

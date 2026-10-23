@@ -84,6 +84,11 @@ ACTIVE_STATUS = "active"
 
 _STATUS_REFUSED = N_("user account is not active")
 
+# `users.kind`: a person of one client, who uses the portal (MSP clients spec §1.3).
+CONTACT_KIND = "contact"
+
+_CONTACT_REFUSED = N_("this account can only use the portal")
+
 
 def status_refusal(status: str) -> str | None:
     """``None`` when the account may act, otherwise the refusal reason.
@@ -110,6 +115,18 @@ def status_refusal(status: str) -> str | None:
     button that claims to disable people is enforcement nobody had.
     """
     return None if status == ACTIVE_STATUS else _STATUS_REFUSED
+
+
+def contact_refusal(kind: str) -> str | None:
+    """``None`` for a technician, otherwise the refusal reason: a contact never
+    enters the console (MSP clients spec §1.3), at any of its doors -- the
+    HTTP API, the console WebSocket or the remote tunnel. The portal is the one
+    door that admits a contact, and it does not call this.
+
+    Before any permission is looked at: a contact who somehow holds a role is
+    still a contact, and "what may they do here" is not a question the console
+    asks about them."""
+    return _CONTACT_REFUSED if kind == CONTACT_KIND else None
 
 
 def log_admission_refusal(door: str, *, sub: str, email: str, reason: str) -> None:
@@ -188,7 +205,9 @@ async def audit_admission_refusal(
 __all__ = [
     "ACTIVE_STATUS",
     "ADMISSION_REFUSED_ACTION",
+    "CONTACT_KIND",
     "audit_admission_refusal",
+    "contact_refusal",
     "domain_refusal",
     "is_allowed_domain",
     "log_admission_refusal",

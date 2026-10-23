@@ -28,14 +28,14 @@ async def reporting_user(
     api_env: Any,
     org_id: UUID,
     *codes: str,
-    device_group_id: UUID | None = None,
+    client_id: UUID | None = None,
 ) -> tuple[UUID, str]:
     """A user in `org_id` holding exactly `codes` and nothing else.
 
-    `device_group_id` scopes the grant to one device group -- the §0.6 case:
-    `user_permission_codes` counts such a row ONLY when asked about that same
-    group, and every reporting gate asks with `device_group_id=None`, so a
-    group-scoped grant holds nothing org-wide.
+    `client_id` scopes the grant to one client -- the §0.6 case (MSP clients
+    spec §2.1): `user_permission_codes` counts such a row ONLY when asked
+    about that same client, and every reporting gate asks with no client, so a
+    client-scoped grant holds nothing on every client.
     """
     from app.models import Permission, Role, RolePermission, User, UserRole
 
@@ -57,7 +57,7 @@ async def reporting_user(
                 org_id=org_id,
                 user_id=user.id,
                 role_id=role.id,
-                device_group_id=device_group_id,
+                client_id=client_id,
             )
         )
         await session.commit()

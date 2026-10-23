@@ -48,13 +48,21 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.i18n import N_, tr_marked
 from app.core.identity.policy import resolve_console_domain
 from app.core.tenancy import org_session
 from app.modules.user_admin import service
 from app.modules.user_admin.kc_client import KeycloakAdminConfig
 from app.modules.user_admin.service import UserAdminError
+
+#: `users.manage` with a scope of EVERY client. Technicians and their grants
+#: are Novieri-global (MSP clients spec §1.4, "Técnicos y roles"), and a
+#: per-client grant of this code must not become one that reaches every client:
+#: a technician holding it on one client could otherwise grant themselves -- or
+#: a colleague -- a role on all of them, or disable the administrators who do
+#: hold every client. Reads stay open to any scope.
+_MANAGE = require_permission_on_every_client("users.manage")
 
 router = APIRouter(tags=["users"])
 
@@ -129,16 +137,16 @@ class RoleAssignmentOut(BaseModel):
     assignment_id: UUID = Field(
         description=(
             "The `user_roles` row. Address a revoke to THIS, not to `role_id`: the "
-            "same role may be held twice at different device-group scopes, so "
-            "'remove technician' is ambiguous."
+            "same role may be held twice for different clients, so 'remove "
+            "technician' is ambiguous."
         )
     )
     role_id: UUID = Field(description="The role granted.")
     role_name: str = Field(description="The role's name, e.g. `technician`.")
-    device_group_id: UUID | None = Field(
+    client_id: UUID | None = Field(
         description=(
-            "`null` for an org-wide grant; a device group id when the grant applies "
-            "only within that group."
+            "`null` for a grant on every client, including clients created later; a "
+            "client id when the grant applies only within that client."
         )
     )
 
@@ -188,8 +196,8 @@ class CreatedUserOut(UserOut):
 class CodeGrantOut(BaseModel):
     code: str = Field(description="A permission code the user effectively holds.")
     via_role: str = Field(description="The role that granted it.")
-    device_group_id: UUID | None = Field(
-        description="`null` when the grant is org-wide, else the group it is scoped to."
+    client_id: UUID | None = Field(
+        description="`null` when the grant covers every client, else the client it is scoped to."
     )
 
 
@@ -236,9 +244,12 @@ class RoleAssign(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     role_id: UUID
-    device_group_id: UUID | None = Field(
+    client_id: UUID | None = Field(
         default=None,
-        description="Omit for an org-wide grant; supply a group to scope the grant to it.",
+        description=(
+            "Omit for a grant on every client; supply a client to scope the grant to it. "
+            "Not the unassigned client, and not an archived one."
+        ),
     )
 
 
@@ -258,7 +269,7 @@ def _user_out(view: service.UserView) -> UserOut:
                 assignment_id=r.assignment_id,
                 role_id=r.role_id,
                 role_name=r.role_name,
-                device_group_id=r.device_group_id,
+                client_id=r.client_id,
             )
             for r in view.roles
         ],
@@ -294,7 +305,7 @@ async def effective_permissions(
     ctx: AuthContext = Depends(require_permission("users.read")),
 ) -> EffectivePermissionsOut:
     """The union of this user's roles' codes, annotated with which role granted
-    each and whether the grant is org-wide or scoped to a device group."""
+    each and whether the grant covers every client or one client."""
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
@@ -308,7 +319,7 @@ async def effective_permissions(
         user_id=user_id,
         codes=[
             CodeGrantOut(
-                code=g.code, via_role=g.via_role, device_group_id=g.device_group_id
+                code=g.code, via_role=g.via_role, client_id=g.client_id
             )
             for g in grants
         ],
@@ -329,7 +340,7 @@ async def create_user(
     # the provisioning client secret off disk -- so the RBAC gate goes first,
     # and an unauthenticated or unauthorized request is refused before anything
     # opens the credential. See the note on `keycloak_config`.
-    ctx: AuthContext = Depends(require_permission("users.manage")),
+    ctx: AuthContext = Depends(_MANAGE),
     config: KeycloakAdminConfig | None = Depends(keycloak_config),
 ) -> CreatedUserOut:
     """Create the Keycloak identity, then the ITMS row holding its roles.
@@ -382,9 +393,9 @@ async def assign_role(
     user_id: UUID,
     body: RoleAssign,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("users.manage")),
+    ctx: AuthContext = Depends(_MANAGE),
 ) -> RoleAssignmentOut:
-    """Grant a role, org-wide or scoped to one device group.
+    """Grant a role for every client, or for one client (MSP clients spec §2.1).
 
     No Keycloak involvement -- roles are an ITMS concept -- so this works on a
     deployment that has not configured provisioning.
@@ -399,7 +410,7 @@ async def assign_role(
                 actor_id=ctx.user_id,
                 user_id=user_id,
                 role_id=body.role_id,
-                device_group_id=body.device_group_id,
+                client_id=body.client_id,
             )
         except UserAdminError as exc:
             raise _http(exc) from exc
@@ -407,7 +418,7 @@ async def assign_role(
             assignment_id=view.assignment_id,
             role_id=view.role_id,
             role_name=view.role_name,
-            device_group_id=view.device_group_id,
+            client_id=view.client_id,
         )
 
 
@@ -418,7 +429,7 @@ async def remove_role(
     user_id: UUID,
     assignment_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("users.manage")),
+    ctx: AuthContext = Depends(_MANAGE),
 ) -> Response:
     """Revoke one assignment.
 
@@ -477,7 +488,7 @@ async def disable_user(
     user_id: UUID,
     request: Request,
     # RBAC BEFORE THE SECRET READ -- see `create_user`.
-    ctx: AuthContext = Depends(require_permission("users.manage")),
+    ctx: AuthContext = Depends(_MANAGE),
     config: KeycloakAdminConfig | None = Depends(keycloak_config),
 ) -> UserOut:
     """Stop this account signing in, in Keycloak AND in ITMS.
@@ -497,7 +508,7 @@ async def enable_user(
     user_id: UUID,
     request: Request,
     # RBAC BEFORE THE SECRET READ -- see `create_user`.
-    ctx: AuthContext = Depends(require_permission("users.manage")),
+    ctx: AuthContext = Depends(_MANAGE),
     config: KeycloakAdminConfig | None = Depends(keycloak_config),
 ) -> UserOut:
     """Undo a disable, in both systems. A deleted user is not re-enabled here --
@@ -515,7 +526,7 @@ async def reset_password(
     user_id: UUID,
     request: Request,
     # RBAC BEFORE THE SECRET READ -- see `create_user`.
-    ctx: AuthContext = Depends(require_permission("users.manage")),
+    ctx: AuthContext = Depends(_MANAGE),
     config: KeycloakAdminConfig | None = Depends(keycloak_config),
 ) -> MailResultOut:
     """Ask Keycloak to email this user an `UPDATE_PASSWORD` link.
@@ -543,7 +554,7 @@ async def resend_enrolment(
     user_id: UUID,
     request: Request,
     # RBAC BEFORE THE SECRET READ -- see `create_user`.
-    ctx: AuthContext = Depends(require_permission("users.manage")),
+    ctx: AuthContext = Depends(_MANAGE),
     config: KeycloakAdminConfig | None = Depends(keycloak_config),
 ) -> MailResultOut:
     """Send the first-contact mail again.
@@ -576,7 +587,7 @@ async def delete_user(
     user_id: UUID,
     request: Request,
     # RBAC BEFORE THE SECRET READ -- see `create_user`.
-    ctx: AuthContext = Depends(require_permission("users.manage")),
+    ctx: AuthContext = Depends(_MANAGE),
     config: KeycloakAdminConfig | None = Depends(keycloak_config),
 ) -> Response:
     """Remove the Keycloak identity. The ITMS row is RETAINED, marked `deleted`.

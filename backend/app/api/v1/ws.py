@@ -71,11 +71,13 @@ async def ui_websocket(websocket: WebSocket) -> None:
         return
 
     # ADMISSION, DOOR 2 OF 3 (spec §3.2): the org's email-domain rule, then
-    # `users.status`, read by `read_door_identity` -- tenant-scoped through
-    # `org_session` rather than bolted onto the admin read above (invariant 5
-    # wants the predicate in the database), and outside this route file
-    # because it runs before the person's client scope exists (MSP clients
-    # spec §2.2-2.3).
+    # `users.status` and `users.kind` (a contact never enters the console,
+    # MSP clients spec §1.3), read by `read_door_identity` -- tenant-scoped
+    # through `org_session` rather than bolted onto the admin read above
+    # (invariant 5 wants the predicate in the database), and outside this
+    # route file because it runs before the person's client scope exists
+    # (MSP clients spec §2.2-2.3). `identity.clients` is that scope: every
+    # client the person holds any role in.
     #
     # 4403, NOT 4401, and the distinction is the point: 4401 above means the
     # token is not genuine, 4403 here means it is genuine and the identity is

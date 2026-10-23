@@ -28,6 +28,7 @@ admin carve-out exists in the RLS policy predicate -- see migration `0028` /
 is see their own tickets, same as any other requester.
 """
 
+import dataclasses
 from collections.abc import AsyncIterator, Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
@@ -35,30 +36,47 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
 
-from app.api.deps import auth_context
+from app.api.deps import admit
 from app.core.client_scope import ClientScope
 from app.core.i18n import tr
+from app.core.identity.door import person_scope
 from app.core.logging import bind
-from app.core.rbac import has_permission, user_permission_codes
-from app.core.tenancy import org_session
+
+#: Holding either is what makes somebody a portal user at all (spec §3).
+PORTAL_CODES = ("portal.ticket.read", "portal.ticket.write")
 
 
 @dataclass(frozen=True)
 class PortalContext:
     org_id: UUID
     requester_user_id: UUID
+    # The clients this request may see (MSP clients spec §2.3), pinned by
+    # `portal_session` as its third GUC: a contact's own client, or every
+    # client a technician holds any role in -- narrowed by X-Client-Id, and by
+    # `require_portal_permission(code)` to where the code is held.
     clients: ClientScope
+
+
+async def _holds_within(
+    request: Request, org_id: UUID, user_id: UUID, code: str, within: ClientScope
+) -> ClientScope:
+    """Where, inside `within`, the person holds `code`."""
+    holding = await person_scope(
+        org_id=org_id, user_id=user_id, code=code, engine=request.app.state.app_engine
+    )
+    return within.intersect(holding)
 
 
 async def resolve_portal_principal(request: Request) -> PortalContext:
     """Resolve an authenticated portal principal.
 
-    v1 reuses the OIDC path (`auth_context`), then requires the caller hold
-    A portal permission -- `portal.ticket.read` OR `portal.ticket.write`
-    (spec §3, exactly: "requiring a portal permission (`portal.ticket.read`
-    or `portal.ticket.write`)") -- the minimum bar for being a "portal user"
-    at all; `require_portal_permission` (below) checks the finer-grained code
-    a given route actually needs. M1 fix: an EARLIER version of this check
+    v1 reuses the OIDC path (`app.api.deps.admit`, the same authentication
+    and admission as the console), then requires the caller hold A portal
+    permission -- `portal.ticket.read` OR `portal.ticket.write` (spec §3,
+    exactly: "requiring a portal permission (`portal.ticket.read` or
+    `portal.ticket.write`)") -- the minimum bar for being a "portal user" at
+    all; `require_portal_permission` (below) checks the finer-grained code a
+    given route actually needs. M1 fix: an EARLIER version of this check
     hard-coded `portal.ticket.read` only, so a write-only principal (holding
     `portal.ticket.write` but not `portal.ticket.read`) got a 403 here before
     ever reaching a route -- contradicting spec §3's "or". Harmless in
@@ -68,23 +86,33 @@ async def resolve_portal_principal(request: Request) -> PortalContext:
     therefore no access, which is a clean 403 rather than a 500. Having a row
     is not access; the permission grant is.
 
-    This is the ONE place in this module that uses `org_session` rather than
-    `portal_session`, and it must be: the requester identity IS what this
-    function is still establishing, so `portal_session` -- which requires a
-    requester id up front to pin the GUC -- cannot work here. Every other read
-    or write this module performs, once a `PortalContext` exists, goes through
-    `portal_session`.
+    THE ONE DOOR THAT ADMITS A CONTACT (MSP clients spec §1.3): `admit` is
+    called with `contacts=True`, where the console refuses one. A contact's
+    scope is its own client and nothing else, whatever it holds; a
+    technician's is every client they hold any role in. Either way the portal
+    code must be held INSIDE that scope -- a contact's grant on another client
+    admits nothing here -- and the request then runs narrowed by X-Client-Id.
+
+    This module holds no "every client" scope of its own: the identity and
+    grants are read under it in `admit` and `person_scope`, which is where it
+    is reviewed (`ALL_SCOPE_ALLOWLIST`). Every read or write this module
+    performs once a `PortalContext` exists goes through `portal_session`.
     """
-    ctx = await auth_context(request)
-    async with org_session(
-        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
-    ) as session:
-        codes = await user_permission_codes(session, ctx.user_id)
-    if not (codes & {"portal.ticket.read", "portal.ticket.write"}):
+    person = await admit(request, contacts=True)
+    # The gate asks whether this is a portal user AT ALL, so it reads the
+    # person's own scope, not the header-narrowed one -- exactly as
+    # `require_permission` gates a staff route.
+    for code in PORTAL_CODES:
+        if not (
+            await _holds_within(request, person.org_id, person.user_id, code, person.clients)
+        ).is_empty:
+            break
+    else:
         raise HTTPException(status.HTTP_403_FORBIDDEN, tr("not a portal user"))
-    # Task 4 replaces this with the person's scope.
     return PortalContext(
-        org_id=ctx.org_id, requester_user_id=ctx.user_id, clients=ClientScope.all()
+        org_id=person.org_id,
+        requester_user_id=person.user_id,
+        clients=person.clients.narrow(person.requested_client),
     )
 
 
@@ -95,7 +123,7 @@ async def bound_portal_principal(request: Request) -> AsyncIterator[PortalContex
     THE GAP THIS CLOSES. `app.api.deps.bound_auth_context` gave every staff
     route its correlation ids, and a sweep there stops a new staff route from
     losing them again. The portal escaped both nets. `resolve_portal_principal`
-    above awaits `auth_context` DIRECTLY rather than through `Depends` -- it
+    above awaits `admit` DIRECTLY rather than through `Depends` -- it
     must, since it is still establishing the identity `portal_session` needs --
     so it never matched the staff sweep's pattern (a `Depends` on the bare
     staff dependency, spelled out in `tests/test_bound_auth_context.py`), and
@@ -115,7 +143,7 @@ async def bound_portal_principal(request: Request) -> AsyncIterator[PortalContex
     `bound_auth_context`'s docstring gives: everything from the yield until
     FastAPI closes this generator runs in the SAME asyncio Task as the
     binding. The request-context middleware's capture cannot use a contextvar
-    and does not -- `auth_context`, reached through the resolver above, has
+    and does not -- `admit`, reached through the resolver above, has
     already stashed `request.state.org_id`/`user_id` for it.
     """
     ctx = await resolve_portal_principal(request)
@@ -148,12 +176,19 @@ def require_portal_permission(code: str) -> Callable[..., Coroutine[Any, Any, Po
         # time this body runs and stays active until FastAPI closes ITS
         # generator -- which happens after this dependency finishes, since
         # this one depends on it.
-        async with org_session(
-            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
-        ) as session:
-            allowed = await has_permission(session, ctx.requester_user_id, code)
-        if not allowed:
+        #
+        # THE ROUTE'S CODE NARROWS THE SCOPE, as `require_permission` does for
+        # a staff route: the request sees only the clients, inside the
+        # principal's own, where `code` is held. Unlike the staff gate, the
+        # code must be held INSIDE that scope -- for a contact, its own client
+        # -- so a contact's grant on some other client opens nothing. (With an
+        # X-Client-Id naming a client where the code is not held, that makes
+        # this a 403 rather than an empty scope; never a wider one.)
+        scope = await _holds_within(
+            request, ctx.org_id, ctx.requester_user_id, code, ctx.clients
+        )
+        if scope.is_empty:
             raise HTTPException(status.HTTP_403_FORBIDDEN, tr("requires {code}", code=code))
-        return ctx
+        return dataclasses.replace(ctx, clients=scope)
 
     return dependency

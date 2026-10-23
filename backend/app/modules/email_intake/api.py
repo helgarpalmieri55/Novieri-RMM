@@ -7,8 +7,10 @@ job type -- like `service_desk`/`notification`/`portal`, it is control-plane
 only (spec §1).
 
 **RBAC (invariant #6, spec §10).** Every route depends on
-`require_permission` DIRECTLY -- reads take `email_intake.read`, every
-mutation AND the connection test take `email_intake.admin`, which is
+`require_permission` -- reads take `email_intake.read` directly, every
+mutation AND the connection test take `email_intake.admin` through
+`require_permission_on_every_client`, which also requires an every-client
+scope (MSP clients spec §2.2: this is global configuration). It is
 high-privilege by design: it sets which mailbox the platform authenticates to
 and which category inbound tickets land in. Completeness is derived from the
 router by `app.core.rbac.route_permission`
@@ -97,7 +99,7 @@ from uuid import UUID
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.modules.email_intake import microsoft, oauth, oauth_app
@@ -126,6 +128,15 @@ from app.modules.email_intake.schema import (
     OAuthCompleteIn,
     OAuthStartOut,
 )
+
+#: `email_intake.admin` with a scope of every client: mailboxes, the OAuth app
+#: and the credentials they write (`oauth.complete`, the refresh-token
+#: rotation) are Novieri-global configuration carrying no client (MSP clients
+#: spec §1.4, §2.2), so a technician whose grants are per client, or whose
+#: request X-Client-Id narrowed, is refused before anything is read or
+#: written. Reads (`email_intake.read`) stay open to any scope.
+_ADMIN = require_permission_on_every_client("email_intake.admin")
+
 
 router = APIRouter(tags=["email-intake"])
 
@@ -236,7 +247,7 @@ async def list_mailboxes_route(
 async def create_mailbox_route(
     body: MailboxCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("email_intake.admin")),
+    ctx: AuthContext = Depends(_ADMIN),
 ) -> MailboxOut:
     state = request.app.state
     try:
@@ -278,7 +289,7 @@ async def update_mailbox_route(
     mailbox_id: UUID,
     body: MailboxUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("email_intake.admin")),
+    ctx: AuthContext = Depends(_ADMIN),
 ) -> MailboxOut:
     state = request.app.state
     try:
@@ -298,7 +309,7 @@ async def update_mailbox_route(
 async def delete_mailbox_route(
     mailbox_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("email_intake.admin")),
+    ctx: AuthContext = Depends(_ADMIN),
 ) -> None:
     """`vault=` is not optional. `delete_mailbox` drops the vault-held secret
     and its `Credential` row in the same transaction as the mailbox; omitting
@@ -322,7 +333,7 @@ async def delete_mailbox_route(
 async def test_mailbox_route(
     mailbox_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("email_intake.admin")),
+    ctx: AuthContext = Depends(_ADMIN),
 ) -> MailboxTestResult:
     """Connect and list the folder. `email_intake.admin`-gated, rate-limited
     per org, audited (`email_intake.mailbox_tested`, written by
@@ -410,7 +421,7 @@ async def read_oauth_app_route(
 async def write_oauth_app_route(
     body: OAuthAppUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("email_intake.admin")),
+    ctx: AuthContext = Depends(_ADMIN),
 ) -> OAuthAppOut:
     if body.client_secret is not None and len(body.client_secret) > MAX_CLIENT_SECRET:
         raise HTTPException(
@@ -447,7 +458,7 @@ def _not_configured(exc: microsoft.MicrosoftNotConfigured) -> HTTPException:
 async def start_oauth_route(
     mailbox_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("email_intake.admin")),
+    ctx: AuthContext = Depends(_ADMIN),
 ) -> OAuthStartOut:
     """Mint a single-use authorization and return where to send the browser.
     A POST: it writes a row and an audit event."""
@@ -473,7 +484,7 @@ async def start_oauth_route(
 async def disconnect_oauth_route(
     mailbox_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("email_intake.admin")),
+    ctx: AuthContext = Depends(_ADMIN),
 ) -> MailboxOut:
     state = request.app.state
     try:
@@ -491,7 +502,7 @@ async def disconnect_oauth_route(
 async def complete_oauth_route(
     body: OAuthCompleteIn,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("email_intake.admin")),
+    ctx: AuthContext = Depends(_ADMIN),
 ) -> MailboxOut:
     """Redeem the code the console received from Microsoft. The caller's own
     token authorises this; `state` is a third check, not the tenant binding."""
@@ -519,7 +530,7 @@ async def complete_oauth_route(
 async def abandon_oauth_route(
     body: OAuthAbandonIn,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("email_intake.admin")),
+    ctx: AuthContext = Depends(_ADMIN),
 ) -> None:
     try:
         async with org_session(

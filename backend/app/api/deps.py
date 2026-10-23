@@ -3,11 +3,19 @@
 Every privileged route depends on require_permission(code), which resolves the
 operator from the bearer token, pins the tenant, and evaluates RBAC inside the
 tenant session — server-side, always.
+
+The same evaluation yields the request's CLIENT SCOPE (MSP clients spec
+§2.1-2.2): the clients where the person holds the route's code, narrowed --
+never widened -- by `X-Client-Id`. `AuthContext.clients` carries it to every
+`org_session`, where RLS enforces it. A contact (`users.kind = 'contact'`) is
+refused here; the portal admits one through `admit(..., contacts=True)`.
 """
 
-from collections.abc import AsyncIterator, Callable
+import dataclasses
+from collections.abc import AsyncIterator, Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
@@ -15,9 +23,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
-from app.core.client_scope import ClientScope
-from app.core.i18n import tr, tr_marked
-from app.core.identity import domain_refusal, log_admission_refusal, status_refusal
+from app.core.client_scope import ClientScope, parse_client_header
+from app.core.i18n import N_, tr, tr_marked
+from app.core.identity import (
+    CONTACT_KIND,
+    contact_refusal,
+    domain_refusal,
+    log_admission_refusal,
+    status_refusal,
+)
+from app.core.identity.door import person_scope
 from app.core.identity.policy import resolve_console_domain
 from app.core.logging import bind
 from app.core.mcp_channel import (
@@ -26,7 +41,7 @@ from app.core.mcp_channel import (
     mcp_call_from_scope,
     mcp_resource,
 )
-from app.core.rbac import has_permission
+from app.core.rbac import clients_holding
 from app.core.security import (
     JwksCache,
     TokenClaims,
@@ -44,7 +59,44 @@ class AuthContext:
     org_id: UUID
     user_id: UUID
     claims: TokenClaims
+    # The request's client scope (MSP clients spec §2.2), already narrowed by
+    # X-Client-Id. `bound_auth_context`: every client the person holds any
+    # role in. `require_permission(code)`: every client they hold `code` in.
+    # Routes pass it to `org_session(..., clients=ctx.clients)`, and RLS does
+    # the rest: a record of a client outside it does not exist for the request.
     clients: ClientScope
+
+
+@dataclass(frozen=True)
+class Admission:
+    """A person door 1 admitted, before the console and the portal part ways.
+
+    `clients` is the person's OWN scope -- a contact's one client (only the
+    portal admits a contact), or every client a technician holds any role in
+    (spec §2.2) -- and `requested_client` the client X-Client-Id names. A
+    door gates on the first and hands the route `clients.narrow(requested)`.
+    """
+
+    org_id: UUID
+    user_id: UUID
+    claims: TokenClaims
+    clients: ClientScope
+    requested_client: UUID | None
+
+
+#: The 403 for global configuration -- an O-table row with no client, which
+#: only an all-clients scope may write (spec §2.2) -- reached with a scope that
+#: is not "every client". Shared by every such route, so it reads the same.
+ALL_CLIENTS_REQUIRED = N_("only a technician with access to every client can do this")
+
+
+def require_all_clients(ctx: AuthContext) -> None:
+    """Refuse a write to Novieri-global configuration unless the request's
+    scope is every client (spec §2.2: "Un técnico limitado puede ver la
+    configuración global, pero no cambiarla"). A request narrowed by
+    X-Client-Id is not every client either, whatever the person holds."""
+    if not ctx.clients.is_all:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, tr_marked(ALL_CLIENTS_REQUIRED))
 
 
 def app_engine(request: Request) -> AsyncEngine:
@@ -74,7 +126,42 @@ def _mcp_call(request: Request) -> McpCall | None:
         ) from exc
 
 
+def requested_client(request: Request) -> UUID | None:
+    """The client `X-Client-Id` names, or None (spec §2.2, §3.1). Anything but
+    one UUID is a 400: the header narrows a scope, so a value that cannot be
+    read is never quietly treated as absent -- that would be the un-narrowed
+    scope the caller asked not to use."""
+    try:
+        return parse_client_header(request.headers.get("X-Client-Id"))
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, tr("X-Client-Id must be one client id")
+        ) from exc
+
+
 async def auth_context(request: Request) -> AuthContext:
+    """Door 1 for the console and MCP: an admitted technician, and the clients
+    they hold any role in, narrowed by X-Client-Id. A contact is refused."""
+    person = await admit(request, contacts=False)
+    # NARROWED, NEVER WIDENED (spec §2.2): `[that client] ∩ allowed`, which is
+    # the empty scope -- zero rows -- for a client outside it.
+    return AuthContext(
+        org_id=person.org_id,
+        user_id=person.user_id,
+        claims=person.claims,
+        clients=person.clients.narrow(person.requested_client),
+    )
+
+
+async def admit(request: Request, *, contacts: bool) -> Admission:
+    """Authenticate the token and admit the person behind it (spec §3.2).
+
+    `contacts` is the one difference between the console and the portal: the
+    console refuses a contact with 403 (spec §1.3), the portal admits one
+    (`app.modules.portal.principal`). Everything else -- the channel, the
+    origin, the org, the domain rule, `users.status`, the self-heal -- is the
+    same door for both.
+    """
     # THE CHANNEL DECIDES THE AUDIENCE (MCP server design §4). A request that
     # came in through `/mcp` carries the scope marker and is validated against
     # the MCP resource ONLY; every other request against `oidc_audience` only.
@@ -146,6 +233,14 @@ async def auth_context(request: Request) -> AuthContext:
     if org_id is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, tr("unknown organization"))
 
+    # Read before the tenant session: a malformed header is the caller's
+    # mistake, answered before anything is read or written on their behalf.
+    requested = requested_client(request)
+
+    # EVERY CLIENT, AND ONLY FOR THIS (spec §2.2, "Resolver quién es el
+    # técnico"): the person's row and grants are read before their scope
+    # exists, because the scope is computed from exactly these rows. The rest
+    # of the request runs under the scope this computes.
     async with org_session(
         org_id, engine=request.app.state.app_engine, clients=ClientScope.all()
     ) as session:
@@ -270,6 +365,23 @@ async def auth_context(request: Request) -> AuthContext:
 
             user.last_login_at = datetime.now(UTC)
             session.add(user)
+
+        # A CONTACT NEVER ENTERS THE CONSOLE (spec §1.3), whatever roles it
+        # holds -- refused before its grants are read. Raised inside this
+        # transaction, so the `last_login_at` above is rolled back with it: a
+        # refused request records no login. A self-healed row is always staff.
+        refusal = None if contacts else contact_refusal(user.kind)
+        if refusal is not None:
+            log_admission_refusal("http", sub=claims.sub, email=claims.email, reason=refusal)
+            raise HTTPException(status.HTTP_403_FORBIDDEN, tr_marked(refusal))
+        if user.kind == CONTACT_KIND:
+            # A contact sees its own client and nothing else; no grant widens
+            # that (a grant is about what it may DO there). A contact with no
+            # client cannot exist (`ck_users_kind_client`); were one to, it
+            # would see nothing rather than fall through to a staff scope.
+            scope = ClientScope.only([] if user.client_id is None else [user.client_id])
+        else:
+            scope = await clients_holding(session, user.id, None)
         user_id = user.id
 
     # Task 3 (error monitoring): stash org_id/user_id on `request.state` --
@@ -296,8 +408,13 @@ async def auth_context(request: Request) -> AuthContext:
     request.state.org_id = str(org_id)
     request.state.user_id = str(user_id)
 
-    # Task 4 replaces this with the person's scope.
-    return AuthContext(org_id=org_id, user_id=user_id, claims=claims, clients=ClientScope.all())
+    return Admission(
+        org_id=org_id,
+        user_id=user_id,
+        claims=claims,
+        clients=scope,
+        requested_client=requested,
+    )
 
 
 async def bound_auth_context(request: Request) -> AsyncIterator[AuthContext]:
@@ -370,12 +487,51 @@ def require_permission(code: str) -> Callable[..., AsyncIterator[AuthContext]]:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, tr("this action is never available to an AI app")
             )
-        async with org_session(
-            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
-        ) as session:
-            allowed = await has_permission(session, ctx.user_id, code)
-        if not allowed:
+        #
+        # THE ROUTE'S CODE DECIDES THE SCOPE (spec §2.1-2.2). Holding `code`
+        # in SOME client passes the gate -- the same rule as an org-wide grant
+        # always was -- and the request then sees only the clients where the
+        # person holds it: technician on X and read-only on Z, a route that
+        # needs `jobs.dispatch` runs with scope [X], and Z's records are a 404
+        # by RLS rather than by a per-record check somebody could forget.
+        # Intersected with `ctx.clients`, which already carries the
+        # X-Client-Id narrowing, so the header narrows this scope too and
+        # nothing here can widen it.
+        holding = await person_scope(
+            org_id=ctx.org_id,
+            user_id=ctx.user_id,
+            code=code,
+            engine=request.app.state.app_engine,
+        )
+        if holding.is_empty:
             raise HTTPException(status.HTTP_403_FORBIDDEN, tr("requires {code}", code=code))
-        yield ctx
+        yield dataclasses.replace(ctx, clients=ctx.clients.intersect(holding))
 
     return dependency
+
+
+def require_permission_on_every_client(
+    code: str,
+) -> Callable[..., Coroutine[Any, Any, AuthContext]]:
+    """`require_permission(code)`, held with a scope of EVERY client.
+
+    For the routes that write Novieri-global configuration (MSP clients spec
+    §1.4: technicians and roles, incoming mail, ...): one row serves every
+    client, so only an all-clients scope may change it (spec §2.2, "un técnico
+    limitado puede ver la configuración global, pero no cambiarla"). Holding
+    `code` on one client passes `require_permission`; it does not pass this.
+    Neither does a request X-Client-Id narrowed, whatever the person holds.
+
+    A DEPENDENCY, not a check in the handler, so the refusal comes before the
+    request body is validated: a per-client technician learns nothing from a
+    422 about a body they could never have sent. `route_permission` still
+    recovers `code`, by walking into `gate` -- the one
+    `require_permission.<locals>.dependency` this wraps.
+    """
+    gate = require_permission(code)
+
+    async def on_every_client(ctx: AuthContext = Depends(gate)) -> AuthContext:
+        require_all_clients(ctx)
+        return ctx
+
+    return on_every_client
