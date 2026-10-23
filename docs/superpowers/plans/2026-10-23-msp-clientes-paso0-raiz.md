@@ -94,4 +94,18 @@ git push -u origin claude/compassionate-bardeen-vgtwus
 
 ## Línea base
 
-Se completa en la Task 2.
+**Hallazgo 1 (2026-10-23): ningún archivo del primer commit era ejecutable.**
+`git ls-tree -r 2e1ff7b` muestra los 3.122 archivos con modo `100644`, así que
+la subida inicial perdió el bit de ejecución. La primera ejecución de la CI
+(run 39981024034) falló en `agent-update-e2e (ubuntu-latest)` con
+`./internal/update/e2e/build.sh: Permission denied`. El propio repo exige ese
+bit (`agent/packaging/packaging_test.go:300-333`).
+
+Se corrige en este mismo PR, en un commit aparte: se marcan como ejecutables
+los 49 archivos versionados que empiezan con `#!`. Es una excepción a la regla
+de la Task 2 de arreglar en un PR aparte, porque esta sesión solo puede
+publicar en la rama `claude/compassionate-bardeen-vgtwus`, y porque sin esta
+corrección ninguna línea base sería útil. Después de la corrección,
+`go test ./packaging/ -run Executable` pasa en local.
+
+El resto de la línea base se completa cuando termine la CI con la corrección.
