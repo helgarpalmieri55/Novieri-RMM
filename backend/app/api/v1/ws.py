@@ -36,14 +36,11 @@ from fastapi import APIRouter, WebSocket
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.client_scope import ClientScope
-from app.core.identity import domain_refusal, log_admission_refusal, status_refusal
-from app.core.identity.policy import resolve_console_domain
+from app.core.identity.door import read_door_identity
 from app.core.security import TokenValidationError, require_console_token, validate_token
-from app.core.tenancy import org_session
 from app.core.ws_auth import AUTH_SUBPROTOCOL, token_from_subprotocols
 from app.gateway.dispatch import ui_channel
-from app.models import Organization, User
+from app.models import Organization
 
 logger = logging.getLogger("its.ui-ws")
 
@@ -73,55 +70,36 @@ async def ui_websocket(websocket: WebSocket) -> None:
         await websocket.close(code=4401)
         return
 
-    # `users.status`. This door never needed the `users` row before -- it
-    # authorizes per-org, not per-permission -- so the lookup is new, and it is
-    # TENANT-SCOPED through `org_session` rather than bolted onto the admin
-    # read above: invariant 5 wants the predicate in the database, and a
-    # BYPASSRLS read keyed on a token-supplied `sub` is exactly the
-    # application-code-only scoping it calls a security bug.
+    # ADMISSION, DOOR 2 OF 3 (spec §3.2): the org's email-domain rule, then
+    # `users.status`, read by `read_door_identity` -- tenant-scoped through
+    # `org_session` rather than bolted onto the admin read above (invariant 5
+    # wants the predicate in the database), and outside this route file
+    # because it runs before the person's client scope exists (MSP clients
+    # spec §2.2-2.3).
     #
-    # A `sub` with NO row is left alone, as it was before this: the HTTP door
-    # self-heals such a user into an active row, so refusing here would
-    # contradict the door next to it for no gain. What this closes is the
-    # disabled user whose row exists and whose token has not yet expired.
-    async with org_session(org_id, engine=state.app_engine, clients=ClientScope.all()) as session:
-        # ADMISSION, DOOR 2 OF 3 (spec §3.2). 4403, NOT 4401, and the
-        # distinction is the point: 4401 above means the token is not genuine,
-        # 4403 here means it is genuine and the identity is not admitted. A
-        # single "refused" code would make a domain lockout indistinguishable
-        # from an expired session on the wire, and the operator debugging a
-        # lockout has only the wire.
-        #
-        # The allowlist is the ORG's setting now (invisible-identity-layer
-        # design §2.2), so it is read here rather than before the org lookup:
-        # inside the tenant session, RLS-scoped, resolved per request so a
-        # console change applies without a restart. Ordering note: a token
-        # naming an unknown org now closes 4401 (above) rather than 4403 — the
-        # org has to exist before its setting can be read, and "we do not know
-        # that tenant" is the more accurate of the two answers anyway.
-        domain_reason = domain_refusal(
-            claims.email, await resolve_console_domain(session, org_id, state.settings)
-        )
-        if domain_reason is not None:
-            log_admission_refusal(
-                "console-ws", sub=claims.sub, email=claims.email, reason=domain_reason
-            )
-            await websocket.close(code=4403)
-            return
-
-        user_status = (
-            await session.execute(
-                select(User.status).where(User.external_subject == claims.sub)
-            )
-        ).scalar_one_or_none()
-    if user_status is not None:
-        status_reason = status_refusal(user_status)
-        if status_reason is not None:
-            log_admission_refusal(
-                "console-ws", sub=claims.sub, email=claims.email, reason=status_reason
-            )
-            await websocket.close(code=4403)
-            return
+    # 4403, NOT 4401, and the distinction is the point: 4401 above means the
+    # token is not genuine, 4403 here means it is genuine and the identity is
+    # not admitted. A single "refused" code would make a domain lockout
+    # indistinguishable from an expired session on the wire, and the operator
+    # debugging a lockout has only the wire. Ordering note: a token naming an
+    # unknown org closes 4401 (above) rather than 4403 -- the org has to exist
+    # before its setting can be read.
+    #
+    # A `sub` with NO row is admitted, as it was before the status check
+    # existed: the HTTP door self-heals such a user into an active row, so
+    # refusing here would contradict the door next to it for no gain. What
+    # this closes is the disabled user whose row exists and whose token has
+    # not yet expired.
+    identity = await read_door_identity(
+        door="console-ws",
+        org_id=org_id,
+        claims=claims,
+        settings=state.settings,
+        engine=state.app_engine,
+    )
+    if identity.refusal is not None:
+        await websocket.close(code=4403)
+        return
 
     # Echoing the selected subprotocol is mandatory: a browser that offered
     # one and got none back fails the handshake and closes the connection.
