@@ -438,6 +438,35 @@ async def test_client_scoped_role_limits_to_that_client(
         assert not await has_permission(session, user_id, "jobs.dispatch", client_id=uuid4())
 
 
+async def test_an_all_clients_grant_counts_when_a_client_is_named(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """A grant with `client_id IS NULL` is every client, including this one.
+
+    THE HALF OF THE RULE THE SCOPED TEST CANNOT SEE. Asking about one client
+    must still count the user's all-clients grants, and a filter written as
+    `scoped_client == client_id` passes every test that asks about no client
+    (None == None) while silently dropping an org-wide technician from every
+    request that names a client -- which is how a per-client console would lock
+    out the very people who administer all of them.
+    """
+    org_id, user_id, _ = await _seed_user_with_role(admin_engine, "technician", "rbac-allcl")
+    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
+        customer = Client(org_id=org_id, name="some-customer")
+        session.add(customer)
+        await session.commit()
+        client_id = customer.id
+    async with org_session(org_id, engine=app_engine) as session:
+        assert await has_permission(session, user_id, "jobs.dispatch", client_id=client_id)
+        assert "jobs.dispatch" in await user_permission_codes(
+            session, user_id, client_id=client_id
+        )
+        # Naming no client, and naming one, give an all-clients grant the same answer.
+        assert await user_permission_codes(session, user_id) <= await user_permission_codes(
+            session, user_id, client_id=client_id
+        )
+
+
 async def test_docs_permission_grants(admin_engine, app_engine) -> None:
     org_id, tech_id, _ = await _seed_user_with_role(admin_engine, "technician", "rbac-docs-t")
     async with org_session(org_id, engine=app_engine) as session:

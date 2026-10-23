@@ -124,7 +124,7 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE FUNCTION its_org_system_clients() RETURNS trigger
-        LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+        LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
         BEGIN
             INSERT INTO clients (id, org_id, name, kind)
                 VALUES (NEW.id, NEW.id, NEW.name, 'internal');

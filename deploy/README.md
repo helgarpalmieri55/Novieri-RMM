@@ -2312,7 +2312,7 @@ the directory holding `docker-compose.yml` and `.env`. First, by hand, set
 : "${PUBLISHER:?set PUBLISHER to the email the account signs in with first}"
 docker compose exec -T -e PGPASSWORD="$(grep '^POSTGRES_ADMIN_PASSWORD=' .env | cut -d= -f2-)" \
   postgres psql -U its_admin -d itsuite -v publisher="$PUBLISHER" <<'SQL'
-INSERT INTO user_roles (id, org_id, user_id, role_id, device_group_id)
+INSERT INTO user_roles (id, org_id, user_id, role_id, client_id)
 SELECT gen_random_uuid(), u.org_id, u.id, r.id, NULL
 FROM users u, roles r
 WHERE u.email = :'publisher' AND r.name = 'super-admin' AND r.org_id IS NULL
@@ -2346,11 +2346,20 @@ fail *after* you have built and are ready to upload:
   tenant, so it takes the user's own `org_id`. `SELECT ..., NULL` for that
   column is `null value in column "org_id" violates not-null constraint`.
 
+`client_id` is the grant's scope, and `NULL` means **every client**, including
+ones created later (migration `0230` replaced the old `device_group_id` column
+with it; a runbook written before then and still using `device_group_id` fails
+with `column "device_group_id" of relation "user_roles" does not exist`).
+`super-admin` is a platform role, so this is the grant you want.
+
 `ON CONFLICT DO NOTHING` is now belt and braces rather than the whole guard:
 migration `0073` added a partial unique index on `(user_id, role_id) WHERE
-device_group_id IS NULL`, so a second run is refused at the database rather
-than producing the duplicated role the console used to render. Keep the clause
-anyway — it turns that refusal into `INSERT 0 0` instead of an error.
+device_group_id IS NULL`, and `0230` rebuilt it as `WHERE client_id IS NULL`,
+so a second run is refused at the database rather than producing the
+duplicated role the console used to render. Keep the clause anyway — it turns
+that refusal into `INSERT 0 0` instead of an error. (It names no conflict
+target, so it matches whichever unique rule the row would break and needs no
+edit when that rule's columns change.)
 
 Sign out and back in afterwards — the permission set is resolved at token issue.
 

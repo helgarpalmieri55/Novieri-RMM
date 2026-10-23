@@ -127,7 +127,7 @@ async def test_clients_and_sites_are_tenant_scoped(admin_engine, app_engine) -> 
     assert client_orgs == {org_a.id}
     assert site_orgs == {org_a.id}
 
-    with pytest.raises(DBAPIError):
+    with pytest.raises(DBAPIError) as refused:
         async with org_session(org_a.id, engine=app_engine) as s:
             await s.execute(
                 text(
@@ -136,3 +136,5 @@ async def test_clients_and_sites_are_tenant_scoped(admin_engine, app_engine) -> 
                 ),
                 {"o": org_b.id},
             )
+    # The refusal is the row-level security policy, not some other error.
+    assert "row-level security" in str(refused.value)
