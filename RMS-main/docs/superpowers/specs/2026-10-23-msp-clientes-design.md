@@ -1,8 +1,8 @@
 # Clientes (modelo MSP) — diseño
 
-**Estado:** aprobado por el operador (Helgar Palmieri, Novieri) el 2026-10-23,
-sección por sección (partes 1 a 4). Pendiente: revisión de este documento
-escrito como un todo.
+**Estado:** aprobado por el operador (Helgar Palmieri, Novieri) el 2026-10-23:
+primero sección por sección (partes 1 a 4) y después este documento escrito
+como un todo, incluidos el paso 0 (§0) y la enmienda 5a a `CLAUDE.md` (§2.7).
 
 Es el **proyecto 1 de 4** del plan acordado el 2026-10-23:
 
@@ -37,8 +37,11 @@ define este documento.
 en la raíz del repositorio. Por eso el PR #1 no mostró ninguna comprobación.
 
 **Decisión:** se mueve el contenido de `RMS-main/` a la raíz del repositorio con
-`git mv`, en un PR propio que no cambia nada más. La carpeta `UI/`, con las
-capturas y el recorrido de Atera, pasa a `docs/design/referencias-atera/`.
+`git mv`, en un commit propio que no cambia ningún contenido, solo rutas. Va en
+el mismo PR que este documento, que solo contiene documentación. La carpeta
+`UI/`, con las capturas y el recorrido de Atera, pasa a
+`docs/design/referencias-atera/`. El plan está en
+`docs/superpowers/plans/2026-10-23-msp-clientes-paso0-raiz.md`.
 
 Mover es mejor que reescribir las rutas de los workflows: `CLAUDE.md`,
 `deploy/README.md`, los scripts de `deploy/scripts/` y los propios workflows
