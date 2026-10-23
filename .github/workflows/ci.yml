@@ -1408,6 +1408,12 @@ jobs:
           fi
           if [ -n "$base" ]; then
             git worktree add --detach "$RUNNER_TEMP/base" "$base"
+            # A base commit from before the project moved to the repository
+            # root (2026-10-23) has no agent/ here to build.
+            if [ ! -d "$RUNNER_TEMP/base/agent" ]; then
+              echo "base commit has no agent/ at the root; sizes of this commit only"
+              base=""
+            fi
           fi
           for goos in linux windows; do
             ext=""; [ "$goos" = windows ] && ext=".exe"
