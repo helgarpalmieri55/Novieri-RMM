@@ -13,14 +13,14 @@ from app.core.rbac import (
     user_permission_codes,
 )
 from app.core.tenancy import org_session
-from app.models import DeviceGroup, Organization, Permission, Role, RolePermission, User, UserRole
+from app.models import Client, Organization, Permission, Role, RolePermission, User, UserRole
 
 
 async def _seed_user_with_role(
     admin_engine: AsyncEngine,
     role_name: str,
     slug_prefix: str,
-    device_group: bool = False,
+    client: bool = False,
 ) -> tuple[UUID, UUID, UUID | None]:
     slug = f"{slug_prefix}-{uuid4().hex[:6]}"
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
@@ -32,18 +32,16 @@ async def _seed_user_with_role(
         role = (
             await session.execute(select(Role).where(Role.name == role_name, Role.org_id.is_(None)))
         ).scalar_one()
-        group_id: UUID | None = None
-        if device_group:
-            group = DeviceGroup(org_id=org.id, name="helpdesk-fleet")
-            session.add(group)
+        client_id: UUID | None = None
+        if client:
+            customer = Client(org_id=org.id, name="helpdesk-customer")
+            session.add(customer)
             await session.flush()
-            group_id = group.id
+            client_id = customer.id
         await session.flush()
-        session.add(
-            UserRole(org_id=org.id, user_id=user.id, role_id=role.id, device_group_id=group_id)
-        )
+        session.add(UserRole(org_id=org.id, user_id=user.id, role_id=role.id, client_id=client_id))
         await session.commit()
-        return org.id, user.id, group_id
+        return org.id, user.id, client_id
 
 
 async def test_permission_registry_complete() -> None:
@@ -425,21 +423,19 @@ async def test_user_without_roles_has_nothing(
         assert not await has_permission(session, user_id, "devices.read")
 
 
-async def test_group_scoped_role_limits_to_that_group(
+async def test_client_scoped_role_limits_to_that_client(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
-    org_id, user_id, group_id = await _seed_user_with_role(
-        admin_engine, "technician", "rbac-scope", device_group=True
+    org_id, user_id, client_id = await _seed_user_with_role(
+        admin_engine, "technician", "rbac-scope", client=True
     )
-    assert group_id is not None
+    assert client_id is not None
     async with org_session(org_id, engine=app_engine) as session:
-        # granted within the scoped group
-        assert await has_permission(session, user_id, "jobs.dispatch", device_group_id=group_id)
-        # not granted org-wide, nor for a different group
+        # granted within the scoped client
+        assert await has_permission(session, user_id, "jobs.dispatch", client_id=client_id)
+        # not granted for every client, nor for a different client
         assert not await has_permission(session, user_id, "jobs.dispatch")
-        assert not await has_permission(
-            session, user_id, "jobs.dispatch", device_group_id=uuid4()
-        )
+        assert not await has_permission(session, user_id, "jobs.dispatch", client_id=uuid4())
 
 
 async def test_docs_permission_grants(admin_engine, app_engine) -> None:

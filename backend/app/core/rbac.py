@@ -1,9 +1,9 @@
 """Server-side RBAC. Authorization is evaluated here, inside the tenant session,
 on every privileged endpoint and job dispatch — the frontend never gates security.
 
-Grant semantics: a user_roles row with device_group_id NULL grants the role's
-permissions org-wide; a row with a device_group_id grants them only for that
-device group.
+Grant semantics (MSP clients spec §2.1): a user_roles row with client_id NULL
+grants the role's permissions for every client, including ones created later; a
+row with a client_id grants them only for that client.
 """
 
 from collections.abc import Iterator
@@ -411,23 +411,22 @@ PLATFORM_OPERATOR_CODES: frozenset[str] = frozenset(
 
 
 async def user_permission_codes(
-    session: AsyncSession, user_id: UUID, *, device_group_id: UUID | None = None
+    session: AsyncSession, user_id: UUID, *, client_id: UUID | None = None
 ) -> set[str]:
-    """Permission codes granted to the user: org-wide grants always count; group-
-    scoped grants count only when asking about that same device group."""
+    """Permission codes granted to the user: all-clients grants always count; a
+    client grant counts only when asking about that same client (MSP clients
+    spec §2.1)."""
     rows = (
         await session.execute(
-            select(Permission.code, UserRole.device_group_id)
+            select(Permission.code, UserRole.client_id)
             .join(RolePermission, RolePermission.permission_id == Permission.id)
             .join(UserRole, UserRole.role_id == RolePermission.role_id)
             .where(UserRole.user_id == user_id)
         )
     ).all()
     granted: set[str] = set()
-    for code, scoped_group in rows:
-        if scoped_group is None or (
-            device_group_id is not None and scoped_group == device_group_id
-        ):
+    for code, scoped_client in rows:
+        if scoped_client is None or (client_id is not None and scoped_client == client_id):
             granted.add(code)
     return granted
 
@@ -459,13 +458,13 @@ async def has_permission(
     user_id: UUID,
     code: str,
     *,
-    device_group_id: UUID | None = None,
+    client_id: UUID | None = None,
 ) -> bool:
     if code not in PERMISSIONS:
         raise ValueError(  # i18n-exempt: programmer error, unhandled 500
             f"unknown permission code {code!r}"
         )
-    return code in await user_permission_codes(session, user_id, device_group_id=device_group_id)
+    return code in await user_permission_codes(session, user_id, client_id=client_id)
 
 
 def _walk_dependant(dependant: Any) -> Iterator[Any]:
