@@ -18,6 +18,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, License, Organization, User, Vendor
 from app.modules.subscriptions.errors import (
@@ -113,7 +114,7 @@ def _create_kwargs(**overrides: Any) -> dict[str, Any]:
 async def _audit_actions(
     app_engine: AsyncEngine, org_id: UUID, target_type: str, target_id: UUID
 ) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -132,7 +133,7 @@ async def _audit_meta(
     app_engine: AsyncEngine, org_id: UUID, target_type: str, target_id: UUID, action: str
 ) -> dict[str, Any]:
     """The `meta` payload of the single audit row for `action` on this target."""
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -160,7 +161,7 @@ async def test_create_subscription_records_created_event_and_audits(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s, org_id=org_id, actor_id=actor_id, **_create_kwargs()
         )
@@ -169,7 +170,7 @@ async def test_create_subscription_records_created_event_and_audits(
 
     assert sub.service_name == "Acme SaaS"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = await list_events(s, org_id, sub_id)
         assert len(events) == 1
         assert events[0].type == "created"
@@ -178,7 +179,7 @@ async def test_create_subscription_records_created_event_and_audits(
     actions = await _audit_actions(app_engine, org_id, "subscription", sub_id)
     assert actions == ["subscription.created"]
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_subscription(s, org_id, sub_id)
         assert fetched is not None
         assert fetched.id == sub_id
@@ -192,7 +193,7 @@ async def test_create_subscription_invalid_billing_cycle_raises_validation_error
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError):
             await create_subscription(
                 s,
@@ -207,7 +208,7 @@ async def test_create_subscription_invalid_status_raises_validation_error(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError):
             await create_subscription(
                 s,
@@ -224,7 +225,7 @@ async def test_create_subscription_cross_org_vendor_raises_validation_error(
     org_b, actor_b = await _org_with_user(admin_engine)
     vendor_b = await _vendor(admin_engine, org_b, actor_b)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError):
             await create_subscription(
                 s,
@@ -240,7 +241,7 @@ async def test_create_subscription_cross_org_owner_user_raises_validation_error(
     org_a, actor_a = await _org_with_user(admin_engine)
     org_b, actor_b = await _org_with_user(admin_engine)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError):
             await create_subscription(
                 s,
@@ -257,7 +258,7 @@ async def test_create_subscription_cross_org_license_ref_raises_validation_error
     org_b, actor_b = await _org_with_user(admin_engine)
     license_b = await _license(admin_engine, org_b, actor_b)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError):
             await create_subscription(
                 s,
@@ -273,7 +274,7 @@ async def test_create_subscription_valid_license_ref_succeeds(
     org_id, actor_id = await _org_with_user(admin_engine)
     license_id = await _license(admin_engine, org_id, actor_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s,
             org_id=org_id,
@@ -386,14 +387,14 @@ async def test_update_subscription_cost_change_records_price_change_event(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s, org_id=org_id, actor_id=actor_id, **_create_kwargs(cost_per_cycle=Decimal("100.00"))
         )
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         updated = await update_subscription(
             s,
             org_id=org_id,
@@ -404,7 +405,7 @@ async def test_update_subscription_cost_change_records_price_change_event(
         await s.commit()
         assert updated.cost_per_cycle == Decimal("150.00")
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = await list_events(s, org_id, sub_id)
         types = [e.type for e in events]
         assert types == ["created", "price_change"]
@@ -420,14 +421,14 @@ async def test_update_subscription_unchanged_field_records_no_extra_event(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s, org_id=org_id, actor_id=actor_id, **_create_kwargs(cost_per_cycle=Decimal("100.00"))
         )
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await update_subscription(
             s,
             org_id=org_id,
@@ -438,7 +439,7 @@ async def test_update_subscription_unchanged_field_records_no_extra_event(
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = await list_events(s, org_id, sub_id)
         types = [e.type for e in events]
         assert types == ["created"]
@@ -449,20 +450,20 @@ async def test_update_subscription_seats_change_records_seat_change_event(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s, org_id=org_id, actor_id=actor_id, **_create_kwargs(seats=10)
         )
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await update_subscription(
             s, org_id=org_id, actor_id=actor_id, sub_id=sub_id, seats=15
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = await list_events(s, org_id, sub_id)
         types = [e.type for e in events]
         assert types == ["created", "seat_change"]
@@ -474,20 +475,20 @@ async def test_update_subscription_plan_change_records_plan_change_event(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s, org_id=org_id, actor_id=actor_id, **_create_kwargs(plan="Pro")
         )
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await update_subscription(
             s, org_id=org_id, actor_id=actor_id, sub_id=sub_id, plan="Enterprise"
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = await list_events(s, org_id, sub_id)
         types = [e.type for e in events]
         assert types == ["created", "plan_change"]
@@ -499,7 +500,7 @@ async def test_update_subscription_missing_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionNotFoundError):
             await update_subscription(
                 s, org_id=org_id, actor_id=actor_id, sub_id=uuid4(), service_name="x"
@@ -511,12 +512,12 @@ async def test_update_subscription_invalid_billing_cycle_raises_validation_error
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(s, org_id=org_id, actor_id=actor_id, **_create_kwargs())
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError):
             await update_subscription(
                 s, org_id=org_id, actor_id=actor_id, sub_id=sub_id, billing_cycle="biweekly"
@@ -528,12 +529,12 @@ async def test_update_subscription_invalid_status_raises_validation_error(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(s, org_id=org_id, actor_id=actor_id, **_create_kwargs())
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError):
             await update_subscription(
                 s, org_id=org_id, actor_id=actor_id, sub_id=sub_id, status="expired"
@@ -547,12 +548,12 @@ async def test_update_subscription_cross_org_vendor_raises_validation_error(
     org_b, actor_b = await _org_with_user(admin_engine)
     vendor_b = await _vendor(admin_engine, org_b, actor_b)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(s, org_id=org_a, actor_id=actor_a, **_create_kwargs())
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError):
             await update_subscription(
                 s, org_id=org_a, actor_id=actor_a, sub_id=sub_id, vendor_id=vendor_b
@@ -565,12 +566,12 @@ async def test_update_subscription_cross_org_owner_user_raises_validation_error(
     org_a, actor_a = await _org_with_user(admin_engine)
     org_b, actor_b = await _org_with_user(admin_engine)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(s, org_id=org_a, actor_id=actor_a, **_create_kwargs())
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError):
             await update_subscription(
                 s, org_id=org_a, actor_id=actor_a, sub_id=sub_id, owner_user_id=actor_b
@@ -584,12 +585,12 @@ async def test_update_subscription_cross_org_license_ref_raises_validation_error
     org_b, actor_b = await _org_with_user(admin_engine)
     license_b = await _license(admin_engine, org_b, actor_b)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(s, org_id=org_a, actor_id=actor_a, **_create_kwargs())
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError):
             await update_subscription(
                 s, org_id=org_a, actor_id=actor_a, sub_id=sub_id, license_ref=license_b
@@ -609,7 +610,7 @@ async def test_update_subscription_explicit_null_clears_nullable_field(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s,
             org_id=org_id,
@@ -619,14 +620,14 @@ async def test_update_subscription_explicit_null_clears_nullable_field(
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         updated = await update_subscription(
             s, org_id=org_id, actor_id=actor_id, sub_id=sub_id, renews_at=None
         )
         await s.commit()
         assert updated.renews_at is None
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_subscription(s, org_id, sub_id)
         assert fetched is not None
         assert fetched.renews_at is None
@@ -643,7 +644,7 @@ async def test_update_subscription_explicit_null_clears_every_nullable_column(
     vendor_id = await _vendor(admin_engine, org_id, actor_id)
     license_id = await _license(admin_engine, org_id, actor_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s,
             org_id=org_id,
@@ -660,7 +661,7 @@ async def test_update_subscription_explicit_null_clears_every_nullable_column(
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await update_subscription(
             s,
             org_id=org_id,
@@ -675,7 +676,7 @@ async def test_update_subscription_explicit_null_clears_every_nullable_column(
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_subscription(s, org_id, sub_id)
         assert fetched is not None
         assert fetched.vendor_id is None
@@ -708,12 +709,12 @@ async def test_update_subscription_explicit_null_on_non_nullable_raises_validati
     never an `IntegrityError` surfacing as a 500."""
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(s, org_id=org_id, actor_id=actor_id, **_create_kwargs())
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError):
             await update_subscription(
                 s, org_id=org_id, actor_id=actor_id, sub_id=sub_id, **{field: sentinel}
@@ -725,7 +726,7 @@ async def test_update_subscription_omitted_field_is_untouched(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s,
             org_id=org_id,
@@ -735,13 +736,13 @@ async def test_update_subscription_omitted_field_is_untouched(
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await update_subscription(
             s, org_id=org_id, actor_id=actor_id, sub_id=sub_id, plan="Enterprise"
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_subscription(s, org_id, sub_id)
         assert fetched is not None
         assert fetched.plan == "Enterprise"
@@ -760,12 +761,12 @@ async def test_update_subscription_audit_metadata_lists_changed_field_names(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(s, org_id=org_id, actor_id=actor_id, **_create_kwargs())
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await update_subscription(
             s,
             org_id=org_id,
@@ -791,14 +792,14 @@ async def test_update_subscription_audit_metadata_records_a_cleared_field(
     """A field cleared to `null` is a real change and must appear by name."""
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s, org_id=org_id, actor_id=actor_id, **_create_kwargs(renews_at=date(2026, 6, 1))
         )
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await update_subscription(
             s, org_id=org_id, actor_id=actor_id, sub_id=sub_id, renews_at=None
         )
@@ -815,14 +816,14 @@ async def test_update_subscription_audit_metadata_empty_when_nothing_changed(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s, org_id=org_id, actor_id=actor_id, **_create_kwargs(plan="Pro")
         )
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await update_subscription(
             s, org_id=org_id, actor_id=actor_id, sub_id=sub_id, plan="Pro"
         )
@@ -846,14 +847,14 @@ async def test_update_subscription_seats_below_active_count_raises_validation_er
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s, org_id=org_id, actor_id=actor_id, **_create_kwargs(seats=7)
         )
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         for n in range(7):
             await assign_seat(
                 s,
@@ -865,13 +866,13 @@ async def test_update_subscription_seats_below_active_count_raises_validation_er
             )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError):
             await update_subscription(
                 s, org_id=org_id, actor_id=actor_id, sub_id=sub_id, seats=2
             )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_subscription(s, org_id, sub_id)
         assert fetched is not None
         assert fetched.seats == 7
@@ -883,14 +884,14 @@ async def test_update_subscription_seats_down_to_active_count_is_allowed(
     """The floor is inclusive: reducing to exactly the active count is fine."""
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s, org_id=org_id, actor_id=actor_id, **_create_kwargs(seats=5)
         )
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         for n in range(2):
             await assign_seat(
                 s,
@@ -902,7 +903,7 @@ async def test_update_subscription_seats_down_to_active_count_is_allowed(
             )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         updated = await update_subscription(
             s, org_id=org_id, actor_id=actor_id, sub_id=sub_id, seats=2
         )
@@ -916,14 +917,14 @@ async def test_update_subscription_seats_reduction_ignores_released_seats(
     """Only ACTIVE (unreleased) assignments set the floor."""
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s, org_id=org_id, actor_id=actor_id, **_create_kwargs(seats=5)
         )
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         seat = await assign_seat(
             s,
             org_id=org_id,
@@ -935,11 +936,11 @@ async def test_update_subscription_seats_reduction_ignores_released_seats(
         await s.commit()
         seat_id = seat.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await release_seat(s, org_id=org_id, actor_id=actor_id, assignment_id=seat_id)
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         updated = await update_subscription(
             s, org_id=org_id, actor_id=actor_id, sub_id=sub_id, seats=0
         )
@@ -957,14 +958,14 @@ async def test_get_list_events_write_no_audit(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(s, org_id=org_id, actor_id=actor_id, **_create_kwargs())
         await s.commit()
         sub_id = sub.id
 
     before = await _audit_actions(app_engine, org_id, "subscription", sub_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await get_subscription(s, org_id, sub_id)
         await list_subscriptions(s, org_id)
         await list_events(s, org_id, sub_id)
@@ -977,7 +978,7 @@ async def test_get_subscription_missing_returns_none(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _actor_id = await _org_with_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await get_subscription(s, org_id, uuid4())
         assert result is None
 
@@ -988,12 +989,12 @@ async def test_another_orgs_subscription_is_hidden_by_rls(
     org_a, actor_a = await _org_with_user(admin_engine)
     org_b, actor_b = await _org_with_user(admin_engine)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(s, org_id=org_a, actor_id=actor_a, **_create_kwargs())
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_subscription(s, org_b, sub_id)
         assert fetched is None
 

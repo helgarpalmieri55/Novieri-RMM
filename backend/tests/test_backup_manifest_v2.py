@@ -19,6 +19,7 @@ from moto import mock_aws
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
@@ -89,7 +90,7 @@ async def _v2_point(app_engine: AsyncEngine, store: ObjectStore, org: Any,
     }
     ref = await store.put_backup_object(org.org_id, org.repository_id,
                                         f"manifests/{uuid4().hex}", await _seal_doc(org, doc))
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         run = BackupRun(org_id=org.org_id, device_id=org.device_id,
                         repository_id=org.repository_id, state="success", actor_type="system")
         session.add(run)
@@ -112,7 +113,7 @@ async def test_gc_keeps_every_v2_page_and_deletes_only_the_orphan(
     _point, ids = await _v2_point(app_engine, aws, org)
     orphan = await _put(aws, org, b"nothing references me")
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         deleted = await gc_repository(session, aws, vault, org_id=org.org_id,
                                       repository_id=org.repository_id, now=datetime.now(UTC))
 
@@ -129,13 +130,13 @@ async def test_verification_checks_v2_pages_and_the_chunks_they_list(
     vault = LocalVaultService(tmp_path / "k")
     org = await seed_org(admin_engine, app_engine, vault, "v2ver")
     point_id, ids = await _v2_point(app_engine, aws, org)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await verify_point(session, aws, vault, org_id=org.org_id,
                                   backup_point_id=point_id, now=datetime.now(UTC))
     # Every data chunk is checked, including those listed only in an id page.
     big_chunk = sorted(ids["data"])[0]
     await aws.delete_backup_chunk(org.org_id, org.repository_id, big_chunk)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert not await verify_point(session, aws, vault, org_id=org.org_id,
                                       backup_point_id=point_id, now=datetime.now(UTC))
 
@@ -146,7 +147,7 @@ async def test_browse_flattens_v2_pages_into_entries(
     vault = LocalVaultService(tmp_path / "k")
     org = await seed_org(admin_engine, app_engine, vault, "v2br")
     point_id, _ids = await _v2_point(app_engine, aws, org)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         manifest = await browse_manifest(session, aws, vault, org_id=org.org_id,
                                          backup_point_id=point_id)
     by_path = {e.path: e for e in manifest.streams[0].entries}
@@ -160,7 +161,7 @@ async def test_an_unknown_schema_version_refuses_rather_than_guessing(
     vault = LocalVaultService(tmp_path / "k")
     org = await seed_org(admin_engine, app_engine, vault, "v2unk")
     _point, ids = await _v2_point(app_engine, aws, org, schema_version=3)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(ManifestError):
             await gc_repository(session, aws, vault, org_id=org.org_id,
                                 repository_id=org.repository_id, now=datetime.now(UTC))
@@ -201,13 +202,15 @@ async def test_replication_copies_v2_pages_and_the_tool_restores_them(
     await add_proven_key(app_engine, org)
     target_id = await add_target(app_engine, vault, org)
     point_id, ids = await _v2_point(app_engine, aws, org)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         (item,) = await pending_copies(session, org.org_id)
     assert await replicate_point(
-        lambda: org_session(org.org_id, engine=app_engine), vault=vault, local_store=aws,
+        lambda: org_session(
+            org.org_id, engine=app_engine, clients=ClientScope.all()
+        ), vault=vault, local_store=aws,
         client_factory=moto_client_factory, item=item, org_id=org.org_id, now=datetime.now(UTC),
     )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         copied = set((await session.execute(select(BackupChunkCopy.chunk_id).where(
             BackupChunkCopy.target_id == target_id))).scalars().all())
     assert copied == ids["pages"] | ids["data"]

@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import portal_session
 from app.models import Ticket, User
@@ -87,7 +88,9 @@ async def test_a_staff_reason_never_reaches_the_portal_detail_response(
                 reason=staff_reason,
             )
 
-    async with portal_session(org_id, mine.requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, mine.requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         detail = await get_my_ticket(
             s, org_id=org_id, requester_id=mine.requester_id, ticket_id=mine.id
         )
@@ -111,7 +114,9 @@ async def test_a_ticket_that_is_not_mine_is_not_found(api_env, portal_engine, a_
     theirs = await a_ticket_for(org_id, "them")
     me = await a_ticket_for(org_id, "me")
 
-    async with portal_session(org_id, me.requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, me.requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         with pytest.raises(PortalNotFoundError):
             await get_my_ticket(s, org_id=org_id, requester_id=me.requester_id, ticket_id=theirs.id)
 
@@ -128,7 +133,9 @@ async def test_an_absent_ticket_raises_the_identical_error_as_not_mine(
     me = await a_ticket_for(org_id, "me")
     nonexistent_id = uuid4()
 
-    async with portal_session(org_id, me.requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, me.requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         with pytest.raises(PortalNotFoundError) as not_mine:
             await get_my_ticket(s, org_id=org_id, requester_id=me.requester_id, ticket_id=theirs.id)
         with pytest.raises(PortalNotFoundError) as absent:
@@ -153,7 +160,9 @@ async def test_internal_notes_are_absent_from_the_thread(
     await add_comment_as_staff(mine, body="visible to you", internal=False)
     await add_comment_as_staff(mine, body="STAFF ONLY do not disclose", internal=True)
 
-    async with portal_session(org_id, mine.requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, mine.requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         detail = await get_my_ticket(
             s, org_id=org_id, requester_id=mine.requester_id, ticket_id=mine.id
         )
@@ -171,7 +180,9 @@ async def test_list_my_tickets_excludes_another_requesters_ticket(
     mine = await a_ticket_for(org_id, "me")
     theirs = await a_ticket_for(org_id, "them")
 
-    async with portal_session(org_id, mine.requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, mine.requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         summaries = await list_my_tickets(s, org_id=org_id, requester_id=mine.requester_id)
 
     ids = {t.id for t in summaries}
@@ -221,7 +232,9 @@ async def test_creating_a_ticket_forces_me_as_requester(api_env, portal_engine) 
             )
         category_id = category.id
 
-    async with portal_session(org_id, requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         detail = await create_my_ticket(
             s,
             org_id=org_id,
@@ -244,7 +257,9 @@ async def test_add_my_comment_appears_in_the_thread_as_public(
     org_id = await api_env.create_org("portal-comment")
     mine = await a_ticket_for(org_id, "me")
 
-    async with portal_session(org_id, mine.requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, mine.requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         out = await add_my_comment(
             s,
             org_id=org_id,
@@ -270,7 +285,9 @@ async def test_add_my_comment_on_someone_elses_ticket_is_not_found(
     theirs = await a_ticket_for(org_id, "them")
     me = await a_ticket_for(org_id, "me")
 
-    async with portal_session(org_id, me.requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, me.requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         with pytest.raises(PortalNotFoundError):
             await add_my_comment(
                 s,
@@ -344,7 +361,9 @@ async def test_get_my_ticket_lists_only_the_requesters_own_attachments(
                 store=store,
             )
 
-    async with portal_session(org_id, mine.requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, mine.requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         my_attachment = await add_my_attachment(
             s,
             org_id=org_id,
@@ -377,7 +396,9 @@ async def test_add_my_attachment_succeeds_natively_under_portal_session(
     org_id = await api_env.create_org("portal-attachment")
     mine = await a_ticket_for(org_id, "me")
 
-    async with portal_session(org_id, mine.requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, mine.requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         out = await add_my_attachment(
             s,
             org_id=org_id,
@@ -420,7 +441,9 @@ async def test_the_three_write_paths_all_run_on_one_portal_session_connection(
             )
         category_id = category.id
 
-    async with portal_session(org_id, requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         detail = await create_my_ticket(
             s,
             org_id=org_id,
@@ -460,7 +483,9 @@ async def test_a_requester_sees_only_their_own_user_row(
     me = await a_ticket_for(org_id, "me")
     them = await a_ticket_for(org_id, "them")
 
-    async with portal_session(org_id, me.requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, me.requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         rows = (await s.execute(select(User))).scalars().all()
 
     visible_ids = {row.id for row in rows}
@@ -485,7 +510,9 @@ async def test_cross_requester_write_is_refused_by_the_database(
     mine = await a_ticket_for(org_id, "me")
     them = await a_ticket_for(org_id, "them")
 
-    async with portal_session(org_id, them.requester_id, engine=portal_engine) as s:
+    async with portal_session(
+        org_id, them.requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as s:
         with pytest.raises(TicketNotFoundError):
             await sd_threads.add_comment(
                 s,
@@ -516,7 +543,9 @@ async def test_cross_requester_status_history_insert_is_refused_by_the_database(
     them = await a_ticket_for(org_id, "them")
 
     with pytest.raises(ProgrammingError, match="row-level security policy"):
-        async with portal_session(org_id, them.requester_id, engine=portal_engine) as s:
+        async with portal_session(
+            org_id, them.requester_id, engine=portal_engine, clients=ClientScope.all()
+        ) as s:
             s.add(
                 TicketStatusHistory(
                     org_id=org_id,

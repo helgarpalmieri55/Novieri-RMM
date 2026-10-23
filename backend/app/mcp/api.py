@@ -404,7 +404,9 @@ async def get_connections(
 ) -> McpConnectionsOut:
     """This organization's AI connections: the switch, the address to give an
     AI app, and the apps that called tools here in the last 90 days."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         org_settings = (
             await session.execute(
                 select(Organization.settings).where(Organization.id == ctx.org_id)
@@ -448,7 +450,9 @@ async def revoke_connection(
                 client_id=client_id,
             ),
         )
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         # The route is gated on `mcp.use`, which "me" needs; "everyone" also
         # needs `orgs.manage`. Refused before anything is written.
         if body.scope == "everyone" and not await has_permission(
@@ -488,7 +492,9 @@ async def _record_incomplete(
     500 that reads as "nothing happened". The response still carries the
     failure count, and the WARNING says which org and app went unrecorded."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await audit_service.record(
                 session,
                 org_id=ctx.org_id,

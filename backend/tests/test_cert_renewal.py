@@ -40,6 +40,7 @@ from cryptography.x509.oid import NameOID
 from sqlalchemy import select, update
 
 from app.core.ca import AGENT_CERT_TTL_DAYS, LocalCA
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer, verify_signature
 from app.core.tenancy import org_session
 from app.gateway.main import GatewayServer
@@ -127,7 +128,7 @@ async def set_not_after(app_engine, org_id: UUID, device_id: UUID, *, days_left:
     rotation (§0.6), and forging a short-lived certificate instead would be
     testing the TLS stack rather than the state machine.
     """
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await session.execute(
             update(Agent)
             .where(Agent.device_id == device_id)
@@ -136,14 +137,14 @@ async def set_not_after(app_engine, org_id: UUID, device_id: UUID, *, days_left:
 
 
 async def agent_row(app_engine, org_id: UUID, device_id: UUID) -> Agent:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return (
             await session.execute(select(Agent).where(Agent.device_id == device_id))
         ).scalar_one()
 
 
 async def audit_actions(app_engine, org_id: UUID) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return list(
             (
                 await session.execute(
@@ -156,7 +157,7 @@ async def audit_actions(app_engine, org_id: UUID) -> list[str]:
 
 
 async def audit_metadata(app_engine, org_id: UUID, action: str) -> dict:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return (
             await session.execute(
                 select(AuditEvent.meta)
@@ -179,7 +180,7 @@ def ca_for(api_env):
 
 async def step(api_env, engine_for, ca_for, org_id: UUID, device_id: UUID) -> Job | None:
     """One pass of the state machine, in its own transaction."""
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         agent = (
             await session.execute(select(Agent).where(Agent.device_id == device_id))
         ).scalar_one()
@@ -188,10 +189,10 @@ async def step(api_env, engine_for, ca_for, org_id: UUID, device_id: UUID) -> Jo
 
 async def complete_job(api_env, engine_for, org_id: UUID, job_id: UUID, result: dict) -> Job:
     """Drive a job to succeeded through the engine, running its result handler."""
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         await engine_for.complete(session, job, state="succeeded", result=result)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         return (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
 
 
@@ -353,13 +354,13 @@ async def test_a_revoked_agent_is_never_issued_a_fresh_certificate(
     enrolled = await enroll_device(api_env)
     org_id, device_id = enrolled["org_id"], UUID(enrolled["device_id"])
     await set_not_after(api_env.app_engine, org_id, device_id, days_left=100)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await session.execute(
             update(Agent).where(Agent.device_id == device_id).values(cert_revoked=True)
         )
 
     assert await step(api_env, engine_for, ca_for, org_id, device_id) is None
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         jobs = list((await session.execute(select(Job))).scalars().all())
     assert jobs == []
 
@@ -383,7 +384,7 @@ async def test_a_failed_install_consumes_the_csr_and_a_fresh_one_is_requested(
     await complete_job(api_env, engine_for, org_id, renew.id, {"csr_pem": csr_pem})
     install = await step(api_env, engine_for, ca_for, org_id, device_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == install.id))).scalar_one()
         await engine_for.complete(session, job, state="failed", result={"error": "boom"})
 
@@ -431,7 +432,7 @@ async def test_the_rotation_failure_audit_carries_the_exception_TYPE_not_its_tex
     await complete_job(api_env, engine_for, org_id, renew.id, {"csr_pem": "-----NOT A CSR-----"})
     await step(api_env, engine_for, ca_for, org_id, device_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (
             (
                 await session.execute(
@@ -584,7 +585,7 @@ async def test_an_agent_that_does_not_know_the_job_type_is_refused_and_keeps_its
     old_fingerprint = fingerprint_of(enrolled["cert_pem"])
 
     renew = await step(api_env, engine_for, ca_for, org_id, device_id)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == renew.id))).scalar_one()
         await engine_for.refuse(session, job, reason="unknown_type")
 
@@ -614,7 +615,7 @@ async def test_a_control_plane_that_never_rotates_leaves_an_agent_exactly_as_it_
     org_id, device_id = enrolled["org_id"], UUID(enrolled["device_id"])
 
     assert await step(api_env, engine_for, ca_for, org_id, device_id) is None
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert list((await session.execute(select(Job))).scalars().all()) == []
     row = await agent_row(api_env.app_engine, org_id, device_id)
     assert row.cert_fingerprint == fingerprint_of(enrolled["cert_pem"])

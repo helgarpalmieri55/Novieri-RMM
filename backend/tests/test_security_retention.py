@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Device, Organization, Policy, SecurityEvent
 from app.modules.security_logs.retention import apply_retention
@@ -60,7 +61,7 @@ async def test_retention_deletes_old_keeps_recent_and_audits(
     deleted = await apply_retention(org_id, admin_engine, app_engine)
     assert deleted == 5
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         remaining = (
             await session.execute(select(func.count()).select_from(SecurityEvent))
         ).scalar_one()
@@ -79,7 +80,7 @@ async def test_custom_retention_policy_honored(admin_engine, app_engine) -> None
     org_id, _ = await _seed(admin_engine, old=2, recent=2, retention_days=30)
     deleted = await apply_retention(org_id, admin_engine, app_engine)
     assert deleted == 2
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         remaining = (
             await session.execute(select(func.count()).select_from(SecurityEvent))
         ).scalar_one()
@@ -89,7 +90,7 @@ async def test_custom_retention_policy_honored(admin_engine, app_engine) -> None
 async def test_noop_sweep_writes_no_audit_event(admin_engine, app_engine) -> None:
     org_id, _ = await _seed(admin_engine, old=0, recent=2)
     assert await apply_retention(org_id, admin_engine, app_engine) == 0
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         count = (
             await session.execute(
                 select(func.count())
@@ -127,13 +128,13 @@ async def test_retention_does_not_delete_a_neighbour_orgs_events(
     deleted = await apply_retention(org_id, admin_engine, app_engine)
     assert deleted == 4
 
-    async with org_session(neighbour_id, engine=app_engine) as session:
+    async with org_session(neighbour_id, engine=app_engine, clients=ClientScope.all()) as session:
         surviving = (
             await session.execute(select(func.count()).select_from(SecurityEvent))
         ).scalar_one()
     assert surviving == 8, "retention swept a neighbour org's security events"
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         remaining = (
             await session.execute(select(func.count()).select_from(SecurityEvent))
         ).scalar_one()

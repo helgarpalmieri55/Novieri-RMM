@@ -24,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from tests.ipam_fixtures import seed_device, seed_org
 from tests.site_server_fixtures import seed_site_server, site_server_rows
@@ -92,13 +93,13 @@ async def test_a_row_is_invisible_to_another_org(
         admin_engine, org_a.org_id, device_id=org_a.device_id, segments=["10.20.0.0/16"]
     )
 
-    async with org_session(org_b.org_id, engine=app_engine) as session:
+    async with org_session(org_b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         seen = (
             await session.execute(text("SELECT device_id FROM site_server"))
         ).scalars().all()
     assert list(seen) == []
 
-    async with org_session(org_a.org_id, engine=app_engine) as session:
+    async with org_session(org_a.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         own = (await session.execute(text("SELECT device_id FROM site_server"))).scalars().all()
     assert list(own) == [org_a.device_id]
 
@@ -121,7 +122,9 @@ async def test_a_row_cannot_be_inserted_under_another_orgs_id(
 
     refused = False
     try:
-        async with org_session(org_a.org_id, engine=app_engine) as session:
+        async with org_session(
+            org_a.org_id, engine=app_engine, clients=ClientScope.all()
+        ) as session:
             await _insert(
                 session, org_b.org_id, org_b.device_id, segments=["10.9.0.0/16"], roles=["wake"]
             )

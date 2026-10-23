@@ -72,6 +72,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from uuid_extensions import uuid7
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.storage import MAX_PRESIGNED_TTL_S, ObjectStore
 from app.core.tenancy import org_session
 from app.gateway.protocol import (
@@ -474,7 +475,7 @@ async def handle_chunk_query(
     from app.gateway.dispatch import dispatch_channel
 
     store = object_store or gateway_object_store()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         reply = await answer_chunk_query(
             session, store, msg, org_id=org_id, device_id=device_id
         )

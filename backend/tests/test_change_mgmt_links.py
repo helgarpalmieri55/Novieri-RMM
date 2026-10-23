@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
@@ -193,7 +194,7 @@ async def _seed_patch_approval(admin_engine: AsyncEngine, org_id: UUID) -> UUID:
 
 
 async def _audit_actions(app_engine: AsyncEngine, org_id: UUID, change_id: UUID) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -219,14 +220,14 @@ async def test_add_link_deployment_succeeds_and_is_advisory(
     org_id, user_id, change_id = await _org_with_user_and_change(admin_engine)
     deployment_id = await _seed_deployment(admin_engine, org_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         before = (
             await s.execute(select(Deployment).where(Deployment.id == deployment_id))
         ).scalar_one()
         before_state = before.state
         before_action = before.action
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         link = await add_link(
             s,
             org_id=org_id,
@@ -241,7 +242,7 @@ async def test_add_link_deployment_succeeds_and_is_advisory(
         assert link.change_id == change_id
 
     # Advisory: the linked Deployment row is completely unchanged.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         after = (
             await s.execute(select(Deployment).where(Deployment.id == deployment_id))
         ).scalar_one()
@@ -251,7 +252,7 @@ async def test_add_link_deployment_succeeds_and_is_advisory(
     actions = await _audit_actions(app_engine, org_id, change_id)
     assert actions == ["change.linked"]
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         event = (
             await s.execute(
                 select(AuditEvent)
@@ -274,12 +275,12 @@ async def test_add_link_patch_run_succeeds_and_is_advisory(
     org_id, user_id, change_id = await _org_with_user_and_change(admin_engine)
     run_id = await _seed_patch_run(admin_engine, org_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         before = (await s.execute(select(PatchRun).where(PatchRun.id == run_id))).scalar_one()
         before_finished = before.finished_at
         before_results = dict(before.results)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         link = await add_link(
             s,
             org_id=org_id,
@@ -292,7 +293,7 @@ async def test_add_link_patch_run_succeeds_and_is_advisory(
         assert link.action_type == "patch_run"
         assert link.action_id == run_id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         after = (await s.execute(select(PatchRun).where(PatchRun.id == run_id))).scalar_one()
         assert after.finished_at == before_finished
         assert dict(after.results) == before_results
@@ -304,13 +305,13 @@ async def test_add_link_provision_run_succeeds_and_is_advisory(
     org_id, user_id, change_id = await _org_with_user_and_change(admin_engine)
     run_id = await _seed_provision_run(admin_engine, org_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         before = (
             await s.execute(select(ProvisionRun).where(ProvisionRun.id == run_id))
         ).scalar_one()
         before_state = before.state
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         link = await add_link(
             s,
             org_id=org_id,
@@ -322,7 +323,7 @@ async def test_add_link_provision_run_succeeds_and_is_advisory(
         await s.commit()
         assert link.action_type == "provision_run"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         after = (
             await s.execute(select(ProvisionRun).where(ProvisionRun.id == run_id))
         ).scalar_one()
@@ -335,13 +336,13 @@ async def test_add_link_patch_approval_succeeds_and_is_advisory(
     org_id, user_id, change_id = await _org_with_user_and_change(admin_engine)
     approval_id = await _seed_patch_approval(admin_engine, org_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         before = (
             await s.execute(select(PatchApproval).where(PatchApproval.id == approval_id))
         ).scalar_one()
         before_revoked = before.revoked
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         link = await add_link(
             s,
             org_id=org_id,
@@ -353,7 +354,7 @@ async def test_add_link_patch_approval_succeeds_and_is_advisory(
         await s.commit()
         assert link.action_type == "patch_approval"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         after = (
             await s.execute(select(PatchApproval).where(PatchApproval.id == approval_id))
         ).scalar_one()
@@ -370,7 +371,7 @@ async def test_add_link_nonexistent_action_id_raises(
 ) -> None:
     org_id, user_id, change_id = await _org_with_user_and_change(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(ChangeValidationError):
             await add_link(
                 s,
@@ -381,7 +382,7 @@ async def test_add_link_nonexistent_action_id_raises(
                 action_id=uuid4(),
             )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await list_links(s, org_id, change_id)
         assert result == []
 
@@ -394,7 +395,7 @@ async def test_add_link_cross_org_action_raises_and_creates_no_link(
 
     deployment_b = await _seed_deployment(admin_engine, org_b)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(ChangeValidationError):
             await add_link(
                 s,
@@ -405,13 +406,13 @@ async def test_add_link_cross_org_action_raises_and_creates_no_link(
                 action_id=deployment_b,
             )
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         result = await list_links(s, org_a, change_a)
         assert result == []
 
     # Confirm the org-B deployment itself is untouched and still resolvable
     # in its own org (i.e. it really exists -- this wasn't "nonexistent").
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         dep = (
             await s.execute(select(Deployment).where(Deployment.id == deployment_b))
         ).scalar_one()
@@ -423,7 +424,7 @@ async def test_add_link_unknown_action_type_raises(
 ) -> None:
     org_id, user_id, change_id = await _org_with_user_and_change(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(ChangeValidationError, match="unknown action_type"):
             await add_link(
                 s,
@@ -441,7 +442,7 @@ async def test_add_link_nonexistent_change_raises(
     org_id, user_id, _change_id = await _org_with_user_and_change(admin_engine)
     deployment_id = await _seed_deployment(admin_engine, org_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(ChangeNotFoundError):
             await add_link(
                 s,
@@ -459,7 +460,7 @@ async def test_add_link_duplicate_raises(
     org_id, user_id, change_id = await _org_with_user_and_change(admin_engine)
     deployment_id = await _seed_deployment(admin_engine, org_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await add_link(
             s,
             org_id=org_id,
@@ -470,7 +471,7 @@ async def test_add_link_duplicate_raises(
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(ChangeValidationError, match="already linked"):
             await add_link(
                 s,
@@ -481,7 +482,7 @@ async def test_add_link_duplicate_raises(
                 action_id=deployment_id,
             )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await list_links(s, org_id, change_id)
         assert len(result) == 1
 
@@ -580,7 +581,7 @@ async def test_remove_link_deletes_and_audits(
     org_id, user_id, change_id = await _org_with_user_and_change(admin_engine)
     deployment_id = await _seed_deployment(admin_engine, org_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         link = await add_link(
             s,
             org_id=org_id,
@@ -592,20 +593,20 @@ async def test_remove_link_deletes_and_audits(
         await s.commit()
         link_id = link.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await remove_link(
             s, org_id=org_id, actor_id=user_id, change_id=change_id, link_id=link_id
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await list_links(s, org_id, change_id)
         assert result == []
 
     actions = await _audit_actions(app_engine, org_id, change_id)
     assert actions == ["change.linked", "change.unlinked"]
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         event = (
             await s.execute(
                 select(AuditEvent)
@@ -619,7 +620,7 @@ async def test_remove_link_deletes_and_audits(
         assert event.meta["link_id"] == str(link_id)
 
     # The linked action itself is still untouched.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         dep = (
             await s.execute(select(Deployment).where(Deployment.id == deployment_id))
         ).scalar_one()
@@ -631,7 +632,7 @@ async def test_remove_link_nonexistent_raises(
 ) -> None:
     org_id, user_id, change_id = await _org_with_user_and_change(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(ChangeNotFoundError):
             await remove_link(
                 s, org_id=org_id, actor_id=user_id, change_id=change_id, link_id=uuid4()
@@ -645,7 +646,7 @@ async def test_remove_link_cross_org_raises(
     org_b, user_b, change_b = await _org_with_user_and_change(admin_engine)
     deployment_b = await _seed_deployment(admin_engine, org_b)
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         link = await add_link(
             s,
             org_id=org_b,
@@ -657,14 +658,14 @@ async def test_remove_link_cross_org_raises(
         await s.commit()
         link_id = link.id
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(ChangeNotFoundError):
             await remove_link(
                 s, org_id=org_a, actor_id=user_a, change_id=change_a, link_id=link_id
             )
 
     # The link in org_b is untouched.
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         result = await list_links(s, org_b, change_b)
         assert len(result) == 1
 
@@ -682,7 +683,7 @@ async def test_list_links_returns_only_the_calling_orgs_links_under_rls(
     deployment_a = await _seed_deployment(admin_engine, org_a)
     deployment_b = await _seed_deployment(admin_engine, org_b)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         await add_link(
             s,
             org_id=org_a,
@@ -693,7 +694,7 @@ async def test_list_links_returns_only_the_calling_orgs_links_under_rls(
         )
         await s.commit()
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         await add_link(
             s,
             org_id=org_b,
@@ -704,12 +705,12 @@ async def test_list_links_returns_only_the_calling_orgs_links_under_rls(
         )
         await s.commit()
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         result_a = await list_links(s, org_a, change_a)
         assert len(result_a) == 1
         assert result_a[0].action_id == deployment_a
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         result_b = await list_links(s, org_b, change_b)
         assert len(result_b) == 1
         assert result_b[0].action_id == deployment_b

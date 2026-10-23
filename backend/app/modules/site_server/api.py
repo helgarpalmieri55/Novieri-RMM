@@ -122,7 +122,7 @@ async def list_site_servers_route(
     """`segment` filters by CONTAINMENT: asking who serves `10.20.7.0/24` finds
     the branch server declared for `10.20.0.0/16`."""
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             rows = await registry_service.list_site_servers(
                 session,
                 ctx.org_id,
@@ -144,7 +144,7 @@ async def promote_route(
     """§3.3. A `device_id` from another org is a 404 about the device — it must
     not confirm that the id exists somewhere else."""
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await registry_service.promote(
                 session,
                 ctx.org_id,
@@ -168,7 +168,7 @@ async def get_site_server_route(
     ctx: AuthContext = Depends(require_permission("site.read")),
 ) -> SiteServerOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await registry_service.get_site_server(session, ctx.org_id, site_server_id)
             return await _out(session, ctx.org_id, row)
     except SiteServerError as exc:
@@ -184,7 +184,7 @@ async def update_site_server_route(
 ) -> SiteServerOut:
     changes = body.model_dump(exclude_unset=True)
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await registry_service.update_site_server(
                 session,
                 ctx.org_id,
@@ -207,7 +207,7 @@ async def demote_route(
     """Demote. **There is no lease to revoke in v1**, because v1 binds no
     socket and issues no `site.serve` lease (§0.3, §7.3)."""
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             await registry_service.demote(
                 session, ctx.org_id, site_server_id, reason=reason, actor_id=ctx.user_id
             )
@@ -225,7 +225,7 @@ async def segment_check_route(
     explicitly, because "no mismatches" and "we could not look" are opposite
     answers and must not render the same."""
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             check = await segment_check(session, ctx.org_id, site_server_id)
     except SiteServerError as exc:
         raise _http_error(exc) from None
@@ -255,7 +255,7 @@ async def wake_route(
     """
     envelope: dict[str, Any] | None = None
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             job, envelope = await wake_via_site_server(
                 session,
                 request.app.state.job_engine,

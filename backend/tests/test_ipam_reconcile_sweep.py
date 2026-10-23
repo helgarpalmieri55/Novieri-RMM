@@ -30,6 +30,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.models import IpamDrift
 from app.modules.ipam.reconcile import (
     RECONCILE_INTERVAL_SECONDS,
@@ -289,7 +290,7 @@ async def test_the_sweep_runs_under_rls_not_on_the_admin_engine(
     org = await _absent_org(admin_engine, "sw-rls", "10.76.0.0/24")
     await reconcile_sweep_all_orgs(engine=app_engine, admin_engine=admin_engine, now=NOW)
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rows = (await session.execute(select(IpamDrift))).scalars().all()
     assert [(str(r.address), r.drift_class) for r in rows] == [
         ("10.76.0.42", "documented_absent")

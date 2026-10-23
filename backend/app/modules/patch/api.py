@@ -609,7 +609,9 @@ async def list_patches(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> PatchListResponse:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         query = select(Patch).where(Patch.org_id == ctx.org_id)
         if os_family:
             query = query.where(Patch.os_family == os_family)
@@ -684,7 +686,9 @@ async def list_updates(
     per-device patch list is this query with one more predicate.
     """
     severities = frozenset(value for value in (severity or []) if value.strip()) or None
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         page = await update_rollup(
             session,
             ctx.org_id,
@@ -730,7 +734,9 @@ async def list_device_rollup(
     narrows to the severities that demand a decision, and this panel is the
     guarantee that the narrowing hides no machine.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         page = await device_rollup(
             session, ctx.org_id, q=q, os_family=os_family, limit=limit, offset=offset
         )
@@ -758,7 +764,9 @@ async def list_runs(
     JSON. `DevicePatchStatus` holds the durable per-patch end state; this holds
     the event.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await recent_runs(session, ctx.org_id, device_id=device_id, limit=limit)
     return PatchRunListResponse(items=[PatchRunOut(**row) for row in rows])
 
@@ -771,7 +779,9 @@ async def list_app_sources(
 ) -> AppSourceSummaryResponse:
     """Whether winget / Homebrew could be scanned, counted over each device's
     latest completed scan."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await app_source_summary(session, ctx.org_id, os_family)
     return AppSourceSummaryResponse(items=[AppSourceSummaryOut(**r) for r in rows])
 
@@ -783,7 +793,9 @@ async def list_restarts(
     limit: int = Query(default=200, ge=1, le=500),
 ) -> RestartListResponse:
     """Devices still owed a restart after patching, oldest first."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await open_restarts(session, ctx.org_id, limit)
     return RestartListResponse(items=[RestartListItem(**r) for r in rows], total=len(rows))
 
@@ -794,7 +806,9 @@ async def device_status(
     request: Request,
     ctx: AuthContext = Depends(require_permission("patch.read")),
 ) -> DeviceStatusOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one_or_none()
@@ -821,7 +835,9 @@ async def request_restart(
     `patch.reboot` inside the window, with the policy's notice for a signed-in
     user. Asking again while one is booked changes nothing (202 either way).
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         device = (
             await session.execute(
                 select(Device.id).where(Device.org_id == ctx.org_id, Device.id == device_id)
@@ -857,7 +873,7 @@ async def trigger_scan(
     state = request.app.state
     job_ids: list[UUID] = []
     pending: list[tuple[UUID, dict[str, Any]]] = []
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         query = select(Device.id).where(Device.org_id == ctx.org_id)
         if body.device_ids:
             query = query.where(Device.id.in_(body.device_ids))
@@ -920,7 +936,9 @@ async def list_approvals_route(
     an approval id was returned only by the POST that created it, so an
     approval made in an earlier session could never be revoked over HTTP.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows, total = await list_approvals(
             session,
             org_id=ctx.org_id,
@@ -1002,7 +1020,9 @@ async def _approve_with_change(
     """
     refusal: str | None = None
     result: list[tuple[ApprovalOutcome, ApprovalOut]] = []
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             change = (
                 await authorizing_change(session, ctx.org_id, change_id)
@@ -1089,7 +1109,9 @@ async def delete_approval(
     request: Request,
     ctx: AuthContext = Depends(require_permission("patch.approve")),
 ) -> None:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         revoked = await revoke_approval(
             session, org_id=ctx.org_id, actor_id=ctx.user_id, approval_id=approval_id
         )
@@ -1109,7 +1131,7 @@ async def apply_patches(
     ctx: AuthContext = Depends(require_permission("patch.apply")),
 ) -> ApplyResponse:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         pending = await dispatch_apply(
             session,
             state.job_engine,
@@ -1148,7 +1170,9 @@ async def list_rings(
     `patch.read`, not `patch.approve`: which ring a machine is in is read work,
     and the technician who may see it is still refused the approval it informs.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         populations = await resolve_ring_populations(session, ctx.org_id)
     items = [
         RingOut(
@@ -1170,7 +1194,9 @@ async def list_policies(
     request: Request,
     ctx: AuthContext = Depends(require_permission("patch.read")),
 ) -> list[PolicyOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = (
             (
                 await session.execute(
@@ -1191,7 +1217,9 @@ async def upsert_policy(
     request: Request,
     ctx: AuthContext = Depends(require_permission("patch.policy.manage")),
 ) -> PolicyOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         # As in `remote`'s upsert_policy: for the org-default (device_group_id
         # IS NULL), Postgres's UNIQUE allows duplicate NULLs, so we deterministically
         # take the first existing default rather than risk inserting a second.
@@ -1245,7 +1273,9 @@ async def report(
     request: Request,
     ctx: AuthContext = Depends(require_permission("patch.read")),
 ) -> FleetReportOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         data = await fleet_report(session, ctx.org_id)
         return FleetReportOut(**data)
 
@@ -1315,7 +1345,9 @@ async def report_export(
     request: Request,
     ctx: AuthContext = Depends(require_permission("patch.read")),
 ) -> StreamingResponse:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await export_rows(session, ctx.org_id)
         await audit_service.record(
             session,

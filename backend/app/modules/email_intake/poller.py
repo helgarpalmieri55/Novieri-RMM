@@ -84,6 +84,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.i18n import N_, tr, tr_marked, use_locale
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -310,7 +311,7 @@ async def _claim(
     row and returns nothing rather than blocking on it.
     """
     now = datetime.now(UTC)
-    async with org_session(org_id, engine=engine) as session:
+    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
         await session.execute(
             update(EmailMailbox)
             .where(
@@ -377,7 +378,7 @@ async def _checkout_credential(
         raise MailboxNotConnected(  # i18n-exempt: _describe words it, str(exc) unused
             "this mailbox has no saved sign-in yet"
         )
-    async with org_session(org_id, engine=engine) as session:
+    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
         password = await vault.checkout(session, org_id=org_id, credential_id=credential_id)
         await audit_service.record(
             session,
@@ -398,7 +399,7 @@ async def _mark_needs_reconsent(
 ) -> None:
     """A refused Microsoft sign-in is a STATE: the console offers Reconnect and
     the claim filter stops polling. The claim is released here too."""
-    async with org_session(org_id, engine=engine) as session:
+    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
         await session.execute(
             update(EmailMailbox)
             .where(EmailMailbox.org_id == org_id, EmailMailbox.id == mailbox_id)
@@ -461,7 +462,7 @@ async def _release(
     working again must stop reporting an error it no longer has, or §10's
     surface degrades into a list of stale complaints nobody reads.
     """
-    async with org_session(org_id, engine=engine) as session:
+    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
         await session.execute(
             update(EmailMailbox)
             .where(EmailMailbox.org_id == org_id, EmailMailbox.id == mailbox_id)
@@ -498,7 +499,7 @@ async def _process_one(
     """
     parsed = parse_message(raw, mailbox_address=mailbox_address)
     try:
-        async with org_session(org_id, engine=engine) as session:
+        async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
             mailbox = (
                 await session.execute(
                     select(EmailMailbox).where(
@@ -699,7 +700,7 @@ async def test_mailbox(
     vocabularies, bounded -- never `str(exc)`, never a server response line
     (invariant #3).
     """
-    async with org_session(org_id, engine=engine) as session:
+    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
         mailbox = (
             await session.execute(
                 select(EmailMailbox).where(
@@ -765,7 +766,7 @@ async def test_mailbox(
         detail = _describe(stage, exc)
         stored_detail = _describe_stored(stage, exc)
 
-    async with org_session(org_id, engine=engine) as session:
+    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
         await audit_service.record(
             session,
             org_id=org_id,
@@ -821,7 +822,7 @@ async def poll_all_mailboxes(
     polled = 0
     for org_id in org_ids:
         try:
-            async with org_session(org_id, engine=engine) as session:
+            async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
                 mailbox_ids = list(
                     (
                         await session.execute(

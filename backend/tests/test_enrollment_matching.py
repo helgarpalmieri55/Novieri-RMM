@@ -26,6 +26,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Agent, AuditEvent, Device, SuggestedAssetMatch
 from app.services.enrollment import DeviceFacts
@@ -56,7 +57,7 @@ def facts(**kw: Any) -> DeviceFacts:
 async def _asset(api_env: ApiEnv, org_id: UUID, **kw: Any) -> UUID:
     """An agentless record: what an operator typed in, or promoted."""
     macs = kw.pop("macs", [])
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         source = kw.pop("source", "discovery")
         device = Device(
             org_id=org_id,
@@ -80,7 +81,7 @@ async def _asset(api_env: ApiEnv, org_id: UUID, **kw: Any) -> UUID:
 
 async def _managed(api_env: ApiEnv, org_id: UUID, **kw: Any) -> UUID:
     device_id = await _asset(api_env, org_id, source="agent", **kw)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         session.add(
             Agent(
                 org_id=org_id,
@@ -96,7 +97,7 @@ async def _managed(api_env: ApiEnv, org_id: UUID, **kw: Any) -> UUID:
 
 
 async def _resolve(api_env: ApiEnv, org_id: UUID, device_facts: DeviceFacts) -> MatchOutcome:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         return await resolve_enrolment_target(session, org_id, device_facts)
 
 
@@ -255,7 +256,7 @@ async def test_enrolling_onto_a_discovered_record_does_not_create_a_second_row(
     body = await _enrol(api_env, org_id, admin, macs=[PHYSICAL])
     assert body["device_id"] == str(existing), "enrolment created a second row"
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         total = (
             await session.execute(select(func.count()).select_from(Device))
         ).scalar_one()
@@ -275,7 +276,7 @@ async def test_the_linked_row_keeps_its_source_and_gains_the_agent_facts(
 
     await _enrol(api_env, org_id, admin, macs=[PHYSICAL])
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         device = await session.get(Device, existing)
         assert device is not None
         assert device.source == "discovery"
@@ -293,7 +294,7 @@ async def test_a_hostname_collision_creates_the_device_and_files_a_suggestion(
     body = await _enrol(api_env, org_id, admin)
     assert body["device_id"] != str(existing)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = list((await session.execute(select(SuggestedAssetMatch))).scalars())
     assert len(rows) == 1, rows
     assert rows[0].candidate_device_id == existing
@@ -312,7 +313,7 @@ async def test_linking_writes_an_audit_event_naming_both_rows(
 
     await _enrol(api_env, org_id, admin, macs=[PHYSICAL])
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = list(
             (
                 await session.execute(

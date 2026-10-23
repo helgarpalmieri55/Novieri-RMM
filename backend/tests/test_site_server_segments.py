@@ -20,6 +20,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.modules.site_server import segments as segments_module
 from app.modules.site_server.errors import SiteServerNotFoundError
@@ -80,7 +81,7 @@ async def test_an_observed_declared_segment_is_matched_and_nothing_else(
     )
     await _observe(admin_engine, org, vrf_id, "10.20.7.9")
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         check = await segment_check(session, org.org_id, site_server_id, now=NOW)
 
     observed = (
@@ -111,7 +112,7 @@ async def test_a_declared_segment_with_no_observation_lands_in_declared_unobserv
     )
     await _observe(admin_engine, org, vrf_id, "10.20.7.9")
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         check = await segment_check(session, org.org_id, site_server_id, now=NOW)
 
     assert (check.matched, check.declared_unobserved) == (
@@ -129,7 +130,7 @@ async def test_an_address_outside_every_declared_segment_is_observed_undeclared(
     await _observe(admin_engine, org, vrf_id, "10.20.7.9")
     await _observe(admin_engine, org, vrf_id, "192.168.50.4")
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         check = await segment_check(session, org.org_id, site_server_id, now=NOW)
 
     assert (check.matched, check.observed_undeclared) == (
@@ -181,7 +182,7 @@ async def test_a_non_inventory_observation_is_not_evidence_about_this_device(
         now=NOW - timedelta(hours=1),
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         check = await segment_check(session, org.org_id, site_server_id, now=NOW)
 
     assert (check.matched, check.declared_unobserved, check.observed_undeclared) == (
@@ -209,7 +210,7 @@ async def test_a_sweep_observation_is_not_evidence_either(
     await _observe(admin_engine, org, vrf_id, "10.20.7.9")
     await _observe(admin_engine, org, vrf_id, "10.30.1.5", source="sweep")
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         check = await segment_check(session, org.org_id, site_server_id, now=NOW)
 
     assert (check.matched, check.declared_unobserved) == (
@@ -235,7 +236,7 @@ async def test_an_observation_older_than_the_ttl_is_excluded(
     await _observe(admin_engine, org, vrf_id, "10.20.7.9", age=timedelta(days=1))
     await _observe(admin_engine, org, vrf_id, "10.30.1.5", age=timedelta(days=60))
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         check = await segment_check(session, org.org_id, site_server_id, now=NOW)
 
     assert (check.matched, check.declared_unobserved, check.observed_undeclared) == (
@@ -258,7 +259,7 @@ async def test_another_devices_observation_is_not_evidence_about_this_one(
     neighbour = await seed_device(admin_engine, org.org_id, hostname="neighbour")
     await _observe(admin_engine, org, vrf_id, "10.20.7.50", device_id=neighbour)
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         check = await segment_check(session, org.org_id, site_server_id, now=NOW)
 
     assert (check.matched, check.declared_unobserved) == ([], ["10.20.7.0/24"])
@@ -281,7 +282,7 @@ async def test_the_probe_returns_true_against_the_real_schema(
     forced below.
     """
     org = await seed_org(admin_engine, "sseg-g")
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await segments_module._observation_evidence_available(session) is True
 
 
@@ -302,14 +303,14 @@ async def test_unavailable_and_empty_are_different_answers(
     )
     await _observe(admin_engine, org, vrf_id, "10.20.7.9")
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         available = await segment_check(session, org.org_id, site_server_id, now=NOW)
 
     async def _absent(_session: Any) -> bool:
         return False
 
     monkeypatch.setattr(segments_module, "_observation_evidence_available", _absent)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         unavailable = await segment_check(session, org.org_id, site_server_id, now=NOW)
 
     assert (available.evidence, available.matched) == ("ipam", ["10.20.7.0/24"])
@@ -336,7 +337,7 @@ async def test_the_unavailable_branch_does_not_poison_the_transaction(
         return False
 
     monkeypatch.setattr(segments_module, "_observation_evidence_available", _absent)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         check = await segment_check(session, org.org_id, site_server_id, now=NOW)
         await session.execute(
             text("UPDATE site_server SET notes = 'still writable' WHERE id = :id"),

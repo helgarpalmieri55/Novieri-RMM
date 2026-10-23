@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from uuid_extensions import uuid7
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, CostCenter, Device, Expense, ExpenseCategory, User
 from app.modules.budget.errors import BudgetNotFoundError, BudgetValidationError
@@ -84,7 +85,7 @@ async def _seed_vendor(
 async def test_create_captures_the_rate_and_base_amount(api_env) -> None:
     """Spec §3: conversion is CAPTURED at write time, not computed on read."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         await create_rate(
             session, org_id, user_id,
@@ -121,7 +122,7 @@ async def test_create_expense_with_confirmed_status_stamps_an_asserter(api_env) 
     column. `confirmed_by`/`confirmed_at` must be stamped here, not left
     NULL, for that explicit path."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         expense = await create_expense(
             session, org_id, user_id,
@@ -151,7 +152,7 @@ async def test_create_expense_with_confirmed_status_stamps_an_asserter(api_env) 
 async def test_a_later_rate_correction_does_not_re_value_a_stored_expense(api_env) -> None:
     """The whole point of storing fx_rate + amount_base on the row."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         rate_row = await create_rate(
             session, org_id, user_id,
@@ -196,7 +197,7 @@ async def test_a_later_rate_correction_does_not_re_value_a_stored_expense(api_en
 async def test_unconvertible_expense_is_created_with_null_base(api_env) -> None:
     """Never guess a rate (spec §0.1) -- the row exists, amount_base is NULL."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         # No fx_rate row exists for JPY -> the org's default base (USD).
         expense = await create_expense(
@@ -236,7 +237,7 @@ async def test_convert_overflow_raises_and_expense_is_not_persisted(api_env) -> 
     unconvertible case -- and because the conversion is computed BEFORE the
     ORM object is constructed, nothing is left behind to roll back."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         await create_rate(
             session, org_id, user_id,
@@ -267,7 +268,7 @@ async def test_convert_overflow_raises_and_expense_is_not_persisted(api_env) -> 
 async def test_confirm_stamps_actor_and_time_and_accepts_a_corrected_amount(api_env) -> None:
     """Spec §0.3: the confirmed amount may differ from the projected one."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         expense = await create_expense(
             session, org_id, user_id,
@@ -294,7 +295,7 @@ async def test_confirm_stamps_actor_and_time_and_accepts_a_corrected_amount(api_
 
 async def test_confirm_without_an_amount_keeps_the_recorded_amount(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         expense = await create_expense(
             session, org_id, user_id,
@@ -313,7 +314,7 @@ async def test_confirm_without_an_amount_keeps_the_recorded_amount(api_env) -> N
 
 async def test_confirm_re_runs_conversion_against_expense_date(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         # No rate covers this date yet -- created unconvertible.
         expense = await create_expense(
@@ -342,7 +343,7 @@ async def test_confirm_re_runs_conversion_against_expense_date(api_env) -> None:
 
 async def test_confirm_a_void_expense_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         expense = await create_expense(
             session, org_id, user_id,
@@ -366,7 +367,7 @@ async def test_confirming_an_already_confirmed_expense_is_rejected(api_env) -> N
     asserter, even with `amount` omitted -- reject it outright instead,
     mirroring the void guard."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         expense = await create_expense(
             session, org_id, user_id,
@@ -404,7 +405,7 @@ async def test_confirming_an_already_confirmed_expense_is_rejected(api_env) -> N
 
 async def test_void_stamps_and_is_audited(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         expense = await create_expense(
             session, org_id, user_id,
@@ -435,7 +436,7 @@ async def test_void_stamps_and_is_audited(api_env) -> None:
 
 async def test_voiding_an_already_void_expense_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         expense = await create_expense(
             session, org_id, user_id,
@@ -460,7 +461,7 @@ async def test_voiding_an_already_void_expense_is_rejected(api_env) -> None:
 async def test_patch_omitted_field_is_left_untouched(api_env) -> None:
     """exclude_unset -- the Phase-12 lesson."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         cc = await _seed_cost_center(session, org_id, user_id)
         expense = await create_expense(
@@ -492,7 +493,7 @@ async def test_patch_explicit_null_clears_a_nullable_field(api_env) -> None:
     """{"cost_center_id": null} must actually clear it -- Phase 12 shipped a
     PATCH that returned 200 and changed nothing."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         cc = await _seed_cost_center(session, org_id, user_id)
         expense = await create_expense(
@@ -515,7 +516,7 @@ async def test_patch_explicit_null_clears_a_nullable_field(api_env) -> None:
 
 async def test_patch_amount_currency_or_date_re_runs_conversion(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         await create_rate(
             session, org_id, user_id,
@@ -543,7 +544,7 @@ async def test_patch_amount_currency_or_date_re_runs_conversion(api_env) -> None
 
 async def test_patch_a_field_unrelated_to_conversion_does_not_touch_fx(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         await create_rate(
             session, org_id, user_id,
@@ -581,7 +582,7 @@ async def test_patch_explicit_null_on_a_non_nullable_field_is_rejected(api_env, 
     """Rejected BEFORE any setattr, so the ORM object is never left partially
     mutated when the error is raised."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         expense = await create_expense(
             session, org_id, user_id,
@@ -616,7 +617,7 @@ async def test_patch_explicit_null_on_a_non_nullable_field_is_rejected(api_env, 
 async def test_edit_audit_records_field_names_and_never_amounts(api_env) -> None:
     """Spec §8: amounts are the sensitive payload in this module."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         expense = await create_expense(
             session, org_id, user_id,
@@ -649,7 +650,7 @@ async def test_edit_audit_records_field_names_and_never_amounts(api_env) -> None
 
 async def test_update_expense_on_unknown_id_raises_not_found(api_env) -> None:
     org_id, _user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(BudgetNotFoundError):
             await update_expense(session, org_id, _user_id, uuid7(), {"description": "x"})
 
@@ -660,7 +661,7 @@ async def test_update_expense_on_a_void_row_is_rejected(api_env) -> None:
     materialized row would free `uq_expense_autofeed`'s unique slot and let
     the next materialization resurrect a deliberately-suppressed cost."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         expense = await create_expense(
             session, org_id, user_id,
@@ -694,7 +695,7 @@ async def test_update_link_id_on_a_non_manual_expense_is_rejected(api_env) -> No
     next materialization pass re-create the row the auto-feed already
     covers."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
@@ -746,7 +747,7 @@ async def test_bare_link_type_patch_on_a_manual_expense_re_resolves_link_id(api_
     contract. Here the subscription's id does not exist in the device
     table, so the merged pair must fail to resolve."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
@@ -792,7 +793,7 @@ async def test_bare_link_type_patch_re_resolves_successfully_against_the_new_typ
     new type, a bare `link_type` PATCH is accepted -- the merged pair is
     re-resolved, not merely rejected out of hand."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         device = Device(org_id=org_id, hostname="host-1", os_family="linux")
         session.add(device)
@@ -848,7 +849,7 @@ async def test_bare_null_link_type_patch_stranding_an_existing_link_id_is_reject
     a non-null `link_id` with no dispatch type -- the merged pair has a
     non-null link_id and a null link_type, which can never be resolved."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
@@ -895,7 +896,7 @@ async def test_list_expenses_filters_by_status_category_cost_center_vendor_sourc
     api_env,
 ) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat_a = await _seed_category(session, org_id, user_id, key="hardware")
         cat_b = await _seed_category(session, org_id, user_id, key="telecom")
         cc = await _seed_cost_center(session, org_id, user_id)
@@ -934,7 +935,7 @@ async def test_list_expenses_filters_by_status_category_cost_center_vendor_sourc
 
 async def test_list_expenses_filters_by_date_range(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         jan = await create_expense(
             session, org_id, user_id,
@@ -960,7 +961,7 @@ async def test_list_expenses_is_ordered_by_expense_date_desc(api_env) -> None:
     """A list-equality assertion on an unordered query is a landmine (the
     prior-task lesson) -- `list_expenses` has an explicit ORDER BY."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
         early = await create_expense(
             session, org_id, user_id,
@@ -983,7 +984,7 @@ async def test_list_expenses_is_ordered_by_expense_date_desc(api_env) -> None:
 async def test_list_expenses_returns_only_this_orgs_rows(api_env) -> None:
     org_a, user_a = await _org_with_user(api_env)
     org_b, user_b = await _org_with_user(api_env)
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat_a = await _seed_category(session, org_a, user_a)
         await create_expense(
             session, org_a, user_a,
@@ -992,7 +993,7 @@ async def test_list_expenses_returns_only_this_orgs_rows(api_env) -> None:
                 category_id=cat_a.id, status="expected",
             ),
         )
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat_b = await _seed_category(session, org_b, user_b)
         await create_expense(
             session, org_b, user_b,
@@ -1008,7 +1009,7 @@ async def test_list_expenses_returns_only_this_orgs_rows(api_env) -> None:
 
 async def test_get_expense_on_unknown_id_raises_not_found(api_env) -> None:
     org_id, _user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(BudgetNotFoundError):
             await get_expense(session, org_id, uuid7())
 

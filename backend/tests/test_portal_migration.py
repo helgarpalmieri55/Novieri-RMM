@@ -17,6 +17,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.client_scope import ClientScope
+
 # Spec §2.1. Note what is ABSENT: ticket_queue. A requester never chooses a
 # queue, so portal_user gets no access to it at all.
 PORTAL_READABLE = [
@@ -528,7 +530,7 @@ async def test_cross_actor_audit_insert_is_refused_by_the_database(
     someone_else = uuid4()
 
     with pytest.raises(ProgrammingError, match="row-level security policy"):
-        async with portal_session(org_id, me, engine=portal_engine) as s:
+        async with portal_session(org_id, me, engine=portal_engine, clients=ClientScope.all()) as s:
             await s.execute(
                 text(
                     "INSERT INTO audit_events "

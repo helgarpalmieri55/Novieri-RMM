@@ -41,6 +41,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from uuid_extensions import uuid7
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Device, Ticket, TicketStatusHistory, User
 from app.modules.service_desk.errors import TicketNotFoundError, TicketValidationError
@@ -105,7 +106,7 @@ async def _category(
 
 async def test_create_incident_defaults_queue_from_category(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -129,7 +130,7 @@ async def test_create_incident_defaults_queue_from_category(api_env) -> None:
 
 async def test_explicit_queue_id_overrides_category_default(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         default_queue = await _queue(session, org_id, user_id, key="helpdesk")
         override_queue = await _queue(session, org_id, user_id, key="infrastructure")
         category = await _category(
@@ -152,7 +153,7 @@ async def test_explicit_queue_id_overrides_category_default(api_env) -> None:
 
 async def test_create_fails_when_neither_queue_resolves(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         category = await _category(session, org_id, user_id, type="incident")
         with pytest.raises(TicketValidationError):
             await create_ticket(
@@ -170,7 +171,7 @@ async def test_create_fails_when_neither_queue_resolves(api_env) -> None:
 
 async def test_create_rejects_type_mismatch_with_category(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="request", default_queue_id=queue.id
@@ -196,7 +197,7 @@ async def test_create_rejects_type_mismatch_with_category(api_env) -> None:
 
 async def test_incident_starts_new(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -214,7 +215,7 @@ async def test_incident_starts_new(api_env) -> None:
 
 async def test_request_requiring_approval_starts_pending_approval(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session,
@@ -241,7 +242,7 @@ async def test_request_requiring_approval_starts_pending_approval(api_env) -> No
 
 async def test_request_not_requiring_approval_starts_in_progress(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session,
@@ -273,7 +274,7 @@ async def test_request_not_requiring_approval_starts_in_progress(api_env) -> Non
 
 async def test_create_writes_status_history_row_with_null_from_status(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -312,7 +313,7 @@ async def test_create_writes_status_history_row_with_null_from_status(api_env) -
 
 async def test_alert_origin_succeeds_with_null_requester_and_created_by(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -333,7 +334,7 @@ async def test_alert_origin_succeeds_with_null_requester_and_created_by(api_env)
 
 async def test_alert_origin_status_history_is_system_actor(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -366,7 +367,7 @@ async def test_integration_origin_is_system_actor_but_keeps_human_attribution(ap
     `ticket.created` audit event's `actor_type`/`actor_id` differ from the
     ordinary `"technician"` case."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -411,7 +412,7 @@ async def test_integration_origin_is_system_actor_but_keeps_human_attribution(ap
 
 async def test_non_alert_origin_with_null_requester_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -433,7 +434,7 @@ async def test_non_alert_origin_with_null_requester_is_rejected(api_env) -> None
 
 async def test_non_alert_origin_with_null_actor_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -459,7 +460,7 @@ async def test_alert_origin_discards_actor_and_requester_even_if_supplied(api_en
     non-None actor_id AND a non-None data.requester_id, and confirm both are
     discarded rather than smuggled through."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -485,7 +486,7 @@ async def test_alert_origin_rejects_non_incident_type(api_env) -> None:
     paired with `type="request"` must be rejected up front, not silently
     accepted with a relaxed human-attribution rule on a request ticket."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session,
@@ -513,7 +514,7 @@ async def test_source_alert_id_rejected_for_non_alert_origin(api_env) -> None:
     A non-None `source_alert_id` paired with any origin other than `"alert"`
     must be rejected, not persisted."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -541,7 +542,7 @@ async def test_source_alert_id_rejected_for_non_alert_origin(api_env) -> None:
 
 async def test_create_audits_exactly_once_with_no_subject_leak(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -587,7 +588,7 @@ async def test_create_audits_exactly_once_with_no_subject_leak(api_env) -> None:
 
 async def test_get_ticket_returns_the_created_ticket(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -606,7 +607,7 @@ async def test_get_ticket_returns_the_created_ticket(api_env) -> None:
 
 async def test_get_ticket_raises_not_found_for_nonexistent_id(api_env) -> None:
     org_id, _user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(TicketNotFoundError):
             await get_ticket(session, org_id, uuid7())
 
@@ -618,7 +619,7 @@ async def test_get_ticket_raises_not_found_for_nonexistent_id(api_env) -> None:
 
 async def test_list_tickets_filters_by_type_status_queue_priority(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue_a = await _queue(session, org_id, user_id, key="helpdesk")
         queue_b = await _queue(session, org_id, user_id, key="infrastructure")
         incident_cat = await _category(
@@ -678,7 +679,7 @@ async def test_list_tickets_filters_by_q_case_insensitive_over_subject_and_descr
     api_env,
 ) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -737,7 +738,7 @@ async def test_list_tickets_filters_by_assigned_to_requester_and_device(api_env)
             await session.execute(select(User.id).where(User.external_subject == other_sub))
         ).scalar_one()
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -783,7 +784,7 @@ async def test_list_tickets_filters_by_assigned_to_requester_and_device(api_env)
 
 async def test_list_tickets_is_ordered_newest_first(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -819,7 +820,7 @@ async def test_list_tickets_is_ordered_newest_first(api_env) -> None:
 
 async def test_list_tickets_respects_limit_and_offset(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await _queue(session, org_id, user_id)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
@@ -868,7 +869,7 @@ async def _create_basic_ticket(session, org_id, user_id):
 
 async def test_update_omitted_key_leaves_field_untouched(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
         updated = await update_ticket(session, org_id, user_id, ticket.id, {"priority": "high"})
     assert updated.priority == "high"
@@ -882,7 +883,7 @@ async def test_update_explicit_none_on_nullable_field_clears_it(api_env) -> None
     (`ticket.assign`, spec §5), so it can no longer exercise this PATCH
     semantics case here."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
         device = Device(org_id=org_id, hostname="host-1", os_family="linux")
         session.add(device)
@@ -901,7 +902,7 @@ async def test_update_explicit_none_on_non_nullable_field_rejected_before_setatt
     api_env,
 ) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
         with pytest.raises(TicketValidationError):
             await update_ticket(
@@ -929,7 +930,7 @@ async def test_status_is_not_editable_through_update_ticket(api_env) -> None:
     the editable half is NOT applied -- see
     `test_update_ticket_refusal_does_not_apply_the_editable_half`."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
         ticket_id = ticket.id
         with pytest.raises(TicketValidationError) as excinfo:
@@ -945,7 +946,7 @@ async def test_status_is_not_editable_through_update_ticket(api_env) -> None:
 
 async def test_terminal_ticket_rejects_edits(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
         # This test targets `update_ticket`'s own terminal-edit guard in
         # isolation, not the full `transitions.change_status` path -- forcing
@@ -970,7 +971,7 @@ async def test_closed_ticket_rejects_edits(api_env) -> None:
     that would catch it (mutation-verified: see
     `.git/sdd/task-7-report.md`)."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
         ticket.status = "closed"
         await session.flush()
@@ -989,7 +990,7 @@ async def test_update_category_id_enforces_type_match(api_env) -> None:
     carrying a `type="request"` category, unreachable by the create path's
     guard and uncaught by any DB constraint."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)  # type="incident"
         request_queue = await _queue(session, org_id, user_id, key="requests")
         request_category = await _category(
@@ -1208,7 +1209,7 @@ async def test_create_cross_org_assigned_to_raises_not_found(
 
 async def test_update_audits_exactly_once_with_field_names_only(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
         await update_ticket(
             session,
@@ -1254,7 +1255,7 @@ async def test_update_ticket_system_actor_is_audited_with_no_actor_id(api_env) -
     never silently coerced back to `"user"` (that would make an audit row
     claim a human actor did something no human did)."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
         updated = await update_ticket(
             session,
@@ -1286,7 +1287,7 @@ async def test_update_ticket_system_actor_is_audited_with_no_actor_id(api_env) -
 
 async def test_update_ticket_rejects_unknown_actor_type(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
         with pytest.raises(TicketValidationError):
             await update_ticket(
@@ -1301,7 +1302,7 @@ async def test_update_ticket_rejects_unknown_actor_type(api_env) -> None:
 
 async def test_update_ticket_rejects_system_actor_with_actor_id(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
         with pytest.raises(TicketValidationError):
             await update_ticket(
@@ -1316,7 +1317,7 @@ async def test_update_ticket_rejects_system_actor_with_actor_id(api_env) -> None
 
 async def test_update_ticket_rejects_user_actor_type_without_actor_id(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
         with pytest.raises(TicketValidationError):
             await update_ticket(
@@ -1352,7 +1353,7 @@ async def test_update_ticket_refuses_queue_id_rather_than_silently_dropping_it(
     The refusal names the service to call instead so a caller cannot be left
     guessing."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
         other_queue = await create_queue(session, org_id, user_id, key="esc", name="Escalation")
         ticket_id = ticket.id
@@ -1411,7 +1412,7 @@ async def test_update_ticket_refuses_every_non_editable_key(
     the two keys that moved to a dedicated service, the message names that
     service."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
 
         with pytest.raises(TicketValidationError) as excinfo:
@@ -1427,7 +1428,7 @@ async def test_update_ticket_refusal_does_not_apply_the_editable_half(api_env) -
     success in a smaller costume -- and is precisely the shape SLA task 9's
     combined priority+queue escalation would have taken."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
         other_queue = await create_queue(session, org_id, user_id, key="esc", name="Escalation")
         ticket_id = ticket.id

@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -136,14 +137,14 @@ async def _setup(
         await session.commit()
         org_id, device_id, user_id = org.id, device.id, user.id
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
             session, vault, org_id=org_id, actor_id=user_id, name="primary"
         )
         await session.commit()
         repo_id = repo.id
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         key = await open_repo_key(session, vault, org_id=org_id, repository_id=repo_id)
         blob = seal_manifest(key, _KNOWN_MANIFEST)
         manifest_ref = await object_store.put_backup_object(
@@ -193,7 +194,7 @@ async def test_browse_manifest_round_trips_known_filetree(
         admin_engine, app_engine, vault, object_store
     )
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         manifest = await browse_manifest(
             session, object_store, vault, org_id=org_id, backup_point_id=point_id
         )
@@ -219,7 +220,7 @@ async def test_browse_manifest_raises_not_found_for_another_orgs_point_under_rls
         admin_engine, app_engine, vault, object_store
     )
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(NoResultFound):
             await browse_manifest(
                 session, object_store, vault, org_id=org_b, backup_point_id=point_a
@@ -243,10 +244,10 @@ async def test_dispatch_restore_creates_signed_job_and_restore_job_row(
     )
     now = _dt.datetime(2026, 7, 21, 12, 0)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         raw_key = await open_repo_key(session, vault, org_id=org_id, repository_id=repo_id)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job_engine = _FakeJobEngine()
         pending = await dispatch_restore(
             session,
@@ -323,7 +324,7 @@ async def test_dispatch_restore_verify_mode_sets_restore_job_mode(
     )
     now = _dt.datetime(2026, 7, 21, 12, 0)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job_engine = _FakeJobEngine()
         pending = await dispatch_restore(
             session,
@@ -365,7 +366,7 @@ async def test_dispatch_restore_finds_no_point_for_another_orgs_id_under_rls(
     )
     now = _dt.datetime(2026, 7, 21, 12, 0)
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         job_engine = _FakeJobEngine()
         pending = await dispatch_restore(
             session,
@@ -400,7 +401,7 @@ async def test_dispatch_restore_does_not_publish(
     )
     now = _dt.datetime(2026, 7, 21, 12, 0)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job_engine = _FakeJobEngine()
         pending = await dispatch_restore(
             session,

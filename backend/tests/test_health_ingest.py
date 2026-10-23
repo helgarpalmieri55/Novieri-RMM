@@ -26,6 +26,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.gateway.protocol import HealthReportMsg, parse_agent_message
 from app.modules.health.ingest import ingest_report
 from tests.health_fixtures import (
@@ -881,7 +882,7 @@ async def test_a_report_on_the_wrong_org_binding_is_audited_as_an_identity_misma
     )
     await redis.aclose()
 
-    async with org_session(a.org_id, engine=app_engine) as session:
+    async with org_session(a.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         mismatches = list(
             (
                 await session.execute(

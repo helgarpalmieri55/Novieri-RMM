@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
+from app.core.client_scope import ClientScope
 from app.core.rbac import route_permission
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -65,7 +66,7 @@ async def _published(
     )
     assert resp.status_code == 201, resp.text
     created: dict[str, Any] = resp.json()
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         release = await session.get(AgentRelease, UUID(created["id"]))
         assert release is not None
         release.sha256 = "b" * 64
@@ -135,7 +136,7 @@ async def test_the_deployment_package_carries_no_credential(api_env: ApiEnv) -> 
     assert "ITS_AGENT_ENROLL_TOKEN=<" not in rendered
 
     # The half a response-only check cannot see: nothing was minted.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = list((await session.execute(select(EnrollmentToken))).scalars())
     assert rows == [], "the package route minted an enrollment token"
 
@@ -219,7 +220,7 @@ async def test_a_minted_deployment_token_is_bounded_in_the_database(
     assert body["max_uses"] == 300
     assert body["token"]
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = list((await session.execute(select(EnrollmentToken))).scalars())
     assert len(rows) == 1
     assert rows[0].max_uses == 300, "max_uses is null: this token is unlimited"
@@ -421,7 +422,7 @@ async def test_both_acts_are_audited(api_env: ApiEnv) -> None:
         headers=headers,
     )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = list(
             (
                 await session.execute(

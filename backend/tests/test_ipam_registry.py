@@ -33,6 +33,7 @@ from sqlalchemy import func, select
 from sqlalchemy import text as sqltext
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, IpamVlan, IpamVrf
 from app.modules.ipam.errors import (
@@ -188,7 +189,7 @@ async def test_ensure_default_vrf_works_inside_a_tenant_session(
     `WITH CHECK` predicate, which it does only because `org_id` comes from the
     argument and not from anywhere else."""
     org = await seed_org(admin_engine, "vrfrls")
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         vrf_id = await ensure_default_vrf(session, org.org_id)
         await session.commit()
     assert await _count(admin_engine, IpamVrf, org.org_id) == 1

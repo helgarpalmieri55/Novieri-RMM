@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Agent, AuditEvent, Job, PatchPolicy, Script, ScriptPolicy, ScriptRun
 from app.modules.deploy.handler import register_job_types
@@ -83,7 +84,7 @@ async def _policy(app_engine: AsyncEngine, org: Any, script_id: UUID, **kw: Any)
         "enabled": True,
     }
     values.update(kw)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = await create_policy(
             session,
             org_id=org.org_id,
@@ -97,7 +98,7 @@ async def _policy(app_engine: AsyncEngine, org: Any, script_id: UUID, **kw: Any)
 
 async def _sweep(app_engine: AsyncEngine, org_id: UUID, now: datetime) -> _FakeJobEngine:
     engine = _FakeJobEngine()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await run_policy_sweep(session, engine, org_id=org_id, now=now)
     return engine
 
@@ -118,7 +119,7 @@ async def _runs(admin_engine: AsyncEngine, org_id: UUID) -> list[ScriptRun]:
 async def _finish(
     admin_engine: AsyncEngine, app_engine: AsyncEngine, run: ScriptRun, *, exit_code: int
 ) -> None:
-    async with org_session(run.org_id, engine=app_engine) as session:
+    async with org_session(run.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == run.job_id))).scalar_one()
         await ingest_script_result(
             session,

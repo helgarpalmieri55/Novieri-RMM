@@ -27,6 +27,7 @@ import redis.asyncio as aioredis
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings, override_settings
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
@@ -134,7 +135,7 @@ async def test_scan_sweep_dispatches_never_scanned_and_skips_recent(
     await _succeeded_scan(admin_engine, org_id, recent_id, finished_at=now - timedelta(hours=1))
     await _succeeded_scan(admin_engine, org_id, stale_id, finished_at=now - timedelta(hours=48))
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         patch = Patch(
             org_id=org_id,
             os_family="linux",
@@ -188,7 +189,7 @@ async def test_scan_sweep_dispatches_never_scanned_and_skips_recent(
     assert set(dispatched_device_ids) == {never_id, stale_id}
     assert recent_id not in dispatched_device_ids
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         jobs = (
             await session.execute(
                 select(Job).where(Job.type == "patch.scan", Job.status == JobStatus.queued)
@@ -414,7 +415,7 @@ async def _expire_scan_jobs(app_engine: AsyncEngine, org_id: UUID, before: datet
     """
     from app.models import Job
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await session.execute(
             update(Job)
             .where(Job.org_id == org_id, Job.type == "patch.scan")
@@ -426,7 +427,7 @@ async def _expire_scan_jobs(app_engine: AsyncEngine, org_id: UUID, before: datet
 async def _scan_jobs(app_engine: AsyncEngine, org_id: UUID) -> list[Any]:
     from app.models import Job
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return list(
             (
                 await session.execute(
@@ -569,7 +570,7 @@ async def _settled_patch_set(
     """A device whose patch set has not changed since `detected_at`: one status
     row, stamped once, never rewritten. This is the ordinary steady state of a
     managed machine, not an edge case."""
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         patch = Patch(
             org_id=org_id,
             os_family="linux",

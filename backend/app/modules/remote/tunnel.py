@@ -14,6 +14,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.identity import domain_refusal, log_admission_refusal, status_refusal
 from app.core.identity.policy import resolve_console_domain
@@ -102,7 +103,7 @@ async def authorize_tunnel(
             4401, "unknown organization"
         )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         # 4403, matching this door's existing vocabulary (4401 bad token / 4403
         # authenticated-but-refused / 4404 no such session) rather than
         # inventing a fourth code, so "the allowlist turned you away" is

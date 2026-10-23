@@ -25,6 +25,7 @@ from uuid import UUID
 import websockets
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.modules.remote import rsp
@@ -185,7 +186,7 @@ async def _finish(
         try:
             if recording.frames > 0:
                 object_store = store()
-                async with org_session(org_id, engine=app_engine) as s:
+                async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
                     await finalize_recording_file(
                         s,
                         object_store,
@@ -201,7 +202,7 @@ async def _finish(
         finally:
             recording.discard()
     try:
-        async with org_session(org_id, engine=app_engine) as s:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
             await service.end_session(s, session_id=session_id, reason="completed")
     except InvalidSessionState:
         pass  # the gateway (or a stop) ended it first, with the real reason

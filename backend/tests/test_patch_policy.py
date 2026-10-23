@@ -2,6 +2,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Device, DeviceGroup, Organization, PatchPolicy
 from app.modules.patch.policy import resolve_patch_policy, resolve_ring_populations
@@ -23,7 +24,7 @@ async def _setup(admin_engine):
 
 async def test_defaults_when_no_policy(admin_engine: AsyncEngine, app_engine: AsyncEngine) -> None:
     org_id, _, device_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         pol = await resolve_patch_policy(s, org_id, device_id)
     assert pol.ring_name == "broad" and pol.auto_approve_security is False
     assert pol.reboot == "if_required" and pol.scan_interval_hours == 24
@@ -33,7 +34,7 @@ async def test_group_policy_wins_and_dup_org_default_safe(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, group_id, device_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         s.add(PatchPolicy(org_id=org_id, device_group_id=None, ring_name="broad"))
         s.add(PatchPolicy(org_id=org_id, device_group_id=group_id, ring_name="test",
                           ring_order=0, auto_approve_security=True))
@@ -51,7 +52,7 @@ async def test_org_default_resolves_when_duplicate_rows_exist(
     must deterministically pick the lowest-id row (device has no group-specific
     policy, so the org-default branch is genuinely exercised)."""
     org_id, _, device_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         first = PatchPolicy(org_id=org_id, device_group_id=None, ring_name="pilot",
                              scan_interval_hours=6)
         s.add(first)
@@ -130,7 +131,7 @@ async def test_ring_populations_agree_with_the_per_device_resolver(
     """THE FALSIFIER FOR THE WHOLE OPTIMISATION. Every device is resolved both
     ways and the two answers must be identical, device by device."""
     org_id, devices = await _mixed_fleet(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         populations = await resolve_ring_populations(s, org_id)
         fast = {
             device_id: population.ring_name
@@ -156,7 +157,7 @@ async def test_every_device_lands_in_exactly_one_ring(
     rings PARTITION the fleet: a device counted twice inflates the reach of an
     approval, and a device counted nowhere hides one."""
     org_id, devices = await _mixed_fleet(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         populations = await resolve_ring_populations(s, org_id)
     placed = [d for population in populations for d in population.device_ids]
     assert sorted(placed) == sorted(devices.values())
@@ -167,7 +168,7 @@ async def test_a_ring_a_policy_names_is_listed_even_with_nobody_in_it(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _ = await _mixed_fleet(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         populations = await resolve_ring_populations(s, org_id)
     by_name = {p.ring_name: p for p in populations}
     assert by_name["canary"].device_ids == ()
@@ -182,6 +183,6 @@ async def test_a_ring_with_no_policy_at_all_falls_back_to_broad(
     """`ResolvedPatchPolicy()`'s hardcoded default is a real ring an approval
     can be made into, so it must be listed on an org that has no policy rows."""
     org_id, _, device_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         populations = await resolve_ring_populations(s, org_id)
     assert [(p.ring_name, p.device_ids) for p in populations] == [("broad", (device_id,))]

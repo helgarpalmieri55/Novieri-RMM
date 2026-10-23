@@ -43,6 +43,7 @@ from sqlalchemy import text as sqltext
 from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.rbac import PERMISSIONS, PLATFORM_OPERATOR_CODES
 from app.core.tenancy import org_session
 from tests.agent_push_fixtures import PushOrg, seed_credential, seed_org
@@ -109,9 +110,9 @@ async def test_cross_org_read_returns_nothing(
         await session.commit()
 
     query = sqltext(f"SELECT org_id FROM {table}")  # noqa: S608 -- table is from TABLES
-    async with org_session(b.org_id, engine=app_engine) as session:
+    async with org_session(b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         seen_by_b = {r.org_id for r in (await session.execute(query)).all()}
-    async with org_session(a.org_id, engine=app_engine) as session:
+    async with org_session(a.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         seen_by_a = {r.org_id for r in (await session.execute(query)).all()}
 
     assert a.org_id not in seen_by_b
@@ -129,7 +130,7 @@ async def test_cross_org_insert_is_rejected(
     credential_id = await seed_credential(admin_engine, a)
     planted = _row(table, a, credential_id)
     try:
-        async with org_session(b.org_id, engine=app_engine) as session:
+        async with org_session(b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
             session.add(planted)
             await session.flush()
     except (DBAPIError, ProgrammingError) as exc:

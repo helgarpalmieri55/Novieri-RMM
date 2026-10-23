@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
@@ -180,7 +181,7 @@ async def test_the_requester_is_recorded_in_the_chain_and_not_in_the_response(
     row = await _row(api_env, job_id)
     assert row.cancel_requested_by is not None
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         events = {
             r.action: r
             for r in (
@@ -383,7 +384,7 @@ async def test_rls_hides_a_neighbours_job_from_an_unfiltered_select(
     mine = await api_env.create_org("cancel-rls-mine")
     victim_job = await _job(api_env, victim, await _device(api_env, victim, "v-2"))
 
-    async with org_session(mine, engine=app_engine) as session:
+    async with org_session(mine, engine=app_engine, clients=ClientScope.all()) as session:
         visible = {row.id for row in (await session.execute(select(Job))).scalars()}
     assert victim_job not in visible
 
@@ -428,7 +429,9 @@ async def test_a_cancel_racing_a_delivery_never_produces_both(
     locked, released = asyncio.Event(), asyncio.Event()
 
     async def delivery() -> None:
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             job = (
                 await session.execute(
                     select(Job).where(Job.id == job_id).with_for_update()
@@ -439,7 +442,9 @@ async def test_a_cancel_racing_a_delivery_never_produces_both(
             await engine.mark_dispatched(session, job)
 
     async def cancel() -> Exception | None:
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             try:
                 await request_cancellation(
                     session,

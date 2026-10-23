@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
 from app.core.client_address import IPAddress, IPNetwork, address_in
+from app.core.client_scope import ClientScope
 from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.models import Device, InstallLink
@@ -416,7 +417,7 @@ async def resolve_live(
     org_id = await resolve_org(admin_engine, code)
     if org_id is None:
         return None
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = await live_link_for(session, org_id, code=code, source=source, now=now)
     return org_id if row is not None else None
 

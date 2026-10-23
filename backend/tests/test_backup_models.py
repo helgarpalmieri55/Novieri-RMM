@@ -3,6 +3,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     BackupPoint,
@@ -31,7 +32,7 @@ async def _org_device_user(admin_engine: AsyncEngine):
 
 async def test_backup_models_roundtrip(admin_engine: AsyncEngine, app_engine: AsyncEngine) -> None:
     org_id, device_id, user_id = await _org_device_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         repo = BackupRepository(
             org_id=org_id,
             name="primary",
@@ -93,7 +94,7 @@ async def test_backup_models_roundtrip(admin_engine: AsyncEngine, app_engine: As
         assert restore.state == "pending"
         assert restore.mode == "verify"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         got_repo = (
             await s.execute(select(BackupRepository).where(BackupRepository.id == repo.id))
         ).scalar_one()

@@ -37,6 +37,7 @@ from websockets.typing import Subprotocol
 
 from app.core.audit import audit_service
 from app.core.ca import CAService, get_ca
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.health.heartbeat import HEARTBEAT_INTERVAL_S, write_heartbeat
 from app.core.tenancy import org_session
@@ -431,7 +432,9 @@ class GatewayServer:
         from app.modules.inventory.schedule import queue_first_collect
 
         try:
-            async with org_session(org_id, engine=self._app_engine) as session:
+            async with org_session(
+                org_id, engine=self._app_engine, clients=ClientScope.all()
+            ) as session:
                 await queue_first_collect(session, self._job_engine, org_id, device_id)
         except Exception:  # noqa: BLE001 - see docstring
             logger.exception("first inventory collect not queued for device %s", device_id)
@@ -459,7 +462,9 @@ class GatewayServer:
             return
         from app.models import Job, JobStatus
 
-        async with org_session(org_id, engine=self._app_engine) as session:
+        async with org_session(
+            org_id, engine=self._app_engine, clients=ClientScope.all()
+        ) as session:
             job = (
                 await session.execute(
                     select(Job).where(Job.id == UUID(job_id)).with_for_update()
@@ -472,7 +477,9 @@ class GatewayServer:
         self, org_id: UUID, device_id: UUID, connection: ServerConnection
     ) -> None:
         envelopes: list[dict[str, Any]] = []
-        async with org_session(org_id, engine=self._app_engine) as session:
+        async with org_session(
+            org_id, engine=self._app_engine, clients=ClientScope.all()
+        ) as session:
             for job in await self._job_engine.queued_for_device(session, device_id):
                 envelopes.append(await self._job_engine.signed_envelope(job))
                 await self._job_engine.mark_dispatched(session, job)
@@ -487,7 +494,9 @@ class GatewayServer:
         ip: str | None,
         report: AgentSelfReport | None = None,
     ) -> None:
-        async with org_session(org_id, engine=self._app_engine) as session:
+        async with org_session(
+            org_id, engine=self._app_engine, clients=ClientScope.all()
+        ) as session:
             row = (
                 await session.execute(select(Agent).where(Agent.id == agent_id))
             ).scalar_one()
@@ -527,7 +536,9 @@ class GatewayServer:
 
     async def _mark_offline(self, org_id: UUID, agent_id: UUID) -> None:
         try:
-            async with org_session(org_id, engine=self._app_engine) as session:
+            async with org_session(
+                org_id, engine=self._app_engine, clients=ClientScope.all()
+            ) as session:
                 row = (
                     await session.execute(select(Agent).where(Agent.id == agent_id))
                 ).scalar_one()

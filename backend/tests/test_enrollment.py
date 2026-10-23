@@ -8,6 +8,7 @@ from cryptography.x509.oid import NameOID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.models import AuditEvent, Device, EnrollmentToken
 from app.services.enrollment import DeviceFacts
 
@@ -819,7 +820,9 @@ async def test_the_bound_is_the_services_and_not_only_the_routes(api_env) -> Non
 
     org_id = await api_env.create_org("enr-svc-bound")
     admin = await api_env.create_user(org_id, "org-admin")
-    async with org_session(org_id, engine=api_env.app.state.app_engine) as session:
+    async with org_session(
+        org_id, engine=api_env.app.state.app_engine, clients=ClientScope.all()
+    ) as session:
         for bad in (None, 0, -1, MAX_TOKEN_USES + 1):
             with pytest.raises(TokenBoundsError):
                 await create_token(

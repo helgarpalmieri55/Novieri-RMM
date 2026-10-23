@@ -44,6 +44,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.tenancy import admin_session, org_session
 from app.models import KeycloakEventIngest, User
 from app.modules.keycloak_events.client import KeycloakEventsConfig, fetch_events
@@ -232,7 +233,7 @@ async def _forward(
     an event that never landed.
     """
     fingerprint = event_fingerprint(realm, event)
-    async with org_session(org_id, engine=engine) as session:
+    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
         result = await session.execute(
             pg_insert(KeycloakEventIngest)
             # `ingested_at` FROM THE SWEEP'S OWN CLOCK, not the column's

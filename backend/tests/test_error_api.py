@@ -32,6 +32,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.errors.capture import capture_exception, drained
 from app.main import drain_platform_errors_once
 from app.models import Permission, Role, RolePermission, User, UserRole
@@ -451,7 +452,7 @@ async def _audit_rows(api_env: Any, org_id: UUID) -> list[Any]:
     from app.core.tenancy import org_session
     from app.models import AuditEvent
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         return list(
             (await session.execute(select(AuditEvent).order_by(AuditEvent.id))).scalars()
         )
@@ -622,7 +623,7 @@ async def test_the_audit_chain_still_verifies_after_a_resolve_and_a_reopen(
         f"/api/v1/platform/errors/{group_id}/unresolve", headers=headers
     )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await audit_service.verify(session, org_id)
     assert result.ok is True
     assert result.count >= 2

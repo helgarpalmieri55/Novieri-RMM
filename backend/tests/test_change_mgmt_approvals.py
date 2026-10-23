@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, ChangeApproval, ChangeRequest, Organization, User
 from app.modules.change_mgmt.service import create_change, decide_change, transition_change
@@ -64,7 +65,7 @@ async def _org_with_two_users(admin_engine: AsyncEngine) -> tuple[UUID, UUID, UU
 async def _approval_rows(
     app_engine: AsyncEngine, org_id: UUID, change_id: UUID
 ) -> list[ChangeApproval]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         return list(
             (
                 await s.execute(
@@ -79,7 +80,7 @@ async def _approval_rows(
 
 
 async def _audit_actions(app_engine: AsyncEngine, org_id: UUID, change_id: UUID) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -97,7 +98,7 @@ async def _audit_actions(app_engine: AsyncEngine, org_id: UUID, change_id: UUID)
 async def _create_and_submit(
     app_engine: AsyncEngine, spy: _SpyTicket, *, org_id: UUID, requester_id: UUID, type_: str
 ) -> UUID:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         change = await create_change(
             s,
             org_id=org_id,
@@ -114,7 +115,7 @@ async def _create_and_submit(
         await s.commit()
         change_id = change.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await transition_change(
             s, spy, org_id=org_id, actor_id=requester_id, change_id=change_id, action="submit"
         )
@@ -137,7 +138,7 @@ async def test_decide_change_approve_by_different_user_moves_to_approved(
         app_engine, spy, org_id=org_id, requester_id=requester_id, type_="normal"
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         approval = await decide_change(
             s,
             spy,
@@ -153,7 +154,7 @@ async def test_decide_change_approve_by_different_user_moves_to_approved(
         assert approval.is_retrospective is False
         assert approval.comment == "looks good"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = (
             await s.execute(select(ChangeRequest).where(ChangeRequest.id == change_id))
         ).scalar_one()
@@ -167,7 +168,7 @@ async def test_decide_change_approve_by_different_user_moves_to_approved(
     actions = await _audit_actions(app_engine, org_id, change_id)
     assert actions == ["change.created", "change.submitted", "change.approved"]
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         event = (
             await s.execute(
                 select(AuditEvent)
@@ -198,7 +199,7 @@ async def test_decide_change_approve_by_requester_raises_sod(
         app_engine, spy, org_id=org_id, requester_id=requester_id, type_="normal"
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(ChangeValidationError):
             await decide_change(
                 s,
@@ -213,7 +214,7 @@ async def test_decide_change_approve_by_requester_raises_sod(
     rows = await _approval_rows(app_engine, org_id, change_id)
     assert rows == []
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = (
             await s.execute(select(ChangeRequest).where(ChangeRequest.id == change_id))
         ).scalar_one()
@@ -234,7 +235,7 @@ async def test_decide_change_reject_by_different_user_moves_to_rejected(
         app_engine, spy, org_id=org_id, requester_id=requester_id, type_="normal"
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         approval = await decide_change(
             s,
             spy,
@@ -247,7 +248,7 @@ async def test_decide_change_reject_by_different_user_moves_to_rejected(
         await s.commit()
         assert approval.decision == "rejected"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = (
             await s.execute(select(ChangeRequest).where(ChangeRequest.id == change_id))
         ).scalar_one()
@@ -276,7 +277,7 @@ async def test_decide_change_insert_only_multiple_decisions_persist(
     )
 
     # First decision: reject.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await decide_change(
             s,
             spy,
@@ -289,20 +290,20 @@ async def test_decide_change_insert_only_multiple_decisions_persist(
         await s.commit()
 
     # Revise back to draft, then resubmit.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await transition_change(
             s, spy, org_id=org_id, actor_id=requester_id, change_id=change_id, action="revise"
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await transition_change(
             s, spy, org_id=org_id, actor_id=requester_id, change_id=change_id, action="submit"
         )
         await s.commit()
 
     # Second decision: approve.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await decide_change(
             s,
             spy,
@@ -319,7 +320,7 @@ async def test_decide_change_insert_only_multiple_decisions_persist(
     decisions = sorted(r.decision for r in rows)
     assert decisions == ["approved", "rejected"]
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = (
             await s.execute(select(ChangeRequest).where(ChangeRequest.id == change_id))
         ).scalar_one()
@@ -337,7 +338,7 @@ async def test_emergency_retrospective_approve_records_row_and_unblocks_complete
     org_id, requester_id, approver_id = await _org_with_two_users(admin_engine)
     spy = _SpyTicket()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         change = await create_change(
             s,
             org_id=org_id,
@@ -355,21 +356,21 @@ async def test_emergency_retrospective_approve_records_row_and_unblocks_complete
         change_id = change.id
 
     # Fast-path: draft -> submitted -> implementing (no prior approval needed).
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = (
             await s.execute(select(ChangeRequest).where(ChangeRequest.id == change_id))
         ).scalar_one()
         row.state = "submitted"
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await transition_change(
             s, spy, org_id=org_id, actor_id=requester_id, change_id=change_id, action="begin"
         )
         await s.commit()
 
     # Retrospective approval by a different user.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         approval = await decide_change(
             s,
             spy,
@@ -383,7 +384,7 @@ async def test_emergency_retrospective_approve_records_row_and_unblocks_complete
         assert approval.is_retrospective is True
         assert approval.decision == "approved"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = (
             await s.execute(select(ChangeRequest).where(ChangeRequest.id == change_id))
         ).scalar_one()
@@ -396,7 +397,7 @@ async def test_emergency_retrospective_approve_records_row_and_unblocks_complete
     actions = await _audit_actions(app_engine, org_id, change_id)
     assert actions == ["change.created", "change.transitioned", "change.approved"]
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         event = (
             await s.execute(
                 select(AuditEvent)
@@ -408,7 +409,7 @@ async def test_emergency_retrospective_approve_records_row_and_unblocks_complete
         assert event.meta == {"decision": "approved", "is_retrospective": True}
 
     # Now completion succeeds because a retrospective approval was recorded.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await transition_change(
             s, spy, org_id=org_id, actor_id=approver_id, change_id=change_id, action="complete"
         )
@@ -422,7 +423,7 @@ async def test_emergency_retrospective_approve_by_requester_raises(
     org_id, requester_id, _approver_id = await _org_with_two_users(admin_engine)
     spy = _SpyTicket()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         change = await create_change(
             s,
             org_id=org_id,
@@ -439,20 +440,20 @@ async def test_emergency_retrospective_approve_by_requester_raises(
         await s.commit()
         change_id = change.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = (
             await s.execute(select(ChangeRequest).where(ChangeRequest.id == change_id))
         ).scalar_one()
         row.state = "submitted"
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await transition_change(
             s, spy, org_id=org_id, actor_id=requester_id, change_id=change_id, action="begin"
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(ChangeValidationError):
             await decide_change(
                 s,
@@ -479,7 +480,7 @@ async def test_decide_change_on_draft_raises_illegal(
     org_id, requester_id, approver_id = await _org_with_two_users(admin_engine)
     spy = _SpyTicket()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         change = await create_change(
             s,
             org_id=org_id,
@@ -496,7 +497,7 @@ async def test_decide_change_on_draft_raises_illegal(
         await s.commit()
         change_id = change.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(ChangeValidationError):
             await decide_change(
                 s,
@@ -526,7 +527,7 @@ async def test_decide_change_invalid_decision_raises(
         app_engine, spy, org_id=org_id, requester_id=requester_id, type_="normal"
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(ChangeValidationError):
             await decide_change(
                 s,
@@ -555,7 +556,7 @@ async def test_decide_change_refuses_a_change_rls_has_already_hidden(
         app_engine, spy, org_id=org_a, requester_id=requester_a, type_="normal"
     )
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(ChangeValidationError):
             await decide_change(
                 s,

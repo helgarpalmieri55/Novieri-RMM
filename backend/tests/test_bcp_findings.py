@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, ChangeRequest, Organization, User
 from app.modules.bcp.errors import BcpNotFoundError, BcpValidationError
@@ -41,7 +42,7 @@ async def _org_with_user(admin_engine: AsyncEngine) -> tuple[UUID, UUID]:
 
 
 async def _seed_plan(app_engine: AsyncEngine, org_id: UUID, actor_id: UUID) -> UUID:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         plan = await create_plan(
             s,
             org_id=org_id,
@@ -60,7 +61,7 @@ async def _seed_plan(app_engine: AsyncEngine, org_id: UUID, actor_id: UUID) -> U
 
 
 async def _seed_test(app_engine: AsyncEngine, org_id: UUID, actor_id: UUID, plan_id: UUID) -> UUID:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         test = await bcp_create_test(
             s,
             org_id=org_id,
@@ -94,7 +95,7 @@ async def _seed_change_request(admin_engine: AsyncEngine, org_id: UUID, actor_id
 async def _audit_actions(
     app_engine: AsyncEngine, org_id: UUID, target_type: str, target_id: str
 ) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -123,7 +124,7 @@ async def test_create_finding_defaults_open_and_audits(
     plan_id = await _seed_plan(app_engine, org_id, actor_id)
     test_id = await _seed_test(app_engine, org_id, actor_id, plan_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         finding = await create_finding(
             s,
             org_id=org_id,
@@ -148,7 +149,7 @@ async def test_create_finding_missing_test_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpNotFoundError):
             await create_finding(
                 s,
@@ -167,7 +168,7 @@ async def test_create_finding_invalid_severity_raises_validation_error(
     plan_id = await _seed_plan(app_engine, org_id, actor_id)
     test_id = await _seed_test(app_engine, org_id, actor_id, plan_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpValidationError):
             await create_finding(
                 s,
@@ -191,7 +192,7 @@ async def test_update_finding_remediation_state_transitions_stamp_resolved_at(
     plan_id = await _seed_plan(app_engine, org_id, actor_id)
     test_id = await _seed_test(app_engine, org_id, actor_id, plan_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         finding = await create_finding(
             s,
             org_id=org_id,
@@ -204,7 +205,7 @@ async def test_update_finding_remediation_state_transitions_stamp_resolved_at(
         finding_id = finding.id
 
     # open -> in_progress: resolved_at stays None
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         updated = await update_finding(
             s,
             org_id=org_id,
@@ -217,7 +218,7 @@ async def test_update_finding_remediation_state_transitions_stamp_resolved_at(
     assert updated.resolved_at is None
 
     # in_progress -> resolved: resolved_at stamped
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         updated = await update_finding(
             s,
             org_id=org_id,
@@ -230,7 +231,7 @@ async def test_update_finding_remediation_state_transitions_stamp_resolved_at(
     assert updated.resolved_at is not None
 
     # resolved -> in_progress: resolved_at cleared
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         updated = await update_finding(
             s,
             org_id=org_id,
@@ -258,7 +259,7 @@ async def test_update_finding_invalid_remediation_state_raises_validation_error(
     plan_id = await _seed_plan(app_engine, org_id, actor_id)
     test_id = await _seed_test(app_engine, org_id, actor_id, plan_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         finding = await create_finding(
             s,
             org_id=org_id,
@@ -270,7 +271,7 @@ async def test_update_finding_invalid_remediation_state_raises_validation_error(
         await s.commit()
         finding_id = finding.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpValidationError):
             await update_finding(
                 s,
@@ -286,7 +287,7 @@ async def test_update_finding_missing_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpNotFoundError):
             await update_finding(
                 s,
@@ -310,7 +311,7 @@ async def test_update_finding_links_own_org_change_ref_and_leaves_it_unchanged(
     test_id = await _seed_test(app_engine, org_id, actor_id, plan_id)
     change_id = await _seed_change_request(admin_engine, org_id, actor_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         finding = await create_finding(
             s,
             org_id=org_id,
@@ -322,7 +323,7 @@ async def test_update_finding_links_own_org_change_ref_and_leaves_it_unchanged(
         await s.commit()
         finding_id = finding.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         updated = await update_finding(
             s,
             org_id=org_id,
@@ -355,7 +356,7 @@ async def test_update_finding_cross_org_change_ref_raises_validation_error(
     test_id = await _seed_test(app_engine, org_id, actor_id, plan_id)
     foreign_change_id = await _seed_change_request(admin_engine, other_org_id, other_actor_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         finding = await create_finding(
             s,
             org_id=org_id,
@@ -367,7 +368,7 @@ async def test_update_finding_cross_org_change_ref_raises_validation_error(
         await s.commit()
         finding_id = finding.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpValidationError):
             await update_finding(
                 s,
@@ -398,7 +399,7 @@ async def test_update_finding_change_ref_org_filter_is_load_bearing(
     test_id = await _seed_test(app_engine, org_a, actor_a, plan_id)
     foreign_change_id = await _seed_change_request(admin_engine, org_b, actor_b)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         finding = await create_finding(
             s,
             org_id=org_a,
@@ -428,7 +429,7 @@ async def test_update_finding_nonexistent_change_ref_raises_validation_error(
     plan_id = await _seed_plan(app_engine, org_id, actor_id)
     test_id = await _seed_test(app_engine, org_id, actor_id, plan_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         finding = await create_finding(
             s,
             org_id=org_id,
@@ -440,7 +441,7 @@ async def test_update_finding_nonexistent_change_ref_raises_validation_error(
         await s.commit()
         finding_id = finding.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpValidationError):
             await update_finding(
                 s,
@@ -463,7 +464,7 @@ async def test_list_findings_returns_the_orgs_findings_and_writes_no_audit_event
     plan_id = await _seed_plan(app_engine, org_id, actor_id)
     test_id = await _seed_test(app_engine, org_id, actor_id, plan_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         finding = await create_finding(
             s,
             org_id=org_id,
@@ -475,7 +476,7 @@ async def test_list_findings_returns_the_orgs_findings_and_writes_no_audit_event
         await s.commit()
         finding_id = finding.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         findings = await list_findings(s, org_id, test_id)
         assert [f.id for f in findings] == [finding_id]
 
@@ -489,7 +490,7 @@ async def test_list_findings_empty_for_missing_test(
 ) -> None:
     org_id, _actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         findings = await list_findings(s, org_id, uuid4())
         assert findings == []
 
@@ -502,7 +503,7 @@ async def test_another_orgs_finding_is_hidden_by_rls(
     plan_a = await _seed_plan(app_engine, org_a, actor_a)
     test_a = await _seed_test(app_engine, org_a, actor_a, plan_a)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         finding = await create_finding(
             s,
             org_id=org_a,
@@ -514,7 +515,7 @@ async def test_another_orgs_finding_is_hidden_by_rls(
         await s.commit()
         finding_id = finding.id
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         findings = await list_findings(s, org_b, test_a)
         assert findings == []
 

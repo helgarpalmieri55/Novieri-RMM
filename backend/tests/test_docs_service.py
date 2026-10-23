@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Device, DocVersion, Organization, User
 from app.modules.documentation import service as svc
@@ -27,7 +28,7 @@ async def _org_user(admin_engine: AsyncEngine) -> tuple[UUID, UUID, UUID]:
 
 async def test_create_and_update_version_and_audit(admin_engine, app_engine) -> None:
     org_id, user_id, _ = await _org_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         article = await svc.create_article(
             session,
             org_id=org_id,
@@ -77,7 +78,7 @@ async def test_create_and_update_version_and_audit(admin_engine, app_engine) -> 
 
 async def test_archive_hides_but_keeps_history(admin_engine, app_engine) -> None:
     org_id, user_id, _ = await _org_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         article = await svc.create_article(
             session, org_id=org_id, actor_id=user_id, title="Old doc", body="x", category="G"
         )
@@ -109,7 +110,7 @@ async def test_record_field_validation() -> None:
 
 async def test_record_lifecycle(admin_engine, app_engine) -> None:
     org_id, user_id, _ = await _org_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         record = await svc.create_record(
             session,
             org_id=org_id,
@@ -134,7 +135,7 @@ async def test_record_lifecycle(admin_engine, app_engine) -> None:
 async def test_links_validate_in_org_targets(admin_engine, app_engine) -> None:
     org_id, user_id, device_id = await _org_user(admin_engine)
     foreign_org, _, foreign_device = await _org_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         article = await svc.create_article(
             session, org_id=org_id, actor_id=user_id, title="Linked", body="b", category="G"
         )

@@ -37,6 +37,7 @@ import pytest
 from sqlalchemy import text as sqltext
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.rbac import PERMISSIONS
 from app.core.tenancy import org_session
 from tests.test_ai_admin_migration import (
@@ -122,7 +123,7 @@ async def test_cross_org_read_is_isolated(
     )
     await _admin_insert_outcome(admin_engine, _INSERT, o=org_b, p="admin", r="high", lvl="suggest")
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         seen = [
             (r[0], r[1])
             for r in (
@@ -306,12 +307,12 @@ async def test_the_grants_match_section_16(
     from tests.test_rbac import _seed_user_with_role
 
     org_id, tech_id, _ = await _seed_user_with_role(admin_engine, "technician", "ai-act-t")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await has_permission(session, tech_id, "ai.act.propose")
         assert not await has_permission(session, tech_id, "ai.act.confirm")
 
     org_id, admin_id, _ = await _seed_user_with_role(admin_engine, "org-admin", "ai-act-a")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await has_permission(session, admin_id, "ai.act.propose")
         assert await has_permission(session, admin_id, "ai.act.confirm")
 

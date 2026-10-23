@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
@@ -90,7 +91,7 @@ async def test_approve_flips_in_ring_missing_to_approved_and_audits(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, user_id, patch_id, device_test_id, device_broad_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         approval = await approve_patch(
             session, org_id=org_id, actor_id=user_id, patch_id=patch_id, ring_name="test"
         )
@@ -128,7 +129,7 @@ async def test_approve_flips_in_ring_missing_to_approved_and_audits(
 
 async def test_approve_is_idempotent(admin_engine: AsyncEngine, app_engine: AsyncEngine) -> None:
     org_id, user_id, patch_id, _, _ = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         first = await approve_patch(
             session, org_id=org_id, actor_id=user_id, patch_id=patch_id, ring_name="test"
         )
@@ -151,7 +152,7 @@ async def test_revoke_flips_approved_back_to_missing_but_leaves_installed(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, user_id, patch_id, device_test_id, _ = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         approval = await approve_patch(
             session, org_id=org_id, actor_id=user_id, patch_id=patch_id, ring_name="test"
         )
@@ -217,7 +218,7 @@ async def test_revoke_of_unknown_id_returns_false(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, user_id, _, _, _ = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         ok = await revoke_approval(
             session, org_id=org_id, actor_id=user_id, approval_id=uuid4()
         )
@@ -326,7 +327,7 @@ async def test_reapprove_after_revoke_unrevokes_in_place(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, user_id, patch_id, device_test_id, _ = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         first = await approve_patch(
             session, org_id=org_id, actor_id=user_id, patch_id=patch_id, ring_name="test"
         )
@@ -415,7 +416,7 @@ async def test_bulk_approval_writes_one_audit_event_per_patch_not_one_for_the_ba
     patch_two = await _extra_patch(admin_engine, org_id, "KB2")
     patch_three = await _extra_patch(admin_engine, org_id, "KB3")
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         outcomes = await approve_patches(
             session,
             org_id=org_id,
@@ -448,11 +449,11 @@ async def test_bulk_approval_says_which_patches_were_already_in_force(
     org_id, user_id, patch_one, _, _ = await _setup(admin_engine)
     patch_two = await _extra_patch(admin_engine, org_id, "KB2")
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await approve_patch(
             session, org_id=org_id, actor_id=user_id, patch_id=patch_one, ring_name="test"
         )
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         outcomes = await approve_patches(
             session,
             org_id=org_id,
@@ -478,7 +479,7 @@ async def test_bulk_approval_deduplicates_repeated_ids(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, user_id, patch_id, _, _ = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         outcomes = await approve_patches(
             session,
             org_id=org_id,
@@ -502,7 +503,7 @@ async def test_bulk_approval_refuses_a_patch_from_another_org_and_writes_nothing
     org_id, user_id, patch_id, _, _ = await _setup(admin_engine)
     other_org_id, _, foreign_patch_id, _, _ = await _setup(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(UnknownPatchError) as raised:
             await approve_patches(
                 session,
@@ -514,7 +515,7 @@ async def test_bulk_approval_refuses_a_patch_from_another_org_and_writes_nothing
         assert raised.value.patch_ids == [foreign_patch_id]
 
     # NOTHING from the batch was written -- not even the id that was legitimate.
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         approvals = (
             (await session.execute(select(PatchApproval))).scalars().all()
         )
@@ -529,7 +530,7 @@ async def test_single_approval_refuses_a_patch_from_another_org_too(
     shipped. It is one function; the batch did not invent the check."""
     org_id, user_id, _, _, _ = await _setup(admin_engine)
     _, _, foreign_patch_id, _, _ = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(UnknownPatchError):
             await approve_patch(
                 session,
@@ -544,7 +545,7 @@ async def test_bulk_approval_flips_only_the_ring_it_names(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, user_id, patch_id, device_test_id, device_broad_id = await _setup(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         outcomes = await approve_patches(
             session, org_id=org_id, actor_id=user_id, patch_ids=[patch_id], ring_name="test"
         )

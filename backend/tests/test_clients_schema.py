@@ -9,6 +9,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Client, Organization, Site
 
@@ -119,7 +120,7 @@ async def test_clients_and_sites_are_tenant_scoped(admin_engine, app_engine) -> 
     org_a = await _new_org(admin_engine)
     org_b = await _new_org(admin_engine)
 
-    async with org_session(org_a.id, engine=app_engine) as s:
+    async with org_session(org_a.id, engine=app_engine, clients=ClientScope.all()) as s:
         client_rows = (await s.execute(text("SELECT org_id FROM clients"))).all()
         site_rows = (await s.execute(text("SELECT org_id FROM sites"))).all()
     client_orgs = {r.org_id for r in client_rows}
@@ -128,7 +129,7 @@ async def test_clients_and_sites_are_tenant_scoped(admin_engine, app_engine) -> 
     assert site_orgs == {org_a.id}
 
     with pytest.raises(DBAPIError) as refused:
-        async with org_session(org_a.id, engine=app_engine) as s:
+        async with org_session(org_a.id, engine=app_engine, clients=ClientScope.all()) as s:
             await s.execute(
                 text(
                     "INSERT INTO clients (id, org_id, name) "

@@ -20,6 +20,7 @@ from moto import mock_aws
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Device, Package, User
@@ -134,7 +135,7 @@ async def test_upload_artifact_audits_with_user_actor(api_env) -> None:
         assert body["artifact_ref"] is not None
         assert body["artifact_sha256"]
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         event = (
             await session.execute(
                 select(AuditEvent).where(
@@ -349,7 +350,7 @@ async def test_execute_deployment_dispatches_signed_job_and_audits_user_actor(
     assert published["job"]["id"] == job_ids[0]
     assert published["sig"]
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         event = (
             await session.execute(
                 select(AuditEvent).where(AuditEvent.action == "deploy.dispatched")
@@ -603,7 +604,7 @@ async def test_execute_deployment_without_an_uploaded_artifact_is_422(api_env) -
     assert "artifact" in resp.text
 
     # And no job, and no deployment_results row, was created for it.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         from app.models import DeploymentResult, Job
 
         assert (

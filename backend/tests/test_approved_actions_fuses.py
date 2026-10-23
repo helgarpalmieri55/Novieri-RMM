@@ -34,6 +34,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.approved_actions import fuse_breach
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from tests.health_action_fixtures import seed_approved_action
 from tests.health_fixtures import seed_device, seed_org
@@ -334,7 +335,7 @@ async def test_the_verdict_is_the_same_through_a_tenant_session(
         admin_engine, org.org_id, org.device_id, created_at=now - timedelta(minutes=1)
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         breach = await fuse_breach(
             session, org.org_id, action, device_id=org.device_id, now=now
         )

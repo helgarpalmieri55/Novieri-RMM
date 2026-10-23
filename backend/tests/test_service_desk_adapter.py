@@ -25,6 +25,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.tenancy import org_session
 from app.models import (
@@ -105,12 +106,12 @@ async def test_push_change_opens_incident_ticket_in_default_queue(
     org_id, user_id, change = await _org_user_change(admin_engine)
     adapter = ServiceDeskChangeTicketAdapter()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         external_id = await adapter.push_change(s, org_id=org_id, change=change)
 
     assert external_id  # non-empty, unlike the null adapter's ""
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         ticket = (
             await s.execute(select(Ticket).where(Ticket.org_id == org_id))
         ).scalar_one()
@@ -153,10 +154,10 @@ async def test_push_change_uses_system_actor_attribution(
     org_id, user_id, change = await _org_user_change(admin_engine)
     adapter = ServiceDeskChangeTicketAdapter()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         external_id = await adapter.push_change(s, org_id=org_id, change=change)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         ticket = (
             await s.execute(select(Ticket).where(Ticket.org_id == org_id))
         ).scalar_one()
@@ -197,9 +198,9 @@ async def test_push_change_risk_to_priority_mapping(
     adapter = ServiceDeskChangeTicketAdapter()
     for risk, expected_priority in (("low", "low"), ("medium", "normal"), ("high", "high")):
         org_id, _user_id, change = await _org_user_change(admin_engine, risk=risk)
-        async with org_session(org_id, engine=app_engine) as s:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
             await adapter.push_change(s, org_id=org_id, change=change)
-        async with org_session(org_id, engine=app_engine) as s:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
             ticket = (
                 await s.execute(select(Ticket).where(Ticket.org_id == org_id))
             ).scalar_one()
@@ -212,14 +213,14 @@ async def test_update_change_resolves_via_real_external_id(
     org_id, _user_id, change = await _org_user_change(admin_engine)
     adapter = ServiceDeskChangeTicketAdapter()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         external_id = await adapter.push_change(s, org_id=org_id, change=change)
 
     change.state = "implementing"
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await adapter.update_change(s, org_id=org_id, external_id=external_id, change=change)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         comments = (
             await s.execute(select(TicketComment).where(TicketComment.org_id == org_id))
         ).scalars().all()
@@ -239,14 +240,14 @@ async def test_update_change_falls_back_to_ref_lookup_when_external_id_blank(
     org_id, _user_id, change = await _org_user_change(admin_engine)
     adapter = ServiceDeskChangeTicketAdapter()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await adapter.push_change(s, org_id=org_id, change=change)
 
     change.state = "completed"
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await adapter.update_change(s, org_id=org_id, external_id="", change=change)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         comments = (
             await s.execute(select(TicketComment).where(TicketComment.org_id == org_id))
         ).scalars().all()
@@ -265,10 +266,10 @@ async def test_update_change_is_noop_when_no_ref_was_ever_created(
     # with return-only exits, so `assert result is None` here asserted
     # nothing real (mypy already guarantees it). The actual behavior worth
     # pinning -- no comment gets written -- is the assertion below.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await adapter.update_change(s, org_id=org_id, external_id="", change=change)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         comments = (
             await s.execute(select(TicketComment).where(TicketComment.org_id == org_id))
         ).scalars().all()
@@ -284,19 +285,19 @@ async def test_close_change_drives_ticket_to_resolved_not_closed(
     org_id, _user_id, change = await _org_user_change(admin_engine)
     adapter = ServiceDeskChangeTicketAdapter()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         external_id = await adapter.push_change(s, org_id=org_id, change=change)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         ticket_before = (
             await s.execute(select(Ticket).where(Ticket.org_id == org_id))
         ).scalar_one()
         assert ticket_before.status == "new"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await adapter.close_change(s, org_id=org_id, external_id=external_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         ticket_after = (
             await s.execute(select(Ticket).where(Ticket.org_id == org_id))
         ).scalar_one()
@@ -325,17 +326,17 @@ async def test_close_change_is_noop_when_external_id_blank(
     org_id, _user_id, change = await _org_user_change(admin_engine)
     adapter = ServiceDeskChangeTicketAdapter()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await adapter.push_change(s, org_id=org_id, change=change)
 
     # B5 (whole-branch review, round B): `close_change` is likewise declared
     # `-> None` with return-only exits -- `assert result is None` asserted
     # nothing real. The actual behavior worth pinning is the ticket status
     # assertion below.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await adapter.close_change(s, org_id=org_id, external_id="")
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         ticket = (
             await s.execute(select(Ticket).where(Ticket.org_id == org_id))
         ).scalar_one()
@@ -384,14 +385,14 @@ async def test_close_change_is_idempotent(
     org_id, _user_id, change = await _org_user_change(admin_engine)
     adapter = ServiceDeskChangeTicketAdapter()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         external_id = await adapter.push_change(s, org_id=org_id, change=change)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await adapter.close_change(s, org_id=org_id, external_id=external_id)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await adapter.close_change(s, org_id=org_id, external_id=external_id)  # second call
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         ticket = (
             await s.execute(select(Ticket).where(Ticket.org_id == org_id))
         ).scalar_one()

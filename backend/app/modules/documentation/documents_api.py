@@ -188,7 +188,9 @@ async def create_document(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> DocumentOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         document = await svc.create_document(
             session,
             org_id=ctx.org_id,
@@ -215,7 +217,9 @@ async def list_documents(
     """§0.9/F8a: this route never touches the object store, so the library
     still lists when MinIO is down. A metadata list rendered as an empty list
     would tell an operator their documents are gone."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows, total = await svc.list_documents(
             session,
             ctx.org_id,
@@ -252,7 +256,9 @@ async def get_document(
 ) -> DocumentOut:
     """One document, its current version's metadata and its links. A cross-org
     id is a 404, indistinguishable from a nonexistent one."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             document = await svc.get_document(session, ctx.org_id, document_id)
         except svc.DocumentNotFound as exc:
@@ -267,7 +273,9 @@ async def update_document(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> DocumentOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             document = await svc.get_document(session, ctx.org_id, document_id)
         except svc.DocumentNotFound as exc:
@@ -290,7 +298,9 @@ async def archive_document(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> dict[str, bool]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             document = await svc.get_document(session, ctx.org_id, document_id)
         except svc.DocumentNotFound as exc:
@@ -320,7 +330,9 @@ async def list_versions(
     a claim about how people behave rather than about the data. `limit` is the
     same shape the documents list uses.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await svc.get_document(session, ctx.org_id, document_id)
         except svc.DocumentNotFound as exc:
@@ -370,7 +382,9 @@ async def upload_version(
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
 
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             document = await svc.get_document(session, ctx.org_id, document_id)
         except svc.DocumentNotFound as exc:
@@ -433,7 +447,9 @@ async def download_version(
     documentation library holds signed contracts and those should not sit in a
     shared workstation's disk cache.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await svc.get_document(session, ctx.org_id, document_id)
             row = await svc.get_version(session, ctx.org_id, document_id, version)
@@ -497,7 +513,9 @@ async def purge_version(
     """The only irreversible act in this module, on its own admin-tier code
     (§6.3, §9). A technician holding `docs.manage` can archive a document;
     only an admin can destroy its bytes."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await svc.get_document(session, ctx.org_id, document_id)
             row = await svc.get_version(session, ctx.org_id, document_id, version)
@@ -536,7 +554,9 @@ async def add_link(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> DocumentLinkOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             document = await svc.get_document(session, ctx.org_id, document_id)
         except svc.DocumentNotFound as exc:
@@ -563,7 +583,9 @@ async def remove_link(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> dict[str, bool]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             document = await svc.get_document(session, ctx.org_id, document_id)
         except svc.DocumentNotFound as exc:

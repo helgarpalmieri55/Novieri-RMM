@@ -50,6 +50,7 @@ from moto import mock_aws
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
@@ -125,7 +126,9 @@ class ReplyEnv:
         return sent[-1]
 
     async def a_ticket(self) -> UUID:
-        async with org_session(self.org_id, engine=self.engine) as session:
+        async with org_session(
+            self.org_id, engine=self.engine, clients=ClientScope.all()
+        ) as session:
             ticket = await create_ticket(
                 session,
                 self.org_id,
@@ -270,7 +273,7 @@ class ReplyEnv:
         org_id = await self.api_env.create_org(f"other-{uuid4().hex[:8]}")
         category_id = await _seed_category(self.api_env, org_id)
         actor_id = await _seed_user(self.api_env, org_id, f"boss-{uuid4().hex[:8]}@other.test")
-        async with org_session(org_id, engine=self.engine) as session:
+        async with org_session(org_id, engine=self.engine, clients=ClientScope.all()) as session:
             session.add(
                 EmailMailbox(
                     org_id=org_id,
@@ -283,7 +286,7 @@ class ReplyEnv:
                     created_by=actor_id,
                 )
             )
-        async with org_session(org_id, engine=self.engine) as session:
+        async with org_session(org_id, engine=self.engine, clients=ClientScope.all()) as session:
             # Without this the caller's "returns None" assertion could pass
             # for the wrong reason -- the no-mailbox gate rather than
             # tenancy.
@@ -350,7 +353,9 @@ class ReplyEnv:
             refusal=None,
             refusal_reason="",
         )
-        async with org_session(self.org_id, engine=self.engine) as session:
+        async with org_session(
+            self.org_id, engine=self.engine, clients=ClientScope.all()
+        ) as session:
             return await process_message(
                 session, self.org_id, mailbox, parsed, store=self.store
             )
@@ -380,7 +385,9 @@ async def reply_env(api_env: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         category_id = await _seed_category(api_env, org_id)
         alice_id = await _seed_user(api_env, org_id, REQUESTER)
 
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             mailbox = EmailMailbox(
                 org_id=org_id,
                 address="helpdesk@acme.test",
@@ -802,14 +809,18 @@ async def test_another_orgs_ticket_is_invisible_and_mints_nothing_under_rls(
     other_org_id = await reply_env.another_org_with_a_mailbox()
     ticket_id = await reply_env.a_ticket()
 
-    async with org_session(other_org_id, engine=reply_env.engine) as session:
+    async with org_session(
+        other_org_id, engine=reply_env.engine, clients=ClientScope.all()
+    ) as session:
         stolen = await reply_to_for_ticket(session, other_org_id, ticket_id, REQUESTER)
     assert stolen is None
     assert await reply_env.token_for(ticket_id) is None
 
     # The positive control: the same call, from the owning org, does work --
     # so the None above is tenancy, not a broken fixture.
-    async with org_session(reply_env.org_id, engine=reply_env.engine) as session:
+    async with org_session(
+        reply_env.org_id, engine=reply_env.engine, clients=ClientScope.all()
+    ) as session:
         mine = await reply_to_for_ticket(session, reply_env.org_id, ticket_id, REQUESTER)
     token = await reply_env.token_for(ticket_id)
     assert token is not None

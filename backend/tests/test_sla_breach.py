@@ -75,6 +75,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 
 # `app.models` first, before any `app.modules.*` import -- importing an SLA
@@ -204,7 +205,7 @@ async def _track(api_env, org_id: UUID, ticket: Ticket) -> TicketSla:
     every deadline under test was produced by `tracking.start_tracking` from
     `ticket.created_at` -- never hand-written into the column this module is
     accused of rewriting."""
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         row = await start_tracking(session, org_id, ticket)
         await session.commit()
     assert row is not None
@@ -225,7 +226,7 @@ async def _mark(
     """Run `mark_breached` in its own committed transaction with `_utcnow`
     frozen at `at`."""
     monkeypatch.setattr(breach_module, "_utcnow", lambda: at)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         row = (
             await session.execute(select(TicketSla).where(TicketSla.id == ticket_sla.id))
         ).scalar_one()
@@ -735,7 +736,9 @@ async def test_an_unknown_target_is_refused(api_env, monkeypatch: pytest.MonkeyP
     would otherwise have its breach quietly not recorded."""
     env = await _env(api_env)
 
-    async with org_session(env.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        env.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         row = (
             await session.execute(select(TicketSla).where(TicketSla.id == env.tracking.id))
         ).scalar_one()
@@ -1320,7 +1323,9 @@ async def test_a_voided_promise_is_never_marked_breached_or_published(
     from app.modules.sla.tracking import note_cancelled
 
     env = await _env(api_env, status="cancelled", type_="incident")
-    async with org_session(env.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        env.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await note_cancelled(session, env.org_id, env.ticket.id)
         await session.commit()
 
@@ -1461,7 +1466,9 @@ async def test_an_off_ladder_priority_is_refused_rather_than_guessed(
             row.priority = "p1"
 
     monkeypatch.setattr(breach_module, "_utcnow", lambda: BREACH_AT)
-    async with org_session(env.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        env.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         tracking = (
             await session.execute(select(TicketSla).where(TicketSla.id == env.tracking.id))
         ).scalar_one()

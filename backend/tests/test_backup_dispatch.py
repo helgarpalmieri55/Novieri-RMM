@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
 from app.models import (
@@ -105,7 +106,7 @@ async def _setup(
         await session.commit()
         org_id, device_id, user_id = org.id, device.id, user.id
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
             session, vault, org_id=org_id, actor_id=user_id, name="primary"
         )
@@ -135,10 +136,10 @@ async def test_open_window_dispatches_signed_job_and_backup_run_row(
     )
     now = _dt.datetime(2026, 7, 19, 3, 0)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         raw_key = await open_repo_key(session, vault, org_id=org_id, repository_id=repo_id)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job_engine = _FakeJobEngine()
         pending = await dispatch_backup(
             session,
@@ -199,7 +200,7 @@ async def test_a_schedule_with_nothing_due_dispatches_nothing(
     )
     now = _dt.datetime(2026, 7, 19, 10, 0, tzinfo=_dt.UTC)  # no fire in the look-back
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job_engine = _FakeJobEngine()
         pending = await dispatch_due_backup(
             session, job_engine, vault, org_id=org_id, device_id=device_id, now=now
@@ -226,7 +227,7 @@ async def test_no_policy_dispatches_nothing(
         org_id, device_id = org.id, device.id
 
     now = _dt.datetime(2026, 7, 19, 3, 0)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job_engine = _FakeJobEngine()
         pending = await dispatch_backup(
             session, job_engine, vault, org_id=org_id, device_id=device_id, now=now
@@ -245,7 +246,7 @@ async def test_another_orgs_device_is_not_dispatched_because_rls_hides_it(
     org_b, _device_b, _repo_b, _user_b = await _setup(admin_engine, app_engine, vault)
     now = _dt.datetime(2026, 7, 19, 3, 0)
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         job_engine = _FakeJobEngine()
         pending = await dispatch_backup(
             session,
@@ -272,7 +273,7 @@ async def test_dispatch_does_not_publish(
     org_id, device_id, _repo_id, _user_id = await _setup(admin_engine, app_engine, vault)
     now = _dt.datetime(2026, 7, 19, 3, 0)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job_engine = _FakeJobEngine()
         pending = await dispatch_backup(
             session, job_engine, vault, org_id=org_id, device_id=device_id, now=now

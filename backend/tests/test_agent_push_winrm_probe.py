@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Job
 from app.modules.agent_push import host_key as host_key_service
@@ -49,7 +50,7 @@ async def _probe_job(admin_engine: AsyncEngine, org, *, transport: str) -> Job:
 
 
 async def _record(app_engine, org, job, result) -> None:
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         j = (await session.execute(select(Job).where(Job.id == job.id))).scalar_one()
         await record_probe_result(session, j, result)
 
@@ -73,7 +74,7 @@ async def test_a_winrm_probe_records_readiness_and_no_key(
             "kdc_reachable": True,
         },
     )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = await host_key_service.get_host_key(session, org.org_id, TARGET)
         assert row is not None
         assert row.transport == "winrm"
@@ -113,7 +114,7 @@ async def test_a_winrm_readiness_invalidates_a_previously_confirmed_ssh_key(
         job,
         {"target_address": TARGET, "transport": "winrm", "winrm_http": True},
     )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         fingerprint, reason = await host_key_service.confirmed_key_for(
             session, org.org_id, TARGET
         )
@@ -131,7 +132,7 @@ async def test_the_winrm_marker_cannot_be_confirmed_as_a_host_key(
         job,
         {"target_address": TARGET, "transport": "winrm", "winrm_https": True},
     )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushValidationError, match="Kerberos"):
             await host_key_service.confirm_host_key(
                 session, org.org_id, actor_id=org.user_id, address=TARGET, fingerprint="winrm"
@@ -161,7 +162,7 @@ async def test_an_ssh_probe_after_a_winrm_one_clears_the_stale_readiness(
             "host_key_type": "ssh-ed25519",
         },
     )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = await host_key_service.get_host_key(session, org.org_id, TARGET)
         assert row is not None
         assert row.transport == "ssh"
@@ -185,7 +186,7 @@ async def test_an_ssh_probe_result_is_unchanged(
             "host_key_type": "ssh-ed25519",
         },
     )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = await host_key_service.get_host_key(session, org.org_id, TARGET)
         assert row is not None
         assert (row.transport, row.observed_fingerprint, row.readiness) == (
@@ -213,7 +214,7 @@ async def test_a_winrm_probe_whose_result_claims_ssh_records_no_key(
         {"target_address": TARGET, "transport": "ssh", "host_key_fingerprint": "SHA256:evil",
          "winrm_https": True},
     )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = await host_key_service.get_host_key(session, org.org_id, TARGET)
     assert row is not None
     assert (row.transport, row.observed_fingerprint) == ("winrm", "winrm")
@@ -231,6 +232,6 @@ async def test_a_probe_result_is_recorded_at_the_signed_address_not_the_echoed_o
         {"target_address": "10.72.0.99", "transport": transport,
          "host_key_fingerprint": "SHA256:abc", "winrm_http": True},
     )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await host_key_service.get_host_key(session, org.org_id, "10.72.0.99") is None
         assert await host_key_service.get_host_key(session, org.org_id, TARGET) is not None

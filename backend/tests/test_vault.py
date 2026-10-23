@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService, OpenBaoVaultService, get_vault
@@ -29,7 +30,7 @@ async def _org_credentials(admin_engine: AsyncEngine) -> tuple[UUID, UUID, UUID]
 async def test_local_roundtrip(admin_engine, app_engine, tmp_path: Path) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, cred_id, _ = await _org_credentials(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         stored = await vault.store(
             session, org_id=org_id, credential_id=cred_id, plaintext="hunter2"
         )
@@ -41,7 +42,7 @@ async def test_local_roundtrip(admin_engine, app_engine, tmp_path: Path) -> None
         credential.key_version = stored.key_version
         await session.flush()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         plaintext = await vault.checkout(session, org_id=org_id, credential_id=cred_id)
     assert plaintext == "hunter2"
     # ciphertext does not contain the plaintext bytes
@@ -51,7 +52,7 @@ async def test_local_roundtrip(admin_engine, app_engine, tmp_path: Path) -> None
 async def test_two_secrets_differ_and_aad_binds(admin_engine, app_engine, tmp_path: Path) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, cred_a, cred_b = await _org_credentials(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         stored_a = await vault.store(
             session, org_id=org_id, credential_id=cred_a, plaintext="same-secret"
         )
@@ -69,14 +70,14 @@ async def test_two_secrets_differ_and_aad_binds(admin_engine, app_engine, tmp_pa
         cred.key_version = stored_a.key_version
         await session.flush()
     with pytest.raises(Exception):  # noqa: B017 - InvalidTag from cryptography
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await vault.checkout(session, org_id=org_id, credential_id=cred_b)
 
 
 async def test_one_org_key_reused(admin_engine, app_engine, tmp_path: Path) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, cred_a, cred_b = await _org_credentials(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await vault.store(session, org_id=org_id, credential_id=cred_a, plaintext="a")
         await vault.store(session, org_id=org_id, credential_id=cred_b, plaintext="b")
         count = (
@@ -109,7 +110,7 @@ async def test_openbao_backend_roundtrip(admin_engine, app_engine, tmp_path: Pat
         client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
     org_id, cred_id, _ = await _org_credentials(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         stored = await vault.store(
             session, org_id=org_id, credential_id=cred_id, plaintext="bao-secret"
         )
@@ -122,7 +123,7 @@ async def test_openbao_backend_roundtrip(admin_engine, app_engine, tmp_path: Pat
             stored.key_version,
         )
         await session.flush()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await vault.checkout(session, org_id=org_id, credential_id=cred_id) == "bao-secret"
 
 

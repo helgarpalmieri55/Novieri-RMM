@@ -62,6 +62,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -300,7 +301,7 @@ async def test_a_wake_job_is_a_device_job_naming_the_site_server(
         admin_engine, org.org_id, device_id=org.device_id, segments=["10.20.7.0/24"]
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await wake_via_site_server(
             session,
             JobEngine(signer=LocalEd25519Signer(tmp_path / "job-signing.key")),
@@ -494,7 +495,7 @@ async def test_the_audit_target_type_and_the_job_target_type_are_different_colum
         admin_engine, org.org_id, device_id=org.device_id, segments=["10.20.7.0/24"]
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await wake_via_site_server(
             session,
             JobEngine(signer=LocalEd25519Signer(tmp_path / "job-signing.key")),

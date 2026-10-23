@@ -42,6 +42,7 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.identity.email_domain import domain_refusal, is_allowed_domain
 from app.core.identity.policy import (
     CONSOLE_DOMAIN_KEY,
@@ -164,11 +165,11 @@ async def test_resolve_reads_the_setting_out_of_the_tenant_session(api_env: Any)
     """The doors resolve per request, inside the `org_session` they already
     hold, so a change through the console applies WITHOUT A RESTART."""
     org_id = await api_env.create_org("policy-resolve")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await resolve_console_domain(session, org_id, api_env.settings) is None
 
     await _set_org_domain(api_env, org_id, BASE_DOMAIN)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await resolve_console_domain(session, org_id, api_env.settings) == BASE_DOMAIN
 
 
@@ -180,9 +181,9 @@ async def test_resolve_is_per_org_not_per_deployment(api_env: Any) -> None:
     await _set_org_domain(api_env, a, BASE_DOMAIN)
     await _set_org_domain(api_env, b, "acme.example")
 
-    async with org_session(a, engine=api_env.app_engine) as session:
+    async with org_session(a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await resolve_console_domain(session, a, api_env.settings) == BASE_DOMAIN
-    async with org_session(b, engine=api_env.app_engine) as session:
+    async with org_session(b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await resolve_console_domain(session, b, api_env.settings) == "acme.example"
 
 
@@ -192,7 +193,7 @@ async def test_the_override_beats_the_stored_setting(
     org_id = await api_env.create_org("policy-override")
     await _set_org_domain(api_env, org_id, BASE_DOMAIN)
     monkeypatch.setenv(OVERRIDE_ENV_VAR, "off")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await resolve_console_domain(session, org_id, api_env.settings) is None
 
 
@@ -217,7 +218,7 @@ async def test_the_preview_lists_exactly_what_the_script_would_list(api_env: Any
     for email, status in seeded:
         await _seed_user(api_env, org_id, email, status)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         refused = await users_refused_by(session, org_id, domain=BASE_DOMAIN)
 
     script_answer = sorted(
@@ -250,7 +251,7 @@ async def test_the_preview_answers_with_only_this_tenants_users_under_rls(api_en
     await _seed_user(api_env, mine, ada)
     await _seed_user(api_env, theirs, _unique("eve", "elsewhere.example"))
 
-    async with org_session(mine, engine=api_env.app_engine) as session:
+    async with org_session(mine, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         refused = await users_refused_by(session, mine, domain=BASE_DOMAIN)
     assert [row.email for row in refused] == [ada]
 
@@ -474,7 +475,7 @@ async def test_clearing_the_key_still_works_and_is_audited_as_a_clear(
     # And the doors now read the platform default, which in this deployment is
     # unset -- so the org is unrestricted BECAUSE the platform is, not because
     # a tenant admin said so.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await resolve_console_domain(session, org_id, api_env.settings) is None
 
 

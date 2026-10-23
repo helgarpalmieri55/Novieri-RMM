@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.core.audit import audit_service
 from app.core.ca import CAService
 from app.core.client_address import IPAddress
+from app.core.client_scope import ClientScope
 from app.core.events import publish as publish_event
 from app.core.i18n import tr
 from app.core.signing import SigningService
@@ -515,7 +516,7 @@ async def enroll(
             "token rejected"
         )
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         # Atomically consume the token: one guarded UPDATE re-checks the hash,
         # revocation, expiry, and use-count and increments in a single statement.
         # Zero rows affected = rejected. This closes the TOCTOU / lost-update
@@ -716,7 +717,7 @@ async def enroll_via_link(
     limited = False
     retry_after_s = MIN_LINK_RETRY_AFTER_S
     created: tuple[UUID, Any] | None = None
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         link = await link_svc.live_link_for(
             session, org_id, code=link_code, source=source, now=stamp, for_update=True
         )

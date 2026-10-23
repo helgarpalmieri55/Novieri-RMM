@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ca import LocalCA
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer, verify_signature
 from app.core.tenancy import org_session
 from app.gateway.main import GatewayServer
@@ -140,7 +141,7 @@ async def test_agent_runs_signed_job_end_to_end(api_env, gateway, tmp_path: Path
     job_engine = JobEngine(signer=LocalEd25519Signer(api_env.settings.signing_key_path))
     from uuid import UUID
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         job = await job_engine.create(
             session,
             org_id=org_id,
@@ -186,7 +187,7 @@ async def test_agent_runs_signed_job_end_to_end(api_env, gateway, tmp_path: Path
 
     from uuid import UUID as _UUID
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         refreshed = (
             await session.execute(select(Job).where(Job.id == _UUID(job_id)))
         ).scalar_one()
@@ -269,7 +270,7 @@ async def test_first_connect_after_enrolment_delivers_one_inventory_collect(
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(ws.recv(), timeout=1)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         jobs = (
             await session.execute(
                 select(Job).where(Job.type == "inventory.collect", Job.target_id == device_id)

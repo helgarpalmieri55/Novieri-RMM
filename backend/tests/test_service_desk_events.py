@@ -36,6 +36,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import DomainEvent, User
 from app.modules.service_desk.approvals import decide_approval
@@ -131,7 +132,7 @@ async def _events(session, org_id) -> list[DomainEvent]:
 async def test_assigning_publishes_ticket_assigned(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     assignee_id = await _second_user(api_env, org_id, "technician")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         await assign_ticket(
             session, org_id, user_id, ticket.id, {"assigned_to": assignee_id}
@@ -154,7 +155,7 @@ async def test_assigning_publishes_string_ids_not_bare_uuids(api_env) -> None:
     JSON-serializable and would never have survived a real write."""
     org_id, user_id = await _org_with_user(api_env)
     assignee_id = await _second_user(api_env, org_id, "technician")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         await assign_ticket(
             session, org_id, user_id, ticket.id, {"assigned_to": assignee_id}
@@ -178,7 +179,7 @@ async def test_status_change_publishes_ticket_status_changed(api_env) -> None:
     `ticket.resolved` (see the dedicated `ticket.resolved` tests below, C2
     fix) and would otherwise make this assertion about a different thing."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket.status = "open"
         await session.flush()
@@ -204,7 +205,7 @@ async def test_a_public_comment_and_an_internal_note_use_different_event_types(
 ) -> None:
     """Spec §6.4 -- the write-time leak guard depends on these being distinct."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         await add_comment(
             session, org_id, ticket.id, body="visible", author_id=user_id, visibility="public"
@@ -221,7 +222,7 @@ async def test_a_public_comment_and_an_internal_note_use_different_event_types(
 async def test_internal_note_event_omits_the_body(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     secret = "staff only -- do not disclose"
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         await add_comment(
             session, org_id, ticket.id, body=secret, author_id=user_id, visibility="internal"
@@ -244,7 +245,7 @@ async def test_public_comment_event_carries_the_body(api_env) -> None:
     internal notes specifically, not a blanket "never send body" rule that
     would make public-comment notifications useless."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         await add_comment(
             session,
@@ -268,7 +269,7 @@ async def test_internal_note_event_carries_requester_id_for_the_routing_guard(
     surfaced them. If this event omitted `requester_id`, that guard could
     never run for internal notes -- the one event type it exists for."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         await add_comment(
             session, org_id, ticket.id, body="staff only", author_id=user_id, visibility="internal"
@@ -290,7 +291,7 @@ async def test_internal_note_event_carries_requester_id_for_the_routing_guard(
 
 async def test_incident_reaching_resolved_publishes_ticket_resolved(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket.status = "open"
         await session.flush()
@@ -323,7 +324,7 @@ async def test_request_reaching_fulfilled_publishes_ticket_resolved(api_env) -> 
     to the requester notifies them either way, which is spec §0.4's whole
     point."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         # requires_approval=False so creation lands directly on in_progress,
         # from which `fulfilled` is reachable through the generic path.
         queue = await create_queue(session, org_id, user_id, key="requests-res", name="Requests")
@@ -364,7 +365,7 @@ async def test_a_non_resolving_status_change_publishes_no_ticket_resolved(api_en
     only checked "did resolved_at get stamped" rather than the specific
     to_status -- would still pass the positive tests above."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         ticket.status = "open"
         await session.flush()
@@ -394,7 +395,7 @@ async def test_creating_a_request_needing_approval_publishes_approval_requested(
     is the notification that did not exist before this fix: the approver was
     never told a decision was waiting on them."""
     org_id, requester_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_request(session, org_id, requester_id, requester_id)
         events = await _events(session, org_id)
 
@@ -421,7 +422,7 @@ async def test_creating_a_request_not_needing_approval_publishes_no_approval_req
     when the category actually requires approval and the ticket actually
     lands on `pending_approval` -- would pass the positive test above too."""
     org_id, requester_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await create_queue(
             session, org_id, requester_id, key="requests-noap", name="Requests"
         )
@@ -459,7 +460,7 @@ async def test_approval_requested_event_carries_the_full_routing_payload(api_env
     merely present as keys, when the ticket actually carries them."""
     org_id, requester_id = await _org_with_user(api_env)
     assignee_id = await _second_user(api_env, org_id, "technician")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         queue = await create_queue(
             session, org_id, requester_id, key="requests-full", name="Requests"
         )
@@ -524,7 +525,7 @@ async def test_change_status_entering_pending_approval_publishes_approval_reques
     it is what makes the edge testable at all, not a claim that any user or
     route can reach it."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         # A category with requires_approval=False, so CREATION lands on
         # `in_progress` and publishes no `ticket.approval_requested` itself
         # -- this isolates the event under test to the `change_status` call
@@ -595,7 +596,7 @@ async def test_approval_decision_publishes_ticket_approval_decided_not_requested
     request was decided" is the exact defect this task fixes."""
     org_id, requester_id = await _org_with_user(api_env)
     approver_id = await _second_user(api_env, org_id, "org-admin")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_request(session, org_id, requester_id, requester_id)
         await decide_approval(session, org_id, approver_id, ticket.id, approve=True)
         events = await _events(session, org_id)
@@ -621,7 +622,7 @@ async def test_approval_rejection_does_not_leak_the_rejection_reason(api_env) ->
     org_id, requester_id = await _org_with_user(api_env)
     approver_id = await _second_user(api_env, org_id, "org-admin")
     reason = "does not meet the access policy for this role"
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_request(session, org_id, requester_id, requester_id)
         await decide_approval(
             session, org_id, approver_id, ticket.id, approve=False, reason=reason
@@ -643,7 +644,9 @@ async def test_a_rolled_back_assignment_publishes_nothing(api_env) -> None:
     assignee_id = await _second_user(api_env, org_id, "technician")
 
     with pytest.raises(RuntimeError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             ticket = await _create_incident(session, org_id, user_id)
             await assign_ticket(
                 session, org_id, user_id, ticket.id, {"assigned_to": assignee_id}

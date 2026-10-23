@@ -15,6 +15,7 @@ import redis.asyncio as aioredis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -101,7 +102,7 @@ def _engine(tmp_path: Path) -> JobEngine:
 
 
 async def _jobs(app_engine: AsyncEngine, org_id: UUID, job_type: str) -> list[Job]:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return list(
             (await session.execute(select(Job).where(Job.type == job_type))).scalars()
         )
@@ -163,7 +164,7 @@ async def test_inventory_sweep_dispatches_only_to_due_online_devices(
     assert all(j.signature for j in queued)
     assert all(j.requested_by is None for j in queued)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         audited = (
             await session.execute(
                 select(AuditEvent).where(AuditEvent.action == "inventory.collect_scheduled")
@@ -181,9 +182,9 @@ async def test_inventory_sweep_does_not_duplicate_on_the_next_pass(
     await _device(admin_engine, org_id)
     job_engine = _engine(tmp_path)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         first = await inventory_schedule.dispatch_scheduled(session, job_engine, org_id, now=now)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         second = await inventory_schedule.dispatch_scheduled(
             session, job_engine, org_id, now=now + timedelta(minutes=30)
         )
@@ -211,7 +212,7 @@ async def test_inventory_sweep_is_capped_and_oldest_first(
     await _job(admin_engine, org_id, newer, t, status=JobStatus.succeeded,
                issued_at=now - timedelta(days=1), finished_at=now - timedelta(days=1))
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         due = await inventory_schedule.due_device_ids(session, org_id, now=now)
     assert due == [never, older]
 
@@ -229,7 +230,7 @@ async def test_inventory_cadence_follows_the_org_policy(
 
     got = {}
     for org_id in (default_org, weekly_org, junk_org):
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             got[org_id] = await inventory_schedule.collect_every(session, org_id)
     assert got[default_org] == timedelta(hours=20)
     assert got[weekly_org] == timedelta(hours=140)
@@ -278,11 +279,11 @@ async def test_first_collect_is_queued_once_per_enrolment(
                finished_at=now - timedelta(days=10))
     job_engine = _engine(tmp_path)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         first = await inventory_schedule.queue_first_collect(
             session, job_engine, org_id, device_id
         )
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         again = await inventory_schedule.queue_first_collect(
             session, job_engine, org_id, device_id
         )
@@ -302,7 +303,7 @@ async def test_first_collect_refuses_a_revoked_agent(
 ) -> None:
     org_id = await _org(admin_engine)
     device_id = await _device(admin_engine, org_id, revoked=True)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert (
             await inventory_schedule.queue_first_collect(
                 session, _engine(tmp_path), org_id, device_id
@@ -341,7 +342,7 @@ async def test_ship_interval_reads_the_policy_and_clamps_it(
 
     results = {}
     for org_id in (no_policy, long_policy, short_policy, junk_policy):
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             results[org_id] = await logs_schedule.ship_interval_s(session, org_id)
 
     floor = logs_schedule.MIN_SHIP_INTERVAL_S
@@ -407,7 +408,7 @@ async def test_logs_ship_sweep_targets_windows_and_macos_only_without_duplicates
         # TTL is one interval, so an undelivered job cannot overlap the next.
         assert job.expires_at - job.issued_at == timedelta(seconds=3600)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         audited = (
             await session.execute(
                 select(AuditEvent).where(AuditEvent.action == "security_logs.ship_scheduled")

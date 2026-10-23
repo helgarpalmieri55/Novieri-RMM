@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -85,7 +86,7 @@ async def _setup_base(
         await session.commit()
         org_id, device_id, user_id = org.id, device.id, user.id
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
             session, vault, org_id=org_id, actor_id=user_id, name="primary"
         )
@@ -187,7 +188,7 @@ async def test_gc_keeps_live_and_shared_chunks_deletes_pruned_only_and_orphan(
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, device_id, repo_id, _user_id = await _setup_base(admin_engine, app_engine, vault)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo_key = await open_repo_key(session, vault, org_id=org_id, repository_id=repo_id)
 
         c1 = await _seed_chunk(object_store, repo_key, org_id, repo_id, b"plaintext-1")
@@ -212,7 +213,7 @@ async def test_gc_keeps_live_and_shared_chunks_deletes_pruned_only_and_orphan(
     before = set(await object_store.list_backup_chunks(org_id, repo_id))
     assert before == {c1, c2, c3, c4, c5}
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         deleted = await gc_repository(
             session, object_store, vault, org_id=org_id, repository_id=repo_id, now=_NOW
         )
@@ -226,7 +227,7 @@ async def test_gc_keeps_live_and_shared_chunks_deletes_pruned_only_and_orphan(
     # deleted set: pruned-only chunk + orphan
     assert (before - after) == {c4, c5}
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         event = (
             await session.execute(
                 select(AuditEvent).where(AuditEvent.action == "backup.gc")
@@ -254,7 +255,7 @@ async def test_gc_missing_repository_fails_closed(
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, _device_id, _repo_id, _user_id = await _setup_base(admin_engine, app_engine, vault)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(NoResultFound):
             await gc_repository(
                 session, object_store, vault, org_id=org_id, repository_id=uuid4(), now=_NOW
@@ -275,7 +276,7 @@ async def test_verify_point_good_sets_verified_at_and_returns_true(
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, device_id, repo_id, _user_id = await _setup_base(admin_engine, app_engine, vault)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo_key = await open_repo_key(session, vault, org_id=org_id, repository_id=repo_id)
         c1 = await _seed_chunk(object_store, repo_key, org_id, repo_id, b"good-1")
         c2 = await _seed_chunk(object_store, repo_key, org_id, repo_id, b"good-2")
@@ -286,7 +287,7 @@ async def test_verify_point_good_sets_verified_at_and_returns_true(
         )
         await session.commit()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         ok = await verify_point(
             session, object_store, vault, org_id=org_id, backup_point_id=point_id, now=_NOW
         )
@@ -294,7 +295,7 @@ async def test_verify_point_good_sets_verified_at_and_returns_true(
 
     assert ok is True
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         point = (
             await session.execute(select(BackupPoint).where(BackupPoint.id == point_id))
         ).scalar_one()
@@ -325,7 +326,7 @@ async def test_verify_point_corrupt_chunk_returns_false_and_does_not_stamp(
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, device_id, repo_id, _user_id = await _setup_base(admin_engine, app_engine, vault)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo_key = await open_repo_key(session, vault, org_id=org_id, repository_id=repo_id)
         c1 = await _seed_chunk(object_store, repo_key, org_id, repo_id, b"corruptible-1")
         c2 = await _seed_chunk(object_store, repo_key, org_id, repo_id, b"corruptible-2")
@@ -339,7 +340,7 @@ async def test_verify_point_corrupt_chunk_returns_false_and_does_not_stamp(
     # corrupt c1's object in place (keep its id/key, replace bytes with garbage)
     await object_store.put_backup_chunk(org_id, repo_id, c1, b"\x00garbage-not-sealed")
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         ok = await verify_point(
             session, object_store, vault, org_id=org_id, backup_point_id=point_id, now=_NOW
         )
@@ -347,7 +348,7 @@ async def test_verify_point_corrupt_chunk_returns_false_and_does_not_stamp(
 
     assert ok is False
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         point = (
             await session.execute(select(BackupPoint).where(BackupPoint.id == point_id))
         ).scalar_one()
@@ -371,7 +372,7 @@ async def test_verify_point_missing_chunk_returns_false(
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, device_id, repo_id, _user_id = await _setup_base(admin_engine, app_engine, vault)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo_key = await open_repo_key(session, vault, org_id=org_id, repository_id=repo_id)
         c1 = await _seed_chunk(object_store, repo_key, org_id, repo_id, b"present-1")
         c2 = await _seed_chunk(object_store, repo_key, org_id, repo_id, b"to-be-deleted-2")
@@ -384,7 +385,7 @@ async def test_verify_point_missing_chunk_returns_false(
 
     await object_store.delete_backup_chunk(org_id, repo_id, c2)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         ok = await verify_point(
             session, object_store, vault, org_id=org_id, backup_point_id=point_id, now=_NOW
         )
@@ -392,7 +393,7 @@ async def test_verify_point_missing_chunk_returns_false(
 
     assert ok is False
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         point = (
             await session.execute(select(BackupPoint).where(BackupPoint.id == point_id))
         ).scalar_one()
@@ -408,7 +409,7 @@ async def test_verify_point_missing_point_fails_closed(
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, _device_id, _repo_id, _user_id = await _setup_base(admin_engine, app_engine, vault)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(NoResultFound):
             await verify_point(
                 session, object_store, vault, org_id=org_id, backup_point_id=uuid4(), now=_NOW
@@ -434,7 +435,7 @@ async def test_gc_never_touches_another_orgs_chunks(
     org_b, device_b, repo_b, _user_b = await _setup_base(admin_engine, app_engine, vault)
 
     # org A: one live point refs {a1}; a2 is an orphan in A's prefix
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         key_a = await open_repo_key(session, vault, org_id=org_a, repository_id=repo_a)
         a1 = await _seed_chunk(object_store, key_a, org_a, repo_a, b"a-live-1")
         # a-orphan-2: referenced by no live point in A -> A's GC should delete it
@@ -447,13 +448,13 @@ async def test_gc_never_touches_another_orgs_chunks(
         await session.commit()
 
     # org B: chunks referenced by NO live point in B (pure orphans in B's prefix)
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         key_b = await open_repo_key(session, vault, org_id=org_b, repository_id=repo_b)
         b1 = await _seed_chunk(object_store, key_b, org_b, repo_b, b"b-1")
         b2 = await _seed_chunk(object_store, key_b, org_b, repo_b, b"b-2")
         await session.commit()
 
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         deleted = await gc_repository(
             session, object_store, vault, org_id=org_a, repository_id=repo_a, now=_NOW
         )

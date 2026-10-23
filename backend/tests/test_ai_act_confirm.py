@@ -40,6 +40,7 @@ from app.core.ai.act import (
 )
 from app.core.ai.errors import AiValidationError
 from app.core.ai.executor_staff import invoke_tool
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AiAction, ApprovedAction, AuditEvent, Job
 from tests.ai_act_fixtures import build_world
@@ -59,7 +60,9 @@ async def _job_count(api_env: Any, org_id: Any) -> int:
 
 
 async def _preview(api_env: Any, world: Any) -> Any:
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         return await propose(
             session,
             org_id=world.org_id,
@@ -80,7 +83,9 @@ async def _confirm(
     permissions: tuple[str, ...] = CONFIRMER,
     now: datetime | None = None,
 ) -> Any:
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         return await confirm_action(
             session,
             org_id=world.org_id,
@@ -251,7 +256,9 @@ async def test_a_confirmation_carrying_someone_elses_valid_digest_is_refused(
     """
     world = await build_world(api_env, tag="conf-swap")
     first = await _preview(api_env, world)
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         second = await propose(
             session,
             org_id=world.org_id,
@@ -331,7 +338,9 @@ async def test_lowering_the_dial_between_preview_and_confirm_refuses_the_dispatc
     preview = await _preview(api_env, world)
     before = await _job_count(api_env, world.org_id)
 
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         from app.core.ai.autonomy import set_ceiling
 
         await set_ceiling(
@@ -551,7 +560,9 @@ async def test_reject_stores_a_bounded_reason_and_audits_it(api_env: Any) -> Non
     world = await build_world(api_env, tag="conf-reject")
     preview = await _preview(api_env, world)
 
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await reject_action(
             session,
             org_id=world.org_id,
@@ -584,7 +595,9 @@ async def test_a_free_text_rejection_reason_is_refused_and_nothing_is_stored(
     world = await build_world(api_env, tag="conf-reject-free")
     preview = await _preview(api_env, world)
 
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(AiValidationError):
             await reject_action(
                 session,
@@ -604,7 +617,9 @@ async def test_a_rejected_action_cannot_then_be_confirmed(api_env: Any) -> None:
     preview = await _preview(api_env, world)
     before = await _job_count(api_env, world.org_id)
 
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await reject_action(
             session,
             org_id=world.org_id,

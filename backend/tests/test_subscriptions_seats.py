@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Organization, User
 from app.modules.subscriptions.errors import (
@@ -72,7 +73,7 @@ def _create_kwargs(**overrides: Any) -> dict[str, Any]:
 async def _audit_actions(
     app_engine: AsyncEngine, org_id: UUID, target_type: str, target_id: UUID
 ) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -91,7 +92,7 @@ async def _audit_meta(
     app_engine: AsyncEngine, org_id: UUID, target_type: str, target_id: UUID, action: str
 ) -> dict[str, Any]:
     """The `meta` payload of the single audit row for `action` on this target."""
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -116,7 +117,7 @@ async def _make_subscription(
     actor_id: UUID,
     **overrides: Any,
 ) -> UUID:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s, org_id=org_id, actor_id=actor_id, **_create_kwargs(**overrides)
         )
@@ -135,7 +136,7 @@ async def test_assign_seat_up_to_pool_then_exhausted_raises_validation_error(
     org_id, actor_id = await _org_with_user(admin_engine)
     sub_id = await _make_subscription(admin_engine, app_engine, org_id, actor_id, seats=2)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         seat1 = await assign_seat(
             s,
             org_id=org_id,
@@ -156,7 +157,7 @@ async def test_assign_seat_up_to_pool_then_exhausted_raises_validation_error(
         assert seat1.assignee_email == "alice@example.com"
         assert seat2.assignee_email == "bob@example.com"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError, match="no seats available"):
             await assign_seat(
                 s,
@@ -173,7 +174,7 @@ async def test_assign_seat_missing_subscription_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionNotFoundError):
             await assign_seat(
                 s,
@@ -192,7 +193,7 @@ async def test_assign_seat_cross_org_subscription_raises_not_found(
     org_b, actor_b = await _org_with_user(admin_engine)
     sub_id = await _make_subscription(admin_engine, app_engine, org_a, actor_a)
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionNotFoundError):
             await assign_seat(
                 s,
@@ -269,7 +270,7 @@ async def test_assign_seat_concurrent_calls_cannot_exceed_pool(
     outcome: dict[str, str | None] = {}
 
     async def attempt_b() -> None:
-        async with org_session(org_id, engine=app_engine) as session_b:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session_b:
             try:
                 await assign_seat(
                     session_b,
@@ -285,7 +286,7 @@ async def test_assign_seat_concurrent_calls_cannot_exceed_pool(
                 outcome["error"] = None
                 await session_b.commit()
 
-    async with org_session(org_id, engine=app_engine) as session_a:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session_a:
         # Session A takes the pool's only seat. Its transaction (and the
         # `FOR UPDATE` lock it holds on the subscription row) stays open
         # until the explicit commit below.
@@ -318,7 +319,7 @@ async def test_assign_seat_concurrent_calls_cannot_exceed_pool(
     # B lost the race: the typed error, never a raw IntegrityError.
     assert outcome["error"] == "no seats available"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await get_subscription(s, org_id, sub_id)
         assert sub is not None
         # The pool was never overfilled: exactly one seat is active, not two.
@@ -337,7 +338,7 @@ async def test_available_seats_decreases_on_assign_and_recovers_on_release(
     org_id, actor_id = await _org_with_user(admin_engine)
     sub_id = await _make_subscription(admin_engine, app_engine, org_id, actor_id, seats=2)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await get_subscription(s, org_id, sub_id)
         assert sub is not None
         assert await available_seats(s, org_id, sub) == 2
@@ -364,7 +365,7 @@ async def test_available_seats_decreases_on_assign_and_recovers_on_release(
         await s.commit()
         seat1_id = seat1.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await get_subscription(s, org_id, sub_id)
         assert sub is not None
         await release_seat(s, org_id=org_id, actor_id=actor_id, assignment_id=seat1_id)
@@ -372,7 +373,7 @@ async def test_available_seats_decreases_on_assign_and_recovers_on_release(
         await s.commit()
 
     # a new assign now succeeds again, filling the freed slot
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         seat3 = await assign_seat(
             s,
             org_id=org_id,
@@ -396,7 +397,7 @@ async def test_release_seat_twice_raises_validation_error(
     org_id, actor_id = await _org_with_user(admin_engine)
     sub_id = await _make_subscription(admin_engine, app_engine, org_id, actor_id, seats=2)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         seat = await assign_seat(
             s,
             org_id=org_id,
@@ -408,11 +409,11 @@ async def test_release_seat_twice_raises_validation_error(
         await s.commit()
         seat_id = seat.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await release_seat(s, org_id=org_id, actor_id=actor_id, assignment_id=seat_id)
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError, match="already released"):
             await release_seat(s, org_id=org_id, actor_id=actor_id, assignment_id=seat_id)
 
@@ -422,7 +423,7 @@ async def test_release_seat_missing_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionNotFoundError):
             await release_seat(s, org_id=org_id, actor_id=actor_id, assignment_id=uuid4())
 
@@ -434,7 +435,7 @@ async def test_release_seat_cross_org_raises_not_found(
     org_b, actor_b = await _org_with_user(admin_engine)
     sub_id = await _make_subscription(admin_engine, app_engine, org_a, actor_a)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         seat = await assign_seat(
             s,
             org_id=org_a,
@@ -446,7 +447,7 @@ async def test_release_seat_cross_org_raises_not_found(
         await s.commit()
         seat_id = seat.id
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionNotFoundError):
             await release_seat(s, org_id=org_b, actor_id=actor_b, assignment_id=seat_id)
 
@@ -461,7 +462,7 @@ async def test_release_seat_cross_org_filter_is_load_bearing(
     org_b, actor_b = await _org_with_user(admin_engine)
     sub_id = await _make_subscription(admin_engine, app_engine, org_a, actor_a)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         seat = await assign_seat(
             s,
             org_id=org_a,
@@ -489,7 +490,7 @@ async def test_assign_and_release_record_seat_change_events_and_audit(
     org_id, actor_id = await _org_with_user(admin_engine)
     sub_id = await _make_subscription(admin_engine, app_engine, org_id, actor_id, seats=2)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         seat = await assign_seat(
             s,
             org_id=org_id,
@@ -501,7 +502,7 @@ async def test_assign_and_release_record_seat_change_events_and_audit(
         await s.commit()
         seat_id = seat.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = await list_events(s, org_id, sub_id)
         types = [e.type for e in events]
         assert types == ["created", "seat_change"]
@@ -510,11 +511,11 @@ async def test_assign_and_release_record_seat_change_events_and_audit(
     seat_actions = await _audit_actions(app_engine, org_id, "seat_assignment", seat_id)
     assert seat_actions == ["subscription.seat_assigned"]
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await release_seat(s, org_id=org_id, actor_id=actor_id, assignment_id=seat_id)
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = await list_events(s, org_id, sub_id)
         types = [e.type for e in events]
         assert types == ["created", "seat_change", "seat_change"]
@@ -533,7 +534,7 @@ async def test_seat_assign_and_release_audit_metadata_are_aligned(
     org_id, actor_id = await _org_with_user(admin_engine)
     sub_id = await _make_subscription(admin_engine, app_engine, org_id, actor_id, seats=2)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         seat = await assign_seat(
             s,
             org_id=org_id,
@@ -545,7 +546,7 @@ async def test_seat_assign_and_release_audit_metadata_are_aligned(
         await s.commit()
         seat_id = seat.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await release_seat(s, org_id=org_id, actor_id=actor_id, assignment_id=seat_id)
         await s.commit()
 
@@ -570,7 +571,7 @@ async def test_list_seats_and_available_seats_write_no_audit(
     org_id, actor_id = await _org_with_user(admin_engine)
     sub_id = await _make_subscription(admin_engine, app_engine, org_id, actor_id, seats=2)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         seat = await assign_seat(
             s,
             org_id=org_id,
@@ -584,7 +585,7 @@ async def test_list_seats_and_available_seats_write_no_audit(
 
     before = await _audit_actions(app_engine, org_id, "seat_assignment", seat_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await get_subscription(s, org_id, sub_id)
         assert sub is not None
         seats = await list_seats(s, org_id, sub_id)
@@ -602,7 +603,7 @@ async def test_list_seats_is_empty_for_another_orgs_subscription_under_rls(
     org_b, _actor_b = await _org_with_user(admin_engine)
     sub_id = await _make_subscription(admin_engine, app_engine, org_a, actor_a)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         await assign_seat(
             s,
             org_id=org_a,
@@ -613,6 +614,6 @@ async def test_list_seats_is_empty_for_another_orgs_subscription_under_rls(
         )
         await s.commit()
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         seats = await list_seats(s, org_b, sub_id)
         assert seats == []

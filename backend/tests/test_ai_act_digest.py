@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ai.act import compute_preview_digest, digest_fields, propose
 from app.core.ai.executor_staff import invoke_tool
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.jobs.canonical import canonical_bytes
 from app.models import AiAction, ApprovedAction
@@ -33,7 +34,9 @@ from tests.ai_act_fixtures import build_world
 
 
 async def _propose(api_env: Any, world: Any, **kw: Any) -> Any:
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         return await propose(
             session,
             org_id=world.org_id,
@@ -255,7 +258,9 @@ def _aware(value: datetime) -> datetime:
 
 
 async def _preview(api_env: Any, world: Any) -> Any:
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         return await propose(
             session,
             org_id=world.org_id,

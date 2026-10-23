@@ -18,6 +18,7 @@ from moto import mock_aws
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
@@ -68,11 +69,11 @@ def vault(tmp_path: Path) -> LocalVaultService:
 
 
 def _session_factory(app_engine: AsyncEngine, org_id: UUID) -> Any:
-    return lambda: org_session(org_id, engine=app_engine)
+    return lambda: org_session(org_id, engine=app_engine, clients=ClientScope.all())
 
 
 async def _replicate_all(app_engine, vault, store, org, now, batch=256) -> list[bool]:
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         work = await pending_copies(session, org.org_id)
     return [
         await replicate_point(
@@ -101,7 +102,7 @@ async def test_off_site_cannot_be_enabled_without_a_proven_recovery_key(
 ) -> None:
     org = await seed_org(admin_engine, app_engine, vault, "os-nokey")
     target_id = await add_target(app_engine, vault, org, attach=False)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(OffsiteError, match="recovery key"):
             await set_repository_target(session, org_id=org.org_id,
                                         repository_id=org.repository_id,
@@ -115,7 +116,7 @@ async def test_off_site_cannot_be_enabled_on_an_untested_target(
     org = await seed_org(admin_engine, app_engine, vault, "os-untested")
     await add_proven_key(app_engine, org)
     target_id = await add_target(app_engine, vault, org, state="untested", attach=False)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(OffsiteError) as exc:
             await set_repository_target(session, org_id=org.org_id,
                                         repository_id=org.repository_id,
@@ -129,7 +130,7 @@ async def test_enabling_is_audited_and_sets_the_repository_target(
     org = await seed_org(admin_engine, app_engine, vault, "os-on")
     await add_proven_key(app_engine, org)
     target_id = await add_target(app_engine, vault, org, attach=False)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await set_repository_target(session, org_id=org.org_id,
                                            repository_id=org.repository_id,
                                            target_id=target_id, actor_id=org.user_id)
@@ -151,7 +152,7 @@ async def test_a_bucket_without_object_lock_fails_the_test_with_a_clear_message(
     org = await seed_org(admin_engine, app_engine, vault, "os-nolock")
     target_id = await add_target(app_engine, vault, org, bucket=PLAIN_BUCKET, state="testing",
                                  attach=False)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         target = await get_target(session, org.org_id, target_id)
         assert target is not None
         result = await run_target_test(session, vault, target, moto_client_factory,
@@ -167,7 +168,7 @@ async def test_a_locked_bucket_passes_every_step_and_the_decrypt_is_audited(
 ) -> None:
     org = await seed_org(admin_engine, app_engine, vault, "os-lock")
     target_id = await add_target(app_engine, vault, org, state="testing", attach=False)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         target = await get_target(session, org.org_id, target_id)
         assert target is not None
         result = await run_target_test(session, vault, target, moto_client_factory,
@@ -226,7 +227,7 @@ async def test_replication_copies_ciphertext_under_keyed_names_with_a_30_day_loc
     days = (head["ObjectLockRetainUntilDate"] - now).total_seconds() / 86400
     assert 29.9 < days <= 30.01
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         copy = (await session.execute(select(BackupPointCopy).where(
             BackupPointCopy.point_id == point_id))).scalar_one()
     assert copy.state == "complete"
@@ -245,7 +246,7 @@ async def test_replication_resumes_at_chunk_granularity(
     target_id = await add_target(app_engine, vault, org)
     point_id, _ = await add_point(app_engine, store, org,
                                   {"/a": [b"1" * 10, b"2" * 10, b"3" * 10]})
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         (item,) = await pending_copies(session, org.org_id)
     # A deadline already passed stops after the first committed step.
     done = await replicate_point(
@@ -254,7 +255,7 @@ async def test_replication_resumes_at_chunk_granularity(
         now=datetime.now(UTC), batch=1, deadline=0.0,
     )
     assert done is False
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rows = (await session.execute(select(BackupChunkCopy).where(
             BackupChunkCopy.target_id == target_id))).scalars().all()
         copy = (await session.execute(select(BackupPointCopy).where(
@@ -276,7 +277,7 @@ async def test_nothing_is_copied_to_a_bucket_that_lost_its_lock(
     point_id, _ = await add_point(app_engine, store, org, {"/a": [b"x" * 10]})
     assert await _replicate_all(app_engine, vault, store, org, datetime.now(UTC)) == [False]
     assert s3.list_objects_v2(Bucket=PLAIN_BUCKET).get("KeyCount", 0) == 0
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         copy = (await session.execute(select(BackupPointCopy).where(
             BackupPointCopy.point_id == point_id))).scalar_one()
     assert copy.state == "failed"
@@ -301,7 +302,7 @@ async def test_a_shared_chunk_near_the_end_of_its_lock_is_extended(
         await s.commit()
     await add_point(app_engine, store, org, {"/a": [b"shared" * 10], "/b": [b"new" * 10]})
     await _replicate_all(app_engine, vault, store, org, t0)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rows = (await session.execute(select(BackupChunkCopy).where(
             BackupChunkCopy.target_id == target_id))).scalars().all()
     by_days = sorted(round((r.locked_until - t0).total_seconds() / 86400) for r in rows)
@@ -360,7 +361,7 @@ async def test_off_site_retention_is_per_copy_and_gc_waits_for_the_lock(
     gc = lambda session, when: offsite_gc(  # noqa: E731
         session, vault=vault, local_store=store, client_factory=moto_client_factory,
         org_id=org.org_id, now=when)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         counts = await gc(session, now)
     assert counts == {"expired": 1, "deleted": 0}  # still locked: nothing deleted
 
@@ -370,7 +371,7 @@ async def test_off_site_retention_is_per_copy_and_gc_waits_for_the_lock(
         await s.execute(text("UPDATE backup_chunk_copies SET locked_until = :t "
                              "WHERE target_id = :tid"), {"t": now, "tid": target_id})
         await s.commit()
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rows_before = (await session.execute(select(BackupChunkCopy).where(
             BackupChunkCopy.target_id == target_id))).scalars().all()
     shared_id = blake3(b"both" * 5).hexdigest()
@@ -388,11 +389,11 @@ async def test_off_site_retention_is_per_copy_and_gc_waits_for_the_lock(
             return fn(**kwargs)
 
         mp.setattr(offsite_mod, "_call", fake_call)
-        async with org_session(org.org_id, engine=app_engine) as session:
+        async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
             counts = await gc(session, later)
     assert counts["deleted"] == 1
     assert deleted_keys == [only_old.object_name]
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         states = dict((await session.execute(select(
             BackupPointCopy.point_id, BackupPointCopy.state))).all())
     assert states[old_id] == "expired"
@@ -409,7 +410,7 @@ async def test_local_gc_holds_points_whose_off_site_copy_is_not_complete(
     copied, _ = await add_point(app_engine, store, org, {"/a": [b"1" * 10]})
     await _replicate_all(app_engine, vault, store, org, datetime.now(UTC))
     pending, _ = await add_point(app_engine, store, org, {"/a": [b"2" * 10]})
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         held = await offsite_hold(session, org.org_id, {copied, pending})
         repo = (await session.execute(select(BackupRepository).where(
             BackupRepository.id == org.repository_id))).scalar_one()

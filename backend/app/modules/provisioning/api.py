@@ -158,7 +158,9 @@ async def list_images_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("provisioning.read")),
 ) -> list[OsImageOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_images(session, ctx.org_id)
         return [_image_out(r) for r in rows]
 
@@ -169,7 +171,9 @@ async def create_image_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("provisioning.manage")),
 ) -> OsImageOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             image = await create_image(
                 session,
@@ -192,7 +196,9 @@ async def get_image_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("provisioning.read")),
 ) -> OsImageOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         image = await get_image(session, ctx.org_id, image_id)
         if image is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such image"))
@@ -209,7 +215,9 @@ async def list_profiles_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("provisioning.read")),
 ) -> list[ProfileOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_profiles(session, ctx.org_id)
         return [_profile_out(r) for r in rows]
 
@@ -221,7 +229,7 @@ async def create_profile_route(
     ctx: AuthContext = Depends(require_permission("provisioning.manage")),
 ) -> ProfileOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             profile = await upsert_profile(
                 session,
@@ -248,7 +256,7 @@ async def update_profile_route(
     ctx: AuthContext = Depends(require_permission("provisioning.manage")),
 ) -> ProfileOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             profile = await upsert_profile(
                 session,
@@ -274,7 +282,9 @@ async def get_profile_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("provisioning.read")),
 ) -> ProfileOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         profile = await get_profile(session, ctx.org_id, profile_id)
         if profile is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such profile"))
@@ -296,7 +306,7 @@ async def start_run_route(
     state = request.app.state
     wake_envelope: dict[str, Any] | None = None
     try:
-        async with org_session(ctx.org_id, engine=state.app_engine) as session:
+        async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
             run, wake_envelope = await start_provision_run(
                 session,
                 _object_store(request),
@@ -339,7 +349,9 @@ async def list_runs_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("provisioning.read")),
 ) -> list[RunOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = (
             (
                 await session.execute(
@@ -360,7 +372,9 @@ async def get_run_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("provisioning.read")),
 ) -> RunOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         data = await provision_run_status(session, ctx.org_id, run_id)
         if data["state"] is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such run"))
@@ -391,7 +405,9 @@ async def device_provisioning_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("provisioning.read")),
 ) -> DeviceProvisioningOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         data = await device_provisioning(session, ctx.org_id, device_id)
         return DeviceProvisioningOut(**data)
 
@@ -401,7 +417,9 @@ async def report_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("provisioning.read")),
 ) -> FleetProvisioningReportOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         data = await fleet_provisioning_report(session, ctx.org_id)
         data["per_profile"] = {str(k): v for k, v in data["per_profile"].items()}
         return FleetProvisioningReportOut(**data)

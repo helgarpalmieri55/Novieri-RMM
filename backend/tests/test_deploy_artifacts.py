@@ -37,6 +37,7 @@ from moto import mock_aws
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings, override_settings
 from app.core.signing import LocalEd25519Signer
 from app.core.storage import MAX_PRESIGNED_TTL_S, ObjectStore
@@ -359,7 +360,7 @@ async def test_the_url_expires_when_the_job_does(
     """
     org_id, deployment_id, _device_id, package_id = await _fixture(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pending = await dispatch_deployment(
             session,
             job_engine,
@@ -437,7 +438,7 @@ async def test_one_grant_per_dispatch_not_one_per_device(
         org_id, deployment_id = org.id, deployment.id
 
     signer = _RecordingSigner()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pending = await dispatch_deployment(
             session,
             job_engine,
@@ -461,7 +462,7 @@ async def test_a_manager_sourced_deployment_asks_for_no_grant_at_all(
         package_identifier="Mozilla.Firefox",
     )
     signer = _RecordingSigner()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pending = await dispatch_deployment(
             session,
             job_engine,
@@ -487,7 +488,7 @@ async def test_an_artifact_backed_package_with_no_upload_is_refused_before_dispa
     org_id, deployment_id, _device_id, _package_id = await _fixture(
         admin_engine, installer_type="msi", with_artifact=False
     )
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(DeployValidationError):
             await dispatch_deployment(
                 session,
@@ -521,7 +522,7 @@ async def test_the_url_reaches_no_log_record_and_no_audit_row(
     signer = _RecordingSigner()
 
     with caplog.at_level(logging.DEBUG):
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             pending = await dispatch_deployment(
                 session,
                 job_engine,
@@ -650,7 +651,7 @@ async def test_the_url_never_reaches_the_jobs_api(api_env) -> None:
         job_id = executed.json()["job_ids"][0]
 
     # The fixture is not vacuous: a live grant really is in the signed params.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         row = (await session.execute(select(Job).where(Job.id == UUID(job_id)))).scalar_one()
     assert row.params["artifact_ref"].startswith("https://")
     assert "X-Amz-Signature" in row.params["artifact_ref"]
@@ -672,7 +673,7 @@ async def test_the_url_never_reaches_the_jobs_api(api_env) -> None:
     assert "X-Amz-Signature" not in listed.text
 
     # And the deployment itself is untouched by any of this.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         dep = (
             await session.execute(select(_Deployment).where(_Deployment.org_id == org_id))
         ).scalar_one()
@@ -706,7 +707,7 @@ async def test_a_retry_gets_a_fresh_url_sized_to_its_new_window(
     """
     org_id, deployment_id, _device_id, _package_id = await _fixture(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pending = await dispatch_deployment(
             session,
             job_engine,  # 900 s
@@ -720,7 +721,7 @@ async def test_a_retry_gets_a_fresh_url_sized_to_its_new_window(
     retry_engine = JobEngine(
         signer=LocalEd25519Signer(tmp_path / "sign.key"), default_ttl_s=4000
     )
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         first_url, first_sig = job.params["artifact_ref"], job.signature
         assert int(parse_qs(urlparse(first_url).query)["X-Amz-Expires"][0]) == 900
@@ -769,7 +770,7 @@ async def test_a_manager_sourced_job_is_re_signed_with_its_params_untouched(
         with_artifact=False,
         package_identifier="googlechrome",
     )
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pending = await dispatch_deployment(
             session,
             job_engine,
@@ -794,7 +795,7 @@ async def test_a_retry_whose_package_is_gone_lands_terminal_instead_of_wedging(
     deleted yields `artifact_ref: null`, which the agent refuses on arrival —
     terminal and legible."""
     org_id, deployment_id, _d, package_id = await _fixture(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pending = await dispatch_deployment(
             session,
             job_engine,
@@ -814,7 +815,7 @@ async def test_a_retry_whose_package_is_gone_lands_terminal_instead_of_wedging(
         session.add(pkg)
         await session.commit()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         await job_engine.resign_for_retry(session, job)  # must not raise
         assert job.params["artifact_ref"] is None

@@ -62,6 +62,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 
 # `app.models` first, before any `app.modules.*` import: importing an SLA
@@ -133,19 +134,19 @@ async def _pause_at(api_env, monkeypatch, org_id: UUID, ticket_id: UUID, when: d
     """`pause` with the clock frozen at `when`, through the RLS-constrained app
     engine (the ordinary caller's path)."""
     monkeypatch.setattr(tracking, "_utcnow", lambda: when)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await pause(session, org_id, ticket_id)
 
 
 async def _resume_at(api_env, monkeypatch, org_id: UUID, ticket_id: UUID, when: datetime) -> None:
     """`resume` with the clock frozen at `when`."""
     monkeypatch.setattr(tracking, "_utcnow", lambda: when)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await resume(session, org_id, ticket_id)
 
 
 async def _start(api_env, org_id: UUID, ticket: Ticket) -> None:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await tracking.start_tracking(session, org_id, ticket)
 
 
@@ -728,7 +729,7 @@ async def test_a_retriage_onto_identical_targets_preserves_completed_pause_credi
     assert stored.paused_minutes_total == 120
 
     moved = await _retriage(api_env, ticket, queue_id=queue_b)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await recompute_for_retriage(session, org_id, moved)
 
     stored = await _row(api_env, ticket.id)
@@ -775,7 +776,7 @@ async def test_on_business_hours_the_lost_credit_would_be_two_working_days(
     assert stored.resolution_due_at == datetime(2026, 3, 4, 17, 0, tzinfo=UTC)
 
     moved = await _retriage(api_env, ticket, queue_id=queue_b)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await recompute_for_retriage(session, org_id, moved)
 
     stored = await _row(api_env, ticket.id)
@@ -817,7 +818,7 @@ async def test_the_credit_is_spent_in_working_time_not_wall_clock(api_env, monke
     assert stored.resolution_due_at != datetime(2026, 3, 6, 18, 0, tzinfo=UTC)
 
     moved = await _retriage(api_env, ticket, queue_id=queue_b)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await recompute_for_retriage(session, org_id, moved)
 
     stored = await _row(api_env, ticket.id)
@@ -869,7 +870,7 @@ async def test_an_open_pause_is_credited_at_resume_and_never_by_the_recompute(
     await _pause_at(api_env, monkeypatch, org_id, ticket.id, paused_at)
 
     moved = await _retriage(api_env, ticket, queue_id=queue_b)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await recompute_for_retriage(session, org_id, moved)
 
     stored = await _row(api_env, ticket.id)
@@ -931,14 +932,14 @@ async def test_recompute_before_and_after_a_pause_reach_the_same_deadlines(
     await _pause_at(api_env, monkeypatch, org_id, first.id, pause_from)
     await _resume_at(api_env, monkeypatch, org_id, first.id, pause_to)
     moved_first = await _retriage(api_env, first, queue_id=queue_b)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await recompute_for_retriage(session, org_id, moved_first)
 
     # Ticket 2: re-triage FIRST, then pause and resume.
     second = await _seed_ticket(api_env, org_id, queue_id=queue_a, created_at=FRIDAY_0900)
     await _start(api_env, org_id, second)
     moved_second = await _retriage(api_env, second, queue_id=queue_b)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await recompute_for_retriage(session, org_id, moved_second)
     await _pause_at(api_env, monkeypatch, org_id, second.id, pause_from)
     await _resume_at(api_env, monkeypatch, org_id, second.id, pause_to)

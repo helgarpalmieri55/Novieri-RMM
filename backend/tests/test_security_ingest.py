@@ -5,6 +5,7 @@ import redis.asyncio as aioredis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.gateway.dispatch import handle_agent_message
@@ -45,13 +46,13 @@ async def _org_device(admin_engine: AsyncEngine) -> tuple[UUID, UUID]:
 
 async def test_batch_inserts_with_columns(admin_engine, app_engine) -> None:
     org_id, device_id = await _org_device(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one()
         inserted = await ingest_events(session, device, _events(3))
     assert inserted == 3
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rows = (
             (await session.execute(select(SecurityEvent).order_by(SecurityEvent.event_uid)))
             .scalars()
@@ -76,18 +77,18 @@ async def test_batch_inserts_with_columns(admin_engine, app_engine) -> None:
 
 async def test_redelivery_dedupes_on_event_uid(admin_engine, app_engine) -> None:
     org_id, device_id = await _org_device(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one()
         assert await ingest_events(session, device, _events(4)) == 4
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one()
         # at-least-once redelivery: same uids plus one new
         assert await ingest_events(session, device, _events(5)) == 1
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         total = (
             await session.execute(select(func.count()).select_from(SecurityEvent))
         ).scalar_one()
@@ -125,7 +126,7 @@ async def test_gateway_branch_ingests_and_queues_ui_event(
         app_engine, engine, redis, msg, device_id=device_id, org_id=org_id
     )
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = (
             await session.execute(
                 select(SecurityEvent).where(SecurityEvent.event_uid == "gw1")

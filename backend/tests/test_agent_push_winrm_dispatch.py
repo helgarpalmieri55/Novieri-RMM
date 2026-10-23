@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -150,7 +151,7 @@ async def _dispatch(
     app_engine, org, credential_id, *, kind, vault, tmp_path, store=None,
     public_console_url: str | None = CONSOLE,
 ):
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return await dispatch_push_batch(
             session,
             JobEngine(signer=LocalEd25519Signer(tmp_path / "job-signing.key")),

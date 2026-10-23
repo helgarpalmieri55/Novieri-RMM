@@ -24,6 +24,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -120,14 +121,14 @@ async def _world(
 
 
 async def _pick(app_engine: AsyncEngine, org: PushOrg, transport: str | None):
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return await _site_server_for(
             session, org.org_id, parse_target_address(TARGET), transport=transport
         )
 
 
 async def _decide(app_engine: AsyncEngine, org: PushOrg, credential_id: UUID):
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         decisions = await evaluate_targets(
             session,
             org.org_id,
@@ -295,7 +296,7 @@ async def test_a_windows_push_with_only_an_older_site_server_is_refused_and_reco
     await seed_agent_release(admin_engine, os_name="windows", arch="amd64")
     vault = _CountingVault()
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = await dispatch_push_batch(
             session,
             JobEngine(signer=LocalEd25519Signer(tmp_path / "job-signing.key")),

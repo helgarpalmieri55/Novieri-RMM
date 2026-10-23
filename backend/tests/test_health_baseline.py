@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     Agent,
@@ -28,7 +29,7 @@ from tests.health_fixtures import seed_device, seed_org, seed_profile, seed_sett
 
 
 async def _profiles(app_engine: AsyncEngine, org_id: UUID) -> list[HealthProfile]:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return list(
             (
                 await session.execute(
@@ -39,7 +40,7 @@ async def _profiles(app_engine: AsyncEngine, org_id: UUID) -> list[HealthProfile
 
 
 async def _seed(app_engine: AsyncEngine, org_id: UUID) -> str:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return await baseline.ensure_baseline(session, org_id)
 
 
@@ -49,7 +50,7 @@ async def test_a_new_org_gets_the_baseline_as_its_default(
     org = await seed_org(admin_engine, "bl")
     assert await _seed(app_engine, org.org_id) == "seeded"
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         profiles = list((await session.execute(select(HealthProfile))).scalars())
         assert [p.name for p in profiles] == [baseline.BASELINE_NAME]
         profile = profiles[0]
@@ -117,7 +118,7 @@ async def test_checks_resolve_per_os(
     mac = await seed_device(admin_engine, org.org_id, os_family="macos")
     await _seed(app_engine, org.org_id)
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         got = {}
         for device_id in (org.device_id, linux, mac):
             device = await session.get(Device, device_id)
@@ -150,7 +151,7 @@ async def test_a_deleted_baseline_is_not_recreated(
     await _seed(app_engine, org.org_id)
     from app.modules.health.profiles import delete_assignment, delete_profile
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         profile = (await session.execute(select(HealthProfile))).scalar_one()
         assignment = (await session.execute(select(HealthProfileAssignment))).scalar_one()
         await delete_assignment(session, org.org_id, None, assignment.id)
@@ -174,7 +175,7 @@ async def test_an_org_that_has_profiles_is_skipped_and_untouched(
 
     after = {p.id: p.policy_version for p in await _profiles(app_engine, org.org_id)}
     assert after == before == {own: 1}
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert list((await session.execute(select(HealthProfileAssignment))).scalars()) == []
         settings_row = (await session.execute(select(HealthOrgSettings))).scalar_one()
         marker = (await session.execute(select(HealthBaselineSeed))).scalar_one()
@@ -188,7 +189,7 @@ async def test_existing_org_settings_are_not_overwritten(
     org = await seed_org(admin_engine, "bl")
     await seed_settings(admin_engine, org.org_id, offline_after_s=3600)
     assert await _seed(app_engine, org.org_id) == "seeded"
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         settings_row = (await session.execute(select(HealthOrgSettings))).scalar_one()
     assert settings_row.offline_after_s == 3600
 
@@ -265,9 +266,9 @@ async def test_the_baseline_raises_an_offline_alert_after_thirty_minutes(
             )
             await session.commit()
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await run_offline_sweep(session, org.org_id, now=now)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         alerts = list((await session.execute(select(HealthAlert))).scalars())
     assert [(a.device_id, a.check_type, a.severity) for a in alerts] == [
         (org.device_id, "agent.offline", "warning")

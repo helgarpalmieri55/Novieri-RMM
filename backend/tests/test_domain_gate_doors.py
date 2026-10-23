@@ -46,6 +46,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.ws import AUTH_SUBPROTOCOL
+from app.core.client_scope import ClientScope
 from app.core.identity.policy import OVERRIDE_ENV_VAR
 from app.models import Device, RemoteSession, User
 from app.modules.remote.tunnel import TunnelAuthError, authorize_tunnel
@@ -835,7 +836,7 @@ async def test_audit_admission_refusal_writes_a_verifiable_chained_event(api_env
     # TENANT-SCOPED, on the application engine: invariant 5 says the filter
     # belongs in the database, and a refusal written through the BYPASSRLS
     # engine would be application-code-only scoping on a security event.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await audit_admission_refusal(
             session, org_id=org_id, user_id=user_id, door="http", reason="not active"
         )
@@ -878,7 +879,7 @@ async def test_audit_admission_refusal_chains_onto_what_came_before(api_env) -> 
     sub = await api_env.create_user(org_id, "read-only")
     user_id = await _user_id_of(api_env, sub)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await audit_service.record(
             session,
             org_id=org_id,
@@ -1122,5 +1123,5 @@ async def test_the_create_user_form_reads_the_same_org_setting(api_env) -> None:
 
     org_id = await api_env.create_org("dom-create")
     await _set_org_domain(api_env, org_id, BASE_DOMAIN)
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         assert await resolve_console_domain(s, org_id, api_env.settings) == BASE_DOMAIN

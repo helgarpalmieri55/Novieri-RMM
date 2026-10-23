@@ -25,6 +25,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Agent, AuditEvent, Device
 from tests.conftest import ApiEnv
@@ -40,7 +41,7 @@ _SWITCH: dict[str, Any] = {
 
 async def _enrolled_device(api_env: ApiEnv, org_id: UUID) -> UUID:
     """A device that HAS an agent, for the edit-refusal cases."""
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         device = Device(org_id=org_id, hostname="managed-01", os_family="linux")
         session.add(device)
         await session.flush()
@@ -146,7 +147,7 @@ async def test_creating_and_editing_an_asset_are_both_audited(
     assert resp.json()["lifecycle"] == "retired"
     assert resp.json()["location"] == "rack 3"
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         actions = list(
             (
                 await session.execute(select(AuditEvent.action).order_by(AuditEvent.id))
@@ -344,7 +345,7 @@ async def test_setting_a_dns_name_is_audited_by_field_name(api_env: ApiEnv) -> N
     )
     assert resp.status_code == 200, resp.text
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         events = list(
             (
                 await session.execute(

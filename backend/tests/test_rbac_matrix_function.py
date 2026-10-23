@@ -19,6 +19,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 
 pytestmark = pytest.mark.asyncio
@@ -77,7 +78,7 @@ async def test_app_user_still_cannot_write_role_permissions_directly(
     role_id = await _seed_role(admin_engine, org_id, "direct-write")
 
     with pytest.raises(Exception) as caught:
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await session.execute(
                 text(
                     "INSERT INTO role_permissions (role_id, permission_id) "
@@ -94,7 +95,7 @@ async def test_the_function_applies_a_whole_code_set_as_app_user(
     org_id = await _seed_org(admin_engine)
     role_id = await _seed_role(admin_engine, org_id, "matrix-apply")
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         written = await _apply(session, role_id, ["devices.read", "jobs.read"])
 
     assert written == 2
@@ -110,7 +111,7 @@ async def test_applying_replaces_rather_than_accumulates(
     org_id = await _seed_org(admin_engine)
     role_id = await _seed_role(admin_engine, org_id, "matrix-replace")
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await _apply(session, role_id, ["devices.read", "jobs.read", "audit.read"])
         await _apply(session, role_id, ["devices.read"])
 
@@ -123,7 +124,7 @@ async def test_an_empty_set_clears_the_role(
     org_id = await _seed_org(admin_engine)
     role_id = await _seed_role(admin_engine, org_id, "matrix-clear")
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await _apply(session, role_id, ["devices.read"])
         cleared = await _apply(session, role_id, [])
 
@@ -147,7 +148,7 @@ async def test_super_admin_is_refused_in_the_database(
         ).scalar_one()
 
     with pytest.raises(Exception) as caught:
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await _apply(session, role_id, ["devices.read"])
     assert "super-admin is not editable" in str(caught.value)
 
@@ -172,7 +173,7 @@ async def test_a_platform_operator_code_is_refused_in_the_database(
     role_id = await _seed_role(admin_engine, org_id, f"self-grant-{uuid4().hex[:6]}")
 
     with pytest.raises(Exception) as caught:
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await _apply(session, role_id, ["devices.read", "platform.errors.read"])
     assert "platform.errors.read" in str(caught.value)
     assert "not grantable here" in str(caught.value)
@@ -193,7 +194,7 @@ async def test_an_ordinary_code_set_still_applies_after_the_operator_rail(
     org_id = await _seed_org(admin_engine)
     role_id = await _seed_role(admin_engine, org_id, f"ordinary-{uuid4().hex[:6]}")
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         written = await _apply(session, role_id, ["devices.read", "platform.status.read"])
     assert written == 2
     assert await _codes_of(admin_engine, role_id) == {"devices.read", "platform.status.read"}
@@ -220,7 +221,7 @@ async def test_agent_release_manage_is_refused_in_the_database(
     role_id = await _seed_role(admin_engine, org_id, f"publisher-{uuid4().hex[:6]}")
 
     with pytest.raises(Exception) as caught:
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await _apply(session, role_id, ["devices.read", "agent.release.manage"])
     assert "agent.release.manage" in str(caught.value)
     assert "not grantable here" in str(caught.value)
@@ -239,7 +240,7 @@ async def test_agent_release_read_still_applies_after_the_operator_rail(
     org_id = await _seed_org(admin_engine)
     role_id = await _seed_role(admin_engine, org_id, f"installer-{uuid4().hex[:6]}")
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         written = await _apply(session, role_id, ["devices.read", "agent.release.read"])
     assert written == 2
     assert await _codes_of(admin_engine, role_id) == {"devices.read", "agent.release.read"}
@@ -262,7 +263,7 @@ async def test_a_global_role_is_refused_because_it_is_shared_by_every_tenant(
         ).scalar_one()
 
     with pytest.raises(Exception) as caught:
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await _apply(session, role_id, ["devices.read"])
     assert "must be cloned before editing" in str(caught.value)
 
@@ -278,7 +279,7 @@ async def test_an_unknown_code_raises_rather_than_silently_writing_nothing(
     role_id = await _seed_role(admin_engine, org_id, "matrix-typo")
 
     with pytest.raises(Exception) as caught:
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await _apply(session, role_id, ["devices.read", "devices.raed"])
     assert "devices.raed" in str(caught.value)
 
@@ -293,6 +294,6 @@ async def test_an_unknown_role_raises(
 ) -> None:
     org_id = await _seed_org(admin_engine)
     with pytest.raises(Exception) as caught:
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await _apply(session, uuid4(), ["devices.read"])
     assert "no such role" in str(caught.value)

@@ -44,7 +44,9 @@ def _http(exc: svc.RolloutError) -> HTTPException:
 
 
 async def _require_rollback(request: Request, ctx: AuthContext) -> None:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         allowed = await has_permission(session, ctx.user_id, _ROLLBACK)
     if not allowed:
         raise HTTPException(
@@ -92,7 +94,9 @@ async def _rollout_out(session: AsyncSession, rollout: AgentUpdateRollout) -> Ro
 async def fleet_versions_route(
     request: Request, ctx: AuthContext = Depends(require_permission(_READ))
 ) -> FleetVersionsOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         fv = await svc.fleet_versions(session)
     return FleetVersionsOut(
         total=fv.total,
@@ -115,7 +119,9 @@ async def fleet_versions_route(
 async def list_rollouts_route(
     request: Request, ctx: AuthContext = Depends(require_permission(_READ))
 ) -> list[RolloutOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         return [await _rollout_out(session, r) for r in await svc.list_rollouts(session)]
 
 
@@ -123,7 +129,9 @@ async def list_rollouts_route(
 async def get_rollout_route(
     rollout_id: UUID, request: Request, ctx: AuthContext = Depends(require_permission(_READ))
 ) -> RolloutOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             return await _rollout_out(session, await svc.get_rollout(session, rollout_id))
         except svc.RolloutError as exc:
@@ -134,7 +142,9 @@ async def get_rollout_route(
 async def list_targets_route(
     rollout_id: UUID, request: Request, ctx: AuthContext = Depends(require_permission(_READ))
 ) -> list[TargetOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             rows = await svc.list_targets(session, rollout_id)
         except svc.RolloutError as exc:
@@ -160,7 +170,9 @@ async def list_targets_route(
 async def preview_route(
     body: RolloutIn, request: Request, ctx: AuthContext = Depends(require_permission(_ROLLOUT))
 ) -> PreviewOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             pv = await svc.preview(
                 session,
@@ -184,7 +196,9 @@ async def create_rollout_route(
 ) -> RolloutOut:
     if body.is_rollback:
         await _require_rollback(request, ctx)
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             rollout = await svc.create_rollout(
                 session,
@@ -206,7 +220,9 @@ async def create_rollout_route(
 async def _act(
     request: Request, ctx: AuthContext, rollout_id: UUID, action: str, ring_id: UUID | None = None
 ) -> RolloutOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             rollout = await svc.get_rollout(session, rollout_id)
             if rollout.is_rollback and action in ("start", "resume", "advance"):
@@ -284,7 +300,9 @@ async def promote_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("agent.release.manage")),
 ) -> PromoteOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             rows = await svc.promote_version(
                 session,
@@ -305,7 +323,9 @@ async def release_signature_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("agent.release.manage")),
 ) -> None:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await svc.set_release_signature(
                 session,

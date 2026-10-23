@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
@@ -106,7 +107,7 @@ async def test_a_live_point_is_stored_as_not_crash_consistent_with_its_warnings(
                         repository_id=org.repository_id, job_id=job.id, state="running",
                         actor_type="system"))
         await s.commit()
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await ingest_backup_result(session, lambda: store, job, BackupRunResult(**V2_RESULT))
     async with AsyncSession(admin_engine) as s:
         point = (await s.execute(select(BackupPoint).where(
@@ -137,7 +138,7 @@ async def test_restore_warnings_are_kept(
                          job_id=job.id, selection={"paths": ["/a"]}, target={}, mode="restore",
                          state="running", actor_type="user"))
         await s.commit()
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await ingest_restore_result(session, job, BackupRestoreResult(
             state="success", restored_bytes=1, verified=True,
             warnings=["ownership_not_applied"]))

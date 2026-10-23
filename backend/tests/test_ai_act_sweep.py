@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.ai.sweep import blank_rationales, expire_stale_actions, settle_action_for_job
+from app.core.client_scope import ClientScope
 from app.core.config import Settings, override_settings
 from app.core.tenancy import org_session
 from app.models import AiAction, AiMessage, AiSession, AuditEvent, Organization
@@ -132,7 +133,7 @@ async def test_a_stale_preview_expires_and_one_inside_the_window_does_not(
     )
     fresh = await _seed_action(admin_engine, world, expires_at=NOW + timedelta(seconds=1))
 
-    async with org_session(world.org_id, engine=app_engine) as session:
+    async with org_session(world.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         moved = await expire_stale_actions(session, org_id=world.org_id, now=NOW)
 
     assert moved == 1, moved
@@ -164,7 +165,7 @@ async def test_a_transient_proposed_row_is_expired_too(
         preview_digest="",
         expires_at=NOW - timedelta(seconds=1),
     )
-    async with org_session(world.org_id, engine=app_engine) as session:
+    async with org_session(world.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await expire_stale_actions(session, org_id=world.org_id, now=NOW)
 
     row = await _read(admin_engine, action_id)
@@ -183,7 +184,7 @@ async def test_a_terminal_or_dispatched_row_is_never_expired(
     action_id = await _seed_action(
         admin_engine, world, state=state, expires_at=NOW - timedelta(days=30)
     )
-    async with org_session(world.org_id, engine=app_engine) as session:
+    async with org_session(world.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         moved = await expire_stale_actions(session, org_id=world.org_id, now=NOW)
 
     row = await _read(admin_engine, action_id)
@@ -260,7 +261,7 @@ async def test_the_sweep_blanks_the_rationale_and_leaves_every_other_column_by_v
     )
     assert before.rationale, "the fixture must seed a rationale or this proves nothing"
 
-    async with org_session(world.org_id, engine=app_engine) as session:
+    async with org_session(world.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         blanked = await blank_rationales(session, org_id=world.org_id, cutoff=NOW)
 
     after = await _read(admin_engine, action_id)
@@ -291,7 +292,7 @@ async def test_a_previewed_row_inside_the_retention_window_keeps_its_rationale(
     fresh = await _seed_action(admin_engine, world, created_at=NOW)
     stale = await _seed_action(admin_engine, world, created_at=NOW - timedelta(days=400))
 
-    async with org_session(world.org_id, engine=app_engine) as session:
+    async with org_session(world.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         blanked = await blank_rationales(session, org_id=world.org_id, cutoff=NOW)
 
     fresh_row = await _read(admin_engine, fresh)
@@ -375,7 +376,7 @@ async def test_the_transcript_sweep_over_a_session_with_a_dispatched_action(
         )
         await session.commit()
 
-    async with org_session(world.org_id, engine=app_engine) as session:
+    async with org_session(world.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         counts = await sweep_org(session, world.org_id, now=NOW)
 
     async with AsyncSession(admin_engine) as session:
@@ -424,7 +425,7 @@ async def test_an_emptied_session_with_no_action_is_still_deleted(
         )
         await session.commit()
 
-    async with org_session(world.org_id, engine=app_engine) as session:
+    async with org_session(world.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         counts = await sweep_org(session, world.org_id, now=NOW)
 
     async with AsyncSession(admin_engine) as session:
@@ -480,7 +481,7 @@ async def test_settle_follows_the_job_to_its_terminal_state(
     job_id = await _seed_job(admin_engine, world)
     action_id = await _seed_action(admin_engine, world, state="dispatched", job_id=job_id)
 
-    async with org_session(world.org_id, engine=app_engine) as session:
+    async with org_session(world.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await settle_action_for_job(
             session, org_id=world.org_id, job_id=job_id, terminal_state=terminal  # type: ignore[arg-type]
         )
@@ -500,11 +501,11 @@ async def test_settling_twice_does_not_move_an_already_settled_row(
     job_id = await _seed_job(admin_engine, world)
     action_id = await _seed_action(admin_engine, world, state="dispatched", job_id=job_id)
 
-    async with org_session(world.org_id, engine=app_engine) as session:
+    async with org_session(world.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await settle_action_for_job(
             session, org_id=world.org_id, job_id=job_id, terminal_state="succeeded"
         )
-    async with org_session(world.org_id, engine=app_engine) as session:
+    async with org_session(world.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await settle_action_for_job(
             session, org_id=world.org_id, job_id=job_id, terminal_state="failed"
         )
@@ -524,7 +525,7 @@ async def test_a_job_nobody_proposed_settles_nothing(
     other = await _seed_job(admin_engine, world)
     action_id = await _seed_action(admin_engine, world, state="dispatched", job_id=mine)
 
-    async with org_session(world.org_id, engine=app_engine) as session:
+    async with org_session(world.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await settle_action_for_job(
             session, org_id=world.org_id, job_id=other, terminal_state="succeeded"
         )
@@ -561,7 +562,7 @@ async def test_the_job_engine_settles_through_its_own_terminal_transitions(
     )
 
     engine = JobEngine(signer=_Signer())  # type: ignore[arg-type]
-    async with org_session(world.org_id, engine=app_engine) as session:
+    async with org_session(world.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await session.get(Job, job_id)
         assert job is not None
         await engine.complete(session, job, state="succeeded", result={})

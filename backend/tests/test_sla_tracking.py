@@ -42,6 +42,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Ticket, TicketStatusHistory
 from app.modules.sla.errors import SlaValidationError, UnsatisfiableCalendar
@@ -224,7 +225,7 @@ async def test_start_tracking_materialises_both_deadlines_from_created_at(api_en
     ticket = await _seed_ticket(api_env, org_id, created_at=MONDAY_0900)
 
     before = datetime.now(UTC)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         tracking = await start_tracking(session, org_id, ticket)
     assert tracking is not None
 
@@ -269,7 +270,7 @@ async def test_start_tracking_measures_the_target_on_the_business_calendar(api_e
     )
     ticket = await _seed_ticket(api_env, org_id, created_at=FRIDAY_1630)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         tracking = await start_tracking(session, org_id, ticket)
 
     assert tracking is not None
@@ -289,7 +290,7 @@ async def test_start_tracking_writes_no_row_when_no_policy_matches(api_env) -> N
     await _seed_calendar(api_env, org_id, timezone=LONDON, windows=_ALWAYS)
     ticket = await _seed_ticket(api_env, org_id, created_at=MONDAY_0900)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         tracking = await start_tracking(session, org_id, ticket)
 
     assert tracking is None
@@ -315,7 +316,7 @@ async def test_start_tracking_twice_is_an_idempotent_no_op(api_env) -> None:
     )
     ticket = await _seed_ticket(api_env, org_id, priority="high", created_at=MONDAY_0900)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         first = await start_tracking(session, org_id, ticket)
     assert first is not None
 
@@ -328,7 +329,7 @@ async def test_start_tracking_twice_is_an_idempotent_no_op(api_env) -> None:
         response_minutes=15,
         resolution_minutes=90,
     )
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         second = await start_tracking(session, org_id, ticket)
 
     assert second is not None
@@ -361,7 +362,7 @@ async def test_start_tracking_returns_the_existing_row_even_if_no_policy_resolve
         api_env, org_id, calendar_id=calendar_id, response_minutes=60, resolution_minutes=480
     )
     ticket = await _seed_ticket(api_env, org_id, created_at=MONDAY_0900)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         first = await start_tracking(session, org_id, ticket)
     assert first is not None
 
@@ -373,7 +374,7 @@ async def test_start_tracking_returns_the_existing_row_even_if_no_policy_resolve
                 text("UPDATE sla_policy SET active = false WHERE id = :id"), {"id": policy_id}
             )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         second = await start_tracking(session, org_id, ticket)
 
     assert second is not None, "an already-tracked ticket must not report itself untracked"
@@ -397,7 +398,9 @@ async def test_concurrent_start_tracking_yields_one_row_and_no_integrity_error(a
     barrier = asyncio.Barrier(2)
 
     async def attempt() -> UUID | None:
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await session.execute(select(TicketSla.id))
             await asyncio.wait_for(barrier.wait(), timeout=30)
             tracking = await start_tracking(session, org_id, ticket)
@@ -426,7 +429,9 @@ async def test_start_tracking_surfaces_an_unsatisfiable_calendar_and_writes_no_r
     ticket = await _seed_ticket(api_env, org_id, created_at=MONDAY_0900)
 
     with pytest.raises(UnsatisfiableCalendar):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await start_tracking(session, org_id, ticket)
 
     assert await _row_count(api_env, org_id) == 0
@@ -442,7 +447,7 @@ async def test_start_tracking_rejects_a_ticket_from_another_org(api_env) -> None
     await _seed_policy(api_env, org_a, calendar_id=calendar_a)
     ticket_b = await _seed_ticket(api_env, org_b, created_at=MONDAY_0900)
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(SlaValidationError, match="does not belong to org"):
             await start_tracking(session, org_a, ticket_b)
 
@@ -497,7 +502,7 @@ async def test_retriage_recomputes_from_ticket_start_and_comes_out_already_breac
     )
     ticket = await _seed_ticket(api_env, org_id, priority="normal", created_at=MONDAY_0900)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         initial = await start_tracking(session, org_id, ticket)
     assert initial is not None
     assert initial.policy_id == normal_id
@@ -507,7 +512,7 @@ async def test_retriage_recomputes_from_ticket_start_and_comes_out_already_breac
 
     retriaged_ticket = await _retriage(api_env, ticket, priority="urgent")
     before_recompute = datetime.now(UTC)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         recomputed = await recompute_for_retriage(session, org_id, retriaged_ticket)
     after_recompute = datetime.now(UTC)
     assert recomputed is not None
@@ -565,11 +570,11 @@ async def test_retriage_recomputes_into_the_future_when_not_yet_breached(api_env
     )
     created_at = datetime.now(UTC) - timedelta(minutes=5)
     ticket = await _seed_ticket(api_env, org_id, priority="normal", created_at=created_at)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await start_tracking(session, org_id, ticket)
 
     retriaged = await _retriage(api_env, ticket, priority="urgent")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         recomputed = await recompute_for_retriage(session, org_id, retriaged)
     assert recomputed is not None
 
@@ -612,12 +617,12 @@ async def test_retriage_keeps_a_met_response_deadline_and_moves_the_running_one(
         resolution_minutes=120,
     )
     ticket = await _seed_ticket(api_env, org_id, priority="normal", created_at=MONDAY_0900)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await start_tracking(session, org_id, ticket)
     await _stop_clocks(api_env, ticket.id, response_met_at=MONDAY_0900 + timedelta(minutes=30))
 
     retriaged = await _retriage(api_env, ticket, priority="urgent")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await recompute_for_retriage(session, org_id, retriaged)
 
     stored = await _row(api_env, ticket.id)
@@ -662,14 +667,14 @@ async def test_retriage_keeps_a_breached_response_deadline_and_moves_the_running
         resolution_minutes=120,
     )
     ticket = await _seed_ticket(api_env, org_id, priority="normal", created_at=MONDAY_0900)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await start_tracking(session, org_id, ticket)
     await _stop_clocks(
         api_env, ticket.id, response_breached_at=MONDAY_0900 + timedelta(minutes=30)
     )
 
     retriaged = await _retriage(api_env, ticket, priority="urgent")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await recompute_for_retriage(session, org_id, retriaged)
 
     stored = await _row(api_env, ticket.id)
@@ -713,14 +718,14 @@ async def test_retriage_keeps_a_breached_resolution_deadline_and_moves_the_runni
         resolution_minutes=120,
     )
     ticket = await _seed_ticket(api_env, org_id, priority="normal", created_at=MONDAY_0900)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await start_tracking(session, org_id, ticket)
     await _stop_clocks(
         api_env, ticket.id, resolution_breached_at=MONDAY_0900 + timedelta(minutes=500)
     )
 
     retriaged = await _retriage(api_env, ticket, priority="urgent")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await recompute_for_retriage(session, org_id, retriaged)
 
     stored = await _row(api_env, ticket.id)
@@ -758,12 +763,12 @@ async def test_retriage_keeps_a_met_resolution_deadline_and_moves_the_running_on
         resolution_minutes=120,
     )
     ticket = await _seed_ticket(api_env, org_id, priority="normal", created_at=MONDAY_0900)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await start_tracking(session, org_id, ticket)
     await _stop_clocks(api_env, ticket.id, resolution_met_at=MONDAY_0900 + timedelta(minutes=400))
 
     retriaged = await _retriage(api_env, ticket, priority="urgent")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await recompute_for_retriage(session, org_id, retriaged)
 
     stored = await _row(api_env, ticket.id)
@@ -799,7 +804,7 @@ async def test_retriage_leaves_a_row_with_both_clocks_stopped_completely_untouch
         resolution_minutes=120,
     )
     ticket = await _seed_ticket(api_env, org_id, priority="normal", created_at=MONDAY_0900)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await start_tracking(session, org_id, ticket)
     await _stop_clocks(
         api_env,
@@ -819,7 +824,7 @@ async def test_retriage_leaves_a_row_with_both_clocks_stopped_completely_untouch
     )
 
     retriaged = await _retriage(api_env, ticket, priority="urgent")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         returned = await recompute_for_retriage(session, org_id, retriaged)
     assert returned is not None
 
@@ -872,7 +877,7 @@ async def test_retriage_follows_a_queue_move_onto_that_queues_own_calendar(api_e
         api_env, org_id, queue_id=queue_office, priority="normal", created_at=FRIDAY_1630
     )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         initial = await start_tracking(session, org_id, ticket)
     assert initial is not None
     assert initial.policy_id == office_policy
@@ -880,7 +885,7 @@ async def test_retriage_follows_a_queue_move_onto_that_queues_own_calendar(api_e
 
     moved = await _retriage(api_env, ticket, queue_id=queue_noc)
     assert moved.priority == "normal"
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await recompute_for_retriage(session, org_id, moved)
 
     stored = await _row(api_env, ticket.id)
@@ -901,7 +906,7 @@ async def test_retriage_materialises_tracking_that_did_not_exist_yet(api_env) ->
     calendar_id = await _seed_calendar(api_env, org_id, timezone=LONDON, windows=_ALWAYS)
     ticket = await _seed_ticket(api_env, org_id, priority="normal", created_at=MONDAY_0900)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await start_tracking(session, org_id, ticket) is None
     assert await _row_count(api_env, org_id) == 0
 
@@ -914,7 +919,7 @@ async def test_retriage_materialises_tracking_that_did_not_exist_yet(api_env) ->
         resolution_minutes=180,
     )
     retriaged = await _retriage(api_env, ticket, priority="urgent")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         created = await recompute_for_retriage(session, org_id, retriaged)
 
     assert created is not None
@@ -965,7 +970,7 @@ async def test_retriage_onto_a_pending_ticket_credits_the_wait_since_it_entered_
                 )
             )
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await start_tracking(session, org_id, ticket) is None
     assert await _row_count(api_env, org_id) == 0
 
@@ -980,7 +985,7 @@ async def test_retriage_onto_a_pending_ticket_credits_the_wait_since_it_entered_
     retriaged = await _retriage(api_env, ticket, priority="urgent")
     assert retriaged.status == "pending"
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         created = await recompute_for_retriage(session, org_id, retriaged)
 
     assert created is not None
@@ -1005,11 +1010,11 @@ async def test_retriage_into_an_unpoliced_level_leaves_the_promise_intact(api_en
         resolution_minutes=480,
     )
     ticket = await _seed_ticket(api_env, org_id, priority="normal", created_at=MONDAY_0900)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await start_tracking(session, org_id, ticket)
 
     retriaged = await _retriage(api_env, ticket, priority="low")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         returned = await recompute_for_retriage(session, org_id, retriaged)
     assert returned is not None
 
@@ -1052,12 +1057,14 @@ async def test_retriage_surfaces_an_unsatisfiable_calendar_and_leaves_the_row_un
         resolution_minutes=120,
     )
     ticket = await _seed_ticket(api_env, org_id, priority="normal", created_at=MONDAY_0900)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await start_tracking(session, org_id, ticket)
 
     retriaged = await _retriage(api_env, ticket, priority="urgent")
     with pytest.raises(UnsatisfiableCalendar):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await recompute_for_retriage(session, org_id, retriaged)
 
     stored = await _row(api_env, ticket.id)
@@ -1075,7 +1082,7 @@ async def test_retriage_rejects_a_ticket_from_another_org(api_env) -> None:
     await _seed_policy(api_env, org_a, calendar_id=calendar_a)
     ticket_b = await _seed_ticket(api_env, org_b, created_at=MONDAY_0900)
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(SlaValidationError, match="does not belong to org"):
             await recompute_for_retriage(session, org_a, ticket_b)
 

@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
@@ -117,7 +118,7 @@ async def _seed_complete_point(
 async def _seed_plan_with_scope(
     app_engine: AsyncEngine, org_id: UUID, actor_id: UUID, device_ids: list[UUID]
 ) -> UUID:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         plan = await create_plan(
             s,
             org_id=org_id,
@@ -138,7 +139,7 @@ async def _seed_plan_with_scope(
 async def _audit_actions(
     app_engine: AsyncEngine, org_id: UUID, target_type: str, target_id: str
 ) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -164,7 +165,7 @@ async def test_create_test_succeeds_and_audits(
     org_id, actor_id = await _org_with_user(admin_engine)
     plan_id = await _seed_plan_with_scope(app_engine, org_id, actor_id, [])
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         test = await bcp_create_test(
             s,
             org_id=org_id,
@@ -189,7 +190,7 @@ async def test_create_test_missing_plan_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpNotFoundError):
             await bcp_create_test(
                 s,
@@ -228,7 +229,7 @@ async def test_record_test_captures_frozen_evidence_snapshot(
 
     plan_id = await _seed_plan_with_scope(app_engine, org_id, actor_id, [device_a, device_b])
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         test = await bcp_create_test(
             s,
             org_id=org_id,
@@ -242,7 +243,7 @@ async def test_record_test_captures_frozen_evidence_snapshot(
         test_id = test.id
 
     executed_at = _dt.datetime.now(_dt.UTC)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         recorded = await record_test(
             s,
             org_id=org_id,
@@ -291,7 +292,7 @@ async def test_record_test_captures_frozen_evidence_snapshot(
 
     # Round-trip: JSONB column values are plain JSON-safe types, no
     # datetime/UUID objects leaked through.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         fresh = (await s.execute(select(BcpTest).where(BcpTest.id == test_id))).scalar_one()
         for row in fresh.evidence["devices"]:
             assert isinstance(row["device_id"], str)
@@ -301,7 +302,7 @@ async def test_record_test_captures_frozen_evidence_snapshot(
     actions = await _audit_actions(app_engine, org_id, "bcp_test", str(test_id))
     assert actions == ["bcp.test_created", "bcp.test_recorded"]
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         event = (
             await s.execute(
                 select(AuditEvent)
@@ -323,7 +324,7 @@ async def test_record_test_captures_frozen_evidence_snapshot(
     # must NOT change -- it's a stored snapshot, not a live query.
     await _seed_complete_point(admin_engine, org_id, device_b, repo_id, restore_tested=True)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         refetched = (
             await s.execute(select(BcpTest).where(BcpTest.id == test_id))
         ).scalar_one()
@@ -385,7 +386,7 @@ async def test_record_test_missing_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpNotFoundError):
             await record_test(
                 s,
@@ -406,7 +407,7 @@ async def test_record_test_defaults_executed_at_to_now(
     org_id, actor_id = await _org_with_user(admin_engine)
     plan_id = await _seed_plan_with_scope(app_engine, org_id, actor_id, [])
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         test = await bcp_create_test(
             s,
             org_id=org_id,
@@ -420,7 +421,7 @@ async def test_record_test_defaults_executed_at_to_now(
         test_id = test.id
 
     before = _dt.datetime.now(_dt.UTC)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         recorded = await record_test(
             s,
             org_id=org_id,
@@ -451,7 +452,7 @@ async def test_upsert_step_inserts_then_updates(
     org_id, actor_id = await _org_with_user(admin_engine)
     plan_id = await _seed_plan_with_scope(app_engine, org_id, actor_id, [])
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         test = await bcp_create_test(
             s,
             org_id=org_id,
@@ -464,7 +465,7 @@ async def test_upsert_step_inserts_then_updates(
         await s.commit()
         test_id = test.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         step = await upsert_step(
             s,
             org_id=org_id,
@@ -481,7 +482,7 @@ async def test_upsert_step_inserts_then_updates(
     assert step.ordinal == 1
     assert step.result == "pending"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         updated = await upsert_step(
             s,
             org_id=org_id,
@@ -498,7 +499,7 @@ async def test_upsert_step_inserts_then_updates(
     assert updated.result == "pass"
     assert updated.evidence_ref == "s3://evidence/1"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = (
             await s.execute(select(BcpTestStep).where(BcpTestStep.test_id == test_id))
         ).scalars().all()
@@ -520,7 +521,7 @@ async def test_upsert_step_missing_test_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpNotFoundError):
             await upsert_step(
                 s,
@@ -545,7 +546,7 @@ async def test_get_test_and_list_plan_tests(
     org_id, actor_id = await _org_with_user(admin_engine)
     plan_id = await _seed_plan_with_scope(app_engine, org_id, actor_id, [])
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         test = await bcp_create_test(
             s,
             org_id=org_id,
@@ -558,7 +559,7 @@ async def test_get_test_and_list_plan_tests(
         await s.commit()
         test_id = test.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_test(s, org_id, test_id)
         assert fetched is not None
         assert fetched.id == test_id
@@ -571,7 +572,7 @@ async def test_get_test_missing_returns_none(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _actor_id = await _org_with_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await get_test(s, org_id, uuid4())
         assert result is None
 
@@ -583,7 +584,7 @@ async def test_another_orgs_test_is_hidden_by_rls(
     org_b, _actor_b = await _org_with_user(admin_engine)
     plan_a = await _seed_plan_with_scope(app_engine, org_a, actor_a, [])
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         test = await bcp_create_test(
             s,
             org_id=org_a,
@@ -596,7 +597,7 @@ async def test_another_orgs_test_is_hidden_by_rls(
         await s.commit()
         test_id = test.id
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_test(s, org_b, test_id)
         assert fetched is None
 

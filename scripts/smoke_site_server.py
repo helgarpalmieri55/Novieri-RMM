@@ -91,6 +91,7 @@ async def main() -> int:
 
 async def run(admin_url: str, app_url: str) -> int:  # noqa: PLR0915
     from app.core.audit import audit_service
+    from app.core.client_scope import ClientScope
     from app.core.signing import LocalEd25519Signer
     from app.core.tenancy import org_session
     from app.gateway.dispatch import publish_job
@@ -201,7 +202,7 @@ async def run(admin_url: str, app_url: str) -> int:  # noqa: PLR0915
 
     # ---------------------------------------------------------------- step 2
     print("\n== step 2: promote, declaring 10.20.0.0/16 ==")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = await site_registry.promote(
             session,
             org_id,
@@ -223,7 +224,7 @@ async def run(admin_url: str, app_url: str) -> int:  # noqa: PLR0915
         ).scalars().all()
     check("site.promoted on the audit chain", list(actions) == ["site.promoted"], str(list(actions)))
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         verified = await audit_service.verify(session, org_id)
     check("audit chain still verifies", verified.ok, f"{verified.count} events")
 
@@ -234,7 +235,7 @@ async def run(admin_url: str, app_url: str) -> int:  # noqa: PLR0915
     await pubsub.subscribe(channel)
     await asyncio.sleep(0.2)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job, envelope = await wake_via_site_server(
             session,
             job_engine,
@@ -279,7 +280,7 @@ async def run(admin_url: str, app_url: str) -> int:  # noqa: PLR0915
 
     # ---------------------------------------------------------------- step 4
     print("\n== step 4: complete with a matching, then a differing broadcast ==")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         from app.models import Job
 
         job_row = await session.get(Job, job_id)
@@ -302,7 +303,7 @@ async def run(admin_url: str, app_url: str) -> int:  # noqa: PLR0915
         ).scalar_one()
     check("matching broadcast -> succeeded", status == JobStatus.succeeded.value, str(status))
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         second, second_envelope = await wake_via_site_server(
             session,
             job_engine,
@@ -313,7 +314,7 @@ async def run(admin_url: str, app_url: str) -> int:  # noqa: PLR0915
         )
         second_id = second.id
     del second_envelope
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         from app.models import Job
 
         job_row = await session.get(Job, second_id)
@@ -387,7 +388,7 @@ async def run(admin_url: str, app_url: str) -> int:  # noqa: PLR0915
 
     # ---------------------------------------------------------------- step 6
     print("\n== step 6: segment check ==")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = await segment_check(session, org_id, site_server_id, now=now)
     check(
         "10.20.0.0/16 is matched, with real evidence",
@@ -447,7 +448,7 @@ async def run(admin_url: str, app_url: str) -> int:  # noqa: PLR0915
 
     with mock_aws():
         store = ObjectStore(settings)
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             image = await create_image(
                 session,
                 org_id=org_id,
@@ -473,7 +474,7 @@ async def run(admin_url: str, app_url: str) -> int:  # noqa: PLR0915
             profile_id = profile.id
             await session.commit()
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             run, wake_envelope = await start_provision_run(
                 session,
                 store,
@@ -518,7 +519,7 @@ async def run(admin_url: str, app_url: str) -> int:  # noqa: PLR0915
 
         refused = False
         try:
-            async with org_session(org_id, engine=app_engine) as session:
+            async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
                 await start_provision_run(
                     session,
                     store,

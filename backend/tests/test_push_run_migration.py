@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from tests.agent_push_fixtures import PushOrg, seed_asset, seed_credential, seed_org
 
@@ -94,7 +95,7 @@ async def test_another_org_cannot_read_a_run(
     owner = await seed_org(admin_engine, "pr-own")
     other = await seed_org(admin_engine, "pr-oth")
     await _insert_run(admin_engine, owner)
-    async with org_session(other.org_id, engine=app_engine) as session:
+    async with org_session(other.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         runs = (await session.execute(text("SELECT id FROM push_run"))).all()
         targets = (await session.execute(text("SELECT id FROM push_run_target"))).all()
     assert runs == [] and targets == []
@@ -106,7 +107,9 @@ async def test_a_run_cannot_be_written_into_another_org(
     mine = await seed_org(admin_engine, "pr-ins")
     theirs = await seed_org(admin_engine, "pr-ins2")
     with pytest.raises(DBAPIError):
-        async with org_session(mine.org_id, engine=app_engine) as session:
+        async with org_session(
+            mine.org_id, engine=app_engine, clients=ClientScope.all()
+        ) as session:
             await session.execute(
                 text(
                     "INSERT INTO push_run (id, org_id, created_by, prefix, list_digest,"

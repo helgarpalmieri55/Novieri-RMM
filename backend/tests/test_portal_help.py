@@ -13,6 +13,8 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
+from app.core.client_scope import ClientScope
+
 SUGGEST = "/api/v1/portal/help/suggest"
 ARTICLE = "/api/v1/portal/help/articles"
 
@@ -267,7 +269,9 @@ async def test_the_portal_role_sees_only_the_published_portal_slice(
     archived = await _article(api_env, tech, "Archived", visible=True)
     await api_env.client.post(f"/api/v1/docs/articles/{archived}/archive", headers=tech)
 
-    async with portal_session(org_id, uuid4(), engine=portal_engine) as session:
+    async with portal_session(
+        org_id, uuid4(), engine=portal_engine, clients=ClientScope.all()
+    ) as session:
         ids = (await session.execute(select(DocArticle.id))).scalars().all()
     assert [str(i) for i in ids] == [visible]
 
@@ -281,7 +285,9 @@ async def test_the_portal_role_cannot_read_other_article_columns(
     org_id, tech, _ = await _org(api_env, f"help-cols-{column[:4]}")
     await _article(api_env, tech, "Visible", visible=True)
     with pytest.raises(DBAPIError, match="permission denied"):
-        async with portal_session(org_id, uuid4(), engine=portal_engine) as session:
+        async with portal_session(
+            org_id, uuid4(), engine=portal_engine, clients=ClientScope.all()
+        ) as session:
             await session.execute(text(f"SELECT {column} FROM doc_articles"))
 
 

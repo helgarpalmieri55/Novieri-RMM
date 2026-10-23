@@ -68,6 +68,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session, portal_session
 
 # `app.models` before any `app.modules.*` import -- importing a service module
@@ -145,7 +146,7 @@ async def _create(
     """`tickets.create_ticket` through the RLS-constrained app engine -- the
     ordinary caller's path, and the only creation path in this file. Returns
     the ticket id."""
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await create_ticket(
             session,
             org_id,
@@ -185,7 +186,7 @@ async def _change(
     `FINAL_STATUSES` and is unreachable any other way, so it is worth the
     private keyword rather than leaving half the set untested.
     """
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await change_status(
             session,
             org_id,
@@ -206,7 +207,7 @@ async def _patch(
     actor_id: UUID | None,
     actor_type: str = "user",
 ) -> None:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await update_ticket(
             session,
             org_id,
@@ -226,7 +227,7 @@ async def _assign(
     actor_id: UUID | None,
     actor_type: str = "user",
 ) -> None:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await assign_ticket(
             session,
             org_id,
@@ -558,7 +559,9 @@ async def test_a_tenancy_failure_in_the_sla_hook_is_not_swallowed(api_env) -> No
 
     with pytest.raises(SlaValidationError):
         async with tracking.sla_misconfiguration_is_not_fatal("start_tracking", ticket_id):
-            async with org_session(org_b, engine=api_env.app_engine) as session:
+            async with org_session(
+                org_b, engine=api_env.app_engine, clients=ClientScope.all()
+            ) as session:
                 await tracking.start_tracking(session, org_b, ticket)
 
 
@@ -614,7 +617,9 @@ async def test_a_portal_filed_ticket_materialises_its_sla_on_the_portal_connecti
     requester_id = await _seed_user(api_env, org_id, email=f"pw-{uuid4().hex[:10]}@test.local")
     category_id = await _seed_category(api_env, org_id, queue_id=queue_id)
 
-    async with portal_session(org_id, requester_id, engine=portal_engine) as session:
+    async with portal_session(
+        org_id, requester_id, engine=portal_engine, clients=ClientScope.all()
+    ) as session:
         detail = await create_my_ticket(
             session,
             org_id=org_id,
@@ -653,7 +658,9 @@ async def test_a_requester_cannot_read_another_requesters_sla_row(
 
     ids = []
     for requester_id in (mine, theirs):
-        async with portal_session(org_id, requester_id, engine=portal_engine) as session:
+        async with portal_session(
+            org_id, requester_id, engine=portal_engine, clients=ClientScope.all()
+        ) as session:
             detail = await create_my_ticket(
                 session,
                 org_id=org_id,
@@ -667,7 +674,9 @@ async def test_a_requester_cannot_read_another_requesters_sla_row(
     assert await _row(api_env, ids[1]) is not None
 
     # ...and each requester sees exactly one of them.
-    async with portal_session(org_id, mine, engine=portal_engine) as session:
+    async with portal_session(
+        org_id, mine, engine=portal_engine, clients=ClientScope.all()
+    ) as session:
         visible = (await session.execute(select(TicketSla.ticket_id))).scalars().all()
     assert list(visible) == [ids[0]]
 
@@ -705,7 +714,9 @@ async def test_a_requester_cannot_insert_an_sla_row_onto_another_requesters_tick
 
     policy_id, calendar_id = await _any_policy(api_env, org_id)
     with pytest.raises(ProgrammingError) as caught:
-        async with portal_session(org_id, attacker, engine=portal_engine) as session:
+        async with portal_session(
+            org_id, attacker, engine=portal_engine, clients=ClientScope.all()
+        ) as session:
             session.add(
                 TicketSla(
                     org_id=org_id,

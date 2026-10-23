@@ -223,7 +223,9 @@ async def list_mailboxes_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("email_intake.read")),
 ) -> list[MailboxOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_mailboxes(session, ctx.org_id)
         return [_mailbox_out(row) for row in rows]
 
@@ -240,7 +242,7 @@ async def create_mailbox_route(
     try:
         # The error must escape the `org_session` block so the transaction
         # rolls back -- see the module docstring.
-        async with org_session(ctx.org_id, engine=state.app_engine) as session:
+        async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
             mailbox = await create_mailbox(
                 session, ctx.org_id, ctx.user_id, body, vault=state.vault
             )
@@ -262,7 +264,9 @@ async def get_mailbox_route(
     ctx: AuthContext = Depends(require_permission("email_intake.read")),
 ) -> MailboxOut:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             out = _mailbox_out(await get_mailbox(session, ctx.org_id, mailbox_id))
     except MailboxValidationError as exc:
         raise _http_error(exc) from None
@@ -278,7 +282,7 @@ async def update_mailbox_route(
 ) -> MailboxOut:
     state = request.app.state
     try:
-        async with org_session(ctx.org_id, engine=state.app_engine) as session:
+        async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
             mailbox = await update_mailbox(
                 session, ctx.org_id, ctx.user_id, mailbox_id, body, vault=state.vault
             )
@@ -301,7 +305,7 @@ async def delete_mailbox_route(
     it would leave an ownerless envelope-encrypted IMAP password behind."""
     state = request.app.state
     try:
-        async with org_session(ctx.org_id, engine=state.app_engine) as session:
+        async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
             await delete_mailbox(
                 session, ctx.org_id, ctx.user_id, mailbox_id, vault=state.vault
             )
@@ -394,7 +398,9 @@ async def read_oauth_app_route(
     """The org's Azure application for Microsoft 365 sign-in, and the return
     address to register on it. Never the client secret: `has_secret` only
     says whether one is stored."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         app = await oauth_app.get_app(session, org_id=ctx.org_id)
         return _oauth_app_out(app, request)
 
@@ -415,7 +421,7 @@ async def write_oauth_app_route(
         )
     state = request.app.state
     try:
-        async with org_session(ctx.org_id, engine=state.app_engine) as session:
+        async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
             app = await oauth_app.set_app(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, body=body, vault=state.vault
             )
@@ -446,7 +452,7 @@ async def start_oauth_route(
     A POST: it writes a row and an audit event."""
     state = request.app.state
     try:
-        async with org_session(ctx.org_id, engine=state.app_engine) as session:
+        async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
             url = await oauth.start(
                 session,
                 org_id=ctx.org_id,
@@ -470,7 +476,7 @@ async def disconnect_oauth_route(
 ) -> MailboxOut:
     state = request.app.state
     try:
-        async with org_session(ctx.org_id, engine=state.app_engine) as session:
+        async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
             mailbox = await disconnect_mailbox(
                 session, ctx.org_id, ctx.user_id, mailbox_id, vault=state.vault
             )
@@ -503,7 +509,7 @@ async def complete_oauth_route(
         raise _not_configured(exc) from None
     except oauth.OAuthFlowError as exc:
         raise HTTPException(exc.status, str(exc)) from None
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         return _mailbox_out(await get_mailbox(session, ctx.org_id, mailbox_id))
 
 
@@ -514,7 +520,9 @@ async def abandon_oauth_route(
     ctx: AuthContext = Depends(require_permission("email_intake.admin")),
 ) -> None:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await oauth.abandon(session, org_id=ctx.org_id, user_id=ctx.user_id, state=body.state)
     except oauth.OAuthFlowError as exc:
         raise HTTPException(exc.status, str(exc)) from None
@@ -555,7 +563,9 @@ async def list_messages_route(
     message from the operator's window, and from that window's quarantined
     count, or pin it to row 1 forever.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         return await list_messages(
             session,
             ctx.org_id,

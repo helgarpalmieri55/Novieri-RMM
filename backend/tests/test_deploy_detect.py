@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Device, InstalledSoftware, Organization
 from app.modules.deploy.detect import device_in_desired_state
@@ -45,7 +46,7 @@ async def test_package_installed_install_skips_when_present(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id = await _org_device_with_software(admin_engine, with_acme=True)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await device_in_desired_state(
             s,
             org_id=org_id,
@@ -60,7 +61,7 @@ async def test_package_installed_uninstall_dispatches_when_still_present(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id = await _org_device_with_software(admin_engine, with_acme=True)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await device_in_desired_state(
             s,
             org_id=org_id,
@@ -75,7 +76,7 @@ async def test_package_installed_install_dispatches_when_absent(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id = await _org_device_with_software(admin_engine, with_acme=False)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await device_in_desired_state(
             s,
             org_id=org_id,
@@ -90,7 +91,7 @@ async def test_package_installed_uninstall_skips_when_absent(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id = await _org_device_with_software(admin_engine, with_acme=False)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await device_in_desired_state(
             s,
             org_id=org_id,
@@ -105,7 +106,7 @@ async def test_package_installed_version_mismatch_dispatches(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id = await _org_device_with_software(admin_engine, with_acme=True)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await device_in_desired_state(
             s,
             org_id=org_id,
@@ -120,7 +121,7 @@ async def test_file_exists_rule_defers_to_agent(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id = await _org_device_with_software(admin_engine, with_acme=True)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await device_in_desired_state(
             s,
             org_id=org_id,
@@ -135,7 +136,7 @@ async def test_empty_rule_always_dispatches(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id = await _org_device_with_software(admin_engine, with_acme=True)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         install_result = await device_in_desired_state(
             s,
             org_id=org_id,
@@ -163,7 +164,7 @@ async def test_org_bs_software_row_is_hidden_from_org_a_by_rls(
 
     # org A's device has no Acme of its own; org B's Acme row must not leak in
     # even though we deliberately query org A's device_id scoped under org_id=org_a.
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         result = await device_in_desired_state(
             s,
             org_id=org_a,
@@ -174,7 +175,7 @@ async def test_org_bs_software_row_is_hidden_from_org_a_by_rls(
     assert result is False
 
     # Sanity: org B's own device does see it.
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         result_b = await device_in_desired_state(
             s,
             org_id=org_b,

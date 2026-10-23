@@ -185,7 +185,9 @@ async def create_token(
     request: Request,
     ctx: AuthContext = Depends(require_permission("enrollment.manage")),
 ) -> TokenCreatedResponse:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         issued = await svc.create_token(
             session,
             org_id=ctx.org_id,
@@ -253,7 +255,9 @@ async def list_tokens(
     GATE UNCHANGED: `enrollment.manage`, tenant-scoped. Paging is not a
     permission decision and this route's is not being reopened here.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         page = await svc.list_tokens(
             session,
             org_id=ctx.org_id,
@@ -286,7 +290,9 @@ async def revoke_token(
     request: Request,
     ctx: AuthContext = Depends(require_permission("enrollment.manage")),
 ) -> dict[str, bool]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         found = await svc.revoke_token(
             session, org_id=ctx.org_id, actor_id=ctx.user_id, token_id=token_id
         )
@@ -306,7 +312,7 @@ async def revoke_agent(
     CRL, and publishes a revoke event the gateway consumes to disconnect the
     device immediately."""
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         serial = await svc.revoke_agent(
             session, org_id=ctx.org_id, actor_id=ctx.user_id, device_id=device_id
         )

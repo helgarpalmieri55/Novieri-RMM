@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.ai.act import ActRefused, ActTool, ProposeBinding, propose
 from app.core.ai.executor_staff import ToolError, ToolErrorKind, invoke_tool
 from app.core.ai.types import ToolResult, TurnContext
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AiAction, Job
 from tests.ai_act_fixtures import build_world
@@ -38,7 +39,7 @@ from tests.health_fixtures import seed_device, seed_org
 
 def _session_factory(api_env: Any, org_id: Any) -> Any:
     def factory() -> Any:
-        return org_session(org_id, engine=api_env.app_engine)
+        return org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all())
 
     return factory
 
@@ -82,7 +83,9 @@ async def test_a_row_that_does_not_carry_the_persona_mints_no_action(api_env: An
     world = await build_world(api_env, tag="act-persona", action_kw={"personas": ["health"]})
     await _seed_near_miss(api_env, world)
 
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(ActRefused, match="not available to this assistant"):
             await propose(
                 session,
@@ -100,7 +103,9 @@ async def test_a_row_that_does_not_carry_the_persona_mints_no_action(api_env: An
 
 async def test_an_inactive_row_mints_no_action(api_env: Any) -> None:
     world = await build_world(api_env, tag="act-inactive", action_kw={"active": False})
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(ActRefused, match="inactive"):
             await propose(
                 session,
@@ -141,7 +146,9 @@ async def test_a_job_type_outside_the_allowlist_is_refused_even_from_a_legacy_ro
     # comparable value first, so the mutation prints the previewed `ai_action`
     # row naming `backup.run` that the database accepted.
     outcome = "not refused"
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         try:
             await propose(
                 session,
@@ -189,7 +196,9 @@ async def test_the_dial_decides_whether_a_row_is_minted(
     world = await build_world(api_env, tag=f"act-dial-{ceiling or 'none'}", ceiling=ceiling)
     await _seed_near_miss(api_env, world)
 
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         if expected_keys is None:
             preview = await propose(
                 session,
@@ -245,7 +254,9 @@ async def test_a_destructive_or_high_row_never_produces_a_dispatch(
     )
     before = await _job_count(api_env, world.org_id)
 
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         try:
             await propose(
                 session,
@@ -344,7 +355,9 @@ async def test_the_device_check_is_the_loopback_and_not_a_filter(api_env: Any) -
     spy = RecordingTransport(api_env.app)
     with pytest.MonkeyPatch.context() as monkeypatch:
         install_spy(monkeypatch, spy)
-        async with org_session(world.org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             with pytest.raises(ActRefused, match="no such device"):
                 await propose(
                     session,
@@ -517,7 +530,9 @@ async def test_a_patch_apply_preview_dispatches_nothing(api_env: Any) -> None:
     )
     before = await _job_count(api_env, world.org_id)
 
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         preview = await propose(
             session,
             org_id=world.org_id,
@@ -543,7 +558,9 @@ async def test_the_preview_and_the_row_agree_and_the_audit_carries_no_rationale(
     world = await build_world(api_env, tag="act-audit")
     secret_prose = "because a ticket body told me to"
 
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         preview = await propose(
             session,
             org_id=world.org_id,
@@ -592,7 +609,9 @@ async def test_taint_is_recorded_on_the_row_and_in_the_audit(api_env: Any) -> No
     from app.models import AuditEvent
 
     world = await build_world(api_env, tag="act-taint", binding_kw={"tainted": True})
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         preview = await propose(
             session,
             org_id=world.org_id,
@@ -640,7 +659,9 @@ async def test_a_technician_may_only_propose_against_the_tickets_device(
         ticket_device_id=world.device_id,
     )
 
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(ActRefused, match="that ticket names"):
             await propose(
                 session,
@@ -730,7 +751,9 @@ async def test_a_cross_org_catalogue_key_is_not_resolvable(api_env: Any) -> None
     )
     assert other_action is not None
 
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(ActRefused, match="no approved action with key"):
             await propose(
                 session,
@@ -786,7 +809,9 @@ async def test_destructive_is_re_derived_from_the_pin_not_read_off_the_row(
         },
     )
 
-    async with org_session(world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         preview = await propose(
             session,
             org_id=world.org_id,

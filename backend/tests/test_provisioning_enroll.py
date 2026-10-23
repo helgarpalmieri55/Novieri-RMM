@@ -43,6 +43,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.ca import LocalCA
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.signing import LocalEd25519Signer
 from app.core.storage import ObjectStore
@@ -195,12 +196,12 @@ async def _start_windows_run(
 ) -> tuple[object, str]:
     """Create a windows profile, start a provisioning run, and return
     (run_id, plaintext_token) with the run committed in `awaiting_enrollment`."""
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         profile = await _make_windows_profile(session, vault, org_id, actor_id)
         await session.commit()
         profile_id = profile.id
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         run, _wake = await start_provision_run(
             session,
             object_store,
@@ -252,7 +253,7 @@ async def test_bind_provisioned_device_advances_run_on_real_enroll(
         facts=FACTS,
     )
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         run = (
             await session.execute(select(ProvisionRun).where(ProvisionRun.id == run_id))
         ).scalar_one()
@@ -284,7 +285,7 @@ async def test_ordinary_token_enrollment_is_a_noop_for_provisioning(
     org_id, actor_id = await _org_and_admin(admin_engine)
     now = datetime(2026, 7, 23, tzinfo=UTC)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         issued = await create_token(
             session,
             org_id=org_id,
@@ -311,7 +312,7 @@ async def test_ordinary_token_enrollment_is_a_noop_for_provisioning(
         facts=FACTS,
     )
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(select(Device).where(Device.org_id == org_id))
         ).scalar_one()
@@ -375,7 +376,7 @@ async def test_dispatch_provision_enroll_builds_signed_job_without_secrets(
     )
 
     job_engine = _FakeJobEngine()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pending = await dispatch_provision_enroll(
             session,
             job_engine,
@@ -392,7 +393,7 @@ async def test_dispatch_provision_enroll_builds_signed_job_without_secrets(
     assert device_id == result.device_id
     assert envelope["job"]["id"] == str(job_id)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         run = (
             await session.execute(select(ProvisionRun).where(ProvisionRun.id == run_id))
         ).scalar_one()
@@ -449,14 +450,14 @@ async def test_bind_and_dispatch_find_nothing_across_the_boundary_under_rls(
             app_engine, object_store, vault, signer, org_id=org_a, actor_id=actor_a, now=now
         )
 
-        async with org_session(org_a, engine=app_engine) as session:
+        async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
             run_a = (
                 await session.execute(select(ProvisionRun).where(ProvisionRun.id == run_id))
             ).scalar_one()
             token_id = run_a.enrollment_token_id
 
         # org B can't bind org A's token to some device id of its own.
-        async with org_session(org_b, engine=app_engine) as session:
+        async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
             bound = await bind_provisioned_device(
                 session,
                 org_id=org_b,
@@ -467,7 +468,7 @@ async def test_bind_and_dispatch_find_nothing_across_the_boundary_under_rls(
             assert bound is None
 
         # org A's run is untouched: still awaiting_enrollment.
-        async with org_session(org_a, engine=app_engine) as session:
+        async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
             reloaded = (
                 await session.execute(select(ProvisionRun).where(ProvisionRun.id == run_id))
             ).scalar_one()
@@ -476,7 +477,7 @@ async def test_bind_and_dispatch_find_nothing_across_the_boundary_under_rls(
 
         # org B can't dispatch org A's run either (not found under org B).
         job_engine = _FakeJobEngine()
-        async with org_session(org_b, engine=app_engine) as session:
+        async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
             pending = await dispatch_provision_enroll(
                 session,
                 job_engine,

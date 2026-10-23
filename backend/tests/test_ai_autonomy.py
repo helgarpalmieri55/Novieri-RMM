@@ -34,6 +34,7 @@ from app.core.ai.autonomy import (
     set_ceiling,
 )
 from app.core.ai.errors import AiValidationError
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from tests.ai_admin_fakes import ai_user
 from tests.health_fixtures import seed_org
@@ -504,7 +505,7 @@ async def test_the_seed_helper_and_the_service_agree(api_env: Any) -> None:
     decision rather than a broken fixture."""
     org_id = await api_env.create_org("dial-seed")
     await _seed_ceiling(api_env, org_id, persona="admin", risk_class="high", level="suggest")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (
             await ceiling_for(session, org_id=org_id, persona="admin", risk_class="high")
             == "suggest"

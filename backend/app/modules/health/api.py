@@ -600,7 +600,9 @@ async def list_profiles_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("health.read")),
 ) -> list[ProfileOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_profiles(session, ctx.org_id)
         return [await _profile_out(session, ctx.org_id, row) for row in rows]
 
@@ -618,7 +620,9 @@ async def create_profile_route(
     would put a `health.policy.apply` job on every device that happens to be
     behind, attributed to a profile nobody has assigned yet."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             profile = await create_profile(
                 session,
                 ctx.org_id,
@@ -648,7 +652,9 @@ async def get_profile_route(
     ctx: AuthContext = Depends(require_permission("health.read")),
 ) -> ProfileOut:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             profile = await get_profile(session, ctx.org_id, profile_id)
             out = await _profile_out(session, ctx.org_id, profile)
     except HealthValidationError as exc:
@@ -670,7 +676,9 @@ async def update_profile_route(
     drift."""
     envelopes: list[Envelope] = []
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             profile = await update_profile(
                 session, ctx.org_id, ctx.user_id, profile_id, body.supplied()
             )
@@ -695,7 +703,9 @@ async def delete_profile_route(
     deactivating takes it out of service while leaving every alert intact."""
     envelopes: list[Envelope] = []
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await delete_profile(session, ctx.org_id, ctx.user_id, profile_id)
             envelopes = await _reconcile(session, request, ctx.org_id)
     except HealthValidationError as exc:
@@ -724,7 +734,9 @@ async def clone_profile_route(
     reviewed -- so, as with create, no device's effective policy moved and
     nothing is pushed."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             clone = await clone_profile(
                 session, ctx.org_id, ctx.user_id, profile_id, name=body.name
             )
@@ -746,7 +758,9 @@ async def list_checks_route(
     ctx: AuthContext = Depends(require_permission("health.read")),
 ) -> ProfileChecksOut:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             profile = await get_profile(session, ctx.org_id, profile_id)
             checks = await list_checks(session, ctx.org_id, profile_id)
             out = ProfileChecksOut(
@@ -779,7 +793,9 @@ async def replace_checks_route(
     """
     envelopes: list[Envelope] = []
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await replace_checks(
                 session,
                 ctx.org_id,
@@ -813,7 +829,9 @@ async def list_assignments_route(
     ctx: AuthContext = Depends(require_permission("health.read")),
     profile_id: UUID | None = Query(default=None),
 ) -> list[AssignmentOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_assignments(session, ctx.org_id, profile_id=profile_id)
         names = {
             profile.id: profile.name for profile in await list_profiles(session, ctx.org_id)
@@ -835,7 +853,9 @@ async def create_assignment_route(
     chose."""
     envelopes: list[Envelope] = []
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             row = await create_assignment(
                 session,
                 ctx.org_id,
@@ -867,7 +887,9 @@ async def delete_assignment_route(
     instruction rather than silence (§5.2)."""
     envelopes: list[Envelope] = []
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await delete_assignment(session, ctx.org_id, ctx.user_id, assignment_id)
             envelopes = await _reconcile(session, request, ctx.org_id)
     except HealthValidationError as exc:
@@ -927,7 +949,9 @@ async def get_settings_route(
     org with no row rather than lazily inserting one, so a `health.read` request
     never becomes a write.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         effective = await get_settings(session, ctx.org_id)
         row = await get_settings_row(session, ctx.org_id)
         return SettingsOut(
@@ -953,7 +977,9 @@ async def update_settings_route(
     ctx: AuthContext = Depends(require_permission("health.admin")),
 ) -> SettingsOut:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             row = await update_settings(session, ctx.org_id, ctx.user_id, body.supplied())
             effective = await get_settings(session, ctx.org_id)
             out = SettingsOut(
@@ -996,7 +1022,9 @@ async def list_alerts_route(
     in a state that does not exist", where a 422 would read as a server error to
     a UI that built the filter from a stale enum.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         alerts = await list_alerts(
             session,
             ctx.org_id,
@@ -1037,7 +1065,9 @@ async def alert_summary_route(
     GATED `health.read` like its neighbours: it exposes counts of rows the same
     principal may already list one by one.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         summary = await summarise_open_alerts(session, ctx.org_id)
     # The service returns plain `str` keys; the schema's `Literal`s are what
     # narrow them, and Pydantic VALIDATES that here rather than trusting it --
@@ -1065,7 +1095,9 @@ async def get_alert_route(
     `app/core/egress.py`.
     """
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             alert = await get_alert(session, ctx.org_id, alert_id)
             device = (
                 await session.execute(
@@ -1187,7 +1219,9 @@ async def acknowledge_alert_route(
     carries both `state` and `cleared_reason` so nothing downstream has to guess.
     """
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             alert = await acknowledge(session, ctx.org_id, alert_id, actor_id=ctx.user_id)
             out = _alert_out(alert, await _device(session, ctx.org_id, alert.device_id))
     except HealthValidationError as exc:
@@ -1209,7 +1243,9 @@ async def mute_alert_route(
     fleet accumulates permanently silent alarms everyone believes are armed.
     """
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             alert = await mute(
                 session,
                 ctx.org_id,
@@ -1233,7 +1269,9 @@ async def close_alert_route(
     separate this from every machine-driven clear in reporting: an alert a human
     closed is not evidence that anything was fixed."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             alert = await close(session, ctx.org_id, alert_id, actor_id=ctx.user_id)
             out = _alert_out(alert, await _device(session, ctx.org_id, alert.device_id))
     except HealthValidationError as exc:
@@ -1275,7 +1313,9 @@ async def remediate_alert_route(
     envelope: Envelope | None = None
     device_id: UUID
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             alert = await get_alert(session, ctx.org_id, alert_id)
             device_id = alert.device_id
             job_id, signed = await dispatch_manual_remediation(
@@ -1319,7 +1359,9 @@ async def approve_action_route(
     envelope: Envelope | None = None
     device_id: UUID
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             alert = await get_alert(session, ctx.org_id, alert_id)
             device_id = alert.device_id
             job_id, signed = await approve_action(
@@ -1351,7 +1393,9 @@ async def refuse_action_route(
     """Refuse it. The row is `skipped`, forever: `UNIQUE (alert_id, kind)` means
     there is no second attempt to make."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             row = await refuse_action(
                 session,
                 ctx.org_id,
@@ -1417,7 +1461,9 @@ async def device_health_route(
        survived it going quiet.
     """
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             device = await _device(session, ctx.org_id, device_id)
             resolved = await resolve_profile_for_device(session, ctx.org_id, device)
             effective = await get_settings(session, ctx.org_id)
@@ -1607,7 +1653,9 @@ async def check_now_route(
     """
     envelope: Envelope | None = None
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             device = await _device(session, ctx.org_id, device_id)
             breach = await _check_now_fuse(
                 session, ctx.org_id, device_id, now=datetime.now(UTC)
@@ -1646,7 +1694,9 @@ async def list_approved_actions_route(
     exemption. Readable with `health.read` and writable only with
     `health.action.admin`: seeing what may run automatically is not the same
     grant as deciding it."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_approved_actions(session, ctx.org_id)
         return [await _approved_action_out(session, ctx.org_id, row) for row in rows]
 
@@ -1670,7 +1720,9 @@ async def create_approved_action_route(
     gate.
     """
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             action = await create_approved_action(
                 session, ctx.org_id, ctx.user_id, body.supplied()
             )
@@ -1687,7 +1739,9 @@ async def get_approved_action_route(
     ctx: AuthContext = Depends(require_permission("health.read")),
 ) -> ApprovedActionOut:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             action = await get_action(session, ctx.org_id, action_id)
             out = await _approved_action_out(session, ctx.org_id, action)
     except HealthValidationError as exc:
@@ -1706,7 +1760,9 @@ async def update_approved_action_route(
     "who set this action to autonomous" is only answerable if the previous value
     is in the audit row, since the new one is already in the table."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             action = await update_approved_action(
                 session, ctx.org_id, action_id, ctx.user_id, body.supplied()
             )
@@ -1723,7 +1779,9 @@ async def delete_approved_action_route(
     ctx: AuthContext = Depends(require_permission("health.action.admin")),
 ) -> None:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await delete_approved_action(session, ctx.org_id, action_id, ctx.user_id)
     except HealthValidationError as exc:
         raise _http_error(exc) from None
@@ -1754,7 +1812,9 @@ async def exempt_script_route(
     consequence the caller needs to see.
     """
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await grant_script_exemption(
                 session, ctx.org_id, action_id, actor_id=ctx.user_id, reason=body.reason
             )
@@ -1782,7 +1842,9 @@ async def revoke_script_exemption_route(
     body is the action, and it is worth reading.
     """
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await revoke_script_exemption(session, ctx.org_id, action_id, actor_id=ctx.user_id)
             action = await get_action(session, ctx.org_id, action_id)
             out = await _approved_action_out(session, ctx.org_id, action)

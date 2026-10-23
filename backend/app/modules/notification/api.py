@@ -326,7 +326,9 @@ async def list_channels_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("notification.read")),
 ) -> list[ChannelOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_channels(session, org_id=ctx.org_id)
         return [_channel_out(r) for r in rows]
 
@@ -340,7 +342,7 @@ async def create_channel_route(
     ctx: AuthContext = Depends(require_permission("notification.admin")),
 ) -> ChannelOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             channel = await create_channel(
                 session,
@@ -362,7 +364,9 @@ async def get_channel_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("notification.read")),
 ) -> ChannelOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             channel = await get_channel(session, org_id=ctx.org_id, channel_id=channel_id)
         except NotificationValidationError as exc:
@@ -378,7 +382,7 @@ async def update_channel_route(
     ctx: AuthContext = Depends(require_permission("notification.admin")),
 ) -> ChannelOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             channel = await update_channel(
                 session,
@@ -401,7 +405,9 @@ async def delete_channel_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("notification.admin")),
 ) -> None:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await delete_channel(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, channel_id=channel_id
@@ -424,7 +430,7 @@ async def test_channel_route(
     attempt), so this is the only place that audit event is ever written."""
     state = request.app.state
     await _enforce_test_send_rate_limit(state.redis, ctx.org_id)
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         try:
             channel = await get_channel(session, org_id=ctx.org_id, channel_id=channel_id)
         except NotificationValidationError as exc:
@@ -461,7 +467,9 @@ async def list_rules_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("notification.read")),
 ) -> list[RuleOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_rules(session, org_id=ctx.org_id)
         return [_rule_out(r) for r in rows]
 
@@ -472,7 +480,9 @@ async def create_rule_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("notification.admin")),
 ) -> RuleOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             rule = await create_rule(session, org_id=ctx.org_id, actor_id=ctx.user_id, data=body)
         except NotificationValidationError as exc:
@@ -487,7 +497,9 @@ async def update_rule_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("notification.admin")),
 ) -> RuleOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             rule = await update_rule(
                 session,
@@ -507,7 +519,9 @@ async def delete_rule_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("notification.admin")),
 ) -> None:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await delete_rule(session, org_id=ctx.org_id, actor_id=ctx.user_id, rule_id=rule_id)
         except NotificationValidationError as exc:
@@ -527,7 +541,9 @@ async def list_allowlist_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("notification.read")),
 ) -> list[AllowlistEntryOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_allowlist(session, org_id=ctx.org_id)
         return [_allowlist_out(r) for r in rows]
 
@@ -542,7 +558,9 @@ async def create_allowlist_entry_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("notification.admin")),
 ) -> AllowlistEntryOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             entry = await add_allowlist_entry(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, data=body
@@ -558,7 +576,9 @@ async def delete_allowlist_entry_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("notification.admin")),
 ) -> None:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await delete_allowlist_entry(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, entry_id=entry_id
@@ -581,7 +601,9 @@ async def list_queue_members_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("notification.read")),
 ) -> list[QueueMemberOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_queue_members(session, org_id=ctx.org_id, queue_id=queue_id)
         return [_queue_member_out(r) for r in rows]
 
@@ -595,7 +617,9 @@ async def add_queue_member_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("notification.admin")),
 ) -> QueueMemberOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             member = await add_queue_member(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, queue_id=queue_id, user_id=user_id
@@ -615,7 +639,9 @@ async def remove_queue_member_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("notification.admin")),
 ) -> None:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await remove_queue_member(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, queue_id=queue_id, user_id=user_id
@@ -643,7 +669,9 @@ async def list_deliveries_route(
     offset: int = Query(default=0, ge=0),
     ctx: AuthContext = Depends(require_permission("notification.read")),
 ) -> DeliveryListResponse:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         conditions: list[Any] = [NotificationDelivery.org_id == ctx.org_id]
         if status_ is not None:
             conditions.append(NotificationDelivery.status == status_)

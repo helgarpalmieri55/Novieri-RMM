@@ -24,6 +24,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings, override_settings
 from app.core.tenancy import org_session
 from app.models import License, LicenseComplianceSnapshot, Organization, User
@@ -55,7 +56,7 @@ async def _seed_product(
     name: str,
     match_rules: list[dict],
 ):
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         product = await create_product(
             s,
             org_id=org_id,
@@ -189,7 +190,7 @@ async def test_sweep_persists_snapshots_per_org_per_product_under_rls(
     # correctness is proven by the org-scoped assertions below.
     assert total >= 3
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         rows_a = (
             (
                 await s.execute(
@@ -213,7 +214,7 @@ async def test_sweep_persists_snapshots_per_org_per_product_under_rls(
     assert by_product_a[product_a2.id].delta == 2
     assert by_product_a[product_a2.id].computed_at == fixed_now
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         rows_b = (
             (
                 await s.execute(

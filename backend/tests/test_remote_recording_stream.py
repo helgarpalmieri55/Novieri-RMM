@@ -12,6 +12,7 @@ from moto import mock_aws
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.storage import S3_MIN_PART_BYTES, ObjectStore
 from app.core.tenancy import org_session
@@ -108,7 +109,7 @@ async def test_truncated_recording_is_flagged_and_audited(
         s.add_all([dev, usr])
         await s.commit()
     path, _ = _file(tmp_path, 4096)
-    async with org_session(org.id, engine=app_engine) as s:
+    async with org_session(org.id, engine=app_engine, clients=ClientScope.all()) as s:
         row = RemoteSession(
             org_id=org.id, device_id=dev.id, technician_id=usr.id,
             protocol="screen", consent_mode="attended", state="ended",
@@ -119,7 +120,7 @@ async def test_truncated_recording_is_flagged_and_audited(
             s, store, org_id=org.id, session_id=row.id, path=path, truncated=True
         )
         sid = row.id
-    async with org_session(org.id, engine=app_engine) as s:
+    async with org_session(org.id, engine=app_engine, clients=ClientScope.all()) as s:
         got = (await s.execute(select(RemoteSession).where(RemoteSession.id == sid))).scalar_one()
         assert got.recording_ref == ref and got.recording_bytes == size == 4096
         assert got.recording_truncated is True

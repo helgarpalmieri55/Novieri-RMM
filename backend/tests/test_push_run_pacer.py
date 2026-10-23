@@ -22,6 +22,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 import app as app_pkg
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Job
 from app.modules.agent_push import preflight, runs
@@ -49,7 +50,9 @@ def _register_push_job_types() -> None:
 
 
 async def _advance(app_engine: AsyncEngine, world: RunWorld, run_id, dispatcher) -> list[Any]:
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         return await runs.advance_run(
             session, world.org.org_id, run_id, dispatcher=dispatcher
         )
@@ -189,7 +192,9 @@ async def test_concurrent_advances_never_exceed_the_ceiling(
     # row lock -- not the run lock -- would serialize them: this test then
     # passed with `FOR UPDATE` deleted (checked 2026-09-30).
     (proving,) = await _in_flight(admin_engine, run_id)
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         job = (await session.execute(select(Job).where(Job.id == proving.job_id))).scalar_one()
         await runs.settle_target_for_job(session, job)
     assert await _in_flight(admin_engine, run_id) == []
@@ -337,7 +342,9 @@ async def test_the_pacer_never_resumes_a_paused_run_but_still_settles_it(
     run_id = await start_run(app_engine, world)
     dispatcher = make_dispatcher(tmp_path)
     await _advance(app_engine, world, run_id, dispatcher)
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         await runs.pause_run(session, world.org.org_id, run_id=run_id, actor_id=world.org.user_id)
     first = (await _targets(admin_engine, run_id))[0]
     await _finish_job(admin_engine, first.job_id, "succeeded",
@@ -361,7 +368,9 @@ async def test_a_paused_run_whose_last_target_settles_completes(
     run_id = await start_run(app_engine, world)
     dispatcher = make_dispatcher(tmp_path)
     assert len(await _advance(app_engine, world, run_id, dispatcher)) == 1
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         await runs.pause_run(session, world.org.org_id, run_id=run_id, actor_id=world.org.user_id)
     (only,) = await _in_flight(admin_engine, run_id)
     await _finish(admin_engine, only, "installed")
@@ -379,7 +388,9 @@ async def test_a_cancelled_run_dispatches_nothing_and_stays_cancelled(
 ) -> None:
     world = await run_world(admin_engine, "rp-cxl", octet=110, count=2)
     run_id = await start_run(app_engine, world)
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         await runs.cancel_run(session, world.org.org_id, run_id=run_id, actor_id=world.org.user_id)
     assert await _advance(app_engine, world, run_id, make_dispatcher(tmp_path)) == []
     assert (await _run(admin_engine, run_id)).state == "cancelled"
@@ -487,7 +498,9 @@ async def test_the_install_result_settles_the_target_in_the_jobs_transaction(
         # One first: each target is dispatched only after the one before settled.
         await _advance(app_engine, world, run_id, dispatcher)
         target = (await _targets(admin_engine, run_id))[position]
-        async with org_session(world.org.org_id, engine=app_engine) as session:
+        async with org_session(
+            world.org.org_id, engine=app_engine, clients=ClientScope.all()
+        ) as session:
             job = (await session.execute(select(Job).where(Job.id == target.job_id))).scalar_one()
             await engine.complete(
                 session, job, state="succeeded",
@@ -663,7 +676,9 @@ async def test_three_sign_in_failures_stop_the_run_and_only_a_person_restarts_it
     assert vault.calls == 3
 
     # A person's Resume restarts it -- from ONE, with a fresh count.
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         await runs.resume_run(session, world.org.org_id, run_id=run_id, actor_id=world.org.user_id)
     assert len(await _advance(app_engine, world, run_id, dispatcher)) == 1
     (target,) = await _in_flight(admin_engine, run_id)
@@ -715,7 +730,9 @@ async def _stop_with_six_in_flight(
         await _finish(admin_engine, target, "auth_failed")
     assert await _advance(app_engine, world, run_id, dispatcher) == []
     assert (await _run(admin_engine, run_id)).state == "stopped_credential"
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         await runs.resume_run(session, world.org.org_id, run_id=run_id, actor_id=world.org.user_id)
     return world, run_id, dispatcher, old
 
@@ -790,7 +807,9 @@ async def test_a_third_failure_settled_mid_pass_never_frees_a_slot_for_a_fourth(
             settled.append(True)
             # The gateway: the job's result and the target's settle, committed.
             await _finish(admin_engine, third, "auth_failed")
-            async with org_session(world.org.org_id, engine=app_engine) as session:
+            async with org_session(
+                world.org.org_id, engine=app_engine, clients=ClientScope.all()
+            ) as session:
                 job = (
                     await session.execute(select(Job).where(Job.id == third.job_id))
                 ).scalar_one()
@@ -896,7 +915,9 @@ async def test_a_ticked_push_is_still_bounded_by_twenty_five_while_a_run_exists(
     world = await run_world(admin_engine, "rp-25", octet=112, count=1)
     await start_run(app_engine, world)
     with pytest.raises(PushValidationError, match="at most 25"):
-        async with org_session(world.org.org_id, engine=app_engine) as session:
+        async with org_session(
+            world.org.org_id, engine=app_engine, clients=ClientScope.all()
+        ) as session:
             await preflight.request_push_batch(
                 session,
                 world.org.org_id,

@@ -16,6 +16,7 @@ from moto import mock_aws
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import admin_session, org_session
 from app.models import EmailMailbox
@@ -209,7 +210,9 @@ class EmailEnv:
             self.incident_category_id if ticket_type == "incident" else self.request_category_id
         )
         token = mint_email_token()
-        async with org_session(self.org_id, engine=self.engine) as session:
+        async with org_session(
+            self.org_id, engine=self.engine, clients=ClientScope.all()
+        ) as session:
             ticket = await create_ticket(
                 session,
                 self.org_id,
@@ -245,7 +248,7 @@ class EmailEnv:
         org_id = await self.api_env.create_org("email-intake-other")
         category_id = await _seed_category(self.api_env, org_id)
         alice_id = await _seed_user(self.api_env, org_id, "alice@acme.test")
-        async with org_session(org_id, engine=self.engine) as session:
+        async with org_session(org_id, engine=self.engine, clients=ClientScope.all()) as session:
             mailbox = EmailMailbox(
                 org_id=org_id,
                 address="helpdesk@acme.test",
@@ -276,7 +279,9 @@ class EmailEnv:
         self, *, sender: str = "alice@acme.test", **kwargs: Any
     ) -> InboundMessage:
         """Run one message through `process_message` in its own transaction."""
-        async with org_session(self.org_id, engine=self.engine) as session:
+        async with org_session(
+            self.org_id, engine=self.engine, clients=ClientScope.all()
+        ) as session:
             return await process_message(
                 session,
                 self.org_id,
@@ -286,7 +291,9 @@ class EmailEnv:
             )
 
     async def ticket_for_row(self, row: InboundMessage) -> Ticket:
-        async with org_session(self.org_id, engine=self.engine) as session:
+        async with org_session(
+            self.org_id, engine=self.engine, clients=ClientScope.all()
+        ) as session:
             return (
                 await session.execute(select(Ticket).where(Ticket.id == row.ticket_id))
             ).scalar_one()
@@ -294,15 +301,21 @@ class EmailEnv:
     async def audit_count(self) -> int:
         from app.models import AuditEvent
 
-        async with org_session(self.org_id, engine=self.engine) as session:
+        async with org_session(
+            self.org_id, engine=self.engine, clients=ClientScope.all()
+        ) as session:
             return len((await session.execute(select(AuditEvent))).scalars().all())
 
     async def tickets(self) -> list[Ticket]:
-        async with org_session(self.org_id, engine=self.engine) as session:
+        async with org_session(
+            self.org_id, engine=self.engine, clients=ClientScope.all()
+        ) as session:
             return list((await session.execute(select(Ticket))).scalars().all())
 
     async def ticket_number(self, ticket_id: UUID) -> str:
-        async with org_session(self.org_id, engine=self.engine) as session:
+        async with org_session(
+            self.org_id, engine=self.engine, clients=ClientScope.all()
+        ) as session:
             return (
                 await session.execute(select(Ticket.number).where(Ticket.id == ticket_id))
             ).scalar_one()
@@ -318,7 +331,9 @@ async def email_env(api_env: Any) -> Any:
         alice_id = await _seed_user(api_env, org_id, "alice@acme.test")
         bob_id = await _seed_user(api_env, org_id, "bob@acme.test")
 
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             mailbox = EmailMailbox(
                 org_id=org_id,
                 address="helpdesk@acme.test",
@@ -373,14 +388,18 @@ def test_reopen_target_covers_every_reopenable_status() -> None:
 async def test_a_known_sender_with_no_token_creates_a_ticket(email_env) -> None:
     """Spec §8 row 1."""
     parsed = email_env.parsed(sender="alice@acme.test", subject="Printer broken")
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
         assert row.disposition == "created"
         assert row.sender_user_id == email_env.alice_id
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         ticket = (await session.execute(select(Ticket))).scalar_one()
     assert ticket.origin == "email"
     assert ticket.requester_id == email_env.alice_id
@@ -393,18 +412,24 @@ async def test_processing_the_same_message_id_twice_creates_one_ticket(email_env
     fail if the unique constraint is dropped."""
     parsed = email_env.parsed(sender="alice@acme.test", message_id="<dup@acme.test>")
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
 
     with pytest.raises(AlreadyProcessed):
-        async with org_session(email_env.org_id, engine=email_env.engine) as session:
+        async with org_session(
+            email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+        ) as session:
             await process_message(
                 session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
             )
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         assert len((await session.execute(select(Ticket))).scalars().all()) == 1
         assert len((await session.execute(select(InboundMessage))).scalars().all()) == 1
 
@@ -416,14 +441,18 @@ async def test_a_valid_token_from_the_requester_adds_a_public_comment(email_env)
     parsed = email_env.parsed(
         sender="alice@acme.test", to=f"helpdesk+t-{token}@acme.test", body="still broken"
     )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
         assert row.disposition == "commented"
         assert row.ticket_id == ticket_id
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         comment = (
             await session.execute(select(TicketComment).where(TicketComment.ticket_id == ticket_id))
         ).scalar_one()
@@ -445,7 +474,9 @@ async def test_a_valid_token_from_the_wrong_sender_is_quarantined(email_env) -> 
     from app.modules.service_desk.models import TicketAttachment
 
     ticket_id, token = await email_env.a_ticket_for("alice@acme.test")
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         before = (
             await session.execute(select(Ticket).where(Ticket.id == ticket_id))
         ).scalar_one()
@@ -458,7 +489,9 @@ async def test_a_valid_token_from_the_wrong_sender_is_quarantined(email_env) -> 
         body="let me in",
         attachments=(ParsedAttachment(filename="payload.png", content=b"\x89PNG\r\n"),),
     )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
@@ -474,7 +507,9 @@ async def test_a_valid_token_from_the_wrong_sender_is_quarantined(email_env) -> 
     # the victim's subject or body onto a row about someone else's message.
     assert row.reason == "reply token does not belong to this sender"
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         comments = (
             (
                 await session.execute(
@@ -485,14 +520,18 @@ async def test_a_valid_token_from_the_wrong_sender_is_quarantined(email_env) -> 
             .all()
         )
     assert comments == [], "bob's mail must not reach alice's ticket"
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         assert len((await session.execute(select(Ticket))).scalars().all()) == 1, (
             "and it must not become a new ticket either"
         )
 
     # The victim's ticket is untouched on every observable: not reopened, not
     # even written (a bare `UPDATE ... SET updated_at` would show here).
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         after = (await session.execute(select(Ticket).where(Ticket.id == ticket_id))).scalar_one()
         attachments = (await session.execute(select(TicketAttachment))).scalars().all()
     assert after.status == victim_status
@@ -504,7 +543,9 @@ async def test_a_valid_token_from_the_wrong_sender_is_quarantined(email_env) -> 
     # and none of them ran -- a quarantine is not a privileged action taken on
     # the ticket, it is one refused.
     assert await email_env.audit_count() == audit_before
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         bob_events = (
             (
                 await session.execute(
@@ -520,13 +561,17 @@ async def test_a_valid_token_from_the_wrong_sender_is_quarantined(email_env) -> 
 async def test_an_unknown_sender_is_quarantined_with_no_ticket(email_env) -> None:
     """Spec §11.3."""
     parsed = email_env.parsed(sender="stranger@elsewhere.test")
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
     assert row.disposition == "quarantined"
     assert "unknown" in row.reason.lower()
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         assert (await session.execute(select(Ticket))).scalars().all() == []
 
 
@@ -551,14 +596,18 @@ async def test_a_reply_within_the_window_reopens_and_comments(
     parsed = email_env.parsed(
         sender="alice@acme.test", to=f"helpdesk+t-{token}@acme.test", body="it came back"
     )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
     assert row.disposition == "reopened"
     assert row.ticket_id == ticket_id
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         ticket = (await session.execute(select(Ticket).where(Ticket.id == ticket_id))).scalar_one()
         comments = (
             (
@@ -585,14 +634,18 @@ async def test_a_reply_beyond_the_window_creates_a_new_ticket_citing_the_old(ema
     parsed = email_env.parsed(
         sender="alice@acme.test", to=f"helpdesk+t-{token}@acme.test", body="same thing again"
     )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
     assert row.disposition == "created"
     assert row.ticket_id != old_id
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         new_ticket = (
             await session.execute(select(Ticket).where(Ticket.id == row.ticket_id))
         ).scalar_one()
@@ -668,13 +721,17 @@ async def test_a_refused_loop_message_gets_a_row_and_no_ticket(email_env) -> Non
     parsed = email_env.parsed(
         sender="alice@acme.test", refusal="refused_loop", refusal_reason="auto-submitted"
     )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
     assert row.disposition == "refused_loop"
     assert row.reason == "auto-submitted"
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         assert (await session.execute(select(Ticket))).scalars().all() == []
 
 
@@ -687,12 +744,16 @@ async def test_an_oversized_message_still_delivers_its_text(email_env) -> None:
         refusal="refused_parse",
         refusal_reason="message exceeds size limit",
     )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
     assert row.disposition == "refused_parse"
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         ticket = (await session.execute(select(Ticket))).scalar_one()
     assert "the actual words" in ticket.description
 
@@ -705,11 +766,15 @@ async def test_attachments_land_on_the_ticket(email_env) -> None:
         sender="alice@acme.test",
         attachments=(ParsedAttachment(filename="shot.png", content=b"\x89PNG\r\n"),),
     )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         attachment = (
             await session.execute(
                 select(TicketAttachment).where(TicketAttachment.ticket_id == row.ticket_id)
@@ -745,7 +810,9 @@ async def test_mail_from_the_orgs_own_notification_sender_is_refused_as_a_loop(
     a comment, which notifies again: the mail loop §6 exists to prevent."""
     from app.models import NotificationChannel
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         session.add(
             NotificationChannel(
                 org_id=email_env.org_id,
@@ -765,13 +832,17 @@ async def test_mail_from_the_orgs_own_notification_sender_is_refused_as_a_loop(
     await _seed_user(email_env.api_env, email_env.org_id, "no-reply@acme.test")
 
     parsed = email_env.parsed(sender="No-Reply@acme.test", body="your ticket was updated")
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
     assert row.disposition == "refused_loop"
     assert "notification sender" in row.reason
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         assert (await session.execute(select(Ticket))).scalars().all() == []
 
 
@@ -784,7 +855,9 @@ async def test_an_over_long_reason_is_truncated_rather_than_failing_the_insert(
     mailbox, routed around parsing.py's own no-raise guarantee."""
     long_sender = "x" * 300 + "@elsewhere.test"
     parsed = email_env.parsed(sender=long_sender, subject="s" * 900)
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
@@ -820,14 +893,18 @@ async def test_an_unsanitizable_attachment_filename_does_not_stop_the_message(
             ParsedAttachment(filename="ok.txt", content=b"fine"),
         ),
     )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
     assert row.disposition == "created"
     assert "attachment" in row.reason.lower()
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         names = (
             (
                 await session.execute(
@@ -871,7 +948,9 @@ async def test_redelivery_writes_no_further_storage_objects(email_env) -> None:
         attachments=(ParsedAttachment(filename="shot.png", content=b"\x89PNG\r\n"),),
     )
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
@@ -882,7 +961,9 @@ async def test_redelivery_writes_no_further_storage_objects(email_env) -> None:
 
     for _ in range(3):
         with pytest.raises(AlreadyProcessed):
-            async with org_session(email_env.org_id, engine=email_env.engine) as session:
+            async with org_session(
+                email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+            ) as session:
                 await process_message(
                     session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
                 )
@@ -891,7 +972,9 @@ async def test_redelivery_writes_no_further_storage_objects(email_env) -> None:
         "a redelivery must not write another object -- storage is not rolled back"
     )
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         from app.modules.service_desk.models import TicketAttachment
 
         attachments = (
@@ -931,7 +1014,9 @@ async def test_a_queueless_default_category_is_recorded_not_raised(email_env) ->
 
     # The row is COMMITTED, not just returned -- that is what lets the poller
     # mark the message `\Seen` and stop refetching it.
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         stored = (await session.execute(select(InboundMessage))).scalar_one()
     assert stored.disposition == "quarantined"
 
@@ -1050,7 +1135,9 @@ async def test_a_mailbox_from_another_org_is_refused(email_env, api_env) -> None
     email_env.mailbox.org_id = other_org
 
     with pytest.raises(ValueError, match="belongs to org"):
-        async with org_session(email_env.org_id, engine=email_env.engine) as session:
+        async with org_session(
+            email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+        ) as session:
             await process_message(
                 session,
                 email_env.org_id,
@@ -1071,14 +1158,18 @@ async def test_a_reply_to_a_cancelled_ticket_becomes_a_new_ticket(email_env) -> 
     parsed = email_env.parsed(
         sender="alice@acme.test", to=f"helpdesk+t-{token}@acme.test", body="still need this"
     )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
     assert row.disposition == "created"
     assert row.ticket_id != old_id
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         new_ticket = (
             await session.execute(select(Ticket).where(Ticket.id == row.ticket_id))
         ).scalar_one()
@@ -1095,7 +1186,9 @@ async def test_an_unresolvable_token_falls_through_to_a_new_ticket(email_env) ->
         to=f"helpdesk+t-{mint_email_token()}@acme.test",
         body="hello",
     )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
@@ -1111,7 +1204,9 @@ async def test_a_token_for_another_orgs_ticket_never_resolves(email_env, api_env
     other_category = await _seed_category(api_env, other_org)
     other_user = await _seed_user(api_env, other_org, "alice@acme.test")
     token = mint_email_token()
-    async with org_session(other_org, engine=api_env.app_engine) as session:
+    async with org_session(
+        other_org, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         ticket = await create_ticket(
             session,
             other_org,
@@ -1130,14 +1225,18 @@ async def test_a_token_for_another_orgs_ticket_never_resolves(email_env, api_env
     parsed = email_env.parsed(
         sender="alice@acme.test", to=f"helpdesk+t-{token}@acme.test", body="cross-tenant"
     )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
     assert row.disposition == "created"
     assert row.ticket_id != other_ticket_id
 
-    async with org_session(other_org, engine=api_env.app_engine) as session:
+    async with org_session(
+        other_org, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         comments = (
             (
                 await session.execute(
@@ -1163,7 +1262,9 @@ async def test_a_flood_from_one_sender_is_refused_rate(email_env) -> None:
 
     dispositions = []
     for i in range(SENDER_RATE_LIMIT + 2):
-        async with org_session(email_env.org_id, engine=email_env.engine) as session:
+        async with org_session(
+            email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+        ) as session:
             row = await process_message(
                 session,
                 email_env.org_id,
@@ -1184,7 +1285,9 @@ async def test_the_sender_rate_limit_is_scoped_to_one_sender(email_env) -> None:
     from app.modules.email_intake.intake import SENDER_RATE_LIMIT
 
     for i in range(SENDER_RATE_LIMIT + 2):
-        async with org_session(email_env.org_id, engine=email_env.engine) as session:
+        async with org_session(
+            email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+        ) as session:
             await process_message(
                 session,
                 email_env.org_id,
@@ -1193,7 +1296,9 @@ async def test_the_sender_rate_limit_is_scoped_to_one_sender(email_env) -> None:
                 store=email_env.store,
             )
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session,
             email_env.org_id,
@@ -1209,7 +1314,9 @@ async def test_the_rate_limit_is_scoped_to_one_org(email_env, api_env) -> None:
     from app.modules.email_intake.intake import SENDER_RATE_LIMIT
 
     for i in range(SENDER_RATE_LIMIT + 2):
-        async with org_session(email_env.org_id, engine=email_env.engine) as session:
+        async with org_session(
+            email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+        ) as session:
             await process_message(
                 session,
                 email_env.org_id,
@@ -1219,7 +1326,9 @@ async def test_the_rate_limit_is_scoped_to_one_org(email_env, api_env) -> None:
             )
 
     other = await email_env.another_org_with_alice()
-    async with org_session(other.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        other.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, other.org_id, other.mailbox,
             other.parsed(sender="alice@acme.test", message_id="<other1@acme.test>"),
@@ -1246,7 +1355,9 @@ async def test_the_sender_rate_limit_org_predicate_is_load_bearing(email_env) ->
 
     other = await email_env.another_org_with_alice()
     for i in range(SENDER_RATE_LIMIT + 2):
-        async with org_session(other.org_id, engine=email_env.engine) as session:
+        async with org_session(
+            other.org_id, engine=email_env.engine, clients=ClientScope.all()
+        ) as session:
             await process_message(
                 session,
                 other.org_id,
@@ -1297,7 +1408,9 @@ async def test_a_flood_of_replies_to_one_ticket_is_refused_rate(email_env) -> No
     last_message_id = ""
     for i in range(TICKET_RATE_LIMIT + 2):
         last_message_id = f"<reply{i}@acme.test>"
-        async with org_session(email_env.org_id, engine=email_env.engine) as session:
+        async with org_session(
+            email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+        ) as session:
             row = await process_message(
                 session,
                 email_env.org_id,
@@ -1333,7 +1446,9 @@ async def test_a_flood_of_replies_to_one_ticket_is_refused_rate(email_env) -> No
     # And it is genuinely the TICKET that is rate-limited, not the sender:
     # the row names the targeted ticket, same convention as the wrong-sender
     # quarantine case.
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         last_row = (
             await session.execute(
                 select(InboundMessage).where(InboundMessage.message_id == last_message_id)
@@ -1389,7 +1504,9 @@ async def test_quarantined_wrong_sender_mail_does_not_rate_limit_the_requester(
 
     bob_dispositions = []
     for i in range(TICKET_RATE_LIMIT + 4):
-        async with org_session(email_env.org_id, engine=email_env.engine) as session:
+        async with org_session(
+            email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+        ) as session:
             row = await process_message(
                 session,
                 email_env.org_id,
@@ -1411,7 +1528,9 @@ async def test_quarantined_wrong_sender_mail_does_not_rate_limit_the_requester(
         f"the flood must be quarantined, not refused for some other reason: {bob_dispositions}"
     )
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session,
             email_env.org_id,
@@ -1431,7 +1550,9 @@ async def test_quarantined_wrong_sender_mail_does_not_rate_limit_the_requester(
     assert row.ticket_id == ticket_id
 
     # ...and it really landed, on STORED STATE, not merely on the row.
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         comments = (
             (
                 await session.execute(
@@ -1461,7 +1582,9 @@ async def test_genuine_replies_still_reach_the_per_ticket_limit(email_env) -> No
 
     dispositions = []
     for i in range(TICKET_RATE_LIMIT):
-        async with org_session(email_env.org_id, engine=email_env.engine) as session:
+        async with org_session(
+            email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+        ) as session:
             row = await process_message(
                 session,
                 email_env.org_id,
@@ -1482,7 +1605,9 @@ async def test_genuine_replies_still_reach_the_per_ticket_limit(email_env) -> No
 
     # A few quarantines mixed in; they must not change the answer either way.
     for i in range(3):
-        async with org_session(email_env.org_id, engine=email_env.engine) as session:
+        async with org_session(
+            email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+        ) as session:
             row = await process_message(
                 session,
                 email_env.org_id,
@@ -1497,7 +1622,9 @@ async def test_genuine_replies_still_reach_the_per_ticket_limit(email_env) -> No
         assert row.disposition == "quarantined"
         await _backdate_out_of_the_sender_window(email_env, row.id)
 
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session,
             email_env.org_id,
@@ -1516,7 +1643,9 @@ async def test_genuine_replies_still_reach_the_per_ticket_limit(email_env) -> No
     assert row.ticket_id == ticket_id
 
     # The refusal is real: the ticket did NOT receive the comment.
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         comments = (
             (
                 await session.execute(
@@ -1548,7 +1677,9 @@ async def test_the_ticket_rate_limit_org_predicate_is_load_bearing(email_env) ->
     from app.modules.service_desk.models import TicketCategory
 
     other = await email_env.another_org_with_alice()
-    async with org_session(other.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        other.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         other_alice = (
             await session.execute(
                 select(User.id).where(User.email == "alice@acme.test")
@@ -1621,7 +1752,9 @@ async def test_a_message_that_fails_to_parse_is_not_counted_as_quarantined(
         refusal="refused_parse",
         refusal_reason="malformed MIME structure",
     )
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         row = await process_message(
             session, email_env.org_id, email_env.mailbox, parsed, store=email_env.store
         )
@@ -1635,7 +1768,9 @@ async def test_a_message_that_fails_to_parse_is_not_counted_as_quarantined(
     # Still no ticket, and still no sender attributed to it.
     assert row.ticket_id is None
     assert row.sender_user_id is None
-    async with org_session(email_env.org_id, engine=email_env.engine) as session:
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
         assert (await session.execute(select(Ticket))).scalars().all() == []
 
 

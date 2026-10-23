@@ -36,6 +36,7 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, Request, status
 
 from app.api.deps import auth_context
+from app.core.client_scope import ClientScope
 from app.core.i18n import tr
 from app.core.logging import bind
 from app.core.rbac import has_permission, user_permission_codes
@@ -46,6 +47,7 @@ from app.core.tenancy import org_session
 class PortalContext:
     org_id: UUID
     requester_user_id: UUID
+    clients: ClientScope
 
 
 async def resolve_portal_principal(request: Request) -> PortalContext:
@@ -74,11 +76,16 @@ async def resolve_portal_principal(request: Request) -> PortalContext:
     `portal_session`.
     """
     ctx = await auth_context(request)
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         codes = await user_permission_codes(session, ctx.user_id)
     if not (codes & {"portal.ticket.read", "portal.ticket.write"}):
         raise HTTPException(status.HTTP_403_FORBIDDEN, tr("not a portal user"))
-    return PortalContext(org_id=ctx.org_id, requester_user_id=ctx.user_id)
+    # Task 4 replaces this with the person's scope.
+    return PortalContext(
+        org_id=ctx.org_id, requester_user_id=ctx.user_id, clients=ClientScope.all()
+    )
 
 
 async def bound_portal_principal(request: Request) -> AsyncIterator[PortalContext]:
@@ -141,7 +148,9 @@ def require_portal_permission(code: str) -> Callable[..., Coroutine[Any, Any, Po
         # time this body runs and stays active until FastAPI closes ITS
         # generator -- which happens after this dependency finishes, since
         # this one depends on it.
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             allowed = await has_permission(session, ctx.requester_user_id, code)
         if not allowed:
             raise HTTPException(status.HTTP_403_FORBIDDEN, tr("requires {code}", code=code))

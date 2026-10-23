@@ -274,7 +274,9 @@ async def list_groups(
     code would need a migration and a decision about which seeded roles hold
     it, to gate a smaller fact than the route beside it.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         page = await list_device_groups(
             session,
             org_id=ctx.org_id,
@@ -467,7 +469,9 @@ async def create_group(
     `device_count` is 0 by construction: nothing is in a group that has just
     been created.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             group = await create_device_group(
                 session,
@@ -570,7 +574,9 @@ async def preview_group_rules(
     all unmatchable. An operator who writes a rule for a fleet, receives half
     of it, and is not told why concludes the rule is wrong.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             preview = await preview_rules(
                 session,
@@ -614,7 +620,9 @@ async def get_group(
     `user.role_assigned` event naming a group must still resolve to a name in
     five years.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             group = await get_device_group(session, ctx.org_id, group_id)
         except DeviceGroupError as exc:
@@ -661,7 +669,9 @@ async def update_group(
     # column JSON-native regardless.
     fields = body.model_dump(exclude_unset=True)
     envelopes: list[Any] = []
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             group, reparented = await update_device_group(
                 session,
@@ -704,7 +714,9 @@ async def archive_group(
     NO health reconcile: the refusal guarantees the group holds no devices and
     no health assignment, so no device's effective profile can move.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await archive_device_group(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, group_id=group_id
@@ -741,7 +753,9 @@ async def unarchive_group(
     partial unique index makes possible, and refused when the parent was
     archived after this group was, which is the one way an orphan could appear.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             group = await unarchive_device_group(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, group_id=group_id
@@ -777,7 +791,9 @@ async def add_members(
     edit on a screen whose whole job is bulk is the job storm §12 of the health
     spec exists to avoid. The device's next tick picks it up.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             results = await add_group_members(
                 session,
@@ -815,7 +831,9 @@ async def remove_member(
     org-wide fallback. The console says so before it happens; the API records
     it either way.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await remove_group_member(
                 session,

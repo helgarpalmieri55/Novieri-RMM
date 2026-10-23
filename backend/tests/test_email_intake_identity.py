@@ -1,5 +1,6 @@
 """Sender resolution and the reply token (spec §5, §0.2)."""
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import admin_session, org_session
 from app.modules.email_intake.identity import (
     extract_reply_token,
@@ -13,7 +14,7 @@ from tests.test_email_intake_migration import _seed_user
 async def test_exactly_one_matching_user_resolves(api_env) -> None:
     org_id = await api_env.create_org()
     user_id = await _seed_user(api_env, org_id, email="alice@acme.test")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await resolve_sender(session, org_id, "alice@acme.test")
     assert result.user_id == user_id
 
@@ -21,7 +22,7 @@ async def test_exactly_one_matching_user_resolves(api_env) -> None:
 async def test_matching_is_case_insensitive(api_env) -> None:
     org_id = await api_env.create_org()
     user_id = await _seed_user(api_env, org_id, email="Alice@Acme.Test")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await resolve_sender(session, org_id, "ALICE@acme.TEST")
     assert result.user_id == user_id
 
@@ -30,7 +31,7 @@ async def test_an_unknown_sender_does_not_resolve(api_env) -> None:
     """Spec §11.3: quarantined, not dropped. The reason is recorded so an
     admin can tell 'the helpdesk ignored my email' from 'never received it'."""
     org_id = await api_env.create_org()
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await resolve_sender(session, org_id, "stranger@elsewhere.test")
     assert result.user_id is None
     assert "unknown" in result.reason.lower()
@@ -43,7 +44,7 @@ async def test_an_empty_from_address_is_quarantined_without_a_query(api_env) -> 
     and gives a more specific reason. Pin that reason so the branch is
     exercised rather than dead code."""
     org_id = await api_env.create_org()
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await resolve_sender(session, org_id, "   ")
     assert result.user_id is None
     assert result.reason == "unknown sender: empty From address"
@@ -53,7 +54,7 @@ async def test_a_user_in_another_org_does_not_resolve(api_env) -> None:
     org_a = await api_env.create_org("a")
     org_b = await api_env.create_org("b")
     await _seed_user(api_env, org_b, email="alice@acme.test")
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await resolve_sender(session, org_a, "alice@acme.test")
     assert result.user_id is None
 
@@ -82,7 +83,7 @@ async def test_an_ambiguous_sender_does_not_resolve(api_env) -> None:
     org_id = await api_env.create_org()
     await _seed_user(api_env, org_id, email="shared@acme.test")
     await _seed_user(api_env, org_id, email="shared@acme.test")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await resolve_sender(session, org_id, "shared@acme.test")
     assert result.user_id is None
     assert "ambiguous" in result.reason.lower()
@@ -175,7 +176,7 @@ async def test_a_token_resolves_to_its_ticket_and_only_within_the_org(
     ticket = await a_ticket_for(org_a, "requester")
     token = mint_email_token()
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         # `a_ticket_for` returns an `ATicket` dataclass (id, requester_id),
         # not the ORM row -- load the real `Ticket` to set `email_token`.
         from app.models import Ticket as TicketModel
@@ -185,11 +186,11 @@ async def test_a_token_resolves_to_its_ticket_and_only_within_the_org(
         ticket_row.email_token = token
         session.add(ticket_row)
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         found_ticket = await resolve_ticket_by_token(session, org_a, token)
         assert found_ticket is not None
         assert found_ticket.id == ticket.id
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert await resolve_ticket_by_token(session, org_b, token) is None
 
 
@@ -208,7 +209,7 @@ async def test_the_ticket_org_predicate_is_load_bearing(api_env, a_ticket_for) -
     org_b = await api_env.create_org("b")
     ticket = await a_ticket_for(org_a, "requester")
     token = mint_email_token()
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket_row = await session.get(TicketModel, ticket.id)
         assert ticket_row is not None
         ticket_row.email_token = token
@@ -230,12 +231,12 @@ async def test_an_unknown_token_resolves_to_none(api_env, a_ticket_for) -> None:
 
     org_id = await api_env.create_org()
     ticket = await a_ticket_for(org_id, "requester")
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket_row = await session.get(TicketModel, ticket.id)
         assert ticket_row is not None
         ticket_row.email_token = mint_email_token()
         session.add(ticket_row)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         other_token = mint_email_token()
         assert await resolve_ticket_by_token(session, org_id, other_token) is None

@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     BackupPoint,
@@ -126,7 +127,7 @@ async def _seed_plan(
     scope: list[dict[str, Any]] | None = None,
     review_interval_days: int = 180,
 ) -> UUID:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         plan = await create_plan(
             s,
             org_id=org_id,
@@ -158,7 +159,7 @@ async def _set_last_reviewed_at(
 
 
 async def _seed_test(app_engine: AsyncEngine, org_id: UUID, actor_id: UUID, plan_id: UUID) -> UUID:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         test = await bcp_create_test(
             s,
             org_id=org_id,
@@ -181,7 +182,7 @@ async def _record(
     executed_at: _dt.datetime,
     outcome: str,
 ) -> None:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await record_test(
             s,
             org_id=org_id,
@@ -248,7 +249,7 @@ async def test_bcp_test_report_returns_full_nested_record_with_frozen_evidence(
     )
     test_id = await _seed_test(app_engine, org_id, actor_id, plan_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await upsert_step(
             s,
             org_id=org_id,
@@ -260,7 +261,7 @@ async def test_bcp_test_report_returns_full_nested_record_with_frozen_evidence(
             evidence_ref=None,
         )
         await s.commit()
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await upsert_step(
             s,
             org_id=org_id,
@@ -274,7 +275,7 @@ async def test_bcp_test_report_returns_full_nested_record_with_frozen_evidence(
         await s.commit()
 
     executed_at = _dt.datetime.now(_dt.UTC)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         recorded = await record_test(
             s,
             org_id=org_id,
@@ -289,7 +290,7 @@ async def test_bcp_test_report_returns_full_nested_record_with_frozen_evidence(
         await s.commit()
         expected_evidence = recorded.evidence
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         finding1 = await create_finding(
             s,
             org_id=org_id,
@@ -300,7 +301,7 @@ async def test_bcp_test_report_returns_full_nested_record_with_frozen_evidence(
         )
         await s.commit()
         finding1_id = finding1.id
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         finding2 = await create_finding(
             s,
             org_id=org_id,
@@ -312,7 +313,7 @@ async def test_bcp_test_report_returns_full_nested_record_with_frozen_evidence(
         await s.commit()
         finding2_id = finding2.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         report = await bcp_test_report(s, org_id, test_id)
 
     assert report["test"]["id"] == test_id
@@ -343,7 +344,7 @@ async def test_bcp_test_report_missing_test_returns_empty_shape(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _actor_id = await _org_with_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         report = await bcp_test_report(s, org_id, uuid4())
     assert report == {"test": None, "plan": None, "steps": [], "findings": [], "evidence": {}}
 
@@ -356,7 +357,7 @@ async def test_bcp_test_report_cross_org_test_returns_empty_shape(
     plan_a = await _seed_plan(app_engine, org_a, actor_a)
     test_a = await _seed_test(app_engine, org_a, actor_a, plan_a)
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         report = await bcp_test_report(s, org_b, test_a)
     assert report == {"test": None, "plan": None, "steps": [], "findings": [], "evidence": {}}
 
@@ -447,7 +448,7 @@ async def test_bcp_period_report_hand_computed_counts_and_overdue_plans(
     )
 
     # Findings: mix of open/in_progress/resolved across plans/tests.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await create_finding(
             s,
             org_id=org_id,
@@ -457,7 +458,7 @@ async def test_bcp_period_report_hand_computed_counts_and_overdue_plans(
             severity="high",
         )
         await s.commit()
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         finding2 = await create_finding(
             s,
             org_id=org_id,
@@ -468,7 +469,7 @@ async def test_bcp_period_report_hand_computed_counts_and_overdue_plans(
         )
         await s.commit()
         finding2_id = finding2.id
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await update_finding(
             s,
             org_id=org_id,
@@ -477,7 +478,7 @@ async def test_bcp_period_report_hand_computed_counts_and_overdue_plans(
             remediation_state="resolved",
         )
         await s.commit()
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await create_finding(
             s,
             org_id=org_id,
@@ -487,7 +488,7 @@ async def test_bcp_period_report_hand_computed_counts_and_overdue_plans(
             severity="high",
         )
         await s.commit()
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         finding4 = await create_finding(
             s,
             org_id=org_id,
@@ -498,7 +499,7 @@ async def test_bcp_period_report_hand_computed_counts_and_overdue_plans(
         )
         await s.commit()
         finding4_id = finding4.id
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await update_finding(
             s,
             org_id=org_id,
@@ -508,7 +509,7 @@ async def test_bcp_period_report_hand_computed_counts_and_overdue_plans(
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         report = await bcp_period_report(s, org_id, frm=t_frm, to=t_to)
 
     assert report["outcome_counts"] == {"pass": 2, "partial": 1, "fail": 1, "pending": 0}
@@ -562,7 +563,7 @@ async def test_bcp_plan_status_review_overdue_and_restore_proven_coverage(
         outcome="partial",
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         statuses = await bcp_plan_status(s, org_id, now=now)
 
     by_id = {row["id"]: row for row in statuses}
@@ -589,24 +590,24 @@ async def test_bcp_plan_status_open_findings_count(
     plan_id = await _seed_plan(app_engine, org_id, actor_id)
     test_id = await _seed_test(app_engine, org_id, actor_id, plan_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         f1 = await create_finding(
             s, org_id=org_id, actor_id=actor_id, test_id=test_id, description="a", severity="low"
         )
         await s.commit()
         f1_id = f1.id
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await create_finding(
             s, org_id=org_id, actor_id=actor_id, test_id=test_id, description="b", severity="high"
         )
         await s.commit()
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await update_finding(
             s, org_id=org_id, actor_id=actor_id, finding_id=f1_id, remediation_state="resolved"
         )
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         statuses = await bcp_plan_status(s, org_id, now=now)
 
     row = next(r for r in statuses if r["id"] == plan_id)
@@ -634,7 +635,7 @@ async def test_another_orgs_rows_are_excluded_from_all_reports_by_rls(
         executed_at=_dt.datetime(2026, 1, 5, tzinfo=_dt.UTC),
         outcome="pass",
     )
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         await create_finding(
             s, org_id=org_a, actor_id=actor_a, test_id=test_a, description="x", severity="critical"
         )
@@ -650,7 +651,7 @@ async def test_another_orgs_rows_are_excluded_from_all_reports_by_rls(
         executed_at=_dt.datetime(2026, 1, 5, tzinfo=_dt.UTC),
         outcome="fail",
     )
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         await create_finding(
             s, org_id=org_b, actor_id=actor_b, test_id=test_b, description="y", severity="critical"
         )
@@ -659,7 +660,7 @@ async def test_another_orgs_rows_are_excluded_from_all_reports_by_rls(
     frm = _dt.datetime(2026, 1, 1, tzinfo=_dt.UTC)
     to = _dt.datetime(2026, 1, 31, tzinfo=_dt.UTC)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         period = await bcp_period_report(s, org_a, frm=frm, to=to)
         statuses = await bcp_plan_status(s, org_a, now=to)
         report_a = await bcp_test_report(s, org_a, test_a)
@@ -705,7 +706,7 @@ async def test_tenancy_report_org_filters_are_load_bearing(
         executed_at=_dt.datetime(2026, 1, 5, tzinfo=_dt.UTC),
         outcome="pass",
     )
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         await create_finding(
             s, org_id=org_a, actor_id=actor_a, test_id=test_a, description="x", severity="critical"
         )
@@ -721,7 +722,7 @@ async def test_tenancy_report_org_filters_are_load_bearing(
         executed_at=_dt.datetime(2026, 1, 5, tzinfo=_dt.UTC),
         outcome="fail",
     )
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         await create_finding(
             s, org_id=org_b, actor_id=actor_b, test_id=test_b, description="y", severity="critical"
         )

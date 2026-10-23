@@ -59,6 +59,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.ai.settings import get_settings
 from app.core.ai.sweep import blank_rationales
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Organization
 from app.models.ai import AiAction, AiInjectionFlag, AiMessage, AiSession
@@ -212,7 +213,7 @@ async def sweep_all_orgs(
     total = 0
     for org_id in org_ids:
         try:
-            async with org_session(org_id, engine=engine) as scoped:
+            async with org_session(org_id, engine=engine, clients=ClientScope.all()) as scoped:
                 counts = await sweep_org(scoped, org_id, now=now)
             # `org_session` opens the transaction and commits on exit; a commit
             # inside the block would close it under the context manager.

@@ -162,7 +162,9 @@ async def spend_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("subscriptions.read")),
 ) -> dict[str, list[dict[str, Any]]]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         return await spend_summary(session, ctx.org_id)
 
 
@@ -177,7 +179,9 @@ async def renewals_route(
     Bounded `[1, 365]` so an out-of-range value is a clean 422 rather than a
     silently absurd window; mirrors `licenses/api.py::renewals_route`.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         return await renewal_calendar(
             session, ctx.org_id, now=datetime.now(UTC), within_days=within_days
         )
@@ -188,7 +192,9 @@ async def idle_seats_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("subscriptions.read")),
 ) -> list[dict[str, Any]]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         return await idle_seats(session, ctx.org_id)
 
 
@@ -197,7 +203,9 @@ async def export_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("subscriptions.read")),
 ) -> list[dict[str, Any]]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await export_rows(session, ctx.org_id)
 
         # An explicit, audited export (invariant #4) -- the ONLY report route
@@ -228,7 +236,9 @@ async def list_subscriptions_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("subscriptions.read")),
 ) -> list[SubscriptionOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_subscriptions(session, ctx.org_id)
         return [_subscription_out(r) for r in rows]
 
@@ -241,7 +251,9 @@ async def create_subscription_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("subscriptions.manage")),
 ) -> SubscriptionOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             sub = await create_subscription(
                 session,
@@ -280,7 +292,9 @@ async def get_subscription_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("subscriptions.read")),
 ) -> SubscriptionOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         sub = await get_subscription(session, ctx.org_id, subscription_id)
         if sub is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such subscription"))
@@ -301,7 +315,9 @@ async def update_subscription_route(
     # unreachable. The service layer relies on key PRESENCE to decide what to
     # apply, and rejects an explicit `null` on a NOT NULL column with
     # `SubscriptionValidationError` -> 400 (never an IntegrityError -> 500).
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             sub = await update_subscription(
                 session,
@@ -326,7 +342,9 @@ async def cancel_subscription_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("subscriptions.manage")),
 ) -> SubscriptionOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             sub = await cancel_subscription(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, sub_id=subscription_id
@@ -342,7 +360,9 @@ async def renew_subscription_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("subscriptions.manage")),
 ) -> SubscriptionOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             sub = await record_renewal(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, sub_id=subscription_id
@@ -363,7 +383,9 @@ async def list_events_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("subscriptions.read")),
 ) -> list[EventOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         sub = await get_subscription(session, ctx.org_id, subscription_id)
         if sub is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such subscription"))
@@ -382,7 +404,9 @@ async def list_seats_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("subscriptions.read")),
 ) -> list[SeatAssignmentOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         sub = await get_subscription(session, ctx.org_id, subscription_id)
         if sub is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such subscription"))
@@ -401,7 +425,9 @@ async def assign_seat_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("subscriptions.manage")),
 ) -> SeatAssignmentOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             seat = await assign_seat(
                 session,
@@ -423,7 +449,9 @@ async def release_seat_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("subscriptions.manage")),
 ) -> SeatAssignmentOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             seat = await release_seat(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, assignment_id=seat_id

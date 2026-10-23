@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
 from app.models import BackupChunk, BackupRepository, BackupRun, Device, Job, Organization, User
@@ -107,7 +108,7 @@ async def seed_dedup_org(
         org_id, user_id = org.id, user.id
         device_ids = [d.id for d in devices]
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
             session, vault, org_id=org_id, actor_id=user_id, name=f"repo-{slug}"
         )

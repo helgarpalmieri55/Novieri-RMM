@@ -5,6 +5,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     License,
@@ -33,7 +34,7 @@ async def test_licenses_models_roundtrip(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, user_id = await _org_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         # Test Vendor
         vendor = Vendor(
             org_id=org_id,
@@ -135,7 +136,7 @@ async def test_licenses_models_roundtrip(
         await s.flush()
 
     # Verify round-trip with fresh session
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         got_vendor = (
             await s.execute(select(Vendor).where(Vendor.id == vendor.id))
         ).scalar_one()

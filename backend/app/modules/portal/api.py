@@ -231,7 +231,7 @@ async def list_categories_route(
     ctx: PortalContext = Depends(require_portal_permission("portal.ticket.read")),
 ) -> list[PortalCategoryOut]:
     async with portal_session(
-        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request)
+        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request), clients=ctx.clients
     ) as session:
         return await list_categories(session, org_id=ctx.org_id)
 
@@ -251,7 +251,7 @@ async def suggest_help_route(
     ctx: PortalContext = Depends(require_portal_permission("portal.ticket.read")),
 ) -> list[PortalHelpSuggestion]:
     async with portal_session(
-        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request)
+        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request), clients=ctx.clients
     ) as session:
         return await suggest_help(session, org_id=ctx.org_id, text=q, limit=limit)
 
@@ -263,7 +263,7 @@ async def get_help_article_route(
     ctx: PortalContext = Depends(require_portal_permission("portal.ticket.read")),
 ) -> PortalHelpArticle:
     async with portal_session(
-        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request)
+        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request), clients=ctx.clients
     ) as session:
         try:
             return await get_help_article(session, org_id=ctx.org_id, article_id=article_id)
@@ -284,7 +284,7 @@ async def list_my_tickets_route(
     ctx: PortalContext = Depends(require_portal_permission("portal.ticket.read")),
 ) -> list[PortalTicketSummary]:
     async with portal_session(
-        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request)
+        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request), clients=ctx.clients
     ) as session:
         return await list_my_tickets(
             session,
@@ -304,7 +304,7 @@ async def create_my_ticket_route(
     ctx: PortalContext = Depends(require_portal_permission("portal.ticket.write")),
 ) -> PortalTicketDetail:
     async with portal_session(
-        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request)
+        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request), clients=ctx.clients
     ) as session:
         try:
             return await create_my_ticket(
@@ -326,7 +326,7 @@ async def get_my_ticket_route(
     ctx: PortalContext = Depends(require_portal_permission("portal.ticket.read")),
 ) -> PortalTicketDetail:
     async with portal_session(
-        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request)
+        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request), clients=ctx.clients
     ) as session:
         try:
             return await get_my_ticket(
@@ -356,7 +356,7 @@ async def add_my_comment_route(
     ctx: PortalContext = Depends(require_portal_permission("portal.ticket.write")),
 ) -> PortalCommentOut:
     async with portal_session(
-        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request)
+        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request), clients=ctx.clients
     ) as session:
         try:
             return await add_my_comment(
@@ -394,7 +394,7 @@ async def upload_my_attachment_route(
     reject_oversized_content_length(request, MAX_ATTACHMENT_BYTES)
 
     async with portal_session(
-        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request)
+        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request), clients=ctx.clients
     ) as session:
         # The ticket is verified to be MINE before the request body is ever
         # read (module docstring): reading first would let any
@@ -450,7 +450,7 @@ async def download_my_attachment_route(
     ctx: PortalContext = Depends(require_portal_permission("portal.ticket.read")),
 ) -> Response:
     async with portal_session(
-        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request)
+        ctx.org_id, ctx.requester_user_id, engine=_portal_engine(request), clients=ctx.clients
     ) as session:
         try:
             ticket = await _load_my_ticket_row(

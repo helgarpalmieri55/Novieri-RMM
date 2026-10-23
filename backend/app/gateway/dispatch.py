@@ -23,6 +23,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.gateway.connections import ConnectionRegistry
 from app.gateway.protocol import (
@@ -206,7 +207,7 @@ async def _handle_security_events(
     from app.modules.security_logs.ingest import SecurityIngestError, ingest_events
 
     inserted = 0
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
         ).scalar_one_or_none()
@@ -261,7 +262,7 @@ async def _handle_health_report(
 
     outcome = IngestOutcome()
     queued_events: list[tuple[UUID, dict[str, Any]]] = []
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         queued_events = session.info.setdefault("ui_events", [])
         device = (
             await session.execute(select(Device).where(Device.id == device_id))
@@ -364,7 +365,7 @@ async def _touch_agent(app_engine: AsyncEngine, *, device_id: UUID, org_id: UUID
     and carries an explicit `org_id` predicate, so a device_id belonging to
     another org matches zero rows rather than silently succeeding.
     """
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await session.execute(
             update(Agent)
             .where(Agent.device_id == device_id, Agent.org_id == org_id)
@@ -424,7 +425,7 @@ async def handle_agent_message(
         return
 
     queued_events: list[tuple[UUID, dict[str, Any]]] = []
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         queued_events = session.info.setdefault("ui_events", [])
         job = await _load_job_for_device(session, msg.job_id, device_id)
         if job is None:

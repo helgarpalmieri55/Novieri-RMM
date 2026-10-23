@@ -13,6 +13,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Policy, SecurityEvent
 
@@ -25,7 +26,7 @@ async def apply_retention(
 ) -> int:
     """Delete this org's security events older than its retention window.
     Returns the deleted count; audits the sweep unless nothing was deleted."""
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         config: dict[str, Any] = (
             (
                 await session.execute(
@@ -58,7 +59,7 @@ async def apply_retention(
             total += len(batch_ids)
 
     if total:
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await audit_service.record(
                 session,
                 org_id=org_id,

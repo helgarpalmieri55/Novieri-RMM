@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 from moto import mock_aws
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.models import Agent, Device, RemoteSession, User
 
 
@@ -310,7 +311,7 @@ async def test_recording_download_ok_and_audited(api_env) -> None:
     assert resp.status_code == 200, resp.text
     assert resp.content == b"GUAC-RECORDING-BYTES"
 
-    async with org_session(org_id, engine=api_env.app_engine) as s:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
         actions = {
             a.action
             for a in (

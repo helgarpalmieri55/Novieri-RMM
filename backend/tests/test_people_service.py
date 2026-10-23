@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -48,7 +49,7 @@ async def _org(admin_engine: AsyncEngine) -> tuple[UUID, UUID]:
 
 
 async def _person(app_engine: AsyncEngine, org_id: UUID, name: str, email: str | None) -> UUID:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         p = Person(org_id=org_id, display_name=name, email=email, source="operator")
         s.add(p)
         await s.flush()
@@ -56,7 +57,7 @@ async def _person(app_engine: AsyncEngine, org_id: UUID, name: str, email: str |
 
 
 async def _device(app_engine: AsyncEngine, org_id: UUID, **kw: Any) -> UUID:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         d = Device(org_id=org_id, hostname=f"pc-{uuid4().hex[:6]}", os_family="windows", **kw)
         s.add(d)
         await s.flush()
@@ -64,7 +65,7 @@ async def _device(app_engine: AsyncEngine, org_id: UUID, **kw: Any) -> UUID:
 
 
 async def _actions(app_engine: AsyncEngine, org_id: UUID) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         return list(
             (
                 await s.execute(
@@ -92,11 +93,11 @@ async def test_sync_gives_every_account_one_person_and_is_idempotent(
                    display_name="Bob Builder"))
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         linked, created = await service.sync_accounts(s, org_id)
     # Maria's account links to her existing person; Bob and the actor get one.
     assert (linked, created) == (1, 2)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         assert await service.sync_accounts(s, org_id) == (0, 0)
         people = (await s.execute(select(Person).where(Person.org_id == org_id))).scalars().all()
     by_email = {(p.email or "").lower(): p for p in people}
@@ -126,11 +127,11 @@ async def test_create_person_refuses_a_second_person_for_one_address(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, actor = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await service.create_person(
             s, org_id=org_id, actor_id=actor, display_name="Ann", email="ann@corp.example"
         )
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(PeopleConflictError):
             await service.create_person(
                 s, org_id=org_id, actor_id=actor, display_name="Ann 2", email=" ANN@corp.example"
@@ -141,7 +142,7 @@ async def test_create_person_links_an_existing_account(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, actor = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         email = (await s.execute(select(User.email).where(User.id == actor))).scalar_one()
         person = await service.create_person(
             s, org_id=org_id, actor_id=actor, display_name="IT", email=email.upper()
@@ -161,7 +162,7 @@ async def test_resolver_rules_in_order(admin_engine: AsyncEngine, app_engine: As
     await _person(app_engine, org_id, "Sam One", "sam@corp.example")
     await _person(app_engine, org_id, "Sam Two", "sam@other.example")
     kiosk = await _person(app_engine, org_id, "Kiosk", "kiosk@corp.example")
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         s.add(PersonLogin(org_id=org_id, person_id=kiosk, login="corp\\frontdesk"))
         await s.flush()
         assert await service.resolve_login(s, org_id, "CORP\\FrontDesk") == kiosk
@@ -198,7 +199,7 @@ async def _collect(
     register_job_type()
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
     doc = {"hostname": "pc-maria", "os_family": "windows", "facts": facts}
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = await engine.create(
             session, org_id=org_id, type="inventory.collect", target_device_id=device_id, params={}
         )
@@ -207,7 +208,7 @@ async def _collect(
 
 
 async def _link(app_engine: AsyncEngine, org_id: UUID, device_id: UUID) -> DevicePerson | None:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         return (
             await s.execute(select(DevicePerson).where(DevicePerson.device_id == device_id))
         ).scalar_one_or_none()
@@ -236,19 +237,19 @@ async def test_inventory_sets_the_primary_user_and_an_override_survives(
     link = await _link(app_engine, org_id, device)
     assert link is not None and link.person_id is None
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await service.set_device_person(
             s, org_id=org_id, actor_id=actor, device_id=device, person_id=bob
         )
     # The override taught the resolver the sign-in name.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         assert await service.resolve_login(s, org_id, "corp\\TEMP") == bob
 
     await _collect(app_engine, org_id, device, tmp_path, {"console_user": "AzureAD\\MariaGarcia"})
     link = await _link(app_engine, org_id, device)
     assert link is not None and link.person_id == bob and link.source == "operator"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         back = await service.clear_device_override(
             s, org_id=org_id, actor_id=actor, device_id=device
         )
@@ -273,13 +274,13 @@ async def test_leaver_steps_tick_from_live_data_and_completion_waits_for_them(
         leaver_user = User(org_id=org_id, external_subject="lv", email="lee@corp.example")
         s.add(leaver_user)
         await s.commit()
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await service.sync_accounts(s, org_id)
         person = await service.person_for_user(s, org_id, leaver_user.id)
         assert person is not None
         person_id = person.id
     device = await _device(app_engine, org_id)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await service.set_device_person(
             s, org_id=org_id, actor_id=actor, device_id=device, person_id=person_id
         )
@@ -289,7 +290,7 @@ async def test_leaver_steps_tick_from_live_data_and_completion_waits_for_them(
             action="credential.checked_out", target_type="credential", target_id="cred-1",
         )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         checklist = await checklists.start_checklist(
             s, org_id=org_id, actor_id=actor, person_id=person_id, kind="leaver"
         )
@@ -297,7 +298,7 @@ async def test_leaver_steps_tick_from_live_data_and_completion_waits_for_them(
         assert (await service.load_person(s, org_id, person_id)).status == "leaving"
 
     async def view() -> dict[str, Any]:
-        async with org_session(org_id, engine=app_engine) as s:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
             person = await service.load_person(s, org_id, person_id)
             row = await checklists.load_checklist(s, org_id, person_id, checklist_id)
             return await checklists.checklist_view(
@@ -312,13 +313,13 @@ async def test_leaver_steps_tick_from_live_data_and_completion_waits_for_them(
     assert steps["tickets"]["state"] == "done"
 
     # Marking a step done while the data disagrees needs a reason.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(PeopleError, match="note"):
             await checklists.update_step(
                 s, org_id=org_id, actor_id=actor, person_id=person_id,
                 checklist_id=checklist_id, key="access", state="done", note="",
             )
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(PeopleError, match="Not finished"):
             await checklists.close_checklist(
                 s, org_id=org_id, actor_id=actor, person_id=person_id,
@@ -326,7 +327,7 @@ async def test_leaver_steps_tick_from_live_data_and_completion_waits_for_them(
             )
 
     # The real work happens in the owning modules; the steps follow.
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         u = (await s.execute(select(User).where(User.id == leaver_user.id))).scalar_one()
         u.status = "disabled"
         d = (await s.execute(select(Device).where(Device.id == device))).scalar_one()
@@ -338,7 +339,7 @@ async def test_leaver_steps_tick_from_live_data_and_completion_waits_for_them(
     steps = {s["key"]: s for s in (await view())["steps"]}
     assert all(step["state"] == "done" for step in steps.values()), steps
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await checklists.close_checklist(
             s, org_id=org_id, actor_id=actor, person_id=person_id,
             checklist_id=checklist_id, outcome="completed",
@@ -357,16 +358,16 @@ async def test_one_open_checklist_at_a_time_and_a_skip_needs_a_note(
 ) -> None:
     org_id, actor = await _org(admin_engine)
     person_id = await _person(app_engine, org_id, "New Starter", "new@corp.example")
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         checklist = await checklists.start_checklist(
             s, org_id=org_id, actor_id=actor, person_id=person_id, kind="starter"
         )
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(PeopleConflictError):
             await checklists.start_checklist(
                 s, org_id=org_id, actor_id=actor, person_id=person_id, kind="leaver"
             )
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(PeopleError):
             await checklists.update_step(
                 s, org_id=org_id, actor_id=actor, person_id=person_id,
@@ -377,7 +378,7 @@ async def test_one_open_checklist_at_a_time_and_a_skip_needs_a_note(
             s, org_id=org_id, actor_id=actor, person_id=person_id,
             checklist_id=checklist.id, key="baseline", state="done", note="",
         )
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await checklists.close_checklist(
             s, org_id=org_id, actor_id=actor, person_id=person_id,
             checklist_id=checklist.id, outcome="cancelled",

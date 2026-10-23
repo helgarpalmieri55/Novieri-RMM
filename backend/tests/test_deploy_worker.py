@@ -21,6 +21,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings, override_settings
 from app.core.tenancy import org_session
 from app.jobs.registry import UnknownJobType, get_job_type
@@ -184,7 +185,7 @@ async def test_closed_window_pending_deployment_dispatches_nothing(
     with override_settings(settings):
         await worker.deploy_window_sweep_all_orgs(now)
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         results = (
             await session.execute(
                 select(DeploymentResult).where(DeploymentResult.org_id == org_id)

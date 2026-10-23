@@ -29,6 +29,7 @@ from sqlalchemy import select
 from sqlalchemy import text as sqltext
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, HealthOrgSettings
 from app.modules.health.errors import HealthValidationError
@@ -74,7 +75,7 @@ async def test_get_settings_returns_the_documented_defaults_for_an_unconfigured_
     api_env,
 ) -> None:
     org_id = await api_env.create_org()
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         effective = await get_settings(session, org_id)
 
     assert effective.flap_window_s == 3600
@@ -95,7 +96,7 @@ async def test_get_settings_writes_nothing(api_env) -> None:
     the same values as this one, so asserting on the return value cannot see
     the difference -- only the row count can."""
     org_id = await api_env.create_org()
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await get_settings(session, org_id)
         await get_settings(session, org_id)
     assert await _settings_row_count(api_env.admin_engine, org_id) == 0
@@ -139,7 +140,9 @@ async def test_update_settings_creates_the_row_and_audits_old_and_new(api_env) -
     PREVIOUS value is in the audit row -- the new one is already in the
     table."""
     org = await seed_org(api_env, "set-w")
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         row = await update_settings(
             session, org.org_id, org.user_id, {"flap_threshold": 10, "offline_after_s": 1800}
         )
@@ -161,9 +164,13 @@ async def test_update_settings_is_an_upsert_not_a_check_then_insert(api_env) -> 
     """Second write updates rather than raising -- and the row count stays 1,
     which is what `ON CONFLICT DO UPDATE` on the `org_id` PK buys."""
     org = await seed_org(api_env, "set-u")
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await update_settings(session, org.org_id, org.user_id, {"flap_threshold": 10})
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         row = await update_settings(session, org.org_id, org.user_id, {"flap_threshold": 20})
     assert row.flap_threshold == 20
     assert await _settings_row_count(api_env.admin_engine, org.org_id) == 1
@@ -174,9 +181,13 @@ async def test_update_settings_is_an_upsert_not_a_check_then_insert(api_env) -> 
 
 async def test_update_settings_reflects_in_the_next_get(api_env) -> None:
     org = await seed_org(api_env, "set-r")
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await update_settings(session, org.org_id, org.user_id, {"unavailable_clear_after_s": 7200})
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         effective = await get_settings(session, org.org_id)
     assert effective.unavailable_clear_after_s == 7200
 
@@ -209,7 +220,9 @@ async def test_an_out_of_range_setting_is_a_typed_error_not_a_500(
     answer to a typo is a 500 from an `IntegrityError`, and the operator
     learns nothing about which bound they crossed."""
     org = await seed_org(api_env, "set-rng")
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthValidationError) as exc:
             await update_settings(session, org.org_id, org.user_id, {field: value})
     assert field in str(exc.value)
@@ -222,7 +235,9 @@ async def test_every_bounded_setting_accepts_both_ends_of_its_range(api_env) -> 
     org = await seed_org(api_env, "set-ends")
     for field, (low, high) in SETTING_BOUNDS.items():
         for value in (low, high):
-            async with org_session(org.org_id, engine=api_env.app_engine) as session:
+            async with org_session(
+                org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+            ) as session:
                 row = await update_settings(session, org.org_id, org.user_id, {field: value})
             assert getattr(row, field) == value, field
 
@@ -231,14 +246,18 @@ async def test_an_unknown_settings_field_is_refused_not_ignored(api_env) -> None
     """Silently dropping it returns 200 for a typo'd body having changed
     nothing, and audits a no-op edit."""
     org = await seed_org(api_env, "set-unk")
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthValidationError):
             await update_settings(session, org.org_id, org.user_id, {"flap_windows": 3600})
 
 
 async def test_an_empty_settings_update_is_refused(api_env) -> None:
     org = await seed_org(api_env, "set-empty")
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthValidationError):
             await update_settings(session, org.org_id, org.user_id, {})
 
@@ -258,7 +277,9 @@ async def test_a_queue_from_another_org_is_refused(api_env) -> None:
         await session.commit()
         foreign_queue_id = queue.id
 
-    async with org_session(a.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        a.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthValidationError):
             await update_settings(
                 session, a.org_id, a.user_id, {"default_alert_queue_id": foreign_queue_id}

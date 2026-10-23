@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, BcpPlan, Device, DeviceGroup, DocArticle, Organization, User
 from app.modules.bcp.errors import BcpNotFoundError, BcpValidationError
@@ -72,7 +73,7 @@ async def _seed_doc_article(
 
 
 async def _audit_actions(app_engine: AsyncEngine, org_id: UUID, plan_id: UUID) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -102,7 +103,7 @@ async def test_create_plan_with_valid_refs_succeeds_and_audits(
     device_id = await _seed_device(admin_engine, org_id, "host-1", group_id)
     doc_id = await _seed_doc_article(admin_engine, org_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         plan = await create_plan(
             s,
             org_id=org_id,
@@ -125,7 +126,7 @@ async def test_create_plan_with_valid_refs_succeeds_and_audits(
     assert plan.state == "active"
     assert plan.created_by == actor_id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = (await s.execute(select(BcpPlan).where(BcpPlan.id == plan_id))).scalar_one()
         assert row.name == "DR Plan"
         assert row.review_interval_days == 180
@@ -133,7 +134,7 @@ async def test_create_plan_with_valid_refs_succeeds_and_audits(
     actions = await _audit_actions(app_engine, org_id, plan_id)
     assert actions == ["bcp.plan_created"]
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         event = (
             await s.execute(
                 select(AuditEvent).where(
@@ -153,7 +154,7 @@ async def test_create_plan_scope_device_from_another_org_raises(
     other_org_id, _ = await _org_with_user(admin_engine)
     foreign_device_id = await _seed_device(admin_engine, other_org_id, "foreign-host")
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpValidationError):
             await create_plan(
                 s,
@@ -175,7 +176,7 @@ async def test_create_plan_scope_random_device_id_raises(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpValidationError):
             await create_plan(
                 s,
@@ -197,7 +198,7 @@ async def test_create_plan_unknown_scope_kind_raises(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpValidationError):
             await create_plan(
                 s,
@@ -219,7 +220,7 @@ async def test_create_plan_malformed_scope_uuid_raises(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpValidationError):
             await create_plan(
                 s,
@@ -243,7 +244,7 @@ async def test_create_plan_cross_org_procedure_ref_raises(
     other_org_id, _ = await _org_with_user(admin_engine)
     foreign_doc_id = await _seed_doc_article(admin_engine, other_org_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpValidationError):
             await create_plan(
                 s,
@@ -265,7 +266,7 @@ async def test_create_plan_random_procedure_ref_raises(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpValidationError):
             await create_plan(
                 s,
@@ -292,7 +293,7 @@ async def test_update_plan_applies_fields_and_audits(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         plan = await create_plan(
             s,
             org_id=org_id,
@@ -309,7 +310,7 @@ async def test_update_plan_applies_fields_and_audits(
         await s.commit()
         plan_id = plan.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         updated = await update_plan(
             s, org_id=org_id, actor_id=actor_id, plan_id=plan_id, name="Renamed", rto_minutes=30
         )
@@ -329,7 +330,7 @@ async def test_update_plan_revalidates_new_scope(
     other_org_id, _ = await _org_with_user(admin_engine)
     foreign_device_id = await _seed_device(admin_engine, other_org_id, "foreign-host")
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         plan = await create_plan(
             s,
             org_id=org_id,
@@ -346,7 +347,7 @@ async def test_update_plan_revalidates_new_scope(
         await s.commit()
         plan_id = plan.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpValidationError):
             await update_plan(
                 s,
@@ -362,7 +363,7 @@ async def test_update_plan_missing_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpNotFoundError):
             await update_plan(
                 s, org_id=org_id, actor_id=actor_id, plan_id=uuid4(), name="nope"
@@ -379,7 +380,7 @@ async def test_review_plan_sets_reviewed_fields_and_audits(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         plan = await create_plan(
             s,
             org_id=org_id,
@@ -396,7 +397,7 @@ async def test_review_plan_sets_reviewed_fields_and_audits(
         await s.commit()
         plan_id = plan.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         reviewed = await review_plan(s, org_id=org_id, actor_id=actor_id, plan_id=plan_id)
         await s.commit()
         assert reviewed.last_reviewed_at is not None
@@ -411,7 +412,7 @@ async def test_review_plan_missing_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(BcpNotFoundError):
             await review_plan(s, org_id=org_id, actor_id=actor_id, plan_id=uuid4())
 
@@ -436,7 +437,7 @@ async def testresolve_scope_devices_expands_group_and_includes_direct_device(
     # predicate — if that predicate were removed, this device would leak in.
     other_org_leak = await _seed_device(admin_engine, other_org_id, "other-org-host", group_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         resolved = await resolve_scope_devices(
             s,
             org_id,
@@ -458,7 +459,7 @@ async def testresolve_scope_devices_expands_group_and_includes_direct_device(
 async def test_get_plan_and_list_plans(admin_engine: AsyncEngine, app_engine: AsyncEngine) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         plan = await create_plan(
             s,
             org_id=org_id,
@@ -475,7 +476,7 @@ async def test_get_plan_and_list_plans(admin_engine: AsyncEngine, app_engine: As
         await s.commit()
         plan_id = plan.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_plan(s, org_id, plan_id)
         assert fetched is not None
         assert fetched.id == plan_id
@@ -488,7 +489,7 @@ async def test_get_plan_missing_returns_none(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, _actor_id = await _org_with_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         result = await get_plan(s, org_id, uuid4())
         assert result is None
 
@@ -499,7 +500,7 @@ async def test_another_orgs_plan_is_hidden_by_rls(
     org_a, actor_a = await _org_with_user(admin_engine)
     org_b, _actor_b = await _org_with_user(admin_engine)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         plan = await create_plan(
             s,
             org_id=org_a,
@@ -516,7 +517,7 @@ async def test_another_orgs_plan_is_hidden_by_rls(
         await s.commit()
         plan_id = plan.id
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_plan(s, org_b, plan_id)
         assert fetched is None
 
@@ -528,7 +529,7 @@ async def test_update_plan_rejects_invalid_state(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         plan = await create_plan(
             s, org_id=org_id, actor_id=actor_id, name="p", description="",
             scope=[], rto_minutes=None, rpo_minutes=None, procedure_refs=[],

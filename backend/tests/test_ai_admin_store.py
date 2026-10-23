@@ -29,6 +29,7 @@ from app.core.ai.store import (
     persist_turn,
     question_sha256,
 )
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 
 # From the KERNEL package, not from `app.models.ai` directly:
@@ -561,7 +562,7 @@ async def test_a_turn_persists_through_an_org_session_under_rls(
     pins that the writes are permitted at all."""
     org_id, user_id = await seed_org_and_user(admin_engine, "store-rls")
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = await create_session(
             session, org_id=org_id, user_id=user_id, persona=ADMIN_PROFILE.name
         )
@@ -574,7 +575,7 @@ async def test_a_turn_persists_through_an_org_session_under_rls(
             outcome=_outcome(),
         )
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         loaded, messages = await load_session(
             session, org_id=org_id, user_id=user_id, session_id=row.id
         )

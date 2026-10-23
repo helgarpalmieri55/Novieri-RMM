@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app.modules.ai_copilot as copilot_package
 from app.core.ai.providers import TextBlock, ToolCallBlock
 from app.core.ai.tools import REGISTRY as PLATFORM_READ_TOOLS
+from app.core.client_scope import ClientScope
 from app.models import AiAction, AiSettings, Job, Ticket, TicketComment
 from app.modules.ai_copilot import api as copilot_api
 from app.modules.ai_copilot.profile import COPILOT_PROFILE
@@ -510,7 +511,9 @@ async def test_an_admin_proposal_records_no_ticket_rather_than_a_null_one(
     from tests.test_ai_act_propose import _actions as _admin_actions
 
     admin_world = await build_world(api_env, tag="copilot-audit-admin")
-    async with org_session(admin_world.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        admin_world.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await propose(
             session,
             org_id=admin_world.org_id,

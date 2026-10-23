@@ -8,6 +8,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Device, InstallLink, Organization
 
@@ -47,7 +48,7 @@ async def test_one_org_never_reads_another_orgs_link(
     async with AsyncSession(admin_engine) as session:
         session.add_all([InstallLink(org_id=a.id), InstallLink(org_id=b.id)])
         await session.commit()
-    async with org_session(b.id, engine=app_engine) as session:
+    async with org_session(b.id, engine=app_engine, clients=ClientScope.all()) as session:
         seen = (await session.execute(select(InstallLink.org_id))).scalars().all()
     assert seen == [b.id]
 

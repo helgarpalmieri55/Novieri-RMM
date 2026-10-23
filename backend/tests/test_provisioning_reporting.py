@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Device, Organization, OsImage, ProvisionProfile, ProvisionRun
 from app.modules.provisioning.reporting import (
@@ -140,7 +141,7 @@ async def test_provision_run_status_returns_fields_for_a_run(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed_org(admin_engine, f"prs-{uuid4().hex[:6]}")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         status = await provision_run_status(session, ids["org_id"], ids["r1"])
 
         assert status["run_id"] == ids["r1"]
@@ -158,7 +159,7 @@ async def test_provision_run_status_failed_run_carries_error(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed_org(admin_engine, f"prs-{uuid4().hex[:6]}")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         status = await provision_run_status(session, ids["org_id"], ids["r2"])
 
         assert status["state"] == "failed"
@@ -171,7 +172,7 @@ async def test_provision_run_status_missing_run_returns_none_shape(
 ) -> None:
     ids = await _seed_org(admin_engine, f"prs-{uuid4().hex[:6]}")
     missing_run_id = uuid4()
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         status = await provision_run_status(session, ids["org_id"], missing_run_id)
 
         assert status["run_id"] == missing_run_id
@@ -190,7 +191,7 @@ async def test_fleet_provisioning_report_math_against_hand_computed_values(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed_org(admin_engine, f"fpr-{uuid4().hex[:6]}")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         report = await fleet_provisioning_report(session, ids["org_id"])
 
         assert report["run_counts_by_state"] == {
@@ -219,7 +220,7 @@ async def test_fleet_provisioning_report_zero_runs_guards_divide_by_zero(
         org_id = org.id
         await session.commit()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         report = await fleet_provisioning_report(session, org_id)
         assert report["run_counts_by_state"] == {
             "pending": 0,
@@ -237,7 +238,7 @@ async def test_device_provisioning_returns_binding_for_provisioned_device(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed_org(admin_engine, f"dpv-{uuid4().hex[:6]}")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         result = await device_provisioning(session, ids["org_id"], ids["d1"])
 
         assert result["device_id"] == ids["d1"]
@@ -251,7 +252,7 @@ async def test_device_provisioning_no_history_returns_none_shape(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed_org(admin_engine, f"dpv-{uuid4().hex[:6]}")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         result = await device_provisioning(session, ids["org_id"], ids["d3"])
 
         assert result["device_id"] == ids["d3"]
@@ -267,7 +268,9 @@ async def test_a_second_orgs_rows_never_appear_in_any_output_under_rls(
     ids_a = await _seed_org(admin_engine, f"tenant-a-{uuid4().hex[:6]}")
     ids_b = await _seed_org(admin_engine, f"tenant-b-{uuid4().hex[:6]}")
 
-    async with org_session(ids_a["org_id"], engine=app_engine) as session:
+    async with org_session(
+        ids_a["org_id"], engine=app_engine, clients=ClientScope.all()
+    ) as session:
         fleet_a = await fleet_provisioning_report(session, ids_a["org_id"])
         assert fleet_a["run_counts_by_state"] == {
             "pending": 1,
@@ -290,7 +293,9 @@ async def test_a_second_orgs_rows_never_appear_in_any_output_under_rls(
         assert device_result["profile_id"] is None
         assert device_result["latest_run_state"] is None
 
-    async with org_session(ids_b["org_id"], engine=app_engine) as session:
+    async with org_session(
+        ids_b["org_id"], engine=app_engine, clients=ClientScope.all()
+    ) as session:
         fleet_b = await fleet_provisioning_report(session, ids_b["org_id"])
         assert fleet_b["machines_provisioned"] == 2  # org B's own, not org A's
         assert ids_a["p1"] not in fleet_b["per_profile"]

@@ -147,7 +147,9 @@ async def create_article(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> ArticleOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         article = await svc.create_article(
             session,
             org_id=ctx.org_id,
@@ -181,7 +183,9 @@ async def list_articles(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> ArticleListPage:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         query: Select[Any] = select(
             DocArticle, func.count(DocLink.id).label("link_count")
         ).join(DocLink, DocLink.article_id == DocArticle.id, isouter=True)
@@ -231,7 +235,9 @@ async def get_article(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.read")),
 ) -> ArticleOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         article = await _get_article(session, article_id)
         links = (
             (
@@ -265,7 +271,9 @@ async def update_article(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> ArticleOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         article = await _get_article(session, article_id)
         await svc.update_article(
             session,
@@ -298,7 +306,9 @@ async def set_portal_visibility(
 ) -> PortalVisibility:
     """Show or hide an article in the end-user portal (requesters read it
     through `/portal/help`, never through these routes)."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         article = await _get_article(session, article_id)
         await svc.set_portal_visibility(
             session, article, actor_id=ctx.user_id, visible=body.portal_visible
@@ -312,7 +322,9 @@ async def archive_article(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> dict[str, bool]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         article = await _get_article(session, article_id)
         await svc.archive_article(session, article, actor_id=ctx.user_id)
     return {"archived": True}
@@ -324,7 +336,9 @@ async def article_versions(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.read")),
 ) -> list[VersionOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         await _get_article(session, article_id)
         versions = await svc.list_versions(session, article_id=article_id)
         return [
@@ -344,7 +358,9 @@ async def add_link(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> LinkOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         article = await _get_article(session, article_id)
         try:
             link = await svc.add_link(
@@ -368,7 +384,9 @@ async def remove_link(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> dict[str, bool]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         article = await _get_article(session, article_id)
         removed = await svc.remove_link(session, article, link_id, actor_id=ctx.user_id)
     if not removed:
@@ -382,7 +400,9 @@ async def create_record(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> RecordOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             record = await svc.create_record(
                 session,
@@ -406,7 +426,9 @@ async def list_records(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> RecordListPage:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         query = select(DocRecord)
         if not include_archived:
             query = query.where(DocRecord.archived.is_(False))
@@ -429,7 +451,9 @@ async def get_record(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.read")),
 ) -> RecordOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         record = (
             await session.execute(select(DocRecord).where(DocRecord.id == record_id))
         ).scalar_one_or_none()
@@ -445,7 +469,9 @@ async def update_record(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> RecordOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         record = (
             await session.execute(select(DocRecord).where(DocRecord.id == record_id))
         ).scalar_one_or_none()
@@ -466,7 +492,9 @@ async def archive_record(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> dict[str, bool]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         record = (
             await session.execute(select(DocRecord).where(DocRecord.id == record_id))
         ).scalar_one_or_none()
@@ -482,7 +510,9 @@ async def record_versions(
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.read")),
 ) -> list[VersionOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         versions = await svc.list_versions(session, record_id=record_id)
         return [
             VersionOut(
@@ -509,7 +539,9 @@ async def suggest(
 ) -> list[ArticleSuggestion]:
     """Articles sharing any meaningful word with `q` (a ticket subject), best
     match first. Used beside a ticket reply; `/search` is the search box."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await svc.suggest_articles(session, ctx.org_id, q, limit=limit)
         return [ArticleSuggestion(id=r.id, title=r.title, category=r.category) for r in rows]
 
@@ -520,7 +552,9 @@ async def search(
     ctx: AuthContext = Depends(require_permission("docs.read")),
     q: str = Query(min_length=1),
 ) -> list[SearchHit]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         document = func.to_tsvector(
             "english", DocArticle.title + " " + DocArticle.body
         )

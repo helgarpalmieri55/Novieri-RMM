@@ -523,7 +523,9 @@ async def get_current_org(
     one row per org returns whatever the planner hands back first the moment
     this runs on a session without the GUC.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         org = (
             await session.execute(select(Organization).where(Organization.id == ctx.org_id))
         ).scalar_one_or_none()
@@ -548,7 +550,9 @@ async def update_current_org(
     if not supplied:
         raise _reject(tr("no fields supplied; send name and/or settings"))
 
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         org = (
             await session.execute(select(Organization).where(Organization.id == ctx.org_id))
         ).scalar_one_or_none()
@@ -749,7 +753,9 @@ async def preview_console_domain(
     would say `eviltoeshee.com` is fine while the gate says it is not, and the
     operator would be told nobody is affected and lock somebody out anyway.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         examined = (
             await session.execute(
                 select(func.count()).select_from(User).where(User.org_id == ctx.org_id)

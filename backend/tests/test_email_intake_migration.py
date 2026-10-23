@@ -26,6 +26,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import EmailMailbox, InboundMessage
 
@@ -88,7 +89,7 @@ async def test_a_mailbox_is_invisible_to_another_org(api_env) -> None:
     category_id = await _seed_category(api_env, org_a)
     actor_id = await _seed_user(api_env, org_a)
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         session.add(
             EmailMailbox(
                 org_id=org_a,
@@ -102,9 +103,9 @@ async def test_a_mailbox_is_invisible_to_another_org(api_env) -> None:
             )
         )
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert len((await session.execute(select(EmailMailbox))).scalars().all()) == 1
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await session.execute(select(EmailMailbox))).scalars().all() == []
 
 
@@ -117,7 +118,9 @@ async def test_a_mailbox_cannot_be_inserted_under_another_orgs_id(api_env) -> No
     actor_id = await _seed_user(api_env, org_a)
 
     with pytest.raises(ProgrammingError):
-        async with org_session(org_a, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_a, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             credential_id = await _seed_credential(session, org_a, actor_id)
             session.add(
                 EmailMailbox(
@@ -164,7 +167,7 @@ async def test_email_mailbox_rejects_a_duplicate_org_and_address(api_env) -> Non
     category_id = await _seed_category(api_env, org_id)
     actor_id = await _seed_user(api_env, org_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         session.add(
             EmailMailbox(
                 org_id=org_id,
@@ -179,7 +182,9 @@ async def test_email_mailbox_rejects_a_duplicate_org_and_address(api_env) -> Non
         )
 
     with pytest.raises(IntegrityError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             session.add(
                 EmailMailbox(
                     org_id=org_id,
@@ -203,7 +208,9 @@ async def test_inbound_message_disposition_check_rejects_invalid_value(api_env) 
     actor_id = await _seed_user(api_env, org_id)
 
     with pytest.raises(IntegrityError):
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             mailbox = EmailMailbox(
                 org_id=org_id,
                 address="helpdesk@chk.test",
@@ -237,7 +244,7 @@ async def test_an_inbound_message_is_invisible_to_another_org(api_env) -> None:
     category_id = await _seed_category(api_env, org_a)
     actor_id = await _seed_user(api_env, org_a)
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         mailbox = EmailMailbox(
             org_id=org_a,
             address="helpdesk@a.test",
@@ -261,9 +268,9 @@ async def test_an_inbound_message_is_invisible_to_another_org(api_env) -> None:
             )
         )
 
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert len((await session.execute(select(InboundMessage))).scalars().all()) == 1
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         assert (await session.execute(select(InboundMessage))).scalars().all() == []
 
 
@@ -276,7 +283,9 @@ async def test_an_inbound_message_cannot_be_inserted_under_another_orgs_id(api_e
     actor_id = await _seed_user(api_env, org_a)
 
     with pytest.raises(ProgrammingError):
-        async with org_session(org_a, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_a, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             mailbox = EmailMailbox(
                 org_id=org_a,
                 address="helpdesk2@a.test",

@@ -64,6 +64,7 @@ from starlette.types import Receive, Scope, Send
 
 from app.api.deps import AuthContext, auth_context
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.i18n import parse_accept_language, tr, use_locale
 from app.core.mcp_channel import EXTENSION_KEY, McpCall, mcp_resource, use_mcp_call
 from app.core.rbac import has_permission, user_permission_codes
@@ -238,7 +239,9 @@ async def _gate(fastapi_app: FastAPI, ctx: AuthContext) -> tuple[int, str] | Non
     switch off, removing the permission or revoking the app stops the next
     call, not the next sign-in."""
     issued_at = datetime.fromtimestamp(ctx.claims.iat, UTC)
-    async with org_session(ctx.org_id, engine=fastapi_app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=fastapi_app.state.app_engine, clients=ctx.clients
+    ) as session:
         org_settings = (
             await session.execute(
                 select(Organization.settings).where(Organization.id == ctx.org_id)
@@ -547,7 +550,9 @@ class _ToolHandlers:
                     {"status": 429, "retry_after": seconds},
                 )
         catalog = _catalog(self._app)
-        async with org_session(principal.org_id, engine=self._app.state.app_engine) as session:
+        async with org_session(
+            principal.org_id, engine=self._app.state.app_engine, clients=ClientScope.all()
+        ) as session:
             held = await user_permission_codes(session, principal.user_id)
         return ListToolsResult(
             tools=[_sdk_tool(t) for t in catalog.values() if _visible(t, held, principal.areas)]
@@ -621,7 +626,9 @@ class _ToolHandlers:
         # here, before the route, in the API's own words; the route would
         # refuse it again with the same check (`require_permission`).
         if tool.permission is not None:
-            async with org_session(principal.org_id, engine=self._app.state.app_engine) as session:
+            async with org_session(
+                principal.org_id, engine=self._app.state.app_engine, clients=ClientScope.all()
+            ) as session:
                 allowed = await has_permission(session, principal.user_id, tool.permission)
             if not allowed:
                 return _invoke.InvokeOutcome(403, None, tr("requires {code}", code=tool.permission))
@@ -693,7 +700,9 @@ class _ToolHandlers:
         if outcome.outcome_unknown:
             metadata["outcome_unknown"] = True
         with use_mcp_call(McpCall(azp=principal.claims.azp, tool=tool)):
-            async with org_session(principal.org_id, engine=self._app.state.app_engine) as session:
+            async with org_session(
+                principal.org_id, engine=self._app.state.app_engine, clients=ClientScope.all()
+            ) as session:
                 await audit_service.record(
                     session,
                     org_id=principal.org_id,

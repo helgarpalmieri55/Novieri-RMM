@@ -47,6 +47,7 @@ from moto import mock_aws
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Ticket, TicketAttachment, TicketComment, User
@@ -113,7 +114,7 @@ def store(api_env):
 
 async def test_add_comment_appends_and_list_comments_returns_it_oldest_first(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         first = await add_comment(session, org_id, ticket.id, body="first", author_id=user_id)
@@ -128,7 +129,7 @@ async def test_add_comment_appends_and_list_comments_returns_it_oldest_first(api
 
 async def test_system_comment_requires_null_author_id(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         comment = await add_comment(
@@ -157,7 +158,7 @@ async def test_system_comment_audit_event_records_system_actor(api_env) -> None:
     `actor_type="user"` in that call, confirm this test fails, restore,
     confirm identical (see `.git/sdd/task-10-report.md`)."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         comment = await add_comment(
@@ -190,7 +191,7 @@ async def test_system_comment_audit_event_records_system_actor(api_env) -> None:
 
 async def test_system_comment_with_an_author_id_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         with pytest.raises(TicketValidationError):
@@ -206,7 +207,7 @@ async def test_system_comment_with_an_author_id_is_rejected(api_env) -> None:
 
 async def test_user_comment_with_no_author_id_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         with pytest.raises(TicketValidationError):
@@ -215,7 +216,7 @@ async def test_user_comment_with_no_author_id_is_rejected(api_env) -> None:
 
 async def test_unknown_visibility_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         with pytest.raises(TicketValidationError):
@@ -239,7 +240,7 @@ async def test_add_comment_rejects_unknown_author_type(api_env) -> None:
     `test_service_desk_transitions.py`) IS tested; this was the skipped half
     of that pair."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         with pytest.raises(TicketValidationError) as exc:
@@ -262,7 +263,7 @@ async def test_add_comment_rejects_unknown_author_type(api_env) -> None:
 
 async def test_include_internal_false_excludes_internal_comments(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         await add_comment(
@@ -290,7 +291,7 @@ async def test_adding_a_comment_to_a_terminal_ticket_is_rejected(api_env) -> Non
     gates new comments. `new -> cancelled` is a legal incident transition
     (`lifecycle.py`), reached directly with no detour needed."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         await change_status(session, org_id, ticket.id, to_status="cancelled", actor_id=user_id)
 
@@ -316,7 +317,7 @@ async def test_adding_a_comment_to_a_closed_ticket_is_rejected(api_env) -> None:
     sequence (not a raw `ticket.status =` assignment), is the one that would
     catch it (mutation-verified: see `.git/sdd/task-10-report.md`)."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         await change_status(session, org_id, ticket.id, to_status="open", actor_id=user_id)
         await change_status(session, org_id, ticket.id, to_status="resolved", actor_id=user_id)
@@ -328,7 +329,7 @@ async def test_adding_a_comment_to_a_closed_ticket_is_rejected(api_env) -> None:
 
 async def test_add_comment_audits_exactly_once_and_never_carries_the_body(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         comment = await add_comment(
@@ -428,7 +429,7 @@ async def test_list_comments_org_id_predicate_is_exercised(
 
 async def test_add_attachment_key_is_entirely_server_derived(api_env, store: ObjectStore) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         attachment = await add_attachment(
@@ -454,7 +455,7 @@ async def test_add_attachment_and_get_attachment_roundtrip_the_bytes(
     api_env, store: ObjectStore
 ) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         attachment = await add_attachment(
@@ -480,7 +481,7 @@ async def test_get_ticket_attachment_asserts_org_prefix(api_env, store: ObjectSt
     server-derived, `get_ticket_attachment` refuses to serve it back to a
     caller passing the wrong `org_id`."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         attachment = await add_attachment(
             session,
@@ -500,7 +501,7 @@ async def test_add_attachment_rejects_invalid_filenames_before_touching_the_stor
     api_env, store: ObjectStore
 ) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         for bad in ("a.pdf\n", "../x.pdf", "発票.pdf", ""):
@@ -530,7 +531,7 @@ async def test_add_attachment_rejects_invalid_filenames_before_touching_the_stor
 
 async def test_add_attachment_rejects_oversized_body(api_env, store: ObjectStore) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         oversized = b"x" * (10 * 1024 * 1024 + 1)
@@ -557,7 +558,7 @@ async def test_add_attachment_to_a_terminal_ticket_is_rejected(
     no detour needed. No attachment row is left behind by the rejected
     upload."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         await change_status(session, org_id, ticket.id, to_status="cancelled", actor_id=user_id)
 
@@ -586,7 +587,7 @@ async def test_add_attachment_to_a_terminal_ticket_is_rejected(
 
 async def test_add_attachment_audits_exactly_once(api_env, store: ObjectStore) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
 
         attachment = await add_attachment(
@@ -671,7 +672,7 @@ async def test_get_attachment_does_not_audit(api_env, store: ObjectStore) -> Non
     itself, the plain org-scoped load, writes nothing (the no-audit-on-view
     rule every other module in this platform already follows)."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket = await _create_incident(session, org_id, user_id)
         attachment = await add_attachment(
             session,

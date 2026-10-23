@@ -3,6 +3,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (  # noqa: F401 -- PatchApproval/PatchRun verify importability
     Device,
@@ -33,7 +34,7 @@ async def test_patch_and_status_roundtrip(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id, _ = await _org_device_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         p = Patch(
             org_id=org_id,
             os_family="windows",
@@ -48,7 +49,7 @@ async def test_patch_and_status_roundtrip(
         s.add(st)
         await s.flush()
         assert p.priority is None and p.cve is None
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         got = (
             await s.execute(select(DevicePatchStatus).where(DevicePatchStatus.patch_id == p.id))
         ).scalar_one()
@@ -57,7 +58,7 @@ async def test_patch_and_status_roundtrip(
 
 async def test_policy_defaults(admin_engine: AsyncEngine, app_engine: AsyncEngine) -> None:
     org_id, _, _ = await _org_device_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         pol = PatchPolicy(org_id=org_id, device_group_id=None)
         s.add(pol)
         await s.flush()
@@ -85,7 +86,7 @@ async def test_rls_hides_another_orgs_approval_from_an_unfiltered_select(
 
     ids: dict[str, object] = {}
     for org_id, key in ((mine, "mine"), (theirs, "theirs")):
-        async with org_session(org_id, engine=app_engine) as s:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
             patch = Patch(
                 org_id=org_id,
                 os_family="windows",
@@ -101,12 +102,12 @@ async def test_rls_hides_another_orgs_approval_from_an_unfiltered_select(
             await s.flush()
             ids[key] = approval.id
 
-    async with org_session(mine, engine=app_engine) as s:
+    async with org_session(mine, engine=app_engine, clients=ClientScope.all()) as s:
         visible = {row.id for row in (await s.execute(select(PatchApproval))).scalars()}
     assert visible == {ids["mine"]}, "an unfiltered SELECT must still be tenant-scoped"
 
     # ...and the other org can see its own, so the assertion above is not
     # passing merely because the row was never written.
-    async with org_session(theirs, engine=app_engine) as s:
+    async with org_session(theirs, engine=app_engine, clients=ClientScope.all()) as s:
         visible = {row.id for row in (await s.execute(select(PatchApproval))).scalars()}
     assert visible == {ids["theirs"]}

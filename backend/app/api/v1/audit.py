@@ -111,7 +111,9 @@ async def list_events(
     and its links are untouched — `GET /audit/verify` is unaffected by
     anything this route does.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         query = select(AuditEvent)
         if action:
             query = query.where(AuditEvent.action == action)
@@ -160,6 +162,8 @@ async def verify_chain(
     request: Request,
     ctx: AuthContext = Depends(require_permission("audit.read")),
 ) -> AuditVerifyResponse:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         result = await audit_service.verify(session, ctx.org_id)
     return AuditVerifyResponse(ok=result.ok, count=result.count, broken_at=result.broken_at)

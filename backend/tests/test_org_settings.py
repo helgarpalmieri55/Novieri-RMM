@@ -32,6 +32,7 @@ from app.api.v1.orgs import (
     SECRET_SHAPED_FRAGMENTS,
     SETTINGS_ALLOWLIST,
 )
+from app.core.client_scope import ClientScope
 from app.core.rbac import route_permission
 from app.core.router_inspect import flatten
 from app.core.tenancy import org_session
@@ -253,7 +254,7 @@ async def test_rls_refuses_a_cross_org_read_and_write_at_the_database(
     a = await api_env.create_org("orgs-rls-a")
     b = await api_env.create_org("orgs-rls-b")
 
-    async with org_session(a, engine=app_engine) as session:
+    async with org_session(a, engine=app_engine, clients=ClientScope.all()) as session:
         seen = (
             await session.execute(select(Organization.id).where(Organization.id == b))
         ).scalar_one_or_none()

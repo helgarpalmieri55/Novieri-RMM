@@ -47,6 +47,7 @@ from moto import mock_aws
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
@@ -243,12 +244,12 @@ async def _start(
 ) -> tuple[Any, dict[str, Any] | None]:
     with mock_aws():
         object_store = _object_store(tmp_path)
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             profile = await _make_profile(session, vault, org_id, actor_id)
             await session.commit()
             profile_id = profile.id
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             run, envelope = await start_provision_run(
                 session,
                 object_store,

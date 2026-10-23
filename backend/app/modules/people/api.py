@@ -96,7 +96,9 @@ async def list_people(
 ) -> list[PersonListRow]:
     """Everyone who works here, by name, with how many computers each uses.
     Accounts that have no person yet get one first."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         await service.sync_accounts(session, ctx.org_id)
         rows = await service.list_people(
             session, ctx.org_id, q=q, status=person_status, limit=limit
@@ -112,7 +114,9 @@ async def create_person(
     request: Request,
     ctx: AuthContext = Depends(require_permission("people.manage")),
 ) -> PersonOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             person = await service.create_person(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, **body.model_dump()
@@ -128,7 +132,9 @@ async def unmatched(
     ctx: AuthContext = Depends(require_permission("people.read")),
 ) -> UnmatchedOut:
     """Seats, computers and licences that are not linked to anyone yet."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         return UnmatchedOut.model_validate(await service.unmatched(session, ctx.org_id))
 
 
@@ -139,7 +145,9 @@ async def link_seat(
     request: Request,
     ctx: AuthContext = Depends(require_permission("people.manage")),
 ) -> PersonOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             seat = await service.link_seat(
                 session,
@@ -161,7 +169,9 @@ async def person_for_user(
     ctx: AuthContext = Depends(require_permission("people.read")),
 ) -> PersonOut:
     """The person behind a console or portal account."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         await service.sync_accounts(session, ctx.org_id)
         person = await service.person_for_user(session, ctx.org_id, user_id)
         if person is None:
@@ -176,7 +186,9 @@ async def device_person(
     ctx: AuthContext = Depends(require_permission("people.read")),
 ) -> DevicePersonOut:
     """Who uses this computer, and whether inventory or a person said so."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             link, person = await service.device_link(session, ctx.org_id, device_id)
         except PeopleError as exc:
@@ -191,7 +203,9 @@ async def set_device_person(
     request: Request,
     ctx: AuthContext = Depends(require_permission("people.manage")),
 ) -> DevicePersonOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await service.set_device_person(
                 session,
@@ -212,7 +226,9 @@ async def clear_device_override(
     request: Request,
     ctx: AuthContext = Depends(require_permission("people.manage")),
 ) -> DevicePersonOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await service.clear_device_override(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, device_id=device_id
@@ -236,7 +252,9 @@ async def get_person(
 ) -> PersonDetailOut:
     """Everything one person holds: computers, licences, subscriptions,
     open tickets, sign-in and the open checklist."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             detail = await person_detail(
                 session, org_id=ctx.org_id, viewer_id=ctx.user_id, person_id=person_id
@@ -257,7 +275,9 @@ async def update_person(
     request: Request,
     ctx: AuthContext = Depends(require_permission("people.manage")),
 ) -> PersonOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             person = await service.update_person(
                 session,
@@ -278,7 +298,9 @@ async def link_account(
     request: Request,
     ctx: AuthContext = Depends(require_permission("people.manage")),
 ) -> PersonOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             person = await service.link_account(
                 session,
@@ -299,7 +321,9 @@ async def add_login(
     request: Request,
     ctx: AuthContext = Depends(require_permission("people.manage")),
 ) -> LoginOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             row = await service.add_login(
                 session,
@@ -320,7 +344,9 @@ async def remove_login(
     request: Request,
     ctx: AuthContext = Depends(require_permission("people.manage")),
 ) -> Response:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await service.remove_login(
                 session,
@@ -348,7 +374,9 @@ async def start_checklist(
     request: Request,
     ctx: AuthContext = Depends(require_permission("people.manage")),
 ) -> ChecklistOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         if body.kind == "leaver":
             await _require_offboard(session, ctx)
         try:
@@ -373,7 +401,9 @@ async def update_step(
     request: Request,
     ctx: AuthContext = Depends(require_permission("people.manage")),
 ) -> ChecklistOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             row = await checklists.load_checklist(session, ctx.org_id, person_id, checklist_id)
             if row.kind == "leaver":
@@ -396,7 +426,9 @@ async def update_step(
 async def _close(
     request: Request, ctx: AuthContext, person_id: UUID, checklist_id: UUID, outcome: str
 ) -> ChecklistOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             row = await checklists.load_checklist(session, ctx.org_id, person_id, checklist_id)
             if row.kind == "leaver":

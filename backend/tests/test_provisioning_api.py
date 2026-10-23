@@ -13,6 +13,7 @@ from moto import mock_aws
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.models import Device, ProvisionRun, User
@@ -289,7 +290,7 @@ async def test_start_run_forbidden_for_read_only_ok_for_technician_no_secrets(ap
     _assert_no_secrets(ok)
 
     expected_user_id = await _user_id(api_env, org_id, tech)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         run = (
             await session.execute(
                 select(ProvisionRun).where(ProvisionRun.id == UUID(out["run_id"]))

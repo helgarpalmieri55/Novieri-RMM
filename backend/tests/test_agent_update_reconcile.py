@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -79,7 +80,9 @@ class Rig:
         is_rollback: bool = False,
     ) -> UUID:
         rings = rings or [svc.RingSpec("pilot", None, True)]
-        async with org_session(self.org_id, engine=self.env.app_engine) as s:
+        async with org_session(
+            self.org_id, engine=self.env.app_engine, clients=ClientScope.all()
+        ) as s:
             rollout = await svc.create_rollout(
                 s,
                 org_id=self.org_id,
@@ -97,13 +100,17 @@ class Rig:
             return rollout.id
 
     async def tick(self, now: datetime | None = None) -> list[tuple[UUID, dict[str, Any]]]:
-        async with org_session(self.org_id, engine=self.env.app_engine) as s:
+        async with org_session(
+            self.org_id, engine=self.env.app_engine, clients=ClientScope.all()
+        ) as s:
             return await reconcile.tick(
                 s, self.org_id, job_engine=self.engine, presign=self.presign, now=now
             )
 
     async def targets(self, rollout_id: UUID) -> dict[UUID, AgentUpdateTarget]:
-        async with org_session(self.org_id, engine=self.env.app_engine) as s:
+        async with org_session(
+            self.org_id, engine=self.env.app_engine, clients=ClientScope.all()
+        ) as s:
             rows = (
                 await s.execute(
                     select(AgentUpdateTarget).where(AgentUpdateTarget.rollout_id == rollout_id)
@@ -112,7 +119,9 @@ class Rig:
             return {t.device_id: t for t in rows}
 
     async def rollout(self, rollout_id: UUID) -> AgentUpdateRollout:
-        async with org_session(self.org_id, engine=self.env.app_engine) as s:
+        async with org_session(
+            self.org_id, engine=self.env.app_engine, clients=ClientScope.all()
+        ) as s:
             return await svc.get_rollout(s, rollout_id)
 
 
@@ -160,7 +169,7 @@ async def test_dispatch_goes_only_to_online_devices_within_the_batch(rig: Rig) -
 
 async def test_a_device_with_a_job_already_running_waits(rig: Rig) -> None:
     device = await seed_device(rig.admin, rig.org_id)
-    async with org_session(rig.org_id, engine=rig.env.app_engine) as s:
+    async with org_session(rig.org_id, engine=rig.env.app_engine, clients=ClientScope.all()) as s:
         other = await rig.engine.create(
             s, org_id=rig.org_id, type="hello", target_device_id=device, params={}
         )
@@ -304,7 +313,7 @@ async def test_the_pilot_pauses_on_its_first_failure(rig: Rig) -> None:
     await rig.tick()
     rollout = await rig.rollout(rollout_id)
     assert (rollout.state, rollout.pause_reason) == ("paused", "failure_threshold")
-    async with org_session(rig.org_id, engine=rig.env.app_engine) as s:
+    async with org_session(rig.org_id, engine=rig.env.app_engine, clients=ClientScope.all()) as s:
         paused = (
             await s.execute(
                 select(AuditEvent).where(AuditEvent.action == "agent.update.rollout_paused")
@@ -325,7 +334,7 @@ async def _ring_with(
 ) -> tuple[AgentUpdateRollout, AgentUpdateRing]:
     """A running rollout whose active ring holds targets in `states`, in
     resolution order (the last is the most recent)."""
-    async with org_session(rig.org_id, engine=rig.env.app_engine) as s:
+    async with org_session(rig.org_id, engine=rig.env.app_engine, clients=ClientScope.all()) as s:
         rollout = AgentUpdateRollout(
             org_id=rig.org_id,
             target_version=rig.version,
@@ -365,7 +374,7 @@ async def _ring_with(
 
 
 async def _breached(rig: Rig, rollout: AgentUpdateRollout, ring: AgentUpdateRing) -> bool:
-    async with org_session(rig.org_id, engine=rig.env.app_engine) as s:
+    async with org_session(rig.org_id, engine=rig.env.app_engine, clients=ClientScope.all()) as s:
         return await reconcile.threshold_breached(s, rollout, ring)
 
 
@@ -417,7 +426,7 @@ async def test_a_ring_is_never_advanced_by_the_reconciler(rig: Rig) -> None:
     await set_job(rig.admin, job_id, JobStatus.succeeded, {"outcome": "already_current"})
     await rig.tick()
     await rig.tick()
-    async with org_session(rig.org_id, engine=rig.env.app_engine) as s:
+    async with org_session(rig.org_id, engine=rig.env.app_engine, clients=ClientScope.all()) as s:
         states = [r.state for r in await svc.rings_of(s, rollout_id)]
     assert states == ["done", "pending"]
     assert (await rig.rollout(rollout_id)).state == "running"

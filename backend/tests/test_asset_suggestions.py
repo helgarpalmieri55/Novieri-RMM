@@ -21,6 +21,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Agent, AuditEvent, Device, SuggestedAssetMatch
 from tests.conftest import ApiEnv
@@ -34,7 +35,7 @@ _PROVENANCE_FOR = {"agent": "agent", "manual": "operator", "discovery": "promote
 
 async def _pair(api_env: ApiEnv, org_id: UUID, **kw: Any) -> tuple[UUID, UUID, UUID]:
     """A just-enrolled device, an older record, and an open suggestion."""
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         enrolled = Device(org_id=org_id, hostname="wks-001", os_family="linux")
         candidate_source = kw.pop("candidate_source", "manual")
         older = Device(
@@ -127,7 +128,7 @@ async def test_rejecting_closes_the_question_and_changes_no_rows(
     )
     assert resp.status_code == 200, resp.text
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         row = await session.get(SuggestedAssetMatch, suggestion_id)
         assert row is not None
         assert row.resolution == "rejected"
@@ -165,7 +166,7 @@ async def test_linking_moves_the_agent_and_retires_the_duplicate(
     )
     assert resp.status_code == 200, resp.text
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         agent = (
             await session.execute(select(Agent).where(Agent.org_id == org_id))
         ).scalar_one()
@@ -193,7 +194,7 @@ async def test_linking_is_audited_naming_both_rows(api_env: ApiEnv) -> None:
         json={"resolution": "linked"},
         headers=await api_env.headers(org_id, admin),
     )
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = list(
             (
                 await session.execute(

@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Permission, Role, RolePermission, User, UserRole
 from app.modules.agent_push import runs
@@ -343,7 +344,9 @@ async def _finish_in_flight(api_env, run_id: UUID, outcome: str) -> int:
 
 
 async def _advance(api_env, world, run_id: UUID, dispatcher: Any) -> list[Any]:
-    async with org_session(world.org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         return await runs.advance_run(
             session, world.org.org_id, run_id, dispatcher=dispatcher
         )

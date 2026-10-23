@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, EnrollmentToken, Job
 from app.modules.agent_push import credential_scope, preflight
@@ -29,7 +30,9 @@ def _register_push_job_types() -> None:
 
 
 async def _dispatch_one(app_engine: AsyncEngine, world: RunWorld, dispatcher, run_id):
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         credential = await credential_scope.resolve_push_credential(
             session, world.org.org_id, world.credential_id
         )

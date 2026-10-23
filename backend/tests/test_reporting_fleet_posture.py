@@ -22,6 +22,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import admin_session, org_session
 from app.modules.reporting.definitions.fleet_posture import (
     _SEVERITY_LADDER,
@@ -49,7 +50,7 @@ async def _run(api_env: Any, org_id: UUID, **params: Any) -> Any:
     """The report through `org_session` on the RLS-constrained app engine --
     the way a request runs. The API-level path is exercised separately; this is
     for the cases that assert on typed rows rather than on JSON."""
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         return await execute_report(
             session, _definition(), FleetPostureParams(**params), org_id=org_id
         )

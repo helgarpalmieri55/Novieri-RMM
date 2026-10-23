@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Deployment, DeploymentResult, Device, Organization, Package
 from app.modules.deploy.models import Script, ScriptRun
@@ -151,7 +152,7 @@ async def test_deployment_report_per_device_rows_and_counts(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed_org(admin_engine, f"drpt-{uuid4().hex[:6]}")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         report = await deployment_report(session, ids["org_id"], ids["deployment_a"])
 
         assert report["state"] == "complete"
@@ -183,7 +184,7 @@ async def test_deployment_report_unknown_deployment_returns_none_fields(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed_org(admin_engine, f"drpt-none-{uuid4().hex[:6]}")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         report = await deployment_report(session, ids["org_id"], uuid4())
         assert report["state"] is None
         assert report["action"] is None
@@ -202,7 +203,7 @@ async def test_fleet_deploy_report_success_rate_math_and_script_history(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     ids = await _seed_org(admin_engine, f"frpt-{uuid4().hex[:6]}")
-    async with org_session(ids["org_id"], engine=app_engine) as session:
+    async with org_session(ids["org_id"], engine=app_engine, clients=ClientScope.all()) as session:
         report = await fleet_deploy_report(session, ids["org_id"])
 
         by_id = {d["deployment_id"]: d for d in report["deployments"]}
@@ -261,7 +262,7 @@ async def test_fleet_deploy_report_no_result_rows_yields_zero_success_rate(
         org_id, deployment_id = org.id, deployment.id
         await session.commit()
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         report = await fleet_deploy_report(session, org_id)
         dep = next(d for d in report["deployments"] if d["deployment_id"] == deployment_id)
         assert dep["device_count"] == 0
@@ -275,7 +276,9 @@ async def test_a_second_orgs_rows_never_appear_under_rls(
     ids_a = await _seed_org(admin_engine, f"drpt-tenant-a-{uuid4().hex[:6]}")
     ids_b = await _seed_org(admin_engine, f"drpt-tenant-b-{uuid4().hex[:6]}")
 
-    async with org_session(ids_a["org_id"], engine=app_engine) as session:
+    async with org_session(
+        ids_a["org_id"], engine=app_engine, clients=ClientScope.all()
+    ) as session:
         fleet = await fleet_deploy_report(session, ids_a["org_id"])
         fleet_deployment_ids = {d["deployment_id"] for d in fleet["deployments"]}
         assert ids_b["deployment_a"] not in fleet_deployment_ids
@@ -297,7 +300,9 @@ async def test_a_second_orgs_rows_never_appear_under_rls(
             "pending": 0,
         }
 
-    async with org_session(ids_b["org_id"], engine=app_engine) as session:
+    async with org_session(
+        ids_b["org_id"], engine=app_engine, clients=ClientScope.all()
+    ) as session:
         fleet_b = await fleet_deploy_report(session, ids_b["org_id"])
         fleet_b_deployment_ids = {d["deployment_id"] for d in fleet_b["deployments"]}
         assert ids_a["deployment_a"] not in fleet_b_deployment_ids

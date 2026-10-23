@@ -12,6 +12,7 @@ from moto import mock_aws
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
@@ -84,7 +85,7 @@ async def _protected(admin_engine: AsyncEngine, app_engine: AsyncEngine, vault: 
 
 async def _run(app_engine: AsyncEngine, vault: Any, store: ObjectStore, org: Any,
                engine: _FakeJobEngine, now: datetime) -> list[Any]:
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return await dispatch_due_test_restores(session, engine, vault, store,
                                                 org_id=org.org_id, now=now,
                                                 rng=random.Random(7))

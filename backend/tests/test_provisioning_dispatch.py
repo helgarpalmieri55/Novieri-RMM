@@ -17,6 +17,7 @@ from moto import mock_aws
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -118,12 +119,12 @@ async def test_start_provision_run_windows_profile(
 
     with mock_aws():
         object_store = _object_store(tmp_path)
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             profile = await _make_profile(session, vault, org_id, actor_id)
             await session.commit()
             profile_id = profile.id
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             run, _wake = await start_provision_run(
                 session,
                 object_store,
@@ -147,7 +148,7 @@ async def test_start_provision_run_windows_profile(
         answer_bytes = await object_store.get_provision_object(answer_ref)
         assert b"WK-0001" in answer_bytes
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             from app.models import EnrollmentToken
 
             token_row = (
@@ -186,12 +187,12 @@ async def test_start_provision_run_no_secret_or_token_leakage(
 
     with mock_aws():
         object_store = _object_store(tmp_path)
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             profile = await _make_profile(session, vault, org_id, actor_id)
             await session.commit()
             profile_id = profile.id
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             run, _wake = await start_provision_run(
                 session,
                 object_store,
@@ -213,7 +214,7 @@ async def test_start_provision_run_no_secret_or_token_leakage(
         # assert the KNOWN plaintext secret material (the admin/domain-join
         # passwords planted in post_config) is absent everywhere, and that no
         # audit metadata field contains a "<token_id>.<secret>"-shaped string.
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             events = (
                 await session.execute(
                     select(AuditEvent).where(AuditEvent.org_id == org_id)
@@ -255,7 +256,7 @@ async def test_start_provision_run_macos_skips_answer_file(
 
     with mock_aws():
         object_store = _object_store(tmp_path)
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             profile = await _make_profile(
                 session,
                 vault,
@@ -268,7 +269,7 @@ async def test_start_provision_run_macos_skips_answer_file(
             await session.commit()
             profile_id = profile.id
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             run, _wake = await start_provision_run(
                 session,
                 object_store,
@@ -301,12 +302,12 @@ async def test_start_provision_run_disabled_profile_raises(
 
     with mock_aws():
         object_store = _object_store(tmp_path)
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             profile = await _make_profile(session, vault, org_id, actor_id, enabled=False)
             await session.commit()
             profile_id = profile.id
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             with pytest.raises(ProvisioningValidationError):
                 await start_provision_run(
                     session,
@@ -330,7 +331,7 @@ async def test_start_provision_run_missing_profile_raises(
 
     with mock_aws():
         object_store = _object_store(tmp_path)
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             with pytest.raises(ProvisioningValidationError):
                 await start_provision_run(
                     session,
@@ -360,7 +361,9 @@ async def test_start_provision_run_missing_image_raises(
 
     with mock_aws():
         object_store = _object_store(tmp_path)
-        async with org_session(other_org_id, engine=app_engine) as session:
+        async with org_session(
+            other_org_id, engine=app_engine, clients=ClientScope.all()
+        ) as session:
             foreign_image = await create_image(
                 session,
                 org_id=other_org_id,
@@ -374,7 +377,7 @@ async def test_start_provision_run_missing_image_raises(
             await session.commit()
             foreign_image_id = foreign_image.id
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             profile = await upsert_profile(
                 session,
                 vault,
@@ -390,7 +393,7 @@ async def test_start_provision_run_missing_image_raises(
             await session.commit()
             profile_id = profile.id
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             with pytest.raises(ProvisioningValidationError):
                 await start_provision_run(
                     session,
@@ -436,12 +439,12 @@ async def test_start_provision_run_audits_prepare_and_start_without_secrets(
 
     with mock_aws():
         object_store = _object_store(tmp_path)
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             profile = await _make_profile(session, vault, org_id, actor_id)
             await session.commit()
             profile_id = profile.id
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             run, _wake = await start_provision_run(
                 session,
                 object_store,
@@ -456,7 +459,7 @@ async def test_start_provision_run_audits_prepare_and_start_without_secrets(
             await session.commit()
             run_id = run.id
 
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             prepare_event = (
                 await session.execute(
                     select(AuditEvent).where(
@@ -499,12 +502,12 @@ async def test_start_provision_run_raises_for_an_id_rls_has_hidden(
 
     with mock_aws():
         object_store = _object_store(tmp_path)
-        async with org_session(org_a, engine=app_engine) as session:
+        async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
             profile = await _make_profile(session, vault, org_a, actor_a)
             await session.commit()
             profile_id = profile.id
 
-        async with org_session(org_b, engine=app_engine) as session:
+        async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
             with pytest.raises(ProvisioningValidationError):
                 await start_provision_run(
                     session,

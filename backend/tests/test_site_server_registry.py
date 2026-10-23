@@ -29,6 +29,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.modules.site_server import registry
 from app.modules.site_server.errors import (
@@ -80,7 +81,7 @@ async def test_promote_stores_the_declaration_and_audits_it(
     await seed_agent(admin_engine, org.org_id, org.device_id)
     site_id = await seed_site(admin_engine, org.org_id)
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = await registry.promote(
             session,
             org.org_id,
@@ -119,7 +120,7 @@ async def test_promote_succeeds_with_no_observation_at_all(
     org = await seed_org(admin_engine, "ssr-b")
     await seed_agent(admin_engine, org.org_id, org.device_id)
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await registry.promote(
             session, org.org_id, device_id=org.device_id, segments=["10.99.0.0/16"]
         )
@@ -136,7 +137,7 @@ async def test_the_name_defaults_to_the_device_hostname(
     device_id = await seed_device(admin_engine, org.org_id, hostname="branch-manila-01")
     await seed_agent(admin_engine, org.org_id, device_id)
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         default_named = await registry.promote(
             session, org.org_id, device_id=device_id, segments=["10.20.0.0/16"]
         )
@@ -144,7 +145,7 @@ async def test_the_name_defaults_to_the_device_hostname(
 
     other = await seed_device(admin_engine, org.org_id, hostname="branch-cebu-01")
     await seed_agent(admin_engine, org.org_id, other)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         explicit = await registry.promote(
             session, org.org_id, device_id=other, segments=["10.21.0.0/16"], name="Cebu edge"
         )
@@ -201,7 +202,7 @@ async def test_a_device_with_no_agent_is_refused_and_its_neighbour_is_not(
     await seed_agent(admin_engine, org.org_id, with_agent)
     without_agent = await seed_device(admin_engine, org.org_id, hostname="no-agent")
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(SiteServerValidationError, match="no enrolled agent"):
             await registry.promote(
                 session, org.org_id, device_id=without_agent, segments=["10.20.0.0/16"]
@@ -209,7 +210,7 @@ async def test_a_device_with_no_agent_is_refused_and_its_neighbour_is_not(
 
     assert await site_server_rows(admin_engine, org.org_id) == []
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await registry.promote(
             session, org.org_id, device_id=with_agent, segments=["10.20.0.0/16"]
         )
@@ -228,12 +229,12 @@ async def test_double_promotion_leaves_exactly_one_row(
     org = await seed_org(admin_engine, "ssr-g")
     await seed_agent(admin_engine, org.org_id, org.device_id)
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await registry.promote(
             session, org.org_id, device_id=org.device_id, segments=["10.20.0.0/16"]
         )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(SiteServerValidationError, match="already a site server"):
             await registry.promote(
                 session, org.org_id, device_id=org.device_id, segments=["10.21.0.0/16"]
@@ -252,14 +253,14 @@ async def test_host_bits_refused_and_a_network_prefix_accepted(
     org = await seed_org(admin_engine, "ssr-h")
     await seed_agent(admin_engine, org.org_id, org.device_id)
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(SiteServerValidationError):
             await registry.promote(
                 session, org.org_id, device_id=org.device_id, segments=["10.20.7.4/24"]
             )
     assert await site_server_rows(admin_engine, org.org_id) == []
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await registry.promote(
             session, org.org_id, device_id=org.device_id, segments=["10.20.7.0/24"]
         )
@@ -283,7 +284,7 @@ async def test_cache_role_refused_and_wake_accepted(
     org = await seed_org(admin_engine, "ssr-i")
     await seed_agent(admin_engine, org.org_id, org.device_id)
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(SiteServerValidationError) as excinfo:
             await registry.promote(
                 session,
@@ -295,7 +296,7 @@ async def test_cache_role_refused_and_wake_accepted(
     assert "§4.4" in str(excinfo.value)
     assert await site_server_rows(admin_engine, org.org_id) == []
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = await registry.promote(
             session,
             org.org_id,
@@ -318,7 +319,7 @@ async def test_zero_and_thirty_three_segments_are_refused_by_the_service(
     org = await seed_org(admin_engine, "ssr-j")
     await seed_agent(admin_engine, org.org_id, org.device_id)
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(SiteServerValidationError, match="at least one segment"):
             await registry.promote(session, org.org_id, device_id=org.device_id, segments=[])
         with pytest.raises(SiteServerValidationError, match="at most 32"):
@@ -386,7 +387,7 @@ async def test_list_filters_by_enabled_site_and_containment(
         admin_engine, org.org_id, device_id=disabled, segments=["10.20.0.0/16"], enabled=False
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         by_segment = await registry.list_site_servers(session, org.org_id, segment="10.20.7.0/24")
         by_enabled = await registry.list_site_servers(session, org.org_id, enabled=True)
         by_site = await registry.list_site_servers(session, org.org_id, ipam_site_id=site_id)
@@ -439,7 +440,7 @@ async def test_a_segment_filtered_list_is_ordered_most_specific_first(
         created_at=datetime(2026, 8, 1, 9, 2, tzinfo=UTC),
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         by_address = await registry.list_site_servers(session, org.org_id, segment="10.20.7.5")
         by_prefix = await registry.list_site_servers(
             session, org.org_id, segment="10.20.7.0/24"
@@ -476,7 +477,7 @@ async def test_update_changes_segments_and_records_before_and_after(
         admin_engine, org.org_id, device_id=org.device_id, segments=["10.20.0.0/16"]
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await registry.update_site_server(
             session,
             org.org_id,
@@ -502,7 +503,7 @@ async def test_update_refuses_a_cache_role_and_an_unknown_field(
     site_server_id = await seed_site_server(
         admin_engine, org.org_id, device_id=org.device_id, segments=["10.20.0.0/16"]
     )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(SiteServerValidationError, match="§4.4"):
             await registry.update_site_server(
                 session, org.org_id, site_server_id, changes={"roles": ["pxe"]}
@@ -526,7 +527,7 @@ async def test_demote_deletes_the_row_and_audits(
         admin_engine, org.org_id, device_id=org.device_id, segments=["10.20.0.0/16"]
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await registry.demote(
             session, org.org_id, doomed, reason="decommissioned", actor_id=org.user_id
         )

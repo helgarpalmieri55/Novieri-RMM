@@ -280,7 +280,9 @@ async def list_users(
     Needs no Keycloak: this is the ITMS projection, which is what every other
     surface in the platform joins against.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         views = await service.list_users(session, org_id=ctx.org_id)
     return UserListOut(users=[_user_out(v) for v in views])
 
@@ -293,7 +295,9 @@ async def effective_permissions(
 ) -> EffectivePermissionsOut:
     """The union of this user's roles' codes, annotated with which role granted
     each and whether the grant is org-wide or scoped to a device group."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             grants = await service.effective_permissions(
                 session, org_id=ctx.org_id, user_id=user_id
@@ -338,7 +342,9 @@ async def create_user(
     without a restart.
     """
     provisioning = _provisioning(config)
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             created = await service.create_user(
                 session,
@@ -383,7 +389,9 @@ async def assign_role(
     No Keycloak involvement -- roles are an ITMS concept -- so this works on a
     deployment that has not configured provisioning.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             view = await service.assign_role(
                 session,
@@ -418,7 +426,9 @@ async def remove_role(
     and refused outright for `super-admin`: no console surface can grant that
     role back, so revoking it is a one-way door.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await service.remove_role(
                 session,
@@ -445,7 +455,9 @@ async def _set_enabled(
     enabled: bool,
 ) -> UserOut:
     provisioning = _provisioning(config)
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             view = await service.set_enabled(
                 session,
@@ -514,7 +526,9 @@ async def reset_password(
     the mail IS the action and there is no partial success to report.
     """
     provisioning = _provisioning(config)
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await service.send_password_reset(
                 session, provisioning, org_id=ctx.org_id, actor_id=ctx.user_id, user_id=user_id
@@ -540,7 +554,9 @@ async def resend_enrolment(
     pass on by hand.
     """
     provisioning = _provisioning(config)
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await service.resend_enrolment(
                 session, provisioning, org_id=ctx.org_id, actor_id=ctx.user_id, user_id=user_id
@@ -574,7 +590,9 @@ async def delete_user(
     holder of `super-admin`.
     """
     provisioning = _provisioning(config)
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await service.delete_user(
                 session, provisioning, org_id=ctx.org_id, actor_id=ctx.user_id, user_id=user_id

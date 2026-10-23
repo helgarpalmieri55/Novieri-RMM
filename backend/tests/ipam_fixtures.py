@@ -23,6 +23,8 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
+
 
 def admin_engine_of(env_or_engine: Any) -> AsyncEngine:
     """`api_env` or a bare engine -> the admin engine."""
@@ -524,7 +526,7 @@ async def complete_sweep(
     app = getattr(app_engine, "app_engine", app_engine)
     admin = admin_engine_of(admin_engine)
     engine = JobEngine(signer=LocalEd25519Signer(Path(tmp_path) / "sweep.key"))
-    async with org_session(fx.org_id, engine=app) as session:
+    async with org_session(fx.org_id, engine=app, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == fx.job_id))).scalar_one()
         await engine.complete(session, job, state="succeeded", result=doc)
     async with AsyncSession(admin) as session:

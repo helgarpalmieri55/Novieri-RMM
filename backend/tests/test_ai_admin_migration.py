@@ -55,6 +55,7 @@ from sqlalchemy import text as sqltext
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.rbac import PERMISSIONS
 from app.core.tenancy import org_session
 
@@ -139,7 +140,7 @@ async def _insert_outcome(engine: AsyncEngine, org_id: UUID, sql: str, **params:
     when it refused. Compared instead of `pytest.raises` so a failure prints
     what actually happened rather than `DID NOT RAISE`."""
     try:
-        async with org_session(org_id, engine=engine) as session:
+        async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
             await session.execute(sqltext(sql), params)
     except DBAPIError as exc:  # IntegrityError / ProgrammingError both derive
         return _refusal(exc.orig or exc)
@@ -209,7 +210,7 @@ async def test_cross_org_read_of_ai_session_is_isolated(
     await seed_session(admin_engine, org_a, user_a)
     mine = await seed_session(admin_engine, org_b, user_b)
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         seen = [r[0] for r in (await session.execute(sqltext("SELECT id FROM ai_session"))).all()]
 
     # Seeded in BOTH orgs: `[mine]` and `[]` are different failures, so an
@@ -239,7 +240,7 @@ async def test_cross_org_read_of_ai_message_is_isolated(
         s=sess_b,
     )
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         seen = [
             r[0] for r in (await session.execute(sqltext("SELECT content FROM ai_message"))).all()
         ]
@@ -265,7 +266,7 @@ async def test_cross_org_read_of_ai_injection_flag_is_isolated(
             e=excerpt,
         )
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         seen = [
             r[0]
             for r in (
@@ -289,7 +290,7 @@ async def test_cross_org_read_of_ai_settings_is_isolated(
     await seed_settings(admin_engine, org_a, transcript_retention_days=111)
     await seed_settings(admin_engine, org_b, transcript_retention_days=222)
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         seen = [
             r[0]
             for r in (

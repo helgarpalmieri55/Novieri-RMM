@@ -23,6 +23,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Organization, SeatAssignment, Subscription, User, Vendor
 from app.modules.subscriptions.reporting import (
@@ -205,7 +206,7 @@ async def test_spend_summary_hand_computed_by_currency_vendor_category_owner(
         status="cancelled",
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         report = await spend_summary(s, org_id)
 
     by_currency = {row["currency"]: row for row in report["by_currency"]}
@@ -272,7 +273,7 @@ async def test_spend_summary_null_vendor_and_owner_grouped_together(
         billing_cycle="monthly",
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         report = await spend_summary(s, org_id)
 
     # a subscription with no vendor rolls up under a bucket with both
@@ -317,7 +318,7 @@ async def test_spend_summary_foreign_org_vendor_name_does_not_leak(
         status="active",
     )
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         report = await spend_summary(s, org_a)
 
     vendor_row = next(row for row in report["by_vendor"] if row["currency"] == "USD")
@@ -415,7 +416,7 @@ async def test_renewal_calendar_hand_computed(
         status="active",
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await renewal_calendar(s, org_id, now=now)
 
     by_sub = {row["subscription_id"]: row for row in rows}
@@ -469,7 +470,7 @@ async def test_renewal_calendar_within_days_boundary_is_inclusive(
         status="active",
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await renewal_calendar(s, org_id, now=now, within_days=30)
 
     assert any(
@@ -499,7 +500,7 @@ async def test_renewal_calendar_notice_deadline_today_is_inclusive(
         status="active",
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await renewal_calendar(s, org_id, now=now)
 
     row = next(r for r in rows if r["subscription_id"] == sub_id)
@@ -528,7 +529,7 @@ async def test_renewal_calendar_renews_at_today_is_inclusive(
         status="active",
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await renewal_calendar(s, org_id, now=now)
 
     row = next(r for r in rows if r["subscription_id"] == sub_id)
@@ -562,7 +563,7 @@ async def test_idle_seats_hand_computed(
     await _seed_seat(admin_engine, org_id, actor_id, sub_id, released=False)
     await _seed_seat(admin_engine, org_id, actor_id, sub_id, released=True)  # not active
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await idle_seats(s, org_id)
 
     assert len(rows) == 1
@@ -592,7 +593,7 @@ async def test_idle_seats_zero_seats_guarded(
         status="active",
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await idle_seats(s, org_id)
 
     row = next(r for r in rows if r["subscription_id"] == sub_id)
@@ -623,7 +624,7 @@ async def test_idle_seats_clamps_over_assigned_subscription_to_zero(
     for _ in range(7):
         await _seed_seat(admin_engine, org_id, actor_id, sub_id, released=False)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await idle_seats(s, org_id)
 
     row = next(r for r in rows if r["subscription_id"] == sub_id)
@@ -641,7 +642,7 @@ async def test_idle_seats_excludes_cancelled_subscriptions(
         admin_engine, org_id, actor_id, seats=10, status="cancelled"
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await idle_seats(s, org_id)
 
     assert rows == []
@@ -677,7 +678,7 @@ async def test_export_rows_has_expected_fields_and_no_org_id(
         status="active",
     )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await export_rows(s, org_id)
 
     assert len(rows) == 1
@@ -706,7 +707,7 @@ async def test_export_rows_ordered_deterministically_by_service_name(
     await _seed_subscription(admin_engine, org_id, actor_id, service_name="Zeta")
     await _seed_subscription(admin_engine, org_id, actor_id, service_name="Alpha")
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         rows = await export_rows(s, org_id)
 
     names = [row["service_name"] for row in rows]
@@ -752,7 +753,7 @@ async def test_a_second_orgs_rows_are_excluded_from_all_four_reports_by_rls(
     )
     await _seed_seat(admin_engine, org_a, actor_a, sub_a, released=False)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         spend = await spend_summary(s, org_a)
         renewals = await renewal_calendar(s, org_a, now=now)
         idle = await idle_seats(s, org_a)

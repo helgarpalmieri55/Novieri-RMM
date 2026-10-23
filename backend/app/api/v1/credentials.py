@@ -105,7 +105,7 @@ async def create_credential(
 ) -> CredentialOut:
     state = request.app.state
     realm = _windows_domain_realm(body.secret) if body.type == _WINDOWS_DOMAIN else None
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         credential = Credential(
             org_id=ctx.org_id,
             name=body.name,
@@ -148,7 +148,9 @@ async def list_credentials(
     request: Request,
     ctx: AuthContext = Depends(require_permission("credentials.read")),
 ) -> list[CredentialOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = (
             (await session.execute(select(Credential).order_by(Credential.name)))
             .scalars()
@@ -163,7 +165,9 @@ async def get_credential(
     request: Request,
     ctx: AuthContext = Depends(require_permission("credentials.read")),
 ) -> CredentialOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         return _out(await _get(session, ctx.org_id, credential_id))
 
 
@@ -179,7 +183,7 @@ async def checkout_credential(
     Requires credentials.checkout — a distinct privilege from credentials.read
     (metadata), so a read-only auditor cannot exfiltrate plaintext secrets."""
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         credential = await _get(session, ctx.org_id, credential_id)
         if credential.type in _NEVER_CHECKED_OUT:
             raise HTTPException(
@@ -213,7 +217,7 @@ async def update_credential(
     ctx: AuthContext = Depends(require_permission("credentials.manage")),
 ) -> CredentialOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         credential = await _get(session, ctx.org_id, credential_id)
         credential.name = body.name
         if body.secret is not None:
@@ -252,7 +256,9 @@ async def delete_credential(
     request: Request,
     ctx: AuthContext = Depends(require_permission("credentials.manage")),
 ) -> dict[str, bool]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         credential = await _get(session, ctx.org_id, credential_id)
         await audit_service.record(
             session,

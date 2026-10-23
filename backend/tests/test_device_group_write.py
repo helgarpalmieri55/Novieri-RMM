@@ -30,6 +30,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.models import (
     AuditEvent,
     BackupPolicy,
@@ -829,7 +830,7 @@ async def test_an_archived_group_cannot_become_a_new_rbac_scope(api_env: Any) ->
         await api_env.client.delete(f"{GROUPS}/{group['id']}", headers=headers)
     ).status_code == 204
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         try:
             await _visible_group(session, org_id, UUID(group["id"]))
         except UserAdminError as exc:

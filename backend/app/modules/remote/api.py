@@ -65,7 +65,9 @@ def require_any_permission(*codes: str) -> Callable[..., Coroutine[Any, Any, Aut
     async def dependency(
         request: Request, ctx: AuthContext = Depends(bound_auth_context)
     ) -> AuthContext:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             allowed = False
             for code in codes:
                 if await has_permission(session, ctx.user_id, code):
@@ -218,7 +220,7 @@ async def start_session(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             tr("{protocol} is retired; start a screen session instead", protocol=body.protocol),
         )
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         device = (
             await session.execute(select(Device).where(Device.id == body.device_id))
         ).scalar_one_or_none()
@@ -259,7 +261,9 @@ async def list_sessions(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> SessionListResponse:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         query = select(RemoteSession)
         if state_filter:
             query = query.where(RemoteSession.state == state_filter)
@@ -286,7 +290,9 @@ async def get_session(
     request: Request,
     ctx: AuthContext = Depends(require_any_permission(*_READ_PERMS)),
 ) -> SessionOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         row = (
             await session.execute(
                 select(RemoteSession).where(RemoteSession.id == session_id)
@@ -305,7 +311,7 @@ async def stop_session(
 ) -> SessionOut:
     state = request.app.state
     service = state.remote_service
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         row = (
             await session.execute(
                 select(RemoteSession).where(RemoteSession.id == session_id)
@@ -337,7 +343,9 @@ async def get_recording(
     request: Request,
     ctx: AuthContext = Depends(require_permission("remote.recordings.read")),
 ) -> Response:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         row = (
             await session.execute(
                 select(RemoteSession).where(RemoteSession.id == session_id)
@@ -372,7 +380,9 @@ async def list_policies(
     request: Request,
     ctx: AuthContext = Depends(require_permission("remote.control")),
 ) -> list[PolicyOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = (
             (
                 await session.execute(
@@ -392,7 +402,7 @@ async def upsert_policy(
     ctx: AuthContext = Depends(require_permission("remote.policy.manage")),
 ) -> PolicyOut:
     state = request.app.state
-    async with org_session(ctx.org_id, engine=state.app_engine) as session:
+    async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         # Locate the existing row to update. For the org-default (device_group_id
         # IS NULL) we must NOT create a second row: Postgres's UNIQUE allows
         # duplicate NULLs, so single-org-default is enforced here in code by

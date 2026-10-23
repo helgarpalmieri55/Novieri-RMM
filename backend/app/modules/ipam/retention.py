@@ -108,6 +108,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Organization
 from app.modules.ipam.models import IpamDrift, IpamObservation, IpamSweepRun
@@ -275,7 +276,7 @@ async def sweep_all_orgs(
     total = 0
     for org_id in org_ids:
         try:
-            async with org_session(org_id, engine=engine) as scoped:
+            async with org_session(org_id, engine=engine, clients=ClientScope.all()) as scoped:
                 counts = await sweep_org(scoped, org_id, now=stamp)
                 deleted = sum(counts.values())
                 if deleted:

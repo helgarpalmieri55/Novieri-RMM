@@ -18,6 +18,7 @@ from fastapi.routing import APIRoute
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from app.core.client_scope import ClientScope
 from app.core.rbac import _walk_dependant, route_permission
 from app.core.tenancy import org_session
 
@@ -440,7 +441,9 @@ async def test_the_statement_timeout_applies(api_env: Any) -> None:
     """
     org_id = await api_env.create_org("rep-timeout")
     with pytest.raises(ReportTimeout) as exc:
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await run_bounded(
                 session,
                 select(func.pg_sleep(2)),
@@ -459,7 +462,9 @@ async def test_a_non_timeout_database_error_is_not_reported_as_a_timeout(
     window while the real defect sat in the SQL."""
     org_id = await api_env.create_org("rep-error")
     with pytest.raises(Exception) as exc:  # noqa: PT011
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await run_bounded(session, select(func.no_such_function_at_all()))
     assert not isinstance(exc.value, ReportTimeout)
 
@@ -478,7 +483,7 @@ async def test_the_statement_timeout_does_not_leak_to_the_next_checkout(
     engine = create_async_engine(pg_cluster.app_url, pool_size=1, max_overflow=0)
     try:
         org_id = uuid4()
-        async with org_session(org_id, engine=engine) as session:
+        async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
             await run_bounded(session, select(func.now()), timeout_ms=50)
             inside = (await session.execute(text("SHOW statement_timeout"))).scalar_one()
         assert inside == "50ms", inside

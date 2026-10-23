@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.core.wire import InstallOutcome
@@ -115,7 +116,7 @@ async def test_installed_outcome_flips_result_and_completes_deployment(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, deployment_id, device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = AppDeployResult(
             outcomes=[
                 InstallOutcome(
@@ -155,7 +156,7 @@ async def test_failed_outcome_fails_deployment(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, deployment_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = AppDeployResult(
             outcomes=[
                 InstallOutcome(identifier="Acme-1.2", state="failed", exit_code=1)
@@ -183,7 +184,7 @@ async def test_not_all_terminal_leaves_deployment_state_unchanged(
     """A deployment with more than one device result must not roll up until
     every device's result is terminal."""
     org_id, deployment_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         deployment = (
             await session.execute(select(Deployment).where(Deployment.id == deployment_id))
         ).scalar_one()
@@ -219,7 +220,7 @@ async def test_not_applicable_outcome_completes_deployment(
     result row to `not_applicable` and, as the only device, roll the
     deployment to `complete`."""
     org_id, deployment_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = AppDeployResult(
             outcomes=[InstallOutcome(identifier="Acme-1.2", state="not_applicable")]
         )
@@ -248,7 +249,7 @@ async def test_out_of_domain_state_coerced_to_failed_and_rolls_up(
     instead be coerced to `failed` — a terminal state — with the original
     value recorded in the audit metadata so the operator can see why."""
     org_id, deployment_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = AppDeployResult(
             outcomes=[InstallOutcome(identifier="Acme-1.2", state="succeeded", exit_code=0)]
         )
@@ -282,7 +283,7 @@ async def test_empty_outcomes_marks_failed_without_raising(
     instead land the result row on a terminal `failed` state with a clear
     note, and still roll up the deployment — no exception, no wedge."""
     org_id, deployment_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = AppDeployResult(outcomes=[])
         await ingest_deploy_result(session, job, result)  # must not raise
 
@@ -314,7 +315,7 @@ async def test_no_matching_result_row_is_a_graceful_no_op(
     row must never raise — the agent's report should never be able to fail
     the job over server-side bookkeeping."""
     org_id, _deployment_id, _device_id, job = await _setup_job(admin_engine)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         # Detach the row from this job so there's nothing to match.
         dep_result = (
             await session.execute(
@@ -345,7 +346,7 @@ async def test_another_orgs_job_row_is_invisible_to_the_result_session_under_rls
     org_a, _deployment_a, _device_a, job_a = await _setup_job(admin_engine)
     org_b, _deployment_b, _device_b, _job_b = await _setup_job(admin_engine)
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         result = AppDeployResult(
             outcomes=[InstallOutcome(identifier="Acme-1.2", state="installed", exit_code=0)]
         )
@@ -359,7 +360,7 @@ async def test_another_orgs_job_row_is_invisible_to_the_result_session_under_rls
         ).scalars().all()
         assert rows == []  # org B's RLS-scoped session cannot see org A's row
 
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         dep_result = (
             await session.execute(
                 select(DeploymentResult).where(DeploymentResult.job_id == job_a.id)
@@ -383,7 +384,7 @@ async def test_valid_result_through_job_engine_reconciles_and_queues_ui_event(
 ) -> None:
     org_id, deployment_id, device_id, job = await _setup_job(admin_engine)
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job.id))).scalar_one()
         await engine.mark_dispatched(session, job)
         await engine.complete(

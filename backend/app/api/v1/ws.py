@@ -36,6 +36,7 @@ from fastapi import APIRouter, WebSocket
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.identity import domain_refusal, log_admission_refusal, status_refusal
 from app.core.identity.policy import resolve_console_domain
 from app.core.security import TokenValidationError, require_console_token, validate_token
@@ -83,7 +84,7 @@ async def ui_websocket(websocket: WebSocket) -> None:
     # self-heals such a user into an active row, so refusing here would
     # contradict the door next to it for no gain. What this closes is the
     # disabled user whose row exists and whose token has not yet expired.
-    async with org_session(org_id, engine=state.app_engine) as session:
+    async with org_session(org_id, engine=state.app_engine, clients=ClientScope.all()) as session:
         # ADMISSION, DOOR 2 OF 3 (spec §3.2). 4403, NOT 4401, and the
         # distinction is the point: 4401 above means the token is not genuine,
         # 4403 here means it is genuine and the identity is not admitted. A

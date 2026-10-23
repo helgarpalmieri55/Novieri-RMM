@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     Agent,
@@ -167,7 +168,7 @@ async def test_a_restart_the_agent_booked_is_recorded_as_scheduled_and_audited(
 ) -> None:
     org_id, device_id = await _setup(admin_engine)
     job = await _apply_job(admin_engine, org_id, device_id)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await ingest_apply_result(
             session,
             job,
@@ -189,7 +190,7 @@ async def test_a_restart_nobody_booked_waits_for_the_window(
 ) -> None:
     org_id, device_id = await _setup(admin_engine)
     job = await _apply_job(admin_engine, org_id, device_id)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await ingest_apply_result(session, job, _apply_result(reboot_required=True))
     [row] = await _rows(admin_engine, org_id)
     assert row.state == "pending"
@@ -201,7 +202,7 @@ async def test_the_never_policy_records_no_restart(
 ) -> None:
     org_id, device_id = await _setup(admin_engine, reboot="never")
     job = await _apply_job(admin_engine, org_id, device_id)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await ingest_apply_result(session, job, _apply_result(reboot_required=True))
     assert await _rows(admin_engine, org_id) == []
 
@@ -211,16 +212,16 @@ async def test_the_sweep_dispatches_only_inside_the_window_and_only_once(
 ) -> None:
     org_id, device_id = await _setup(admin_engine)
     job = await _apply_job(admin_engine, org_id, device_id)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await ingest_apply_result(session, job, _apply_result(reboot_required=True))
 
     engine = _FakeJobEngine()
     closed = SAT - _dt.timedelta(days=1)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await run_reboot_sweep(session, engine, org_id=org_id, now=closed) == []
     assert engine.created == []
 
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pending = await run_reboot_sweep(session, engine, org_id=org_id, now=SAT)
     assert [device for device, _ in pending] == [device_id]
     [created] = engine.created
@@ -234,7 +235,7 @@ async def test_the_sweep_dispatches_only_inside_the_window_and_only_once(
     assert row.state == "dispatched" and row.attempts == 1
 
     # A second pass while the job is in flight dispatches nothing.
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await run_reboot_sweep(session, engine, org_id=org_id, now=SAT) == []
     assert len(engine.created) == 1
     assert await _actions(admin_engine, org_id) == [
@@ -248,7 +249,7 @@ async def test_forced_policy_restarts_even_when_the_os_does_not_ask(
 ) -> None:
     org_id, device_id = await _setup(admin_engine, reboot="forced")
     job = await _apply_job(admin_engine, org_id, device_id)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await ingest_apply_result(session, job, _apply_result(reboot_required=True))
         engine = _FakeJobEngine()
         await run_reboot_sweep(session, engine, org_id=org_id, now=SAT)
@@ -261,7 +262,7 @@ async def test_an_offline_device_is_passed_over(
     org_id, device_id = await _setup(admin_engine, online=False)
     job = await _apply_job(admin_engine, org_id, device_id)
     engine = _FakeJobEngine()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await ingest_apply_result(session, job, _apply_result(reboot_required=True))
         assert await run_reboot_sweep(session, engine, org_id=org_id, now=SAT) == []
     assert engine.created == []
@@ -273,11 +274,11 @@ async def test_the_reboot_result_moves_the_record(
     org_id, device_id = await _setup(admin_engine)
     apply_job = await _apply_job(admin_engine, org_id, device_id)
     engine = _FakeJobEngine()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await ingest_apply_result(session, apply_job, _apply_result(reboot_required=True))
         await run_reboot_sweep(session, engine, org_id=org_id, now=SAT)
     [row] = await _rows(admin_engine, org_id)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == row.job_id))).scalar_one()
         await ingest_reboot_result(
             session,
@@ -302,7 +303,7 @@ async def test_a_refused_restart_fails_and_a_failed_one_is_retried(
         org_id, device_id = await _setup(admin_engine)
         apply_job = await _apply_job(admin_engine, org_id, device_id)
         engine = _FakeJobEngine()
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await ingest_apply_result(session, apply_job, _apply_result(reboot_required=True))
             await run_reboot_sweep(session, engine, org_id=org_id, now=SAT)
         [row] = await _rows(admin_engine, org_id)
@@ -311,7 +312,7 @@ async def test_a_refused_restart_fails_and_a_failed_one_is_retried(
             job.status = status
             await session.commit()
         # Outside the window, so a retried row is not redispatched this pass.
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await run_reboot_sweep(
                 session, engine, org_id=org_id, now=SAT + _dt.timedelta(hours=6)
             )
@@ -326,7 +327,7 @@ async def test_a_later_boot_completes_the_restart_and_a_scan_can_open_one(
     doc = PatchScanDocument(
         os_family="windows", patches=[], scanned_at="2026-09-26T02:00:00Z", reboot_required=True
     )
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = (await session.execute(select(Device).where(Device.id == device_id))).scalar_one()
         await ingest_scan(session, device, doc)
     [row] = await _rows(admin_engine, org_id)
@@ -340,7 +341,7 @@ async def test_a_later_boot_completes_the_restart_and_a_scan_can_open_one(
         reboot_required=False,
         booted_at=booted,
     )
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = (await session.execute(select(Device).where(Device.id == device_id))).scalar_one()
         await ingest_scan(session, device, later)
     [row] = await _rows(admin_engine, org_id)
@@ -356,18 +357,18 @@ async def test_a_scheduled_restart_is_confirmed_by_one_scan_after_its_time(
 ) -> None:
     org_id, device_id = await _setup(admin_engine)
     job = await _apply_job(admin_engine, org_id, device_id)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await ingest_apply_result(
             session,
             job,
             _apply_result(reboot_required=True, reboot_scheduled_for="2026-09-26T02:45:00Z"),
         )
     engine = _FakeJobEngine()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await run_reboot_sweep(session, engine, org_id=org_id, now=SAT) == []
     later = SAT + _dt.timedelta(minutes=30)
     for _ in range(2):
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await run_reboot_sweep(session, engine, org_id=org_id, now=later)
     assert [c["type"] for c in engine.created] == ["patch.scan"]
 
@@ -395,7 +396,7 @@ async def test_apply_dispatch_opens_mid_hour_and_bounds_the_restart_by_the_windo
         session.add(PatchApproval(org_id=org_id, patch_id=patch.id, ring_name="broad"))
         await session.commit()
     engine = _FakeJobEngine()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pending = await dispatch_apply(session, engine, org_id=org_id, now=SAT)
     assert len(pending) == 1
     params = engine.created[0]["params"]

@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings, override_settings
 from app.core.tenancy import org_session
 from tests.conftest import PgCluster
@@ -77,7 +78,9 @@ async def test_a_cancelled_run_is_not_continued_by_the_beat(
 
     world = await run_world(admin_engine, "rt-cxl", octet=122, count=2)
     run_id = await start_run(app_engine, world)
-    async with org_session(world.org.org_id, engine=app_engine) as session:
+    async with org_session(
+        world.org.org_id, engine=app_engine, clients=ClientScope.all()
+    ) as session:
         await runs.cancel_run(session, world.org.org_id, run_id=run_id, actor_id=world.org.user_id)
     with override_settings(_settings(pg_cluster, tmp_path)):
         await worker.push_run_tick_all_orgs()

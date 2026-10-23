@@ -24,6 +24,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -137,7 +138,7 @@ async def test_verify_success_no_mismatch_marks_point_proven(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, point_id, device_id, job = await _setup_restore_job(admin_engine, mode="verify")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRestoreResult(
             state="success", restored_bytes=1000, verified=True, mismatch=None
         )
@@ -175,7 +176,7 @@ async def test_verify_success_with_mismatch_does_not_mark_point(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, point_id, _device_id, job = await _setup_restore_job(admin_engine, mode="verify")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRestoreResult(
             state="success", restored_bytes=1000, verified=True, mismatch=["/a"]
         )
@@ -196,7 +197,7 @@ async def test_restore_mode_success_does_not_mark_point(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, point_id, _device_id, job = await _setup_restore_job(admin_engine, mode="restore")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRestoreResult(
             state="success", restored_bytes=1000, verified=True, mismatch=None
         )
@@ -217,7 +218,7 @@ async def test_failed_result_fails_restore_job(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, point_id, _device_id, job = await _setup_restore_job(admin_engine, mode="verify")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRestoreResult(
             state="failed", restored_bytes=0, verified=False, error="disk full"
         )
@@ -246,7 +247,7 @@ async def test_out_of_domain_state_coerced_to_failed(
     still land on a terminal `failed` state — never raise, never wedge the
     job — with the original value recorded in the audit metadata."""
     org_id, _point_id, _device_id, job = await _setup_restore_job(admin_engine, mode="verify")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRestoreResult.model_construct(
             state="running",  # type: ignore[arg-type]  # deliberately out-of-domain
             restored_bytes=0,
@@ -275,7 +276,7 @@ async def test_audit_metadata_carries_mismatch_count_not_paths(
 ) -> None:
     """Invariant #3: no file/path data in the audit log — only the count."""
     org_id, _point_id, _device_id, job = await _setup_restore_job(admin_engine, mode="verify")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRestoreResult(
             state="success",
             restored_bytes=1000,
@@ -303,7 +304,7 @@ async def test_no_matching_restore_job_row_is_a_graceful_no_op(
     must never raise — the agent's report should never be able to fail the
     job over server-side bookkeeping."""
     org_id, _point_id, _device_id, job = await _setup_restore_job(admin_engine, mode="verify")
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         rj = (
             await session.execute(select(RestoreJob).where(RestoreJob.job_id == job.id))
         ).scalar_one()
@@ -332,7 +333,7 @@ async def test_another_orgs_job_row_is_invisible_to_the_result_session_under_rls
     org_a, _point_a, _device_a, job_a = await _setup_restore_job(admin_engine, mode="verify")
     org_b, _point_b, _device_b, _job_b = await _setup_restore_job(admin_engine, mode="verify")
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         result = BackupRestoreResult(
             state="success", restored_bytes=1000, verified=True, mismatch=None
         )
@@ -344,7 +345,7 @@ async def test_another_orgs_job_row_is_invisible_to_the_result_session_under_rls
         ).scalars().all()
         assert rows == []  # org B's RLS-scoped session cannot see org A's row
 
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         rj = (
             await session.execute(select(RestoreJob).where(RestoreJob.job_id == job_a.id))
         ).scalar_one()
@@ -371,7 +372,7 @@ async def test_valid_result_through_job_engine_reconciles_and_queues_ui_event(
 ) -> None:
     org_id, point_id, device_id, job = await _setup_restore_job(admin_engine, mode="verify")
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job.id))).scalar_one()
         await engine.mark_dispatched(session, job)
         await engine.complete(

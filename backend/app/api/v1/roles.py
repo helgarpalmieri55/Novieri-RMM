@@ -200,7 +200,9 @@ async def list_roles(
     """Roles this organization may assign: its own, plus the platform-wide ones
     it has not taken a copy of, each with its code set and how many local users
     hold it."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         views = await rbac_admin.list_roles(session, org_id=ctx.org_id)
     return RoleListOut(roles=[_role_out(v) for v in views])
 
@@ -212,7 +214,9 @@ async def create_role(
     ctx: AuthContext = Depends(require_permission("roles.manage")),
 ) -> RoleOut:
     """Create a role in this organization and set its permission codes."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             view = await rbac_admin.create_role(
                 session,
@@ -245,7 +249,9 @@ async def update_role(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             tr("no fields supplied; send name and/or description"),
         )
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             view = await rbac_admin.update_role(
                 session,
@@ -274,7 +280,9 @@ async def set_role_permissions(
     the `role_permissions` table -- `app_user` has no write privilege on it, by
     design (`deploy/postgres/grant-app-privileges.sql`).
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             result = await rbac_admin.set_permissions(
                 session,
@@ -302,7 +310,9 @@ async def delete_role(
     role users still hold -- with the count, so the operator knows what to do
     next.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await rbac_admin.delete_role(
                 session, org_id=ctx.org_id, actor_id=ctx.user_id, role_id=role_id

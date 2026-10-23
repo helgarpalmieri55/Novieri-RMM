@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import CostCenter, ExpenseCategory, User
 from app.modules.budget.errors import BudgetNotFoundError, BudgetValidationError
@@ -55,7 +56,7 @@ async def test_seed_default_categories_creates_all_seven_with_matching_system_ke
     api_env,
 ) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cats = await seed_default_categories(session, org_id, user_id)
     assert {c.key for c in cats} == {key for key, _name in DEFAULT_CATEGORIES}
     assert {c.name for c in cats} == {name for _key, name in DEFAULT_CATEGORIES}
@@ -69,14 +70,14 @@ async def test_seed_default_categories_is_idempotent_by_construction(api_env) ->
     selects the org's existing `system_key`s first and inserts only the
     ones missing."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         first = await seed_default_categories(session, org_id, user_id)
         second = await seed_default_categories(session, org_id, user_id)
     assert len(first) == 7
     assert len(second) == 7
     assert {c.id for c in first} == {c.id for c in second}
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         count = (
             await session.execute(
                 select(func.count())
@@ -100,7 +101,7 @@ async def test_seed_emits_one_system_event_not_per_row_user_events(api_env) -> N
     from app.models import AuditEvent
 
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await seed_default_categories(session, org_id, user_id)
 
         created_events = (
@@ -129,7 +130,7 @@ async def test_seed_emits_one_system_event_not_per_row_user_events(api_env) -> N
 
     # A second call inserts nothing, so it must audit nothing -- not even a
     # second `budget.categories_seeded`.
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await seed_default_categories(session, org_id, user_id)
         seeded_events_after = (
             await session.execute(
@@ -155,7 +156,7 @@ async def test_seed_skips_a_hand_made_category_whose_key_collides(api_env) -> No
     than silently booking spend against a category made for another purpose.
     """
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         hand_made = await create_category(
             session, org_id, user_id, key="hardware", name="Hardware (ours)"
         )
@@ -189,7 +190,7 @@ async def test_seed_default_categories_backfills_only_the_missing_ones(api_env) 
     from a partial prior seed -- a later call must add only what is
     missing, not re-touch what already exists."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         pre_existing = ExpenseCategory(
             org_id=org_id,
             key="hardware",
@@ -214,7 +215,7 @@ async def test_seed_default_categories_backfills_only_the_missing_ones(api_env) 
 
 async def test_operator_created_category_has_no_system_key(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await create_category(session, org_id, user_id, key="training", name="Training")
     assert cat.key == "training"
     assert cat.name == "Training"
@@ -225,7 +226,7 @@ async def test_renaming_a_category_preserves_its_system_key(api_env) -> None:
     """system_key is the stable identifier the auto-feeds resolve against
     (spec §6.1) -- renaming the display name must never break materialization."""
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await seed_default_categories(session, org_id, user_id)
         cat = await category_by_system_key(session, org_id, "saas_subscriptions")
         assert cat is not None
@@ -238,14 +239,14 @@ async def test_renaming_a_category_preserves_its_system_key(api_env) -> None:
 
 async def test_category_by_system_key_returns_none_when_absent(api_env) -> None:
     org_id, _user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await category_by_system_key(session, org_id, "does_not_exist")
     assert cat is None
 
 
 async def test_duplicate_key_in_one_org_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_category(session, org_id, user_id, key="widgets", name="Widgets")
         with pytest.raises(BudgetValidationError):
             await create_category(session, org_id, user_id, key="widgets", name="Widgets 2")
@@ -321,9 +322,9 @@ async def test_create_category_concurrent_duplicate_raises_typed_error_not_integ
 async def test_same_key_in_two_orgs_is_fine(api_env) -> None:
     org_a, user_a = await _org_with_user(api_env)
     org_b, user_b = await _org_with_user(api_env)
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat_a = await create_category(session, org_a, user_a, key="widgets", name="Widgets")
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat_b = await create_category(session, org_b, user_b, key="widgets", name="Widgets")
     assert cat_a.key == cat_b.key == "widgets"
     assert cat_a.id != cat_b.id
@@ -332,7 +333,7 @@ async def test_same_key_in_two_orgs_is_fine(api_env) -> None:
 
 async def test_list_categories_excludes_inactive_by_default(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await create_category(session, org_id, user_id, key="widgets", name="Widgets")
         await update_category(session, org_id, user_id, cat.id, {"active": False})
         active_only = await list_categories(session, org_id, user_id)
@@ -343,7 +344,7 @@ async def test_list_categories_excludes_inactive_by_default(api_env) -> None:
 
 async def test_update_category_rejects_null_name(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await create_category(session, org_id, user_id, key="widgets", name="Widgets")
         with pytest.raises(BudgetValidationError):
             await update_category(session, org_id, user_id, cat.id, {"name": None})
@@ -356,7 +357,7 @@ async def test_update_category_reports_only_the_changed_field_names(api_env) -> 
     from app.models import AuditEvent
 
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await create_category(session, org_id, user_id, key="widgets", name="Widgets")
         await update_category(
             session, org_id, user_id, cat.id, {"name": "Widgets", "sort_order": 5}
@@ -382,7 +383,7 @@ async def test_update_category_reports_only_the_changed_field_names(api_env) -> 
 
 async def test_create_cost_center_and_resolve(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cc = await create_cost_center(session, org_id, user_id, code="ENG", name="Engineering")
         resolved = await resolve_cost_center(session, org_id, cc.id)
     assert resolved.id == cc.id
@@ -394,7 +395,7 @@ async def test_create_cost_center_and_resolve(api_env) -> None:
 
 async def test_duplicate_cost_center_code_in_one_org_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_cost_center(session, org_id, user_id, code="ENG", name="Engineering")
         with pytest.raises(BudgetValidationError):
             await create_cost_center(session, org_id, user_id, code="ENG", name="Eng 2")
@@ -464,9 +465,9 @@ async def test_create_cost_center_concurrent_duplicate_raises_typed_error_not_in
 async def test_same_cost_center_code_in_two_orgs_is_fine(api_env) -> None:
     org_a, user_a = await _org_with_user(api_env)
     org_b, user_b = await _org_with_user(api_env)
-    async with org_session(org_a, engine=api_env.app_engine) as session:
+    async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cc_a = await create_cost_center(session, org_a, user_a, code="ENG", name="Engineering")
-    async with org_session(org_b, engine=api_env.app_engine) as session:
+    async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cc_b = await create_cost_center(session, org_b, user_b, code="ENG", name="Engineering")
     assert cc_a.code == cc_b.code == "ENG"
     assert cc_a.id != cc_b.id
@@ -474,7 +475,7 @@ async def test_same_cost_center_code_in_two_orgs_is_fine(api_env) -> None:
 
 async def test_update_cost_center_changes_name_and_external_ref(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cc = await create_cost_center(session, org_id, user_id, code="ENG", name="Engineering")
         updated = await update_cost_center(
             session, org_id, user_id, cc.id, {"name": "Eng Org", "external_ref": "odoo-42"}
@@ -487,7 +488,7 @@ async def test_update_cost_center_changes_name_and_external_ref(api_env) -> None
 
 async def test_update_cost_center_rejects_null_name(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cc = await create_cost_center(session, org_id, user_id, code="ENG", name="Engineering")
         with pytest.raises(BudgetValidationError):
             await update_cost_center(session, org_id, user_id, cc.id, {"name": None})
@@ -495,7 +496,7 @@ async def test_update_cost_center_rejects_null_name(api_env) -> None:
 
 async def test_list_cost_centers_excludes_inactive_by_default(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cc = await create_cost_center(session, org_id, user_id, code="ENG", name="Engineering")
         await update_cost_center(session, org_id, user_id, cc.id, {"active": False})
         active_only = await list_cost_centers(session, org_id)

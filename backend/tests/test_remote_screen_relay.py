@@ -25,6 +25,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ca import LocalCA
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.signing import LocalEd25519Signer, verify_signature
 from app.core.storage import ObjectStore
@@ -117,7 +118,9 @@ class Stack:
         )
         assert resp.status_code == 201, resp.text
         sid = resp.json()["session_id"]
-        async with org_session(org_id, engine=self.api_env.app_engine) as s:
+        async with org_session(
+            org_id, engine=self.api_env.app_engine, clients=ClientScope.all()
+        ) as s:
             jobs = (
                 (await s.execute(select(Job).where(Job.type == "remote.screen.open")))
                 .scalars()
@@ -144,13 +147,17 @@ class Stack:
         )
 
     async def row(self, enrolled: dict, sid: str) -> RemoteSession:
-        async with org_session(enrolled["org_id"], engine=self.api_env.app_engine) as s:
+        async with org_session(
+            enrolled["org_id"], engine=self.api_env.app_engine, clients=ClientScope.all()
+        ) as s:
             return (
                 await s.execute(select(RemoteSession).where(RemoteSession.id == UUID(sid)))
             ).scalar_one()
 
     async def audits(self, enrolled: dict, **match) -> list[AuditEvent]:
-        async with org_session(enrolled["org_id"], engine=self.api_env.app_engine) as s:
+        async with org_session(
+            enrolled["org_id"], engine=self.api_env.app_engine, clients=ClientScope.all()
+        ) as s:
             rows = (
                 (await s.execute(select(AuditEvent).order_by(AuditEvent.id))).scalars().all()
             )
@@ -464,7 +471,9 @@ async def test_consent_timeout_ends_the_session(stack) -> None:
 
 async def test_unattended_needs_no_consent_frames(stack) -> None:
     enrolled = await stack.device()
-    async with org_session(enrolled["org_id"], engine=stack.api_env.app_engine) as s:
+    async with org_session(
+        enrolled["org_id"], engine=stack.api_env.app_engine, clients=ClientScope.all()
+    ) as s:
         from app.models import RemotePolicy
 
         s.add(RemotePolicy(org_id=enrolled["org_id"], allow_unattended=True))
@@ -517,7 +526,9 @@ async def test_gateway_bounds_the_consent_window_itself(stack, monkeypatch) -> N
     session open: the gateway ends it as consent_timeout."""
     monkeypatch.setattr(stack.server.relay, "_consent_grace_s", 0.0)
     enrolled = await stack.device()
-    async with org_session(enrolled["org_id"], engine=stack.api_env.app_engine) as s:
+    async with org_session(
+        enrolled["org_id"], engine=stack.api_env.app_engine, clients=ClientScope.all()
+    ) as s:
         from app.models import RemotePolicy
 
         s.add(RemotePolicy(org_id=enrolled["org_id"], consent_timeout_s=15))
@@ -771,7 +782,9 @@ async def test_the_real_capability_runs_a_session_through_the_gateway(
     assert result["result"]["outcome"] == "ended", result
 
     async def finished() -> bool:
-        async with org_session(enrolled["org_id"], engine=api_env.app_engine) as s:
+        async with org_session(
+            enrolled["org_id"], engine=api_env.app_engine, clients=ClientScope.all()
+        ) as s:
             job = (
                 await s.execute(select(Job).where(Job.type == "remote.screen.open"))
             ).scalar_one()

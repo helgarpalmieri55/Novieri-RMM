@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
@@ -157,7 +158,7 @@ async def test_group_deploy_skips_device_already_installed_and_dispatches_other(
         admin_engine
     )
     now = _dt.datetime(2026, 7, 19, 3, 0)
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job_engine = _FakeJobEngine()
         pending = await dispatch_deployment(
             session,
@@ -228,7 +229,7 @@ async def test_closed_window_dispatches_nothing(
         admin_engine, window_cron="0 2 * * *"
     )
     now = _dt.datetime(2026, 7, 19, 10, 0)  # outside the 02:00 window
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job_engine = _FakeJobEngine()
         pending = await dispatch_deployment(
             session,
@@ -255,7 +256,7 @@ async def test_unknown_org_deployment_dispatches_nothing_and_does_not_touch_othe
     org_b, _deployment_b, _device_a_b, _device_b_b, _pkg_b, _user_b = await _setup(admin_engine)
     now = _dt.datetime(2026, 7, 19, 3, 0)
 
-    async with org_session(org_b, engine=app_engine) as session:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as session:
         job_engine = _FakeJobEngine()
         pending = await dispatch_deployment(
             session,
@@ -268,7 +269,7 @@ async def test_unknown_org_deployment_dispatches_nothing_and_does_not_touch_othe
         assert pending == []
         assert job_engine.created == []
 
-    async with org_session(org_a, engine=app_engine) as session:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         job_engine = _FakeJobEngine()
         pending = await dispatch_deployment(
             session,
@@ -298,7 +299,7 @@ async def test_a_group_deployment_passes_over_a_device_waiting_for_review(
         )
         await session.commit()
     job_engine = _FakeJobEngine()
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         pending = await dispatch_deployment(
             session,
             job_engine,

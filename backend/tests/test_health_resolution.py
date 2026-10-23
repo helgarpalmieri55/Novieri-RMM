@@ -30,6 +30,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Device, DeviceGroup
 from app.modules.health.resolution import (
@@ -62,7 +63,7 @@ async def _device(api_env, device_id) -> Device:
 
 
 async def _resolve(api_env, org_id, device: Device) -> ResolvedProfile | None:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         return await resolve_profile_for_device(session, org_id, device)
 
 

@@ -72,6 +72,7 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings, override_settings
 from app.core.tenancy import org_session
 
@@ -136,7 +137,7 @@ _NEW_RESOLUTION_DUE = datetime(2026, 3, 4, 11, 0, tzinfo=UTC)
 async def _sweep(api_env, org_id: UUID, *, now: datetime = SWEEP_AT) -> dict[str, int]:
     """One sweep of one org through the RLS-constrained app engine, committed
     -- the production path (`sweep_all_orgs` opens exactly this)."""
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         return await sweep_org(session, org_id, now=now)
 
 
@@ -971,7 +972,7 @@ async def test_a_calendar_edit_recomputes_running_deadlines_only(api_env) -> Non
     org_id, calendar_id, tickets = await _recompute_env(api_env)
     await _replace_windows(api_env, org_id, calendar_id, _MON_FRI_9_TO_1)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         counts = await recompute_for_calendar_change(session, org_id, calendar_id)
 
     assert counts == {"recomputed": 2, "skipped": 1, "failed": 0}
@@ -1021,7 +1022,7 @@ async def test_a_calendar_edit_does_not_re_attribute_the_policy(api_env) -> None
     assert original_policy_id != rival_id
     await _replace_windows(api_env, org_id, calendar_id, _MON_FRI_9_TO_1)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await recompute_for_calendar_change(session, org_id, calendar_id)
 
     stored = await _row(api_env, tickets[0].id)
@@ -1042,7 +1043,7 @@ async def test_a_calendar_edit_skips_a_voided_promise(api_env) -> None:
     await _set_columns(api_env, tickets[0].id, voided_at=MONDAY_0900 + timedelta(hours=2))
     await _replace_windows(api_env, org_id, calendar_id, _MON_FRI_9_TO_1)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         counts = await recompute_for_calendar_change(session, org_id, calendar_id)
 
     assert counts == {"recomputed": 1, "skipped": 2, "failed": 0}
@@ -1070,7 +1071,7 @@ async def test_a_row_that_cannot_be_recomputed_does_not_fail_the_others(api_env)
     await _set_columns(api_env, tickets[0].id, paused_minutes_total=500_000)
     await _replace_windows(api_env, org_id, calendar_id, _MON_FRI_9_TO_1)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         counts = await recompute_for_calendar_change(session, org_id, calendar_id)
 
     assert counts == {"recomputed": 1, "skipped": 1, "failed": 1}
@@ -1097,7 +1098,7 @@ async def test_an_unknown_timezone_does_not_escape_the_recompute(api_env) -> Non
     org_id, calendar_id, tickets = await _recompute_env(api_env)
     await _set_timezone(api_env, calendar_id, "Nowhere/Atlantis")
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         counts = await recompute_for_calendar_change(session, org_id, calendar_id)
 
     assert counts == {"recomputed": 0, "skipped": 1, "failed": 2}
@@ -1167,7 +1168,7 @@ async def test_a_policy_edit_recomputes_running_clocks_and_adopts_its_calendar(
     )
     await _set_policy_columns(api_env, policy_id, calendar_id=halved_calendar_id)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         counts = await recompute_for_policy_change(session, org_id, policy_id)
 
     assert counts == {"recomputed": 2, "skipped": 1, "failed": 0}

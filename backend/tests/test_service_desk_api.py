@@ -26,6 +26,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
@@ -159,7 +160,7 @@ async def _create_ticket(
 
 
 async def _audit_count(api_env: ApiEnv, org_id: UUID, action: str) -> int:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (
             await session.execute(select(AuditEvent).where(AuditEvent.action == action))
         ).scalars().all()
@@ -766,7 +767,7 @@ async def test_technician_cannot_bypass_approval_via_generic_status_route(
     )
     assert cancel.status_code == 200, cancel.text
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         approval = (
             await session.execute(
                 select(TicketApproval).where(TicketApproval.ticket_id == UUID(ticket["id"]))
@@ -1039,7 +1040,9 @@ async def test_audit_split_list_download_status(api_env: ApiEnv) -> None:
 
         # Plain reads write nothing (list tickets, get ticket, list comments,
         # list attachments, list queues, list categories).
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             before_total = len((await session.execute(select(AuditEvent))).scalars().all())
 
         for method, path in [
@@ -1053,7 +1056,9 @@ async def test_audit_split_list_download_status(api_env: ApiEnv) -> None:
             r = await api_env.client.request(method, path, headers=admin_headers)
             assert r.status_code == 200, f"{method} {path}: {r.text}"
 
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             after_total = len((await session.execute(select(AuditEvent))).scalars().all())
         assert after_total == before_total, "a read-only route wrote an audit event"
 
@@ -1070,7 +1075,9 @@ async def test_audit_split_list_download_status(api_env: ApiEnv) -> None:
         # for this event either -- `actor_type="user"` -> `"system"` and
         # `actor_id=ctx.user_id` -> `None` both survived with the suite
         # green, since only the COUNT was checked above.
-        async with org_session(org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             download_event = (
                 await session.execute(
                     select(AuditEvent)

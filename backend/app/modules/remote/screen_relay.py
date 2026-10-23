@@ -36,6 +36,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import RemoteSession
 from app.modules.remote import rsp
@@ -160,7 +161,7 @@ class ScreenRelayHub:
         metadata: dict[str, Any],
     ) -> None:
         try:
-            async with org_session(org_id, engine=self._app_engine) as s:
+            async with org_session(org_id, engine=self._app_engine, clients=ClientScope.all()) as s:
                 await audit_service.record(
                     s,
                     org_id=org_id,
@@ -307,7 +308,9 @@ class ScreenRelayHub:
             join.consented = True
             join.consent_given.set()
             if state == "awaiting_consent":
-                async with org_session(reg.org_id, engine=self._app_engine) as s:
+                async with org_session(
+                    reg.org_id, engine=self._app_engine, clients=ClientScope.all()
+                ) as s:
                     await self._service.on_consent(s, session_id=session_id, accepted=True)
         self._joins[session_id] = join
         waiting = self._agent_arrived.pop(session_id, None)
@@ -321,7 +324,7 @@ class ScreenRelayHub:
             await self._teardown(join, default_reason="agent_disconnected")
 
     async def _session_state(self, reg: RelayRegistration) -> str | None:
-        async with org_session(reg.org_id, engine=self._app_engine) as s:
+        async with org_session(reg.org_id, engine=self._app_engine, clients=ClientScope.all()) as s:
             return (
                 await s.execute(
                     select(RemoteSession.state).where(RemoteSession.id == reg.session_id)
@@ -404,7 +407,9 @@ class ScreenRelayHub:
             return
         if frame.type == rsp.HELLO and not join.active:
             join.active = True
-            async with org_session(join.reg.org_id, engine=self._app_engine) as s:
+            async with org_session(
+                join.reg.org_id, engine=self._app_engine, clients=ClientScope.all()
+            ) as s:
                 await self._service.mark_active(
                     s, session_id=join.reg.session_id, audit_ref="rsp/1"
                 )
@@ -420,7 +425,9 @@ class ScreenRelayHub:
     async def _session_event(
         self, join: _Join, action: str, metadata: dict[str, Any] | None = None
     ) -> None:
-        async with org_session(join.reg.org_id, engine=self._app_engine) as s:
+        async with org_session(
+            join.reg.org_id, engine=self._app_engine, clients=ClientScope.all()
+        ) as s:
             await self._service.record_event(
                 s,
                 session_id=join.reg.session_id,
@@ -437,7 +444,9 @@ class ScreenRelayHub:
         if name == "consent_pending":
             await self._session_event(join, "remote.session.consent_prompted")
         elif name == "consent_granted" and attended and not join.consented:
-            async with org_session(join.reg.org_id, engine=self._app_engine) as s:
+            async with org_session(
+                join.reg.org_id, engine=self._app_engine, clients=ClientScope.all()
+            ) as s:
                 await self._service.on_consent(s, session_id=sid, accepted=True)
             await self._session_event(join, "remote.session.consent_granted")
             join.consented = True
@@ -445,7 +454,9 @@ class ScreenRelayHub:
         elif name == "consent_denied" and attended and not join.consented:
             join.end_reason = "denied_consent"
             join.ended_in_db = True
-            async with org_session(join.reg.org_id, engine=self._app_engine) as s:
+            async with org_session(
+                join.reg.org_id, engine=self._app_engine, clients=ClientScope.all()
+            ) as s:
                 await self._service.on_consent(s, session_id=sid, accepted=False)
             await self._teardown(join, default_reason="denied_consent")
         elif name == "consent_timeout" and attended and not join.consented:
@@ -456,7 +467,9 @@ class ScreenRelayHub:
             join.user_revoked_control = True
             if join.input_enabled:
                 join.input_enabled = False
-                async with org_session(join.reg.org_id, engine=self._app_engine) as s:
+                async with org_session(
+                    join.reg.org_id, engine=self._app_engine, clients=ClientScope.all()
+                ) as s:
                     await self._service.set_input_enabled(s, session_id=sid, enabled=False)
                 await self._session_event(
                     join, "remote.session.input_disabled", {"by": "endpoint_user"}
@@ -562,7 +575,9 @@ class ScreenRelayHub:
 
     async def _expire_unconnected(self, reg: RelayRegistration) -> None:
         try:
-            async with org_session(reg.org_id, engine=self._app_engine) as s:
+            async with org_session(
+                reg.org_id, engine=self._app_engine, clients=ClientScope.all()
+            ) as s:
                 await self._service.end_session(
                     s, session_id=reg.session_id, reason="expired", actor_type="system"
                 )
@@ -592,7 +607,9 @@ class ScreenRelayHub:
                 return
             if wanted != join.input_enabled:
                 join.input_enabled = wanted
-                async with org_session(join.reg.org_id, engine=self._app_engine) as s:
+                async with org_session(
+                    join.reg.org_id, engine=self._app_engine, clients=ClientScope.all()
+                ) as s:
                     await self._service.set_input_enabled(
                         s, session_id=join.reg.session_id, enabled=wanted
                     )
@@ -635,7 +652,9 @@ class ScreenRelayHub:
                 # anything else was decided on the endpoint side.
                 by_viewer = ended_by_viewer and join.end_reason is None
                 try:
-                    async with org_session(join.reg.org_id, engine=self._app_engine) as s:
+                    async with org_session(
+                        join.reg.org_id, engine=self._app_engine, clients=ClientScope.all()
+                    ) as s:
                         await self._service.end_session(
                             s,
                             session_id=join.reg.session_id,

@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -133,7 +134,7 @@ async def _dispatch(
     app_engine, org, credential_id, *, kind, vault=None, store=None, tmp_path,
     public_console_url: str | None = CONSOLE,
 ):
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         return await dispatch_push_batch(
             session,
             _engine(tmp_path),
@@ -294,7 +295,7 @@ async def test_an_install_against_a_changed_host_key_is_refused(
     org, credential_id, device_id, _ss = await _world(admin_engine, "d-changed")
     await seed_confirmed_host_key(admin_engine, org, address=TARGET, fingerprint=FINGERPRINT)
     # A later probe observes a DIFFERENT key.
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await host_key_service.record_observation(
             session,
             org.org_id,
@@ -333,7 +334,7 @@ async def test_a_probe_carries_no_credential_and_its_result_pins_the_key(
     assert "enroll_token" not in job.params
 
     # The gateway completes the probe; its result pins the observed key.
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         j = (await session.execute(select(Job).where(Job.id == job.id))).scalar_one()
         await record_probe_result(
             session,
@@ -345,7 +346,7 @@ async def test_a_probe_carries_no_credential_and_its_result_pins_the_key(
                 "host_key_type": "ssh-ed25519",
             },
         )
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         row = await host_key_service.get_host_key(session, org.org_id, TARGET)
         assert row is not None
         assert row.observed_fingerprint == FINGERPRINT
@@ -358,7 +359,7 @@ async def test_a_probe_carries_no_credential_and_its_result_pins_the_key(
     assert refused.refused == {TARGET: ["host_key_unconfirmed"]}
 
     # Confirm, then the install proceeds.
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await host_key_service.confirm_host_key(
             session, org.org_id, actor_id=org.user_id, address=TARGET, fingerprint=FINGERPRINT
         )
@@ -413,7 +414,7 @@ async def test_the_credential_is_scrubbed_from_jobs_params_on_a_terminal_state(
         assert job.params["credential"]["secret"] == "hunter2"
 
     engine = _engine(tmp_path)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         await engine.complete(
             session,
@@ -445,7 +446,7 @@ async def test_the_credential_is_scrubbed_on_a_refused_terminal_state_too(
     )
     job_id = result.dispatched[0].job_id
     engine = _engine(tmp_path)
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job = (await session.execute(select(Job).where(Job.id == job_id))).scalar_one()
         await engine.refuse(session, job, reason="target unreachable")
     async with AsyncSession(admin_engine) as session:

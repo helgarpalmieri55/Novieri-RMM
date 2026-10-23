@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Device, InstalledSoftware, Organization, User
 from app.modules.licenses.errors import LicenseNotFoundError, LicenseValidationError
@@ -76,7 +77,7 @@ async def _seed_installed(
 async def _audit_actions(
     app_engine: AsyncEngine, org_id: UUID, target_type: str, target_id: UUID
 ) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -189,7 +190,7 @@ def test_validate_match_rules_rejects_missing_type() -> None:
 async def _seed_product(
     app_engine: AsyncEngine, org_id: UUID, actor_id: UUID, match_rules: list[dict]
 ):
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         product = await create_product(
             s,
             org_id=org_id,
@@ -227,7 +228,7 @@ async def test_product_installed_device_ids_matches_own_org_only(
 
     product = await _seed_product(app_engine, org_id, actor_id, match_rules)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         device_ids = await product_installed_device_ids(s, org_id, product)
 
     assert device_ids == {device1, device2}
@@ -272,7 +273,7 @@ async def test_create_product_succeeds_and_audits(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         product = await create_product(
             s,
             org_id=org_id,
@@ -287,7 +288,7 @@ async def test_create_product_succeeds_and_audits(
     assert product.name == "Acme Suite"
     assert product.created_by == actor_id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_product(s, org_id, product_id)
         assert fetched is not None
         assert fetched.name == "Acme Suite"
@@ -298,7 +299,7 @@ async def test_create_product_succeeds_and_audits(
     actions = await _audit_actions(app_engine, org_id, "product", product_id)
     assert actions == ["license.product_created"]
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         event = (
             await s.execute(
                 select(AuditEvent).where(
@@ -315,7 +316,7 @@ async def test_create_product_rejects_invalid_match_rules_before_persist(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseValidationError):
             await create_product(
                 s,
@@ -326,7 +327,7 @@ async def test_create_product_rejects_invalid_match_rules_before_persist(
                 match_rules=[{"type": "bogus", "pattern": "x", "publisher": None}],
             )
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         all_products = await list_products(s, org_id)
         assert all_products == []
 
@@ -336,7 +337,7 @@ async def test_update_product_applies_fields_and_audits(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         product = await create_product(
             s,
             org_id=org_id,
@@ -348,7 +349,7 @@ async def test_update_product_applies_fields_and_audits(
         await s.commit()
         product_id = product.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         updated = await update_product(
             s,
             org_id=org_id,
@@ -369,7 +370,7 @@ async def test_update_product_bad_match_rules_raises(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         product = await create_product(
             s,
             org_id=org_id,
@@ -381,7 +382,7 @@ async def test_update_product_bad_match_rules_raises(
         await s.commit()
         product_id = product.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseValidationError):
             await update_product(
                 s,
@@ -397,7 +398,7 @@ async def test_update_product_missing_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(LicenseNotFoundError):
             await update_product(
                 s, org_id=org_id, actor_id=actor_id, product_id=uuid4(), name="nope"
@@ -409,7 +410,7 @@ async def test_get_and_list_product_write_no_audit(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         product = await create_product(
             s,
             org_id=org_id,
@@ -423,7 +424,7 @@ async def test_get_and_list_product_write_no_audit(
 
     before = await _audit_actions(app_engine, org_id, "product", product_id)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await get_product(s, org_id, product_id)
         await list_products(s, org_id)
 
@@ -437,7 +438,7 @@ async def test_another_orgs_product_is_hidden_by_rls(
     org_a, actor_a = await _org_with_user(admin_engine)
     org_b, actor_b = await _org_with_user(admin_engine)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         product = await create_product(
             s,
             org_id=org_a,
@@ -449,7 +450,7 @@ async def test_another_orgs_product_is_hidden_by_rls(
         await s.commit()
         product_id = product.id
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         fetched = await get_product(s, org_b, product_id)
         assert fetched is None
 

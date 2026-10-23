@@ -485,7 +485,7 @@ async def create_ai_session(
     engine = request.app.state.app_engine
     mode = (body or SessionCreate()).mode
 
-    async with org_session(ctx.org_id, engine=engine) as session:
+    async with org_session(ctx.org_id, engine=engine, clients=ctx.clients) as session:
         codes = await user_permission_codes(session, ctx.user_id)
     reason = _availability()
     if reason:
@@ -498,7 +498,7 @@ async def create_ai_session(
 
     provider = _provider_for()
     config = configured_provider()
-    async with org_session(ctx.org_id, engine=engine) as session:
+    async with org_session(ctx.org_id, engine=engine, clients=ctx.clients) as session:
         row = await create_session(
             session,
             org_id=ctx.org_id,
@@ -522,7 +522,9 @@ async def list_ai_sessions(
 ) -> list[SessionOut]:
     """The caller's OWN conversations. Another administrator's are not listed
     and not reachable."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_sessions(
             session, org_id=ctx.org_id, user_id=ctx.user_id, limit=limit
         )
@@ -537,7 +539,9 @@ async def get_ai_session(
 ) -> TranscriptOut:
     """One conversation and its transcript."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             row, messages = await load_session(
                 session, org_id=ctx.org_id, user_id=ctx.user_id, session_id=session_id
             )
@@ -558,7 +562,9 @@ async def delete_ai_session(
     """Delete a conversation and, by cascade, its transcript and its flags. The
     audit events it produced remain: they are the record that it happened."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await delete_session(
                 session, org_id=ctx.org_id, user_id=ctx.user_id, session_id=session_id
             )
@@ -584,7 +590,7 @@ async def create_turn(
     redis = request.app.state.redis
 
     # 1-2. Gate, then availability (§10.6).
-    async with org_session(ctx.org_id, engine=app_engine) as session:
+    async with org_session(ctx.org_id, engine=app_engine, clients=ctx.clients) as session:
         effective = await get_settings(session, ctx.org_id)
     reason = _availability()
     if reason:
@@ -624,7 +630,7 @@ async def create_turn(
         _stored_turn_id(ctx.org_id, body.turn_id) if body.turn_id is not None else stream_id
     )
     try:
-        async with org_session(ctx.org_id, engine=app_engine) as session:
+        async with org_session(ctx.org_id, engine=app_engine, clients=ctx.clients) as session:
             ai_session, messages = await load_session(
                 session, org_id=ctx.org_id, user_id=ctx.user_id, session_id=session_id
             )
@@ -701,7 +707,7 @@ async def create_turn(
             return bool(replayed) or bool(outcome.findings)
 
         def _tenant_session() -> Any:
-            return org_session(ctx.org_id, engine=app_engine)
+            return org_session(ctx.org_id, engine=app_engine, clients=ctx.clients)
 
         act_tools["actions.propose"] = ActTool(
             org_id=ctx.org_id,
@@ -769,7 +775,7 @@ async def create_turn(
 
     # 7. Reopen and persist -- one transaction (§5 step 6). ON EVERY PATH THAT
     #    REACHED THE PROVIDER, including the two failures above.
-    async with org_session(ctx.org_id, engine=app_engine) as session:
+    async with org_session(ctx.org_id, engine=app_engine, clients=ctx.clients) as session:
         row = await session.get(AiSession, session_row_id)
         if row is None:  # pragma: no cover - deleted mid-turn
             raise _http_error(
@@ -867,7 +873,9 @@ async def stream_turn(
     still_answers` is what keeps it real.
     """
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await load_session(
                 session, org_id=ctx.org_id, user_id=ctx.user_id, session_id=session_id
             )
@@ -943,7 +951,9 @@ async def get_ai_settings(
     request: Request, ctx: AuthContext = Depends(require_permission("ai.admin"))
 ) -> SettingsOut:
     """The effective settings. **This read creates no row.**"""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         effective = await get_settings(session, ctx.org_id)
     return SettingsOut(
         transcript_retention_days=effective.transcript_retention_days,
@@ -971,7 +981,9 @@ async def put_ai_settings(
     """
     changes = body.model_dump(exclude_none=True)
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             row = await update_settings(session, ctx.org_id, ctx.user_id, **changes)
             return SettingsOut.model_validate(row)
     except AiValidationError as exc:
@@ -1012,7 +1024,9 @@ async def list_injection_flags(
     controlled prose from unauthenticated sources, and reading them across
     every conversation in the org is an administrative act.
     """
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = (
             (
                 await session.execute(
@@ -1109,7 +1123,9 @@ async def list_ai_actions(
 
     `ai.use` on the route, `devices.read` in the handler -- see
     `_require_device_read` for why a proposal costs what a device costs."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         await _require_device_read(session, ctx)
         rows = await list_actions(
             session, org_id=ctx.org_id, ai_session_id=session_id, limit=limit
@@ -1130,7 +1146,9 @@ async def get_ai_action(
     BEFORE the row is loaded -- so a principal without it cannot use this route
     as an existence oracle over `ai_action.id` either."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await _require_device_read(session, ctx)
             preview = await load_preview(session, org_id=ctx.org_id, ai_action_id=ai_action_id)
     except AiNotFoundError as exc:
@@ -1163,7 +1181,7 @@ async def confirm_ai_action(
     """
     engine = request.app.state.app_engine
     try:
-        async with org_session(ctx.org_id, engine=engine) as session:
+        async with org_session(ctx.org_id, engine=engine, clients=ctx.clients) as session:
             codes = await user_permission_codes(session, ctx.user_id)
             outcome = await confirm_action(
                 session,
@@ -1200,7 +1218,9 @@ async def reject_ai_action(
     (§12): declining creates no effect, so requiring the higher grant would leave
     proposals nobody may clear sitting until the sweep expires them."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             codes = await user_permission_codes(session, ctx.user_id)
             row = await reject_action(
                 session,
@@ -1237,7 +1257,9 @@ async def list_ai_ceilings(
 ) -> list[CeilingOut]:
     """This org's STORED ceilings. Unset combinations are absent, not `off`
     rows: a materialized default reads as configuration somebody made."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_ceilings(session, org_id=ctx.org_id)
     return [CeilingOut.model_validate(row) for row in rows]
 
@@ -1251,7 +1273,9 @@ async def put_ai_ceiling(
     """Set one ceiling. Refuses `autonomous` with a 400 (§0.4) and audits the
     change with BOTH levels."""
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await set_ceiling(
                 session,
                 org_id=ctx.org_id,

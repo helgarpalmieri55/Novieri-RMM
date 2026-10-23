@@ -17,6 +17,7 @@ from moto import mock_aws
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Device, DocDocumentVersion
@@ -66,7 +67,7 @@ async def _upload(
 
 
 async def _audit_count(api_env, org_id: UUID, action: str) -> int:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         rows = (
             (await session.execute(select(AuditEvent).where(AuditEvent.action == action)))
             .scalars()

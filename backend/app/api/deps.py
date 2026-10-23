@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.i18n import tr, tr_marked
 from app.core.identity import domain_refusal, log_admission_refusal, status_refusal
 from app.core.identity.policy import resolve_console_domain
@@ -43,6 +44,7 @@ class AuthContext:
     org_id: UUID
     user_id: UUID
     claims: TokenClaims
+    clients: ClientScope
 
 
 def app_engine(request: Request) -> AsyncEngine:
@@ -144,7 +146,9 @@ async def auth_context(request: Request) -> AuthContext:
     if org_id is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, tr("unknown organization"))
 
-    async with org_session(org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        org_id, engine=request.app.state.app_engine, clients=ClientScope.all()
+    ) as session:
         # ADMISSION, DOOR 1 OF 3 (spec §3.2). The token is genuine from here
         # on; the remaining question is whether this identity is one we admit.
         #
@@ -292,7 +296,8 @@ async def auth_context(request: Request) -> AuthContext:
     request.state.org_id = str(org_id)
     request.state.user_id = str(user_id)
 
-    return AuthContext(org_id=org_id, user_id=user_id, claims=claims)
+    # Task 4 replaces this with the person's scope.
+    return AuthContext(org_id=org_id, user_id=user_id, claims=claims, clients=ClientScope.all())
 
 
 async def bound_auth_context(request: Request) -> AsyncIterator[AuthContext]:
@@ -365,7 +370,9 @@ def require_permission(code: str) -> Callable[..., AsyncIterator[AuthContext]]:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, tr("this action is never available to an AI app")
             )
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             allowed = await has_permission(session, ctx.user_id, code)
         if not allowed:
             raise HTTPException(status.HTTP_403_FORBIDDEN, tr("requires {code}", code=code))

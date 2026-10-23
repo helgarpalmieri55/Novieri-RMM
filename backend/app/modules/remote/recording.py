@@ -24,6 +24,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.models import RemotePolicy, RemoteSession
@@ -92,7 +93,7 @@ async def finalize_recording_file(
 
 
 async def _resolve_retention_days(org_id: UUID, app_engine: AsyncEngine) -> int:
-    async with org_session(org_id, engine=app_engine) as session:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         days = (
             await session.execute(
                 select(RemotePolicy.recording_retention_days)
@@ -138,7 +139,7 @@ async def apply_recording_retention(
 
     total = len(expired)
     if total:
-        async with org_session(org_id, engine=app_engine) as session:
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await audit_service.record(
                 session,
                 org_id=org_id,

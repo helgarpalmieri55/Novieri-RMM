@@ -36,6 +36,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.rbac import route_permission
 from app.core.tenancy import admin_session, org_session
 from app.core.vault import get_vault
@@ -149,7 +150,7 @@ async def _seed_mailbox(
     category_id = await _seed_category(api_env, org_id)
     vault = get_vault(api_env.settings)
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         mailbox = await create_mailbox(
             session,
             org_id,
@@ -167,7 +168,7 @@ async def _seed_mailbox(
         )
         mailbox_id, credential_id = mailbox.id, mailbox.credential_id
 
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         stored = await vault.checkout(session, org_id=org_id, credential_id=credential_id)
     assert stored == password, "fixture is vacuous: no credential was stored"
 
@@ -947,7 +948,9 @@ async def test_update_rotates_the_password_without_returning_it(api_env) -> None
     assert response.json()["folder"] == "Support"
 
     vault = get_vault(api_env.settings)
-    async with org_session(env.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        env.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         assert (
             await vault.checkout(session, org_id=env.org_id, credential_id=env.credential_id)
         ) == "rotated-secret"

@@ -372,7 +372,9 @@ async def list_queues_route(
     include_inactive: bool = Query(default=False),
     ctx: AuthContext = Depends(require_permission("ticket.read")),
 ) -> list[QueueOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         # `refdata.list_queues` deliberately does not self-seed (it has no
         # `actor_id` to satisfy the seed's NOT NULL `created_by`) -- the
         # caller bootstraps explicitly first, exactly as its docstring
@@ -388,7 +390,9 @@ async def create_queue_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("ticket.admin")),
 ) -> QueueOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             # `sort_order` is passed straight to `create_queue` as an
             # INSERT-time value (whole-branch security review, minor
@@ -417,7 +421,9 @@ async def update_queue_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("ticket.admin")),
 ) -> QueueOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             queue = await update_queue(
                 session,
@@ -443,7 +449,9 @@ async def list_categories_route(
     include_inactive: bool = Query(default=False),
     ctx: AuthContext = Depends(require_permission("ticket.read")),
 ) -> list[CategoryOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         await ensure_default_categories(session, ctx.org_id, ctx.user_id)
         rows = await list_categories(session, ctx.org_id, include_inactive=include_inactive)
         return [_category_out(r) for r in rows]
@@ -457,7 +465,9 @@ async def create_category_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("ticket.admin")),
 ) -> CategoryOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             # `sort_order` goes straight to `create_category` as an
             # INSERT-time value, for the identical reason `create_queue_route`
@@ -487,7 +497,9 @@ async def update_category_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("ticket.admin")),
 ) -> CategoryOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             category = await update_category(
                 session,
@@ -517,7 +529,9 @@ async def download_attachment_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("ticket.read")),
 ) -> Response:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             attachment = await get_attachment(session, ctx.org_id, attachment_id)
         except TicketValidationError as exc:
@@ -613,7 +627,9 @@ async def list_tickets_route(
         "unassigned": scope == "unassigned",
         "open_only": scope != "all",
     }
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_tickets(
             session, ctx.org_id, sort=sort, limit=limit, offset=offset, **filters
         )
@@ -631,7 +647,9 @@ async def create_ticket_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("ticket.write")),
 ) -> TicketOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             # `origin` is a keyword decided by THIS ROUTE, never read off the
             # request body -- `TicketCreate` has no `origin` field at all
@@ -661,7 +679,9 @@ async def get_ticket_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("ticket.read")),
 ) -> TicketOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             ticket = await get_ticket(session, ctx.org_id, ticket_id)
         except TicketValidationError as exc:
@@ -684,7 +704,9 @@ async def list_status_history_route(
     cross-org/missing `ticket_id`) and the oldest-first ordering; this is a
     pure read, so -- like every other list/detail route in this module,
     spec §8.3's no-audit-on-view rule -- it writes no audit event."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             rows = await list_status_history(session, ctx.org_id, ticket_id)
         except TicketValidationError as exc:
@@ -705,7 +727,9 @@ async def update_ticket_route(
     # indistinguishable -- `update_ticket` relies on key PRESENCE to decide
     # what to touch, and rejects an explicit `null` on a non-nullable column
     # with a typed 400.
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             ticket = await update_ticket(
                 session,
@@ -726,7 +750,9 @@ async def change_status_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("ticket.write")),
 ) -> TicketOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             ticket = await change_status(
                 session,
@@ -750,7 +776,9 @@ async def resolve_ticket_route(
 ) -> TicketOut:
     # Raising inside `org_session` rolls the whole transaction back, so a
     # refused step leaves no reply behind (`resolve.py`).
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             ticket = await reply_and_resolve(
                 session,
@@ -772,7 +800,9 @@ async def assign_ticket_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("ticket.assign")),
 ) -> TicketOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             ticket = await assign_ticket(
                 session,
@@ -793,7 +823,9 @@ async def approve_ticket_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("ticket.approve")),
 ) -> TicketOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await decide_approval(
                 session, ctx.org_id, ctx.user_id, ticket_id, approve=True, reason=body.reason
@@ -811,7 +843,9 @@ async def reject_ticket_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("ticket.approve")),
 ) -> TicketOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await decide_approval(
                 session, ctx.org_id, ctx.user_id, ticket_id, approve=False, reason=body.reason
@@ -836,7 +870,9 @@ async def list_comments_route(
     include_internal: bool = Query(default=True),
     ctx: AuthContext = Depends(require_permission("ticket.read")),
 ) -> list[CommentOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             rows = await list_comments(
                 session, ctx.org_id, ticket_id, include_internal=include_internal
@@ -857,7 +893,9 @@ async def create_comment_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("ticket.write")),
 ) -> CommentOut:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             comment = await add_comment(
                 session,
@@ -894,7 +932,9 @@ async def list_attachments_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("ticket.read")),
 ) -> list[AttachmentOut]:
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         try:
             await get_ticket(session, ctx.org_id, ticket_id)  # 404 if cross-org/missing
         except TicketValidationError as exc:
@@ -942,7 +982,9 @@ async def upload_attachment_route(
     except TicketValidationError as exc:
         raise _http_error(exc) from None
 
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         # requirement #1: the ticket is org-scoped-loaded and validated to
         # exist BEFORE the request body is ever read. Reading first would
         # let any `ticket.write` holder buffer up to `MAX_ATTACHMENT_BYTES`
@@ -1020,7 +1062,9 @@ async def list_canned_responses_route(
 ) -> list[CannedResponseOut]:
     """This org's saved replies, by title. Creation stops at
     `MAX_CANNED_RESPONSES`, so the default page is the whole library."""
-    async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
         rows = await list_canned_responses(session, ctx.org_id, limit=limit)
         return [_canned_out(r) for r in rows]
 
@@ -1036,7 +1080,9 @@ async def create_canned_response_route(
     ctx: AuthContext = Depends(require_permission("ticket.admin")),
 ) -> CannedResponseOut:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             row = await create_canned_response(
                 session, ctx.org_id, ctx.user_id, title=body.title, body=body.body
             )
@@ -1053,7 +1099,9 @@ async def update_canned_response_route(
     ctx: AuthContext = Depends(require_permission("ticket.admin")),
 ) -> CannedResponseOut:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             row = await update_canned_response(
                 session, ctx.org_id, ctx.user_id, response_id, body.model_dump(exclude_unset=True)
             )
@@ -1071,7 +1119,9 @@ async def delete_canned_response_route(
     ctx: AuthContext = Depends(require_permission("ticket.admin")),
 ) -> Response:
     try:
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             await delete_canned_response(session, ctx.org_id, ctx.user_id, response_id)
     except TicketValidationError as exc:
         raise _http_error(exc) from None

@@ -32,6 +32,7 @@ from sqlalchemy import select
 from sqlalchemy import text as sqltext
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, HealthAlert, HealthCheck, HealthProfile
 from app.modules.health.errors import (
@@ -99,7 +100,9 @@ async def _policy_version(admin_engine: AsyncEngine, profile_id: UUID) -> int:
 
 
 async def _make_profile(api_env, org, **kw: Any) -> HealthProfile:
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         return await create_profile(
             session, org.org_id, org.user_id, name=kw.pop("name", f"p-{uuid4().hex[:8]}"), **kw
         )
@@ -141,14 +144,18 @@ async def test_create_profile_stores_every_field_and_audits(api_env) -> None:
 async def test_a_duplicate_profile_name_is_a_typed_error(api_env) -> None:
     org = await seed_org(api_env, "prof-dup")
     await _make_profile(api_env, org, name="Servers")
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthValidationError):
             await create_profile(session, org.org_id, org.user_id, name="Servers")
 
 
 async def test_out_of_range_intervals_are_typed_errors_not_500s(api_env) -> None:
     org = await seed_org(api_env, "prof-rng")
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthValidationError):
             await create_profile(session, org.org_id, org.user_id, name="a", tick_interval_s=30)
         with pytest.raises(HealthValidationError):
@@ -172,7 +179,9 @@ async def test_getting_another_orgs_profile_raises_not_found(api_env) -> None:
     a = await seed_org(api_env, "prof-xa")
     b = await seed_org(api_env, "prof-xb")
     profile = await _make_profile(api_env, b)
-    async with org_session(a.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        a.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthNotFoundError):
             await get_profile(session, a.org_id, profile.id)
 
@@ -193,7 +202,9 @@ async def test_renaming_a_profile_bumps_policy_version(api_env) -> None:
     profile = await _make_profile(api_env, org)
     assert profile.policy_version == 1
 
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         updated = await update_profile(
             session, org.org_id, org.user_id, profile.id, {"name": "Renamed"}
         )
@@ -205,10 +216,14 @@ async def test_renaming_a_profile_bumps_policy_version(api_env) -> None:
 async def test_replacing_checks_bumps_policy_version(api_env) -> None:
     org = await seed_org(api_env, "pv-checks")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await replace_checks(session, org.org_id, org.user_id, profile.id, [CPU])
     assert await _policy_version(api_env.admin_engine, profile.id) == 2
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await replace_checks(session, org.org_id, org.user_id, profile.id, [CPU, MEM])
     assert await _policy_version(api_env.admin_engine, profile.id) == 3
 
@@ -219,7 +234,9 @@ async def test_no_write_path_accepts_a_client_supplied_policy_version(api_env) -
     re-pushes only where the acknowledged version is BEHIND."""
     org = await seed_org(api_env, "pv-client")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthValidationError):
             await update_profile(
                 session, org.org_id, org.user_id, profile.id, {"policy_version": 99}
@@ -230,7 +247,9 @@ async def test_no_write_path_accepts_a_client_supplied_policy_version(api_env) -
 async def test_an_unknown_profile_field_is_refused_not_ignored(api_env) -> None:
     org = await seed_org(api_env, "pv-unk")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthValidationError):
             await update_profile(session, org.org_id, org.user_id, profile.id, {"tick": 300})
 
@@ -246,7 +265,9 @@ async def _replace_outcome(api_env, org, profile_id: UUID, specs: list[dict[str,
     RAISE" and hide the fact that the database now holds a boolean check with a
     numeric threshold."""
     try:
-        async with org_session(org.org_id, engine=api_env.app_engine) as session:
+        async with org_session(
+            org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+        ) as session:
             await replace_checks(session, org.org_id, org.user_id, profile_id, specs)
     except HealthValidationError as exc:
         return f"refused: {exc}"
@@ -439,7 +460,9 @@ async def test_thirty_two_checks_are_accepted(api_env) -> None:
     specs = [
         {**CPU, "check_type": "disk.free_pct", "selector": f"/mnt/{i}"} for i in range(32)
     ]
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         rows = await replace_checks(session, org.org_id, org.user_id, profile.id, specs)
     assert len(rows) == 32
 
@@ -451,7 +474,9 @@ async def test_the_enum_check_type_stores_its_threshold_in_the_boolean_column(
     and `threshold_bool = true` means the first one (`running`)."""
     org = await seed_org(api_env, "chk-enum")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         rows = await replace_checks(
             session,
             org.org_id,
@@ -491,7 +516,9 @@ async def test_for_seconds_converts_against_this_profiles_tick_interval(
     profile = await _make_profile(
         api_env, org, tick_interval_s=tick_interval_s, posture_interval_s=3600
     )
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         rows = await replace_checks(
             session, org.org_id, org.user_id, profile.id, [{**CPU, "for_seconds": for_seconds}]
         )
@@ -515,7 +542,9 @@ async def test_a_for_seconds_below_one_tick_still_stores_at_least_one_tick(api_e
     60` would otherwise make the request a 500."""
     org = await seed_org(api_env, "fs-sub")
     profile = await _make_profile(api_env, org, tick_interval_s=300)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         rows = await replace_checks(
             session, org.org_id, org.user_id, profile.id, [{**CPU, "for_seconds": 10}]
         )
@@ -530,9 +559,13 @@ async def test_a_for_seconds_below_one_tick_still_stores_at_least_one_tick(api_e
 async def test_replace_checks_is_a_set_replacement(api_env) -> None:
     org = await seed_org(api_env, "rc-set")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await replace_checks(session, org.org_id, org.user_id, profile.id, [CPU, MEM])
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await replace_checks(session, org.org_id, org.user_id, profile.id, [MEM, ENCRYPTION])
         live = await list_checks(session, org.org_id, profile.id)
     assert sorted(c.check_type for c in live) == ["memory.used_pct", "posture.disk_encryption"]
@@ -544,9 +577,13 @@ async def test_a_surviving_check_keeps_its_id_across_a_replacement(api_env) -> N
     and therefore re-open every alert the profile carries, once per edit."""
     org = await seed_org(api_env, "rc-id")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         before = await replace_checks(session, org.org_id, org.user_id, profile.id, [CPU])
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         after = await replace_checks(
             session, org.org_id, org.user_id, profile.id, [{**CPU, "threshold_num": 80}, MEM]
         )
@@ -563,12 +600,16 @@ async def test_removing_a_check_retires_it_and_clears_its_alerts(api_env) -> Non
     running and retiring without clearing leaves a permanent alert."""
     org = await seed_org(api_env, "rc-retire")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         rows = await replace_checks(session, org.org_id, org.user_id, profile.id, [CPU, MEM])
     cpu_id = next(c.id for c in rows if c.check_type == "cpu.busy_pct")
     alert_id = await seed_alert(api_env, org, profile_id=profile.id, check_id=cpu_id)
 
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await replace_checks(session, org.org_id, org.user_id, profile.id, [MEM])
 
     async with AsyncSession(api_env.admin_engine) as session:
@@ -586,10 +627,14 @@ async def test_a_check_that_never_alarmed_is_hard_deleted_not_retired(api_env) -
     same minute" path leaves no permanent retired row consuming a slot."""
     org = await seed_org(api_env, "rc-hard")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         rows = await replace_checks(session, org.org_id, org.user_id, profile.id, [CPU, MEM])
     cpu_id = next(c.id for c in rows if c.check_type == "cpu.busy_pct")
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await replace_checks(session, org.org_id, org.user_id, profile.id, [MEM])
 
     async with AsyncSession(api_env.admin_engine) as session:
@@ -601,14 +646,20 @@ async def test_re_adding_a_retired_check_mints_a_new_id(api_env) -> None:
     history that lies about continuity"."""
     org = await seed_org(api_env, "rc-readd")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         rows = await replace_checks(session, org.org_id, org.user_id, profile.id, [CPU])
     cpu_id = rows[0].id
     await seed_alert(api_env, org, profile_id=profile.id, check_id=cpu_id)
 
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await replace_checks(session, org.org_id, org.user_id, profile.id, [])
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         again = await replace_checks(session, org.org_id, org.user_id, profile.id, [CPU])
     assert again[0].id != cpu_id
 
@@ -617,9 +668,13 @@ async def test_an_empty_check_set_is_legal(api_env) -> None:
     """A profile with no checks is a disarm, not an error (§5.2)."""
     org = await seed_org(api_env, "rc-empty")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await replace_checks(session, org.org_id, org.user_id, profile.id, [CPU])
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         rows = await replace_checks(session, org.org_id, org.user_id, profile.id, [])
     assert rows == []
 
@@ -627,9 +682,13 @@ async def test_an_empty_check_set_is_legal(api_env) -> None:
 async def test_replace_checks_audits_what_it_changed(api_env) -> None:
     org = await seed_org(api_env, "rc-audit")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await replace_checks(session, org.org_id, org.user_id, profile.id, [CPU, MEM])
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await replace_checks(session, org.org_id, org.user_id, profile.id, [MEM, ENCRYPTION])
 
     events = [e for e in await _audit(api_env.admin_engine, org.org_id) if "check" in e.action]
@@ -653,13 +712,17 @@ async def test_clone_profile_deep_copies_the_checks_and_creates_no_assignment(
     that carried the assignment would silently retarget the source's devices."""
     org = await seed_org(api_env, "clone")
     source = await _make_profile(api_env, org, tick_interval_s=120, posture_interval_s=1800)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         original = await replace_checks(session, org.org_id, org.user_id, source.id, [CPU, MEM])
         await create_assignment(
             session, org.org_id, org.user_id, profile_id=source.id, device_id=org.device_id
         )
 
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         clone = await clone_profile(session, org.org_id, org.user_id, source.id, name="Copy")
         cloned_checks = await list_checks(session, org.org_id, clone.id)
         assignments = await list_assignments(session, org.org_id, profile_id=clone.id)
@@ -678,10 +741,14 @@ async def test_cloning_does_not_bump_the_sources_policy_version(api_env) -> None
     the source's whole device set for a copy nobody assigned."""
     org = await seed_org(api_env, "clone-pv")
     source = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await replace_checks(session, org.org_id, org.user_id, source.id, [CPU])
     before = await _policy_version(api_env.admin_engine, source.id)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await clone_profile(session, org.org_id, org.user_id, source.id, name="Copy")
     assert await _policy_version(api_env.admin_engine, source.id) == before
 
@@ -691,7 +758,9 @@ async def test_cloning_a_retired_check_does_not_copy_it(api_env) -> None:
     (§3). A clone that copied it would resurrect a rule an operator removed."""
     org = await seed_org(api_env, "clone-ret")
     source = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         rows = await replace_checks(session, org.org_id, org.user_id, source.id, [CPU, MEM])
     await seed_alert(
         api_env,
@@ -699,9 +768,13 @@ async def test_cloning_a_retired_check_does_not_copy_it(api_env) -> None:
         profile_id=source.id,
         check_id=next(c.id for c in rows if c.check_type == "cpu.busy_pct"),
     )
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await replace_checks(session, org.org_id, org.user_id, source.id, [MEM])
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         clone = await clone_profile(session, org.org_id, org.user_id, source.id, name="Copy")
         cloned = await list_checks(session, org.org_id, clone.id)
     assert [c.check_type for c in cloned] == ["memory.used_pct"]
@@ -719,7 +792,9 @@ async def test_a_device_level_assignment_upsert_executes(api_env) -> None:
     it, which is why all three levels get one."""
     org = await seed_org(api_env, "asg-d")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         row = await create_assignment(
             session, org.org_id, org.user_id, profile_id=profile.id, device_id=org.device_id
         )
@@ -730,7 +805,9 @@ async def test_a_device_level_assignment_upsert_executes(api_env) -> None:
 async def test_a_group_level_assignment_upsert_executes(api_env) -> None:
     org = await seed_org(api_env, "asg-g")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         row = await create_assignment(
             session, org.org_id, org.user_id, profile_id=profile.id, device_group_id=org.group_id
         )
@@ -740,7 +817,9 @@ async def test_a_group_level_assignment_upsert_executes(api_env) -> None:
 async def test_an_org_default_assignment_upsert_executes(api_env) -> None:
     org = await seed_org(api_env, "asg-o")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         row = await create_assignment(session, org.org_id, org.user_id, profile_id=profile.id)
     assert (row.device_id, row.device_group_id) == (None, None)
 
@@ -763,9 +842,13 @@ async def test_a_second_assignment_at_one_level_names_the_existing_one(
         "org": {},
     }[level]
 
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await create_assignment(session, org.org_id, org.user_id, profile_id=first.id, **target)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthValidationError) as exc:
             await create_assignment(
                 session, org.org_id, org.user_id, profile_id=second.id, **target
@@ -778,7 +861,9 @@ async def test_one_assignment_at_each_level_coexists(api_env) -> None:
     cannot hold a row each."""
     org = await seed_org(api_env, "asg-all")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await create_assignment(
             session, org.org_id, org.user_id, profile_id=profile.id, device_id=org.device_id
         )
@@ -793,7 +878,9 @@ async def test_one_assignment_at_each_level_coexists(api_env) -> None:
 async def test_an_assignment_naming_both_a_device_and_a_group_is_refused(api_env) -> None:
     org = await seed_org(api_env, "asg-both")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthValidationError):
             await create_assignment(
                 session,
@@ -812,7 +899,9 @@ async def test_an_assignment_to_another_orgs_device_is_refused(api_env) -> None:
     a = await seed_org(api_env, "asg-xa")
     b = await seed_org(api_env, "asg-xb")
     profile = await _make_profile(api_env, a)
-    async with org_session(a.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        a.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthValidationError):
             await create_assignment(
                 session, a.org_id, a.user_id, profile_id=profile.id, device_id=b.device_id
@@ -822,11 +911,15 @@ async def test_an_assignment_to_another_orgs_device_is_refused(api_env) -> None:
 async def test_deleting_an_assignment_audits_and_removes_it(api_env) -> None:
     org = await seed_org(api_env, "asg-del")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         row = await create_assignment(
             session, org.org_id, org.user_id, profile_id=profile.id, device_id=org.device_id
         )
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await delete_assignment(session, org.org_id, org.user_id, row.id)
         assert await list_assignments(session, org.org_id) == []
 
@@ -844,11 +937,15 @@ async def test_a_profile_with_an_assignment_cannot_be_deleted(api_env) -> None:
     operator to find which of a hundred devices still points at it."""
     org = await seed_org(api_env, "del-asg")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         assignment = await create_assignment(
             session, org.org_id, org.user_id, profile_id=profile.id, device_id=org.device_id
         )
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthConflictError) as exc:
             await delete_profile(session, org.org_id, org.user_id, profile.id)
     assert str(assignment.id) in str(exc.value)
@@ -861,11 +958,15 @@ async def test_a_profile_with_alerts_cannot_be_deleted(api_env) -> None:
     bare `IntegrityError`; it does neither."""
     org = await seed_org(api_env, "del-alert")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         rows = await replace_checks(session, org.org_id, org.user_id, profile.id, [CPU])
     alert_id = await seed_alert(api_env, org, profile_id=profile.id, check_id=rows[0].id)
 
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthConflictError) as exc:
             await delete_profile(session, org.org_id, org.user_id, profile.id)
     assert str(alert_id) in str(exc.value)
@@ -874,9 +975,13 @@ async def test_a_profile_with_alerts_cannot_be_deleted(api_env) -> None:
 async def test_deleting_a_profile_removes_its_checks_and_audits(api_env) -> None:
     org = await seed_org(api_env, "del-ok")
     profile = await _make_profile(api_env, org)
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await replace_checks(session, org.org_id, org.user_id, profile.id, [CPU, MEM])
-    async with org_session(org.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        org.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await delete_profile(session, org.org_id, org.user_id, profile.id)
 
     async with api_env.admin_engine.connect() as conn:
@@ -989,7 +1094,9 @@ async def test_a_cross_org_profile_id_cannot_be_written_through(api_env) -> None
     a = await seed_org(api_env, "wx-a")
     b = await seed_org(api_env, "wx-b")
     victim = await _make_profile(api_env, b)
-    async with org_session(a.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        a.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         for call in (
             lambda: update_profile(session, a.org_id, a.user_id, victim.id, {"name": "x"}),
             lambda: replace_checks(session, a.org_id, a.user_id, victim.id, [CPU]),
@@ -1004,11 +1111,15 @@ async def test_an_assignment_id_from_another_org_is_not_deletable(api_env) -> No
     a = await seed_org(api_env, "wd-a")
     b = await seed_org(api_env, "wd-b")
     profile = await _make_profile(api_env, b)
-    async with org_session(b.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        b.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         row = await create_assignment(
             session, b.org_id, b.user_id, profile_id=profile.id, device_id=b.device_id
         )
-    async with org_session(a.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        a.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthNotFoundError):
             await delete_assignment(session, a.org_id, a.user_id, row.id)
 
@@ -1018,7 +1129,9 @@ async def test_a_group_from_another_org_cannot_be_assigned(api_env) -> None:
     b = await seed_org(api_env, "wg-b")
     profile = await _make_profile(api_env, a)
     foreign_group = await seed_group(api_env, b.org_id)
-    async with org_session(a.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        a.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         with pytest.raises(HealthValidationError):
             await create_assignment(
                 session, a.org_id, a.user_id, profile_id=profile.id, device_group_id=foreign_group
@@ -1032,7 +1145,9 @@ async def test_two_orgs_may_hold_a_profile_of_the_same_name(api_env) -> None:
     b = await seed_org(api_env, "nm-b")
     await _make_profile(api_env, a, name="Servers")
     await _make_profile(api_env, b, name="Servers")
-    async with org_session(a.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        a.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         assert [p.name for p in await list_profiles(session, a.org_id)] == ["Servers"]
 
 
@@ -1045,7 +1160,9 @@ async def test_a_device_from_another_org_is_invisible_to_assignment_listing(
     b = await seed_org(api_env, "dv-b")
     other_device = await seed_device(api_env, b.org_id)
     profile = await _make_profile(api_env, a)
-    async with org_session(a.org_id, engine=api_env.app_engine) as session:
+    async with org_session(
+        a.org_id, engine=api_env.app_engine, clients=ClientScope.all()
+    ) as session:
         await create_assignment(
             session, a.org_id, a.user_id, profile_id=profile.id, device_id=a.device_id
         )

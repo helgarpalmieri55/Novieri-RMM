@@ -34,6 +34,7 @@ from pydantic import ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -158,7 +159,7 @@ async def _second_repository(
 ) -> UUID:
     """A second, real repository in org `a` -- built the one way repositories
     are built, so its `storage_ref` is genuine rather than hand-written."""
-    async with org_session(a.org_id, engine=app_engine) as inner:
+    async with org_session(a.org_id, engine=app_engine, clients=ClientScope.all()) as inner:
         repo = await create_repository(
             inner, vault, org_id=a.org_id, actor_id=a.user_id, name=f"second-{uuid4().hex[:8]}"
         )

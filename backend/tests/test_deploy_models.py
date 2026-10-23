@@ -3,6 +3,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (  # noqa: F401 -- Script/ScriptRun verify importability
     Deployment,
@@ -33,7 +34,7 @@ async def test_package_and_deployment_roundtrip(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     org_id, device_id, user_id = await _org_device_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         pkg = Package(
             org_id=org_id,
             name="acrobat",
@@ -72,7 +73,7 @@ async def test_package_and_deployment_roundtrip(
         await s.flush()
         assert res.state == "pending"
         assert res.job_id is None and res.exit_code is None
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         got_pkg = (await s.execute(select(Package).where(Package.id == pkg.id))).scalar_one()
         assert got_pkg.detection_rule["type"] == "registry_value"
         got_dep = (await s.execute(select(Deployment).where(Deployment.id == dep.id))).scalar_one()
@@ -85,7 +86,7 @@ async def test_package_and_deployment_roundtrip(
 
 async def test_script_and_run_roundtrip(admin_engine: AsyncEngine, app_engine: AsyncEngine) -> None:
     org_id, device_id, user_id = await _org_device_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         script = Script(
             org_id=org_id,
             name="cleanup-temp",
@@ -111,6 +112,6 @@ async def test_script_and_run_roundtrip(admin_engine: AsyncEngine, app_engine: A
         await s.flush()
         assert run.state == "pending"
         assert run.job_id is None and run.finished_at is None
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         got = (await s.execute(select(ScriptRun).where(ScriptRun.id == run.id))).scalar_one()
         assert got.state == "pending" and got.script_version == 1

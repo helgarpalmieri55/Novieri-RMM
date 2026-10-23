@@ -599,7 +599,7 @@ async def _resolve_vrf(
 async def list_vrfs(
     request: Request, ctx: AuthContext = Depends(require_permission("ipam.read"))
 ) -> list[VrfOut]:
-    async with org_session(ctx.org_id, engine=_engine(request)) as session:
+    async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
         rows = await registry_service.list_vrfs(session, ctx.org_id)
         return [_vrf_out(row) for row in rows]
 
@@ -611,7 +611,7 @@ async def create_vrf(
     ctx: AuthContext = Depends(require_permission("ipam.manage")),
 ) -> VrfOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await registry_service.create_vrf(
                 session, ctx.org_id, ctx.user_id,
                 name=body.name, rd=body.rd, description=body.description,
@@ -626,7 +626,7 @@ async def create_vrf(
 async def list_sites(
     request: Request, ctx: AuthContext = Depends(require_permission("ipam.read"))
 ) -> list[SiteOut]:
-    async with org_session(ctx.org_id, engine=_engine(request)) as session:
+    async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
         return [_site_out(row) for row in await registry_service.list_sites(session, ctx.org_id)]
 
 
@@ -637,7 +637,7 @@ async def create_site(
     ctx: AuthContext = Depends(require_permission("ipam.manage")),
 ) -> SiteOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await registry_service.create_site(
                 session, ctx.org_id, ctx.user_id,
                 name=body.name, doc_record_id=body.doc_record_id,
@@ -655,7 +655,7 @@ async def list_vlans(
     site_id: UUID | None = Query(default=None),
     ctx: AuthContext = Depends(require_permission("ipam.read")),
 ) -> list[VlanOut]:
-    async with org_session(ctx.org_id, engine=_engine(request)) as session:
+    async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
         rows = await registry_service.list_vlans(session, ctx.org_id, site_id=site_id)
         return [_vlan_out(row) for row in rows]
 
@@ -667,7 +667,7 @@ async def create_vlan(
     ctx: AuthContext = Depends(require_permission("ipam.manage")),
 ) -> VlanOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await registry_service.create_vlan(
                 session, ctx.org_id, ctx.user_id,
                 vid=body.vid, site_id=body.site_id, name=body.name,
@@ -695,7 +695,7 @@ async def list_subnets(
     ctx: AuthContext = Depends(require_permission("ipam.read")),
 ) -> list[SubnetOut]:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             rows = await subnet_service.list_subnets(
                 session, ctx.org_id, vrf_id=vrf, site_id=site, vlan_id=vlan,
                 contains=contains, q=q,
@@ -713,7 +713,7 @@ async def create_subnet(
     ctx: AuthContext = Depends(require_permission("ipam.manage")),
 ) -> SubnetOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await subnet_service.create_subnet(
                 session, ctx.org_id, ctx.user_id,
                 prefix=body.prefix, vrf_id=body.vrf_id, kind=body.kind,
@@ -734,7 +734,7 @@ async def get_subnet(
     ctx: AuthContext = Depends(require_permission("ipam.read")),
 ) -> SubnetOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             out = _subnet_out(
                 await subnet_service.get_subnet(session, ctx.org_id, subnet_id)
             )
@@ -751,7 +751,7 @@ async def update_subnet(
     ctx: AuthContext = Depends(require_permission("ipam.manage")),
 ) -> SubnetOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await subnet_service.update_subnet(
                 session, ctx.org_id, ctx.user_id, subnet_id,
                 body.model_dump(exclude_unset=True),
@@ -770,7 +770,7 @@ async def delete_subnet(
     ctx: AuthContext = Depends(require_permission("ipam.manage")),
 ) -> None:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             await subnet_service.delete_subnet(
                 session, ctx.org_id, ctx.user_id, subnet_id, cascade=cascade
             )
@@ -787,7 +787,7 @@ async def subnet_addresses(
     ctx: AuthContext = Depends(require_permission("ipam.read")),
 ) -> list[GridEntryOut]:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             entries = await allocation_service.address_grid(
                 session, ctx.org_id, subnet_id, offset=offset, limit=limit
             )
@@ -804,7 +804,7 @@ async def subnet_utilization(
     ctx: AuthContext = Depends(require_permission("ipam.read")),
 ) -> UtilizationOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             out = UtilizationOut(
                 **vars(await allocation_service.utilization(session, ctx.org_id, subnet_id))
             )
@@ -821,7 +821,7 @@ async def subnet_next_free(
     ctx: AuthContext = Depends(require_permission("ipam.read")),
 ) -> list[str]:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             out = await allocation_service.next_free(session, ctx.org_id, subnet_id, count)
     except IpamError as exc:
         raise _http_error(exc) from None
@@ -843,7 +843,7 @@ async def subnet_allocate(
     call it race for `.42`; this picks and claims in one transaction under the
     §0.3 advisory lock and returns the address it took."""
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await allocation_service.allocate(
                 session, ctx.org_id, subnet_id, actor_id=ctx.user_id,
                 device_id=body.device_id, asset_label=body.asset_label,
@@ -863,7 +863,7 @@ async def list_ranges(
     ctx: AuthContext = Depends(require_permission("ipam.read")),
 ) -> list[RangeOut]:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             rows = await subnet_service.list_ranges(session, ctx.org_id, subnet_id)
             out = [_range_out(row) for row in rows]
     except IpamError as exc:
@@ -883,7 +883,7 @@ async def create_range(
     ctx: AuthContext = Depends(require_permission("ipam.manage")),
 ) -> RangeOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await subnet_service.create_range(
                 session, ctx.org_id, ctx.user_id, subnet_id,
                 kind=body.kind, start_address=body.start_address,
@@ -906,7 +906,7 @@ async def delete_range(
     ctx: AuthContext = Depends(require_permission("ipam.manage")),
 ) -> None:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             # The subnet is resolved first so a range id from another subnet --
             # or another org -- is a 404 about the SUBNET, not a delete that
             # quietly succeeds against a row the caller did not name.
@@ -933,7 +933,7 @@ async def get_address(
     ctx: AuthContext = Depends(require_permission("ipam.read")),
 ) -> AddressOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             out = _address_out(
                 await address_service.get_address(session, ctx.org_id, address_id)
             )
@@ -949,7 +949,7 @@ async def create_address(
     ctx: AuthContext = Depends(require_permission("ipam.assign")),
 ) -> AddressOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             if body.reserve:
                 row = await address_service.reserve(
                     session, ctx.org_id, ctx.user_id,
@@ -978,7 +978,7 @@ async def update_address(
     ctx: AuthContext = Depends(require_permission("ipam.assign")),
 ) -> AddressOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await address_service.update_address(
                 session, ctx.org_id, ctx.user_id, address_id,
                 body.model_dump(exclude_unset=True),
@@ -996,7 +996,7 @@ async def release_address(
     ctx: AuthContext = Depends(require_permission("ipam.assign")),
 ) -> AddressOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             out = _address_out(
                 await address_service.release(session, ctx.org_id, ctx.user_id, address_id)
             )
@@ -1020,7 +1020,7 @@ async def address_history(
     audit API keeps requiring it.
     """
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             entries = await address_service.address_history(session, ctx.org_id, address_id)
             out = [HistoryEntryOut(**vars(entry)) for entry in entries]
     except IpamError as exc:
@@ -1035,7 +1035,7 @@ async def search(
     ctx: AuthContext = Depends(require_permission("ipam.read")),
 ) -> SearchOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             out = SearchOut(**vars(await address_service.search(session, ctx.org_id, q)))
     except IpamError as exc:
         raise _http_error(exc) from None
@@ -1057,7 +1057,7 @@ async def list_drift(
     ctx: AuthContext = Depends(require_permission("ipam.read")),
 ) -> list[DriftOut]:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             rows = await reconcile_service.list_drift(
                 session, ctx.org_id, drift_class=drift_class, severity=severity,
                 subnet_id=subnet, include_resolved=include_resolved,
@@ -1076,7 +1076,7 @@ async def acknowledge_drift(
     ctx: AuthContext = Depends(require_permission("ipam.assign")),
 ) -> DriftOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             out = _drift_out(
                 await reconcile_service.acknowledge_drift(
                     session, ctx.org_id, actor_id=ctx.user_id, drift_id=drift_id,
@@ -1096,7 +1096,7 @@ async def suppress_drift(
     ctx: AuthContext = Depends(require_permission("ipam.assign")),
 ) -> DriftOut:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             out = _drift_out(
                 await reconcile_service.suppress_drift(
                     session, ctx.org_id, actor_id=ctx.user_id, drift_id=drift_id,
@@ -1114,7 +1114,7 @@ async def list_orphans(
 ) -> list[OrphanOut]:
     """§4.2. NOT drift: nothing is wrong with the plan, the plan is ABSENT --
     which is why this is a separate list with its own page."""
-    async with org_session(ctx.org_id, engine=_engine(request)) as session:
+    async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
         groups = await observation_service.orphan_groups(session, ctx.org_id)
         return [OrphanOut(**vars(group)) for group in groups]
 
@@ -1130,7 +1130,7 @@ async def list_scan_authorizations(
     include_revoked: bool = Query(default=False),
     ctx: AuthContext = Depends(require_permission("ipam.read")),
 ) -> list[ScopeOut]:
-    async with org_session(ctx.org_id, engine=_engine(request)) as session:
+    async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
         rows = await scope_service.list_authorizations(
             session, ctx.org_id, include_revoked=include_revoked
         )
@@ -1152,7 +1152,7 @@ async def create_scan_authorization(
     a scope somebody else authorized.
     """
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             vrf_id = await _resolve_vrf(session, ctx.org_id, body.vrf_id)
             row = await scope_service.create_authorization(
                 session, ctx.org_id, actor_id=ctx.user_id, vrf_id=vrf_id,
@@ -1175,7 +1175,7 @@ async def revoke_scan_authorization(
     """Revocation STAMPS; the row stays, so "who authorized probing that segment
     in March" remains answerable."""
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             await scope_service.revoke_authorization(
                 session, ctx.org_id, actor_id=ctx.user_id,
                 authorization_id=authorization_id,
@@ -1219,7 +1219,7 @@ async def dispatch_sweep(
     envelope: dict[str, Any] | None = None
     refusal: IpamAuthorizationError | None = None
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             run, envelope, refusal = await create_sweep(
                 session,
                 request.app.state.job_engine,
@@ -1270,7 +1270,7 @@ async def update_sweep_settings(
             ),
         )
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await subnet_service.set_sweep_settings(
                 session, ctx.org_id, ctx.user_id, subnet_id,
                 sweep_enabled=body.sweep_enabled,
@@ -1291,7 +1291,7 @@ async def list_sweep_runs(
     ctx: AuthContext = Depends(require_permission("ipam.read")),
 ) -> list[SweepRunOut]:
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             rows = await _list_sweep_runs(session, ctx.org_id, subnet_id, limit=limit)
             out = [_run_out(row) for row in rows]
     except IpamError as exc:
@@ -1410,7 +1410,7 @@ async def import_preview(
     content = await _read_csv(request)
     parsed = _mapping(mapping)
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             preview = await importer.preview_import(
                 session, ctx.org_id, content=content, mapping=parsed
             )
@@ -1435,7 +1435,7 @@ async def import_apply(
     content = await _read_csv(request)
     parsed = _mapping(mapping)
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             result = await importer.apply_import(
                 session, ctx.org_id, actor_id=ctx.user_id, content=content,
                 mapping=parsed, digest=digest,
@@ -1461,7 +1461,7 @@ async def import_doc_records(
     unparseable CIDRs and duplicate prefixes with no operator to ask.
     """
     try:
-        async with org_session(ctx.org_id, engine=_engine(request)) as session:
+        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             conversion = await importer.convert_doc_records(
                 session, ctx.org_id, actor_id=ctx.user_id, dry_run=dry_run
             )
@@ -1479,7 +1479,7 @@ async def import_doc_records(
 async def export_subnets(
     request: Request, ctx: AuthContext = Depends(require_permission("ipam.read"))
 ) -> PlainTextResponse:
-    async with org_session(ctx.org_id, engine=_engine(request)) as session:
+    async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
         body = await importer.export_subnets_csv(session, ctx.org_id)
     return PlainTextResponse(body, media_type="text/csv")
 
@@ -1488,7 +1488,7 @@ async def export_subnets(
 async def export_addresses(
     request: Request, ctx: AuthContext = Depends(require_permission("ipam.read"))
 ) -> PlainTextResponse:
-    async with org_session(ctx.org_id, engine=_engine(request)) as session:
+    async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
         body = await importer.export_addresses_csv(session, ctx.org_id)
     return PlainTextResponse(body, media_type="text/csv")
 
@@ -1501,7 +1501,7 @@ async def export_drift(
 ) -> PlainTextResponse:
     """§4.3: `dormant` IS EXCLUDED. It is not drift, and an export called "drift"
     that contained it would be the mixed list §0.11 says nobody opens twice."""
-    async with org_session(ctx.org_id, engine=_engine(request)) as session:
+    async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
         body = await importer.export_drift_csv(
             session, ctx.org_id, include_resolved=include_resolved
         )

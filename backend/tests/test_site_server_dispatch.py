@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
 from app.jobs.engine import JobEngine
@@ -107,7 +108,7 @@ async def test_the_broadcast_comes_from_the_most_specific_declared_segment(
         segments=["10.20.0.0/16", "10.20.7.0/24"],
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job, envelope = await wake_via_site_server(
             session,
             _engine_for(tmp_path),
@@ -148,7 +149,7 @@ async def test_a_named_prefix_wins_over_a_wider_declared_one(
         admin_engine, org.org_id, device_id=org.device_id, segments=["10.20.0.0/16"]
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await wake_via_site_server(
             session,
             _engine_for(tmp_path),
@@ -171,7 +172,7 @@ async def test_a_sole_declared_segment_needs_no_segment_argument(
         admin_engine, org.org_id, device_id=org.device_id, segments=["10.20.7.0/24"]
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await wake_via_site_server(
             session,
             _engine_for(tmp_path),
@@ -203,7 +204,7 @@ async def test_a_segment_the_server_does_not_declare_creates_no_job(
     )
 
     refused = False
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         try:
             await wake_via_site_server(
                 session,
@@ -229,7 +230,7 @@ async def test_an_address_outside_every_declared_segment_creates_no_job(
     )
 
     refused = False
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         try:
             await wake_via_site_server(
                 session,
@@ -263,7 +264,7 @@ async def test_several_declared_segments_and_no_choice_creates_no_job(
     )
 
     refused = False
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         try:
             await wake_via_site_server(
                 session,
@@ -288,7 +289,7 @@ async def test_a_malformed_mac_creates_no_job(
     )
 
     refused = False
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         try:
             await wake_via_site_server(
                 session,
@@ -319,7 +320,7 @@ async def test_a_disabled_site_server_creates_no_job(
     )
 
     refused = False
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         try:
             await wake_via_site_server(
                 session,
@@ -356,7 +357,7 @@ async def test_the_stored_ttl_is_three_hundred_seconds(
         admin_engine, org.org_id, device_id=org.device_id, segments=["10.20.7.0/24"]
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await wake_via_site_server(
             session,
             _engine_for(tmp_path),
@@ -389,7 +390,7 @@ async def test_the_job_targets_the_site_server_and_is_signed(
         admin_engine, org.org_id, device_id=org.device_id, segments=["10.20.7.0/24"]
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         job, envelope = await wake_via_site_server(
             session,
             _engine_for(tmp_path),
@@ -424,7 +425,7 @@ async def test_nothing_is_published_by_this_function(
     )
     redis = _RecordingRedis()
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         _job, envelope = await wake_via_site_server(
             session,
             _engine_for(tmp_path),
@@ -509,7 +510,7 @@ async def test_capability_advertisement_is_never_consulted(
         admin_engine, org.org_id, device_id=org.device_id, segments=["10.20.7.0/24"]
     )
 
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await wake_via_site_server(
             session,
             _engine_for(tmp_path),
@@ -527,7 +528,7 @@ async def test_an_unknown_site_server_id_is_not_found(
     admin_engine: AsyncEngine, app_engine: AsyncEngine, tmp_path: Path
 ) -> None:
     org = await seed_org(admin_engine, "ssd-o")
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(SiteServerNotFoundError):
             await wake_via_site_server(
                 session,

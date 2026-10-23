@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Organization, User
 from app.modules.subscriptions.errors import (
@@ -70,7 +71,7 @@ def _create_kwargs(**overrides: Any) -> dict[str, Any]:
 async def _audit_actions(
     app_engine: AsyncEngine, org_id: UUID, target_type: str, target_id: UUID
 ) -> list[str]:
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = (
             await s.execute(
                 select(AuditEvent)
@@ -100,19 +101,19 @@ async def test_cancel_subscription_sets_status_records_event_and_audits(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(s, org_id=org_id, actor_id=actor_id, **_create_kwargs())
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         cancelled = await cancel_subscription(
             s, org_id=org_id, actor_id=actor_id, sub_id=sub_id
         )
         await s.commit()
         assert cancelled.status == "cancelled"
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = await list_events(s, org_id, sub_id)
         types = [e.type for e in events]
         assert types == ["created", "cancel"]
@@ -127,16 +128,16 @@ async def test_cancel_subscription_already_cancelled_raises_validation_error(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(s, org_id=org_id, actor_id=actor_id, **_create_kwargs())
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await cancel_subscription(s, org_id=org_id, actor_id=actor_id, sub_id=sub_id)
         await s.commit()
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError):
             await cancel_subscription(s, org_id=org_id, actor_id=actor_id, sub_id=sub_id)
 
@@ -146,7 +147,7 @@ async def test_cancel_subscription_missing_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionNotFoundError):
             await cancel_subscription(s, org_id=org_id, actor_id=actor_id, sub_id=uuid4())
 
@@ -157,12 +158,12 @@ async def test_cancel_subscription_cross_org_raises_not_found(
     org_a, actor_a = await _org_with_user(admin_engine)
     org_b, actor_b = await _org_with_user(admin_engine)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(s, org_id=org_a, actor_id=actor_a, **_create_kwargs())
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionNotFoundError):
             await cancel_subscription(s, org_id=org_b, actor_id=actor_b, sub_id=sub_id)
 
@@ -177,7 +178,7 @@ async def test_record_renewal_advances_renews_at_records_event_and_audits(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s,
             org_id=org_id,
@@ -187,12 +188,12 @@ async def test_record_renewal_advances_renews_at_records_event_and_audits(
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         renewed = await record_renewal(s, org_id=org_id, actor_id=actor_id, sub_id=sub_id)
         await s.commit()
         assert renewed.renews_at == date(2026, 2, 28)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         events = await list_events(s, org_id, sub_id)
         types = [e.type for e in events]
         assert types == ["created", "renewal"]
@@ -207,14 +208,14 @@ async def test_record_renewal_no_renewal_date_raises_validation_error(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s, org_id=org_id, actor_id=actor_id, **_create_kwargs(renews_at=None)
         )
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionValidationError):
             await record_renewal(s, org_id=org_id, actor_id=actor_id, sub_id=sub_id)
 
@@ -224,7 +225,7 @@ async def test_record_renewal_missing_raises_not_found(
 ) -> None:
     org_id, actor_id = await _org_with_user(admin_engine)
 
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionNotFoundError):
             await record_renewal(s, org_id=org_id, actor_id=actor_id, sub_id=uuid4())
 
@@ -235,7 +236,7 @@ async def test_record_renewal_cross_org_raises_not_found(
     org_a, actor_a = await _org_with_user(admin_engine)
     org_b, actor_b = await _org_with_user(admin_engine)
 
-    async with org_session(org_a, engine=app_engine) as s:
+    async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
             s,
             org_id=org_a,
@@ -245,7 +246,7 @@ async def test_record_renewal_cross_org_raises_not_found(
         await s.commit()
         sub_id = sub.id
 
-    async with org_session(org_b, engine=app_engine) as s:
+    async with org_session(org_b, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(SubscriptionNotFoundError):
             await record_renewal(s, org_id=org_b, actor_id=actor_b, sub_id=sub_id)
 

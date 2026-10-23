@@ -69,7 +69,9 @@ def require_report_sources(key: str) -> Callable[..., Coroutine[Any, Any, AuthCo
         request: Request, ctx: Annotated[AuthContext, Depends(bound_auth_context)]
     ) -> AuthContext:
         definition = REGISTRY[key]
-        async with org_session(ctx.org_id, engine=request.app.state.app_engine) as session:
+        async with org_session(
+            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ) as session:
             granted = await user_permission_codes(session, ctx.user_id)
         missing = sorted(definition.requires - granted)
         if missing:

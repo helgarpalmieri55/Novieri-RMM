@@ -13,6 +13,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Device
 from app.services.device_review import (
@@ -147,7 +148,7 @@ async def test_the_service_refuses_more_than_the_limit_on_its_own(
     org = await seed_org(admin_engine, "aa")
     ids = [uuid4() for _ in range(APPROVE_ALL_MAX + 1)]
     with pytest.raises(ApproveAllRefused, match="at most 1000"):
-        async with org_session(org.org_id, engine=app_engine) as session:
+        async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
             await approve_all(
                 session,
                 org_id=org.org_id,
@@ -214,7 +215,7 @@ async def test_the_bulk_approval_takes_the_audit_lock_once_and_keeps_one_chain(
         await seed_device(admin_engine, org.org_id, hostname=f"PC-{i}", review_state="pending")
         for i in range(12)
     ]
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         counter = _LockCountingSession(session)
         outcome = await approve_all(
             counter,  # type: ignore[arg-type]
@@ -226,7 +227,7 @@ async def test_the_bulk_approval_takes_the_audit_lock_once_and_keeps_one_chain(
         )
     assert outcome.approved == 12
     assert counter.locks == 1
-    async with org_session(org.org_id, engine=app_engine) as session:
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         audits = list(
             (
                 await session.execute(

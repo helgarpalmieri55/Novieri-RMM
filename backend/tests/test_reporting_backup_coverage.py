@@ -19,6 +19,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import admin_session, org_session
 from app.modules.reporting.definitions.backup_coverage import (
     _FAILED_RUN_STATES,
@@ -47,7 +48,7 @@ def _definition() -> Any:
 
 
 async def _run(api_env: Any, org_id: UUID, **params: Any) -> Any:
-    async with org_session(org_id, engine=api_env.app_engine) as session:
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         return await execute_report(
             session, _definition(), BackupCoverageParams(**params), org_id=org_id
         )

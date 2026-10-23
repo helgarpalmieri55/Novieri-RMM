@@ -46,6 +46,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
     DomainEvent,
@@ -150,7 +151,7 @@ async def test_domain_events_read_isolation(
         await session.commit()
         event_id = row.id
 
-    async with org_session(org_b.org_id, engine=app_engine) as session:
+    async with org_session(org_b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         seen = (
             (await session.execute(select(DomainEvent).where(DomainEvent.id == event_id)))
             .scalars()
@@ -164,7 +165,9 @@ async def test_domain_events_write_isolation(
 ) -> None:
     org_a, org_b = two_orgs
     with pytest.raises(RLS_VIOLATION):
-        async with org_session(org_b.org_id, engine=app_engine) as session:
+        async with org_session(
+            org_b.org_id, engine=app_engine, clients=ClientScope.all()
+        ) as session:
             session.add(_domain_event(org_a.org_id, {"evil": True}))
             await session.flush()
 
@@ -178,7 +181,7 @@ async def test_notification_channels_read_isolation(
     app_engine: AsyncEngine, two_orgs: tuple[OrgFixture, OrgFixture]
 ) -> None:
     org_a, org_b = two_orgs
-    async with org_session(org_b.org_id, engine=app_engine) as session:
+    async with org_session(org_b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         seen = (
             (
                 await session.execute(
@@ -196,7 +199,9 @@ async def test_notification_channels_write_isolation(
 ) -> None:
     org_a, org_b = two_orgs
     with pytest.raises(RLS_VIOLATION):
-        async with org_session(org_b.org_id, engine=app_engine) as session:
+        async with org_session(
+            org_b.org_id, engine=app_engine, clients=ClientScope.all()
+        ) as session:
             session.add(
                 NotificationChannel(
                     org_id=org_a.org_id,
@@ -231,7 +236,7 @@ async def test_notification_rules_read_isolation(
         await session.commit()
         rule_id = row.id
 
-    async with org_session(org_b.org_id, engine=app_engine) as session:
+    async with org_session(org_b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         seen = (
             (await session.execute(select(NotificationRule).where(NotificationRule.id == rule_id)))
             .scalars()
@@ -245,7 +250,9 @@ async def test_notification_rules_write_isolation(
 ) -> None:
     org_a, org_b = two_orgs
     with pytest.raises(RLS_VIOLATION):
-        async with org_session(org_b.org_id, engine=app_engine) as session:
+        async with org_session(
+            org_b.org_id, engine=app_engine, clients=ClientScope.all()
+        ) as session:
             session.add(
                 NotificationRule(
                     org_id=org_a.org_id,
@@ -279,7 +286,7 @@ async def test_queue_members_read_isolation(
         await session.commit()
         member_id = row.id
 
-    async with org_session(org_b.org_id, engine=app_engine) as session:
+    async with org_session(org_b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         seen = (
             (await session.execute(select(QueueMember).where(QueueMember.id == member_id)))
             .scalars()
@@ -293,7 +300,9 @@ async def test_queue_members_write_isolation(
 ) -> None:
     org_a, org_b = two_orgs
     with pytest.raises(RLS_VIOLATION):
-        async with org_session(org_b.org_id, engine=app_engine) as session:
+        async with org_session(
+            org_b.org_id, engine=app_engine, clients=ClientScope.all()
+        ) as session:
             session.add(
                 QueueMember(
                     org_id=org_a.org_id,
@@ -326,7 +335,7 @@ async def test_notification_deliveries_read_isolation(
         await session.commit()
         delivery_id = row.id
 
-    async with org_session(org_b.org_id, engine=app_engine) as session:
+    async with org_session(org_b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         seen = (
             (
                 await session.execute(
@@ -344,7 +353,9 @@ async def test_notification_deliveries_write_isolation(
 ) -> None:
     org_a, org_b = two_orgs
     with pytest.raises(RLS_VIOLATION):
-        async with org_session(org_b.org_id, engine=app_engine) as session:
+        async with org_session(
+            org_b.org_id, engine=app_engine, clients=ClientScope.all()
+        ) as session:
             session.add(
                 NotificationDelivery(
                     org_id=org_a.org_id,
@@ -376,7 +387,7 @@ async def test_webhook_allowlist_entries_read_isolation(
         await session.commit()
         entry_id = row.id
 
-    async with org_session(org_b.org_id, engine=app_engine) as session:
+    async with org_session(org_b.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         seen = (
             (
                 await session.execute(
@@ -394,7 +405,9 @@ async def test_webhook_allowlist_entries_write_isolation(
 ) -> None:
     org_a, org_b = two_orgs
     with pytest.raises(RLS_VIOLATION):
-        async with org_session(org_b.org_id, engine=app_engine) as session:
+        async with org_session(
+            org_b.org_id, engine=app_engine, clients=ClientScope.all()
+        ) as session:
             session.add(
                 WebhookAllowlistEntry(
                     org_id=org_a.org_id,

@@ -3,6 +3,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Device, Organization, RemotePolicy, RemoteSession, User
 
@@ -22,7 +23,7 @@ async def _org_device_user(admin_engine: AsyncEngine):
 
 async def test_remote_session_roundtrip(admin_engine: AsyncEngine, app_engine: AsyncEngine) -> None:
     org_id, device_id, user_id = await _org_device_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         row = RemoteSession(
             org_id=org_id, device_id=device_id, technician_id=user_id,
             protocol="rdp", consent_mode="attended", state="requested",
@@ -30,14 +31,14 @@ async def test_remote_session_roundtrip(admin_engine: AsyncEngine, app_engine: A
         s.add(row)
         await s.flush()
         sid = row.id
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         got = (await s.execute(select(RemoteSession).where(RemoteSession.id == sid))).scalar_one()
         assert got.protocol == "rdp" and got.state == "requested" and got.recording_ref is None
 
 
 async def test_remote_policy_defaults(admin_engine: AsyncEngine, app_engine: AsyncEngine) -> None:
     org_id, _, _ = await _org_device_user(admin_engine)
-    async with org_session(org_id, engine=app_engine) as s:
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         p = RemotePolicy(org_id=org_id, device_group_id=None)
         s.add(p)
         await s.flush()
