@@ -47,7 +47,11 @@ jobs:
           # What the agent's tests read: the module itself, the wire-protocol
           # schemas (*/schema_test.go), the backup files backup/schema_test.go
           # pins against, and this workflow.
-          if echo "$files" | grep -qE '^(agent/|docs/kernel/wire-protocol/|backend/app/modules/backup/repository\.py$|backend/tests/test_backup_[a-z_]+\.py$|\.github/workflows/ci\.yml$)'; then
+          # A here-string, not `echo "$files" | grep -q`: grep -q exits on the
+          # first match, and on a long list echo then dies of SIGPIPE, which
+          # pipefail turns into a failed `if` -- "agent unchanged" on exactly
+          # the diffs most likely to touch it (3,000 renames, 2026-10-23).
+          if grep -qE '^(agent/|docs/kernel/wire-protocol/|backend/app/modules/backup/repository\.py$|backend/tests/test_backup_[a-z_]+\.py$|\.github/workflows/ci\.yml$)' <<<"$files"; then
             echo "agent=true" >> "$GITHUB_OUTPUT"
           else
             echo "agent=false" >> "$GITHUB_OUTPUT"
