@@ -119,3 +119,71 @@ def test_the_construction_guard_is_not_vacuous() -> None:
         "    b = replace(s, is_all=True)\n"
     )
     assert _constructions([("app/x.py", bad)]) == ["app/x.py:2", "app/x.py:3"]
+
+
+# The functions that answer with a person's UN-NARROWED scope: X-Client-Id has
+# not been applied to what they return. A door combines them with the
+# request's own scope (`deps.admit`, `require_permission`, the portal's
+# principal and gate, `read_door_identity`); anything else calling them could
+# hand a route a scope wider than the one its request asked for.
+UNNARROWED_SCOPE_READERS = frozenset({"person_scope", "clients_holding"})
+UNNARROWED_SCOPE_DOORS = frozenset(
+    {
+        "app/api/deps.py",
+        "app/modules/portal/principal.py",
+        "app/core/identity/door.py",
+        "app/core/rbac.py",
+    }
+)
+
+
+def _unnarrowed_scope_uses(sources: list[tuple[str, ast.Module]]) -> list[str]:
+    """`path:line:name` for every import of, reference to, or attribute access
+    of an un-narrowed scope reader."""
+    found: list[str] = []
+    for path, tree in sources:
+        for node in ast.walk(tree):
+            names: list[str] = []
+            if isinstance(node, ast.ImportFrom):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.Name):
+                names = [node.id]
+            elif isinstance(node, ast.Attribute):
+                names = [node.attr]
+            found.extend(
+                f"{path}:{node.lineno}:{name}"
+                for name in names
+                if name in UNNARROWED_SCOPE_READERS
+            )
+    return found
+
+
+def test_only_the_doors_read_an_unnarrowed_scope() -> None:
+    outside = [
+        use
+        for use in _unnarrowed_scope_uses(_app_sources())
+        if use.split(":")[0] not in UNNARROWED_SCOPE_DOORS
+    ]
+    assert not outside, (
+        "person_scope / clients_holding return a scope X-Client-Id has not "
+        "narrowed; only the doors may use them (intersect with the request's "
+        f"own scope instead): {outside}"
+    )
+
+
+def test_the_unnarrowed_scope_guard_is_not_vacuous() -> None:
+    files = {use.split(":")[0] for use in _unnarrowed_scope_uses(_app_sources())}
+    assert {
+        "app/api/deps.py",
+        "app/modules/portal/principal.py",
+        "app/core/identity/door.py",
+    } <= files
+    bad = ast.parse(
+        "from app.core.rbac import clients_holding\n"
+        "import app.core.identity.door as door\n"
+        "x = door.person_scope\n"
+    )
+    assert _unnarrowed_scope_uses([("app/x.py", bad)]) == [
+        "app/x.py:1:clients_holding",
+        "app/x.py:3:person_scope",
+    ]
