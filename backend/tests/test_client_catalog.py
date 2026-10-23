@@ -4,6 +4,8 @@ import ast
 from pathlib import Path
 
 from app.core.client_scope import ALL_SCOPE_ALLOWLIST
+from app.core.client_scope_catalog import CATALOG, PENDING_PHASE_2
+from app.models.base import Base
 
 BACKEND = Path(__file__).resolve().parent.parent
 DEFINITION = "app/core/client_scope.py"
@@ -187,3 +189,35 @@ def test_the_unnarrowed_scope_guard_is_not_vacuous() -> None:
         "app/x.py:1:clients_holding",
         "app/x.py:3:person_scope",
     ]
+
+
+def test_every_table_is_classified() -> None:
+    live = {t.name for t in Base.metadata.sorted_tables}
+    assert live - set(CATALOG) == set(), "unclassified tables (spec §5 test 1)"
+    assert set(CATALOG) - live == set(), "catalog names tables that do not exist"
+
+
+def test_pending_tables_are_in_the_catalog_and_not_global() -> None:
+    assert PENDING_PHASE_2 <= set(CATALOG)
+    assert all(CATALOG[t].kind in {"C", "H"} for t in PENDING_PHASE_2)
+
+
+# H children of an O parent. Their client_id is NOT NULL, so a parent row with
+# no client (Novieri's own credential) makes the insert fail -- which is the
+# point: Annex A, "`credentials`, que tiene que tener cliente". Any other H
+# table must hang from a C or H parent; a new exception needs a reason here.
+H_OF_AN_OPTIONAL_PARENT = frozenset({"push_credential_scope", "push_credential_realm"})
+
+
+def test_h_parents_are_scoped_tables() -> None:
+    for table, entry in CATALOG.items():
+        if entry.kind == "H":
+            allowed = {"C", "H", "O"} if table in H_OF_AN_OPTIONAL_PARENT else {"C", "H"}
+            assert entry.parent in CATALOG and CATALOG[entry.parent].kind in allowed, table
+
+
+def test_the_optional_parent_exception_has_not_rotted() -> None:
+    for table in H_OF_AN_OPTIONAL_PARENT:
+        entry = CATALOG[table]
+        assert entry.kind == "H" and entry.parent is not None, table
+        assert CATALOG[entry.parent].kind == "O", f"{table}: exempt but its parent is not O"
