@@ -50,8 +50,11 @@ def test_portal_context_is_not_an_auth_context() -> None:
     assert "claims" not in PortalContext.__dataclass_fields__
 
 
-def test_portal_context_carries_only_org_and_requester() -> None:
-    assert sorted(PortalContext.__dataclass_fields__) == ["org_id", "requester_user_id"]
+def test_portal_context_carries_only_org_requester_and_client_scope() -> None:
+    """No claims and nothing else from the token: the org, the requester, and
+    the client scope `portal_session` pins as its third GUC (MSP clients spec
+    §2.3)."""
+    assert sorted(PortalContext.__dataclass_fields__) == ["clients", "org_id", "requester_user_id"]
 
 
 async def test_resolve_refuses_a_principal_without_a_portal_permission(api_env) -> None:
