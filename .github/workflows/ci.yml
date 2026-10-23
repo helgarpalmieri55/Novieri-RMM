@@ -1,0 +1,1517 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref to save minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    # Decides whether the agent's macOS and Windows jobs below have anything
+    # new to test. Those two run on GitHub-hosted macOS/Windows runners -- the
+    # only paid minutes left in this repo (macOS is billed at 10x Linux) --
+    # and re-running them for a backend- or frontend-only change proves
+    # nothing new about the agent. Everything else in this workflow still
+    # runs on every PR and every push to main.
+    #
+    # A skipped job reports success, so `agent-windows` / `agent-macos` stay
+    # satisfiable as required checks. Fails OPEN: any doubt (no base commit,
+    # a diff that errors) means "agent changed" and both jobs run.
+    name: changes (agent paths)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    outputs:
+      agent: ${{ steps.diff.outputs.agent }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -uo pipefail
+          if [ "$EVENT" = pull_request ]; then base="$PR_BASE"; range="$base...HEAD"
+          else base="$PUSH_BEFORE"; range="$base..HEAD"; fi
+          if [ -z "$base" ] || [ "$base" = 0000000000000000000000000000000000000000 ] \
+             || ! files=$(git diff --name-only "$range"); then
+            echo "no usable base ($EVENT, '$base') -- running the agent OS jobs"
+            echo "agent=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # What the agent's tests read: the module itself, the wire-protocol
+          # schemas (*/schema_test.go), the backup files backup/schema_test.go
+          # pins against, and this workflow.
+          # A here-string, not `echo "$files" | grep -q`: grep -q exits on the
+          # first match, and on a long list echo then dies of SIGPIPE, which
+          # pipefail turns into a failed `if` -- "agent unchanged" on exactly
+          # the diffs most likely to touch it (3,000 renames, 2026-10-23).
+          if grep -qE '^(agent/|docs/kernel/wire-protocol/|backend/app/modules/backup/repository\.py$|backend/tests/test_backup_[a-z_]+\.py$|\.github/workflows/ci\.yml$)' <<<"$files"; then
+            echo "agent=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "agent=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "changed files:"; echo "$files" | sed 's/^/  /'
+
+  backend:
+    name: backend (pytest · mypy · ruff)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    services:
+      redis:
+        image: valkey/valkey:8.1.10-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start PostgreSQL
+        # The test suite bootstraps its own roles/database via `sudo -u postgres
+        # psql` against a LOCAL cluster (see backend/tests/conftest.py), then the
+        # app/admin roles connect over TCP 127.0.0.1:5432. So we start the
+        # runner's preinstalled PostgreSQL rather than use a service container.
+        run: |
+          sudo systemctl start postgresql
+          for i in $(seq 1 30); do
+            if sudo -u postgres psql -tAc 'SELECT 1' >/dev/null 2>&1; then
+              echo "postgres ready"; exit 0
+            fi
+            sleep 1
+          done
+          echo "postgres did not become ready" >&2
+          sudo -u postgres psql -tAc 'SELECT 1' || true
+          exit 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend (with dev extras)
+        # The test suite runs migrations via a hardcoded `backend/.venv/bin/alembic`
+        # path (see backend/tests/conftest.py::_run_migrations), so install into a
+        # real venv at that location rather than the system interpreter.
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -e '.[dev]'
+
+      - name: ruff
+        run: .venv/bin/ruff check app tests
+
+      - name: mypy
+        run: .venv/bin/mypy app
+
+      # tests/test_remote_screen_relay.py builds agent/internal/rsp/fakeagent
+      # and drives it through the real gateway; without Go it would skip.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: agent/go.sum
+
+      # The Group Policy MSI is built with wixl, msibuild and msiinfo
+      # (app/services/msi_build.py). Ubuntu packages wixl apart from msitools.
+      - name: msitools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq wixl msitools
+
+      - name: pytest
+        env:
+          ITS_TEST_REQUIRE_GO: "1"
+          # A missing msitools is a failure here, never a quiet skip.
+          ITS_TEST_REQUIRE_MSITOOLS: "1"
+        run: .venv/bin/pytest -q
+
+  migrations:
+    # MIGRATION CORRECTNESS, NOT A ROLLBACK MECHANISM. Production rollback is
+    # restore-from-backup (docs/superpowers/specs/2026-08-15-deploy-rollback-design.md,
+    # decision D1); `alembic downgrade` is never run against live data. This job
+    # exists because the 57 downgrade() bodies had never executed ANYWHERE --
+    # CI ran `upgrade head` and nothing else -- which is how 0001 came to leave
+    # the job_status enum type behind while EXITING 0, breaking the next
+    # `upgrade head` with DuplicateObjectError. A downgrade's exit code does not
+    # tell you the downgrade worked.
+    name: migration round-trip (upgrade · downgrade · upgrade)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start PostgreSQL
+        # Same rationale as the backend job: the runner's preinstalled cluster,
+        # driven through `sudo -u postgres psql`, with the admin role connecting
+        # over TCP.
+        run: |
+          sudo systemctl start postgresql
+          for i in $(seq 1 30); do
+            if sudo -u postgres psql -tAc 'SELECT 1' >/dev/null 2>&1; then
+              echo "postgres ready"; exit 0
+            fi
+            sleep 1
+          done
+          echo "postgres did not become ready" >&2
+          exit 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -e '.[dev]'
+
+      - name: Create the roles and two throwaway databases
+        # ALL THREE ROLES, not just its_admin. The migrations themselves
+        # reference `app_user` and `portal_user` -- e.g. migration 0006's
+        # `REVOKE UPDATE, DELETE ON security_events FROM app_user` -- so
+        # `upgrade head` dies with `role "app_user" does not exist` on a
+        # cluster that has only the admin role. This job shipped with exactly
+        # that gap and went red on its first real run.
+        #
+        # It was hand-verified against clusters where all three roles happened
+        # to exist, which is the same mistake this sub-project made four other
+        # times: the reproduction had a setup the real environment does not.
+        # `backend/tests/conftest.py` creates all three for the same reason;
+        # this mirrors it.
+        run: |
+          sudo -u postgres psql -X -q -c "DO \$\$ BEGIN
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='its_admin') THEN
+              CREATE ROLE its_admin LOGIN PASSWORD 'its_admin_test'
+                NOSUPERUSER CREATEDB CREATEROLE;
+            END IF;
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='app_user') THEN
+              CREATE ROLE app_user LOGIN PASSWORD 'app' NOSUPERUSER NOBYPASSRLS;
+            END IF;
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='portal_user') THEN
+              CREATE ROLE portal_user LOGIN PASSWORD 'portal' NOSUPERUSER NOBYPASSRLS;
+            END IF;
+          END \$\$;"
+          sudo -u postgres psql -X -q -c "ALTER ROLE its_admin BYPASSRLS"
+          sudo -u postgres psql -X -q -c "CREATE DATABASE rt_ref   OWNER its_admin"
+          sudo -u postgres psql -X -q -c "CREATE DATABASE rt_probe OWNER its_admin"
+
+      - name: Reference schema — a straight upgrade head
+        run: |
+          ITS_ALEMBIC_URL="postgresql+asyncpg://its_admin:its_admin_test@127.0.0.1:5432/rt_ref" \
+            .venv/bin/alembic upgrade head
+          sudo -u postgres pg_dump --schema-only --no-owner --no-privileges -d rt_ref > /tmp/ref.sql
+
+      - name: upgrade head, then downgrade base
+        run: |
+          export ITS_ALEMBIC_URL="postgresql+asyncpg://its_admin:its_admin_test@127.0.0.1:5432/rt_probe"
+          .venv/bin/alembic upgrade head
+          .venv/bin/alembic downgrade base
+
+      - name: assert the downgrade left NOTHING behind
+        # THE STEP THAT CATCHES THE REAL DEFECT CLASS, and the enum count is the
+        # half that matters. Counting tables alone would have passed on the
+        # orphaned job_status type: types are not tables, and that is exactly
+        # how the defect went unseen -- the first investigation counted
+        # information_schema.tables, saw only alembic_version, and called it
+        # clean.
+        run: |
+          tables=$(sudo -u postgres psql -X -A -t -d rt_probe -c \
+            "SELECT count(*) FROM information_schema.tables
+             WHERE table_schema='public' AND table_name <> 'alembic_version'")
+          enums=$(sudo -u postgres psql -X -A -t -d rt_probe -c \
+            "SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+             WHERE n.nspname='public' AND t.typtype='e'")
+          echo "leftover tables: $tables, leftover enum types: $enums"
+          if [ "$tables" != "0" ] || [ "$enums" != "0" ]; then
+            echo "::error::downgrade base exited 0 but left objects behind"
+            sudo -u postgres psql -X -d rt_probe -c \
+              "SELECT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+               WHERE n.nspname='public' AND t.typtype='e'"
+            sudo -u postgres psql -X -d rt_probe -c \
+              "SELECT table_name FROM information_schema.tables
+               WHERE table_schema='public' AND table_name <> 'alembic_version'"
+            exit 1
+          fi
+
+      - name: upgrade head again, and diff the schema
+        run: |
+          ITS_ALEMBIC_URL="postgresql+asyncpg://its_admin:its_admin_test@127.0.0.1:5432/rt_probe" \
+            .venv/bin/alembic upgrade head
+          sudo -u postgres pg_dump --schema-only --no-owner --no-privileges -d rt_probe > /tmp/rt.sql
+          # Normalise the ONE thing that differs between any two databases for
+          # reasons unrelated to migrations: pg_dump's random \restrict nonce.
+          #
+          # There used to be a second filter here, dropping three created_at
+          # defaults that were frozen to migration-run wall-clock time. It was
+          # marked "DELETE THIS FILTER in the same commit that fixes them" --
+          # migration 0058 fixed them, so it is gone. The diff below now
+          # compares those defaults like any other, and would catch a
+          # regression to the frozen form.
+          norm() { grep -v '^\\restrict' "$1" | grep -v '^\\unrestrict'; }
+          norm /tmp/ref.sql > /tmp/ref.norm
+          norm /tmp/rt.sql  > /tmp/rt.norm
+          echo "normalised lines: $(wc -l < /tmp/ref.norm) ref, $(wc -l < /tmp/rt.norm) round-trip"
+          diff -u /tmp/ref.norm /tmp/rt.norm
+
+  backup-e2e:
+    # Server side of backup, end to end against two real MinIO servers
+    # (spec-server-backup.md §12): the server dispatches a signed backup.run,
+    # a test-double agent verifies the signature and uploads through the POST
+    # grant (MinIO enforces its prefix, moto does not), the result makes a
+    # point, the worker code replicates it to a second MinIO whose bucket has
+    # Object Lock, and the point is read back twice -- through the read
+    # exchange and, with the server out of the picture, by
+    # scripts/itms_recover.py from the off-site bucket alone -- and compared
+    # byte for byte. The Go agent's own E2E is a step of the `agent` job.
+    name: backup end to end (dispatch · upload · off-site · restore)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    services:
+      redis:
+        image: valkey/valkey:8.1.10-alpine
+        ports:
+          - 6379:6379
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start PostgreSQL
+        # Same rationale as the backend job (tests/conftest.py drives a local
+        # cluster through `sudo -u postgres psql`).
+        run: |
+          sudo systemctl start postgresql
+          for i in $(seq 1 30); do
+            if sudo -u postgres psql -tAc 'SELECT 1' >/dev/null 2>&1; then
+              echo "postgres ready"; exit 0
+            fi
+            sleep 1
+          done
+          echo "postgres did not become ready" >&2
+          exit 1
+
+      # MinIO publishes no free image any more (2026-09); deploy/minio builds it
+      # from pinned source. The GitHub Actions cache keeps this to seconds after
+      # the first run.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build MinIO from source
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/minio
+          tags: itsuite/minio:RELEASE.2025-09-07T16-13-09Z
+          load: true
+          cache-from: type=gha,scope=minio
+          cache-to: type=gha,scope=minio,mode=max
+
+      - name: Start MinIO (local copy and off-site copy)
+        # `docker run`, not `services:`: a service container cannot be given
+        # MinIO's `server` argument. Same release deploy/docker-compose.yml pins.
+        run: |
+          set -euo pipefail
+          for spec in local:9000 offsite:9100; do
+            name="${spec%%:*}"; port="${spec##*:}"
+            docker run -d --name "itms-minio-$name" -p "127.0.0.1:$port:9000" \
+              -e MINIO_ROOT_USER=itmsci -e MINIO_ROOT_PASSWORD=itmsci-throwaway \
+              itsuite/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          done
+          for port in 9000 9100; do
+            for _ in $(seq 1 60); do
+              if curl -fsS "http://127.0.0.1:$port/minio/health/live"; then break; fi
+              sleep 1
+            done
+            curl -fsS "http://127.0.0.1:$port/minio/health/live"
+          done
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -e '.[dev]'
+
+      - name: dispatch, upload, replicate, restore, compare
+        # The test skips without its environment, so the grep is what makes a
+        # skip red rather than green.
+        env:
+          ITS_E2E_LOCAL_S3: http://127.0.0.1:9000
+          ITS_E2E_OFFSITE_S3: http://127.0.0.1:9100
+          ITS_E2E_S3_ACCESS_KEY: itmsci
+          ITS_E2E_S3_SECRET_KEY: itmsci-throwaway
+        run: |
+          set -euo pipefail
+          .venv/bin/pytest -rA -q tests/test_backup_e2e_minio.py | tee "$RUNNER_TEMP/backup-e2e.log"
+          grep -q 'PASSED tests/test_backup_e2e_minio.py::test_dispatch_upload_replicate_and_restore_compare_bytes' \
+            "$RUNNER_TEMP/backup-e2e.log"
+
+  deploy:
+    # Exercises the documented first-boot path (deploy/README.md steps 2 and 4)
+    # against the real compose stack: postgres + init-app-user.sh, `alembic
+    # upgrade head` in the built backend image, then grant-app-privileges.sql.
+    # It exists because the test suite provisions app_user's privileges itself
+    # (backend/tests/conftest.py::_run_migrations), so the backend job above
+    # stays green no matter how broken the deployment scripts are -- exactly
+    # how a fresh boot came to abort on an unset APP_DB_PASSWORD unnoticed.
+    name: deploy (compose first boot · app_user privileges)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Throwaway .env
+        # Values are CI-only and generated per run; nothing here is a real
+        # credential and nothing is written back to the repo (.env is ignored).
+        working-directory: deploy
+        run: |
+          sed -E "s/^([A-Z_]+)=change-me$/\1=ci-$(openssl rand -hex 8)/" \
+            .env.example > .env
+
+      - name: postgres — first boot (init-app-user.sh)
+        working-directory: deploy
+        run: |
+          docker compose up -d --wait postgres
+          docker compose logs postgres
+
+      - name: alembic upgrade head
+        # `run` rather than `up`: it propagates the container's exit code
+        # without `--abort-on-container-exit`'s side effect of stopping the
+        # postgres container the later steps still need.
+        working-directory: deploy
+        run: docker compose run --rm --build migrate
+
+      - name: grant-app-privileges.sql (twice — must be idempotent)
+        working-directory: deploy
+        run: |
+          docker compose run --rm postgres-grants
+          docker compose run --rm postgres-grants
+
+      - name: assert app_user is RLS-constrained and correctly narrowed
+        working-directory: deploy
+        run: |
+          docker compose exec -T postgres \
+            psql -U its_admin -d itsuite -v ON_ERROR_STOP=1 -f - <<'SQL'
+          -- Invariant #5: the application role must be subject to RLS. A
+          -- BYPASSRLS, SUPERUSER, or table-owning app_user is a security
+          -- defect, not a convenience.
+          DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles
+                       WHERE rolname = 'app_user'
+                         AND (rolsuper OR rolbypassrls OR rolcreaterole)) THEN
+              RAISE EXCEPTION 'app_user has privilege-escalating role attributes';
+            END IF;
+            IF EXISTS (SELECT 1 FROM pg_tables
+                       WHERE schemaname = 'public' AND tableowner = 'app_user') THEN
+              RAISE EXCEPTION 'app_user owns a table (owners bypass RLS)';
+            END IF;
+            -- The per-table RLS assertion moved to postgres/assert-rls.sql and
+            -- runs as its own step below: it must be runnable outside this
+            -- workflow (the backend suite runs the same file against the schema
+            -- it migrates), and the version that lived here only ever fired for
+            -- a table that had RLS ENABLED -- a tenant table shipped with RLS
+            -- entirely off short-circuited and passed.
+            -- The narrowings grant-app-privileges.sql exists to apply.
+            IF has_table_privilege('app_user', 'audit_events', 'UPDATE')
+               OR has_table_privilege('app_user', 'audit_events', 'DELETE')
+               OR has_table_privilege('app_user', 'security_events', 'UPDATE')
+               OR has_table_privilege('app_user', 'security_events', 'DELETE')
+               OR has_table_privilege('app_user', 'permissions', 'INSERT')
+               OR has_table_privilege('app_user', 'role_permissions', 'INSERT') THEN
+              RAISE EXCEPTION 'app_user retains a privilege the grants file revokes';
+            END IF;
+            -- ...and the blanket grant it depends on actually landed.
+            IF NOT has_table_privilege('app_user', 'devices', 'SELECT') THEN
+              RAISE EXCEPTION 'app_user cannot read devices — grants did not apply';
+            END IF;
+          END $$;
+          SQL
+
+      - name: assert every tenant table is RLS-protected
+        # postgres/assert-rls.sql, piped in rather than mounted: the same file
+        # the backend suite runs (backend/tests/test_rls_invariant_sql.py), so
+        # the invariant has exactly one statement of itself. A table with an
+        # `org_id` column and RLS off, RLS unforced, or no policy fails here.
+        working-directory: deploy
+        run: |
+          docker compose exec -T postgres \
+            psql -U its_admin -d itsuite -v ON_ERROR_STOP=1 -f - \
+            < postgres/assert-rls.sql
+
+      - name: backup.sh -> restore.sh round trip, invoked AS DOCUMENTED
+        # THIS EXISTS BECAUSE ITS ABSENCE ALREADY COST US ONE. The scripts
+        # were verified by hand from `deploy/scripts/`, while every document
+        # tells the operator to run `./scripts/restore.sh` from `deploy/`.
+        # The default grants path was relative to the CALLER's directory, so
+        # the documented invocation dropped and restored the database and
+        # THEN died before re-narrowing app_user -- a manual measurement of a
+        # different command line than the one that ships.
+        #
+        # So: run them exactly as the runbook does, from `deploy/`, with no
+        # environment overrides beyond the force flag. A standing claim with
+        # no gate is the shape CLAUDE.md calls out for health.check.
+        working-directory: deploy
+        run: |
+          set -euo pipefail
+          ./scripts/backup.sh /tmp/ci-backup
+          test -s /tmp/ci-backup/globals.sql
+          test -s /tmp/ci-backup/itsuite.dump
+          test -s /tmp/ci-backup/alembic_version
+          echo "backup holds revision: $(cat /tmp/ci-backup/alembic_version)"
+          # Non-empty target: must refuse, and must not have touched anything.
+          # Assert WHY it failed, not merely that it did: any non-zero exit
+          # (missing artefact, bad connection, unreadable grants file) would
+          # otherwise print "as designed" and hide a real break.
+          if ./scripts/restore.sh /tmp/ci-backup > /tmp/refuse.log 2>&1; then
+            echo "::error::restore.sh accepted a populated target"; exit 1
+          fi
+          grep -q "already has .* tables" /tmp/refuse.log || {
+            echo "::error::restore.sh failed, but not with the non-empty-target refusal:"
+            cat /tmp/refuse.log; exit 1; }
+          echo "refused a populated target, as designed"
+          # THE WIDENING PATH, and it must be exercised or the narrowing
+          # assertion is vacuous in CI. ITS_RESTORE_FORCE drops the database,
+          # which destroys init-app-user.sh's standing ALTER DEFAULT
+          # PRIVILEGES -- so nothing widens and `grant-app-privileges.sql`
+          # could be deleted with this job still green. Restoring into an
+          # EMPTY database that still carries the rule is the case where the
+          # restore genuinely re-widens app_user (spec §1.3,
+          # docs/07-backup-restore.md §3).
+          docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U its_admin -d postgres \
+            -c "DROP DATABASE itsuite WITH (FORCE)" -c "CREATE DATABASE itsuite OWNER its_admin"
+          docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U its_admin -d itsuite -c "
+            GRANT USAGE ON SCHEMA public TO app_user;
+            ALTER DEFAULT PRIVILEGES FOR ROLE its_admin IN SCHEMA public
+                GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;"
+          ./scripts/restore.sh /tmp/ci-backup
+          # And prove that run was not vacuous: with the narrowing neutralised
+          # the same restore MUST fail. If it succeeds, either the widening
+          # stopped happening or the assertion stopped asserting -- both are
+          # things this job exists to notice.
+          docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U its_admin -d postgres \
+            -c "DROP DATABASE itsuite WITH (FORCE)" -c "CREATE DATABASE itsuite OWNER its_admin"
+          docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U its_admin -d itsuite -c "
+            GRANT USAGE ON SCHEMA public TO app_user;
+            ALTER DEFAULT PRIVILEGES FOR ROLE its_admin IN SCHEMA public
+                GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user;"
+          : > /tmp/noop-grants.sql
+          if ITS_GRANTS_SQL=/tmp/noop-grants.sql ./scripts/restore.sh /tmp/ci-backup > /tmp/wide.log 2>&1; then
+            echo "::error::restore.sh passed with the narrowing neutralised -- the assertion is vacuous"
+            cat /tmp/wide.log; exit 1
+          fi
+          grep -q "still wide on the protected tables" /tmp/wide.log || {
+            echo "::error::neutralised run failed, but not on the narrowing assertion:"
+            cat /tmp/wide.log; exit 1; }
+          echo "narrowing assertion is non-vacuous"
+
+          # Finally the real rollback path (populated target, forced).
+          ITS_RESTORE_FORCE=1 ./scripts/restore.sh /tmp/ci-backup
+          # And prove the end state, rather than trusting the script's own echo.
+          docker compose exec -T postgres psql -X -A -t -U its_admin -d itsuite -c \
+            "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname='public' AND c.relforcerowsecurity" | tr -d '[:space:]' > /tmp/forced
+          echo "FORCE RLS tables after restore: $(cat /tmp/forced)"
+          [ "$(cat /tmp/forced)" -gt 0 ] || { echo "::error::no FORCE RLS after restore"; exit 1; }
+
+      - name: IT_SUITE_VERSION selects the image reference (interpolation only)
+        # WHAT THIS DOES AND DOES NOT PROVE -- stated precisely, because an
+        # earlier version of this step was named "rollback retags, it does not
+        # rebuild" and could not possibly have shown that.
+        #
+        # PROVES: all five services resolve their `image:` from
+        # IT_SUITE_VERSION, so a typo or a missed service cannot silently
+        # leave one pinned elsewhere. That is a real regression guard: the
+        # tag is threaded through every service.
+        #
+        # DOES NOT PROVE: that `docker compose up -d` PULLS OR REUSES the
+        # tagged image rather than building it. `docker compose config` is
+        # pure YAML interpolation -- it consults no image store and no build
+        # context -- so it is structurally incapable of distinguishing a
+        # retag from a rebuild. With both `image:` and `build:` present,
+        # compose builds a missing image and tags it with the `image:` name,
+        # which would redeploy current working-tree source under an old SHA.
+        # Guarding THAT needs a test that builds a tag, changes the tree, and
+        # asserts `up` did not rebuild -- see the spec's open items. Do not
+        # let this step's green stand in for that.
+        working-directory: deploy
+        run: |
+          set -euo pipefail
+          for svc in api gateway worker migrate web; do
+            ref=$(IT_SUITE_VERSION=rollback-probe docker compose config \
+                    --format json 2>/dev/null \
+                  | python3 -c "import json,sys; print(json.load(sys.stdin)['services']['$svc']['image'])")
+            echo "$svc -> $ref"
+            case "$ref" in
+              itsuite/backend:rollback-probe|itsuite/web:rollback-probe) ;;
+              *) echo "::error::$svc did not honour IT_SUITE_VERSION (got $ref)"; exit 1 ;;
+            esac
+          done
+          # Anti-vacuity: the default must NOT also be the probe value, or the
+          # loop above would pass without IT_SUITE_VERSION doing anything.
+          default_ref=$(docker compose config --format json 2>/dev/null \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['services']['api']['image'])")
+          echo "default (no IT_SUITE_VERSION) -> $default_ref"
+          if [ "$default_ref" = "itsuite/backend:rollback-probe" ]; then
+            echo "::error::default equals the probe tag; this assertion proves nothing"
+            exit 1
+          fi
+          echo "IT_SUITE_VERSION selects the image reference for all five services"
+
+      - name: keycloak 26.2 — the realm still parses, and takes the token fields
+        # The only check in the tree that the running identity provider stores
+        # what `realm_config.py` sends for a Microsoft sign-in (mail-oauth
+        # design §6.1 item 10). The fields were read about in release notes.
+        working-directory: deploy
+        run: |
+          set -euo pipefail
+          docker compose up -d keycloak
+          kc() { docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"; }
+          ok=
+          for _ in $(seq 1 60); do
+            if docker compose exec -T keycloak sh -c \
+                '/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 \
+                   --realm master --user "$KC_BOOTSTRAP_ADMIN_USERNAME" \
+                   --password "$KC_BOOTSTRAP_ADMIN_PASSWORD"' >/dev/null 2>&1; then
+              ok=1; break
+            fi
+            sleep 5
+          done
+          [ -n "$ok" ] || { docker compose logs keycloak; echo "::error::keycloak never answered"; exit 1; }
+          # The login theme survived: a silent fallback to the vendor theme logs nothing.
+          # Captured first: `grep -q` closing the pipe early makes
+          # `docker compose exec` exit 255 under pipefail.
+          kc get realms/it-suite --fields loginTheme > /tmp/theme.json
+          grep -q '"itms"' /tmp/theme.json
+          kc update realms/it-suite \
+            -s 'smtpServer.host=smtp.office365.com' \
+            -s 'smtpServer.port=587' \
+            -s 'smtpServer.from=ci@example.invalid' \
+            -s 'smtpServer.starttls=true' \
+            -s 'smtpServer.auth=true' \
+            -s 'smtpServer.user=ci@example.invalid' \
+            -s 'smtpServer.authType=token' \
+            -s 'smtpServer.authTokenUrl=https://login.microsoftonline.com/t/oauth2/v2.0/token' \
+            -s 'smtpServer.authTokenScope=https://outlook.office365.com/.default' \
+            -s 'smtpServer.authTokenClientId=ci-client' \
+            -s 'smtpServer.authTokenClientSecret=ci-secret'
+          # `--fields smtpServer` returns `{}` for this nested map in 26.2, so
+          # read the whole realm and take the block out of it.
+          kc get realms/it-suite > /tmp/realm.json
+          python3 -c "import json; print(json.dumps(json.load(open('/tmp/realm.json'))['smtpServer'], indent=1))" > /tmp/smtp.json
+          cat /tmp/smtp.json
+          grep -q '"authType" *: *"token"' /tmp/smtp.json
+          grep -q '"authTokenClientId" *: *"ci-client"' /tmp/smtp.json
+          # set_smtp's carry-over rests on the secret being MASKED on read. If
+          # this fails it is a finding: record what came back, do not delete it.
+          if grep -q 'ci-secret' /tmp/smtp.json; then
+            echo "::error::the realm returned the client secret unmasked"; exit 1
+          fi
+          grep -q '"authTokenClientSecret" *: *"\*' /tmp/smtp.json
+
+      - name: MCP — live registration, PKCE and audience, through Traefik
+        # THE HALF NO UNIT TEST CAN REACH. test_keycloak_init_job.py proves what
+        # keycloak-init DECIDES against a fake realm, and
+        # test_deploy_keycloak_registration_edge.py proves what the Traefik
+        # rules SAY. This proves what Keycloak 26.2 and Traefik 3.6 DO with
+        # them: an AI app registers anonymously, signs a person in with code +
+        # PKCE S256 for `scope=openid mcp`, and gets a token whose audience is
+        # the MCP resource and never the console's `it-suite`. The full list
+        # of assertions is deploy/keycloak/ci_mcp_flow.py's own docstring and
+        # sections; it prints claim NAMES, never a token or a secret.
+        #
+        # THROUGH TRAEFIK, NOT KEYCLOAK'S PORT. Which registration paths reach
+        # Keycloak at all (`default`, `install`, `;`, `%3B`, `..`, `%2F`, case)
+        # is decided by the edge, so the check has to go through the edge:
+        # the real compose `traefik` service, its docker-label routers, and a
+        # certificate the script verifies (no -k anywhere). Only the admin
+        # calls that set up the test person go to Keycloak's own address on
+        # the compose network, which Traefik never routes by design.
+        #
+        # THE COMPOSE keycloak-init SERVICE, not `python3 init-clients.py`: the
+        # `migrate` step above already built the backend image it runs on, and
+        # its env wiring (ITS_PUBLIC_CONSOLE_URL, ITS_MCP_REGISTRATION,
+        # ITS_OIDC_AUDIENCE), mounts and
+        # secrets volume are part of what ships. `--no-deps` on every run:
+        # ITS_PUBLIC_CONSOLE_URL is exported below for keycloak-init, and
+        # without it compose would see `keycloak`'s KC_HOSTNAME change and
+        # recreate the container mid-step.
+        #
+        # AFTER THE STEP ABOVE, NOT BEFORE: that one signs kcadm in with the
+        # bootstrap password, and keycloak-init rotates it away on every run.
+        # The current one is read off the secrets volume when it is needed.
+        working-directory: deploy
+        run: |
+          set -euo pipefail
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+            -keyout certs/privkey.pem -out certs/fullchain.pem 2>/dev/null
+          docker compose up -d --no-deps traefik
+          up=
+          for _ in $(seq 1 30); do
+            if curl -sf --cacert certs/fullchain.pem -o /dev/null \
+                https://localhost/realms/it-suite/.well-known/openid-configuration; then
+              up=1; break
+            fi
+            sleep 2
+          done
+          [ -n "$up" ] || { docker compose logs traefik; echo "::error::Traefik never routed to Keycloak"; exit 1; }
+
+          init() { docker compose run --rm -T --no-deps keycloak-init; }
+          flow() {
+            python3 keycloak/ci_mcp_flow.py --base https://localhost \
+              --cafile certs/fullchain.pem --realm it-suite "$@"
+          }
+
+          # 1. Neither ITS_PUBLIC_CONSOLE_URL nor the opt-in: closed, and the
+          #    job names both missing settings.
+          unset ITS_PUBLIC_CONSOLE_URL ITS_MCP_REGISTRATION
+          init | tee /tmp/kc-init-closed.log
+          grep -q "anonymous client registration stays closed" /tmp/kc-init-closed.log
+          grep -q "until ITS_PUBLIC_CONSOLE_URL is set and ITS_MCP_REGISTRATION=open" \
+            /tmp/kc-init-closed.log
+          flow --expect-registration-closed
+
+          # 2. The URL alone (operator decision, 2026-10-15): the audience and
+          #    everything else converge, and registration STAYS CLOSED until
+          #    the operator opts in. Proven against Keycloak, not just logged.
+          export ITS_PUBLIC_CONSOLE_URL=https://itms.example.test
+          init | tee /tmp/kc-init-url-only.log
+          grep -q "'mapper:mcp-audience'" /tmp/kc-init-url-only.log
+          grep -q "stays closed (Trusted Hosts kept) until ITS_MCP_REGISTRATION=open" \
+            /tmp/kc-init-url-only.log
+          if grep -q "registration:removed" /tmp/kc-init-url-only.log; then
+            echo "::error::registration opened without ITS_MCP_REGISTRATION=open"; exit 1
+          fi
+          flow --expect-registration-closed
+
+          # 3. The URL and the opt-in: only now does registration open.
+          export ITS_MCP_REGISTRATION=open
+          init | tee /tmp/kc-init-open.log
+          grep -q "'registration:removed:trusted-hosts'" /tmp/kc-init-open.log
+          if grep -q "registration stays closed" /tmp/kc-init-open.log; then
+            echo "::error::keycloak-init still reports registration closed"; exit 1
+          fi
+
+          # 4. The sign-in path, as an AI app sees it. Keycloak's address on
+          #    the stack's OWN network, named by compose rather than guessed, so
+          #    a container on a second network cannot yield two addresses.
+          net=$(docker compose config --format json \
+                  | python3 -c "import json,sys; print(json.load(sys.stdin)['networks']['default']['name'])")
+          kc_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$net\").IPAddress}}" \
+                    "$(docker compose ps -q keycloak)")
+          [ -n "$kc_ip" ] || { echo "::error::keycloak has no address on $net"; exit 1; }
+          secrets_dir=$(mktemp -d)
+          trap 'rm -rf "$secrets_dir"' EXIT
+          read_secret() {
+            ( umask 077
+              docker compose run --rm -T --no-deps --entrypoint cat keycloak-init \
+                "/var/lib/its/secrets/$1" > "$secrets_dir/$1" )
+          }
+          read_secret keycloak-bootstrap-admin.secret
+          read_secret keycloak-admin.secret
+          flow --resource "$ITS_PUBLIC_CONSOLE_URL/mcp" \
+            --admin-base "http://$kc_ip:8080" \
+            --admin-user "$(sed -n 's/^KEYCLOAK_ADMIN_USER=//p' .env)" \
+            --admin-password-file "$secrets_dir/keycloak-bootstrap-admin.secret" \
+            --provisioning-secret-file "$secrets_dir/keycloak-admin.secret"
+          rm -rf "$secrets_dir"
+
+          # 5. A converged realm takes ZERO writes. Every convergence line must
+          #    say `nothing`, the passkey flow included; the bootstrap rotation
+          #    is the one write by design.
+          init | tee /tmp/kc-init-again.log
+          for line in "created=nothing" "granted=nothing" "realm keys converged=nothing" \
+              "required actions registered=nothing updated=nothing" \
+              "clients corrected=nothing" "passkey flow=already-bound writes=nothing" \
+              "mcp converged=nothing"; do
+            grep -qF "identity init: $line" /tmp/kc-init-again.log \
+              || { echo "::error::second keycloak-init run was not a no-op: expected '$line'"; exit 1; }
+          done
+          echo "keycloak-init on a converged realm: mcp converged=nothing, zero writes"
+
+      - name: teardown
+        if: always()
+        working-directory: deploy
+        run: docker compose down -v
+
+  frontend:
+    name: frontend (vitest · tsc · build)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Signing authorization boundary tests
+        working-directory: .
+        run: node --test tests/ci/release-gate.test.cjs
+
+      - name: Install
+        run: npm ci
+
+      - name: test
+        run: npm test
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: build
+        run: npm run build
+
+  a11y:
+    # THE COMPLEMENT TO THE FOUR TEXT GUARDS, and the reason it is a separate
+    # job. `frontend`'s vitest run reads stylesheets as text and renders in
+    # jsdom, which implements no cascade and evaluates no media query. So
+    # nothing above can see a colour composited by opacity, a gradient, a real
+    # viewport, or an element positioned by a rule that does not exist.
+    #
+    # That is not hypothetical. `confirm.tsx` rendered `className="modal open"`
+    # for an entire programme while no `.modal` rule existed anywhere in the
+    # application CSS -- every destructive confirmation in the product drew as
+    # a static full-width block below the fold, underneath its own scrim, with
+    # buttons at 2.11:1. Twelve jsdom tests passed on it. A second defect of
+    # the same shape hid in a cascade LAYER: Tailwind's `sr-only` is layered
+    # and an unlayered `table { width: 100% }` beats it outright regardless of
+    # specificity, which scrolled every charted page sideways at every width.
+    #
+    # `docs/product.md` §11 makes WCAG 2.2 AA a product requirement and names
+    # this pass as the thing that had not been done. It has been done; this
+    # keeps it done.
+    name: a11y (axe · composited contrast · viewports · keyboard)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # Playwright is deliberately NOT a devDependency (see the header of
+      # scripts/a11y-browser.mjs): as one it would put a browser download in
+      # every `npm ci`, including the `frontend` job that has no use for it.
+      # The script resolves it from the global install instead.
+      - name: Install Playwright and Chromium
+        run: npm i -g playwright && npx playwright install --with-deps chromium
+
+      # The self-check runs first and on its own, so a harness that has stopped
+      # being able to SEE a violation fails loudly here rather than reporting a
+      # clean sweep it did not earn. It repaints the table headers at a known
+      # 3.49:1 and requires the detector to catch it.
+      - name: self-check — prove the detector can still fail
+        run: node scripts/a11y-browser.mjs --falsify
+
+      - name: axe, composited contrast, viewports, keyboard
+        run: node scripts/a11y-browser.mjs
+
+  harmony:
+    # THE REDESIGN'S MEASUREMENT, cloned from `a11y` because it is the same
+    # kind of thing: a real browser over the dev server, reporting what jsdom
+    # cannot see. `docs/superpowers/specs/2026-09-07-redesign-v3-port-design.md`
+    # §1.6 makes harmony a measured property, and §5 says what is measured --
+    # every route in `scripts/routes.mjs` (a vitest guard fails when `App.tsx`
+    # mounts one the list lacks), rendered over `?__fixtures` so no backend is
+    # needed, at 1440x900 and 390x844: every computed font-size, radius and
+    # colour diffed against the tokens read from `src/index.css` at run time,
+    # horizontal overflow, axe, and the `ApiClient` methods the page called
+    # that no fixture answered.
+    #
+    # `--strict-fixtures` makes a fixture miss a failure. A page that draws
+    # its error state because a module never wrote its `fixtures.ts` is a
+    # page the review wave cannot read, so the gate refuses to call it clean.
+    #
+    # The screenshots are the job's real product: they are what the review
+    # wave reads against the prototype's, so they are uploaded whether or not
+    # the gate passed -- a red run with no pictures is a finding nobody can
+    # act on.
+    #
+    # IN BOTH LANGUAGES. Spanish runs 20-30% longer than English, and a label
+    # that fits at 390 px in one can overflow in the other, so each language
+    # is its own leg (`--lang`); the script refuses a route whose `<html lang>`
+    # is not the one asked for, so a Spanish leg cannot pass by rendering
+    # English.
+    name: harmony ${{ matrix.lang }} (tokens · overflow · axe · fixtures · screenshots)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        lang: [en, es]
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # Same arrangement as `a11y`: Playwright is deliberately not a
+      # devDependency, and the script resolves it from the global install.
+      - name: Install Playwright and Chromium
+        run: npm i -g playwright && npx playwright install --with-deps chromium
+
+      - name: every route on the tokens, no overflow, no serious axe violation, no fixture miss
+        run: node scripts/harmony.mjs --strict-fixtures --lang ${{ matrix.lang }}
+
+      # WHAT THE SCRIPT ACTUALLY WROTE, before the upload has a chance to say
+      # nothing. Runs of this job reported "No files were found with the
+      # provided path" while the gate itself passed, which is the worst shape
+      # a failure can take: green job, no pictures, and the review wave with
+      # nothing to read. This step names the directory and counts the files,
+      # so the log says whether the script or the upload is at fault.
+      - name: what the gate wrote
+        if: always()
+        run: |
+          ls -la .harmony || { echo "frontend/.harmony does not exist"; exit 1; }
+          find .harmony -name '*.png' | wc -l
+      - name: upload the screenshots and the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harmony-${{ matrix.lang }}
+          # `include-hidden-files` IS THE WHOLE FIX. `.harmony` begins with a
+          # dot, and upload-artifact has EXCLUDED hidden files by default
+          # since v4.4 -- so the glob matched nothing, the action warned, and
+          # the run went green with no artifact. The path was right all
+          # along.
+          path: frontend/.harmony
+          include-hidden-files: true
+          # `error`, not `warn`: the screenshots are this job's real product
+          # and the next phase's only input. A warning is how an empty upload
+          # went unnoticed for a whole phase.
+          if-no-files-found: error
+          retention-days: 14
+
+  harmony-gate:
+    # THE NAME main's ruleset requires. The matrix above reports
+    # `harmony en (…)` and `harmony es (…)`; the ruleset names the check
+    # `harmony (…)`, which no matrix leg reports, so without this job a PR
+    # would wait on it forever. Green only when BOTH languages are.
+    name: harmony (tokens · overflow · axe · fixtures · screenshots)
+    needs: harmony
+    if: always()
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: both languages passed
+        run: test "${{ needs.harmony.result }}" = success
+
+  agent:
+    # The Go agent lives in-tree (CLAUDE.md a32cead) but is its own module, so
+    # nothing above compiles, vets or runs a line of it: a green `backend` job
+    # says nothing about whether the endpoint half of the wire protocol still
+    # builds. That is what this job is for. It goes red on a control-plane
+    # change that breaks the agent -- which, now that both sides can change in
+    # one commit, is the failure mode repo separation used to catch for free.
+    name: agent (go test · vet · staticcheck · cross-compile · packaging)
+    # PINNED TO HOSTED ON PURPOSE — do not fold this back into CI_RUNS_ON.
+    #
+    # This job cannot run on the org's containerised self-hosted runners, and the
+    # reason is structural rather than a missing package:
+    # `TestARealDiskEncryptionProbeAgreesWithLsblk` resolves `/` to a block
+    # device and asks whether it is encrypted. On a VM that is /dev/nvme0n1p1
+    # (ext4); inside a container `/` is `overlay`, so the probe cannot answer and
+    # the test fails. Any container-based runner fails it, including GitHub's own
+    # container jobs.
+    #
+    # Making it pass by removing findmnt/lsblk from the runner image would turn a
+    # real failure into a silent skip — exactly what that test file warns about:
+    # "A skip that reads as a pass is how a gap survives."
+    #
+    # Running it on a bare-metal self-hosted runner was considered and rejected:
+    # the job `dpkg -i`s a real package with a systemd unit, runs the agent as
+    # root, and then ASSERTS THAT /var/lib/its-agent SURVIVES `dpkg -r`. That
+    # assertion only means what it says on a machine that is thrown away
+    # afterwards. On a persistent runner each run would start dirty, and a Spot
+    # eviction mid-job would leave the agent installed and running on the CI host.
+    #
+    # ~6 min/run on hosted, roughly $1/month — the price of keeping one honest
+    # test honest, now that the other 27 jobs in this org run for free.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          # go.sum, as Task 1's note said to do in the task that adds the first
+          # dependency. Task 4 adds it (github.com/coder/websocket), so the
+          # cache key is now the dependency hashes rather than the module line.
+          cache-dependency-path: agent/go.sum
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - name: vet
+        run: go vet ./...
+
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@2025.1.1
+          "$(go env GOPATH)/bin/staticcheck" ./...
+
+      - name: test
+        # -count=1 defeats the test result cache: a cached PASS from a previous
+        # run is not evidence about this commit.
+        run: go test ./... -count=1
+
+      - name: idle budget — the numbers, in the log
+        # CLAUDE.md: "Measured, not asserted. The numbers above are a claim
+        # about running code, so they are owed a benchmark that runs in CI and a
+        # stated falsifier."
+        #
+        # The step above already RUNS these -- they are ordinary Tests and they
+        # fail the build on a regression. This step runs them again with -v for
+        # one reason: so the measured footprint lands in the build log, named
+        # and in bytes, instead of being invisible behind a green tick. A budget
+        # nobody can read the value of drifts back into being a design target.
+        #
+        # NOTE WHAT THIS IS NOT: `go test -bench`. `-bench` EXITS 0 ON A
+        # REGRESSION -- a planted 64 KiB/op regression on this project printed
+        # `65536 B/op` and still exited 0 (agent/internal/budget's package
+        # comment). Every number selected here is produced by testing.Benchmark
+        # called from an ORDINARY Test that then COMPARES against a threshold,
+        # which is why the step above can go red at all.
+        #
+        # No -race: the race detector allocates shadow memory per allocation, so
+        # the RSS thresholds are withheld under it (see each package's
+        # race_on_test.go). This invocation is the one where they are live.
+        # `set -o pipefail` is load-bearing, not hygiene: without it the exit
+        # code of `go test | grep` is GREP's, and a failing budget assertion
+        # would be filtered into a green step. That is the same shape as the
+        # `-bench` trap this whole mechanism exists to avoid.
+        run: |
+          set -o pipefail
+          go test ./... -count=1 -v \
+            -run 'Falsifier|Idle|Allocat|Accumulat|Dormant|CostsABounded|MagicPacketCosts|Retained|LeakNoGoroutines|OpensNoSocket|NothingToInitialise|LinksNothingTheService' \
+            | grep -E 'falsifier|budget|one wake|magic packet|--- (PASS|FAIL|SKIP)|^(ok|FAIL)'
+
+      # MinIO publishes no free image any more (2026-09); deploy/minio builds it
+      # from pinned source. The GitHub Actions cache keeps this to seconds after
+      # the first run.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build MinIO from source
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/minio
+          tags: itsuite/minio:RELEASE.2025-09-07T16-13-09Z
+          load: true
+          cache-from: type=gha,scope=minio
+          cache-to: type=gha,scope=minio,mode=max
+
+      - name: backup end to end against a real MinIO
+        # spec-server-backup.md §12, the part that fits here: the production
+        # backup capability and backupstore transport, jobs signed with a test
+        # key and verified by the real runner, writes under real SigV4 POST
+        # policies and reads under real presigned GETs, over TLS, against the
+        # MinIO image deploy/docker-compose.yml pins. A format-2 run through
+        # the real `auto` provider (a live read on this runner's ext4), a
+        # deduplicating second run, a restore compared byte for byte, and a
+        # verify. The upload rate is printed, not gated.
+        #
+        # The test skips when ITMS_E2E_S3_ENDPOINT is unset, so the grep is
+        # what makes a skip here red rather than green.
+        run: |
+          set -euo pipefail
+          certs="$RUNNER_TEMP/minio-certs"
+          mkdir -p "$certs"
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 \
+            -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" \
+            -keyout "$certs/private.key" -out "$certs/public.crt"
+          chmod 0644 "$certs/private.key"
+          docker run -d --name itms-minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER=itmsci -e MINIO_ROOT_PASSWORD=itmsci-throwaway \
+            -v "$certs:/certs:ro" \
+            itsuite/minio:RELEASE.2025-09-07T16-13-09Z server /data --certs-dir /certs
+          for _ in $(seq 1 60); do
+            if curl -fsS --cacert "$certs/public.crt" https://127.0.0.1:9000/minio/health/live; then break; fi
+            sleep 1
+          done
+          go vet -tags e2e ./internal/backupstore/
+          ITMS_E2E_S3_ENDPOINT=https://127.0.0.1:9000 ITMS_E2E_S3_BUCKET=itms-e2e \
+          ITMS_E2E_S3_ACCESS_KEY=itmsci ITMS_E2E_S3_SECRET_KEY=itmsci-throwaway \
+          ITMS_E2E_S3_CA="$certs/public.crt" \
+            go test -tags e2e -count=1 -run TestE2E -v ./internal/backupstore/ | tee "$RUNNER_TEMP/e2e.log"
+          grep -q -- '--- PASS: TestE2EFormat2BackupRestoreAndVerifyAgainstMinIO' "$RUNNER_TEMP/e2e.log"
+
+      - name: cross-compile
+        # One static binary per platform, no cgo. A capability that reaches for
+        # a C library breaks here rather than at packaging time.
+        #
+        # This is also the only check the WINDOWS SERVICE code gets: internal/
+        # service/service_windows.go and its test compile for windows/amd64 and
+        # are executed by nobody, because this runner is Linux. Said plainly in
+        # agent/packaging/README.md rather than left to be discovered.
+        run: |
+          for t in windows/amd64 windows/arm64 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            echo "== $t"
+            GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build -o /dev/null ./cmd/agent || exit 1
+          done
+
+      - name: darwin/arm64 ad-hoc signature — the numbers, in the log
+        # Apple Silicon KILLS AT EXEC any arm64 Mach-O with no code signature.
+        # That is a kernel check: not Gatekeeper, not notarization, not the
+        # quarantine attribute, and nothing an MDM profile can switch off. An
+        # unsigned arm64 binary is dead on arrival on every Apple Silicon
+        # endpoint in the fleet.
+        #
+        # We are not currently exposed: the Go INTERNAL linker (which the
+        # CGO_ENABLED=0 above guarantees) embeds an ad-hoc signature itself, in
+        # Go code, without shelling out to the Mac-only codesign(1). So this
+        # Linux runner already produces a binary that execs on Apple Silicon.
+        #
+        # This step exists because nothing CHOSE that and nothing would notice
+        # it going away. A capability that actually imports "C" forces external
+        # linking, which leaves darwin signing to the Mac-only codesign(1); any
+        # post-link rewrite (strip, upx, an appended payload) leaves the load
+        # command in place while invalidating the page hashes, which macOS
+        # rejects exactly as hard as no signature. (The trigger for the first is
+        # real cgo USE, not the CGO_ENABLED flag -- flipping the flag alone
+        # still produces a signed binary today, since nothing imports "C". The
+        # flag looks like the control and is not, which is why this measures the
+        # artifact rather than auditing build flags.) Both failures are INVISIBLE
+        # from Linux -- file(1) still says "Mach-O 64-bit arm64 executable",
+        # `go build` still exits 0, every other step here stays green. Nobody
+        # on this project has a Mac, so this arithmetic is the only detector.
+        #
+        # The `test` step above already RUNS these; -v here is so the measured
+        # signature lands in the build log -- byte count, CodeDirectory flags,
+        # page-slot count -- rather than being invisible behind a green tick,
+        # the same reason the idle-budget step re-runs its numbers.
+        #
+        # The negative tests in the same file are deliberately included: they
+        # plant a flipped bit in a real artifact and assert the checker catches
+        # it, so a check that had silently become vacuous goes red here.
+        #
+        # `set -o pipefail` is load-bearing, not hygiene: without it the exit
+        # code of `go test | grep` is GREP's, and a failing signature assertion
+        # would be filtered into a green step.
+        run: |
+          set -o pipefail
+          go test ./packaging/ -count=1 -v \
+            -run 'Darwin|PageHashCheck' \
+            | grep -E 'code signature|page hashes|LC_CODE_SIGNATURE|flipped bit|--- (PASS|FAIL|SKIP)|^(ok|FAIL)'
+
+      - name: windows service and health sampler code compile (vet + test binaries)
+        # `go test ./...` above never touches a //go:build windows file. Without
+        # this, the SCM handler or the health capability's Windows sampler
+        # (sampler_windows.go) could stop compiling and every job stays green
+        # until someone builds a release.
+        run: |
+          GOOS=windows go vet ./...
+          GOOS=windows go test -c -o /dev/null ./internal/service
+          GOOS=windows go test -c -o /dev/null ./internal/capabilities/health
+          GOOS=windows go test -c -o /dev/null ./internal/capabilities/backup/...
+          GOOS=windows go test -c -o /dev/null ./internal/capabilities/remote
+          GOOS=windows go test -c -o /dev/null ./internal/capabilities/remote/helper
+          GOOS=windows go test -c -o /dev/null ./internal/capabilities/uninstall
+          GOOS=windows go test -c -o /dev/null ./internal/install
+
+      - name: macOS code compiles (vet, tests included)
+        # The darwin twin of the step above, and it was missing until
+        # 2026-08-13. The cross-compile step builds ./cmd/agent for darwin,
+        # which does NOT compile _test.go files, so a darwin-tagged test was
+        # checked by nothing at all -- which is how `budget_test.go`'s
+        # `readInto` break survived: it broke `GOOS=darwin go vet ./...` for
+        # weeks while every job stayed green.
+        #
+        # `go vet` type-checks the test files as well as the package, so this
+        # one command is what the posture_darwin*.go and darwin-tagged tests
+        # actually get. It is compilation, not behaviour: nobody on this project
+        # has a Mac, and posture_darwin_probes.go has never executed.
+        run: |
+          GOOS=darwin go vet ./...
+          GOOS=darwin go test -c -o /dev/null ./internal/capabilities/health
+          GOOS=darwin go test -c -o /dev/null ./internal/capabilities/backup/...
+          GOOS=darwin go test -c -o /dev/null ./internal/capabilities/uninstall
+
+      - name: the no-platform sampler fallback still compiles
+        # sampler_other.go is the `unavailable`-for-everything fallback, and as
+        # of 2026-08-14 its build tag is `!linux && !windows && !darwin` -- so
+        # it is compiled by NONE of the three steps above.
+        #
+        # It was covered by `GOOS=darwin go vet` until the macOS fast-tick
+        # sampler cycle narrowed that tag, and the coverage was lost silently:
+        # every job stayed green while the file stopped being compiled by
+        # anything. This step is what makes the fallback's compilation somebody
+        # else's red build rather than nobody's problem.
+        #
+        # freebsd is an arbitrary choice and the agent does not ship there. Any
+        # GOOS outside {linux, windows, darwin} would do; what matters is that
+        # exactly one of them is compiled somewhere.
+        run: |
+          GOOS=freebsd go build ./internal/capabilities/health
+          GOOS=freebsd go build ./internal/capabilities/uninstall
+
+      - name: shellcheck the packaging scripts
+        # A packaging tree is shipped code. These scripts run as root on every
+        # endpoint and handle an enrollment token; an unquoted expansion here is
+        # not a style nit.
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck packaging/build.sh packaging/linux/*.sh packaging/darwin/*.sh \
+                     packaging/linux/its-agent-enroll
+          # dpkg maintainer scripts are POSIX sh, not bash.
+          shellcheck -s sh packaging/linux/debian/postinst \
+                           packaging/linux/debian/prerm \
+                           packaging/linux/debian/postrm
+
+      - name: systemd-analyze verify the unit
+        # Catches what a reading does not: this is how StartLimitIntervalSec was
+        # found sitting in [Service], where systemd 255 ignores it silently.
+        # ExecStart is pointed at a real file first, because verify checks that
+        # the binary exists and is executable.
+        run: |
+          CGO_ENABLED=0 go build -o /tmp/its-agent ./cmd/agent
+          sed 's|^ExecStart=.*|ExecStart=/tmp/its-agent|' \
+            packaging/linux/its-agent.service > /tmp/its-agent.service
+          systemd-analyze verify /tmp/its-agent.service
+
+      - name: build and install the .deb, then purge it
+        # The Ubuntu path is the one that must actually work: the control plane
+        # deploys on Ubuntu Server and the first endpoints under test are Linux.
+        # This exercises the real dpkg lifecycle -- install, enroll with a
+        # throwaway token, remove (state survives), purge (credentials
+        # destroyed) -- on the same 24.04 image the fleet runs.
+        run: |
+          set -euo pipefail
+          VERSION=0.0.0-ci ./packaging/linux/build-deb.sh
+          sudo dpkg -i dist/its-agent_0.0.0-ci_amd64.deb
+          test "$(/usr/bin/its-agent --version)" = "0.0.0-ci"
+          # The package must not have shipped a credential.
+          if dpkg -L its-agent | grep -q 'enroll-token'; then
+            echo "the package ships a token file"; exit 1
+          fi
+          # argv is refused...
+          if sudo its-agent-enroll --url https://example.invalid --token nope; then
+            echo "its-agent-enroll accepted a token in argv"; exit 1
+          fi
+          # ...the environment is not.
+          sudo ITS_AGENT_ENROLL_TOKEN=ci.throwaway.token \
+            its-agent-enroll --url https://example.invalid --no-start
+          # `sudo` goes INSIDE the substitution. Written the other way round,
+          # the shell expands $(stat ...) as the unprivileged runner and only
+          # `test` runs as root -- and /var/lib/its-agent is root-only, so stat
+          # is denied, the substitution is empty, and `test "" = "600"` fails.
+          # That is what this step did the first time it was ever reached.
+          test "$(sudo stat -c %a /var/lib/its-agent/enroll-token)" = "600"
+          test "$(sudo stat -c %U /var/lib/its-agent/enroll-token)" = "root"
+          # A token file others can read must stop the agent, not be tolerated.
+          sudo chmod 0644 /var/lib/its-agent/enroll-token
+          if sudo timeout 30 env ITS_AGENT_DATA_DIR=/var/lib/its-agent /usr/bin/its-agent; then
+            echo "the agent started with a world-readable enrollment token"; exit 1
+          fi
+          sudo dpkg -r its-agent
+          sudo test -f /var/lib/its-agent/enroll-token   # remove keeps state
+          sudo dpkg -P its-agent
+          if sudo test -e /var/lib/its-agent; then echo "purge left the state dir"; exit 1; fi
+
+  agent-windows:
+    # The `agent` job above proves the module builds for six targets and RUNS
+    # for one: linux/amd64, on ubuntu-latest. Everything behind `//go:build
+    # windows` -- the WUA/COM patch engine, the SCM service wrapper, the
+    # Windows host sampler, the SecurityCenter2/WMI posture probes, the
+    # PowerShell-driven inventory gather, the DACL scratch-directory lock --
+    # was, until this job existed, compiled and vetted by `GOOS=windows go vet
+    # ./...` and linked by `GOOS=windows go test -c` on that same Linux
+    # runner, and EXECUTED BY NOBODY. Toeshee's own fleet is Windows 11 and
+    # macOS (HANDOFF.md, docs/reviews/2026-09-23-platform-critique.md #1): a
+    # green `agent` job said, and could only ever say, that the Linux sixth of
+    # this binary works.
+    #
+    # This does not close that gap -- a GitHub-hosted windows-latest VM is not
+    # a domain-joined Windows 11 endpoint, has no EDR, and its WMI/WUA/Defender
+    # registration is whatever that VM image ships -- but it turns "compiles"
+    # into "ran, on a real Windows kernel, against the real COM/WMI/SCM APIs
+    # this code drives". Several tests added alongside this job say so in
+    # their own doc comments and name what would still need a real endpoint
+    # (agent-distribution's first-run-verification.md, which this job does not
+    # fill in).
+    name: agent-windows (go test)
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: agent
+        # The `test` step below uses `set -o pipefail` and `grep -E`, which
+        # are bash, not the pwsh this runner defaults to. One shell for the
+        # whole job rather than a per-step override, so a step added later
+        # does not silently inherit pwsh and start passing vacuously.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Same version as the `agent` job, deliberately -- this is the same
+          # module built for a different GOOS, not a different toolchain.
+          go-version: "1.24"
+          cache-dependency-path: agent/go.sum
+
+      - name: test
+        # -count=1 for the same reason as the `agent` job: a cached PASS from
+        # a previous run is not evidence about this commit.
+        run: go test ./... -count=1
+
+      - name: idle budget — the numbers, in the log
+        # The same falsifiers the `agent` job runs on Linux, run here against
+        # the real Windows GOOS. internal/budget's allocation, goroutine and
+        # "quiet tick writes nothing" proxies are OS-agnostic and hold exactly
+        # as much here as on Linux. The one exception is RSS: internal/budget
+        # reads /proc/self/statm on Linux and falls back to a HeapAlloc proxy
+        # everywhere else (RSSIsProxy=true), which is why every RSS assertion
+        # this package makes is written to log rss_is_heap_proxy rather than
+        # hide the substitution -- see budget.go and budget_test.go's own
+        # TestRSSIsReadFromProcOnLinux. Read the numbers below with that in
+        # mind: an allocation or goroutine regression here is as real as on
+        # Linux; an "RSS delta" here is a heap-growth proxy, not resident
+        # memory, and is not the idle budget's measured claim.
+        run: |
+          set -o pipefail
+          go test ./... -count=1 -v \
+            -run 'Falsifier|Idle|Allocat|Accumulat|Dormant|CostsABounded|MagicPacketCosts|Retained|LeakNoGoroutines|OpensNoSocket|NothingToInitialise|LinksNothingTheService' \
+            | grep -E 'falsifier|budget|one wake|magic packet|--- (PASS|FAIL|SKIP)|^(ok|FAIL)'
+
+      - name: screen share on the runner's desktop — which path ran, in the log
+        # The `test` step already runs these; -v puts the capture path (dxgi
+        # or gdi), the frame the helper captured and every skip with its
+        # reason in the log. A skip here means the runner had no interactive
+        # desktop for that check, not that it passed; the phase-1 laptop
+        # checklist in spec-screen-share.md covers what a runner cannot.
+        run: |
+          set -o pipefail
+          go test ./internal/capabilities/remote/... -count=1 -v \
+            | grep -E 'dxgi|gdi|capturing|captured|budget|SKIP|--- (PASS|FAIL)|^(ok|FAIL)'
+
+  agent-macos:
+    # macOS's twin of agent-windows, above, and read that job's header first --
+    # the same gap, the same partial close, the same reason it is partial.
+    #
+    # What this job actually exercises for the first time anywhere in this
+    # repository: the softwareupdate-driven patch engine's build (still
+    # fixture-only for behaviour -- see patch/mac_test.go's own header), the
+    # LVM-shaped-but-APFS snapshot provider's darwin dispatch, the darwin
+    # health sampler and posture probes, and -- added alongside this job --
+    # facts_darwin_test.go, which runs inventory's gather() against the real
+    # sw_vers, ioreg and sysctl on this runner rather than the fixture strings
+    # parse_test.go has always run on Linux.
+    name: agent-macos (go test)
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: agent/go.sum
+
+      - name: test
+        run: go test ./... -count=1
+
+      - name: idle budget — the numbers, in the log
+        # See agent-windows's identical step for what this proves and does
+        # not: the allocation/goroutine proxies are real evidence here; RSS
+        # falls back to the same HeapAlloc proxy as on Windows (this package
+        # reads /proc/self/statm on Linux only), logged as rss_is_heap_proxy
+        # rather than presented as resident memory.
+        run: |
+          set -o pipefail
+          go test ./... -count=1 -v \
+            -run 'Falsifier|Idle|Allocat|Accumulat|Dormant|CostsABounded|MagicPacketCosts|Retained|LeakNoGoroutines|OpensNoSocket|NothingToInitialise|LinksNothingTheService' \
+            | grep -E 'falsifier|budget|one wake|magic packet|--- (PASS|FAIL|SKIP)|^(ok|FAIL)'
+
+  agent-winrm:
+    # THE KERBEROS PUSH PATH, PROVEN AGAINST CODE THAT IS NOT OURS (plan
+    # 2026-09-28-windows-push-winrm Task 9, §I5). A Go test server importing
+    # the agent's own wrap/CBT would only prove the agent agrees with itself.
+    # This job runs the agent's WinRM client against:
+    #   - a Samba AD domain controller (deploy/ci/samba-ad): a real KDC mints
+    #     the TGT from the password and the HTTP/pc1.corp.example.com service
+    #     ticket, AES only, for a computer account that owns the SPN;
+    #   - an INDEPENDENT acceptor (deploy/ci/winrm-acceptor): MIT Kerberos via
+    #     python-gssapi + pyspnego's SPNEGO and wrap_winrm/unwrap_winrm, with
+    #     the MS-WSMV framing re-implemented after pywinrm. It checks mutual
+    #     auth, decrypts our sealed 5985 messages with MIT's IOV unwrap (so a
+    #     wrong 60-byte signature split fails, not only a wrong key), seals its
+    #     own, verifies our tls-server-end-point channel binding on 5986, and
+    #     REJECTS us on a third listener bound to a different certificate, so
+    #     the 5986 success is not a binding MIT ignored.
+    # NTLM/Basic/CredSSP-only endpoints must be refused with no second
+    # attempt. What this cannot prove is real Windows: that is the operator's
+    # one-PC trial (deploy/WINDOWS-PUSH.md, spec §5).
+    #
+    # The throwaway domain's passwords below are CI fixtures protecting nothing.
+    name: agent-winrm (kerberos push · samba AD DC · independent pyspnego acceptor)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The size step builds the base commit for comparison.
+          fetch-depth: 0
+
+      - name: Shared directory for the DC's keytab and the acceptor's outputs
+        run: echo "SHARED=$RUNNER_TEMP/winrm-shared" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: agent/go.sum
+
+      - name: Binary-size delta (M1) — measured, not asserted
+        # The number the plan quoted (~0.76 MB) was a local reading; this is
+        # the one of record. Stripped (-s -w) linux and windows amd64 builds of
+        # cmd/agent at this commit and at the base, sizes and delta in the log.
+        working-directory: .
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          base="${BASE_SHA:-}"
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "no base commit to compare against; sizes of this commit only"
+            base=""
+          fi
+          if [ -n "$base" ]; then
+            git worktree add --detach "$RUNNER_TEMP/base" "$base"
+            # A base commit from before the project moved to the repository
+            # root (2026-10-23) has no agent/ here to build.
+            if [ ! -d "$RUNNER_TEMP/base/agent" ]; then
+              echo "base commit has no agent/ at the root; sizes of this commit only"
+              base=""
+            fi
+          fi
+          for goos in linux windows; do
+            ext=""; [ "$goos" = windows ] && ext=".exe"
+            (cd agent && GOOS=$goos GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o "$RUNNER_TEMP/after-$goos$ext" ./cmd/agent)
+            after=$(stat -c%s "$RUNNER_TEMP/after-$goos$ext")
+            if [ -n "$base" ]; then
+              (cd "$RUNNER_TEMP/base/agent" && GOOS=$goos GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o "$RUNNER_TEMP/before-$goos$ext" ./cmd/agent)
+              before=$(stat -c%s "$RUNNER_TEMP/before-$goos$ext")
+              echo "size $goos/amd64: base $before, this commit $after, delta $((after - before)) bytes"
+            else
+              echo "size $goos/amd64: this commit $after bytes"
+            fi
+          done
+
+      - name: Build and start the Samba AD DC
+        working-directory: .
+        run: |
+          set -euo pipefail
+          mkdir -p "$SHARED"
+          docker build -t itms-samba-ci deploy/ci/samba-ad
+          # --privileged: samba-tool provision stores NT ACLs in security.*
+          # xattrs. Only the KDC is published, on loopback.
+          docker run -d --name samba --privileged --hostname dc1 \
+            -p 127.0.0.1:88:88 -p 127.0.0.1:88:88/udp \
+            -v "$SHARED:/shared" itms-samba-ci
+          for _ in $(seq 1 120); do [ -f "$SHARED/provisioned" ] && break; sleep 2; done
+          test -f "$SHARED/provisioned" || { docker logs samba; exit 1; }
+          test -s "$SHARED/http.keytab"
+          # The KDC answers before the acceptor starts.
+          for _ in $(seq 1 30); do (exec 3<>/dev/tcp/127.0.0.1/88) 2>/dev/null && break; sleep 1; done
+
+      - name: Build and start the independent pyspnego acceptor
+        working-directory: .
+        run: |
+          set -euo pipefail
+          docker build -t itms-winrm-acceptor deploy/ci/winrm-acceptor
+          docker run -d --name acceptor \
+            -p 127.0.0.1:5985:5985 -p 127.0.0.1:5986:5986 -p 127.0.0.1:5987:5987 \
+            -e KRB5_KTNAME=/shared/http.keytab -v "$SHARED:/shared" itms-winrm-acceptor \
+            --http :5985 --https :5986 --https-badcb :5987 \
+            --ca-out /shared/acceptor-ca.pem --kat-out /shared/kat.json
+          for _ in $(seq 1 30); do [ -f "$SHARED/acceptor-ca.pem" ] && break; sleep 1; done
+          test -f "$SHARED/acceptor-ca.pem" || { docker logs acceptor; exit 1; }
+
+      - name: The Kerberos push path, end to end (independent oracle)
+        env:
+          ITS_WINRM_E2E_KDC: 127.0.0.1:88
+          ITS_WINRM_E2E_FQDN: pc1.corp.example.com
+          ITS_WINRM_E2E_USER: 'svc-push@corp.example.com'
+          ITS_WINRM_E2E_PASS: 'Push0rd!ci-throwaway'
+          ITS_WINRM_E2E_HTTPS: 127.0.0.1:5986
+          ITS_WINRM_E2E_HTTPS_BADCB: 127.0.0.1:5987
+          ITS_WINRM_E2E_HTTP: 127.0.0.1:5985
+          ITS_WINRM_E2E_NTLM: 127.0.0.1:5985/refuse/ntlm
+          ITS_WINRM_E2E_BASIC: 127.0.0.1:5985/refuse/basic
+          ITS_WINRM_E2E_CREDSSP: 127.0.0.1:5985/refuse/credssp
+        run: |
+          set -euo pipefail
+          ITS_WINRM_E2E_CA="$(cat "$SHARED/acceptor-ca.pem")"
+          export ITS_WINRM_E2E_CA
+          go test -tags winrm_e2e -count=1 -v -run TestE2E_KerberosPushPath \
+            ./internal/capabilities/pushinstall/winrm/ | tee "$RUNNER_TEMP/winrm-e2e.log"
+          # A MISSING ENV IS A HARD FAILURE, NOT A SKIP (M5): the test fails on
+          # any unset variable. These greps additionally prove it PASSED rather
+          # than skipped, so a future t.Skip slipped into it turns this red.
+          grep -q -- '--- PASS: TestE2E_KerberosPushPath' "$RUNNER_TEMP/winrm-e2e.log"
+          ! grep -q -- '--- SKIP: TestE2E_KerberosPushPath' "$RUNNER_TEMP/winrm-e2e.log"
+
+      - name: The known-answer vector still holds, and this run's capture
+        # TestWinRMWrapKnownAnswer carries a vector captured from this same
+        # acceptor (MIT sealing a reply): our unwrap must open it and our seal
+        # must reproduce it byte for byte. It runs in the plain `agent` job
+        # too; here it must PASS, never SKIP. This run's own capture is
+        # printed and uploaded so the vector can be refreshed from a real
+        # independent encode rather than typed.
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run TestWinRMWrapKnownAnswer ./internal/capabilities/pushinstall/winrm/ | tee "$RUNNER_TEMP/kat.log"
+          grep -q -- '--- PASS: TestWinRMWrapKnownAnswer' "$RUNNER_TEMP/kat.log"
+          test -s "$SHARED/kat.json"
+          cat "$SHARED/kat.json"
+
+      - name: Acceptor and DC logs
+        if: always()
+        working-directory: .
+        run: |
+          docker logs acceptor 2>&1 | tail -200 || true
+          docker logs samba 2>&1 | tail -100 || true
+
+      - name: Upload this run's KAT capture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: winrm-kat
+          path: ${{ runner.temp }}/winrm-shared/kat.json
+          if-no-files-found: warn
+          retention-days: 14
