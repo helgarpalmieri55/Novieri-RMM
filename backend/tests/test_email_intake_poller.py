@@ -839,6 +839,7 @@ async def test_the_connection_test_succeeds_without_reading_any_mail(poll_env) -
         actor_id=poll_env.actor_id,
         engine=poll_env.engine,
         vault=poll_env.vault,
+        clients=ClientScope.all(),
         client_factory=factory,
     )
 
@@ -873,6 +874,7 @@ async def test_the_connection_test_audits_the_operator_who_ran_it(poll_env) -> N
         actor_id=poll_env.actor_id,
         engine=poll_env.engine,
         vault=poll_env.vault,
+        clients=ClientScope.all(),
         client_factory=lambda **_: RecordingImapClient(),
     )
 

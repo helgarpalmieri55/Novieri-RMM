@@ -37,6 +37,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.ws import AUTH_SUBPROTOCOL
+from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.security import (
     JwksCache,
@@ -430,7 +431,7 @@ async def test_the_ui_websocket_refuses_a_token_carrying_the_mcp_audience(
 # --------------------------------------------------------------------------- #
 
 
-async def _authorize(env: Any, token: str) -> tuple[UUID, UUID]:
+async def _authorize(env: Any, token: str) -> tuple[UUID, UUID, ClientScope]:
     return await authorize_tunnel(
         token=token,
         session_id=uuid4(),

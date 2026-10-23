@@ -462,7 +462,7 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
     state = websocket.app.state
     token = token_from_subprotocols(websocket)
     try:
-        org_id, _user_id = await authorize_tunnel(
+        org_id, _user_id, clients = await authorize_tunnel(
             token=token,
             session_id=session_id,
             settings=state.settings,
@@ -504,6 +504,7 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
             service=service,
             store=lambda: _object_store(websocket),
             app_engine=state.app_engine,
+            clients=clients,
             relay_internal_url=state.settings.relay_internal_url,
             spool_dir=state.settings.remote_recording_spool_dir,
         )

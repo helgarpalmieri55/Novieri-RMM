@@ -360,6 +360,7 @@ async def test_mailbox_route(
             actor_id=ctx.user_id,
             engine=state.app_engine,
             vault=state.vault,
+            clients=ctx.clients,
         )
     except MailboxValidationError as exc:
         raise _http_error(exc) from None
@@ -504,6 +505,7 @@ async def complete_oauth_route(
             settings=state.settings,
             engine=state.app_engine,
             vault=state.vault,
+            clients=ctx.clients,
         )
     except microsoft.MicrosoftNotConfigured as exc:
         raise _not_configured(exc) from None

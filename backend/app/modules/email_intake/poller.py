@@ -352,9 +352,13 @@ async def _checkout_credential(
     *,
     engine: AsyncEngine,
     vault: VaultService,
+    clients: ClientScope,
     actor_id: UUID | None = None,
 ) -> str:
     """Decrypt the mailbox password at point of use, and AUDIT the checkout.
+
+    `clients` is the caller's: `ClientScope.all()` from the scheduled poll,
+    the operator's own scope from `test_mailbox` (MSP clients spec §2.3).
 
     Its own transaction, deliberately outside the claim (see `_claim`): the
     production vault is `OpenBaoVaultService`, whose `_unwrap_dek` is an
@@ -378,7 +382,7 @@ async def _checkout_credential(
         raise MailboxNotConnected(  # i18n-exempt: _describe words it, str(exc) unused
             "this mailbox has no saved sign-in yet"
         )
-    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
+    async with org_session(org_id, engine=engine, clients=clients) as session:
         password = await vault.checkout(session, org_id=org_id, credential_id=credential_id)
         await audit_service.record(
             session,
@@ -429,21 +433,29 @@ async def _sign_in(
     *,
     engine: AsyncEngine,
     vault: VaultService,
+    clients: ClientScope,
     actor_id: UUID | None = None,
 ) -> tuple[str, str | None]:
     """`(password, access_token)` for the client factory: a password, or a
-    fresh Microsoft access token and no password at all."""
+    fresh Microsoft access token and no password at all. Both read under
+    `clients`, the caller's scope (see `_checkout_credential`)."""
     if plan.auth_kind == "microsoft_oauth":
         if plan.credential_id is None:
             raise MailboxNotConnected(  # i18n-exempt: _describe words it, str(exc) unused
                 "this mailbox is not connected to Microsoft yet"
             )
         plan.access_token = await tokens.access_token_for(
-            org_id, mailbox_id, engine=engine, vault=vault, actor_id=actor_id
+            org_id, mailbox_id, engine=engine, vault=vault, clients=clients, actor_id=actor_id
         )
         return "", plan.access_token
     plan.password = await _checkout_credential(
-        org_id, mailbox_id, plan.credential_id, engine=engine, vault=vault, actor_id=actor_id
+        org_id,
+        mailbox_id,
+        plan.credential_id,
+        engine=engine,
+        vault=vault,
+        clients=clients,
+        actor_id=actor_id,
     )
     return plan.password, None
 
@@ -566,7 +578,7 @@ async def poll_mailbox(
         # the length of someone else's network timeout.
         try:
             password, access_token = await _sign_in(
-                plan, org_id, mailbox_id, engine=engine, vault=vault
+                plan, org_id, mailbox_id, engine=engine, vault=vault, clients=ClientScope.all()
             )
             stage = "connect"
             client: ImapClient = await asyncio.to_thread(
@@ -649,6 +661,7 @@ async def test_mailbox(
     actor_id: UUID,
     engine: AsyncEngine,
     vault: VaultService,
+    clients: ClientScope,
     client_factory: ImapClientFactory = imap_client_factory,
 ) -> MailboxTestResult:
     """Validate a mailbox's configuration by CONNECTING AND LISTING THE
@@ -699,8 +712,12 @@ async def test_mailbox(
     `detail` is `stage failed: reason`, both from `imap.py`'s fixed
     vocabularies, bounded -- never `str(exc)`, never a server response line
     (invariant #3).
+
+    `clients` is the operator's scope (`ctx.clients`): every transaction this
+    opens -- the lookup, the credential checkout, the audit row -- runs as
+    the person who pressed Test, never as the whole organization.
     """
-    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
+    async with org_session(org_id, engine=engine, clients=clients) as session:
         mailbox = (
             await session.execute(
                 select(EmailMailbox).where(
@@ -730,7 +747,13 @@ async def test_mailbox(
         password, access_token = "", None
         try:
             password, access_token = await _sign_in(
-                plan, org_id, mailbox_id, engine=engine, vault=vault, actor_id=actor_id
+                plan,
+                org_id,
+                mailbox_id,
+                engine=engine,
+                vault=vault,
+                clients=clients,
+                actor_id=actor_id,
             )
             stage = "connect"
             client: ImapClient = await asyncio.to_thread(
@@ -766,7 +789,7 @@ async def test_mailbox(
         detail = _describe(stage, exc)
         stored_detail = _describe_stored(stage, exc)
 
-    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
+    async with org_session(org_id, engine=engine, clients=clients) as session:
         await audit_service.record(
             session,
             org_id=org_id,

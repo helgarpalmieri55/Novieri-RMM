@@ -39,6 +39,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, require_permission
+from app.core.client_scope import ClientScope
 from app.models import AuditEvent, Organization, Permission, Role, RolePermission, User, UserRole
 from tests.mcp_support import mcp_client, mcp_token, running_mcp
 
@@ -972,6 +973,7 @@ async def test_the_audit_row_is_written_even_when_the_handler_is_cancelled(
         bearer="Bearer x",
         areas=None,
         accept_language="",
+        clients=ClientScope.all(),
     )
     ctx = type("Ctx", (), {})()
     ctx.request = type("Req", (), {"scope": {"state": {server.PRINCIPAL_KEY: principal}}})()
@@ -1001,6 +1003,7 @@ def _direct_call(env: Any, org_id: UUID, user_id: UUID, sub: str) -> tuple[Any, 
         bearer="Bearer x",
         areas=None,
         accept_language="",
+        clients=ClientScope.all(),
     )
     ctx = type("Ctx", (), {})()
     ctx.request = type("Req", (), {"scope": {"state": {server.PRINCIPAL_KEY: principal}}})()

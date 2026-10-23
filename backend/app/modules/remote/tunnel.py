@@ -67,12 +67,16 @@ async def authorize_tunnel(
     jwks: JwksCache,
     admin_engine: AsyncEngine,
     app_engine: AsyncEngine,
-) -> tuple[UUID, UUID]:
+) -> tuple[UUID, UUID, ClientScope]:
     """Authenticate the token and authorize this caller for ``session_id``.
 
-    Returns ``(org_id, user_id)`` on success. Requires the ``remote.control``
-    permission AND that the caller either owns the session (is its technician)
-    or holds ``orgs.manage`` (org-admin). Raises ``TunnelAuthError`` otherwise:
+    Returns ``(org_id, user_id, clients)`` on success -- ``clients`` is the
+    caller's client scope, which the screen tunnel's own sessions run under
+    (MSP clients spec §2.3), exactly as a route passes ``ctx.clients``.
+
+    Requires the ``remote.control`` permission AND that the caller either owns
+    the session (is its technician) or holds ``orgs.manage`` (org-admin).
+    Raises ``TunnelAuthError`` otherwise:
       * 4401 — bad/absent token, unknown org, or unknown user;
       * 4403 — not admitted (email domain, or a non-active account), lacks
         remote.control, or not the owner and not an org-admin;
@@ -163,4 +167,5 @@ async def authorize_tunnel(
             raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
                 4403, "not the session owner"
             )
-    return org_id, user_id
+    # Task 4 replaces this with the person's scope.
+    return org_id, user_id, ClientScope.all()

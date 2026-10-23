@@ -59,7 +59,7 @@ async def test_authorize_tunnel_owner_ok(api_env) -> None:
     tech = await api_env.create_user(org_id, "technician")
     tech_id = await _user_id_of(api_env, tech)
     sid = await _session_row(api_env, org_id, tech_id)
-    got_org, got_user = await _authorize(api_env, await _token(api_env, tech, org_id), sid)
+    got_org, got_user, _ = await _authorize(api_env, await _token(api_env, tech, org_id), sid)
     assert got_org == org_id and got_user == tech_id
 
 
@@ -70,7 +70,7 @@ async def test_authorize_tunnel_org_admin_non_owner_ok(api_env) -> None:
     admin = await api_env.create_user(org_id, "org-admin")
     sid = await _session_row(api_env, org_id, owner_id)
     # org-admin holds orgs.manage, so may drive a session it does not own
-    got_org, _ = await _authorize(api_env, await _token(api_env, admin, org_id), sid)
+    got_org, _, _ = await _authorize(api_env, await _token(api_env, admin, org_id), sid)
     assert got_org == org_id
 
 

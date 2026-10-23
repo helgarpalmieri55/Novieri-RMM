@@ -81,11 +81,14 @@ async def run_screen_tunnel(
     service: RemoteSessionService,
     store: StoreFactory,
     app_engine: AsyncEngine,
+    clients: ClientScope,
     relay_internal_url: str,
     spool_dir: Path | None = None,
     dial: Dial = websockets.connect,
 ) -> None:
-    """Drive the viewer leg from browser open to close.
+    """Drive the viewer leg from browser open to close. ``clients`` is the
+    viewer's scope, from ``authorize_tunnel``; the recording upload and the
+    session end run under it.
 
     Returns without touching the session when this process holds no viewer
     ticket for it (not a screen session, already viewed, or ended).
@@ -120,7 +123,13 @@ async def run_screen_tunnel(
         logger.warning("screen session %s: relay leg failed", session_id, exc_info=True)
     finally:
         await _finish(
-            service, store, app_engine, org_id=org_id, session_id=session_id, recording=recording
+            service,
+            store,
+            app_engine,
+            org_id=org_id,
+            session_id=session_id,
+            recording=recording,
+            clients=clients,
         )
 
 
@@ -178,6 +187,7 @@ async def _finish(
     org_id: UUID,
     session_id: UUID,
     recording: _Recording | None,
+    clients: ClientScope,
 ) -> None:
     """Upload the recording, then end the session, in separate transactions
     so an upload failure can never leave the session open."""
@@ -186,7 +196,7 @@ async def _finish(
         try:
             if recording.frames > 0:
                 object_store = store()
-                async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
+                async with org_session(org_id, engine=app_engine, clients=clients) as s:
                     await finalize_recording_file(
                         s,
                         object_store,
@@ -202,7 +212,7 @@ async def _finish(
         finally:
             recording.discard()
     try:
-        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
+        async with org_session(org_id, engine=app_engine, clients=clients) as s:
             await service.end_session(s, session_id=session_id, reason="completed")
     except InvalidSessionState:
         pass  # the gateway (or a stop) ended it first, with the real reason

@@ -190,16 +190,18 @@ async def complete(
     settings: Settings,
     engine: AsyncEngine,
     vault: VaultService,
+    clients: ClientScope,
 ) -> UUID:
     """Redeem the authorization code and store the refresh token; returns the
-    mailbox id.
+    mailbox id. `clients` is the caller's scope (`ctx.clients`): both
+    transactions run as the person who pressed Connect.
 
     Three steps, deliberately: spend the state and decrypt what the exchange
     needs (one transaction, committed); call Microsoft (no transaction); store
     the refresh token (one transaction).
     """
     redirect = microsoft.redirect_uri(settings)
-    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
+    async with org_session(org_id, engine=engine, clients=clients) as session:
         row = await _consume(session, org_id=org_id, user_id=user_id, state=state)
         mailbox = await _oauth_mailbox(session, org_id, row.mailbox_id)
         app = await oauth_app.get_app(session, org_id=org_id)
@@ -270,7 +272,7 @@ async def complete(
             status=400,
         )
 
-    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
+    async with org_session(org_id, engine=engine, clients=clients) as session:
         mailbox = await _oauth_mailbox(session, org_id, mailbox_id)
         mailbox.credential_id = await _store_secret(
             session,

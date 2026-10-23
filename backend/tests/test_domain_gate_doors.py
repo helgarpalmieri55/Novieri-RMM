@@ -393,7 +393,7 @@ async def test_tunnel_admits_when_the_setting_is_unset(api_env) -> None:
     org_id, tech, sid = await _an_owned_session(api_env)
     slug = await api_env.org_slug(org_id)
     token = api_env.idp.token(tech, slug, email="someone@completely-elsewhere.example")
-    got_org, _ = await _authorize(api_env, token, sid)
+    got_org, _, _ = await _authorize(api_env, token, sid)
     assert got_org == org_id
 
 
@@ -402,7 +402,7 @@ async def test_tunnel_admits_a_matching_domain(api_env) -> None:
     api_env.settings.console_email_domain = BASE_DOMAIN
     slug = await api_env.org_slug(org_id)
     token = api_env.idp.token(tech, slug, email=f"u@mail.{BASE_DOMAIN}")
-    got_org, _ = await _authorize(api_env, token, sid)
+    got_org, _, _ = await _authorize(api_env, token, sid)
     assert got_org == org_id
 
 
@@ -1090,7 +1090,7 @@ async def test_override_off_disables_the_gate_at_the_tunnel_door(
         await _authorize(api_env, token, sid)
     assert exc.value.code == 4403
     monkeypatch.setenv(OVERRIDE_ENV_VAR, "off")
-    got_org, _ = await _authorize(api_env, token, sid)
+    got_org, _, _ = await _authorize(api_env, token, sid)
     assert got_org == org_id
 
 

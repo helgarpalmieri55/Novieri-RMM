@@ -121,6 +121,9 @@ class McpPrincipal:
     bearer: str = field(repr=False)
     areas: frozenset[str] | None
     accept_language: str
+    #: The person's client scope, from the admitted `AuthContext` -- every
+    #: session a handler opens is held to it (MSP clients spec §2.3).
+    clients: ClientScope
     #: `(count, seconds left in the window)` when this request was over the
     #: per-person limit at the door, else None. Counted there, once; the
     #: handlers only read it (`tools/call` to word and audit its refusal).
@@ -380,6 +383,7 @@ class McpAsgi:
             bearer=authorization,
             areas=areas or None,
             accept_language=request.headers.get("accept-language", ""),
+            clients=ctx.clients,
             limited=limited,
         )
         await self._sm.handle_request(scope, receive, send)
@@ -551,7 +555,7 @@ class _ToolHandlers:
                 )
         catalog = _catalog(self._app)
         async with org_session(
-            principal.org_id, engine=self._app.state.app_engine, clients=ClientScope.all()
+            principal.org_id, engine=self._app.state.app_engine, clients=principal.clients
         ) as session:
             held = await user_permission_codes(session, principal.user_id)
         return ListToolsResult(
@@ -627,7 +631,7 @@ class _ToolHandlers:
         # refuse it again with the same check (`require_permission`).
         if tool.permission is not None:
             async with org_session(
-                principal.org_id, engine=self._app.state.app_engine, clients=ClientScope.all()
+                principal.org_id, engine=self._app.state.app_engine, clients=principal.clients
             ) as session:
                 allowed = await has_permission(session, principal.user_id, tool.permission)
             if not allowed:
@@ -701,7 +705,7 @@ class _ToolHandlers:
             metadata["outcome_unknown"] = True
         with use_mcp_call(McpCall(azp=principal.claims.azp, tool=tool)):
             async with org_session(
-                principal.org_id, engine=self._app.state.app_engine, clients=ClientScope.all()
+                principal.org_id, engine=self._app.state.app_engine, clients=principal.clients
             ) as session:
                 await audit_service.record(
                     session,
