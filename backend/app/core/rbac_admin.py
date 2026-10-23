@@ -296,13 +296,14 @@ async def _assigned_users(session: AsyncSession, org_id: UUID, role_id: UUID) ->
 
 
 async def _holders_of(session: AsyncSession, org_id: UUID, code: str) -> int:
-    """How many users IN THIS ORG actually hold `code` org-wide.
+    """How many users IN THIS ORG actually hold `code` for every client.
 
-    `device_group_id IS NULL` matches `user_permission_codes`, which counts a
-    group-scoped grant only when the question names that same group: a user
-    holding `orgs.manage` for one device group cannot administer the
-    organization, so counting them as a holder would leave the org locked out
-    while the rail below reported it safe.
+    `client_id IS NULL` is an all-clients grant, and only that counts as
+    holding an org-level code: a single-client grant does not. It matches
+    `user_permission_codes`, which counts a client-scoped grant only when the
+    question names that same client: a user holding `orgs.manage` for one
+    client cannot administer the organization, so counting them as a holder
+    would leave the org locked out while the rail below reported it safe.
     """
     return int(
         (
@@ -312,7 +313,7 @@ async def _holders_of(session: AsyncSession, org_id: UUID, code: str) -> int:
                 .join(Permission, Permission.id == RolePermission.permission_id)
                 .where(
                     UserRole.org_id == org_id,
-                    UserRole.device_group_id.is_(None),
+                    UserRole.client_id.is_(None),
                     Permission.code == code,
                 )
             )
