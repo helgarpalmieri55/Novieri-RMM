@@ -89,7 +89,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.audit import audit_service
 from app.core.http import read_bounded_body, reject_oversized_content_length
 from app.core.i18n import tr
@@ -388,7 +388,7 @@ async def list_queues_route(
 async def create_queue_route(
     body: QueueCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("ticket.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("ticket.admin")),
 ) -> QueueOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -419,7 +419,7 @@ async def update_queue_route(
     queue_id: UUID,
     body: QueueUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("ticket.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("ticket.admin")),
 ) -> QueueOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -463,7 +463,7 @@ async def list_categories_route(
 async def create_category_route(
     body: CategoryCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("ticket.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("ticket.admin")),
 ) -> CategoryOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -495,7 +495,7 @@ async def update_category_route(
     category_id: UUID,
     body: CategoryUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("ticket.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("ticket.admin")),
 ) -> CategoryOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -1077,7 +1077,7 @@ async def list_canned_responses_route(
 async def create_canned_response_route(
     body: CannedResponseCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("ticket.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("ticket.admin")),
 ) -> CannedResponseOut:
     try:
         async with org_session(
@@ -1096,7 +1096,7 @@ async def update_canned_response_route(
     response_id: UUID,
     body: CannedResponseUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("ticket.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("ticket.admin")),
 ) -> CannedResponseOut:
     try:
         async with org_session(
@@ -1116,7 +1116,7 @@ async def update_canned_response_route(
 async def delete_canned_response_route(
     response_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("ticket.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("ticket.admin")),
 ) -> Response:
     try:
         async with org_session(

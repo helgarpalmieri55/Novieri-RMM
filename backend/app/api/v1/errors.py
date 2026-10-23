@@ -63,7 +63,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.errors.capture import dropped_count
 from app.core.errors.triage import (
     ErrorGroupNotFoundError,
@@ -250,7 +250,7 @@ async def get_error_group(
 async def resolve_error_group(
     group_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("platform.errors.write")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("platform.errors.write")),
 ) -> ErrorGroupOut:
     """Sets `resolved_at` (spec §5). Idempotent: resolving an already-resolved
     group simply moves the timestamp forward rather than erroring, matching
@@ -278,7 +278,7 @@ async def resolve_error_group(
 async def unresolve_error_group(
     group_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("platform.errors.write")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("platform.errors.write")),
 ) -> ErrorGroupOut:
     """Clears `resolved_at` -- the inverse of resolve, which shipped one-way
     (audit finding B76: an operator who resolved a group by mistake had no

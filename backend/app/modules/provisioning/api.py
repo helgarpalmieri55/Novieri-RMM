@@ -31,7 +31,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.i18n import tr
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -169,7 +169,7 @@ async def list_images_route(
 async def create_image_route(
     body: OsImageCreateRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("provisioning.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("provisioning.manage")),
 ) -> OsImageOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -226,7 +226,7 @@ async def list_profiles_route(
 async def create_profile_route(
     body: ProfileUpsertRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("provisioning.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("provisioning.manage")),
 ) -> ProfileOut:
     state = request.app.state
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
@@ -253,7 +253,7 @@ async def update_profile_route(
     profile_id: UUID,
     body: ProfileUpsertRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("provisioning.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("provisioning.manage")),
 ) -> ProfileOut:
     state = request.app.state
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:

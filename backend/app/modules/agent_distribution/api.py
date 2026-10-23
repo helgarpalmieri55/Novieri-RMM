@@ -29,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.audit import audit_service
 from app.core.http import read_bounded_body, reject_oversized_content_length
 from app.core.i18n import N_, tr, tr_marked
@@ -121,7 +121,7 @@ async def list_releases_route(
 async def create_release_route(
     body: ReleaseCreateRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("agent.release.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("agent.release.manage")),
 ) -> ReleaseOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -164,7 +164,7 @@ async def create_release_route(
 async def upload_artifact_route(
     release_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("agent.release.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("agent.release.manage")),
 ) -> ReleaseOut:
     # Cheapest check first, before any database or object-store work. The
     # Content-Length is client-supplied and may be absent or wrong, so the bytes
@@ -237,7 +237,7 @@ async def _unpublish(
 async def delete_release_route(
     release_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("agent.release.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("agent.release.manage")),
 ) -> None:
     await _unpublish(request, ctx, [release_id])
 
@@ -246,7 +246,7 @@ async def delete_release_route(
 async def delete_version_route(
     version: str,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("agent.release.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("agent.release.manage")),
 ) -> VersionUnpublishedOut:
     """Every platform's package of one version, all or none.
 

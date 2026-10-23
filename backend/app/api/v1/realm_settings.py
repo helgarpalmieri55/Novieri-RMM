@@ -76,7 +76,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.identity.policy import resolve_console_domain
@@ -518,7 +518,7 @@ async def read_email_settings(
 async def write_email_settings(
     body: EmailSettingsIn,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("orgs.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("orgs.manage")),
     config: KeycloakAdminConfig | None = Depends(keycloak_config),
 ) -> EmailSettingsOut:
     """Save the relay settings, and answer with what the identity provider
@@ -568,7 +568,7 @@ async def write_email_settings(
 async def send_test_message(
     request: Request,
     body: TestSendIn | None = None,
-    ctx: AuthContext = Depends(require_permission("orgs.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("orgs.manage")),
     config: KeycloakAdminConfig | None = Depends(keycloak_config),
 ) -> TestSendOut:
     """Send a test message to the address asked for, or to the saved SENDING

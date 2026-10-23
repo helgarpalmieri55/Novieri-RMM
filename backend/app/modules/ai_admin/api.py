@@ -82,7 +82,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 from uuid_extensions import uuid7
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.ai.act import (
     ActConflict,
     ActExpired,
@@ -969,7 +969,7 @@ async def get_ai_settings(
 async def put_ai_settings(
     body: SettingsUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("ai.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("ai.admin")),
 ) -> SettingsOut:
     """Write this org's settings. Audited, with old and new values.
 
@@ -1268,7 +1268,7 @@ async def list_ai_ceilings(
 async def put_ai_ceiling(
     body: CeilingUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("ai.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("ai.admin")),
 ) -> CeilingOut:
     """Set one ceiling. Refuses `autonomous` with a 400 (§0.4) and audits the
     change with BOTH levels."""

@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.i18n import tr
 from app.core.rbac import has_permission
 from app.core.tenancy import org_session
@@ -37,6 +37,10 @@ router = APIRouter(prefix="/agent", tags=["agent-update"])
 _READ = "agent.update.read"
 _ROLLOUT = "agent.update.rollout"
 _ROLLBACK = "agent.update.rollback"
+#: A rollout updates the agent across the organization's whole fleet -- one
+#: `agent_update_rollouts` row, not one client's data -- so starting, steering
+#: or previewing one needs a scope of every client (MSP clients spec §2.2).
+_ROLLOUT_GATE = require_permission_on_every_client(_ROLLOUT)
 
 
 def _http(exc: svc.RolloutError) -> HTTPException:
@@ -168,7 +172,7 @@ async def list_targets_route(
 
 @router.post("/update-rollouts/preview", response_model=PreviewOut)
 async def preview_route(
-    body: RolloutIn, request: Request, ctx: AuthContext = Depends(require_permission(_ROLLOUT))
+    body: RolloutIn, request: Request, ctx: AuthContext = Depends(_ROLLOUT_GATE)
 ) -> PreviewOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -192,7 +196,7 @@ async def preview_route(
 
 @router.post("/update-rollouts", status_code=status.HTTP_201_CREATED, response_model=RolloutOut)
 async def create_rollout_route(
-    body: RolloutIn, request: Request, ctx: AuthContext = Depends(require_permission(_ROLLOUT))
+    body: RolloutIn, request: Request, ctx: AuthContext = Depends(_ROLLOUT_GATE)
 ) -> RolloutOut:
     if body.is_rollback:
         await _require_rollback(request, ctx)
@@ -250,28 +254,28 @@ async def _act(
 
 @router.post("/update-rollouts/{rollout_id}/start", response_model=RolloutOut)
 async def start_route(
-    rollout_id: UUID, request: Request, ctx: AuthContext = Depends(require_permission(_ROLLOUT))
+    rollout_id: UUID, request: Request, ctx: AuthContext = Depends(_ROLLOUT_GATE)
 ) -> RolloutOut:
     return await _act(request, ctx, rollout_id, "start")
 
 
 @router.post("/update-rollouts/{rollout_id}/pause", response_model=RolloutOut)
 async def pause_route(
-    rollout_id: UUID, request: Request, ctx: AuthContext = Depends(require_permission(_ROLLOUT))
+    rollout_id: UUID, request: Request, ctx: AuthContext = Depends(_ROLLOUT_GATE)
 ) -> RolloutOut:
     return await _act(request, ctx, rollout_id, "pause")
 
 
 @router.post("/update-rollouts/{rollout_id}/resume", response_model=RolloutOut)
 async def resume_route(
-    rollout_id: UUID, request: Request, ctx: AuthContext = Depends(require_permission(_ROLLOUT))
+    rollout_id: UUID, request: Request, ctx: AuthContext = Depends(_ROLLOUT_GATE)
 ) -> RolloutOut:
     return await _act(request, ctx, rollout_id, "resume")
 
 
 @router.post("/update-rollouts/{rollout_id}/advance", response_model=RolloutOut)
 async def advance_route(
-    rollout_id: UUID, request: Request, ctx: AuthContext = Depends(require_permission(_ROLLOUT))
+    rollout_id: UUID, request: Request, ctx: AuthContext = Depends(_ROLLOUT_GATE)
 ) -> RolloutOut:
     return await _act(request, ctx, rollout_id, "advance")
 
@@ -281,14 +285,14 @@ async def close_ring_route(
     rollout_id: UUID,
     ring_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission(_ROLLOUT)),
+    ctx: AuthContext = Depends(_ROLLOUT_GATE),
 ) -> RolloutOut:
     return await _act(request, ctx, rollout_id, "close", ring_id)
 
 
 @router.post("/update-rollouts/{rollout_id}/cancel", response_model=RolloutOut)
 async def cancel_route(
-    rollout_id: UUID, request: Request, ctx: AuthContext = Depends(require_permission(_ROLLOUT))
+    rollout_id: UUID, request: Request, ctx: AuthContext = Depends(_ROLLOUT_GATE)
 ) -> RolloutOut:
     return await _act(request, ctx, rollout_id, "cancel")
 
@@ -298,7 +302,7 @@ async def promote_route(
     version: str,
     body: PromoteIn,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("agent.release.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("agent.release.manage")),
 ) -> PromoteOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -321,7 +325,7 @@ async def release_signature_route(
     release_id: UUID,
     body: ReleaseSignatureIn,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("agent.release.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("agent.release.manage")),
 ) -> None:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
