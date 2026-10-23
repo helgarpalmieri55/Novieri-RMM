@@ -91,7 +91,6 @@ def upgrade() -> None:
             f"USING (org_id = {ORG_CTX}) WITH CHECK (org_id = {ORG_CTX})"
         )
         op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO app_user")
-    op.execute("GRANT SELECT ON clients, sites TO portal_user")
 
     # A site belongs to its client's org and the unassigned client has none.
     op.execute(
