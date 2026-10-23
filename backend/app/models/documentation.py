@@ -12,6 +12,7 @@ from uuid import UUID
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    FetchedValue,
     ForeignKey,
     Index,
     String,
@@ -52,6 +53,10 @@ class DocArticle(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     title: Mapped[str] = mapped_column(String(300))
     body: Mapped[str] = mapped_column(Text, default="")
     category: Mapped[str] = mapped_column(String(100), default="General")
@@ -70,6 +75,10 @@ class DocRecord(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     record_type: Mapped[str] = mapped_column(String(20))  # network|service|vendor|location
     name: Mapped[str] = mapped_column(String(300))
     fields: Mapped[dict[str, Any]] = mapped_column(default=dict)
@@ -85,6 +94,12 @@ class DocLink(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # article_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     article_id: Mapped[UUID] = mapped_column(ForeignKey("doc_articles.id", ondelete="CASCADE"))
     target_type: Mapped[str] = mapped_column(String(20))  # device|device_group|credential|record
     target_id: Mapped[UUID] = mapped_column()
@@ -102,6 +117,13 @@ class DocVersion(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. TWO PARENTS, one
+    # trigger each (migration 0231): its_client_from_parent copies the
+    # article's client, its_client_from_record the record's -- whichever of
+    # the two is set. The value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     article_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("doc_articles.id", ondelete="CASCADE"), default=None
     )
@@ -150,6 +172,10 @@ class DocDocument(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     title: Mapped[str] = mapped_column(String(300))
     description: Mapped[str] = mapped_column(Text, default="")
     category: Mapped[str] = mapped_column(String(100), default="General")
@@ -182,6 +208,12 @@ class DocDocumentVersion(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # document_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     document_id: Mapped[UUID] = mapped_column(
         ForeignKey("doc_documents.id", ondelete="CASCADE")
     )
@@ -236,6 +268,12 @@ class DocDocumentLink(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # document_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     document_id: Mapped[UUID] = mapped_column(
         ForeignKey("doc_documents.id", ondelete="CASCADE")
     )

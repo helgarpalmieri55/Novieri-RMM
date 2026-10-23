@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import FetchedValue, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, uuid7_pk
@@ -26,6 +26,12 @@ class SecurityEvent(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     event_uid: Mapped[str] = mapped_column(String(64))
     ts: Mapped[datetime] = mapped_column()

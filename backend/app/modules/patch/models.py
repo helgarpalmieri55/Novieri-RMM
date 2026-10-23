@@ -16,6 +16,7 @@ from sqlalchemy import (
     ARRAY,
     Boolean,
     CheckConstraint,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -63,6 +64,12 @@ class DevicePatchStatus(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     patch_id: Mapped[UUID] = mapped_column(ForeignKey("patches.id"))
     state: Mapped[str] = mapped_column(String(16))
@@ -79,6 +86,12 @@ class PatchPolicy(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # device_group_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     device_group_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("device_groups.id"), default=None
     )
@@ -101,6 +114,10 @@ class PatchApproval(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     patch_id: Mapped[UUID] = mapped_column(ForeignKey("patches.id"))
     ring_name: Mapped[str] = mapped_column(String(40))
     # NULL means a system auto-approval (PD-02); see migration 0012.
@@ -142,6 +159,12 @@ class PatchReboot(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     origin: Mapped[str] = mapped_column(String(8))
     state: Mapped[str] = mapped_column(String(12), default="pending")
@@ -165,6 +188,12 @@ class PatchRun(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     job_id: Mapped[UUID] = mapped_column(ForeignKey("jobs.id"))
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     results: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)

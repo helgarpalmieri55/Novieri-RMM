@@ -16,7 +16,16 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ARRAY, CheckConstraint, ForeignKey, Index, String, Text, text
+from sqlalchemy import (
+    ARRAY,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import CIDR
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -50,6 +59,10 @@ class Client(TimestampMixin, Base):
             unique=True,
             postgresql_where=text("kind = 'unassigned'"),
         ),
+        # Migration 0231: the target of every `fk_<table>_client_org`, which
+        # makes a row's client a client of the row's own organization. A
+        # foreign key check ignores RLS, so nothing else can say it.
+        UniqueConstraint("id", "org_id", name="uq_clients_id_org"),
     )
 
     id: Mapped[UUID] = uuid7_pk()

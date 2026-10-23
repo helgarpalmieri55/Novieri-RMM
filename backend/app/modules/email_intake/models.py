@@ -114,6 +114,10 @@ class InboundMessage(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     mailbox_id: Mapped[UUID] = mapped_column(ForeignKey("email_mailbox.id"))
     # RFC 5322's line-length limit. A message with no Message-ID gets a
     # synthesised one (parsing.py) so it still dedupes.

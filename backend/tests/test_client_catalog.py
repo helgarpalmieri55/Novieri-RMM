@@ -3,8 +3,10 @@
 import ast
 from pathlib import Path
 
+from sqlalchemy import text
+
 from app.core.client_scope import ALL_SCOPE_ALLOWLIST
-from app.core.client_scope_catalog import CATALOG, PENDING_PHASE_2
+from app.core.client_scope_catalog import CATALOG, PENDING_PHASE_2, PHASE_1
 from app.models.base import Base
 
 BACKEND = Path(__file__).resolve().parent.parent
@@ -221,3 +223,102 @@ def test_the_optional_parent_exception_has_not_rotted() -> None:
         entry = CATALOG[table]
         assert entry.kind == "H" and entry.parent is not None, table
         assert CATALOG[entry.parent].kind == "O", f"{table}: exempt but its parent is not O"
+
+
+# --------------------------------------------------------------------------- #
+# Spec §5 test 2: the catalog agrees with the database (migration 0231).
+# --------------------------------------------------------------------------- #
+
+
+async def test_phase_1_tables_carry_the_restrictive_policy(admin_engine) -> None:
+    async with admin_engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT tablename, permissive, roles, cmd, qual, with_check FROM pg_policies "
+                    "WHERE policyname = 'client_isolation'"
+                )
+            )
+        ).all()
+    by_table = {r.tablename: r for r in rows}
+    for table, entry in PHASE_1.items():
+        row = by_table.get(table)
+        assert row is not None, f"{table}: no client_isolation policy (spec §5 test 2)"
+        assert row.permissive == "RESTRICTIVE", table
+        # A restrictive policy bound to one role leaves every other role
+        # (portal_user, a future one) unfiltered; one bound to SELECT leaves
+        # writes unfiltered.
+        assert list(row.roles) == ["public"], f"{table}: policy bound to {row.roles}"
+        assert row.cmd == "ALL", f"{table}: policy covers {row.cmd} only"
+        assert "its_client_visible" in row.qual, table
+        # USING scopes reads; WITH CHECK is what stops a write landing in a
+        # client outside the scope.
+        assert row.with_check is not None, f"{table}: no WITH CHECK"
+        assert "its_client_visible" in row.with_check, f"{table}: WITH CHECK ignores the scope"
+        if entry.kind == "O":
+            assert "IS NULL" in row.qual, f"{table}: O tables must read NULL rows"
+
+
+# The second parent of the two O tables that have two (migration 0231): a
+# doc_versions row hangs from an article OR a record, a
+# health_profile_assignment row from a device OR a group. One trigger per
+# parent, or the rows of the second parent read as "every client".
+EXTRA_PARENT_TRIGGERS: dict[tuple[str, str], tuple[str, str]] = {
+    ("doc_versions", "its_client_from_record"): ("doc_records", "record_id"),
+    ("health_profile_assignment", "its_client_from_group"): ("device_groups", "device_group_id"),
+}
+
+# pg_trigger.tgtype bits: ROW (1), BEFORE (2), INSERT (4), UPDATE (16).
+BEFORE_INSERT_OR_UPDATE_ROW = 1 | 2 | 4 | 16
+
+
+async def test_h_tables_carry_the_inheritance_trigger(admin_engine) -> None:
+    """Existence is not enough: a literal copy of the catalog with the wrong
+    parent or fk would still create a trigger of the right name. So each
+    trigger's ARGUMENTS are held to the catalog's `(parent, fk)`, and its
+    column list must hold the fk -- a trigger that does not fire when the fk
+    changes lets a row keep the client of the parent it no longer has."""
+    async with admin_engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT c.relname AS tbl, t.tgname AS name, t.tgargs AS args, "
+                    "t.tgtype AS type, t.tgfoid::regproc::text AS fn, "
+                    "ARRAY(SELECT a.attname::text FROM pg_attribute a "
+                    "      WHERE a.attrelid = t.tgrelid "
+                    "        AND a.attnum = ANY (t.tgattr::int2[])) AS columns "
+                    "FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid "
+                    "WHERE NOT t.tgisinternal AND t.tgname IN "
+                    "('its_client_from_parent', 'its_client_from_record', "
+                    "'its_client_from_group', 'its_job_client')"
+                )
+            )
+        ).all()
+    found = {(r.tbl, r.name): r for r in rows}
+    expected: dict[tuple[str, str], tuple[str, str]] = {
+        (t, "its_client_from_parent"): (e.parent, e.fk)
+        for t, e in PHASE_1.items()
+        if e.parent is not None and e.fk is not None and t != "jobs"
+    }
+    expected.update(EXTRA_PARENT_TRIGGERS)
+    missing = sorted(set(expected) - set(found))
+    assert not missing, f"missing triggers: {missing}"
+
+    for key, (parent, fk) in sorted(expected.items()):
+        row = found[key]
+        # tgargs is the arguments' bytes, each one NUL-terminated.
+        args = tuple(a.decode() for a in bytes(row.args).split(b"\x00")[:-1])
+        assert args == (parent, fk), f"{key}: arguments {args}, catalog says {(parent, fk)}"
+        assert row.fn == "its_client_from_parent", f"{key}: executes {row.fn}"
+        assert row.type & BEFORE_INSERT_OR_UPDATE_ROW == BEFORE_INSERT_OR_UPDATE_ROW, key
+        # The fk, and client_id itself: an UPDATE that rewrites client_id
+        # alone must meet the trigger too (spec §2.4: a client_id that differs
+        # from the parent's raises).
+        assert {fk, "client_id"} <= set(row.columns), f"{key}: fires on {row.columns}"
+
+    # jobs: its own function, keyed on what the target is.
+    job = found.get(("jobs", "its_job_client"))
+    assert job is not None, "jobs: no its_job_client trigger"
+    assert job.fn == "its_job_client"
+    assert job.type & BEFORE_INSERT_OR_UPDATE_ROW == BEFORE_INSERT_OR_UPDATE_ROW
+    assert {"target_id", "target_type", "client_id"} <= set(job.columns), job.columns

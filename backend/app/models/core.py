@@ -13,6 +13,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Enum,
+    FetchedValue,
     ForeignKey,
     Index,
     SmallInteger,
@@ -73,7 +74,11 @@ class User(TimestampMixin, Base):
     # person of one client (portal only, refused by `auth_context`). The CHECK
     # `ck_users_kind_client` (migration 0230) ties the two columns together.
     kind: Mapped[str] = mapped_column(String(10), default="staff", server_default="staff")
-    client_id: Mapped[UUID | None] = mapped_column(ForeignKey("clients.id"), default=None)
+    # Indexed by migration 0231, which also gives it the client policy (O, with
+    # its own WITH CHECK) and the org-consistency key `fk_users_client_org`.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
 
 
 class Role(Base):
@@ -177,6 +182,8 @@ class DeviceGroup(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0231).
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     parent_group_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("device_groups.id"), default=None
@@ -327,6 +334,11 @@ class Device(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0231).
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
+    # Spec §1.5: a site of the same client (devices: trigger
+    # its_device_client_guard).
+    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"))
     # NULLABLE SINCE 0061, and the two are the same decision. A switch has a
     # name but no hostname in this sense and no OS family at all; a laptop in a
     # box has told us neither yet. Both were NOT NULL, which is exactly what
@@ -459,6 +471,12 @@ class SuggestedAssetMatch(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     #: The row enrolment just created.
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     #: The row that already existed and might be the same machine.
@@ -482,6 +500,12 @@ class DeviceTag(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     key: Mapped[str] = mapped_column(String(100))
     value: Mapped[str] = mapped_column(String(500), default="")
@@ -492,6 +516,12 @@ class Agent(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"), unique=True)
     cert_fingerprint: Mapped[str] = mapped_column(String(64), unique=True)
     cert_serial: Mapped[str] = mapped_column(String(64))
@@ -513,6 +543,12 @@ class Policy(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # device_group_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     device_group_id: Mapped[UUID | None] = mapped_column(  # NULL = org-wide scope
         ForeignKey("device_groups.id"), default=None
     )
@@ -529,6 +565,12 @@ class Credential(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # device_group_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     name: Mapped[str] = mapped_column(String(200))
     type: Mapped[str] = mapped_column(String(50))  # windows_admin | ssh_key | domain_join | ...
     device_group_id: Mapped[UUID | None] = mapped_column(
@@ -575,6 +617,12 @@ class Job(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_job_client from the
+    # device or group named by target_type/target_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     type: Mapped[str] = mapped_column(String(100))
     target_type: Mapped[str] = mapped_column(String(10), default="device")  # device | group
     target_id: Mapped[UUID] = mapped_column()
@@ -634,6 +682,12 @@ class JobLog(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the jobs row named by job_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     job_id: Mapped[UUID] = mapped_column(ForeignKey("jobs.id"))
     ts: Mapped[datetime] = mapped_column()
     level: Mapped[str] = mapped_column(String(10), default="info")
@@ -679,6 +733,11 @@ class EnrollmentToken(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0231).
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
+    # Spec §1.5: a site of the same client (devices: trigger
+    # its_device_client_guard).
+    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"))
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     name: Mapped[str] = mapped_column(String(200), default="")
     expires_at: Mapped[datetime] = mapped_column()
@@ -700,12 +759,18 @@ class InstallLink(Base):
 
     __tablename__ = "install_links"
     __table_args__ = (
-        UniqueConstraint("org_id", name="uq_install_links_org"),
+        # One link per SITE (spec §1.5, migration 0231), no longer one per org.
+        UniqueConstraint("site_id", name="uq_install_links_site"),
         UniqueConstraint("code_hash", name="uq_install_links_code_hash"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0231).
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
+    # Spec §1.5: a site of the same client (devices: trigger
+    # its_device_client_guard).
+    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"))
     enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     code_hash: Mapped[str | None] = mapped_column(String(64), default=None)
     networks: Mapped[list[str]] = mapped_column(
@@ -786,6 +851,10 @@ class DomainEvent(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     event_type: Mapped[str] = mapped_column(String(100))
     subject_type: Mapped[str] = mapped_column(String(50))
     subject_id: Mapped[UUID] = mapped_column()

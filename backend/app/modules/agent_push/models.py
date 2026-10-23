@@ -53,7 +53,16 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, String, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    FetchedValue,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    text,
+)
 from sqlalchemy.dialects.postgresql import CIDR, INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -206,6 +215,12 @@ class PushHostKey(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # device_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     #: The promoted asset this key belongs to, resolved at probe time. Nullable
     #: because a probe records what it saw even if the asset row is later removed;
     #: an install re-resolves the asset through the refusal ladder regardless.
@@ -259,6 +274,12 @@ class PushBatchTarget(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the jobs row named by job_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     #: A uuid minted per push request. Not a FK: there is no batch-header row,
     #: because there is no batch-level state worth a row (see the docstring).
     batch_id: Mapped[UUID] = mapped_column()

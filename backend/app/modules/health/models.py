@@ -28,6 +28,7 @@ from uuid import UUID
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -265,6 +266,13 @@ class HealthProfileAssignment(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client (the org-wide
+    # assignment). TWO PARENTS, one trigger each (migration 0231):
+    # its_client_from_parent copies the device's client, its_client_from_group
+    # the group's. The value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     profile_id: Mapped[UUID] = mapped_column(ForeignKey("health_profile.id"))
     device_id: Mapped[UUID | None] = mapped_column(ForeignKey("devices.id"), default=None)
     device_group_id: Mapped[UUID | None] = mapped_column(
@@ -344,6 +352,12 @@ class HealthAlert(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     check_id: Mapped[UUID] = mapped_column(
         ForeignKey("health_check.id", ondelete="RESTRICT")
@@ -411,6 +425,12 @@ class HealthAlertAction(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the health_alert row named by alert_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     alert_id: Mapped[UUID] = mapped_column(ForeignKey("health_alert.id"))
     kind: Mapped[str] = mapped_column(String(12))
     state: Mapped[str] = mapped_column(String(20), server_default="pending", default="pending")
@@ -455,6 +475,12 @@ class DeviceHealthCheckState(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     check_id: Mapped[UUID] = mapped_column(ForeignKey("health_check.id"))
     selector: Mapped[str] = mapped_column(String(200), server_default="", default="")
@@ -483,6 +509,12 @@ class HealthFlapState(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     check_id: Mapped[UUID] = mapped_column(ForeignKey("health_check.id"))
     selector: Mapped[str] = mapped_column(String(200), server_default="", default="")
@@ -617,6 +649,12 @@ class DeviceHealthPolicyAck(Base):
 
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"), primary_key=True)
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     profile_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("health_profile.id"), default=None
     )

@@ -12,6 +12,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
+    FetchedValue,
     ForeignKey,
     Index,
     String,
@@ -60,6 +61,12 @@ class ProvisionRun(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # device_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     profile_id: Mapped[UUID] = mapped_column(ForeignKey("provision_profile.id"))
     job_id: Mapped[UUID | None] = mapped_column(ForeignKey("jobs.id"), default=None)
     device_id: Mapped[UUID | None] = mapped_column(ForeignKey("devices.id"), default=None)

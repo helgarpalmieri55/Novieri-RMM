@@ -193,6 +193,10 @@ class SlaPolicy(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     queue_id: Mapped[UUID | None] = mapped_column(ForeignKey("ticket_queue.id"), default=None)
     priority: Mapped[str | None] = mapped_column(String(16), default=None)
     calendar_id: Mapped[UUID] = mapped_column(ForeignKey("sla_calendar.id"))

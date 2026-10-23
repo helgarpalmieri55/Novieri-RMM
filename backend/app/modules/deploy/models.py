@@ -15,6 +15,7 @@ from uuid import UUID
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -82,6 +83,12 @@ class DeploymentResult(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     deployment_id: Mapped[UUID] = mapped_column(ForeignKey("deployments.id"))
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     job_id: Mapped[UUID | None] = mapped_column(ForeignKey("jobs.id"), default=None)
@@ -124,6 +131,12 @@ class ScriptRun(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     script_id: Mapped[UUID] = mapped_column(ForeignKey("scripts.id"))
     script_version: Mapped[int] = mapped_column(Integer)
     target_type: Mapped[str] = mapped_column(String(8))
@@ -160,6 +173,12 @@ class ScriptPolicy(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the device_groups row named by device_group_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"), index=True, server_default=FetchedValue()
+    )
     name: Mapped[str] = mapped_column(String(200))
     script_id: Mapped[UUID] = mapped_column(ForeignKey("scripts.id"))
     device_group_id: Mapped[UUID] = mapped_column(ForeignKey("device_groups.id"))
