@@ -24,13 +24,19 @@ const OFF: InstallLinkSettings = {
   hourly_limit: 50, enabled_at: null, joined_since_enabled: 0,
 };
 const LINK = "https://itms.example.com/i/AbCdEfGhIjKlMnOpQrStUvWxYz012_-9";
+/**
+ * The site whose link this panel manages (MSP clients, phase 1: one link per
+ * site, at `/sites/{site_id}/install-link`). The page passes the internal
+ * client's "Principal" site, whose id is the organisation's.
+ */
+const SITE = "00000000-0000-4000-8000-0000000000aa";
 
 function renderPanel(api: Partial<ApiClient>) {
   mockUseApi.mockReturnValue(api as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <InstallLinkPanel zone="Europe/Lisbon" />
+      <InstallLinkPanel zone="Europe/Lisbon" siteId={SITE} />
     </QueryClientProvider>,
   );
 }
@@ -54,7 +60,8 @@ describe("InstallLinkPanel", () => {
       enabled_at: "2026-09-28T08:00:00Z", url: LINK,
     };
     const saveInstallLink = vi.fn().mockResolvedValue(saved);
-    renderPanel({ getInstallLink: vi.fn().mockResolvedValue(OFF), saveInstallLink });
+    const getInstallLink = vi.fn().mockResolvedValue(OFF);
+    renderPanel({ getInstallLink, saveInstallLink });
     await userEvent.type(
       await screen.findByLabelText("Networks the link answers"),
       "10.20.0.0/16{enter}{enter}fd00::/8",
@@ -62,7 +69,9 @@ describe("InstallLinkPanel", () => {
     await userEvent.click(screen.getByRole("switch", { name: "Accept new computers through the link" }));
     await userEvent.click(screen.getByRole("button", { name: "Save install link" }));
 
-    expect(saveInstallLink).toHaveBeenCalledWith({
+    // Read and written on the SITE's link.
+    expect(getInstallLink).toHaveBeenCalledWith(SITE);
+    expect(saveInstallLink).toHaveBeenCalledWith(SITE, {
       enabled: true, networks: ["10.20.0.0/16", "fd00::/8"], disable_at: null, hourly_limit: 50,
     });
     const reveal = await screen.findByRole("region", { name: "The new install link" });
@@ -109,6 +118,7 @@ describe("InstallLinkPanel", () => {
       within(screen.getByRole("dialog")).getByRole("button", { name: "Generate new link" }),
     );
     expect(regenerateInstallLink).toHaveBeenCalledOnce();
+    expect(regenerateInstallLink).toHaveBeenCalledWith(SITE);
     expect(await screen.findByText(LINK)).toBeInTheDocument();
   });
 

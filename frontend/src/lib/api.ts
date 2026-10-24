@@ -665,7 +665,8 @@ export interface PromoteResult {
   reason: string;
 }
 
-/** The body of `createAsset`. `source` is stamped server-side, never sent. */
+/** What an operator types about an asset, on create and on edit. `source` is
+ *  stamped server-side, never sent. */
 export interface AssetInput {
   hostname?: string | null;
   description?: string | null;
@@ -686,6 +687,16 @@ export interface AssetInput {
   fqdn?: string | null;
   /** The processor a push installs for. `null` clears it. Agent-owned when managed. */
   architecture?: "amd64" | "arm64" | null;
+}
+
+/**
+ * The body of `createAsset`: what an operator types, and the SITE the asset is
+ * filed under (MSP clients spec §1.5). Required by `POST /devices`; its client
+ * is the site's, derived server-side and never sent. Not on an edit: a
+ * device's client never changes.
+ */
+export interface AssetCreateInput extends AssetInput {
+  site_id: string;
 }
 
 export interface JobLogEntry {
@@ -797,6 +808,29 @@ export interface CurrentOrg {
   slug: string;
   status: string;
   settings: OrgSettings;
+}
+
+/**
+ * One client of the organisation (`GET /api/v1/clients`, MSP clients spec
+ * §1.1, §3.2): a company it serves, or one of the two system clients --
+ * `internal` (its own IT, whose id is the organisation's) and `unassigned`
+ * (where mail from unknown senders lands, and which no grant may name).
+ * Mirrors `backend/app/api/v1/clients.py::ClientOut`.
+ */
+export interface ClientOut {
+  id: string;
+  name: string;
+  kind: "customer" | "internal" | "unassigned";
+  /** `active` or `archived`: clients are archived, never deleted. */
+  status: string;
+  email_domains: string[];
+  phone: string;
+  address: string;
+  website: string;
+  notes: string;
+  enabled_modules: string[];
+  device_count: number;
+  site_count: number;
 }
 
 /**
@@ -1318,7 +1352,8 @@ export interface DeviceGroupReferences {
   remote_policies: number;
   health_assignments: number;
   credentials: number;
-  role_grants: number;
+  // No `role_grants`: a role grant is scoped to a client, not to a group,
+  // since the MSP clients model (spec §2.1), so none can hold a group.
 }
 
 /**
@@ -1352,6 +1387,12 @@ export interface DeviceGroupDetail {
 
 export interface DeviceGroupCreate {
   name: string;
+  /**
+   * The client whose devices the group organises (MSP clients spec §1.5).
+   * Required on create and fixed for the group's life, so it is not part of
+   * `DeviceGroupUpdate`: the server's update model has no such field.
+   */
+  client_id: string;
   description?: string;
   parent_group_id?: string | null;
   precedence?: number;
@@ -1361,7 +1402,7 @@ export interface DeviceGroupCreate {
   rules?: GroupRules | null;
 }
 
-export type DeviceGroupUpdate = Partial<DeviceGroupCreate>;
+export type DeviceGroupUpdate = Partial<Omit<DeviceGroupCreate, "client_id">>;
 
 /** One device a candidate rule would claim, and where it is now. */
 export interface RuleMatch {
@@ -1507,11 +1548,18 @@ export class ApiClient {
    */
   previewDeviceGroupRules(
     rules: GroupRules,
-    groupId?: string | null,
+    groupId: string | null,
+    /**
+     * The client of a group NOT SAVED YET (MSP clients spec §1.5): a preview
+     * runs over one client's devices, as the sweep claims them. A saved
+     * group's preview uses the group's own client, so this is `null` then;
+     * the server refuses a preview that names neither.
+     */
+    clientId: string | null,
   ): Promise<RulePreview> {
     return this.request<RulePreview>("/device-groups/preview", {
       method: "POST",
-      body: JSON.stringify({ rules, group_id: groupId ?? null }),
+      body: JSON.stringify({ rules, group_id: groupId, client_id: clientId }),
     });
   }
 
@@ -1528,6 +1576,16 @@ export class ApiClient {
   /** The caller's own organization. Any authenticated operator may read it. */
   getCurrentOrg(): Promise<CurrentOrg> {
     return this.request<CurrentOrg>("/orgs/current");
+  }
+
+  /**
+   * The clients of the request's scope, archived ones left out
+   * (`clients.read`). The Users tab's grant scope picks from these.
+   */
+  listClients(params: { include_archived?: boolean } = {}): Promise<ClientOut[]> {
+    return this.request<ClientOut[]>(
+      params.include_archived ? "/clients?include_archived=true" : "/clients",
+    );
   }
 
   /**
@@ -1788,7 +1846,7 @@ export class ApiClient {
     );
   }
 
-  createAsset(body: AssetInput): Promise<Device> {
+  createAsset(body: AssetCreateInput): Promise<Device> {
     return this.request<Device>("/devices", {
       method: "POST",
       body: JSON.stringify(body),
@@ -3121,10 +3179,15 @@ export class ApiClient {
   generateAgentInstallCommand(
     releaseId: string,
     expiresInHours: number,
+    /** The site the machine lands in; its client is the site's (MSP clients spec §1.5). */
+    siteId: string,
   ): Promise<AgentInstallCommand> {
     return this.request<AgentInstallCommand>(
       `/agent/releases/${releaseId}/install-command`,
-      { method: "POST", body: JSON.stringify({ expires_in_hours: expiresInHours }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ expires_in_hours: expiresInHours, site_id: siteId }),
+      },
     );
   }
 
@@ -3144,33 +3207,45 @@ export class ApiClient {
     );
   }
 
-  /** `enrollment.link.manage`, on every verb including this read. */
-  getInstallLink(): Promise<InstallLinkSettings> {
-    return this.request<InstallLinkSettings>("/install-link");
+  /**
+   * `enrollment.link.manage`, on every verb including this read.
+   *
+   * ONE LINK PER SITE (MSP clients spec §1.5, §3.2): a machine that joins
+   * through it lands in that site and its client, and the networks it answers
+   * are the site's egress networks. The organisation-level `/install-link`
+   * is gone and answers 404.
+   */
+  getInstallLink(siteId: string): Promise<InstallLinkSettings> {
+    return this.request<InstallLinkSettings>(`/sites/${siteId}/install-link`);
   }
 
-  saveInstallLink(body: InstallLinkUpdate): Promise<InstallLinkSaved> {
-    return this.request<InstallLinkSaved>("/install-link", {
+  saveInstallLink(siteId: string, body: InstallLinkUpdate): Promise<InstallLinkSaved> {
+    return this.request<InstallLinkSaved>(`/sites/${siteId}/install-link`, {
       method: "PUT",
       body: JSON.stringify(body),
     });
   }
 
   /** A new code: the old link stops working the moment this returns. */
-  regenerateInstallLink(): Promise<InstallLinkSaved> {
-    return this.request<InstallLinkSaved>("/install-link/regenerate", { method: "POST" });
+  regenerateInstallLink(siteId: string): Promise<InstallLinkSaved> {
+    return this.request<InstallLinkSaved>(`/sites/${siteId}/install-link/regenerate`, {
+      method: "POST",
+    });
   }
 
   /**
-   * `enrollment.link.manage`. The Group Policy MSI for this organisation's
-   * install link. THE CODE GOES IN THE BODY, never in the URL, which access
-   * logs keep; the server holds only its hash and checks the code against it.
-   * Not routed through `request`: the body is a file, and its name and
-   * SHA-256 come back in headers.
+   * `enrollment.link.manage`. The Group Policy MSI for one site's install
+   * link. THE CODE GOES IN THE BODY, never in the URL, which access logs
+   * keep; the server holds only its hash and checks the code against it. The
+   * site id in the path is not a secret. Not routed through `request`: the
+   * body is a file, and its name and SHA-256 come back in headers.
    */
-  async downloadInstallLinkMsi(body: { code: string; arch: MsiArch }): Promise<InstallLinkMsi> {
+  async downloadInstallLinkMsi(
+    siteId: string,
+    body: { code: string; arch: MsiArch },
+  ): Promise<InstallLinkMsi> {
     const headers = requestHeaders(this.getToken(), { "Content-Type": "application/json" });
-    const response = await fetch(`${this.base}/install-link/msi`, {
+    const response = await fetch(`${this.base}/sites/${siteId}/install-link/msi`, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
@@ -3200,7 +3275,13 @@ export class ApiClient {
    */
   mintAgentDeploymentToken(
     releaseId: string,
-    body: { max_uses: number; expires_in_hours: number; channel: AgentDeploymentChannel },
+    body: {
+      max_uses: number;
+      expires_in_hours: number;
+      channel: AgentDeploymentChannel;
+      /** The site the machines land in; their client is the site's (MSP clients spec §1.5). */
+      site_id: string;
+    },
   ): Promise<AgentDeploymentToken> {
     return this.request<AgentDeploymentToken>(
       `/agent/releases/${releaseId}/deployment-token`,

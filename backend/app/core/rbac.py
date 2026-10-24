@@ -28,6 +28,15 @@ PERMISSIONS: dict[str, str] = {
         "rejecting it uninstalls the agent and revokes its certificate"
     ),
     "assets.manage": "Create and edit assets, including records with no agent",
+    # MSP clients spec §2.1 (migration 0232). Creating and archiving a client
+    # also need a scope of every client (`require_permission_on_every_client`);
+    # editing one, and its sites and contacts, need the code on that client.
+    "clients.read": "View clients, their sites and their contacts",
+    "clients.manage": (
+        "Edit a client and its contacts; with access to every client, create and archive "
+        "clients"
+    ),
+    "sites.manage": "Create, edit and archive a client's sites",
     "jobs.read": "View jobs, job logs, and results",
     "jobs.dispatch": "Dispatch jobs to devices",
     "enrollment.manage": "Issue and revoke enrollment tokens; revoke agents",

@@ -312,7 +312,6 @@ export const devices: Shape<typeof en> = {
       remote_policies: { one: "{count} política de control remoto", other: "{count} políticas de control remoto" },
       health_assignments: { one: "{count} asignación de perfil de estado", other: "{count} asignaciones de perfil de estado" },
       credentials: { one: "{count} credencial guardada", other: "{count} credenciales guardadas" },
-      role_grants: { one: "{count} concesión de rol limitada a él", other: "{count} concesiones de rol limitadas a él" },
     },
     fact: {
       hostname: "Nombre de host",

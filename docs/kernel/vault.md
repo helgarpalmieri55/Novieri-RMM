@@ -23,8 +23,10 @@ concern, not a module fork.
   that needs them, then discarded from memory.
 - Secrets are **never** written to logs, returned in API responses, or exposed
   to the frontend.
-- Access is **scoped by RBAC** (and optionally device group) and **checked out
-  with audit** — every access is an `AuditEvent`.
+- Access is **scoped by RBAC** and by client -- a secret filed under a client
+  exists only for a session whose client scope includes it (RLS, `CLAUDE.md`
+  invariant 5a) -- and **checked out with audit** — every access is an
+  `AuditEvent`.
 
 ## 3. Envelope-encryption design
 

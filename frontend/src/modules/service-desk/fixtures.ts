@@ -64,8 +64,8 @@ export { ME_ID } from "../../fixtures/me";
  * make the two fixture files circular. The values below are restated
  * instead -- keep them matched to `GRANTS` there if it changes.
  *
- * Tomas Kalu carries the SCOPED grant (`technician` at `grp-servers`, not
- * everywhere) and Adaeze Okonkwo's is deliberately DUPLICATED (two
+ * Tomas Kalu carries the SCOPED grant (`technician` on one client,
+ * `cli-logistics`, not everywhere) and Adaeze Okonkwo's is deliberately DUPLICATED (two
  * identical org-wide `technician` grants) -- `GRANTS` itself holds no
  * duplicate to draw from, and the `×N` collapsing had no seed anywhere
  * without one.
@@ -74,12 +74,13 @@ const roleGrant = (
   assignmentId: string,
   roleId: string,
   roleName: string,
-  deviceGroupId: string | null = null,
+  clientId: string | null = null,
 ): RoleAssignmentOut => ({
   assignment_id: assignmentId,
   role_id: roleId,
   role_name: roleName,
-  device_group_id: deviceGroupId,
+  // A grant's scope is a client, or every client (MSP clients spec §2.1).
+  client_id: clientId,
 });
 
 export const USERS: UserOut[] = [
@@ -117,7 +118,7 @@ export const USERS: UserOut[] = [
     display_name: "Tomas Kalu",
     status: "active",
     // Scoped, not everywhere -- see the comment above `USERS`.
-    roles: [roleGrant("sd-5", "role-technician", "technician", "grp-servers")],
+    roles: [roleGrant("sd-5", "role-technician", "technician", "cli-logistics")],
   },
   {
     id: "usr-lf",

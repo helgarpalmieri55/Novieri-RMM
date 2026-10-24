@@ -54,7 +54,13 @@ from app.core.client_scope import ClientScope
 from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.models import Device, InstallLink, Site
-from app.services.client_sites import SiteNotFound, site_for_new_rows
+from app.services.client_sites import (
+    NotAcceptingNewRows,
+    SiteNotFound,
+    refuse_if_closed,
+    site_and_client_status,
+    site_for_new_rows,
+)
 
 #: `secrets.token_urlsafe(24)` is 32 characters of [A-Za-z0-9_-]: 192 bits.
 CODE_BYTES = 24
@@ -338,7 +344,8 @@ async def save(
     Validation happens BEFORE the row is touched, so a refused save changes
     nothing and audits nothing.
     """
-    site = await site_for_new_rows(session, org_id=org_id, site_id=site_id)
+    # FOR NO KEY UPDATE: the networks are written to the site's own row.
+    site = await site_for_new_rows(session, org_id=org_id, site_id=site_id, for_update=True)
     nets = (
         _networks(site)
         if networks is None
@@ -438,8 +445,15 @@ async def code_state(session: AsyncSession, site_id: UUID, *, code: str, now: da
     Only the hash is compared, as everywhere else: the code itself is never
     stored. The allowed networks are NOT checked here -- this answers an
     authenticated administrator in the console, not a machine joining.
+
+    AN ARCHIVED SITE, OR A SITE OF AN ARCHIVED CLIENT, IS REFUSED
+    (`NotAcceptingNewRows`, a 409) whatever its link says (MSP clients Task 9):
+    an MSI built for it would carry a link that enrols nothing.
     """
-    await _site(session, site_id)  # SiteNotFound for a site the session cannot see
+    found = await site_and_client_status(session, site_id)
+    if found is None:  # a site the session cannot see
+        raise SiteNotFound(site_id)
+    refuse_if_closed(*found)
     row = await _row(session, site_id)
     if row is None or not is_live(row, now):
         return "off"
@@ -481,14 +495,23 @@ async def live_link_for(
     for_update: bool = False,
 ) -> InstallLink | None:
     """The link, if it may be used right now by a request from `source`: one
-    of its site's egress networks."""
+    of its site's egress networks.
+
+    NOT FOR AN ARCHIVED SITE OR CLIENT (MSP clients Task 9), even a link that
+    is still switched on because it predates the archive: the answer is the
+    same None -- a 404 at the door -- as for a link that is off."""
     row = await _row(session, site_id, for_update=for_update)
     if row is None or row.code_hash != hash_code(code) or not is_live(row, now):
         return None
-    site = (
-        await session.execute(select(Site).where(Site.id == site_id))
-    ).scalar_one_or_none()
-    if site is None or not address_in(source, site.egress_networks):
+    found = await site_and_client_status(session, site_id)
+    if found is None:
+        return None
+    site, client_status = found
+    try:
+        refuse_if_closed(site, client_status)
+    except NotAcceptingNewRows:
+        return None
+    if not address_in(source, site.egress_networks):
         return None
     return row
 
@@ -552,3 +575,60 @@ async def switch_off_due(session: AsyncSession, org_id: UUID, now: datetime) -> 
             {"reason": "scheduled", "disable_at": disable_at.isoformat()},
         )
     return len(rows)
+
+
+async def lock_links(
+    session: AsyncSession,
+    *,
+    org_id: UUID,
+    client_id: UUID | None = None,
+    site_id: UUID | None = None,
+) -> list[InstallLink]:
+    """Every link of one client or one site, locked FOR UPDATE.
+
+    For archiving (MSP clients Task 9). TAKEN BEFORE THE ARCHIVE COUNTS
+    DEVICES (review 1, concern 5): `enroll_via_link` holds its link's row lock
+    (`live_link_for(..., for_update=True)`) until it commits its device, so
+    the archive either waits for that device and counts it, or holds the lock
+    first and the enrollment then reads the link switched off.
+    """
+    if (client_id is None) == (site_id is None):
+        raise ValueError(  # i18n-exempt: caller contract, unhandled 500
+            "lock_links takes exactly one of client_id / site_id"
+        )
+    query = select(InstallLink).where(InstallLink.org_id == org_id)
+    if client_id is not None:
+        query = query.where(InstallLink.client_id == client_id)
+    else:
+        query = query.where(InstallLink.site_id == site_id)
+    rows = await session.execute(query.order_by(InstallLink.id).with_for_update())
+    return list(rows.scalars())
+
+
+async def switch_off(
+    session: AsyncSession,
+    *,
+    actor_id: UUID,
+    reason: str,
+    now: datetime,
+    links: Sequence[InstallLink],
+) -> int:
+    """Switch off the links `lock_links` returned that are on, each audited
+    `enrollment.link_disabled` with `reason`. Returns how many.
+
+    An archived site or client enrols nothing (`live_link_for` refuses it
+    regardless); switching its links off as well leaves the console saying so
+    rather than showing a link "on" that no machine can use. The code is kept:
+    a switched-off link is not a regenerated one.
+    """
+    switched = 0
+    for row in links:
+        if not row.enabled:
+            continue
+        row.enabled = False
+        row.enabled_at = None
+        row.updated_at = now
+        await session.flush()
+        await _audit(session, row, actor_id, "enrollment.link_disabled", {"reason": reason})
+        switched += 1
+    return switched

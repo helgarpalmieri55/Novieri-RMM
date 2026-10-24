@@ -44,12 +44,21 @@ client's), and serves a client that has no row of its own at the address; a
 client's own row, confirmed or not, always takes precedence over it. Before,
 one row per address: a probe of Y's machine overwrote X's observation and moved
 the row -- X's confirmation with it -- into Y.
+
+**A PROBE WRITES ITS OWN NAMESPACE AND NO OTHER** (Task 8b review 1). An
+observation of a device creates or updates that device's client's row; one with
+no device, the global row. A device's probe never claims, rewrites or moves a
+global row: that took the row from every other client it served, told them some
+other client's machine at the address had been probed, and handed the device's
+client a confirmation nobody made for it. The client's new row is unconfirmed,
+and takes precedence over the global one, until a person confirms it. A global
+row is changed only under scope all.
 """
 
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
@@ -121,6 +130,43 @@ async def _row_for(
     ).scalar_one_or_none()
 
 
+async def _own_row(
+    session: AsyncSession, org_id: UUID, address: str, device_id: UUID | None
+) -> PushHostKey | None:
+    """The row an observation of `device_id` at `address` writes: its client's
+    own, or -- for no device -- the global one. Never the other namespace: a
+    device whose client this session cannot read matches nothing here (the
+    INSERT then meets the database's own refusal), never the global row."""
+    whose: ColumnElement[bool]
+    if device_id is None:
+        whose = PushHostKey.client_id.is_(None)
+    else:
+        device_client = (
+            select(Device.client_id)
+            .where(Device.org_id == org_id, Device.id == device_id)
+            .scalar_subquery()
+        )
+        whose = PushHostKey.client_id == device_client
+    return (
+        await session.execute(
+            select(PushHostKey).where(
+                PushHostKey.org_id == org_id, PushHostKey.address == address, whose
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _audit_row(session: AsyncSession, row: PushHostKey) -> dict[str, str | None]:
+    """The row an event is about: two clients' rows share the address that is
+    the event's target. `client_id` is the trigger's, read back after the
+    write (an UPDATE expires it)."""
+    await session.refresh(row, ["client_id"])
+    return {
+        "host_key_id": str(row.id),
+        "client_id": None if row.client_id is None else str(row.client_id),
+    }
+
+
 async def _row_in_scope(
     session: AsyncSession, org_id: UUID, address: str
 ) -> PushHostKey | None:
@@ -176,12 +222,10 @@ async def record_observation(
     here would erase the evidence of what was confirmed and when, which an
     auditor needs precisely when a key has changed.
 
-    The row is the device's client's (module docstring). A global row at the
-    address is CLAIMED for the device -- it gains the device, and with it the
-    device's client -- as the one row per address always was; a client's
-    existing row is never another client's.
+    The row is the device's client's own, or -- for no device -- the global
+    one (module docstring): a device's probe never touches a global row.
     """
-    row = await _row_for(session, org_id, address, await _client_of(session, org_id, device_id))
+    row = await _own_row(session, org_id, address, device_id)
     now = _utcnow()
     if row is None:
         row = PushHostKey(
@@ -225,6 +269,7 @@ async def record_observation(
             "key_type": key_type,
             "transport": transport,
             "job_id": None if job_id is None else str(job_id),
+            **await _audit_row(session, row),
         },
     )
     return row
@@ -297,7 +342,11 @@ async def confirm_host_key(
         action="push.host_key_confirmed",
         target_type="push_target",
         target_id=parsed,
-        metadata={"fingerprint": fingerprint, "key_type": row.observed_key_type},
+        metadata={
+            "fingerprint": fingerprint,
+            "key_type": row.observed_key_type,
+            **await _audit_row(session, row),
+        },
     )
     return row
 
@@ -324,9 +373,12 @@ async def record_readiness(
     re-probes and re-confirms -- the same fail-closed answer a changed key
     gets. The confirmed value stays on the row as evidence, exactly as
     `record_observation` keeps it.
+
+    The row is the device's client's own, or -- for no device -- the global
+    one, as in `record_observation`.
     """
     parsed = str(parse_target_address(address))
-    row = await _row_for(session, org_id, parsed, await _client_of(session, org_id, device_id))
+    row = await _own_row(session, org_id, parsed, device_id)
     now = _utcnow()
     if row is None:
         row = PushHostKey(
@@ -366,16 +418,19 @@ async def record_readiness(
             "transport": "winrm",
             **readiness,
             "job_id": None if job_id is None else str(job_id),
+            **await _audit_row(session, row),
         },
     )
     return row
 
 
 async def confirmed_key_for(
-    session: AsyncSession, org_id: UUID, address: str, *, device_id: UUID | None = None
+    session: AsyncSession, org_id: UUID, address: str, *, device_id: UUID | None
 ) -> tuple[str | None, str | None]:
     """`(confirmed_fingerprint, refusal_reason)` for a push to `device_id` at
     `address`: its client's own row, else the global one (module docstring).
+    `device_id` has no default: None reads the global row only, and a caller
+    that forgot the device must not do so silently.
 
     Returns the fingerprint only when a human confirmed it AND the latest probe
     still sees the same key. Otherwise the fingerprint is `None` and the reason

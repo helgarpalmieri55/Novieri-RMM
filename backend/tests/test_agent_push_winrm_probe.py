@@ -115,8 +115,10 @@ async def test_a_winrm_readiness_invalidates_a_previously_confirmed_ssh_key(
         {"target_address": TARGET, "transport": "winrm", "winrm_http": True},
     )
     async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
+        # No device: the probe job names none, so its readiness and the
+        # confirmed key it invalidates are the global row's.
         fingerprint, reason = await host_key_service.confirmed_key_for(
-            session, org.org_id, TARGET
+            session, org.org_id, TARGET, device_id=None
         )
     assert fingerprint is None and reason == "host_key_changed"
 

@@ -25,6 +25,7 @@ import {
   BUDGET_SETTINGS_FIXTURE,
   CASEY_USER,
   CATEGORY_FIXTURE,
+  CLIENTS_FIXTURE,
   CHANNEL_FIXTURE,
   EMAIL_SETTINGS_FIXTURE,
   EMAIL_UNCONFIGURED_FIXTURE,
@@ -43,7 +44,7 @@ import {
   renderSettings,
 } from "./__tests__/harness";
 import { testSentMessage } from "./EmailTab";
-import { groupPickerOptions } from "./pickerOptions";
+import { clientPickerOptions } from "./pickerOptions";
 import { permissionReason } from "./settingsState";
 import { settingsHref } from "./tabs";
 import { describeGrantScope, orgSettingChoices, orgSettingLabel, userStatusLabel } from "./types";
@@ -472,13 +473,67 @@ describe("the users tab in Spanish", () => {
     const { container } = await openIn("users");
     await user.click(await screen.findByRole("button", { name: "Administrar los roles de operator@example.com" }));
     const section = await screen.findByRole("region", { name: "Roles de operator@example.com" });
-    expect(within(section).getByText("El acceso se aplica en todas partes salvo que lo limites a un grupo de dispositivos")).toBeInTheDocument();
+    // RE-POINTED (MSP clients, phase 1): a grant is limited to a CLIENT now,
+    // never to a device group.
+    // RE-POINTED (final review, T11R-I1): every client is a choice in the
+    // picker, not what an empty box means, so the words no longer say
+    // "optional" or "leave it blank".
+    expect(within(section).getByText("Cada rol se aplica a todos los clientes o al cliente que elijas")).toBeInTheDocument();
     expect(within(section).getByRole("button", { name: "Quitar Técnico (en todas partes) de operator@example.com" })).toBeInTheDocument();
     expect(within(section).getByRole("option", { name: "Elige un rol…" })).toBeInTheDocument();
-    expect(within(section).getByText("Limitar a un grupo de dispositivos (opcional)")).toBeInTheDocument();
-    expect(within(section).getByPlaceholderText("Déjalo en blanco para aplicarlo en todas partes")).toBeInTheDocument();
+    expect(within(section).getByText("Cliente")).toBeInTheDocument();
+    expect(within(section).getByPlaceholderText("Elige un cliente o todos los clientes")).toBeInTheDocument();
     expect(within(section).getByRole("button", { name: "Asignar rol" })).toBeDisabled();
     expectNoEnglish(container, RECORDED);
+  });
+
+  it("names the scope on the assign button, and never assigns typed text (T11R-I1)", async () => {
+    const user = userEvent.setup();
+    const archived = { ...CLIENTS_FIXTURE[1]!, id: "77777777-7777-4777-8777-777777777777", name: "Old Co", status: "archived" };
+    calls.listClients.mockImplementation((params?: { include_archived?: boolean }) =>
+      Promise.resolve(params?.include_archived ? [...CLIENTS_FIXTURE, archived] : CLIENTS_FIXTURE),
+    );
+    calls.listUsers.mockResolvedValue({
+      users: [
+        {
+          ...OPERATOR_USER,
+          roles: [{ assignment_id: "a-old", role_id: TECHNICIAN_ROLE.id, role_name: "technician", client_id: archived.id }],
+        },
+        CASEY_USER,
+      ],
+    });
+    const { container } = await openIn("users");
+    await user.click(await screen.findByRole("button", { name: "Administrar los roles de operator@example.com" }));
+    const section = await screen.findByRole("region", { name: "Roles de operator@example.com" });
+    // An archived client's grant reads its name, not its id.
+    expect(await within(section).findByText("· limitado a Old Co")).toBeInTheDocument();
+
+    await user.selectOptions(within(section).getByLabelText("Rol"), AUDITOR_ROLE.id);
+    const field = within(section).getByLabelText(/cliente/i);
+    await user.type(field, "Ware");
+    expect(within(section).getByRole("button", { name: /^Asignar rol/ })).toBeDisabled();
+
+    await user.clear(field);
+    expect(await within(section).findByRole("option", { name: /Todos los clientes/ })).toBeInTheDocument();
+    expect(within(section).queryByRole("option", { name: /Old Co/ })).not.toBeInTheDocument();
+    await user.click(within(section).getByRole("option", { name: /Todos los clientes/ }));
+    await user.click(within(section).getByRole("button", { name: "Asignar rol en todos los clientes" }));
+    await waitFor(() => expect(calls.assignUserRole).toHaveBeenCalledTimes(1));
+    expect(calls.assignUserRole).toHaveBeenLastCalledWith(OPERATOR_USER.id, {
+      role_id: AUDITOR_ROLE.id,
+      client_id: null,
+    });
+
+    await user.selectOptions(within(section).getByLabelText("Rol"), AUDITOR_ROLE.id);
+    await user.click(within(section).getByLabelText(/cliente/i));
+    await user.click(await within(section).findByRole("option", { name: /Warehouse/ }));
+    await user.click(within(section).getByRole("button", { name: "Asignar rol en Warehouse" }));
+    await waitFor(() => expect(calls.assignUserRole).toHaveBeenCalledTimes(2));
+    expect(calls.assignUserRole).toHaveBeenLastCalledWith(OPERATOR_USER.id, {
+      role_id: AUDITOR_ROLE.id,
+      client_id: "44444444-4444-4444-8444-444444444444",
+    });
+    expectNoEnglish(container, [...RECORDED, "Old Co"]);
   });
 
   it("says a person holds no roles, and marks a duplicate grant", async () => {
@@ -486,8 +541,8 @@ describe("the users tab in Spanish", () => {
     const twice = {
       ...OPERATOR_USER,
       roles: [
-        { assignment_id: "a1", role_id: TECHNICIAN_ROLE.id, role_name: "technician", device_group_id: null },
-        { assignment_id: "a2", role_id: TECHNICIAN_ROLE.id, role_name: "technician", device_group_id: null },
+        { assignment_id: "a1", role_id: TECHNICIAN_ROLE.id, role_name: "technician", client_id: null },
+        { assignment_id: "a2", role_id: TECHNICIAN_ROLE.id, role_name: "technician", client_id: null },
       ],
     };
     calls.listUsers.mockResolvedValue({ users: [twice, CASEY_USER] });
@@ -1077,16 +1132,18 @@ describe("the settings labels built outside React", () => {
     expect(userStatusLabel("disabled")).toBe("disabled");
   });
 
-  it("words a test-send report and the device-group sub-label with the count agreed", () => {
+  it("words a test-send report and the client sub-label with the count agreed", () => {
+    // RE-POINTED (MSP clients, phase 1): the grant-scope picker lists
+    // clients, not device groups; the sub-label is still the device count.
     setActiveLanguage("es");
     expect(testSentMessage("a@b.c")).toBe("Enviado a a@b.c: revisa ese buzón. Un servidor de correo puede aceptar un mensaje y aun así descartarlo.");
     expect(testSentMessage(null)).toBe("Enviado: revisa el buzón remitente. Un servidor de correo puede aceptar un mensaje y aun así descartarlo.");
-    const group = (count: number) => ({ id: "g", name: "Almacén", parent_group_id: null, description: "", dynamic: false, device_count: count, precedence: 0, archived_at: null });
-    expect(groupPickerOptions([group(1)])[0]?.sublabel).toBe("1 dispositivo");
-    expect(groupPickerOptions([group(6)])[0]?.sublabel).toBe("6 dispositivos");
-    expect(translate("settings.groupPicker.emptyHint")).toMatch(/^No hay grupos de dispositivos para elegir\./);
+    const client = (count: number) => ({ id: "c", name: "Almacén", kind: "customer", status: "active", device_count: count });
+    expect(clientPickerOptions([client(1)])[0]?.sublabel).toBe("1 dispositivo");
+    expect(clientPickerOptions([client(6)])[0]?.sublabel).toBe("6 dispositivos");
+    expect(translate("settings.clientPicker.emptyHint")).toMatch(/^No hay clientes para elegir\./);
     setActiveLanguage("en");
-    expect(groupPickerOptions([group(1)])[0]?.sublabel).toBe("1 device");
+    expect(clientPickerOptions([client(1)])[0]?.sublabel).toBe("1 device");
   });
 });
 

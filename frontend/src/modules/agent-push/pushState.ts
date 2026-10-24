@@ -287,6 +287,7 @@ export function kdcNotFound(): string {
  */
 export const REFUSAL_REASON_LABELS: Readonly<Record<string, string>> = lazyLabels({
   no_asset: "agentPush.refusal.no_asset",
+  ambiguous_asset: "agentPush.refusal.ambiguous_asset",
   no_authorization: "agentPush.refusal.no_authorization",
   credential_not_scoped: "agentPush.refusal.credential_not_scoped",
   no_site_server: "agentPush.refusal.no_site_server",

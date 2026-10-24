@@ -283,9 +283,16 @@ async def list_site_servers(
     enabled: bool | None = None,
     ipam_site_id: UUID | None = None,
     segment: str | None = None,
+    client_id: UUID | None = None,
 ) -> list[SiteServer]:
     """The org's site servers, oldest first — or MOST SPECIFIC FIRST when
     `segment` is given.
+
+    `client_id` keeps only the site servers whose device belongs to that
+    client (`site_server.client_id`, inherited from the device). A push picks
+    its originator with it (`agent_push.preflight._site_server_for`): the
+    machine that will hold a decrypted credential is one of the target's own
+    client, whatever the session's scope.
 
     `segment` filters by CONTAINMENT (`<<=`), not equality: asking "who serves
     10.20.7.0/24" must find the branch server declared for `10.20.0.0/16`,
@@ -314,6 +321,8 @@ async def list_site_servers(
         statement = statement.where(SiteServer.enabled == enabled)
     if ipam_site_id is not None:
         statement = statement.where(SiteServer.ipam_site_id == ipam_site_id)
+    if client_id is not None:
+        statement = statement.where(SiteServer.client_id == client_id)
     if segment is not None:
         prefix = str(parse_segment(segment))
         statement = statement.where(

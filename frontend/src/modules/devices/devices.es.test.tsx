@@ -264,7 +264,7 @@ describe("the asset and push dialogs in Spanish", () => {
     mockUseApi.mockReturnValue({ createAsset } as unknown as ApiClient);
     const { baseElement } = renderInSpanish(
       <QueryClientProvider client={client()}>
-        <AddAssetDialog open onClose={() => {}} />
+        <AddAssetDialog open onClose={() => {}} siteId="00000000-0000-4000-8000-0000000000aa" />
       </QueryClientProvider>,
     );
     const dialog = await screen.findByRole("dialog", { name: "Añadir activo" });
@@ -498,7 +498,6 @@ const references = (over: Partial<DeviceGroupReferences> = {}): DeviceGroupRefer
   remote_policies: 0,
   health_assignments: 0,
   credentials: 0,
-  role_grants: 0,
   ...over,
 });
 
@@ -606,7 +605,9 @@ describe("the device groups page in Spanish", () => {
   it("words the archive confirmation and the refusal as a to-do list", async () => {
     const user = userEvent.setup();
     const archiveDeviceGroup = vi.fn().mockRejectedValue(
-      new ApiError(409, JSON.stringify({ blocked_by: references({ devices: 1, child_groups: 2, patch_policies: 1, role_grants: 3 }) })),
+      // `role_grants` is an older server's key (a grant named a group until
+      // grants were scoped by client): never drawn.
+      new ApiError(409, JSON.stringify({ blocked_by: { ...references({ devices: 1, child_groups: 2, patch_policies: 1 }), role_grants: 3 } })),
     );
     renderGroups([group()], { api: { archiveDeviceGroup } as unknown as Partial<ApiClient> });
     await user.click(await screen.findByRole("button", { name: "Archivar" }));
@@ -618,7 +619,8 @@ describe("the device groups page in Spanish", () => {
     expect(within(blocked).getByText("1 dispositivo todavía en este grupo")).toBeInTheDocument();
     expect(within(blocked).getByText("2 grupos hijos por debajo")).toBeInTheDocument();
     expect(within(blocked).getByText("1 política de parches")).toBeInTheDocument();
-    expect(within(blocked).getByText("3 concesiones de rol limitadas a él")).toBeInTheDocument();
+    // RE-POINTED: role grants are scoped by client now, so none blocks a group.
+    expect(within(blocked).queryByText(/concesi/)).not.toBeInTheDocument();
     expectNoEnglish(blocked, ["servers"]);
   });
 

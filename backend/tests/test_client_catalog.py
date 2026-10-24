@@ -104,7 +104,10 @@ def test_the_allowlist_guard_is_not_vacuous() -> None:
 
 def test_no_route_file_holds_the_all_scope() -> None:
     """Spec §2.3: the HTTP route files (`api.py`, `api/v1/*`) may not use it.
-    (Task 9's client creation and archiving will be the named exceptions.)"""
+    Task 9's client creation and archiving, which spec §2.3 names as the
+    exceptions, turned out to need none: `require_permission_on_every_client`
+    admits only a request whose own scope is every client, and the route
+    passes that scope on."""
     routes = sorted(
         key
         for key in ALL_SCOPE_ALLOWLIST
@@ -492,9 +495,11 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
 #   SAFE   it holds `client_id`; or a column that PINS the row's client -- the
 #          catalog's inheritance fk, a second parent's fk (`global_rows.
 #          SECOND_PARENTS`), or a column X under a foreign key `(X, client_id)
-#          REFERENCES p (id, client_id)` -- that cannot be NULL in a colliding
-#          row (NOT NULL, or the index treats NULLs as distinct); or a
-#          surrogate column below (random, so equal only for the same thing);
+#          REFERENCES p (id, client_id)` on a table whose `client_id` is NOT
+#          NULL or a key that is MATCH FULL (else a row without a client skips
+#          it) -- that cannot be NULL in a colliding row (NOT NULL, or the
+#          index treats NULLs as distinct); or a surrogate column below
+#          (random, so equal only for the same thing);
 #   LEAKY  anything else: a natural key scoped by `org_id` or by nothing.
 #
 # A LEAKY key fails the guard unless `ORG_WIDE_KEYS` names it with a reason.
@@ -570,49 +575,57 @@ def leaky_because(key: UniqueKey, pinning: frozenset[str]) -> str | None:
 
 
 async def _unique_keys(admin_engine) -> tuple[list[UniqueKey], dict[str, frozenset[str]]]:
+    async with admin_engine.connect() as conn:
+        return await _unique_keys_on(conn)
+
+
+async def _unique_keys_on(conn) -> tuple[list[UniqueKey], dict[str, frozenset[str]]]:
     """Every unique index (constraints' included) on a phase-1 table, and per
     table the columns that pin a row's client."""
     tables = list(PHASE_1)
-    async with admin_engine.connect() as conn:
-        rows = (
-            await conn.execute(
-                text(
-                    "SELECT c.relname AS tbl, i.relname AS name, "
-                    "x.indnullsnotdistinct AS nnd, "
-                    "ARRAY(SELECT coalesce(a.attname::text, '') "
-                    "      FROM unnest(x.indkey::int2[]) WITH ORDINALITY AS k(n, o) "
-                    "      LEFT JOIN pg_attribute a "
-                    "        ON a.attrelid = x.indrelid AND a.attnum = k.n "
-                    "      WHERE k.o <= x.indnkeyatts ORDER BY k.o) AS cols, "
-                    "ARRAY(SELECT a.attname::text FROM pg_attribute a "
-                    "      WHERE a.attrelid = x.indrelid AND a.attnotnull "
-                    "        AND a.attnum = ANY (x.indkey::int2[])) AS not_null "
-                    "FROM pg_index x JOIN pg_class c ON c.oid = x.indrelid "
-                    "JOIN pg_class i ON i.oid = x.indexrelid "
-                    "WHERE x.indisunique AND c.relnamespace = 'public'::regnamespace "
-                    "  AND c.relname = ANY (:t)"
-                ),
-                {"t": tables},
-            )
-        ).all()
-        fks = (
-            await conn.execute(
-                text(
-                    "SELECT t.relname AS tbl, "
-                    "ARRAY(SELECT a.attname::text FROM unnest(f.conkey) WITH ORDINALITY "
-                    "      AS k(n, o) JOIN pg_attribute a "
-                    "      ON a.attrelid = f.conrelid AND a.attnum = k.n ORDER BY k.o) AS cols, "
-                    "ARRAY(SELECT a.attname::text FROM unnest(f.confkey) WITH ORDINALITY "
-                    "      AS k(n, o) JOIN pg_attribute a "
-                    "      ON a.attrelid = f.confrelid AND a.attnum = k.n ORDER BY k.o) "
-                    "      AS ref_cols "
-                    "FROM pg_constraint f JOIN pg_class t ON t.oid = f.conrelid "
-                    "WHERE f.contype = 'f' AND t.relnamespace = 'public'::regnamespace "
-                    "  AND t.relname = ANY (:t)"
-                ),
-                {"t": tables},
-            )
-        ).all()
+    rows = (
+        await conn.execute(
+            text(
+                "SELECT c.relname AS tbl, i.relname AS name, "
+                "x.indnullsnotdistinct AS nnd, "
+                "ARRAY(SELECT coalesce(a.attname::text, '') "
+                "      FROM unnest(x.indkey::int2[]) WITH ORDINALITY AS k(n, o) "
+                "      LEFT JOIN pg_attribute a "
+                "        ON a.attrelid = x.indrelid AND a.attnum = k.n "
+                "      WHERE k.o <= x.indnkeyatts ORDER BY k.o) AS cols, "
+                "ARRAY(SELECT a.attname::text FROM pg_attribute a "
+                "      WHERE a.attrelid = x.indrelid AND a.attnotnull "
+                "        AND a.attnum = ANY (x.indkey::int2[])) AS not_null "
+                "FROM pg_index x JOIN pg_class c ON c.oid = x.indrelid "
+                "JOIN pg_class i ON i.oid = x.indexrelid "
+                "WHERE x.indisunique AND c.relnamespace = 'public'::regnamespace "
+                "  AND c.relname = ANY (:t)"
+            ),
+            {"t": tables},
+        )
+    ).all()
+    fks = (
+        await conn.execute(
+            text(
+                "SELECT t.relname AS tbl, "
+                "ARRAY(SELECT a.attname::text FROM unnest(f.conkey) WITH ORDINALITY "
+                "      AS k(n, o) JOIN pg_attribute a "
+                "      ON a.attrelid = f.conrelid AND a.attnum = k.n ORDER BY k.o) AS cols, "
+                "ARRAY(SELECT a.attname::text FROM unnest(f.confkey) WITH ORDINALITY "
+                "      AS k(n, o) JOIN pg_attribute a "
+                "      ON a.attrelid = f.confrelid AND a.attnum = k.n ORDER BY k.o) "
+                "      AS ref_cols, "
+                "f.confmatchtype = 'f' AS match_full, "
+                "coalesce((SELECT a.attnotnull FROM pg_attribute a "
+                "          WHERE a.attrelid = f.conrelid AND a.attname = 'client_id'), false) "
+                "      AS client_not_null "
+                "FROM pg_constraint f JOIN pg_class t ON t.oid = f.conrelid "
+                "WHERE f.contype = 'f' AND t.relnamespace = 'public'::regnamespace "
+                "  AND t.relname = ANY (:t)"
+            ),
+            {"t": tables},
+        )
+    ).all()
     keys = [
         UniqueKey(
             table=r.tbl,
@@ -632,7 +645,10 @@ async def _unique_keys(admin_engine) -> tuple[list[UniqueKey], dict[str, frozens
             pins.add(SECOND_PARENTS[table][1])
     for fk in fks:
         pairs = dict(zip(fk.ref_cols, fk.cols, strict=True))
-        if set(pairs) == {"id", "client_id"} and pairs["client_id"] == "client_id":
+        # Checked only where the row HAS a client: under MATCH SIMPLE a NULL
+        # client_id skips the key, and the row may hold any X (review M1).
+        checked = fk.client_not_null or fk.match_full
+        if set(pairs) == {"id", "client_id"} and pairs["client_id"] == "client_id" and checked:
             pinning[fk.tbl].add(pairs["id"])
     return keys, {t: frozenset(p) for t, p in pinning.items()}
 
@@ -759,3 +775,34 @@ async def test_the_per_client_keys_are_in_the_database_and_on_the_models(admin_e
                 nnd = bool(con.dialect_options["postgresql"].get("nulls_not_distinct"))
                 declared[name] = (table.name, columns, nnd)
     assert declared == PER_CLIENT_KEYS, f"declared: {declared}"
+
+
+async def test_a_composite_key_pins_only_a_client_it_cannot_skip(admin_engine) -> None:
+    """Task 8b review M1. `(X, client_id) REFERENCES p (id, client_id)` checks
+    NOTHING for a row whose `client_id` is NULL under the default MATCH
+    SIMPLE: such a row may hold any X, so X pins its client only where
+    `client_id` is NOT NULL or the key is MATCH FULL. Shown on `install_links`
+    (`uq_install_links_site` is SAFE through `fk_install_links_site_client`),
+    each leg inside one transaction that is rolled back."""
+    async with admin_engine.connect() as conn:
+        keys, pinning = await _unique_keys_on(conn)
+        assert "site_id" in pinning["install_links"]
+
+        await conn.execute(text("ALTER TABLE install_links ALTER COLUMN client_id DROP NOT NULL"))
+        keys, pinning = await _unique_keys_on(conn)
+        assert "site_id" not in pinning["install_links"]
+        site = next(k for k in keys if k.name == "uq_install_links_site")
+        assert leaky_because(site, pinning["install_links"]) == "('site_id',) names no client"
+
+        await conn.execute(
+            text("ALTER TABLE install_links DROP CONSTRAINT fk_install_links_site_client")
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE install_links ADD CONSTRAINT fk_install_links_site_client "
+                "FOREIGN KEY (site_id, client_id) REFERENCES sites (id, client_id) MATCH FULL"
+            )
+        )
+        keys, pinning = await _unique_keys_on(conn)
+        assert "site_id" in pinning["install_links"]
+        await conn.rollback()

@@ -46,7 +46,7 @@ from app.core.i18n import tr
 from app.core.rbac import has_permission
 from app.core.wire_words import say
 from app.gateway.dispatch import publish_job
-from app.models import Agent, Organization, RemoteSession, User
+from app.models import Agent, Device, Organization, RemoteSession, User
 from app.modules.agent_push.credential_scope import refuse_push_install_credential
 from app.modules.remote.capability import SCREEN_JOB_TYPE, can_share_screen
 from app.modules.remote.policy import resolve_policy
@@ -453,12 +453,23 @@ class RemoteSessionService:
                 raise ScreenUnavailable(tr("device already has a live screen session"))
 
         policy = await resolve_policy(session, org_id, device_id)
+        # The permission is asked about THE DEVICE'S CLIENT (MSP clients spec
+        # §2.1): `remote.unattended` on X lets a technician skip consent on X's
+        # machines and on no other client's.
+        device_client = (
+            await session.execute(
+                select(Device.client_id).where(Device.org_id == org_id, Device.id == device_id)
+            )
+        ).scalar_one_or_none()
         # Unattended needs the policy, the permission and the request; anything
         # less is attended (the existing silent downgrade, spec §3.4).
         unattended = (
             requested_mode == "unattended"
             and policy.allow_unattended
-            and await has_permission(session, technician_id, "remote.unattended")
+            and device_client is not None
+            and await has_permission(
+                session, technician_id, "remote.unattended", client_id=device_client
+            )
         )
         consent_mode = "unattended" if unattended else "attended"
 

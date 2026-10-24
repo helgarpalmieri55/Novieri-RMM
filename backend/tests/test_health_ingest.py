@@ -805,7 +805,7 @@ async def test_the_gateway_branch_ingests_and_publishes_after_commit(
     import redis.asyncio as aioredis
 
     from app.core.signing import LocalEd25519Signer
-    from app.gateway.dispatch import handle_agent_message
+    from app.gateway.dispatch import handle_agent_message, ui_channel
     from app.jobs.engine import JobEngine
     from app.models import HealthAlert
 
@@ -813,7 +813,8 @@ async def test_the_gateway_branch_ingests_and_publishes_after_commit(
     redis = aioredis.from_url("redis://localhost:6379/9", decode_responses=True)
     await redis.flushdb()
     pubsub = redis.pubsub()
-    await pubsub.subscribe(f"ui:{fixture.org_id}")
+    # The device is on the org's internal client, whose id is the org's.
+    await pubsub.subscribe(ui_channel(fixture.org_id, fixture.org_id))
 
     msg = _msg([_line(fixture.check_id), _line(uuid4(), selector="X:")])
     engine = JobEngine(signer=LocalEd25519Signer(tmp_path / "k.key"))

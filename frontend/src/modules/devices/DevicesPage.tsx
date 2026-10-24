@@ -48,6 +48,7 @@ import type { Device, DeviceListParams, DeviceProvenance, DeviceState, Me } from
 import { useApi } from "../../lib/ApiContext";
 import { RelTime } from "../../components/reltime";
 import { saveBlob } from "../../lib/download";
+import { internalSiteId } from "../../lib/internalClient";
 import { useLiveEvents } from "../../lib/ws";
 import { Btn, FilterBar, PageHead, Panel, QueryState, ResultCount, SearchField, StatCard, StatsGrid, StatusPill, TableFoot, TableWrap, Tabs, type Kind } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -908,7 +909,15 @@ export function DevicesPage() {
       </Panel>
 
       <DispatchJobDialog device={target} onClose={() => setTarget(null)} />
-      <AddAssetDialog open={adding} onClose={() => setAdding(false)} />
+      <AddAssetDialog
+        open={adding}
+        onClose={() => setAdding(false)}
+        // PHASE 3: the client/site selector. Until it exists a hand-made
+        // asset is filed under the organisation's internal client, whose
+        // "Principal" site has the organisation's id -- `/me`'s `org_id`
+        // (`lib/internalClient.ts`), from the query this page already holds.
+        siteId={internalSiteId(me.data)}
+      />
     </>
   );
 }

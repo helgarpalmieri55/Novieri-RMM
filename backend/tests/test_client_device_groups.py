@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.client_scope import ClientScope
@@ -30,6 +30,7 @@ from app.services.device_groups import (
     reevaluate_org_membership,
 )
 from tests.client_scope_support import EVERY_CLIENT, client_with_site, everything_on
+from tests.race_helpers import backend_pid, normalised, until_blocked_by
 from tests.test_agent_release_api import _StubStore
 from tests.test_inventory_schema import FULL_DOC
 
@@ -447,30 +448,11 @@ async def _until_its_insert_waits_on(app_engine: AsyncEngine, blocker: int) -> N
     """Return once a backend is blocked by `blocker` IN an INSERT into
     `device_groups`: the racing create has passed the name check -- which saw
     no uncommitted row -- and waits on the live-name index for `blocker`'s
-    transaction. Polled from the app role, which may read its own backends'
-    query text in `pg_stat_activity`. A wait anywhere else fails the test
-    rather than passing it through the name check's 409."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + 30
-    async with app_engine.connect() as conn:
-        while True:
-            waiting = (
-                await conn.execute(
-                    text(
-                        "SELECT query FROM pg_stat_activity "
-                        "WHERE CAST(:b AS integer) = ANY (pg_blocking_pids(pid))"
-                    ),
-                    {"b": blocker},
-                )
-            ).scalars().all()
-            if waiting:
-                assert all(
-                    q.lstrip().upper().startswith("INSERT INTO DEVICE_GROUPS") for q in waiting
-                ), waiting
-                return
-            assert loop.time() < deadline, "the racing create never reached the index"
-            await asyncio.sleep(0.02)
-            await conn.rollback()  # a fresh snapshot of pg_stat_activity
+    transaction (`tests/race_helpers.until_blocked_by`, shared with the
+    archive races). A wait anywhere else fails the test rather than passing it
+    through the name check's 409."""
+    waiting = await until_blocked_by(app_engine, blocker)
+    assert all(normalised(q).startswith("INSERT INTO DEVICE_GROUPS") for q in waiting), waiting
 
 
 async def test_two_creates_racing_for_one_name_end_in_a_409_not_a_500(
@@ -503,7 +485,7 @@ async def test_two_creates_racing_for_one_name_end_in_a_409_not_a_500(
         await create_device_group(
             session, org_id=org, client_id=org, actor_id=actor_id, name="Servers"
         )
-        first = (await session.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+        first = await backend_pid(session)
         racing = asyncio.create_task(create())
         reached = False
         try:

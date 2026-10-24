@@ -133,7 +133,6 @@ const getDeviceGroup: FixtureMap["getDeviceGroup"] = (id) => {
       remote_policies: 0,
       health_assignments: 0,
       credentials: 0,
-      role_grants: 0,
     },
   };
   return detail;

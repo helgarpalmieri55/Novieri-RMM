@@ -19,7 +19,7 @@ Three kinds of leak, all present today:
 2. **Internal nouns as UI nouns.** `grant`, `relay`, `flap`, `turns`,
    `transcript`, `scope`. Each is the correct word *inside* the system and the
    wrong word on screen. An administrator thinks "who can do what", not
-   "a grant at a device-group scope".
+   "a grant at a client scope".
 3. **Mechanism where the operator needs consequence.** Health explains what
    the engine does (`clears as unavailable_timeout, which is not a fix`)
    instead of what the number decides.
@@ -29,8 +29,8 @@ Three kinds of leak, all present today:
 | Internal | On screen |
 |---|---|
 | grant, assignment, role assignment | access |
-| organization-wide, org-wide scope | everywhere |
-| device-group scope | limited to *group* |
+| organization-wide, every-client scope | everywhere (the grant picker's choice reads **Every client**) |
+| client scope | limited to *client* |
 | relay | mail server |
 | event type | what happens |
 | recipient kind | who gets told |
@@ -135,9 +135,13 @@ everywhere**, or **Org admin · limited to Warehouse**. `(3 identical grants)`
 → **×3**.
 
 Panel subtitle `A grant is organization-wide unless it names a device group`
-→ **Access applies everywhere unless you limit it to a device group**.
-Fieldset `Roles to grant` → **Give them access to**. Field `Role to grant` →
-**Role**.
+→ **Each role applies to every client, or to the one client you choose**
+(MSP clients: a grant is scoped to a client, or to every client; device
+groups no longer scope grants). Fieldset `Roles to grant` → **Give them
+access to**. Field `Role to grant` → **Role**. The scope field is
+**Client**, whose first choice is **Every client** -- a choice like any
+client, never what an empty box means -- and the button names the scope it
+grants: **Assign role on Warehouse**, **Assign role on every client**.
 
 Six equal-weight buttons per row read as a toolbar with no primary. Keep
 *Roles* and *Permissions* as the two ordinary buttons; render *Disable*,

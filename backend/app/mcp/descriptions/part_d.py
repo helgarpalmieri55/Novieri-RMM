@@ -100,6 +100,48 @@ PART_D: dict[str, str] = {
         "Recomputes the audit log's hash chain and reports whether it is intact, how many events "
         "were checked and where it breaks, if anywhere. Read-only."
     ),
+    # --- clients ---
+    "GET /api/v1/clients": (
+        "Lists the clients the caller may see, with device and site counts. Archived clients are "
+        "excluded unless requested; the unassigned client is listed only with every client."
+    ),
+    "POST /api/v1/clients": (
+        "Creates a customer client and its Principal site. Needs access to every client; a name "
+        "or email domain another client holds is a 409."
+    ),
+    "GET /api/v1/clients/{client_id}": (
+        "Returns one client, archived or not, with its email domains, optional modules and "
+        "device and site counts."
+    ),
+    "PATCH /api/v1/clients/{client_id}": (
+        "Edits a client's name, contact details, email domains or optional modules. An email "
+        "domain held by another client is a 409; an archived client is not edited."
+    ),
+    "POST /api/v1/clients/{client_id}/archive": (
+        "Archives a customer client, revoking its live enrollment tokens and switching off its "
+        "install links. Refused while it has active devices. Needs access to every client."
+    ),
+    "GET /api/v1/clients/{client_id}/contacts": (
+        "Lists a client's contacts, the people of that client who will use the portal, with "
+        "their status."
+    ),
+    "POST /api/v1/clients/{client_id}/contacts": (
+        "Adds a contact to a client. A contact cannot sign in to the console; an email address "
+        "already used by a contact of the same client is a 409."
+    ),
+    "GET /api/v1/clients/{client_id}/sites": (
+        "Lists a client's sites with their device counts. Archived sites are excluded unless "
+        "requested."
+    ),
+    "POST /api/v1/clients/{client_id}/sites": (
+        "Adds a site to a client. A name the client already uses is a 409, and the unassigned "
+        "client has no sites."
+    ),
+    # --- contacts ---
+    "PATCH /api/v1/contacts/{contact_id}": (
+        "Edits a contact's email, name or phone, or switches it off or on. Never changes its "
+        "client or identity."
+    ),
     # --- dashboard ---
     "DELETE /api/v1/dashboard/layout": (
         "Resets the caller's own dashboard to the stock arrangement by deleting their saved "
@@ -194,6 +236,15 @@ PART_D: dict[str, str] = {
     "POST /api/v1/enrollment-tokens/{token_id}/revoke": (
         "Revokes an enrollment token so no further agents can enroll with it. Devices already "
         "enrolled are unaffected."
+    ),
+    # --- sites ---
+    "DELETE /api/v1/sites/{site_id}": (
+        "Archives a site, never a hard delete, revoking its live enrollment tokens and switching "
+        "off its install link. Refused while it holds devices."
+    ),
+    "PATCH /api/v1/sites/{site_id}": (
+        "Renames a site or edits its address and description. Its networks are set with its "
+        "install link; an archived site is not edited."
     ),
     # --- sites (install link) ---
     "GET /api/v1/sites/{site_id}/install-link": (

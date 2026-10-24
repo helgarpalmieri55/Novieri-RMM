@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.gateway.dispatch import queue_ui_event
+from app.gateway.dispatch import queue_job_ui_event
 from app.jobs.registry import JobType, register
 from app.models import Job
 from app.modules.backup import dedup
@@ -64,9 +64,9 @@ def register_job_types() -> None:
         # all: `ingest_backup_result` only calls this factory on the success
         # path that actually needs a store.
         await ingest_backup_result(session, dedup.gateway_object_store, job, res)
-        queue_ui_event(
+        await queue_job_ui_event(
             session,
-            job.org_id,
+            job,
             {
                 "kind": "backup_status_updated",
                 "device_id": str(job.target_id),
@@ -84,9 +84,9 @@ def register_job_types() -> None:
                 f"invalid backup.restore result: {exc}"
             ) from exc
         await ingest_restore_result(session, job, res)
-        queue_ui_event(
+        await queue_job_ui_event(
             session,
-            job.org_id,
+            job,
             {
                 "kind": "backup_status_updated",
                 "device_id": str(job.target_id),

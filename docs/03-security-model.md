@@ -112,8 +112,11 @@ the system.
   then discarded from memory.
 - **Never** written to logs, returned in API responses, or exposed to the
   frontend.
-- **Scoped** by RBAC and, where applicable, by device group. **Checked out with
-  audit** — every access is an audit event.
+- **Scoped** by RBAC and by client: a credential filed under a client (through
+  its device group) exists only for a session whose client scope includes that
+  client, enforced by RLS (`CLAUDE.md` invariant 5a); one with no client is
+  global configuration, readable by any scope and writable only with every
+  client. **Checked out with audit** — every access is an audit event.
 
 ## Authentication & RBAC
 
@@ -168,7 +171,7 @@ the system.
 | Stolen agent certificate | Short-lived certs, rotation, revocation at the gateway |
 | Tampered agent binary / malicious update | Update only by a signed job pinning the release SHA-256, re-checked at the install location; human-started ring rollout; local rollback; Authenticode against a compiled-in pin once signing exists (`spec-self-update.md`) |
 | Credential theft from the vault | Envelope encryption, decrypt-at-use, no plaintext in DB/logs, audited checkout |
-| Operator abuse / over-privilege | RBAC scoped to org + device group; MFA; full audit trail |
+| Operator abuse / over-privilege | RBAC scoped to org + client (per-client grants, the client scope enforced by RLS, invariant 5a); MFA; full audit trail |
 | Cross-tenant data leakage | `org_id` everywhere + PostgreSQL RLS + cert-bound tenant on gateway |
 | Replay of a captured job | Nonce + expiry in signed payload; agent rejects replays |
 | Audit tampering to hide activity | Hash-chained append-only log |

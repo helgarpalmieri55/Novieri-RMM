@@ -266,10 +266,14 @@ async def ingest_scan(
         for patch in newly_missing:
             if patch.severity not in AUTO_APPROVE_SEVERITIES:
                 continue
+            # The auto-approval is GLOBAL, as an operator's is (`approve.py`):
+            # a client's approval of the same (patch, ring) is another row
+            # (`uq_patch_approvals_client_patch_ring`, migration 0231, Task 8b).
             existing_approval = (
                 await session.execute(
                     select(PatchApproval).where(
                         PatchApproval.org_id == org_id,
+                        PatchApproval.client_id.is_(None),
                         PatchApproval.patch_id == patch.id,
                         PatchApproval.ring_name == AUTO_APPROVE_RING,
                     )

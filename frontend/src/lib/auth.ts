@@ -141,6 +141,39 @@ export function accessToken(): string | null {
   return currentUser?.access_token ?? null;
 }
 
+/**
+ * Hear about every NEW access token -- a silent renewal (about a minute
+ * before each expiry, `automaticSilentRenew`) or a fresh sign-in. Returns an
+ * unsubscribe function.
+ *
+ * For the one consumer that holds a token past the request that used it: the
+ * live socket (`lib/ws.ts`), which the server closes 4401 once the token it
+ * was opened with expires, and which therefore swaps to the new token when
+ * this fires (final review W1). Registered after this module's own
+ * `addUserLoaded`, so `accessToken()` already returns the new token here.
+ */
+export function onTokenRenewed(listener: (token: string) => void): () => void {
+  const handle = (user: User) => listener(user.access_token);
+  userManager.events.addUserLoaded(handle);
+  return () => userManager.events.removeUserLoaded(handle);
+}
+
+/**
+ * Renew the access token now, silently, and return it -- or `null` when the
+ * identity provider would not (its session ended). Never a redirect: a failed
+ * renewal is announced by the session banner (`onSessionExpiring`), not by
+ * navigating away from the page the person is on.
+ */
+export async function renewAccessToken(): Promise<string | null> {
+  try {
+    const user = await userManager.signinSilent();
+    if (user) currentUser = user;
+    return user?.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function isAuthenticated(): boolean {
   return currentUser != null && !currentUser.expired;
 }

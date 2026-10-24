@@ -34,6 +34,13 @@ import { ManagedDeploymentDialog } from "./ManagedDeploymentDialog";
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
+/**
+ * The site the deployment token is minted for (MSP clients, phase 1). The page
+ * passes the internal client's "Principal" site, whose id is the
+ * organisation's; any id stands in for it here.
+ */
+const SITE = "00000000-0000-4000-8000-0000000000aa";
+
 const RELEASE: AgentRelease = {
   id: "11111111-1111-1111-1111-111111111111",
   version: "873d666",
@@ -95,7 +102,7 @@ function renderDialog({
   const ui: ReactElement = (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <ManagedDeploymentDialog release={RELEASE} onClose={() => {}} />
+        <ManagedDeploymentDialog release={RELEASE} onClose={() => {}} siteId={SITE} />
       </MemoryRouter>
     </QueryClientProvider>
   );
@@ -145,6 +152,14 @@ describe("the credential is a second act", () => {
 
     await userEvent.click(within(confirm).getByRole("button", { name: "Create token" }));
     expect(mintAgentDeploymentToken).toHaveBeenCalledTimes(1);
+    // The bounds the confirmation named, the channel, and the site the
+    // machines land in -- `POST .../deployment-token` requires it.
+    expect(mintAgentDeploymentToken).toHaveBeenCalledWith(RELEASE.id, {
+      max_uses: 50,
+      expires_in_hours: 72,
+      channel: "gpo",
+      site_id: SITE,
+    });
   });
 
   it("shows the blast radius alongside the live token", async () => {

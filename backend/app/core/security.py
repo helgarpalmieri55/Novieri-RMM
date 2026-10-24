@@ -47,6 +47,10 @@ class TokenClaims:
     # person's own session; a `client_credentials` token has none (recorded
     # live by deploy/keycloak/ci_mcp_flow.py, which fails CI if that changes).
     sid: str = field(default="", compare=False)
+    # When the token stops being valid (epoch seconds; `validate_token`
+    # requires the claim). A door that outlives its handshake -- the console
+    # WebSocket -- closes itself when this passes (MSP clients, final review).
+    exp: int = field(default=0, compare=False)
 
     @property
     def is_service_account(self) -> bool:
@@ -181,6 +185,7 @@ async def validate_token(
         preferred_username=str(claims.get("preferred_username") or ""),
         client_id_claim="client_id" in claims or "clientId" in claims,
         sid=str(claims.get("sid") or ""),
+        exp=int(claims["exp"]),
     )
 
 

@@ -412,6 +412,11 @@ describe("AgentReleasesPage", () => {
 
     await userEvent.click(within(dialog).getByRole("button", { name: "Generate command" }));
     expect(generate).toHaveBeenCalledTimes(1);
+    // MSP clients, phase 1: the token the command carries is minted for a
+    // site, and until the client selector (phase 3) that is the internal
+    // client's "Principal" site, whose id is the organisation's -- `/me`'s
+    // `org_id`, "o" in `renderPage`.
+    expect(generate).toHaveBeenCalledWith("11111111-1111-1111-1111-111111111111", 4, "o");
   });
 
   it("mints nothing when the confirmation is cancelled", async () => {
@@ -670,8 +675,11 @@ describe("the install link panel on Agent packages", () => {
   }
 
   it("is offered to whoever may manage the link", async () => {
-    renderWith(["enrollment.link.manage"]);
+    const { getInstallLink } = renderWith(["enrollment.link.manage"]);
     expect(await screen.findByRole("heading", { name: "Install link" })).toBeInTheDocument();
+    // One link per site now (MSP clients, phase 1): the panel manages the
+    // internal client's "Principal" site, whose id is `/me`'s `org_id`.
+    expect(getInstallLink).toHaveBeenCalledWith("o");
   });
 
   it("is not offered, and not asked for, without that permission", async () => {

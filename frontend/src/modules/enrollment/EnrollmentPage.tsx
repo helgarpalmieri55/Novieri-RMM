@@ -121,6 +121,7 @@ import { EmptyState, NoValue } from "../../components/emptystate";
 import { Field, Td, inputClass } from "../../components/ui";
 import type { Device, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { internalSiteId, requireKnown } from "../../lib/internalClient";
 import { formatDate, formatDateTime } from "../../lib/datetime";
 import { humaniseEnum } from "../../lib/labels";
 import { useT } from "../../i18n/context";
@@ -266,6 +267,9 @@ type PendingRevoke =
   | { kind: "token"; id: string; subject: string }
   | { kind: "agent"; id: string; subject: string };
 
+/** What the form asks for: the request, less the site the mutation adds. */
+type TokenDraft = Omit<EnrollmentTokenCreateRequest, "site_id">;
+
 export function EnrollmentPage() {
   const t = useT();
   const api = useApi();
@@ -394,10 +398,18 @@ export function EnrollmentPage() {
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   /** The validated request, waiting on the confirmation. Nothing is sent while
    *  this is set — it is the state of "asked, not yet answered". */
-  const [pendingIssue, setPendingIssue] = useState<EnrollmentTokenCreateRequest | null>(null);
+  const [pendingIssue, setPendingIssue] = useState<TokenDraft | null>(null);
 
   const create = useMutation({
-    mutationFn: (body: EnrollmentTokenCreateRequest) => createEnrollmentToken(api, body),
+    mutationFn: (body: TokenDraft) =>
+      createEnrollmentToken(api, {
+        ...body,
+        // PHASE 3: the client/site selector. Until it exists the console
+        // issues tokens for the organisation's internal client, whose
+        // "Principal" site has the organisation's id -- `/me`'s `org_id`
+        // (`lib/internalClient.ts`). The route requires the site.
+        site_id: requireKnown(internalSiteId(me.data)),
+      }),
     onSuccess: (created: EnrollmentTokenCreated) => {
       setIssued(created);
       setCopied("idle");

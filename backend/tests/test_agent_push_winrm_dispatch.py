@@ -677,6 +677,8 @@ def test_every_dispatch_refusal_is_plain_language() -> None:
     assert set(DISPATCH_REFUSAL_REASONS) == {
         "no_dns_name", "invalid_dns_name", "wrong_credential_kind", "no_console_url",
         "outside_realm", "realm_not_recorded", "realm_changed",
+        # MSP clients Task 9: an archived site or client enrols nothing.
+        "site_archived",
     }
     for reason, text in DISPATCH_REFUSAL_REASONS.items():
         assert len(text) > 60, reason
@@ -742,3 +744,70 @@ async def test_the_job_is_built_from_the_target_snapshot_that_passed_validation(
     assert (p["transport"], p["os"], p["arch"]) == ("winrm", "windows", "amd64")
     assert p["host_key_fingerprint"] == "kerberos"
     assert p["dns_name"] == FQDN
+
+
+# --------------------------------------------------------------------------- #
+# MSP clients Task 9: an archived site or client enrols nothing
+# --------------------------------------------------------------------------- #
+
+
+async def _archive_targets_site(admin_engine: AsyncEngine, org, *, client: bool = False) -> None:
+    """`seed_asset` files the target under the internal client's Principal
+    site, whose id is the organisation's. Archived behind the API's back, which
+    refuses to archive either."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
+
+    from app.models import Client, Site
+
+    async with AsyncSession(admin_engine) as session:
+        if client:
+            await session.execute(
+                update(Client).where(Client.id == org.org_id).values(status="archived")
+            )
+        else:
+            await session.execute(
+                update(Site).where(Site.id == org.org_id).values(archived_at=datetime.now(UTC))
+            )
+        await session.commit()
+
+
+@pytest.mark.parametrize("client", [False, True])
+async def test_a_target_of_an_archived_site_or_client_is_refused_before_the_decrypt(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine, tmp_path: Path, client: bool
+) -> None:
+    org, credential_id, *_ = await _world(admin_engine, f"wd-arch-{int(client)}")
+    await _archive_targets_site(admin_engine, org, client=client)
+    vault = _FakeVault(WD_JSON)
+    result = await _dispatch(
+        app_engine, org, credential_id, kind="install", vault=vault, tmp_path=tmp_path
+    )
+    await _assert_refused(admin_engine, org, result, vault, "site_archived")
+    assert "push.dispatched" not in await _actions(admin_engine, org)
+
+
+async def test_a_site_archived_after_the_checks_is_a_conflict_not_a_500(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine, tmp_path: Path, monkeypatch
+) -> None:
+    """The token is minted after the checks; a site archived in between is
+    refused by `create_token`, and that refusal arrives as a typed conflict
+    (409 at the route), rolling the batch back -- never an unhandled 500."""
+    from app.modules.agent_push import dispatch as dispatch_module
+    from app.modules.agent_push.errors import PushConflictError
+    from app.services.client_sites import NotAcceptingNewRows
+
+    async def closed(*_args, **_kwargs):
+        raise NotAcceptingNewRows("that site is archived")
+
+    monkeypatch.setattr(dispatch_module, "create_token", closed)
+    org, credential_id, *_ = await _world(admin_engine, "wd-arch-late")
+    with pytest.raises(PushConflictError):
+        await _dispatch(
+            app_engine, org, credential_id, kind="install", vault=_FakeVault(WD_JSON),
+            tmp_path=tmp_path,
+        )
+    async with AsyncSession(admin_engine) as session:
+        assert (
+            await session.execute(select(Job).where(Job.org_id == org.org_id))
+        ).first() is None

@@ -22,8 +22,9 @@ import { useState } from "react";
 
 import { Form, FormActions } from "../../components/form";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
-import type { AssetInput, Device } from "../../lib/api";
+import type { AssetCreateInput, Device } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { requireKnown } from "../../lib/internalClient";
 import { humaniseEnum } from "../../lib/labels";
 import { useT } from "../../i18n/context";
 import { PushDetailsFields, type PushDetails } from "./PushDetailsFields";
@@ -47,7 +48,20 @@ const ASSET_TYPES: Device["asset_type"][] = [
  */
 const LIFECYCLES: Device["lifecycle"][] = ["in_service", "stock", "unmanageable", "retired"];
 
-export function AddAssetDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function AddAssetDialog({
+  open,
+  onClose,
+  siteId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /**
+   * The site the asset is filed under, and with it its client (MSP clients
+   * spec §1.5: `POST /devices` requires it). `null` until the page knows it;
+   * a submit then says so and sends nothing.
+   */
+  siteId: string | null;
+}) {
   const t = useT();
   const api = useApi();
   const queryClient = useQueryClient();
@@ -64,7 +78,13 @@ export function AddAssetDialog({ open, onClose }: { open: boolean; onClose: () =
       // Empty strings are omitted rather than sent. The API rejects a malformed
       // IP, and "" is malformed -- so a form that sent every field would refuse
       // every asset whose IP the operator did not know.
-      const body: AssetInput = { asset_type: assetType, lifecycle };
+      const body: AssetCreateInput = {
+        // PHASE 3: the client/site selector. The Devices page passes the
+        // internal client's "Principal" site (`lib/internalClient.ts`).
+        site_id: requireKnown(siteId),
+        asset_type: assetType,
+        lifecycle,
+      };
       if (hostname.trim()) body.hostname = hostname.trim();
       if (description.trim()) body.description = description.trim();
       if (primaryIp.trim()) body.primary_ip = primaryIp.trim();

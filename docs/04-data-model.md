@@ -33,12 +33,16 @@ Relationships (crow's-foot approximation):
 
 ```
 Organization ─┬─< User >─┬─< UserRole >── Role ──< RolePermission >── Permission
+              │          │       └──> Client (the grant's scope; null = every client)
               │          │
+              ├─< Client ──< Site
+              │
               ├─< Device >─┬── Agent (1:1)
               │            ├──< DeviceTag
+              │            ├──> Client, Site (many-to-one; the client never changes)
               │            └──> DeviceGroup (many-to-one)
               │
-              ├─< DeviceGroup
+              ├─< DeviceGroup (one client's devices)
               ├─< Policy (scoped to org / group)
               ├─< Credential (metadata; secret in vault)
               ├─< Job >──< JobLog
@@ -71,11 +75,35 @@ RBAC storage.
 - **Permission**: `id`, `code` (e.g. `remote.session.start`, `patch.approve`),
   `module`, `action`
 - **RolePermission**: role ↔ permission
-- **UserRole**: user ↔ role, optionally scoped to a `DeviceGroup` (so a
-  technician can be limited to part of the fleet)
+- **UserRole**: user ↔ role, scoped by `client_id`: one `Client` (so a
+  technician can be limited to some of the organization's clients), or `NULL`
+  for every client, including clients created later. A user may hold several.
+  Device groups no longer scope grants (MSP clients spec §2.1).
 
 Baseline roles are seeded (super-admin, org-admin, technician, auditor,
 read-only) per `docs/03-security-model.md`.
+
+### Client / Site
+
+Inside an organization, a device and the data that hangs off it belong to a
+**client**, the MSP model: the organization is the service provider and each
+customer is a client. `clients` carries `id`, `org_id`, `name`, `kind`
+(`internal`, `customer` or `unassigned`), `status` (`active` or `archived`;
+clients are archived, never deleted), `email_domains`, `enabled_modules` and
+contact fields; `sites` carries `id`, `org_id`, `client_id`, `name`,
+`egress_networks` and descriptive fields, and a client's sites hold its
+devices. Every organization has exactly one `internal`
+client, its own IT, and one `unassigned` client, where tickets from unknown
+senders land and which holds no sites or devices. The internal client and its
+"Principal" site share the organization's id. Devices, device groups,
+enrollment tokens and install links carry `client_id`, and devices, tokens and
+links also `site_id`; a device's client never changes. On top of the org
+policy, a second, restrictive RLS layer limits every client-owned table to the
+clients in the session's scope (`app.client_scope`, `app.current_clients`),
+which is `CLAUDE.md` invariant 5a, and `backend/app/core/client_scope_catalog.py`
+classifies every table with an `org_id` as C, H, O or G. The design, the table
+classification and the refinements made while building it are in
+`docs/superpowers/specs/2026-10-23-msp-clientes-design.md`.
 
 ### Device
 
@@ -84,6 +112,7 @@ A managed asset (computer or server). The central entity most modules attach to.
 - `id`, `org_id`, `hostname`, `fqdn`, `os_family` (windows/linux/macos),
   `os_version`, `architecture`, `serial`, `asset_tag`
 - Hardware summary: `cpu`, `ram_bytes`, `disks` (jsonb), `nics` (jsonb)
+- `client_id` (immutable) and `site_id` (a site of that same client)
 - `device_group_id`, `status` (active/inactive/decommissioned),
   `first_seen_at`, `last_seen_at`
 - Detailed/volatile inventory (installed software, full hardware detail) lives in
@@ -91,9 +120,11 @@ A managed asset (computer or server). The central entity most modules attach to.
 
 ### DeviceGroup
 
-Organizational grouping for scoping policies, jobs, and RBAC.
+Organizational grouping for scoping policies and jobs. It organizes one
+client's devices and does not scope RBAC grants (MSP clients spec §2.1).
 
-- `id`, `org_id`, `name`, `parent_group_id` (hierarchical), `description`
+- `id`, `org_id`, `client_id` (required, fixed for the group's life),
+  `name`, `parent_group_id` (hierarchical, same client), `description`
 - Membership can be static or rule-based (rules stored as jsonb; evaluated by the
   inventory/policy engine)
 

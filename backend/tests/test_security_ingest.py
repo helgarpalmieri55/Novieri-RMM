@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.core.client_scope import ClientScope
 from app.core.signing import LocalEd25519Signer
 from app.core.tenancy import org_session
-from app.gateway.dispatch import handle_agent_message
+from app.gateway.dispatch import handle_agent_message, ui_channel
 from app.gateway.protocol import SecurityEventDoc, parse_agent_message
 from app.jobs.engine import JobEngine
 from app.models import Device, Organization, Policy, SecurityEvent
@@ -104,7 +104,8 @@ async def test_gateway_branch_ingests_and_queues_ui_event(
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
     await redis.flushdb()
     pubsub = redis.pubsub()
-    await pubsub.subscribe(f"ui:{org_id}")
+    # The device is on the org's internal client, whose id is the org's.
+    await pubsub.subscribe(ui_channel(org_id, org_id))
 
     msg = parse_agent_message(
         json.dumps(

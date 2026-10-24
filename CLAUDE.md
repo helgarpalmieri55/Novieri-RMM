@@ -112,6 +112,28 @@ one, stop and surface it rather than implementing around it.
 6. **RBAC is checked on every privileged endpoint and every job dispatch.**
    Authorization is server-side; the frontend never gates security.
 
+**5a. Dentro de una organización, todo dato de un cliente está limitado a los
+clientes del alcance de la sesión, y eso lo impone la base de datos mediante
+RLS, no solo el código.** *(Approved by the operator 2026-10-23.)* Un técnico
+limitado a ciertos clientes no puede leer ni escribir filas de otro. Una sesión
+sin alcance ve cero filas. Solo los procesos internos usan el alcance "todos", y
+cada uso está en una lista revisada.
+
+   *Alcance de la fase 1 (2026-10-24):* la base de datos impone 5a en las
+   tablas de `client_scope_catalog.PHASE_1`
+   (`backend/app/core/client_scope_catalog.py`), y solo en ellas. Las familias
+   de `PENDING_PHASE_2` — tickets, personas, licencias, suscripciones,
+   despliegues, IPAM, autorizaciones y ejecuciones de instalación remota,
+   repositorios de respaldo, y los módulos opcionales de continuidad (BCP),
+   presupuesto y gestión de cambios — todavía no tienen la política de cliente
+   y **siguen visibles para toda la organización hasta la fase 2**: un técnico
+   limitado al cliente X lee y escribe las de Y. Por eso, **hasta la fase 2 los
+   técnicos solo deben tener asignaciones de "todos los clientes"**; una
+   asignación limitada a un cliente no limita esas familias. El registro de
+   auditoría, el registro de correo entrante y el de entregas de
+   notificaciones, que guardan datos de todos los clientes en tablas sin
+   cliente, solo se leen con el permiso en todos los clientes.
+
 **1b. A device managed over a third-party management protocol (Apple MDM,
 Android EMM) is commanded over that protocol's trust model, never over the
 signed-job engine, and the two paths never meet.** *(Added 2026-08-16, on the

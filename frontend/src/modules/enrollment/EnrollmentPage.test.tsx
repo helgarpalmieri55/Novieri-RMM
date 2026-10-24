@@ -392,6 +392,12 @@ describe("EnrollmentPage", () => {
       name: "Bogota rollout",
       expires_in_hours: 72,
       max_uses: 1,
+      // RE-POINTED (MSP clients, phase 1): `POST /enrollment-tokens` requires
+      // the site a machine enrolled with the token lands in. Until the client
+      // selector (phase 3) the console issues for the organisation's internal
+      // client, whose "Principal" site has the organisation's id -- `/me`'s
+      // `org_id`, "o" in `renderPage`.
+      site_id: "o",
     });
   });
 

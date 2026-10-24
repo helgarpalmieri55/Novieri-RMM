@@ -189,9 +189,13 @@ Baseline roles and the Phase 0 permission set are seeded in a data migration.
   `enrollment.manage`, `audit.read`, `credentials.read`, `credentials.manage`,
   `policies.manage`, `orgs.manage`). Routers guard privileged endpoints with
   `require_permission("jobs.dispatch")`-style dependencies that resolve the
-  user's roles → permissions within the current org (optionally scoped to a
-  device group via `user_roles.device_group_id`). Enforcement is server-side
-  only; the frontend merely hides what the API would refuse.
+  user's roles → permissions within the current org. Each `user_roles` row is
+  scoped by `user_roles.client_id`: one client, or `NULL` for every client
+  (MSP clients spec §2.1; device groups no longer scope grants). The request's
+  client scope is the set of clients where the user holds the route's code,
+  narrowed by `X-Client-Id`, and RLS enforces it (`CLAUDE.md` invariant 5a).
+  Enforcement is server-side only; the frontend merely hides what the API
+  would refuse.
 - For tests, a **fake IdP** issues tokens from a local RSA key and serves a
   JWKS document; the validation code path is identical to production.
 
@@ -340,7 +344,7 @@ explicit tests:
 - **Audit:** chain verifies; tampering any historical row breaks verification
   at that link; update/delete raise.
 - **RBAC:** each privileged route returns 403 without the permission; role
-  seeds grant expected access; device-group-scoped technician access.
+  seeds grant expected access; client-scoped technician access.
 - **Enrollment:** happy path issues a cert binding device identity; expired/
   revoked/replayed tokens rejected; audit events written.
 - **Gateway:** integration test with a fake agent over real mTLS (test CA):

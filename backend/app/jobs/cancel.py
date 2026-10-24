@@ -272,7 +272,11 @@ async def request_cancellation(
         if stated:
             refusal += ". " + tr_marked(stated)
         raise CancelForbidden(refusal)
-    if not await has_permission(session, user_id, required):
+    # ASKED ABOUT THE JOB'S OWN CLIENT (MSP clients spec §2.1): whoever may
+    # start a job ON THAT CLIENT may stop it. Without the client only
+    # every-client grants would count. `job` was just read by the locking
+    # SELECT above, so `client_id` is loaded, not expired.
+    if not await has_permission(session, user_id, required, client_id=job.client_id):
         raise CancelForbidden(
             tr(
                 "cancelling a {job_type} job requires {required}, the permission its own dispatch "

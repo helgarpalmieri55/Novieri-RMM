@@ -293,7 +293,7 @@ export const OPERATOR_USER = {
       assignment_id: "a1111111-1111-4111-8111-111111111111",
       role_id: TECHNICIAN_ROLE.id,
       role_name: "technician",
-      device_group_id: null,
+      client_id: null,
     },
   ],
 };
@@ -312,33 +312,57 @@ export const CASEY_USER = {
 
 export const USERS_FIXTURE = { users: [OPERATOR_USER, CASEY_USER] };
 
-/** A device group, for the scope picker that replaced the pasted-id field. */
-export const WAREHOUSE_GROUP = {
+/**
+ * The clients a grant's scope can name (`GET /api/v1/clients`), for the
+ * picker that used to offer device groups: a grant is scoped to ONE CLIENT or
+ * to every client now, and device groups no longer scope grants (MSP clients
+ * spec §2.1). A customer, the organisation's internal client, and the
+ * unassigned client -- which no grant may name (the server answers 422), so
+ * the picker leaves it out.
+ */
+export const WAREHOUSE_CLIENT = {
   id: "44444444-4444-4444-8444-444444444444",
   name: "Warehouse",
-  parent_group_id: null,
-  description: "",
-  dynamic: false,
+  kind: "customer",
+  status: "active",
+  email_domains: [],
+  phone: "",
+  address: "",
+  website: "",
+  notes: "",
+  enabled_modules: [],
   device_count: 6,
-  precedence: 0,
-  archived_at: null,
+  site_count: 1,
 };
 
-export const DEVICE_GROUPS_FIXTURE = {
-  items: [WAREHOUSE_GROUP],
-  total: 1,
-  ungrouped_device_count: 0,
-  evaluation: null,
+export const INTERNAL_CLIENT = {
+  ...WAREHOUSE_CLIENT,
+  id: "org-1",
+  name: "Toeshee Group",
+  kind: "internal",
+  enabled_modules: ["budget", "bcp", "change"],
+  device_count: 40,
 };
+
+export const UNASSIGNED_CLIENT = {
+  ...WAREHOUSE_CLIENT,
+  id: "66666666-6666-4666-8666-666666666666",
+  name: "Unassigned",
+  kind: "unassigned",
+  device_count: 0,
+  site_count: 0,
+};
+
+export const CLIENTS_FIXTURE = [INTERNAL_CLIENT, WAREHOUSE_CLIENT, UNASSIGNED_CLIENT];
 
 export const EFFECTIVE_PERMISSIONS_FIXTURE = {
   user_id: OPERATOR_USER.id,
   codes: [
-    { code: "devices.read", via_role: "technician", device_group_id: null },
+    { code: "devices.read", via_role: "technician", client_id: null },
     {
       code: "devices.manage",
       via_role: "warehouse-technician",
-      device_group_id: "44444444-4444-4444-8444-444444444444",
+      client_id: "44444444-4444-4444-8444-444444444444",
     },
   ],
 };
@@ -386,7 +410,7 @@ export const calls = {
   setRolePermissions: vi.fn(),
   deleteRole: vi.fn(),
   listUsers: vi.fn(),
-  listDeviceGroups: vi.fn(),
+  listClients: vi.fn(),
   getUserEffectivePermissions: vi.fn(),
   createUser: vi.fn(),
   assignUserRole: vi.fn(),
@@ -462,7 +486,7 @@ export function installDefaults(permissions: readonly string[] = ALL_PERMISSIONS
   });
   calls.deleteRole.mockResolvedValue(undefined);
   calls.listUsers.mockResolvedValue(USERS_FIXTURE);
-  calls.listDeviceGroups.mockResolvedValue(DEVICE_GROUPS_FIXTURE);
+  calls.listClients.mockResolvedValue(CLIENTS_FIXTURE);
   calls.getUserEffectivePermissions.mockResolvedValue(EFFECTIVE_PERMISSIONS_FIXTURE);
   calls.createUser.mockResolvedValue({
     ...CASEY_USER,
@@ -474,7 +498,7 @@ export function installDefaults(permissions: readonly string[] = ALL_PERMISSIONS
     assignment_id: "a2222222-2222-4222-8222-222222222222",
     role_id: AUDITOR_ROLE.id,
     role_name: "auditor",
-    device_group_id: null,
+    client_id: null,
   });
   calls.removeUserRole.mockResolvedValue(undefined);
   calls.setUserEnabled.mockResolvedValue({ ...OPERATOR_USER, status: "disabled" });

@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.gateway.dispatch import queue_ui_event
+from app.gateway.dispatch import queue_job_ui_event
 from app.jobs.registry import JobType, register
 from app.models import Job
 from app.modules.deploy.artifacts import redact_deploy_params, refresh_deploy_params
@@ -42,9 +42,9 @@ def register_job_types() -> None:
                 f"invalid app.deploy result: {exc}"
             ) from exc
         await ingest_deploy_result(session, job, res)
-        queue_ui_event(
+        await queue_job_ui_event(
             session,
-            job.org_id,
+            job,
             {
                 "kind": "deploy_status_updated",
                 "device_id": str(job.target_id),
@@ -62,9 +62,9 @@ def register_job_types() -> None:
                 f"invalid script.run result: {exc}"
             ) from exc
         await ingest_script_result(session, job, res)
-        queue_ui_event(
+        await queue_job_ui_event(
             session,
-            job.org_id,
+            job,
             {
                 "kind": "script_run_updated",
                 "device_id": str(job.target_id),

@@ -74,7 +74,7 @@ from app.modules.agent_distribution.link_page import (
 from app.modules.agent_update.semver import Version, parse_version, try_parse_version
 from app.services import install_link as link_svc
 from app.services import msi_build
-from app.services.client_sites import SiteNotFound
+from app.services.client_sites import NotAcceptingNewRows, SiteNotFound
 
 #: The first agent that has `--msi-install` and `--msi-uninstall`. 1.6.0 was
 #: tagged before them (`agent-v1.6.0`); an MSI wrapping it would fail its own
@@ -414,6 +414,11 @@ async def _check(
         state = await link_svc.code_state(session, site_id, code=code, now=now)
     except SiteNotFound:
         raise MsiRefused(404, tr("no such site")) from None
+    except NotAcceptingNewRows as exc:
+        # An archived site or client (MSP clients Task 9): its link enrols
+        # nothing, so an MSI carrying it would install an agent that never
+        # appears here.
+        raise MsiRefused(409, exc.detail) from None
     if state == "off":
         raise MsiRefused(
             409,

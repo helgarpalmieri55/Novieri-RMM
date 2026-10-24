@@ -23,7 +23,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -109,6 +109,9 @@ const unarchiveDeviceGroup = vi.fn();
 const addDeviceGroupMembers = vi.fn();
 const removeDeviceGroupMember = vi.fn();
 
+/** `/me`'s `org_id`: the organisation's, and its internal client's, id. */
+const ORG = "00000000-0000-4000-8000-00000000000a";
+
 function renderPage(permissions: string[] = ["devices.read", "devices.manage"]) {
   mockUseApi.mockReturnValue({
     listDeviceGroups,
@@ -121,7 +124,9 @@ function renderPage(permissions: string[] = ["devices.read", "devices.manage"]) 
     unarchiveDeviceGroup,
     addDeviceGroupMembers,
     removeDeviceGroupMember,
-    me: vi.fn().mockResolvedValue({ permissions } as Me),
+    // `org_id` is the internal client's id (MSP clients, phase 1): a new
+    // group, and the preview of one, are filed under it.
+    me: vi.fn().mockResolvedValue({ permissions, org_id: ORG } as Me),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui: ReactElement = (
@@ -198,7 +203,6 @@ function references(over: Partial<DeviceGroupReferences> = {}): DeviceGroupRefer
     remote_policies: 0,
     health_assignments: 0,
     credentials: 0,
-    role_grants: 0,
     ...over,
   };
 }
@@ -390,7 +394,26 @@ describe("the editor", () => {
       // PATCH the difference between "absent" and "null" is the difference
       // between leaving a rules document alone and clearing it.
       rules: null,
+      // RE-POINTED (MSP clients, phase 1): a group organises one client's
+      // devices and `POST /device-groups` requires it. Until the client
+      // selector (phase 3) that is the internal client, whose id is `/me`'s
+      // `org_id`.
+      client_id: ORG,
     });
+  });
+
+  it("never sends a client when it edits a group, whose client is fixed", async () => {
+    // `client_id` is fixed for a group's life; the server's update model has
+    // no such field, so sending one would be a 422 on every edit.
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("servers");
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.click(await screen.findByRole("button", { name: "Save group" }));
+
+    await waitFor(() => expect(updateDeviceGroup).toHaveBeenCalledTimes(1));
+    expect(updateDeviceGroup.mock.calls[0]?.[1]).not.toHaveProperty("client_id");
   });
 
   it("refuses to send a group with no name, and says which field", async () => {
@@ -438,6 +461,9 @@ describe("archiving", () => {
             remote_policies: 0,
             health_assignments: 0,
             credentials: 0,
+            // A key an older server sent: a role grant named a group until
+            // grants were scoped by client (MSP clients spec §2.1), and the
+            // server has not counted them since. Never drawn.
             role_grants: 2,
           },
         }),
@@ -457,7 +483,9 @@ describe("archiving", () => {
       "/devices",
     );
     expect(within(dialog).getByRole("link", { name: /1 patch policy/ })).toBeTruthy();
-    expect(within(dialog).getByRole("link", { name: /2 role grants/ })).toBeTruthy();
+    // RE-POINTED: a role grant no longer names a group, so it is no longer a
+    // blocker the console lists -- even from a body that still carries it.
+    expect(within(dialog).queryByText(/role grant/)).toBeNull();
     // The blockers that are zero are absent, and nothing on screen is the raw
     // object.
     expect(within(dialog).queryByText(/blocked_by/)).toBeNull();
@@ -792,6 +820,9 @@ describe("the rules builder", () => {
     expect(previewDeviceGroupRules).toHaveBeenCalledWith(
       { all: [{ fact: "os_family", op: "eq", value: "windows" }] },
       null,
+      // RE-POINTED: a group not saved yet has no client of its own, so the
+      // preview names the one it will be created in -- the internal client.
+      ORG,
     );
   });
 

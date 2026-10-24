@@ -310,7 +310,6 @@ export const devices = {
       remote_policies: { one: "{count} remote-control policy", other: "{count} remote-control policies" },
       health_assignments: { one: "{count} health profile assignment", other: "{count} health profile assignments" },
       credentials: { one: "{count} stored credential", other: "{count} stored credentials" },
-      role_grants: { one: "{count} role grant narrowed to it", other: "{count} role grants narrowed to it" },
     },
     fact: {
       hostname: "Hostname",

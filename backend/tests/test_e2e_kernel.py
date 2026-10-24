@@ -18,6 +18,7 @@ import websockets
 
 from app.core.ca import LocalCA
 from app.core.signing import LocalEd25519Signer, verify_signature
+from app.gateway.dispatch import ui_channel
 from app.gateway.main import GatewayServer
 from app.jobs.canonical import canonical_bytes
 from app.jobs.engine import JobEngine
@@ -170,7 +171,9 @@ async def test_kernel_end_to_end(api_env, kernel, tmp_path: Path) -> None:
         # === Phase 1: an inventory sweep through the same signed-job loop ===
         ui = aioredis.from_url(REDIS_URL, decode_responses=True)
         pubsub = ui.pubsub()
-        await pubsub.subscribe(f"ui:{org_id}")
+        # Enrolled on the internal client's site (`site_id=org_id`): the
+        # device's client, and so its channel, is the org's internal client.
+        await pubsub.subscribe(ui_channel(org_id, org_id))
 
         sweep = await api_env.client.post(
             "/api/v1/jobs",

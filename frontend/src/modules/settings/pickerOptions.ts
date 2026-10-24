@@ -1,32 +1,69 @@
 /**
- * The device group a role grant's scope can name (cycle 9).
+ * The client a role grant's scope can name.
  *
- * WHY THIS EXISTS. The grant form took a device group as a pasted id with a
- * help line explaining why -- "no endpoint serves device groups yet" was
- * true when it was written and stopped being true once `GET
- * /api/v1/device-groups` shipped for the Device groups page. The picker
- * below points at the same endpoint that page already lists from.
+ * WHY THIS EXISTS. The grant form took a device group as a pasted id, then
+ * (cycle 9) from a picker fed by `GET /api/v1/device-groups`. The MSP clients
+ * model scopes a grant to ONE CLIENT or to every client
+ * (`user_roles.client_id`, spec §2.1), and device groups no longer scope
+ * grants, so the same picker is fed by `GET /api/v1/clients` now.
  */
 
 import type { PickerOption } from "../../components/picker";
 import { translate } from "../../i18n/core";
-import type { DeviceGroup } from "../../lib/api";
+
+/** What the picker reads of a client (`ClientOut` is one). */
+export interface GrantableClient {
+  id: string;
+  name: string;
+  kind: string;
+  status: string;
+  device_count: number;
+}
 
 /** Worded when it is read (a constant would freeze the language the page started in). */
-export function groupPickerEmptyHint(): string {
-  return translate("settings.groupPicker.emptyHint");
+export function clientPickerEmptyHint(): string {
+  return translate("settings.clientPicker.emptyHint");
 }
 
 /**
- * Archived groups are excluded -- see
- * `modules/deploy/pickerOptions.ts::groupPickerOptions` for why.
+ * The clients a grant may name. Never the `unassigned` client -- no grant may
+ * point at it, and the server answers 422 (spec §2.2) -- and never an archived
+ * one, which takes no new grant either. `GET /clients` already leaves archived
+ * clients out; the filter says so here as well rather than trusting it.
  */
-export function groupPickerOptions(groups: readonly DeviceGroup[]): PickerOption[] {
-  return groups
-    .filter((group) => group.archived_at === null)
-    .map((group) => ({
-      id: group.id,
-      label: group.name,
-      sublabel: translate("settings.groupPicker.devices", { count: group.device_count }),
+export function clientPickerOptions(clients: readonly GrantableClient[]): PickerOption[] {
+  return clients
+    .filter((client) => client.kind !== "unassigned" && client.status !== "archived")
+    .map((client) => ({
+      id: client.id,
+      label: client.name,
+      sublabel: translate("settings.clientPicker.devices", { count: client.device_count }),
     }));
+}
+
+/**
+ * THE "EVERY CLIENT" CHOICE (final review, T11R-I1). A grant on every client
+ * (`client_id: null`) used to be what an EMPTY box meant -- so text typed and
+ * never chosen ("Ware") left the box reading "Ware" while the grant went to
+ * every client. Every client is now an option like any client, chosen or not
+ * chosen; this id is the picker's only, and is sent as `null`, never as
+ * itself (`grantClientIdFor`).
+ */
+export const EVERY_CLIENT_CHOICE = "every-client";
+
+/** The grant scope picker's options: "Every client" first, then the clients a grant may name. */
+export function grantScopeOptions(clients: readonly GrantableClient[]): PickerOption[] {
+  return [
+    {
+      id: EVERY_CLIENT_CHOICE,
+      label: translate("settings.clientPicker.everyClient"),
+      sublabel: translate("settings.clientPicker.everyClientHint"),
+    },
+    ...clientPickerOptions(clients),
+  ];
+}
+
+/** What a committed choice sends: `null` for every client, else the client's id. */
+export function grantClientIdFor(choice: string): string | null {
+  return choice === EVERY_CLIENT_CHOICE ? null : choice;
 }

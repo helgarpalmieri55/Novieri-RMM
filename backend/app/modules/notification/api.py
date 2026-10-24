@@ -667,7 +667,12 @@ async def list_deliveries_route(
     until: datetime | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    ctx: AuthContext = Depends(require_permission("notification.read")),
+    # EVERY CLIENT'S RECIPIENTS (MSP clients spec, invariant 5a):
+    # `notification_deliveries` is a G table holding the address and event of
+    # every delivery for every client, so reading it needs
+    # `notification.read` on every client, not on one
+    # (`tests/test_global_writes.py::GLOBAL_READS`).
+    ctx: AuthContext = Depends(require_permission_on_every_client("notification.read")),
 ) -> DeliveryListResponse:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients

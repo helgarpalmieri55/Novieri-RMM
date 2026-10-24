@@ -14,7 +14,7 @@ from typing import Any
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.gateway.dispatch import queue_ui_event
+from app.gateway.dispatch import queue_job_ui_event
 from app.jobs.registry import JobType, register
 from app.models import Job
 from app.modules.provisioning.enroll import ingest_provision_result
@@ -33,9 +33,9 @@ def register_job_types() -> None:
                 f"invalid provision.enroll result: {exc}"
             ) from exc
         await ingest_provision_result(session, job, res)
-        queue_ui_event(
+        await queue_job_ui_event(
             session,
-            job.org_id,
+            job,
             {
                 "kind": "provisioning_status_updated",
                 "device_id": str(job.target_id),
