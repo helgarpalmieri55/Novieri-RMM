@@ -29,9 +29,9 @@ from app.core.events import publish as publish_event
 from app.core.i18n import tr
 from app.core.signing import SigningService
 from app.core.tenancy import org_session
-from app.models import Agent, Device, EnrollmentToken, SuggestedAssetMatch
+from app.models import Agent, Client, Device, EnrollmentToken, Site, SuggestedAssetMatch
 from app.services import install_link as link_svc
-from app.services.client_sites import site_for_new_rows
+from app.services.client_sites import CLIENT_ARCHIVED, site_for_new_rows
 from app.services.matching import resolve_enrolment_target
 
 
@@ -468,6 +468,61 @@ async def revoke_token(
     return True
 
 
+async def revoke_live_tokens(
+    session: AsyncSession,
+    *,
+    org_id: UUID,
+    actor_id: UUID,
+    reason: str,
+    now: datetime,
+    client_id: UUID | None = None,
+    site_id: UUID | None = None,
+) -> int:
+    """Revoke every unrevoked, unexpired token of one client or one site, each
+    audited `enrollment.token_revoked` with `reason`. Returns how many.
+
+    For archiving (MSP clients Task 9). `enroll` already refuses a token whose
+    site or client is archived; revoking them as well is what the token list
+    then shows, and what survives an unarchive should one ever exist.
+    """
+    if (client_id is None) == (site_id is None):
+        raise ValueError(  # i18n-exempt: caller contract, unhandled 500
+            "revoke_live_tokens takes exactly one of client_id / site_id"
+        )
+    query = select(EnrollmentToken).where(
+        EnrollmentToken.org_id == org_id,
+        EnrollmentToken.revoked.is_(False),
+        EnrollmentToken.expires_at > now,
+    )
+    if client_id is not None:
+        query = query.where(EnrollmentToken.client_id == client_id)
+    else:
+        query = query.where(EnrollmentToken.site_id == site_id)
+    rows = (
+        (await session.execute(query.order_by(EnrollmentToken.id).with_for_update()))
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        row.revoked = True
+        await session.flush()
+        await audit_service.record(
+            session,
+            org_id=org_id,
+            actor_type="user",
+            actor_id=actor_id,
+            action="enrollment.token_revoked",
+            target_type="enrollment_token",
+            target_id=str(row.id),
+            metadata={
+                "reason": reason,
+                "client_id": str(row.client_id),
+                "site_id": str(row.site_id),
+            },
+        )
+    return len(rows)
+
+
 async def revoke_agent(
     session: AsyncSession, *, org_id: UUID, actor_id: UUID, device_id: UUID
 ) -> str | None:
@@ -572,6 +627,21 @@ async def enroll(
         # rows are surfaced instead — `TokenPage.unlimited_count` counts them and
         # the console offers the filter that lists them — so a human revokes
         # them, which is an act with a name and an audit entry.
+        #
+        # AN ARCHIVED SITE OR CLIENT ENROLS NOTHING (MSP clients Task 9), even
+        # with a token that predates the archive: archiving revokes the live
+        # tokens, and this is the rule where it binds -- one more condition of
+        # the same guarded UPDATE, so it is the same 403 with no detail.
+        site_open = (
+            select(Site.id)
+            .join(Client, Client.id == Site.client_id)
+            .where(
+                Site.id == EnrollmentToken.site_id,
+                Site.archived_at.is_(None),
+                Client.status != CLIENT_ARCHIVED,
+            )
+            .exists()
+        )
         consumed = (
             await session.execute(
                 update(EnrollmentToken)
@@ -582,6 +652,7 @@ async def enroll(
                     EnrollmentToken.expires_at > datetime.now(UTC),
                     (EnrollmentToken.max_uses.is_(None))
                     | (EnrollmentToken.use_count < EnrollmentToken.max_uses),
+                    site_open,
                 )
                 .values(use_count=EnrollmentToken.use_count + 1)
                 # The client and site come from the row this statement

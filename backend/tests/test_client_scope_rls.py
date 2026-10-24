@@ -911,11 +911,15 @@ async def test_a_narrowed_scope_cannot_change_a_users_status(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     """`users.status` is the admission gate (spec §3): re-enabling a disabled
-    account is the every-client user administration's act, never a narrowed
+    TECHNICIAN is the every-client user administration's act, never a narrowed
     scope's. A staff row is out of a narrowed scope's reach since Task 8
-    (`client_isolation_update`: the UPDATE matches nothing); on a contact of
-    its own client, `its_user_identity_guard` holds `status` with `kind` and
-    `external_subject`."""
+    (`client_isolation_update`: the UPDATE matches nothing), and
+    `its_user_identity_guard` holds a staff row's `status` for any scope but
+    all. Another client's contact is not even visible.
+
+    A contact of the scope's OWN client is that client's to switch on and off
+    since Task 9 (addendum decision 1):
+    `test_a_narrowed_scope_switches_its_own_contact_but_never_rewrites_identity`."""
     c = await _two_clients(admin_engine)
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         staff = User(
@@ -931,11 +935,10 @@ async def test_a_narrowed_scope_cannot_change_a_users_status(
         assert await _rowcount(
             s, "UPDATE users SET status = 'active' WHERE id = :u", u=staff.id
         ) == 0
-    with pytest.raises(DBAPIError, match="only under the every-client scope"):
-        async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
-            await s.execute(
-                text("UPDATE users SET status = 'active' WHERE id = :u"), {"u": contact.id}
-            )
+    async with org_session(c.org, clients=ClientScope.only([c.y]), engine=app_engine) as s:
+        assert await _rowcount(
+            s, "UPDATE users SET status = 'active' WHERE id = :u", u=contact.id
+        ) == 0
     async with AsyncSession(admin_engine) as s:
         statuses = set(
             (
@@ -949,3 +952,50 @@ async def test_a_narrowed_scope_cannot_change_a_users_status(
         assert await _rowcount(
             s, "UPDATE users SET status = 'active' WHERE id = :u", u=staff.id
         ) == 1
+
+
+async def test_a_narrowed_scope_switches_its_own_contact_but_never_rewrites_identity(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Addendum decision 1 (Task 9): `PATCH /contacts/{id}` needs
+    `clients.manage` on the contact's client, so a technician limited to X
+    disables and re-enables X's contacts. `its_user_identity_guard`, as
+    migration 0232 redefines it (0231's own body refused this), holds
+    `status` under a scope that is not all ONLY on a staff row; `kind` and
+    `external_subject` stay every-client acts on every row, a contact's
+    included."""
+    c = await _two_clients(admin_engine)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        contact = User(
+            org_id=c.org, external_subject=uuid4().hex, email="c@test.local",
+            kind="contact", client_id=c.x,
+        )
+        s.add(contact)
+        await s.commit()
+    async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
+        assert await _rowcount(
+            s, "UPDATE users SET status = 'disabled' WHERE id = :u", u=contact.id
+        ) == 1
+    async with AsyncSession(admin_engine) as s:
+        assert (
+            await s.execute(select(User.status).where(User.id == contact.id))
+        ).scalar_one() == "disabled"
+    async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
+        assert await _rowcount(
+            s, "UPDATE users SET status = 'active' WHERE id = :u", u=contact.id
+        ) == 1
+    for sql in (
+        "UPDATE users SET kind = 'staff', client_id = NULL WHERE id = :u",
+        "UPDATE users SET external_subject = 'taken' WHERE id = :u",
+        "UPDATE users SET status = 'disabled', external_subject = 'taken' WHERE id = :u",
+    ):
+        with pytest.raises(DBAPIError, match="only under the every-client scope"):
+            async with org_session(
+                c.org, clients=ClientScope.only([c.x]), engine=app_engine
+            ) as s:
+                await s.execute(text(sql), {"u": contact.id})
+    async with AsyncSession(admin_engine) as s:
+        after = (await s.execute(select(User).where(User.id == contact.id))).scalar_one()
+    assert (after.kind, after.client_id, after.external_subject, after.status) == (
+        "contact", c.x, contact.external_subject, "active",
+    )

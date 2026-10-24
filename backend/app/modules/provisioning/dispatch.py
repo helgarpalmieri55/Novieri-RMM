@@ -48,6 +48,7 @@ from app.modules.provisioning.schema import ProvisionWakeRequest
 from app.modules.site_server.dispatch import wake_via_site_server
 from app.modules.site_server.errors import SiteServerError
 from app.modules.site_server.registry import list_site_servers
+from app.services.client_sites import NotAcceptingNewRows, SiteNotFound
 from app.services.enrollment import create_token
 
 _ANSWER_FILE_OS_FAMILIES = {"windows", "linux"}
@@ -212,19 +213,30 @@ async def start_provision_run(
     session.add(run)
     await session.flush()  # populate run.id before it's used as the token name / answer key
 
-    issued = await create_token(
-        session,
-        org_id=org_id,
-        # PHASE 2: the client the machine is provisioned for (plan "Fuera de
-        # esta fase"). Imaging is hidden in phase 1 (MSP clients spec §1.4), so
-        # the machine joins the internal client's Principal site, whose id is
-        # the organisation's (plan Global Constraints: id convention).
-        site_id=org_id,
-        created_by=actor_id,
-        name=f"provision:{run.id}",
-        expires_in_hours=24,
-        max_uses=1,
-    )
+    try:
+        issued = await create_token(
+            session,
+            org_id=org_id,
+            # PHASE 2: the client the machine is provisioned for (plan "Fuera de
+            # esta fase"). Imaging is hidden in phase 1 (MSP clients spec §1.4),
+            # so the machine joins the internal client's Principal site, whose id
+            # is the organisation's (plan Global Constraints: id convention).
+            site_id=org_id,
+            created_by=actor_id,
+            name=f"provision:{run.id}",
+            expires_in_hours=24,
+            max_uses=1,
+        )
+    except SiteNotFound:
+        # A scope that cannot see the internal client (the route requires every
+        # client, so only a direct caller reaches this): a refusal, not a 500.
+        raise ProvisioningValidationError(
+            tr("the internal client's Principal site is not visible to this request")
+        ) from None
+    except NotAcceptingNewRows as exc:
+        # Archived (MSP clients Task 9): the API refuses to archive this site,
+        # so only a change behind its back reaches this.
+        raise ProvisioningValidationError(exc.detail) from None
     run.enrollment_token_id = issued.id
 
     if image.os_family in _ANSWER_FILE_OS_FAMILIES:

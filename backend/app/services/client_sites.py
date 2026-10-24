@@ -44,27 +44,46 @@ class NotAcceptingNewRows(Exception):
         self.detail = detail
 
 
+async def site_and_client_status(
+    session: AsyncSession, site_id: UUID, *, org_id: UUID | None = None
+) -> tuple[Site, str] | None:
+    """The site as this session sees it, with its client's status -- or None.
+
+    `org_id`, when given, mirrors RLS rather than relying on it, so a caller
+    on the admin engine cannot reach another organisation's site.
+    """
+    query = select(Site, Client.status).join(Client, Client.id == Site.client_id)
+    query = query.where(Site.id == site_id)
+    if org_id is not None:
+        query = query.where(Site.org_id == org_id)
+    found = (await session.execute(query)).one_or_none()
+    if found is None:
+        return None
+    return found[0], found[1]
+
+
+def refuse_if_closed(site: Site, client_status: str) -> None:
+    """`NotAcceptingNewRows` for an archived site, or a site of an archived
+    client. Shared by every path that files or enrols something under a site
+    (MSP clients Task 9: enrollment refuses both, whatever predates the
+    archive), so the sentence is the same everywhere."""
+    if site.archived_at is not None:
+        raise NotAcceptingNewRows(tr("that site is archived"))
+    if client_status == CLIENT_ARCHIVED:
+        raise NotAcceptingNewRows(tr("that client is archived"))
+
+
 async def site_for_new_rows(session: AsyncSession, *, org_id: UUID, site_id: UUID) -> Site:
     """The site a new row is filed under, with its client checked too.
 
     The `org_id` predicate mirrors RLS rather than relying on it, so a caller
     on the admin engine cannot file a row under another organisation's site.
     """
-    found = (
-        await session.execute(
-            select(Site, Client.status)
-            .join(Client, Client.id == Site.client_id)
-            .where(Site.id == site_id, Site.org_id == org_id)
-        )
-    ).one_or_none()
+    found = await site_and_client_status(session, site_id, org_id=org_id)
     if found is None:
         raise SiteNotFound(site_id)
-    site: Site = found[0]
-    client_status = found[1]
-    if site.archived_at is not None:
-        raise NotAcceptingNewRows(tr("that site is archived"))
-    if client_status == CLIENT_ARCHIVED:
-        raise NotAcceptingNewRows(tr("that client is archived"))
+    site, client_status = found
+    refuse_if_closed(site, client_status)
     return site
 
 

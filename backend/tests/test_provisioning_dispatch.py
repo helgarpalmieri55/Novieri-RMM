@@ -520,3 +520,54 @@ async def test_start_provision_run_raises_for_an_id_rls_has_hidden(
                     actor_id=actor_b,
                     actor_type="user",
                 )
+
+
+async def test_start_provision_run_refuses_an_archived_principal_site_cleanly(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """MSP clients Task 9: the run's token is minted for the internal client's
+    Principal site. The API never archives it; archived behind its back, the
+    mint's refusal is a validation error (a 422 at the route), not a 500, and
+    nothing of the run survives."""
+    from sqlalchemy import update
+
+    from app.models import EnrollmentToken, Site
+
+    vault = LocalVaultService(tmp_path / "root.key")
+    org_id, actor_id = await _org_and_user(admin_engine)
+    now = datetime(2026, 7, 23, tzinfo=UTC)
+
+    with mock_aws():
+        object_store = _object_store(tmp_path)
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
+            profile = await _make_profile(session, vault, org_id, actor_id)
+            await session.commit()
+            profile_id = profile.id
+        async with AsyncSession(admin_engine) as session:
+            await session.execute(update(Site).where(Site.id == org_id).values(archived_at=now))
+            await session.commit()
+
+        with pytest.raises(ProvisioningValidationError, match="that site is archived"):
+            async with org_session(
+                org_id, engine=app_engine, clients=ClientScope.all()
+            ) as session:
+                await start_provision_run(
+                    session,
+                    object_store,
+                    vault,
+                    org_id=org_id,
+                    profile_id=profile_id,
+                    target_ref=None,
+                    now=now,
+                    actor_id=actor_id,
+                    actor_type="user",
+                )
+    async with AsyncSession(admin_engine) as session:
+        assert (
+            await session.execute(select(ProvisionRun).where(ProvisionRun.org_id == org_id))
+        ).first() is None
+        assert (
+            await session.execute(
+                select(EnrollmentToken).where(EnrollmentToken.org_id == org_id)
+            )
+        ).first() is None

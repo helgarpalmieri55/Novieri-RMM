@@ -104,7 +104,10 @@ def test_the_allowlist_guard_is_not_vacuous() -> None:
 
 def test_no_route_file_holds_the_all_scope() -> None:
     """Spec §2.3: the HTTP route files (`api.py`, `api/v1/*`) may not use it.
-    (Task 9's client creation and archiving will be the named exceptions.)"""
+    Task 9's client creation and archiving, which spec §2.3 names as the
+    exceptions, turned out to need none: `require_permission_on_every_client`
+    admits only a request whose own scope is every client, and the route
+    passes that scope on."""
     routes = sorted(
         key
         for key in ALL_SCOPE_ALLOWLIST

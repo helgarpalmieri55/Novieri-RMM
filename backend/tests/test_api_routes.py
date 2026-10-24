@@ -43,6 +43,9 @@ async def test_me_returns_identity_and_permissions(api_env) -> None:
         # Migration 0095: a technician sees fleet versions and rollouts; only
         # an org-admin starts one (spec-self-update.md §8.3).
         "agent.update.read",
+        # Migration 0232 (MSP clients spec §2.1): whoever reads the fleet reads
+        # which client each machine belongs to. Managing clients is admin's.
+        "clients.read",
         "jobs.read",
         "jobs.dispatch",
         "docs.read",

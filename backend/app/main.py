@@ -278,6 +278,7 @@ def create_app(
     app.include_router(probes_router)
 
     from app.api.v1.audit import router as audit_router
+    from app.api.v1.clients import router as clients_router
     from app.api.v1.credentials import router as credentials_router
     from app.api.v1.dashboard import router as dashboard_router
     from app.api.v1.device_groups import router as device_groups_router
@@ -308,6 +309,10 @@ def create_app(
     # of this device". Separate router, separate namespace -- the same
     # first-registered-wins hazard the access-control note below records.
     app.include_router(device_groups_router, prefix="/api/v1")
+    # MSP clients spec §3.2: `/clients` and the `/sites/{id}` and
+    # `/contacts/{id}` routes beneath them. `/sites/{id}/install-link` is
+    # `install_link_router`'s, a longer path, so the two never shadow.
+    app.include_router(clients_router, prefix="/api/v1")
     app.include_router(jobs_router, prefix="/api/v1")
     app.include_router(audit_router, prefix="/api/v1")
     app.include_router(credentials_router, prefix="/api/v1")

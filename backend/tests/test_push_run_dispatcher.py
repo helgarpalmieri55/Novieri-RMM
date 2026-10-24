@@ -164,3 +164,49 @@ async def test_an_unreadable_secret_is_refused_and_nothing_is_signed(
     assert vault.calls == 1
     assert await _count(admin_engine, Job, world.org.org_id) == 0
     assert await _count(admin_engine, EnrollmentToken, world.org.org_id) == 0
+
+
+# --------------------------------------------------------------------------- #
+# MSP clients Task 9: an archived site or client enrols nothing
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_target_of_an_archived_site_is_a_named_refusal_before_the_vault(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine, tmp_path: Path
+) -> None:
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
+
+    from app.models import Site
+
+    world = await run_world(admin_engine, "rd-arch", octet=91, count=1)
+    async with AsyncSession(admin_engine) as session:
+        # `seed_asset` files the target under the Principal site (id = org id).
+        await session.execute(
+            update(Site).where(Site.id == world.org.org_id).values(archived_at=datetime.now(UTC))
+        )
+        await session.commit()
+    vault = FakeVault()
+    dispatcher = make_dispatcher(tmp_path, vault=vault)
+    outcome = await _dispatch_one(app_engine, world, dispatcher, uuid4())
+    assert outcome.refusals == ("site_archived",) and not outcome.dispatched
+    assert vault.calls == 0
+    assert await _count(admin_engine, Job, world.org.org_id) == 0
+
+
+async def test_a_site_archived_after_the_checks_is_a_named_refusal_and_mints_nothing(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine, tmp_path: Path, monkeypatch
+) -> None:
+    from app.modules.agent_push import dispatch as dispatch_module
+    from app.services.client_sites import NotAcceptingNewRows
+
+    async def closed(*_args, **_kwargs):
+        raise NotAcceptingNewRows("that site is archived")
+
+    monkeypatch.setattr(dispatch_module, "create_token", closed)
+    world = await run_world(admin_engine, "rd-arch-late", octet=92, count=1)
+    outcome = await _dispatch_one(app_engine, world, make_dispatcher(tmp_path), uuid4())
+    assert outcome.refusals == ("site_archived",) and not outcome.dispatched
+    assert await _count(admin_engine, Job, world.org.org_id) == 0
+    assert await _count(admin_engine, EnrollmentToken, world.org.org_id) == 0

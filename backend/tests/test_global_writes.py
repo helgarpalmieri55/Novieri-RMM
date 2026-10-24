@@ -44,6 +44,10 @@ GATE = "require_permission_on_every_client.<locals>.on_every_client"
 GLOBAL_WRITES: dict[tuple[str, str], str] = {
     # organization settings (`organizations`, the realm's mail settings)
     ("PATCH", "/api/v1/orgs/current"): "orgs.manage",
+    # the list of clients itself (MSP clients spec §2.1): creating and
+    # archiving one need `clients.manage` AND a scope of every client
+    ("POST", "/api/v1/clients"): "clients.manage",
+    ("POST", "/api/v1/clients/{client_id}/archive"): "clients.manage",
     ("PUT", "/api/v1/settings/email"): "orgs.manage",
     ("POST", "/api/v1/settings/email/test"): "orgs.manage",
     # the platform error monitor (`platform_error_group`)
@@ -187,6 +191,11 @@ NOT_GLOBAL: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/budget/cost-centers"): "C: cost_center",
     ("PATCH", "/api/v1/budget/cost-centers/{cost_center_id}"): "C: cost_center",
     ("PUT", "/api/v1/budget/settings"): "C: budget_settings",
+    # Spec §2.1: editing a client and its contacts needs `clients.manage` ON
+    # THAT CLIENT -- one client's own row, which RLS confines to the scope.
+    ("PATCH", "/api/v1/clients/{client_id}"): "clients: that client's own row",
+    ("POST", "/api/v1/clients/{client_id}/contacts"): "O: users, a contact of that client",
+    ("PATCH", "/api/v1/contacts/{contact_id}"): "O: users, a contact of that client",
     # `mcp.use` gates a person's own revocation; revoking an app for EVERYONE
     # is global and is refused inside the handler (tested below).
     ("POST", "/api/v1/mcp/connections/{client_id}/revoke"): "personal, or global by body",
