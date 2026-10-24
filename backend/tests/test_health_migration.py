@@ -442,7 +442,9 @@ async def test_two_group_level_assignments_for_one_group_are_refused(
 async def test_two_org_default_assignments_are_refused(admin_engine: AsyncEngine) -> None:
     fx = await _fixture(admin_engine, "asg-org")
     assert (await _add_assignment(admin_engine, fx)).startswith("ACCEPTED:")
-    assert (await _add_assignment(admin_engine, fx)) == "refused by uq_health_assignment_org"
+    assert (
+        await _add_assignment(admin_engine, fx)
+    ) == "refused by uq_health_assignment_client_org"
 
 
 async def test_one_assignment_at_each_of_the_three_levels_coexists(

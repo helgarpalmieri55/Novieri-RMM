@@ -15,6 +15,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import AuthContext, require_permission
 from app.core.audit import audit_service
@@ -27,12 +28,14 @@ from app.modules.backup.models import (
     BackupRecoveryKey,
 )
 from app.modules.backup.offsite import (
+    TARGET_NAME_KEY,
     OffsiteError,
     OffsiteSecret,
     create_target,
     get_target,
     request_test,
     set_repository_target,
+    target_name_taken,
     update_target,
 )
 from app.modules.backup.recovery import (
@@ -207,6 +210,18 @@ def _settings(body: _TargetSettings) -> dict[str, Any]:
     return body.model_dump(exclude={"access_key_id", "secret_access_key"})
 
 
+def _name_exists() -> HTTPException:
+    return HTTPException(status.HTTP_409_CONFLICT, tr("An off-site target with that name exists."))
+
+
+def _name_clash(exc: IntegrityError) -> bool:
+    """A unique violation on the target-name key: two writes raced past the
+    check (or a rename met a name), and the answer is the check's 409."""
+    return getattr(getattr(exc.orig, "__cause__", None), "constraint_name", None) == (
+        TARGET_NAME_KEY
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Off-site targets
 # --------------------------------------------------------------------------- #
@@ -237,25 +252,22 @@ async def create_target_route(
 ) -> TargetOut:
     state = request.app.state
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
-        exists = (
-            await session.execute(
-                select(BackupOffsiteTarget.id).where(
-                    BackupOffsiteTarget.org_id == ctx.org_id, BackupOffsiteTarget.name == body.name
-                )
+        # A new target is global (phase 1 writes no client): the global names.
+        if await target_name_taken(session, ctx.org_id, None, body.name):
+            raise _name_exists()
+        try:
+            target = await create_target(
+                session,
+                state.vault,
+                org_id=ctx.org_id,
+                actor_id=ctx.user_id,
+                settings=_settings(body),
+                secret=OffsiteSecret(body.access_key_id, body.secret_access_key),
             )
-        ).scalar_one_or_none()
-        if exists is not None:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT, tr("An off-site target with that name exists.")
-            )
-        target = await create_target(
-            session,
-            state.vault,
-            org_id=ctx.org_id,
-            actor_id=ctx.user_id,
-            settings=_settings(body),
-            secret=OffsiteSecret(body.access_key_id, body.secret_access_key),
-        )
+        except IntegrityError as exc:
+            if _name_clash(exc):
+                raise _name_exists() from None
+            raise
         await session.refresh(target)
         return _target_out(target)
 
@@ -282,10 +294,15 @@ async def update_target_route(
             if body.access_key_id is not None and body.secret_access_key is not None
             else None
         )
-        await update_target(
-            session, state.vault, target, actor_id=ctx.user_id, settings=_settings(body),
-            secret=secret,
-        )
+        try:
+            await update_target(
+                session, state.vault, target, actor_id=ctx.user_id, settings=_settings(body),
+                secret=secret,
+            )
+        except IntegrityError as exc:
+            if _name_clash(exc):
+                raise _name_exists() from None
+            raise
         await session.refresh(target)
         return _target_out(target)
 

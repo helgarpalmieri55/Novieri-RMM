@@ -530,8 +530,10 @@ async def pre_dispatch_checks(
             if transports[decision.address][0] == "winrm":
                 confirmed[decision.address] = KERBEROS_HOST_KEY_SENTINEL
                 continue
+            # The target device's client's key (migration 0231, Task 8b): two
+            # clients' machines at one address are two hosts.
             fingerprint, reason = await host_key_service.confirmed_key_for(
-                session, org_id, decision.address
+                session, org_id, decision.address, device_id=decision.device_id
             )
             if fingerprint is None:
                 assert reason is not None

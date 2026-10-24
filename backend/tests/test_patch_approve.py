@@ -240,7 +240,7 @@ async def test_approve_patch_concurrent_first_approvals_do_not_race(
     `(org_id, patch_id, ring_name)` can both miss it (both see "not found")
     before either has written. The fix mirrors the `create_rate`/
     `create_category` shape (hardening-3): the actual insert goes through
-    `ON CONFLICT DO NOTHING` against `uq_patch_approvals_org_patch_ring`.
+    `ON CONFLICT DO NOTHING` against `uq_patch_approvals_client_patch_ring`.
 
     Unlike those, `approve_patch`'s side effects (flipping
     `DevicePatchStatus` rows, writing the audit event) must happen exactly

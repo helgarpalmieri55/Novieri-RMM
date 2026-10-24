@@ -85,10 +85,13 @@ from app.models import (
     User,
 )
 from app.services.device_groups import DeviceGroupError, create_device_group
-from tests.client_scope_support import everything_on
+from tests.client_scope_support import (
+    deparse_policies,
+    everything_on,
+    expected_client_policies,
+)
 from tests.conftest import APP_ROLE, ApiEnv
 from tests.health_fixtures import seed_check, seed_profile
-from tests.test_client_catalog import deparse_policies, expected_client_policies
 
 #: What `app_user` meets writing a row its scope may not hold. Postgres checks
 #: the policies' WITH CHECK before NOT NULL and before unique indexes, so it
@@ -253,7 +256,7 @@ async def test_every_scoped_table_hides_other_clients_rows(
     policies of spec §2.2 -- the full set by name, each restrictive, for every
     role, with its command and both expressions as Postgres deparses them. The
     expected policies are written once, in
-    `tests/test_client_catalog.py::expected_client_policies`; a dropped,
+    `tests/client_scope_support.py::expected_client_policies`; a dropped,
     loosened or extra client policy turns this table's row red. What the
     expressions DO is the behavioural tests below."""
     expected = expected_client_policies(table)

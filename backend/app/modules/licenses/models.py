@@ -130,7 +130,14 @@ class SoftwareIgnore(Base):
     __tablename__ = "software_ignore"
     __table_args__ = (
         client_org_fk("software_ignore"),
-        UniqueConstraint("org_id", "name", name="uq_software_ignore_org_name"),
+        # Per client, the global rows among themselves (migration 0231, Task 8b).
+        UniqueConstraint(
+            "org_id",
+            "client_id",
+            "name",
+            name="uq_software_ignore_client_name",
+            postgresql_nulls_not_distinct=True,
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()

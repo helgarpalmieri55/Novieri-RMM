@@ -215,7 +215,14 @@ class BackupOffsiteTarget(Base):
     __tablename__ = "backup_offsite_targets"
     __table_args__ = (
         client_org_fk("backup_offsite_targets"),
-        UniqueConstraint("org_id", "name", name="uq_backup_offsite_targets_org_name"),
+        # Per client, the global rows among themselves (migration 0231, Task 8b).
+        UniqueConstraint(
+            "org_id",
+            "client_id",
+            "name",
+            name="uq_backup_offsite_targets_client_name",
+            postgresql_nulls_not_distinct=True,
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()
@@ -312,11 +319,14 @@ class BackupRecoveryKey(Base):
     __tablename__ = "backup_recovery_keys"
     __table_args__ = (
         client_org_fk("backup_recovery_keys"),
+        # Per client, the global rows among themselves (migration 0231, Task 8b).
         Index(
-            "uq_backup_recovery_keys_active",
+            "uq_backup_recovery_keys_client_active",
             "org_id",
+            "client_id",
             "fingerprint",
             unique=True,
+            postgresql_nulls_not_distinct=True,
             postgresql_where=text("retired_at IS NULL"),
         ),
     )

@@ -209,9 +209,20 @@ class PushHostKey(Base):
     __tablename__ = "push_host_key"
     __table_args__ = (
         client_org_fk("push_host_key"),
-        # One host-key record per (org, address): a target has one host key at a
-        # time, and re-probing UPDATES the observed half rather than growing rows.
-        Index("uq_push_host_key_address", "org_id", "address", unique=True),
+        # One host-key record per (org, client, address): a target has one host
+        # key at a time, and re-probing UPDATES the observed half rather than
+        # growing rows. PER CLIENT (migration 0231, Task 8b): an address names a
+        # host only within one client's network -- two clients' 10.0.0.5 are
+        # two machines. NULLS NOT DISTINCT: one global row (no device) per
+        # address, which may share it with a client's.
+        Index(
+            "uq_push_host_key_client_address",
+            "org_id",
+            "client_id",
+            "address",
+            unique=True,
+            postgresql_nulls_not_distinct=True,
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()

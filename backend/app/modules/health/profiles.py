@@ -155,9 +155,11 @@ _ASSIGNMENT_INDEX_BY_LEVEL: dict[str, tuple[str, list[str], str]] = {
         ["org_id", "device_group_id"],
         "device_group_id IS NOT NULL",
     ),
+    # The default: global (the org's), and per client under NULLS NOT DISTINCT
+    # (migration 0231, Task 8b) -- the org's default conflicts with the org's.
     "org": (
-        "uq_health_assignment_org",
-        ["org_id"],
+        "uq_health_assignment_client_org",
+        ["org_id", "client_id"],
         "device_id IS NULL AND device_group_id IS NULL",
     ),
 }
@@ -1456,9 +1458,11 @@ async def _assignment_at_level(
     elif device_group_id is not None:
         query = query.where(HealthProfileAssignment.device_group_id == device_group_id)
     else:
+        # The org's default, the global row (a client's has its own key).
         query = query.where(
             HealthProfileAssignment.device_id.is_(None),
             HealthProfileAssignment.device_group_id.is_(None),
+            HealthProfileAssignment.client_id.is_(None),
         )
     return (await session.execute(query)).scalar_one_or_none()
 

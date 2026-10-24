@@ -2,6 +2,7 @@
 asset typed by hand belongs to its site's client."""
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -504,8 +505,19 @@ async def test_two_creates_racing_for_one_name_end_in_a_409_not_a_500(
         )
         first = (await session.execute(text("SELECT pg_backend_pid()"))).scalar_one()
         racing = asyncio.create_task(create())
-        await _until_its_insert_waits_on(app_engine, first)
-        assert not racing.done()
+        reached = False
+        try:
+            await _until_its_insert_waits_on(app_engine, first)
+            assert not racing.done()
+            reached = True
+        finally:
+            # On a timeout (or any failure above) the racing create is still
+            # running: cancelled and awaited here, it releases its connection
+            # and is never destroyed pending.
+            if not reached:
+                racing.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await racing
     with pytest.raises(DeviceGroupError) as refused:
         await racing
     assert refused.value.status_code == 409

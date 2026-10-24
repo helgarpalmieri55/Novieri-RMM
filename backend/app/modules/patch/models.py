@@ -117,8 +117,14 @@ class PatchApproval(TimestampMixin, Base):
     __tablename__ = "patch_approvals"
     __table_args__ = (
         client_org_fk("patch_approvals"),
+        # Per client, the global rows among themselves (migration 0231, Task 8b).
         UniqueConstraint(
-            "org_id", "patch_id", "ring_name", name="uq_patch_approvals_org_patch_ring"
+            "org_id",
+            "client_id",
+            "patch_id",
+            "ring_name",
+            name="uq_patch_approvals_client_patch_ring",
+            postgresql_nulls_not_distinct=True,
         ),
     )
 

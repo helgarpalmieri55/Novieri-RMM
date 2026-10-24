@@ -203,6 +203,29 @@ async def get_target(
     ).scalar_one_or_none()
 
 
+#: The target-name key (migration 0231, Task 8b): unique per client, the global
+#: targets among themselves.
+TARGET_NAME_KEY = "uq_backup_offsite_targets_client_name"
+
+
+async def target_name_taken(
+    session: AsyncSession, org_id: UUID, client_id: UUID | None, name: str
+) -> bool:
+    """Is `name` another target's in `client_id`'s namespace (None: the global
+    targets')? As `TARGET_NAME_KEY` is: a client's target does not take a
+    global name, nor one global target another client's."""
+    found = (
+        await session.execute(
+            select(BackupOffsiteTarget.id).where(
+                BackupOffsiteTarget.org_id == org_id,
+                BackupOffsiteTarget.client_id.is_not_distinct_from(client_id),
+                BackupOffsiteTarget.name == name,
+            )
+        )
+    ).first()
+    return found is not None
+
+
 async def _store_secret(
     session: AsyncSession,
     vault: VaultService,

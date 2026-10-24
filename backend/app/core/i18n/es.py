@@ -2464,6 +2464,11 @@ CATALOG: dict[str, str] = {
         "no se ha observado ninguna clave de host de {parsed}; ejecuta antes un sondeo "
         "(agent.push_probe) para que haya una huella que confirmar"
     ),
+    "{address} has a host key in more than one client; choose the client whose machine it "
+    "is and try again": (
+        "{address} tiene una clave de host en más de un cliente; elige el cliente al que "
+        "pertenece el equipo y vuelve a intentarlo"
+    ),
     "{parsed} was last probed over WinRM, which has no host key to confirm: a Windows push "
     "authenticates the target with Kerberos (design §2.3). Nothing needs confirming before "
     "a WinRM push": (

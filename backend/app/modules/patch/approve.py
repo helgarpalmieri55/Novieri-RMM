@@ -118,10 +118,15 @@ async def _approve_one(
     single transaction anyway. `approve_patch` below is this function with a
     population of one ring's worth resolved for it.
     """
+    # The approval is GLOBAL (phase 1 writes no client), so the row it is, or
+    # races, is the global one: `uq_patch_approvals_client_patch_ring` is per
+    # client (migration 0231, Task 8b), and a client's approval of the same
+    # (patch, ring) is another row.
     existing = (
         await session.execute(
             select(PatchApproval).where(
                 PatchApproval.org_id == org_id,
+                PatchApproval.client_id.is_(None),
                 PatchApproval.patch_id == patch_id,
                 PatchApproval.ring_name == ring_name,
             )
@@ -147,7 +152,7 @@ async def _approve_one(
         approval = existing
     else:
         # First-ever approval for (org_id, patch_id, ring_name). The actual
-        # insert still goes through `uq_patch_approvals_org_patch_ring`: two
+        # insert still goes through `uq_patch_approvals_client_patch_ring`: two
         # concurrent first-time approve calls for the identical triple can
         # both pass the pre-check above (miss) before either has written.
         # `ON CONFLICT DO NOTHING` + explicit conflict target swallows only
@@ -173,7 +178,7 @@ async def _approve_one(
                     revoked=False,
                 )
                 .on_conflict_do_nothing(
-                    index_elements=["org_id", "patch_id", "ring_name"]
+                    index_elements=["org_id", "client_id", "patch_id", "ring_name"]
                 )
                 .returning(PatchApproval.id)
             )
@@ -183,6 +188,7 @@ async def _approve_one(
                 await session.execute(
                     select(PatchApproval).where(
                         PatchApproval.org_id == org_id,
+                        PatchApproval.client_id.is_(None),
                         PatchApproval.patch_id == patch_id,
                         PatchApproval.ring_name == ring_name,
                     )

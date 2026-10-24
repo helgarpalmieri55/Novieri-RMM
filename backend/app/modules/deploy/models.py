@@ -174,7 +174,10 @@ class ScriptPolicy(TimestampMixin, Base):
 
     __tablename__ = "script_policies"
     __table_args__ = (
-        UniqueConstraint("org_id", "name", name="uq_script_policies_org_name"),
+        # Per CLIENT, the group's (migration 0231, Task 8b): a technician limited
+        # to one client cannot see another's names, and two clients may both
+        # schedule "Nightly".
+        UniqueConstraint("org_id", "client_id", "name", name="uq_script_policies_client_name"),
         CheckConstraint("interval_hours BETWEEN 1 AND 720", name="ck_script_policies_interval"),
         CheckConstraint("keep_runs BETWEEN 1 AND 500", name="ck_script_policies_keep_runs"),
     )

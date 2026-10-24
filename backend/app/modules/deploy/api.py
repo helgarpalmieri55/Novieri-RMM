@@ -822,7 +822,7 @@ async def run_script_route(
 def _policy_error(exc: DeployValidationError) -> HTTPException:
     if isinstance(exc, ScriptPolicyNotFound):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
-    return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
 
 
 async def _policy_out(session: Any, org_id: UUID, policy_id: UUID) -> ScriptPolicyOut:

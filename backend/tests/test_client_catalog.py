@@ -2,6 +2,7 @@
 
 import ast
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,9 @@ from sqlalchemy import ForeignKeyConstraint, UniqueConstraint, text
 
 from app.core.client_scope import ALL_SCOPE_ALLOWLIST
 from app.core.client_scope_catalog import CATALOG, PENDING_PHASE_2, PHASE_1
+from app.core.global_rows import SECOND_PARENTS
 from app.models.base import Base
+from tests.client_scope_support import deparse_policies, expected_client_policies
 
 BACKEND = Path(__file__).resolve().parent.parent
 DEFINITION = "app/core/client_scope.py"
@@ -231,67 +234,9 @@ def test_the_optional_parent_exception_has_not_rotted() -> None:
 # Spec §5 test 2: the catalog agrees with the database (migration 0231).
 # --------------------------------------------------------------------------- #
 
-# THE EXPECTED POLICIES, WRITTEN ONCE. Spec §2.2 in SQL. Postgres deparses
-# both these and the live policies (`deparse_policies`), so the comparison is
-# exact and canonical: casts, parentheses and spelling come from the same
-# deparser on both sides. Like `test_schema_drift.py`'s index comparison, a predicate
-# that says the same thing in a different SHAPE fails -- a false failure,
-# never a false pass.
-_SCOPE = "current_setting('app.client_scope', true)"
-_VISIBLE = "its_client_visible(client_id)"
-# A NULL client is "every client": readable under a scope that names at
-# least one client (spec §2.2: no scope, or an empty one, sees zero rows) ...
-_NULL_PINNED = (
-    f"(client_id IS NULL AND ({_SCOPE} = 'all' OR ({_SCOPE} = 'list' AND "
-    "nullif(current_setting('app.current_clients', true), '') IS NOT NULL)))"
-)
-# ... and written, changed or deleted only under scope all.
-_NULL_ALL = f"(client_id IS NULL AND {_SCOPE} = 'all')"
-
-#: THE EXCEPTION, NAMED: the one O table whose `client_isolation` WITH CHECK
-#: admits a NULL row under any pinned scope -- phase 1's client-less domain
-#: events. `users` left it in Task 8: no narrowed path writes a staff row
-#: (`PATCH /me` and the login bookkeeping run under scope all since Task 6b),
-#: so a staff row is created, changed and deleted only under scope all, like
-#: any other global row. Anything else here is a finding.
-NULL_WRITABLE_FROM_ANY_SCOPE = frozenset({"domain_events"})
-
-Shape = tuple[str, str | None, str | None]  # (cmd, USING, WITH CHECK) as written
-
-
-def expected_client_policies(table: str) -> dict[str, Shape]:
-    """Spec §2.2's client policies for `table`, by name, as written. Shared
-    with `tests/test_client_isolation.py`'s per-table sweep."""
-    if table == "clients":
-        return {
-            "client_isolation": (
-                "ALL",
-                f"its_client_visible(id) AND (kind <> 'unassigned' OR {_SCOPE} = 'all')",
-                f"{_SCOPE} = 'all' OR its_client_visible(id)",
-            )
-        }
-    entry = PHASE_1[table]
-    if entry.kind in {"C", "H"}:
-        return {"client_isolation": ("ALL", _VISIBLE, _VISIBLE)}
-    read = f"{_NULL_PINNED} OR {_VISIBLE}"
-    modify = f"{_NULL_ALL} OR {_VISIBLE}"
-    insert = read if table in NULL_WRITABLE_FROM_ANY_SCOPE else modify
-    policies: dict[str, Shape] = {
-        "client_isolation": ("ALL", read, insert),
-        # `users` included since Task 8: a narrowed scope changes no column
-        # of a staff row (`its_user_identity_guard` then holds a visible
-        # contact's kind, external_subject and status).
-        "client_isolation_update": ("UPDATE", modify, None),
-        "client_isolation_delete": ("DELETE", modify, None),
-    }
-    # CREATING a staff row is scope all (Task 6b, re-review M2): first-login
-    # provisioning and `POST /users`, both every-client. Named on `users`
-    # although `client_isolation`'s WITH CHECK now says the same. An INSERT
-    # policy has no USING.
-    if table == "users":
-        policies["client_isolation_insert"] = ("INSERT", None, modify)
-    return policies
-
+# The expected policies are written once, in `tests/client_scope_support.py`
+# (`expected_client_policies`, `deparse_policies`), and shared with
+# `tests/test_client_isolation.py`'s per-table sweep.
 
 # Policies other modules put on these tables. The full set per table is
 # asserted, so a new one has to be added here on purpose.
@@ -299,35 +244,6 @@ OTHER_POLICIES: dict[str, set[str]] = {
     "users": {"portal_isolation"},
     "doc_articles": {"portal_isolation"},
 }
-
-
-async def deparse_policies(conn, shapes: set[Shape]) -> dict[Shape, tuple[str, str | None]]:
-    """Each shape's (qual, with_check) as `pg_policies` prints it, from a
-    policy built on a temporary table with the columns the predicates name.
-    The caller rolls the transaction back."""
-    await conn.execute(
-        text("CREATE TEMP TABLE policy_probe (id uuid, client_id uuid, kind varchar(20))")
-    )
-    names: dict[str, Shape] = {}
-    for n, (cmd, using, check) in enumerate(sorted(shapes, key=repr)):
-        names[f"p{n}"] = (cmd, using, check)
-        using_ = f" USING ({using})" if using is not None else ""
-        with_check = f" WITH CHECK ({check})" if check is not None else ""
-        await conn.execute(
-            text(
-                f"CREATE POLICY p{n} ON policy_probe AS RESTRICTIVE FOR {cmd}"
-                f"{using_}{with_check}"
-            )
-        )
-    rows = (
-        await conn.execute(
-            text(
-                "SELECT policyname, qual, with_check FROM pg_policies "
-                "WHERE tablename = 'policy_probe' AND schemaname LIKE 'pg_temp%'"
-            )
-        )
-    ).all()
-    return {names[r.policyname]: (r.qual, r.with_check) for r in rows}
 
 
 async def test_phase_1_tables_carry_the_restrictive_policy(admin_engine) -> None:
@@ -559,3 +475,287 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
     assert sorted(set(declared) - set(live)) == [], "on a model, not in the database"
     differ = {n: (live[n], declared[n]) for n in live if live[n] != declared[n]}
     assert not differ, f"declared differently from the database: {differ}"
+
+
+# --------------------------------------------------------------------------- #
+# Task 8b: a natural key on a per-client table is unique PER CLIENT.
+# --------------------------------------------------------------------------- #
+
+# A key unique per ORGANISATION over a table whose rows belong to clients is a
+# rule the application cannot see from a narrowed scope: a technician limited
+# to client X runs the duplicate check under X's RLS, misses Y's row, and the
+# INSERT dies on the index -- a 500 where an every-client admin gets a 409,
+# which tells X's technician Y's names one guess at a time (Task 7's
+# `device_groups`, Task 8's review). And two clients cannot both have
+# "Servers". So every unique key on a phase-1 table must be one of:
+#
+#   SAFE   it holds `client_id`; or a column that PINS the row's client -- the
+#          catalog's inheritance fk, a second parent's fk (`global_rows.
+#          SECOND_PARENTS`), or a column X under a foreign key `(X, client_id)
+#          REFERENCES p (id, client_id)` -- that cannot be NULL in a colliding
+#          row (NOT NULL, or the index treats NULLs as distinct); or a
+#          surrogate column below (random, so equal only for the same thing);
+#   LEAKY  anything else: a natural key scoped by `org_id` or by nothing.
+#
+# A LEAKY key fails the guard unless `ORG_WIDE_KEYS` names it with a reason.
+
+#: Columns holding a RANDOM value, so two rows share one only by being the
+#: same thing: a collision on one tells nobody anything about another client.
+#: `id` is every table's (uuid7) primary key.
+SURROGATE_COLUMNS: dict[tuple[str, str], str] = {
+    ("*", "id"): "every table's uuid7 primary key",
+    ("agents", "cert_fingerprint"): (
+        "the SHA-256 of a certificate over a keypair the device generated; the gateway "
+        "finds the agent by it, so it must be unique across the platform, not per client"
+    ),
+    ("enrollment_tokens", "token_hash"): "the hash of a random single-use token",
+    ("install_links", "code_hash"): "the hash of a random install code",
+}
+
+#: Unique keys on phase-1 tables that are deliberately organisation-wide.
+#: Each is LEAKY by the rules above, and kept on purpose; the reason says why
+#: no client namespace applies. A key that stops being LEAKY, or stops
+#: existing, fails `test_the_org_wide_keys_have_not_rotted`.
+ORG_WIDE_KEYS: dict[str, str] = {
+    "users_org_id_external_subject_key": (
+        "an identity, not a name: one subject of the identity provider is one person in "
+        "the organisation, and `deps.admit` finds the user by it. Per client, one login "
+        "could hold a row in each client. Written only under scope all (first-login "
+        "provisioning, `POST /users`), and the value is an opaque id the IdP issues"
+    ),
+    "uq_inbound_message_org_message_id": (
+        "the poller's idempotency key: an RFC 5322 Message-ID names one email, fetched "
+        "from the organisation's own mailboxes (`email_mailbox` is G). Written only by the "
+        "poller under scope all; per client, one email could open a ticket in each client "
+        "the intake ever decided it belonged to"
+    ),
+    "uq_agent_update_rings_ordinal": (
+        "a ring's position in ONE rollout, and the rollout (`agent_update_rollouts`, G) "
+        "spans clients: ring 1 a pilot, ring 2 one client, ring 3 another. Per client, two "
+        "rings could share a position and the order would be undefined. The rings are "
+        "written with the rollout, by `enumerate`, under `require_permission_on_every_client`"
+    ),
+}
+
+
+@dataclass(frozen=True)
+class UniqueKey:
+    table: str
+    name: str
+    columns: tuple[str | None, ...]  # None: an expression column
+    not_null: frozenset[str]
+    nulls_not_distinct: bool
+
+
+def _surrogate(table: str, column: str | None) -> bool:
+    return (table, column) in SURROGATE_COLUMNS or ("*", column) in SURROGATE_COLUMNS
+
+
+def leaky_because(key: UniqueKey, pinning: frozenset[str]) -> str | None:
+    """Why `key` is LEAKY by the rules above, or None when it is SAFE."""
+    columns = set(key.columns)
+    if "client_id" in columns:
+        return None
+    if any(_surrogate(key.table, c) for c in columns):
+        return None
+    for column in columns & pinning:
+        if column in key.not_null or not key.nulls_not_distinct:
+            return None
+    if columns & pinning:
+        return (
+            f"its client column {sorted(columns & pinning)} is nullable under NULLS NOT "
+            "DISTINCT: rows without a parent collide across clients"
+        )
+    return f"{key.columns} names no client"
+
+
+async def _unique_keys(admin_engine) -> tuple[list[UniqueKey], dict[str, frozenset[str]]]:
+    """Every unique index (constraints' included) on a phase-1 table, and per
+    table the columns that pin a row's client."""
+    tables = list(PHASE_1)
+    async with admin_engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT c.relname AS tbl, i.relname AS name, "
+                    "x.indnullsnotdistinct AS nnd, "
+                    "ARRAY(SELECT coalesce(a.attname::text, '') "
+                    "      FROM unnest(x.indkey::int2[]) WITH ORDINALITY AS k(n, o) "
+                    "      LEFT JOIN pg_attribute a "
+                    "        ON a.attrelid = x.indrelid AND a.attnum = k.n "
+                    "      WHERE k.o <= x.indnkeyatts ORDER BY k.o) AS cols, "
+                    "ARRAY(SELECT a.attname::text FROM pg_attribute a "
+                    "      WHERE a.attrelid = x.indrelid AND a.attnotnull "
+                    "        AND a.attnum = ANY (x.indkey::int2[])) AS not_null "
+                    "FROM pg_index x JOIN pg_class c ON c.oid = x.indrelid "
+                    "JOIN pg_class i ON i.oid = x.indexrelid "
+                    "WHERE x.indisunique AND c.relnamespace = 'public'::regnamespace "
+                    "  AND c.relname = ANY (:t)"
+                ),
+                {"t": tables},
+            )
+        ).all()
+        fks = (
+            await conn.execute(
+                text(
+                    "SELECT t.relname AS tbl, "
+                    "ARRAY(SELECT a.attname::text FROM unnest(f.conkey) WITH ORDINALITY "
+                    "      AS k(n, o) JOIN pg_attribute a "
+                    "      ON a.attrelid = f.conrelid AND a.attnum = k.n ORDER BY k.o) AS cols, "
+                    "ARRAY(SELECT a.attname::text FROM unnest(f.confkey) WITH ORDINALITY "
+                    "      AS k(n, o) JOIN pg_attribute a "
+                    "      ON a.attrelid = f.confrelid AND a.attnum = k.n ORDER BY k.o) "
+                    "      AS ref_cols "
+                    "FROM pg_constraint f JOIN pg_class t ON t.oid = f.conrelid "
+                    "WHERE f.contype = 'f' AND t.relnamespace = 'public'::regnamespace "
+                    "  AND t.relname = ANY (:t)"
+                ),
+                {"t": tables},
+            )
+        ).all()
+    keys = [
+        UniqueKey(
+            table=r.tbl,
+            name=r.name,
+            columns=tuple(c or None for c in r.cols),
+            not_null=frozenset(r.not_null),
+            nulls_not_distinct=r.nnd,
+        )
+        for r in rows
+    ]
+    pinning: dict[str, set[str]] = {}
+    for table, entry in PHASE_1.items():
+        pins = pinning.setdefault(table, set())
+        if entry.fk is not None:
+            pins.add(entry.fk)
+        if table in SECOND_PARENTS:
+            pins.add(SECOND_PARENTS[table][1])
+    for fk in fks:
+        pairs = dict(zip(fk.ref_cols, fk.cols, strict=True))
+        if set(pairs) == {"id", "client_id"} and pairs["client_id"] == "client_id":
+            pinning[fk.tbl].add(pairs["id"])
+    return keys, {t: frozenset(p) for t, p in pinning.items()}
+
+
+async def test_natural_keys_on_per_client_tables_are_per_client(admin_engine) -> None:
+    """THE GUARD (Task 8b). Introspects the live database, so a migration that
+    adds `UNIQUE (org_id, name)` to a phase-1 table goes red here, not in a
+    narrowed technician's 500."""
+    keys, pinning = await _unique_keys(admin_engine)
+    leaky = {
+        f"{k.table}.{k.name}": why
+        for k in keys
+        if (why := leaky_because(k, pinning[k.table])) is not None
+        and k.name not in ORG_WIDE_KEYS
+    }
+    assert not leaky, (
+        "unique keys on per-client tables that are unique per ORGANISATION (Task 8b): "
+        "add client_id to each (C/H: `(org_id, client_id, ...)`; O: `UNIQUE NULLS NOT "
+        "DISTINCT (org_id, client_id, ...)`), or name it in ORG_WIDE_KEYS with the reason "
+        f"it is deliberately org-wide: {leaky}"
+    )
+
+
+async def test_the_org_wide_keys_have_not_rotted(admin_engine) -> None:
+    keys, pinning = await _unique_keys(admin_engine)
+    by_name = {k.name: k for k in keys}
+    assert sorted(set(ORG_WIDE_KEYS) - set(by_name)) == [], "allowlisted keys that do not exist"
+    still_leaky = {
+        name for name in ORG_WIDE_KEYS if leaky_because(by_name[name], pinning[by_name[name].table])
+    }
+    assert still_leaky == set(ORG_WIDE_KEYS), (
+        f"allowlisted keys that are per client now: {sorted(set(ORG_WIDE_KEYS) - still_leaky)}"
+    )
+
+
+async def test_the_unique_key_guard_is_not_vacuous(admin_engine) -> None:
+    """It reads the keys it judges: every SAFE leg and the pinning it derives
+    are seen in the live schema, and the old per-organisation shapes -- the
+    keys 0231 replaced -- are judged LEAKY."""
+    keys, pinning = await _unique_keys(admin_engine)
+    by_name = {k.name: k for k in keys}
+    safe = {
+        "device_tags_device_id_key_key",  # the inheritance fk
+        "uq_health_assignment_group",  # a second parent's fk
+        "uq_install_links_site",  # (site_id, client_id) -> sites (id, client_id)
+        "enrollment_tokens_token_hash_key",  # a surrogate
+        "uq_device_groups_client_live_name",  # client_id
+        "device_person_pkey",  # a primary key over the fk
+    }
+    assert safe <= set(by_name), sorted(safe - set(by_name))
+    for name in safe:
+        assert leaky_because(by_name[name], pinning[by_name[name].table]) is None, name
+    assert "site_id" in pinning["install_links"] and "record_id" in pinning["doc_versions"]
+    assert len(keys) > 100, len(keys)  # every phase-1 primary key, at least
+
+    def old(table: str, *columns: str, nnd: bool = False) -> str | None:
+        key = UniqueKey(table, "old", columns, frozenset({"org_id"}), nnd)
+        return leaky_because(key, pinning[table])
+
+    assert old("script_policies", "org_id", "name") is not None
+    assert old("push_host_key", "org_id", "address") is not None
+    assert old("software_ignore", "org_id", "name") is not None
+    # Holds the fk, but a group-less gate is no client's: NULLS NOT DISTINCT
+    # made every client's "every device" gate one row.
+    assert old("change_gates", "org_id", "device_group_id", nnd=True) is not None
+    # The same column with NULLs distinct pins the client wherever it is set.
+    assert old("patch_policies", "org_id", "device_group_id") is None
+
+
+#: Migration 0231's per-client natural keys (Task 8b), with their columns and
+#: whether NULLs are not distinct. Each must be declared on its model too:
+#: `alembic revision --autogenerate` proposes a bare DROP for any key the
+#: metadata does not know, and `test_schema_drift.py` compares no constraint.
+PER_CLIENT_KEYS: dict[str, tuple[str, tuple[str, ...], bool]] = {
+    "uq_device_groups_client_live_name": ("device_groups", ("org_id", "client_id", "name"), False),
+    "uq_script_policies_client_name": ("script_policies", ("org_id", "client_id", "name"), False),
+    "uq_push_host_key_client_address": (
+        "push_host_key", ("org_id", "client_id", "address"), True,
+    ),
+    "uq_backup_offsite_targets_client_name": (
+        "backup_offsite_targets", ("org_id", "client_id", "name"), True,
+    ),
+    "uq_software_ignore_client_name": ("software_ignore", ("org_id", "client_id", "name"), True),
+    "uq_backup_recovery_keys_client_active": (
+        "backup_recovery_keys", ("org_id", "client_id", "fingerprint"), True,
+    ),
+    "uq_patch_approvals_client_patch_ring": (
+        "patch_approvals", ("org_id", "client_id", "patch_id", "ring_name"), True,
+    ),
+    "uq_sla_policy_client_queue_and_priority": (
+        "sla_policy", ("org_id", "client_id", "queue_id", "priority"), True,
+    ),
+    "uq_sla_policy_client_queue_wildcard_priority": (
+        "sla_policy", ("org_id", "client_id", "queue_id"), True,
+    ),
+    "uq_sla_policy_client_wildcard_queue_priority": (
+        "sla_policy", ("org_id", "client_id", "priority"), True,
+    ),
+    "uq_sla_policy_client_wildcard_both": ("sla_policy", ("org_id", "client_id"), True),
+    "uq_health_assignment_client_org": (
+        "health_profile_assignment", ("org_id", "client_id"), True,
+    ),
+    "uq_change_gates_client_group": (
+        "change_gates", ("org_id", "client_id", "device_group_id"), True,
+    ),
+}
+
+
+async def test_the_per_client_keys_are_in_the_database_and_on_the_models(admin_engine) -> None:
+    keys, _ = await _unique_keys(admin_engine)
+    live = {
+        k.name: (k.table, tuple(c or "" for c in k.columns), k.nulls_not_distinct)
+        for k in keys
+        if k.name in PER_CLIENT_KEYS
+    }
+    assert live == PER_CLIENT_KEYS, f"live: {live}"
+
+    declared: dict[str, tuple[str, tuple[str, ...], bool]] = {}
+    for table in Base.metadata.tables.values():
+        for con in [*table.constraints, *table.indexes]:
+            name = con.name if isinstance(con.name, str) else ""
+            if name in PER_CLIENT_KEYS:
+                columns = tuple(c.name for c in con.columns)  # type: ignore[union-attr]
+                nnd = bool(con.dialect_options["postgresql"].get("nulls_not_distinct"))
+                declared[name] = (table.name, columns, nnd)
+    assert declared == PER_CLIENT_KEYS, f"declared: {declared}"

@@ -102,9 +102,13 @@ class ChangeGate(Base):
     __tablename__ = "change_gates"
     __table_args__ = (
         client_org_fk("change_gates"),
+        # One gate per group, and one group-less ("every device") gate per
+        # client and one global (migration 0231, Task 8b): a group-less gate is
+        # no group's client, so the key names the client itself.
         Index(
-            "uq_change_gates_org_group",
+            "uq_change_gates_client_group",
             "org_id",
+            "client_id",
             "device_group_id",
             unique=True,
             postgresql_nulls_not_distinct=True,

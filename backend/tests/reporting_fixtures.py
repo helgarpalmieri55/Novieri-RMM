@@ -503,9 +503,10 @@ async def seed_service_desk_anchor(
     """One queue, and one SLA policy scoped to it.
 
     The policy is scoped to the QUEUE rather than being a `(NULL, NULL)`
-    wildcard on purpose: `uq_sla_policy_wildcard_both` is a partial unique index
-    on `org_id` alone, so two wildcard policies in one org is an
-    IntegrityError -- and a test that wanted two queues in one org would hit it.
+    wildcard on purpose: `uq_sla_policy_client_wildcard_both` is a partial unique
+    index on `(org_id, client_id)` with NULLs not distinct, so two global
+    wildcard policies in one org is an IntegrityError -- and a test that wanted
+    two queues in one org would hit it.
     """
     from app.models import SlaCalendar, SlaPolicy, TicketCategory, TicketQueue, User
 

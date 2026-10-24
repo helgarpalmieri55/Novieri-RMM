@@ -24,7 +24,8 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import ForeignKey, func, select, text
+from sqlalchemy import DateTime, ForeignKey, func, select, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -772,6 +773,84 @@ async def test_the_guard_leaves_a_child_held_by_a_collection_to_the_database(
             ).scalar_one()
             article.links.append(held())
             await s.flush()
+
+
+class _ByFirstParent(DeclarativeBase):
+    """`doc_versions` with its FIRST parent mapped as a relationship that holds
+    nothing, and its second named by id: the guard cannot tell the first, and
+    must not stop there."""
+
+    type_annotation_map = {UUID: PGUUID(as_uuid=True), dict[str, Any]: JSONB}
+
+
+class _VersionedArticle(_ByFirstParent):
+    __tablename__ = "doc_articles"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    org_id: Mapped[UUID]
+    client_id: Mapped[UUID | None]
+
+
+class _VersionedRecord(_ByFirstParent):
+    __tablename__ = "doc_records"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    org_id: Mapped[UUID]
+    client_id: Mapped[UUID | None]
+
+
+class _Version(_ByFirstParent):
+    """No `client_id` mapped: the triggers write it, from whichever parent."""
+
+    __tablename__ = "doc_versions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    org_id: Mapped[UUID]
+    article_id: Mapped[UUID | None] = mapped_column(ForeignKey("doc_articles.id"))
+    record_id: Mapped[UUID | None] = mapped_column(ForeignKey("doc_records.id"))
+    version: Mapped[int]
+    snapshot: Mapped[dict[str, Any]]
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    article: Mapped[_VersionedArticle | None] = relationship()
+
+
+async def test_the_guard_reads_the_second_parent_when_the_first_is_unknown(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Task 8b (Task 8 review M2). A new version whose `article` relationship
+    holds nothing leaves its first parent UNKNOWN -- the flush could still
+    fill `article_id` in. The guard used to stop there and let the database
+    decide; it reads the second parent, `record_id`, now. Sound because the
+    two are exclusive (`doc_versions_one_parent`; for
+    `health_profile_assignment`, `ck_health_assignment_one_target`): a row
+    naming its record has no article to inherit from. So the version of a
+    global record is refused before the INSERT, and one of X's record is X's."""
+    org, _ = await _org_with_group(admin_engine)
+    shared = DocRecord(org_id=org, record_type="service", name="global")
+    own = DocRecord(org_id=org, client_id=org, record_type="service", name="x")
+    await _seed(admin_engine, shared, own)
+    x = ClientScope.only([org])
+
+    def version(record: UUID) -> _Version:
+        return _Version(org_id=org, record_id=record, version=2, snapshot={}, ts=datetime.now(UTC))
+
+    with pytest.raises(GlobalRowNotWritable) as caught:
+        async with org_session(org, clients=x, engine=app_engine) as s:
+            s.add(version(shared.id))
+            await s.flush()
+    assert caught.value.table == "doc_versions"
+    async with org_session(org, clients=x, engine=app_engine) as s:
+        made = version(own.id)
+        s.add(made)
+        await s.flush()
+        written = made.id
+    async with AsyncSession(admin_engine) as session:
+        client = (
+            await session.execute(
+                text("SELECT client_id FROM doc_versions WHERE id = :i"), {"i": written}
+            )
+        ).scalar_one()
+    assert client == org
 
 
 # --------------------------------------------------------------------------- #

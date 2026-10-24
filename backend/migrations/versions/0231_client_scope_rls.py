@@ -55,6 +55,12 @@ TWO TABLES HAVE TWO PARENTS. `doc_versions` hangs from an article XOR a record
 group. Each gets a second trigger for its second parent -- otherwise those
 rows carry NULL, which an O table reads as "every client".
 
+NATURAL KEYS ARE UNIQUE PER CLIENT (Task 8b): `device_groups`' live name and
+every key in `PER_CLIENT_KEYS` below hold `client_id`, so a technician limited
+to one client never meets another client's value, and two clients may share
+one. `tests/test_client_catalog.py`'s guard fails on any unique key of a
+phase-1 table that is unique per organisation without a stated reason.
+
 The table list is a LITERAL copy of `app/core/client_scope_catalog.py`'s
 phase-1 rows: migrations never import application code, and
 `tests/test_client_catalog.py` proves the two agree through `pg_policies` and
@@ -167,6 +173,126 @@ NULL_PINNED = f"(client_id IS NULL AND {SCOPE_PINNED})"
 # Writing, changing or deleting a global row is a change to every client's
 # configuration: scope all.
 NULL_ALL = f"(client_id IS NULL AND {SCOPE} = 'all')"
+
+# NATURAL KEYS ARE UNIQUE PER CLIENT (Task 8b), as `device_groups`' live name
+# is (below). A key unique per ORGANISATION on a table whose rows belong to
+# clients is a rule a technician limited to client X cannot see: the
+# application's duplicate check runs under X's RLS and misses Y's row, the
+# INSERT dies on the index -- a 500 where an every-client admin gets the
+# refusal, which tells X's technician Y's values one guess at a time -- and
+# two clients cannot both hold one value (two networks both have a
+# 10.0.0.5). `tests/test_client_catalog.py`'s guard fails on any such key on
+# a phase-1 table.
+#
+# H: `(org_id, client_id, ...)`. O: `UNIQUE NULLS NOT DISTINCT (org_id,
+# client_id, ...)`, so the global rows (no client: every client's
+# configuration) stay unique among themselves and each client has a namespace
+# of its own -- A GLOBAL ROW AND A CLIENT'S ROW MAY SHARE A VALUE.
+# `change_gates` held its group already, but under NULLS NOT DISTINCT a
+# group-less gate is no client's: every client's "every device" gate was one
+# row. Same columns otherwise, same predicates, so no existing row can break
+# the new key; the downgrade restores each original exactly.
+#
+# (table, "constraint" | "index", old name, old definition, new name, new
+# definition): a definition is what follows `ADD CONSTRAINT <name>`, or
+# `CREATE UNIQUE INDEX <name> ON <table>`.
+PER_CLIENT_KEYS: list[tuple[str, str, str, str, str, str]] = [
+    (
+        "script_policies", "constraint",
+        "uq_script_policies_org_name", "UNIQUE (org_id, name)",
+        "uq_script_policies_client_name", "UNIQUE (org_id, client_id, name)",
+    ),
+    (
+        "push_host_key", "index",
+        "uq_push_host_key_address", "(org_id, address)",
+        "uq_push_host_key_client_address", "(org_id, client_id, address) NULLS NOT DISTINCT",
+    ),
+    (
+        "backup_offsite_targets", "constraint",
+        "uq_backup_offsite_targets_org_name", "UNIQUE (org_id, name)",
+        "uq_backup_offsite_targets_client_name",
+        "UNIQUE NULLS NOT DISTINCT (org_id, client_id, name)",
+    ),
+    (
+        "software_ignore", "constraint",
+        "uq_software_ignore_org_name", "UNIQUE (org_id, name)",
+        "uq_software_ignore_client_name", "UNIQUE NULLS NOT DISTINCT (org_id, client_id, name)",
+    ),
+    (
+        "backup_recovery_keys", "index",
+        "uq_backup_recovery_keys_active", "(org_id, fingerprint) WHERE retired_at IS NULL",
+        "uq_backup_recovery_keys_client_active",
+        "(org_id, client_id, fingerprint) NULLS NOT DISTINCT WHERE retired_at IS NULL",
+    ),
+    (
+        "patch_approvals", "constraint",
+        "patch_approvals_org_id_patch_id_ring_name_key", "UNIQUE (org_id, patch_id, ring_name)",
+        "uq_patch_approvals_client_patch_ring",
+        "UNIQUE NULLS NOT DISTINCT (org_id, client_id, patch_id, ring_name)",
+    ),
+    (
+        "sla_policy", "index",
+        "uq_sla_policy_queue_and_priority",
+        "(org_id, queue_id, priority) "
+        "WHERE queue_id IS NOT NULL AND priority IS NOT NULL AND active",
+        "uq_sla_policy_client_queue_and_priority",
+        "(org_id, client_id, queue_id, priority) NULLS NOT DISTINCT "
+        "WHERE queue_id IS NOT NULL AND priority IS NOT NULL AND active",
+    ),
+    (
+        "sla_policy", "index",
+        "uq_sla_policy_queue_wildcard_priority",
+        "(org_id, queue_id) WHERE queue_id IS NOT NULL AND priority IS NULL AND active",
+        "uq_sla_policy_client_queue_wildcard_priority",
+        "(org_id, client_id, queue_id) NULLS NOT DISTINCT "
+        "WHERE queue_id IS NOT NULL AND priority IS NULL AND active",
+    ),
+    (
+        "sla_policy", "index",
+        "uq_sla_policy_wildcard_queue_priority",
+        "(org_id, priority) WHERE queue_id IS NULL AND priority IS NOT NULL AND active",
+        "uq_sla_policy_client_wildcard_queue_priority",
+        "(org_id, client_id, priority) NULLS NOT DISTINCT "
+        "WHERE queue_id IS NULL AND priority IS NOT NULL AND active",
+    ),
+    (
+        "sla_policy", "index",
+        "uq_sla_policy_wildcard_both",
+        "(org_id) WHERE queue_id IS NULL AND priority IS NULL AND active",
+        "uq_sla_policy_client_wildcard_both",
+        "(org_id, client_id) NULLS NOT DISTINCT "
+        "WHERE queue_id IS NULL AND priority IS NULL AND active",
+    ),
+    (
+        "health_profile_assignment", "index",
+        "uq_health_assignment_org",
+        "(org_id) WHERE device_id IS NULL AND device_group_id IS NULL",
+        "uq_health_assignment_client_org",
+        "(org_id, client_id) NULLS NOT DISTINCT "
+        "WHERE device_id IS NULL AND device_group_id IS NULL",
+    ),
+    (
+        "change_gates", "index",
+        "uq_change_gates_org_group", "(org_id, device_group_id) NULLS NOT DISTINCT",
+        "uq_change_gates_client_group",
+        "(org_id, client_id, device_group_id) NULLS NOT DISTINCT",
+    ),
+]
+
+
+def _drop_key(table: str, kind: str, name: str) -> None:
+    if kind == "constraint":
+        op.execute(f"ALTER TABLE {table} DROP CONSTRAINT {name}")
+    else:
+        op.execute(f"DROP INDEX {name}")
+
+
+def _create_key(table: str, kind: str, name: str, definition: str) -> None:
+    if kind == "constraint":
+        op.execute(f"ALTER TABLE {table} ADD CONSTRAINT {name} {definition}")
+    else:
+        op.execute(f"CREATE UNIQUE INDEX {name} ON {table} {definition}")
+
 
 # O tables whose NULL rows any pinned scope may INSERT (see `_policies`).
 # `users` was here until Task 8; no narrowed path writes a staff row.
@@ -503,6 +629,12 @@ def upgrade() -> None:
         )
         _inherit(table, trigger, parent, fk)
 
+    # Every client_id exists now: the natural keys become per client (Task 8b,
+    # `PER_CLIENT_KEYS`).
+    for table, kind, old, _, new, definition in PER_CLIENT_KEYS:
+        _drop_key(table, kind, old)
+        _create_key(table, kind, new, definition)
+
     # AFTER UPDATE with no column list: a parent's client often changes inside
     # its own BEFORE trigger (a job retargeted, an alert's device corrected),
     # and `UPDATE OF client_id` fires only when the statement names it.
@@ -540,6 +672,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Each natural key back to its original (Task 8b), before the client_id
+    # it now holds is dropped. Fails if two clients of one organisation now
+    # share a value, or a global row and a client's do -- as the
+    # `uq_device_groups_org_live_name` restore below does: downgrade is CI's
+    # round trip, never production's rollback (restore-from-backup, CLAUDE.md).
+    for table, kind, old, definition, new, _ in reversed(PER_CLIENT_KEYS):
+        _drop_key(table, kind, new)
+        _create_key(table, kind, old, definition)
     op.execute("DROP TRIGGER IF EXISTS its_user_identity_guard ON users")
     for parent, child, fk in EDGES:
         op.execute(f"DROP TRIGGER IF EXISTS {_to_children(parent, child, fk)} ON {parent}")

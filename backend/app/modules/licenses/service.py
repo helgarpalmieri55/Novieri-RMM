@@ -852,13 +852,19 @@ async def ignore_software(
     session: AsyncSession, *, org_id: UUID, actor_id: UUID, name: str
 ) -> SoftwareIgnore:
     """Resolve a review-queue entry by ignoring it: inserts a `software_ignore`
-    row. Idempotent on the unique `(org_id, name)` -- if a row already exists
-    for this name (org-scoped), it is returned as-is without inserting a
-    duplicate."""
+    row. Idempotent on the unique key -- if a row already exists for this name
+    in the row's namespace, it is returned as-is without inserting a duplicate.
+
+    The row is GLOBAL (phase 1 writes no client), so its namespace is the
+    global rows': `uq_software_ignore_client_name` is per client (migration
+    0231, Task 8b), and a client's ignore of the same name is another row,
+    never this one."""
     existing = (
         await session.execute(
             select(SoftwareIgnore).where(
-                SoftwareIgnore.org_id == org_id, SoftwareIgnore.name == name
+                SoftwareIgnore.org_id == org_id,
+                SoftwareIgnore.client_id.is_(None),
+                SoftwareIgnore.name == name,
             )
         )
     ).scalar_one_or_none()

@@ -128,7 +128,10 @@ _DEADLINE_INPUT_FIELDS = frozenset(
     {"calendar_id", "response_target_minutes", "resolution_target_minutes"}
 )
 
-# The four partial unique indexes (spec §2.4, migrations 0033 and 0036,
+# The four partial unique indexes (spec §2.4, migrations 0033 and 0036; per
+# client since 0231, Task 8b: each holds `client_id` under NULLS NOT DISTINCT,
+# so a policy -- global in phase 1 -- conflicts with the global policy at its
+# level and never with a client's;
 # `models.py::SlaPolicy.__table_args__`), keyed by (has_queue, has_priority)
 # -- what `create_policy` uses to pick the right ON CONFLICT target, and what
 # `update_policy`'s fallback narrowing matches an `IntegrityError`'s
@@ -138,23 +141,23 @@ _DEADLINE_INPUT_FIELDS = frozenset(
 # and `AND active` (migration 0036) is part of every predicate.
 _POLICY_INDEX_BY_LEVEL: dict[tuple[bool, bool], tuple[str, list[str], str]] = {
     (True, True): (
-        "uq_sla_policy_queue_and_priority",
-        ["org_id", "queue_id", "priority"],
+        "uq_sla_policy_client_queue_and_priority",
+        ["org_id", "client_id", "queue_id", "priority"],
         "queue_id IS NOT NULL AND priority IS NOT NULL AND active",
     ),
     (True, False): (
-        "uq_sla_policy_queue_wildcard_priority",
-        ["org_id", "queue_id"],
+        "uq_sla_policy_client_queue_wildcard_priority",
+        ["org_id", "client_id", "queue_id"],
         "queue_id IS NOT NULL AND priority IS NULL AND active",
     ),
     (False, True): (
-        "uq_sla_policy_wildcard_queue_priority",
-        ["org_id", "priority"],
+        "uq_sla_policy_client_wildcard_queue_priority",
+        ["org_id", "client_id", "priority"],
         "queue_id IS NULL AND priority IS NOT NULL AND active",
     ),
     (False, False): (
-        "uq_sla_policy_wildcard_both",
-        ["org_id"],
+        "uq_sla_policy_client_wildcard_both",
+        ["org_id", "client_id"],
         "queue_id IS NULL AND priority IS NULL AND active",
     ),
 }

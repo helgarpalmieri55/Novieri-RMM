@@ -232,8 +232,16 @@ def _resulting_client(
     session: Session, table: str, state: InstanceState[Any], *, pending: bool
 ) -> Client:
     """The client the row will carry after the write: its parent's while it
-    names one (the trigger overwrites anything else), else its own."""
+    names one (the trigger overwrites anything else), else its own.
+
+    A first parent the guard cannot tell (a relationship that may fill its fk
+    in at flush time) does not end the search: a SECOND parent the row names
+    by id still decides (Task 8b). The two are exclusive on both tables that
+    have two (`doc_versions_one_parent`, `ck_health_assignment_one_target`),
+    so a row naming its second parent has no first to inherit from. Only
+    when no later parent names the row's client is it UNKNOWN."""
     metadata = _table(state).metadata
+    unknown = False
     for parent, fk in _parents(table) if table in CATALOG else []:
         if fk in state.dict:
             parent_id = state.dict[fk]
@@ -241,11 +249,16 @@ def _resulting_client(
             return UNKNOWN
         else:
             linked = _linked_client(session, state, parent, fk)
+            if isinstance(linked, _Unknown):
+                unknown = True
+                continue
             if not isinstance(linked, _Unlinked):
                 return linked
             parent_id = None  # unset on a new row, and nothing will set it: NULL
         if parent_id is not None:
             return _parent_client(session, parent, parent_id, metadata)
+    if unknown:
+        return UNKNOWN
     if "client_id" in state.dict:
         return cast(Client, state.dict["client_id"])
     # Unset on a new row: no default but the trigger's, so NULL.

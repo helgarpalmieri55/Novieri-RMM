@@ -252,10 +252,14 @@ class HealthProfileAssignment(Base):
             unique=True,
             postgresql_where=text("device_group_id IS NOT NULL"),
         ),
+        # The default with no device and no group: one global (the org's) and,
+        # NULLS NOT DISTINCT, one per client (migration 0231, Task 8b).
         Index(
-            "uq_health_assignment_org",
+            "uq_health_assignment_client_org",
             "org_id",
+            "client_id",
             unique=True,
+            postgresql_nulls_not_distinct=True,
             postgresql_where=text("device_id IS NULL AND device_group_id IS NULL"),
         ),
         Index("ix_health_assignment_profile", "org_id", "profile_id"),
