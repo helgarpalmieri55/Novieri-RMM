@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import (
     CheckConstraint,
     Date,
+    FetchedValue,
     ForeignKey,
     Index,
     SmallInteger,
@@ -97,6 +98,16 @@ class DevicePerson(Base):
 
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"), primary_key=True)
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     person_id: Mapped[UUID | None] = mapped_column(ForeignKey("person.id"), default=None)
     source: Mapped[str] = mapped_column(String(12), default="inventory")
     observed_login: Mapped[str | None] = mapped_column(String(256), default=None)

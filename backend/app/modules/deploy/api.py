@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import NoResultFound
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.audit import audit_service
 from app.core.http import read_bounded_body, reject_oversized_content_length
 from app.core.i18n import tr
@@ -403,7 +403,7 @@ async def list_packages(
 async def create_package_route(
     body: PackageCreateRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("deploy.package.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("deploy.package.manage")),
 ) -> PackageOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -447,7 +447,7 @@ _MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
 async def upload_package_artifact(
     package_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("deploy.package.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("deploy.package.manage")),
 ) -> PackageOut:
     # Cheapest check first, before any DB/object-store work (mirrors
     # `app.modules.budget.api.upload_attachment_route`). `Content-Length` is
@@ -481,7 +481,7 @@ async def upload_package_artifact(
 async def delete_package_route(
     package_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("deploy.package.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("deploy.package.manage")),
 ) -> None:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -727,7 +727,7 @@ async def list_scripts(
 async def create_script(
     body: ScriptCreateRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("deploy.script.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("deploy.script.manage")),
 ) -> ScriptOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -752,7 +752,7 @@ async def update_script(
     script_id: UUID,
     body: ScriptUpdateRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("deploy.script.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("deploy.script.manage")),
 ) -> ScriptOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -822,7 +822,7 @@ async def run_script_route(
 def _policy_error(exc: DeployValidationError) -> HTTPException:
     if isinstance(exc, ScriptPolicyNotFound):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
-    return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
 
 
 async def _policy_out(session: Any, org_id: UUID, policy_id: UUID) -> ScriptPolicyOut:

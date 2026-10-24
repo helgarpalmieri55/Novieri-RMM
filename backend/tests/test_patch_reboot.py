@@ -78,7 +78,7 @@ async def _setup(
         org = Organization(name=slug, slug=slug)
         session.add(org)
         await session.flush()
-        group = DeviceGroup(org_id=org.id, name="servers")
+        group = DeviceGroup(org_id=org.id, name="servers", client_id=org.id)
         session.add(group)
         await session.flush()
         session.add(
@@ -92,7 +92,12 @@ async def _setup(
             )
         )
         device = Device(
-            org_id=org.id, hostname="srv1", os_family="windows", device_group_id=group.id
+    org_id=org.id,
+    hostname="srv1",
+    os_family="windows",
+    device_group_id=group.id,
+    client_id=org.id,
+    site_id=org.id,
         )
         session.add(device)
         await session.flush()

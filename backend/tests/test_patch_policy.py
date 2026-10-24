@@ -13,10 +13,17 @@ async def _setup(admin_engine):
         org = Organization(name="pp", slug=f"pp-{uuid4().hex[:6]}")
         s.add(org)
         await s.flush()
-        grp = DeviceGroup(org_id=org.id, name="servers")
+        grp = DeviceGroup(org_id=org.id, name="servers", client_id=org.id)
         s.add(grp)
         await s.flush()
-        dev = Device(org_id=org.id, hostname="h", os_family="linux", device_group_id=grp.id)
+        dev = Device(
+            org_id=org.id,
+            hostname="h",
+            os_family="linux",
+            device_group_id=grp.id,
+            client_id=org.id,
+            site_id=org.id,
+        )
         s.add(dev)
         await s.commit()
         return org.id, grp.id, dev.id
@@ -88,12 +95,12 @@ async def _mixed_fleet(admin_engine) -> tuple[UUID, dict[str, UUID]]:
         org = Organization(name="rp", slug=f"rp-{uuid4().hex[:6]}")
         s.add(org)
         await s.flush()
-        pilot_group = DeviceGroup(org_id=org.id, name="pilot-group")
+        pilot_group = DeviceGroup(org_id=org.id, name="pilot-group", client_id=org.id)
         # A group with a policy but NO devices: its ring must still be listed,
         # at zero, because a ring an operator can approve into and cannot see
         # is a ring they will approve into by accident.
-        empty_group = DeviceGroup(org_id=org.id, name="empty-group")
-        plain_group = DeviceGroup(org_id=org.id, name="plain-group")
+        empty_group = DeviceGroup(org_id=org.id, name="empty-group", client_id=org.id)
+        plain_group = DeviceGroup(org_id=org.id, name="plain-group", client_id=org.id)
         s.add_all([pilot_group, empty_group, plain_group])
         await s.flush()
         s.add(PatchPolicy(org_id=org.id, device_group_id=None, ring_name="broad", ring_order=100))
@@ -111,14 +118,20 @@ async def _mixed_fleet(admin_engine) -> tuple[UUID, dict[str, UUID]]:
             "in_pilot": Device(
                 org_id=org.id, hostname="a", os_family="windows",
                 device_group_id=pilot_group.id,
+                client_id=org.id,
+                site_id=org.id,
             ),
             # Grouped, but that group names no policy -> org default.
             "grouped_no_policy": Device(
                 org_id=org.id, hostname="b", os_family="windows",
                 device_group_id=plain_group.id,
+                client_id=org.id,
+                site_id=org.id,
             ),
             # No group at all -> org default.
-            "ungrouped": Device(org_id=org.id, hostname="c", os_family="linux"),
+            "ungrouped": Device(
+                org_id=org.id, hostname="c", os_family="linux", client_id=org.id, site_id=org.id
+            ),
         }
         s.add_all(list(devices.values()))
         await s.commit()

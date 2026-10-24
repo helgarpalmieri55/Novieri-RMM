@@ -967,7 +967,11 @@ async def _seed_alerts(engine, org, spec: list[tuple[str, str]]) -> None:
         await session.flush()
         for state, severity in spec:
             device = Device(
-                org_id=org.org_id, hostname=f"host-{uuid4().hex[:10]}", os_family="windows"
+    org_id=org.org_id,
+    hostname=f"host-{uuid4().hex[:10]}",
+    os_family="windows",
+    client_id=org.org_id,
+    site_id=org.org_id,
             )
             session.add(device)
             await session.flush()

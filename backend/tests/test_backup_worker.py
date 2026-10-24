@@ -98,11 +98,16 @@ async def _make_windowed_device(
     window is `window_cron`, pointing at a real vault-sealed repository.
     Returns (device_id, repository_id)."""
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        group = DeviceGroup(org_id=org_id, name=f"bkw-{uuid4().hex[:6]}")
+        group = DeviceGroup(org_id=org_id, name=f"bkw-{uuid4().hex[:6]}", client_id=org_id)
         session.add(group)
         await session.flush()
         device = Device(
-            org_id=org_id, hostname="d1", os_family="linux", device_group_id=group.id
+    org_id=org_id,
+    hostname="d1",
+    os_family="linux",
+    device_group_id=group.id,
+    client_id=org_id,
+    site_id=org_id,
         )
         session.add(device)
         await session.flush()
@@ -353,8 +358,12 @@ async def test_retention_gc_is_per_device_and_collects_orphan_chunks(
         await session.flush()
         user = User(org_id=org.id, external_subject=f"sub-{slug}", email=f"{slug}@b.c")
         session.add(user)
-        dev_a = Device(org_id=org.id, hostname="a", os_family="linux")
-        dev_b = Device(org_id=org.id, hostname="b", os_family="linux")
+        dev_a = Device(
+            org_id=org.id, hostname="a", os_family="linux", client_id=org.id, site_id=org.id
+        )
+        dev_b = Device(
+            org_id=org.id, hostname="b", os_family="linux", client_id=org.id, site_id=org.id
+        )
         session.add_all([dev_a, dev_b])
         await session.flush()
         await session.commit()
@@ -490,7 +499,9 @@ async def test_verification_sweep_verifies_never_verified_points(
         await session.flush()
         user = User(org_id=org.id, external_subject=f"sub-{slug}", email=f"{slug}@b.c")
         session.add(user)
-        device = Device(org_id=org.id, hostname="d", os_family="linux")
+        device = Device(
+            org_id=org.id, hostname="d", os_family="linux", client_id=org.id, site_id=org.id
+        )
         session.add(device)
         await session.flush()
         await session.commit()

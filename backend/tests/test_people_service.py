@@ -58,7 +58,14 @@ async def _person(app_engine: AsyncEngine, org_id: UUID, name: str, email: str |
 
 async def _device(app_engine: AsyncEngine, org_id: UUID, **kw: Any) -> UUID:
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        d = Device(org_id=org_id, hostname=f"pc-{uuid4().hex[:6]}", os_family="windows", **kw)
+        d = Device(
+            org_id=org_id,
+            hostname=f"pc-{uuid4().hex[:6]}",
+            os_family="windows",
+            **kw,
+            client_id=org_id,
+            site_id=org_id,
+        )
         s.add(d)
         await s.flush()
         return d.id

@@ -31,7 +31,13 @@ async def _actions(api_env: ApiEnv, org_id: UUID) -> list[str]:
 
 async def _device(api_env: ApiEnv, org_id: UUID) -> UUID:
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
-        d = Device(org_id=org_id, hostname=f"pc-{uuid4().hex[:6]}", os_family="windows")
+        d = Device(
+            org_id=org_id,
+            hostname=f"pc-{uuid4().hex[:6]}",
+            os_family="windows",
+            client_id=org_id,
+            site_id=org_id,
+        )
         s.add(d)
         await s.commit()
         return d.id

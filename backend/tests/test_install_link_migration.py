@@ -38,7 +38,9 @@ async def test_install_links_is_forced_rls_with_a_tenant_policy(admin_engine: As
             )
         ).scalars().all()
     assert tuple(row) == (True, True)
-    assert policies == ["tenant_isolation"]
+    # The tenant policy, and since migration 0231 the restrictive client one
+    # (MSP clients spec §2.2) -- in whatever order `pg_policies` lists them.
+    assert sorted(policies) == ["client_isolation", "tenant_isolation"]
 
 
 async def test_one_org_never_reads_another_orgs_link(
@@ -46,7 +48,11 @@ async def test_one_org_never_reads_another_orgs_link(
 ) -> None:
     a, b = await _org(admin_engine), await _org(admin_engine)
     async with AsyncSession(admin_engine) as session:
-        session.add_all([InstallLink(org_id=a.id), InstallLink(org_id=b.id)])
+        session.add_all([InstallLink(
+            org_id=a.id, client_id=a.id, site_id=a.id
+        ), InstallLink(
+            org_id=b.id, client_id=b.id, site_id=b.id
+        )])
         await session.commit()
     async with org_session(b.id, engine=app_engine, clients=ClientScope.all()) as session:
         seen = (await session.execute(select(InstallLink.org_id))).scalars().all()
@@ -56,7 +62,14 @@ async def test_one_org_never_reads_another_orgs_link(
 async def test_the_link_cannot_be_on_without_a_network(admin_engine: AsyncEngine) -> None:
     org = await _org(admin_engine)
     async with AsyncSession(admin_engine) as session:
-        session.add(InstallLink(org_id=org.id, enabled=True, code_hash="a" * 64, networks=[]))
+        session.add(InstallLink(
+            org_id=org.id,
+            enabled=True,
+            code_hash="a" * 64,
+            networks=[],
+            client_id=org.id,
+            site_id=org.id,
+        ))
         with pytest.raises(IntegrityError, match="ck_install_links_on_needs_code_and_network"):
             await session.commit()
 
@@ -64,7 +77,7 @@ async def test_the_link_cannot_be_on_without_a_network(admin_engine: AsyncEngine
 async def test_the_hourly_limit_is_bounded(admin_engine: AsyncEngine) -> None:
     org = await _org(admin_engine)
     async with AsyncSession(admin_engine) as session:
-        session.add(InstallLink(org_id=org.id, hourly_limit=501))
+        session.add(InstallLink(org_id=org.id, hourly_limit=501, client_id=org.id, site_id=org.id))
         with pytest.raises(IntegrityError, match="ck_install_links_hourly_limit"):
             await session.commit()
 
@@ -74,7 +87,9 @@ async def test_every_existing_and_new_device_is_approved_by_default(
 ) -> None:
     org = await _org(admin_engine)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        device = Device(org_id=org.id, hostname="h", os_family="linux")
+        device = Device(
+            org_id=org.id, hostname="h", os_family="linux", client_id=org.id, site_id=org.id
+        )
         session.add(device)
         await session.commit()
         await session.refresh(device)
@@ -86,7 +101,14 @@ async def test_a_rejection_outcome_is_a_closed_vocabulary(admin_engine: AsyncEng
     org = await _org(admin_engine)
     async with AsyncSession(admin_engine) as session:
         session.add(
-            Device(org_id=org.id, hostname="h", review_state="rejected", rejection_outcome="meh")
+            Device(
+                org_id=org.id,
+                hostname="h",
+                review_state="rejected",
+                rejection_outcome="meh",
+                client_id=org.id,
+                site_id=org.id,
+            )
         )
         with pytest.raises(IntegrityError, match="ck_devices_rejection_outcome"):
             await session.commit()
@@ -106,6 +128,8 @@ async def test_a_manual_removal_is_acknowledged_only_on_a_rejection_that_left_th
                 review_state="rejected",
                 rejection_outcome="agent_confirmed",
                 removal_acknowledged_at=datetime.now(UTC),
+                client_id=org.id,
+                site_id=org.id,
             )
         )
         with pytest.raises(IntegrityError, match="ck_devices_removal_acknowledged"):
@@ -118,6 +142,8 @@ async def test_a_manual_removal_is_acknowledged_only_on_a_rejection_that_left_th
                 review_state="rejected",
                 rejection_outcome="timeout",
                 removal_acknowledged_at=datetime.now(UTC),
+                client_id=org.id,
+                site_id=org.id,
             )
         )
         await session.commit()
@@ -126,7 +152,9 @@ async def test_a_manual_removal_is_acknowledged_only_on_a_rejection_that_left_th
 async def test_review_state_is_a_closed_vocabulary(admin_engine: AsyncEngine) -> None:
     org = await _org(admin_engine)
     async with AsyncSession(admin_engine) as session:
-        session.add(Device(org_id=org.id, hostname="h", review_state="maybe"))
+        session.add(Device(
+            org_id=org.id, hostname="h", review_state="maybe", client_id=org.id, site_id=org.id
+        ))
         with pytest.raises(IntegrityError, match="ck_devices_review_state"):
             await session.commit()
 

@@ -35,16 +35,26 @@ the operator has not seen.
 **NOTHING HERE CONNECTS, SIGNS OR DECRYPTS.** It records what a probe reported
 and what an operator confirmed. The observation is produced by the agent inside
 a verified `agent.push_probe` job and arrives as an ordinary job result.
+
+**AN ADDRESS NAMES A HOST ONLY WITHIN ONE CLIENT'S NETWORK** (migration 0231,
+Task 8b). Two clients' 10.0.0.5 are two machines with two keys, so a row is
+per `(org, client, address)` -- its client is its device's -- and every lookup
+says whose host it means. A row with no device is GLOBAL (an O row: every
+client's), and serves a client that has no row of its own at the address; a
+client's own row, confirmed or not, always takes precedence over it. Before,
+one row per address: a probe of Y's machine overwrote X's observation and moved
+the row -- X's confirmation with it -- into Y.
 """
 
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
 from app.core.i18n import tr
+from app.models import Device
 from app.modules.agent_push.errors import (
     PushConflictError,
     PushNotFoundError,
@@ -76,16 +86,74 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-async def _row_for(
-    session: AsyncSession, org_id: UUID, address: str
-) -> PushHostKey | None:
-    return (
+async def _client_of(
+    session: AsyncSession, org_id: UUID, device_id: UUID | None
+) -> UUID | None:
+    """The client a host key of `device_id` belongs to; None (global) for none."""
+    if device_id is None:
+        return None
+    client: UUID | None = (
         await session.execute(
-            select(PushHostKey).where(
-                PushHostKey.org_id == org_id, PushHostKey.address == address
-            )
+            select(Device.client_id).where(Device.org_id == org_id, Device.id == device_id)
         )
     ).scalar_one_or_none()
+    return client
+
+
+async def _row_for(
+    session: AsyncSession, org_id: UUID, address: str, client_id: UUID | None
+) -> PushHostKey | None:
+    """The row that serves `client_id` at `address`: the client's own, else
+    the global one (for None, the global one only)."""
+    whose = (
+        PushHostKey.client_id.is_(None)
+        if client_id is None
+        else or_(PushHostKey.client_id == client_id, PushHostKey.client_id.is_(None))
+    )
+    return (
+        await session.execute(
+            select(PushHostKey)
+            .where(PushHostKey.org_id == org_id, PushHostKey.address == address, whose)
+            # The client's own first (`false` sorts before `true`).
+            .order_by(PushHostKey.client_id.is_(None))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def _row_in_scope(
+    session: AsyncSession, org_id: UUID, address: str
+) -> PushHostKey | None:
+    """The row at `address` the caller means, from what its scope reads: the
+    one client's row it reaches there, else the global row.
+
+    The address alone cannot say whose host it is when the scope reaches TWO
+    clients' rows at it -- refused, so the person says which (`X-Client-Id`),
+    rather than confirming one machine's key for another.
+    """
+    rows = list(
+        (
+            await session.execute(
+                select(PushHostKey).where(
+                    PushHostKey.org_id == org_id, PushHostKey.address == address
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    own = [row for row in rows if row.client_id is not None]
+    if len(own) > 1:
+        raise PushConflictError(
+            tr(
+                "{address} has a host key in more than one client; choose the client "
+                "whose machine it is and try again",
+                address=address,
+            )
+        )
+    if own:
+        return own[0]
+    return rows[0] if rows else None
 
 
 async def record_observation(
@@ -107,8 +175,13 @@ async def record_observation(
     to return it while the observation disagrees. Overwriting the confirmation
     here would erase the evidence of what was confirmed and when, which an
     auditor needs precisely when a key has changed.
+
+    The row is the device's client's (module docstring). A global row at the
+    address is CLAIMED for the device -- it gains the device, and with it the
+    device's client -- as the one row per address always was; a client's
+    existing row is never another client's.
     """
-    row = await _row_for(session, org_id, address)
+    row = await _row_for(session, org_id, address, await _client_of(session, org_id, device_id))
     now = _utcnow()
     if row is None:
         row = PushHostKey(
@@ -174,7 +247,7 @@ async def confirm_host_key(
     man-in-the-middle -- and is refused.
     """
     parsed = str(parse_target_address(address))
-    row = await _row_for(session, org_id, parsed)
+    row = await _row_in_scope(session, org_id, parsed)
     if row is None:
         raise PushNotFoundError(
             tr(
@@ -253,7 +326,7 @@ async def record_readiness(
     `record_observation` keeps it.
     """
     parsed = str(parse_target_address(address))
-    row = await _row_for(session, org_id, parsed)
+    row = await _row_for(session, org_id, parsed, await _client_of(session, org_id, device_id))
     now = _utcnow()
     if row is None:
         row = PushHostKey(
@@ -299,9 +372,10 @@ async def record_readiness(
 
 
 async def confirmed_key_for(
-    session: AsyncSession, org_id: UUID, address: str
+    session: AsyncSession, org_id: UUID, address: str, *, device_id: UUID | None = None
 ) -> tuple[str | None, str | None]:
-    """`(confirmed_fingerprint, refusal_reason)` for a push to `address`.
+    """`(confirmed_fingerprint, refusal_reason)` for a push to `device_id` at
+    `address`: its client's own row, else the global one (module docstring).
 
     Returns the fingerprint only when a human confirmed it AND the latest probe
     still sees the same key. Otherwise the fingerprint is `None` and the reason
@@ -312,7 +386,7 @@ async def confirmed_key_for(
     * `host_key_changed` -- confirmed, but the latest observation disagrees.
       Refused, not warned about; the operator must re-confirm deliberately.
     """
-    row = await _row_for(session, org_id, address)
+    row = await _row_for(session, org_id, address, await _client_of(session, org_id, device_id))
     if row is None or row.confirmed_fingerprint is None:
         return None, "host_key_unconfirmed"
     if row.confirmed_fingerprint != row.observed_fingerprint:
@@ -323,7 +397,8 @@ async def confirmed_key_for(
 async def get_host_key(
     session: AsyncSession, org_id: UUID, address: str
 ) -> PushHostKey | None:
-    return await _row_for(session, org_id, str(parse_target_address(address)))
+    """The row at `address` the caller's scope means (`_row_in_scope`)."""
+    return await _row_in_scope(session, org_id, str(parse_target_address(address)))
 
 
 async def list_host_keys(

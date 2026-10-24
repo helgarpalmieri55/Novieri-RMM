@@ -26,7 +26,9 @@ async def _org_device(admin_engine: AsyncEngine) -> tuple[UUID, UUID]:
         org = Organization(name=slug, slug=slug)
         session.add(org)
         await session.flush()
-        device = Device(org_id=org.id, hostname="rh1", os_family="linux")
+        device = Device(
+            org_id=org.id, hostname="rh1", os_family="linux", client_id=org.id, site_id=org.id
+        )
         session.add(device)
         await session.commit()
         return org.id, device.id

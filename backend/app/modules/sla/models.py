@@ -26,7 +26,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 
 def _utcnow() -> datetime:
@@ -130,6 +130,7 @@ class SlaPolicy(Base):
 
     __tablename__ = "sla_policy"
     __table_args__ = (
+        client_org_fk("sla_policy"),
         CheckConstraint(
             "response_target_minutes > 0", name="ck_sla_policy_response_positive"
         ),
@@ -161,38 +162,55 @@ class SlaPolicy(Base):
         # its own level forever. `policies.py::_POLICY_INDEX_BY_LEVEL` repeats
         # these predicates verbatim as its ON CONFLICT arbiters; all three
         # copies must agree exactly or Postgres cannot infer the index.
+        #
+        # PER CLIENT (migration 0231, Task 8b): each key holds `client_id` under
+        # NULLS NOT DISTINCT, so the rule is one active policy per level among
+        # the global rows (`NULL` = SLA for everyone) and one per level within
+        # each client; a client's policy and a global one may share a level.
         Index(
-            "uq_sla_policy_queue_and_priority",
+            "uq_sla_policy_client_queue_and_priority",
             "org_id",
+            "client_id",
             "queue_id",
             "priority",
             unique=True,
+            postgresql_nulls_not_distinct=True,
             postgresql_where=text("queue_id IS NOT NULL AND priority IS NOT NULL AND active"),
         ),
         Index(
-            "uq_sla_policy_queue_wildcard_priority",
+            "uq_sla_policy_client_queue_wildcard_priority",
             "org_id",
+            "client_id",
             "queue_id",
             unique=True,
+            postgresql_nulls_not_distinct=True,
             postgresql_where=text("queue_id IS NOT NULL AND priority IS NULL AND active"),
         ),
         Index(
-            "uq_sla_policy_wildcard_queue_priority",
+            "uq_sla_policy_client_wildcard_queue_priority",
             "org_id",
+            "client_id",
             "priority",
             unique=True,
+            postgresql_nulls_not_distinct=True,
             postgresql_where=text("queue_id IS NULL AND priority IS NOT NULL AND active"),
         ),
         Index(
-            "uq_sla_policy_wildcard_both",
+            "uq_sla_policy_client_wildcard_both",
             "org_id",
+            "client_id",
             unique=True,
+            postgresql_nulls_not_distinct=True,
             postgresql_where=text("queue_id IS NULL AND priority IS NULL AND active"),
         ),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     queue_id: Mapped[UUID | None] = mapped_column(ForeignKey("ticket_queue.id"), default=None)
     priority: Mapped[str | None] = mapped_column(String(16), default=None)
     calendar_id: Mapped[UUID] = mapped_column(ForeignKey("sla_calendar.id"))

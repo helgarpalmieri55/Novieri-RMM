@@ -53,7 +53,7 @@ async def seed_org(env_or_engine: Any, tag: str = "h") -> HealthOrg:
         await session.flush()
         user = User(org_id=org.id, external_subject=f"sub-{slug}", email=f"{slug}@test.local")
         session.add(user)
-        group = DeviceGroup(org_id=org.id, name=f"group-{slug}")
+        group = DeviceGroup(org_id=org.id, name=f"group-{slug}", client_id=org.id)
         session.add(group)
         await session.flush()
         device = Device(
@@ -61,6 +61,8 @@ async def seed_org(env_or_engine: Any, tag: str = "h") -> HealthOrg:
             hostname=f"host-{slug}",
             os_family="windows",
             device_group_id=group.id,
+            client_id=org.id,
+            site_id=org.id,
         )
         session.add(device)
         await session.commit()
@@ -105,7 +107,7 @@ async def seed_device(env_or_engine: Any, org_id: UUID, **kw: Any) -> UUID:
     }
     values.update(kw)
     async with AsyncSession(engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, **values)
+        device = Device(org_id=org_id, **values, client_id=org_id, site_id=org_id)
         session.add(device)
         await session.commit()
         return device.id
@@ -118,7 +120,7 @@ async def seed_group(env_or_engine: Any, org_id: UUID, **kw: Any) -> UUID:
     values: dict[str, Any] = {"name": f"group-{uuid4().hex[:8]}"}
     values.update(kw)
     async with AsyncSession(engine, expire_on_commit=False) as session:
-        group = DeviceGroup(org_id=org_id, **values)
+        group = DeviceGroup(org_id=org_id, **values, client_id=org_id)
         session.add(group)
         await session.commit()
         return group.id

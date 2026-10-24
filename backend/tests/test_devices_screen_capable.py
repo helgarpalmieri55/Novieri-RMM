@@ -51,7 +51,9 @@ async def _device(
     agent: bool = True,
 ) -> UUID:
     async with AsyncSession(engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, hostname=hostname, os_family="windows")
+        device = Device(
+            org_id=org_id, hostname=hostname, os_family="windows", client_id=org_id, site_id=org_id
+        )
         session.add(device)
         await session.flush()
         if agent:

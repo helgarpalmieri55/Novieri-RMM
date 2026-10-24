@@ -164,6 +164,11 @@ def _kernel_files() -> list[Path]:
 #:   * `app/jobs/dispatch_permissions.py` — the key and its value.
 #:   * `app/core/approved_actions.py` — the `_DESTRUCTIVE_JOB_TYPES` entry, the
 #:     `NON_APPROVABLE_REASONS` key, and its reason text.
+#:   * `app/core/client_scope_catalog.py` — the `site_server` table's row in
+#:     `CATALOG`. That catalog is a deny-by-default partition over the live
+#:     SCHEMA, as the three above are over the job registry: every table is
+#:     classified by its relation to clients, and an unclassified one breaks
+#:     `tests/test_client_catalog.py`. A dict entry, not a branch.
 #:
 #: `app/models/__init__.py`, `app/modules/__init__.py` and `app/worker.py` are
 #: NOT under these three trees, so they do not appear here.
@@ -173,6 +178,7 @@ EXPECTED_KERNEL_MENTIONS: dict[str, int] = {
     "app/core/approved_actions.py": 4,
     "app/jobs/direct_dispatch.py": 8,
     "app/jobs/dispatch_permissions.py": 2,
+    "app/core/client_scope_catalog.py": 1,
 }
 
 _PATTERNS = ("site_server", "SiteWake", "site.read", "site.manage", "site.wake")

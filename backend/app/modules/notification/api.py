@@ -90,7 +90,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.audit import audit_service
 from app.core.i18n import tr, tr_marked
 from app.core.tenancy import org_session
@@ -339,7 +339,7 @@ async def list_channels_route(
 async def create_channel_route(
     body: ChannelCreateRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("notification.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("notification.admin")),
 ) -> ChannelOut:
     state = request.app.state
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
@@ -379,7 +379,7 @@ async def update_channel_route(
     channel_id: UUID,
     body: ChannelUpdateRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("notification.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("notification.admin")),
 ) -> ChannelOut:
     state = request.app.state
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
@@ -403,7 +403,7 @@ async def update_channel_route(
 async def delete_channel_route(
     channel_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("notification.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("notification.admin")),
 ) -> None:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -420,7 +420,7 @@ async def delete_channel_route(
 async def test_channel_route(
     channel_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("notification.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("notification.admin")),
 ) -> TestSendResult:
     """`notification.admin`-gated (spec §5: not `notification.read` -- a test
     send dials a real destination) and SUBJECT TO THE IDENTICAL EGRESS GUARD
@@ -478,7 +478,7 @@ async def list_rules_route(
 async def create_rule_route(
     body: RuleCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("notification.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("notification.admin")),
 ) -> RuleOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -495,7 +495,7 @@ async def update_rule_route(
     rule_id: UUID,
     body: RuleUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("notification.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("notification.admin")),
 ) -> RuleOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -517,7 +517,7 @@ async def update_rule_route(
 async def delete_rule_route(
     rule_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("notification.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("notification.admin")),
 ) -> None:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -556,7 +556,7 @@ async def list_allowlist_route(
 async def create_allowlist_entry_route(
     body: AllowlistEntryCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("notification.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("notification.admin")),
 ) -> AllowlistEntryOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -574,7 +574,7 @@ async def create_allowlist_entry_route(
 async def delete_allowlist_entry_route(
     entry_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("notification.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("notification.admin")),
 ) -> None:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -615,7 +615,7 @@ async def add_queue_member_route(
     queue_id: UUID,
     user_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("notification.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("notification.admin")),
 ) -> QueueMemberOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -637,7 +637,7 @@ async def remove_queue_member_route(
     queue_id: UUID,
     user_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("notification.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("notification.admin")),
 ) -> None:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients

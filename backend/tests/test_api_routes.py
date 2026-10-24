@@ -14,7 +14,9 @@ REDIS_URL = "redis://localhost:6379/9"
 
 async def _add_device(api_env, org_id, hostname="api-dev-1"):
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, hostname=hostname, os_family="windows")
+        device = Device(
+            org_id=org_id, hostname=hostname, os_family="windows", client_id=org_id, site_id=org_id
+        )
         session.add(device)
         await session.commit()
         return device.id
@@ -232,7 +234,9 @@ async def test_audit_read_and_verify(api_env) -> None:
     headers = await api_env.headers(org_id, admin)
     # generate some audited activity
     await api_env.client.post(
-        "/api/v1/enrollment-tokens", json={"name": "a", "max_uses": 1}, headers=headers
+        "/api/v1/enrollment-tokens",
+        json={"name": "a", "max_uses": 1, "site_id": str(org_id)},
+        headers=headers,
     )
 
     auditor = await api_env.create_user(org_id, "auditor")

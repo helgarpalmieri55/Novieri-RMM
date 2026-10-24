@@ -30,7 +30,9 @@ REDIS_URL = "redis://localhost:6379/9"
 
 async def _device(api_env, org_id: UUID, hostname: str = "wks-deploy") -> UUID:
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
-        dev = Device(org_id=org_id, hostname=hostname, os_family="windows")
+        dev = Device(
+            org_id=org_id, hostname=hostname, os_family="windows", client_id=org_id, site_id=org_id
+        )
         s.add(dev)
         await s.commit()
         return dev.id

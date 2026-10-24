@@ -19,7 +19,7 @@ from app.core.config import Settings, get_settings
 from app.core.errors.asyncio_handler import install_asyncio_exception_handler
 from app.core.errors.store import DRAIN_INTERVAL_S, drain_once
 from app.core.health.heartbeat import HEARTBEAT_INTERVAL_S, write_heartbeat
-from app.core.i18n import tr
+from app.core.i18n import tr, tr_marked
 from app.core.security import JwksCache
 from app.core.signing import get_signer
 from app.core.vault import get_vault
@@ -255,6 +255,21 @@ def create_app(
         )
 
     app.add_exception_handler(DeviceAwaitingReview, _awaiting_review)
+
+    # A write to a global row (an O-table row with no client) under a scope
+    # that is not every client: refused by `app.core.global_rows` before any
+    # SQL, so the transaction and its audit event roll back. The same 403 and
+    # the same words as `require_all_clients`, wherever it was raised -- a
+    # route, a service, the MCP channel's in-process call (which passes a
+    # 403's detail through unchanged, `app/mcp/invoke.py::error_text`).
+    from app.api.deps import ALL_CLIENTS_REQUIRED
+    from app.core.global_rows import GlobalRowNotWritable
+
+    async def _global_row(_request: StarletteRequest, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, GlobalRowNotWritable)
+        return JSONResponse(status_code=403, content={"detail": tr_marked(ALL_CLIENTS_REQUIRED)})
+
+    app.add_exception_handler(GlobalRowNotWritable, _global_row)
 
     from app.api.probes import build_registry
     from app.api.probes import router as probes_router

@@ -67,7 +67,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.tenancy import org_session
 from app.modules.sla.calendars import (
     add_holiday,
@@ -268,7 +268,7 @@ async def list_calendars_route(
 async def create_calendar_route(
     body: CalendarCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("sla.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("sla.admin")),
 ) -> CalendarOut:
     try:
         # The error must escape the `org_session` block so the transaction
@@ -328,7 +328,7 @@ async def update_calendar_route(
     calendar_id: UUID,
     body: CalendarUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("sla.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("sla.admin")),
 ) -> CalendarDetail:
     """A timezone change recomputes every still-running clock on this calendar
     (spec §7), inside this transaction -- `calendars.update_calendar` owns
@@ -355,7 +355,7 @@ async def update_calendar_route(
 async def delete_calendar_route(
     calendar_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("sla.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("sla.admin")),
 ) -> None:
     """A calendar referenced by a policy or by any `ticket_sla` row cannot be
     deleted; the 400 names them (spec §9)."""
@@ -378,7 +378,7 @@ async def replace_windows_route(
     calendar_id: UUID,
     body: WindowsReplace,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("sla.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("sla.admin")),
 ) -> list[WindowOut]:
     """Windows are replaced as a SET, never individually (spec §9): a
     weekday's windows only make sense together, and a partial edit can leave a
@@ -438,7 +438,7 @@ async def add_holiday_route(
     calendar_id: UUID,
     body: HolidayCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("sla.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("sla.admin")),
 ) -> HolidayOut:
     try:
         async with org_session(
@@ -471,7 +471,7 @@ async def remove_holiday_route(
     calendar_id: UUID,
     holiday_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("sla.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("sla.admin")),
 ) -> None:
     try:
         async with org_session(
@@ -648,7 +648,7 @@ async def get_settings_route(
 async def update_settings_route(
     body: SettingsUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("sla.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("sla.admin")),
 ) -> SettingsOut:
     try:
         async with org_session(

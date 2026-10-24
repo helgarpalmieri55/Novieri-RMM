@@ -44,7 +44,9 @@ REDIS_URL = "redis://localhost:6379/9"
 
 async def _device(api_env, org_id: UUID, hostname: str = "wks-patch") -> UUID:
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
-        dev = Device(org_id=org_id, hostname=hostname, os_family="windows")
+        dev = Device(
+            org_id=org_id, hostname=hostname, os_family="windows", client_id=org_id, site_id=org_id
+        )
         s.add(dev)
         await s.commit()
         return dev.id
@@ -238,7 +240,12 @@ async def test_an_untargeted_scan_passes_over_devices_waiting_for_review(api_env
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
         for state in ("pending", "rejected"):
             dev = Device(
-                org_id=org_id, hostname=f"{state}-01", os_family="windows", review_state=state
+    org_id=org_id,
+    hostname=f"{state}-01",
+    os_family="windows",
+    review_state=state,
+    client_id=org_id,
+    site_id=org_id,
             )
             s.add(dev)
             await s.commit()
@@ -1069,7 +1076,7 @@ async def test_rings_says_how_many_devices_each_ring_reaches(api_env) -> None:
     org_id = await api_env.create_org("patch")
     admin = await api_env.create_user(org_id, "org-admin")
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
-        group = DeviceGroup(org_id=org_id, name="pilot-machines")
+        group = DeviceGroup(org_id=org_id, name="pilot-machines", client_id=org_id)
         session.add(group)
         await session.flush()
         session.add(
@@ -1085,10 +1092,20 @@ async def test_rings_says_how_many_devices_each_ring_reaches(api_env) -> None:
         session.add_all(
             [
                 Device(org_id=org_id, hostname="p1", os_family="windows",
-                       device_group_id=group.id),
+                       device_group_id=group.id,
+                       client_id=org_id,
+                       site_id=org_id),
                 Device(org_id=org_id, hostname="p2", os_family="windows",
-                       device_group_id=group.id),
-                Device(org_id=org_id, hostname="b1", os_family="linux"),
+                       device_group_id=group.id,
+                       client_id=org_id,
+                       site_id=org_id),
+                Device(
+                    org_id=org_id,
+                    hostname="b1",
+                    os_family="linux",
+                    client_id=org_id,
+                    site_id=org_id,
+                ),
             ]
         )
         await session.commit()

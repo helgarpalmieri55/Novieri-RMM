@@ -12,6 +12,7 @@ from uuid import UUID
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    FetchedValue,
     ForeignKey,
     Index,
     String,
@@ -22,12 +23,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, uuid7_pk
+from app.models.base import Base, TimestampMixin, client_org_fk, uuid7_pk
 
 
 class DocArticle(TimestampMixin, Base):
     __tablename__ = "doc_articles"
     __table_args__ = (
+        client_org_fk("doc_articles"),
         Index("ix_doc_articles_org_category", "org_id", "category"),
         # DECLARED HERE BECAUSE IT ONCE WAS NOT, and the index spent a month
         # not existing as a result. 0007 created it in raw SQL and left the
@@ -52,6 +54,10 @@ class DocArticle(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     title: Mapped[str] = mapped_column(String(300))
     body: Mapped[str] = mapped_column(Text, default="")
     category: Mapped[str] = mapped_column(String(100), default="General")
@@ -66,10 +72,17 @@ class DocArticle(TimestampMixin, Base):
 
 class DocRecord(TimestampMixin, Base):
     __tablename__ = "doc_records"
-    __table_args__ = (Index("ix_doc_records_org_type", "org_id", "record_type"),)
+    __table_args__ = (
+        Index("ix_doc_records_org_type", "org_id", "record_type"),
+        client_org_fk("doc_records"),
+    )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     record_type: Mapped[str] = mapped_column(String(20))  # network|service|vendor|location
     name: Mapped[str] = mapped_column(String(300))
     fields: Mapped[dict[str, Any]] = mapped_column(default=dict)
@@ -81,10 +94,23 @@ class DocRecord(TimestampMixin, Base):
 
 class DocLink(Base):
     __tablename__ = "doc_links"
-    __table_args__ = (UniqueConstraint("article_id", "target_type", "target_id"),)
+    __table_args__ = (
+        UniqueConstraint("article_id", "target_type", "target_id"),
+        client_org_fk("doc_links"),
+    )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # article_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     article_id: Mapped[UUID] = mapped_column(ForeignKey("doc_articles.id", ondelete="CASCADE"))
     target_type: Mapped[str] = mapped_column(String(20))  # device|device_group|credential|record
     target_id: Mapped[UUID] = mapped_column()
@@ -93,6 +119,7 @@ class DocLink(Base):
 class DocVersion(Base):
     __tablename__ = "doc_versions"
     __table_args__ = (
+        client_org_fk("doc_versions"),
         CheckConstraint(
             "(article_id IS NULL) != (record_id IS NULL)", name="doc_versions_one_parent"
         ),
@@ -102,6 +129,17 @@ class DocVersion(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. TWO PARENTS, one
+    # trigger each (migration 0231): its_client_from_parent copies the
+    # article's client, its_client_from_record the record's -- whichever of
+    # the two is set. The value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     article_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("doc_articles.id", ondelete="CASCADE"), default=None
     )
@@ -130,6 +168,7 @@ class DocDocument(TimestampMixin, Base):
 
     __tablename__ = "doc_documents"
     __table_args__ = (
+        client_org_fk("doc_documents"),
         Index("ix_doc_documents_org_category", "org_id", "category"),
         # DECLARED HERE AS WELL AS IN THE MIGRATION, and that is not
         # belt-and-braces -- it is the fix for an accident this module has
@@ -150,6 +189,10 @@ class DocDocument(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     title: Mapped[str] = mapped_column(String(300))
     description: Mapped[str] = mapped_column(Text, default="")
     category: Mapped[str] = mapped_column(String(100), default="General")
@@ -176,12 +219,23 @@ class DocDocumentVersion(Base):
 
     __tablename__ = "doc_document_versions"
     __table_args__ = (
+        client_org_fk("doc_document_versions"),
         UniqueConstraint("document_id", "version", name="uq_doc_document_versions_doc_version"),
         Index("ix_doc_document_versions_org_doc", "org_id", "document_id", "version"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # document_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     document_id: Mapped[UUID] = mapped_column(
         ForeignKey("doc_documents.id", ondelete="CASCADE")
     )
@@ -226,6 +280,7 @@ class DocDocumentLink(Base):
 
     __tablename__ = "doc_document_links"
     __table_args__ = (
+        client_org_fk("doc_document_links"),
         UniqueConstraint(
             "document_id", "target_type", "target_id", name="uq_doc_document_links_target"
         ),
@@ -236,6 +291,16 @@ class DocDocumentLink(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # document_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     document_id: Mapped[UUID] = mapped_column(
         ForeignKey("doc_documents.id", ondelete="CASCADE")
     )

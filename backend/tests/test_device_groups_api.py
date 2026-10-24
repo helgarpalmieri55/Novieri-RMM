@@ -24,6 +24,7 @@ from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Device, DeviceGroup, Organization
 from app.services.device_groups import list_device_groups
+from tests.client_guard_support import past_the_client_guard
 
 
 async def _group(
@@ -44,6 +45,7 @@ async def _group(
             description=description,
             rules=rules,
             precedence=precedence,
+            client_id=org_id,
         )
         session.add(group)
         await session.commit()
@@ -51,7 +53,12 @@ async def _group(
 
 
 async def _device(
-    api_env, org_id: UUID, *, hostname: str, device_group_id: UUID | None = None
+    api_env,
+    org_id: UUID,
+    *,
+    hostname: str,
+    device_group_id: UUID | None = None,
+    around_the_client_guard: bool = False,
 ) -> UUID:
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
         device = Device(
@@ -59,8 +66,14 @@ async def _device(
             hostname=hostname,
             os_family="windows",
             device_group_id=device_group_id,
+            client_id=org_id,
+            site_id=org_id,
         )
-        session.add(device)
+        if around_the_client_guard:
+            async with past_the_client_guard(session):
+                session.add(device)
+        else:
+            session.add(device)
         await session.commit()
         return device.id
 
@@ -331,9 +344,10 @@ async def test_another_orgs_group_appears_in_neither_items_nor_total(api_env) ->
 async def test_a_neighbours_device_cannot_inflate_this_orgs_group_count(api_env) -> None:
     """`devices.device_group_id` is a bare FK with NO org-aware constraint --
     `health/profiles.py::_assert_target_in_org` exists because of exactly that
-    -- so nothing in the schema stops org B's device row from naming org A's
-    group. The member count has to be tenant-scoped on the DEVICE side too,
-    or a neighbour tenant decides how large this org's blast radius looks.
+    -- so until migration 0231's client guard nothing in the schema stopped org
+    B's device row from naming org A's group. The member count has to be
+    tenant-scoped on the DEVICE side too, or a neighbour tenant decides how
+    large this org's blast radius looks.
     """
     mine = await api_env.create_org("dg-mine")
     theirs = await api_env.create_org("dg-theirs")
@@ -342,8 +356,11 @@ async def test_a_neighbours_device_cannot_inflate_this_orgs_group_count(api_env)
     my_group = await _group(api_env, mine, "servers")
     await _device(api_env, mine, hostname="m1", device_group_id=my_group)
     # Written on the ADMIN engine: RLS would refuse this from an app session,
-    # and the point is that the row can exist at all.
-    await _device(api_env, theirs, hostname="t1", device_group_id=my_group)
+    # and the point is that the row can exist at all -- around the client guard
+    # that now refuses it too (`tests/client_guard_support.py`).
+    await _device(
+        api_env, theirs, hostname="t1", device_group_id=my_group, around_the_client_guard=True
+    )
 
     body = (
         await api_env.client.get(
@@ -374,7 +391,7 @@ async def test_rls_hides_another_orgs_group_from_an_unfiltered_select(
             await session.commit()
             orgs[key] = org.id
         async with org_session(orgs[key], engine=app_engine, clients=ClientScope.all()) as session:
-            group = DeviceGroup(org_id=orgs[key], name=f"group-{key}")
+            group = DeviceGroup(org_id=orgs[key], name=f"group-{key}", client_id=orgs[key])
             session.add(group)
             await session.flush()
             ids[key] = group.id
@@ -414,7 +431,7 @@ async def test_the_query_is_tenant_scoped_where_rls_is_not_the_thing_rejecting(
             session.add(org)
             await session.flush()
             orgs[key] = org.id
-            group = DeviceGroup(org_id=org.id, name=f"servers-{key}")
+            group = DeviceGroup(org_id=org.id, name=f"servers-{key}", client_id=org.id)
             session.add(group)
             await session.flush()
             groups[key] = group.id
@@ -424,18 +441,31 @@ async def test_the_query_is_tenant_scoped_where_rls_is_not_the_thing_rejecting(
                     hostname=f"in-{key}",
                     os_family="windows",
                     device_group_id=group.id,
+                    client_id=org.id,
+                    site_id=org.id,
                 )
             )
-            session.add(Device(org_id=org.id, hostname=f"loose-{key}", os_family="windows"))
-        # The row nothing in the schema forbids: THEIR device naming MY group.
-        session.add(
-            Device(
-                org_id=orgs["theirs"],
-                hostname="theirs-pointing-at-mine",
+            session.add(Device(
+                org_id=org.id,
+                hostname=f"loose-{key}",
                 os_family="windows",
-                device_group_id=groups["mine"],
+                client_id=org.id,
+                site_id=org.id,
+            ))
+        await session.flush()
+        # THEIR device naming MY group: the row only the client guard forbids
+        # now, written around it (`tests/client_guard_support.py`).
+        async with past_the_client_guard(session):
+            session.add(
+                Device(
+                    org_id=orgs["theirs"],
+                    hostname="theirs-pointing-at-mine",
+                    os_family="windows",
+                    device_group_id=groups["mine"],
+                    client_id=orgs["theirs"],
+                    site_id=orgs["theirs"],
+                )
             )
-        )
         await session.commit()
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:

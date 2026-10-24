@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core import db
 from app.core.client_scope import ClientScope
+from app.core.global_rows import SCOPE_KEY, ClientScopedSession
 
 
 @asynccontextmanager
@@ -26,7 +27,15 @@ async def org_session(
 ) -> AsyncIterator[AsyncSession]:
     engine = engine or db.get_engine()
     scope, ids = clients.guc_values()
-    async with AsyncSession(engine, expire_on_commit=False) as session:
+    # The scope is recorded on the session as well as pinned in the GUCs:
+    # `app.core.global_rows` refuses, before any SQL is sent, a write to a
+    # global row that RLS would refuse quietly (a DELETE matching nothing).
+    async with AsyncSession(
+        engine,
+        expire_on_commit=False,
+        sync_session_class=ClientScopedSession,
+        info={SCOPE_KEY: clients},
+    ) as session:
         async with session.begin():
             await session.execute(
                 text(

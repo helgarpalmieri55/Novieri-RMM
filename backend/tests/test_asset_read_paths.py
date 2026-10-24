@@ -42,6 +42,8 @@ async def _bare_asset(api_env: ApiEnv, org_id: UUID) -> UUID:
             provenance="operator",
             description="core switch, rack 3",
             primary_ip="172.22.104.1",
+            client_id=org_id,
+            site_id=org_id,
         )
         session.add(device)
         await session.flush()
@@ -104,7 +106,9 @@ async def test_a_managed_device_still_reports_what_it_always_did(
     org_id = await api_env.create_org("assets")
     admin = await api_env.create_user(org_id, "org-admin")
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        device = Device(org_id=org_id, hostname="ws-01", os_family="linux")
+        device = Device(
+            org_id=org_id, hostname="ws-01", os_family="linux", client_id=org_id, site_id=org_id
+        )
         session.add(device)
         await session.commit()
 

@@ -2801,8 +2801,8 @@ async def install_link_auto_off_all_orgs(now: datetime) -> int:
                 async with org_session(
                     org_id, engine=app_engine, clients=ClientScope.all()
                 ) as session:
-                    if await install_link_module.switch_off_due(session, org_id, now):
-                        total += 1
+                    # One link per site: an organisation may record several.
+                    total += await install_link_module.switch_off_due(session, org_id, now)
             except Exception as exc:  # noqa: BLE001 - contained, see `_OrgCycleFailures`
                 failures.contain(org_id, exc)
         failures.raise_if_total(len(org_ids))

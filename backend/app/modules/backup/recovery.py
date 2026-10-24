@@ -36,6 +36,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
@@ -143,23 +144,44 @@ def _issue_challenge(row: BackupRecoveryKey, now: datetime) -> str:
     return base64.b64encode(json.dumps(blob, sort_keys=True).encode()).decode()
 
 
-async def register_recovery_key(
-    session: AsyncSession, *, org_id: UUID, actor_id: UUID, public_key_text: str, now: datetime
-) -> tuple[BackupRecoveryKey, str]:
-    """Store a public key and return it with a challenge to prove possession."""
-    raw = parse_public_key(public_key_text)
-    fp = fingerprint(raw)
-    existing = (
+#: The active-key key (migration 0231, Task 8b): unique per client, the global
+#: keys among themselves.
+ACTIVE_KEY = "uq_backup_recovery_keys_client_active"
+
+
+async def _active_key_exists(
+    session: AsyncSession, org_id: UUID, client_id: UUID | None, fp: str
+) -> bool:
+    """Is a key of this fingerprint active in `client_id`'s namespace (None:
+    the global keys')? As `ACTIVE_KEY` is."""
+    found = (
         await session.execute(
-            select(BackupRecoveryKey).where(
+            select(BackupRecoveryKey.id).where(
                 BackupRecoveryKey.org_id == org_id,
+                BackupRecoveryKey.client_id.is_not_distinct_from(client_id),
                 BackupRecoveryKey.fingerprint == fp,
                 BackupRecoveryKey.retired_at.is_(None),
             )
         )
-    ).scalar_one_or_none()
-    if existing is not None:
-        raise RecoveryKeyError(tr("This recovery key is already registered."))
+    ).first()
+    return found is not None
+
+
+def _already_registered() -> RecoveryKeyError:
+    return RecoveryKeyError(tr("This recovery key is already registered."))
+
+
+async def register_recovery_key(
+    session: AsyncSession, *, org_id: UUID, actor_id: UUID, public_key_text: str, now: datetime
+) -> tuple[BackupRecoveryKey, str]:
+    """Store a public key and return it with a challenge to prove possession.
+
+    The key is GLOBAL (phase 1 writes no client): a client's key of the same
+    fingerprint is another row and does not refuse it."""
+    raw = parse_public_key(public_key_text)
+    fp = fingerprint(raw)
+    if await _active_key_exists(session, org_id, None, fp):
+        raise _already_registered()
     row = BackupRecoveryKey(
         org_id=org_id,
         public_key=base64.b64encode(raw).decode(),
@@ -167,7 +189,14 @@ async def register_recovery_key(
         created_by=actor_id,
     )
     session.add(row)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        # Two registrations raced past the check: the key's own refusal.
+        constraint = getattr(getattr(exc.orig, "__cause__", None), "constraint_name", None)
+        if constraint == ACTIVE_KEY:
+            raise _already_registered() from None
+        raise
     challenge = _issue_challenge(row, now)
     await audit_service.record(
         session,

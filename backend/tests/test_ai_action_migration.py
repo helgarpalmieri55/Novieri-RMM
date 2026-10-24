@@ -400,13 +400,17 @@ async def test_the_three_indexes_exist_in_the_live_schema(admin_engine: AsyncEng
     } <= names, sorted(names)
 
 
-def test_the_model_declares_the_same_three_indexes() -> None:
+def test_the_model_declares_the_migrations_four_indexes() -> None:
+    """Four: the three of this module's migration, and the client index
+    migration 0231 gives every client-scoped table (MSP clients spec Annex A),
+    which the model declares with `index=True` on `client_id`."""
     from app.models import AiAction
 
     assert {index.name for index in AiAction.__table__.indexes} == {
         "ix_ai_action_org_state_expiry",
         "ix_ai_action_org_session",
         "ix_ai_action_org_device",
+        "ix_ai_action_client_id",
     }
 
 

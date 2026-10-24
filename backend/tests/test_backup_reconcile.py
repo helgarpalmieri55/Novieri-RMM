@@ -35,7 +35,9 @@ async def _org(admin_engine: AsyncEngine) -> tuple[UUID, UUID, UUID]:
         org = Organization(name=slug, slug=slug)
         s.add(org)
         await s.flush()
-        device = Device(org_id=org.id, hostname="srv", os_family="linux")
+        device = Device(
+            org_id=org.id, hostname="srv", os_family="linux", client_id=org.id, site_id=org.id
+        )
         repo = BackupRepository(org_id=org.id, name="r", storage_ref="x",
                                 encryption_key_ref="x", dedup_params={}, state="active")
         s.add_all([device, repo])

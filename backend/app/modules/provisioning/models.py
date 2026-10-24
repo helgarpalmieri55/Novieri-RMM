@@ -12,6 +12,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
+    FetchedValue,
     ForeignKey,
     Index,
     String,
@@ -21,7 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 
 class OsImage(Base):
@@ -56,10 +57,23 @@ class ProvisionProfile(Base):
 
 class ProvisionRun(Base):
     __tablename__ = "provision_run"
-    __table_args__ = (Index("ix_provision_run_state", "org_id", "state"),)
+    __table_args__ = (
+        Index("ix_provision_run_state", "org_id", "state"),
+        client_org_fk("provision_run"),
+    )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # device_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     profile_id: Mapped[UUID] = mapped_column(ForeignKey("provision_profile.id"))
     job_id: Mapped[UUID | None] = mapped_column(ForeignKey("jobs.id"), default=None)
     device_id: Mapped[UUID | None] = mapped_column(ForeignKey("devices.id"), default=None)

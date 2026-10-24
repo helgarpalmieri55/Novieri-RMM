@@ -13,6 +13,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Enum,
+    FetchedValue,
     ForeignKey,
     Index,
     SmallInteger,
@@ -25,7 +26,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, CIDR, INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, uuid7_pk
+from app.models.base import Base, TimestampMixin, client_org_fk, site_client_fk, uuid7_pk
 
 
 class Organization(TimestampMixin, Base):
@@ -41,6 +42,7 @@ class Organization(TimestampMixin, Base):
 class User(TimestampMixin, Base):
     __tablename__ = "users"
     __table_args__ = (
+        client_org_fk("users"),
         UniqueConstraint("org_id", "external_subject"),
         # Migration 0032. Declared here as well as in the migration so
         # `alembic revision --autogenerate` is not one run away from proposing
@@ -73,7 +75,11 @@ class User(TimestampMixin, Base):
     # person of one client (portal only, refused by `auth_context`). The CHECK
     # `ck_users_kind_client` (migration 0230) ties the two columns together.
     kind: Mapped[str] = mapped_column(String(10), default="staff", server_default="staff")
-    client_id: Mapped[UUID | None] = mapped_column(ForeignKey("clients.id"), default=None)
+    # Indexed by migration 0231, which also gives it the client policy (O, with
+    # its own WITH CHECK) and the org-consistency key `fk_users_client_org`.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
 
 
 class Role(Base):
@@ -133,6 +139,7 @@ class UserRole(Base):
 
     __tablename__ = "user_roles"
     __table_args__ = (
+        client_org_fk("user_roles"),
         UniqueConstraint("user_id", "role_id", "client_id"),
         Index(
             "uq_user_roles_user_role_org_wide",
@@ -165,9 +172,14 @@ class DeviceGroup(TimestampMixin, Base):
 
     __tablename__ = "device_groups"
     __table_args__ = (
+        client_org_fk("device_groups"),
+        # A live name is unique WITHIN ITS CLIENT (migration 0231): a group
+        # organises one client's devices, and two clients may each have
+        # "Servers". Partial, as 0072 made it: an archived group's name is free.
         Index(
-            "uq_device_groups_org_live_name",
+            "uq_device_groups_client_live_name",
             "org_id",
+            "client_id",
             "name",
             unique=True,
             postgresql_where=text("archived_at IS NULL"),
@@ -177,6 +189,8 @@ class DeviceGroup(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0231).
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     parent_group_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("device_groups.id"), default=None
@@ -311,6 +325,8 @@ class DeviceGroupEvaluation(Base):
 class Device(TimestampMixin, Base):
     __tablename__ = "devices"
     __table_args__ = (
+        client_org_fk("devices"),
+        site_client_fk("devices"),
         Index("ix_devices_org_hostname", "org_id", "hostname"),
         # 0078 CREATED THIS AND DID NOT DECLARE IT, which is the same shape of
         # accident that deleted `ix_doc_articles_fts` for a month: an index the
@@ -327,6 +343,12 @@ class Device(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0231).
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
+    # Spec §1.5: a site of the same client -- `fk_devices_site_client`, and
+    # trigger its_device_client_guard for the clearer message. Indexed: the
+    # console filters devices by site.
+    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"), index=True)
     # NULLABLE SINCE 0061, and the two are the same decision. A switch has a
     # name but no hostname in this sense and no OS family at all; a laptop in a
     # box has told us neither yet. Both were NOT NULL, which is exactly what
@@ -459,6 +481,16 @@ class SuggestedAssetMatch(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     #: The row enrolment just created.
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     #: The row that already existed and might be the same machine.
@@ -482,6 +514,16 @@ class DeviceTag(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     key: Mapped[str] = mapped_column(String(100))
     value: Mapped[str] = mapped_column(String(500), default="")
@@ -492,6 +534,16 @@ class Agent(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"), unique=True)
     cert_fingerprint: Mapped[str] = mapped_column(String(64), unique=True)
     cert_serial: Mapped[str] = mapped_column(String(64))
@@ -510,9 +562,20 @@ class Agent(TimestampMixin, Base):
 
 class Policy(TimestampMixin, Base):
     __tablename__ = "policies"
+    __table_args__ = (client_org_fk("policies"),)
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # device_group_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_group_id: Mapped[UUID | None] = mapped_column(  # NULL = org-wide scope
         ForeignKey("device_groups.id"), default=None
     )
@@ -526,9 +589,20 @@ class Credential(Base):
     """Credential METADATA only — the secret lives in the vault (docs/03-security-model.md)."""
 
     __tablename__ = "credentials"
+    __table_args__ = (client_org_fk("credentials"),)
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # device_group_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     name: Mapped[str] = mapped_column(String(200))
     type: Mapped[str] = mapped_column(String(50))  # windows_admin | ssh_key | domain_join | ...
     device_group_id: Mapped[UUID | None] = mapped_column(
@@ -575,6 +649,16 @@ class Job(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_job_client from the
+    # device or group named by target_type/target_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     type: Mapped[str] = mapped_column(String(100))
     target_type: Mapped[str] = mapped_column(String(10), default="device")  # device | group
     target_id: Mapped[UUID] = mapped_column()
@@ -634,6 +718,16 @@ class JobLog(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the jobs row named by job_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     job_id: Mapped[UUID] = mapped_column(ForeignKey("jobs.id"))
     ts: Mapped[datetime] = mapped_column()
     level: Mapped[str] = mapped_column(String(10), default="info")
@@ -676,9 +770,19 @@ class AuditEvent(Base):
 
 class EnrollmentToken(Base):
     __tablename__ = "enrollment_tokens"
+    __table_args__ = (
+        client_org_fk("enrollment_tokens"),
+        site_client_fk("enrollment_tokens"),
+    )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0231).
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
+    # Spec §1.5: a site of the same client (`fk_enrollment_tokens_site_client`).
+    # Indexed: the referencing side of that key, so a site's change of client
+    # does not scan every token.
+    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"), index=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     name: Mapped[str] = mapped_column(String(200), default="")
     expires_at: Mapped[datetime] = mapped_column()
@@ -690,22 +794,34 @@ class EnrollmentToken(Base):
 
 
 class InstallLink(Base):
-    """One organisation's install link (install-link spec §1.1).
+    """One site's install link (install-link spec §1.1; one per site since MSP
+    clients spec §1.5).
 
     THE CODE IS NOT HERE. `code_hash` is `sha256(code)` hex; the code itself is
     returned once, by the response that minted it, exactly as an enrollment
     token is. Unique across orgs because the public page and `/enroll/v1`
-    resolve the organisation FROM the hash.
+    resolve the organisation, client and site FROM the hash.
+
+    `networks` IS READ BY NOTHING: the allowed networks are the site's
+    `egress_networks` (`services/install_link.py`'s module docstring).
     """
 
     __tablename__ = "install_links"
     __table_args__ = (
-        UniqueConstraint("org_id", name="uq_install_links_org"),
+        client_org_fk("install_links"),
+        site_client_fk("install_links"),
+        # One link per SITE (spec §1.5, migration 0231), no longer one per org.
+        UniqueConstraint("site_id", name="uq_install_links_site"),
         UniqueConstraint("code_hash", name="uq_install_links_code_hash"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0231).
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
+    # Spec §1.5: a site of the same client (devices: trigger
+    # its_device_client_guard).
+    site_id: Mapped[UUID] = mapped_column(ForeignKey("sites.id"))
     enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     code_hash: Mapped[str | None] = mapped_column(String(64), default=None)
     networks: Mapped[list[str]] = mapped_column(
@@ -767,6 +883,7 @@ class DomainEvent(Base):
 
     __tablename__ = "domain_events"
     __table_args__ = (
+        client_org_fk("domain_events"),
         # Whole-branch review finding M11: this index cannot serve the drain
         # query (`app.worker.drain_outbox` filters `org_id, processed_at IS
         # NULL` -- neither `claimed_at` nor `occurred_at` appears in that
@@ -786,6 +903,10 @@ class DomainEvent(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     event_type: Mapped[str] = mapped_column(String(100))
     subject_type: Mapped[str] = mapped_column(String(50))
     subject_id: Mapped[UUID] = mapped_column()

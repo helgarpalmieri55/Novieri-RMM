@@ -73,7 +73,9 @@ async def _seed_device(admin_engine: AsyncEngine, org_id: UUID, hostname: str) -
     from app.models import Device
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
-        device = Device(org_id=org_id, hostname=hostname, os_family="linux")
+        device = Device(
+            org_id=org_id, hostname=hostname, os_family="linux", client_id=org_id, site_id=org_id
+        )
         s.add(device)
         await s.commit()
         return device.id

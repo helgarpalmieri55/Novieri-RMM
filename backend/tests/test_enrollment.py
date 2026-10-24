@@ -36,9 +36,12 @@ async def _issue_token(api_env, org_id, sub, **kwargs):
     REQUIRES IT -- it used to default to null on the server, and null means
     unlimited. A helper that omitted it now gets a 422, which is exactly the
     loudness the change is for; every test below that does not care about the
-    bound says `1`, the smallest credential that still enrols a machine."""
+    bound says `1`, the smallest credential that still enrols a machine.
+
+    `site_id` IS IN IT FOR THE SAME REASON (MSP clients spec §1.5): the route
+    requires it. The organisation's Principal site has the organisation's id."""
     headers = await api_env.headers(org_id, sub)
-    body = {"name": "lab", "expires_in_hours": 24, "max_uses": 1} | kwargs
+    body = {"name": "lab", "expires_in_hours": 24, "max_uses": 1, "site_id": str(org_id)} | kwargs
     return await api_env.client.post("/api/v1/enrollment-tokens", json=body, headers=headers)
 
 
@@ -625,6 +628,8 @@ async def test_the_token_query_is_tenant_scoped_where_rls_is_not_the_thing_rejec
             token_hash=uuid4().hex + uuid4().hex,
             name=f"live-{key}",
             expires_at=datetime.now(UTC) + timedelta(hours=24),
+            client_id=org.id,
+            site_id=org.id,
         )
         bypassrls_session.add(live)
         bypassrls_session.add(
@@ -634,6 +639,8 @@ async def test_the_token_query_is_tenant_scoped_where_rls_is_not_the_thing_rejec
                 name=f"dead-{key}",
                 expires_at=datetime.now(UTC) + timedelta(hours=24),
                 revoked=True,
+                client_id=org.id,
+                site_id=org.id,
             )
         )
         await bypassrls_session.flush()
@@ -754,7 +761,8 @@ async def test_a_token_cannot_be_minted_without_a_use_limit(api_env) -> None:
 
     omitted = await api_env.client.post(
         "/api/v1/enrollment-tokens",
-        json={"name": "no-limit", "expires_in_hours": 24},
+        # The site is given, so the only thing missing is the bound.
+        json={"name": "no-limit", "expires_in_hours": 24, "site_id": str(org_id)},
         headers=headers,
     )
     assert omitted.status_code == 422
@@ -762,7 +770,12 @@ async def test_a_token_cannot_be_minted_without_a_use_limit(api_env) -> None:
 
     explicit_null = await api_env.client.post(
         "/api/v1/enrollment-tokens",
-        json={"name": "no-limit", "expires_in_hours": 24, "max_uses": None},
+        json={
+            "name": "no-limit",
+            "expires_in_hours": 24,
+            "max_uses": None,
+            "site_id": str(org_id),
+        },
         headers=headers,
     )
     assert explicit_null.status_code == 422, (
@@ -828,6 +841,7 @@ async def test_the_bound_is_the_services_and_not_only_the_routes(api_env) -> Non
                 await create_token(
                     session,
                     org_id=org_id,
+                    site_id=org_id,
                     created_by=admin,
                     name="direct",
                     expires_in_hours=1,
@@ -864,6 +878,8 @@ async def test_a_token_issued_before_the_bound_still_enrols(api_env) -> None:
             name="legacy-unlimited",
             expires_at=datetime.now(UTC) + timedelta(hours=24),
             max_uses=None,
+            client_id=org_id,
+            site_id=org_id,
         )
         session.add(row)
         # The id is read BEFORE the commit expires the instance: `uuid7_pk`'s
@@ -919,6 +935,8 @@ async def test_the_console_can_count_and_find_the_unlimited_tokens_left(api_env)
                 expires_at=expires_at,
                 max_uses=None,
                 revoked=revoked,
+                client_id=org_id,
+                site_id=org_id,
             )
             session.add(row)
             await session.flush()
@@ -978,6 +996,8 @@ async def test_the_unlimited_count_is_tenant_scoped_where_rls_is_not_rejecting(
                     name=f"unlimited-{key}-{index}",
                     expires_at=datetime.now(UTC) + timedelta(hours=24),
                     max_uses=None,
+                    client_id=org.id,
+                    site_id=org.id,
                 )
             )
     await bypassrls_session.commit()

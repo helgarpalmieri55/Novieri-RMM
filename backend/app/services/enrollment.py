@@ -31,6 +31,7 @@ from app.core.signing import SigningService
 from app.core.tenancy import org_session
 from app.models import Agent, Device, EnrollmentToken, SuggestedAssetMatch
 from app.services import install_link as link_svc
+from app.services.client_sites import site_for_new_rows
 from app.services.matching import resolve_enrolment_target
 
 
@@ -150,6 +151,10 @@ class IssuedToken:
     #: because rows issued before this existed are grandfathered -- see
     #: `create_token` and `enroll`.
     max_uses: int
+    #: The client and site a machine enrolled with this token lands in (MSP
+    #: clients spec §1.5).
+    client_id: UUID
+    site_id: UUID
 
 
 @dataclass(frozen=True)
@@ -170,6 +175,7 @@ async def create_token(
     session: AsyncSession,
     *,
     org_id: UUID,
+    site_id: UUID,
     created_by: UUID,
     name: str,
     expires_in_hours: int | None = None,
@@ -177,6 +183,15 @@ async def create_token(
     max_uses: int,
 ) -> IssuedToken:
     """Mint one bootstrap credential. `max_uses` IS REQUIRED AND IS FINITE.
+
+    `site_id` IS REQUIRED TOO (MSP clients spec §1.5): a machine enrolled with
+    the token lands in that site and its client, and `enroll` opens its
+    session on that client alone. The site is loaded HERE, in the caller's own
+    session, and the client is taken from it -- never from the caller, so the
+    pair cannot disagree. RLS hides a site of another organisation or of a
+    client outside the caller's scope (`client_sites.SiteNotFound`), and an
+    archived site or client takes no new token (`NotAcceptingNewRows`); both
+    before a secret is generated.
 
     IT USED TO BE `int | None`, DEFAULTED TO `None` BY THE ROUTE, AND `None`
     MEANS UNLIMITED AT `enroll()`. `docs/modules/agent-distribution/spec-
@@ -203,6 +218,8 @@ async def create_token(
     their behalf and write it into their database.
     """
     _checked_max_uses(max_uses)
+    site = await site_for_new_rows(session, org_id=org_id, site_id=site_id)
+    client_id = site.client_id
     # EXACTLY ONE OF hours/minutes. A minute-granularity expiry exists for one
     # caller and one reason: agent push install mints a token DELIVERED BY A
     # MACHINE rather than typed by a human, and its spec caps that token at 30
@@ -225,6 +242,8 @@ async def create_token(
     secret = pysecrets.token_urlsafe(32)
     row = EnrollmentToken(
         org_id=org_id,
+        client_id=client_id,
+        site_id=site_id,
         token_hash=_hash_secret(secret),
         name=name,
         expires_at=datetime.now(UTC) + lifetime,
@@ -241,7 +260,12 @@ async def create_token(
         action="enrollment.token_created",
         target_type="enrollment_token",
         target_id=str(row.id),
-        metadata={"name": name, "max_uses": max_uses},
+        metadata={
+            "name": name,
+            "max_uses": max_uses,
+            "client_id": str(client_id),
+            "site_id": str(site_id),
+        },
     )
     return IssuedToken(
         id=row.id,
@@ -249,6 +273,8 @@ async def create_token(
         name=name,
         expires_at=row.expires_at,
         max_uses=max_uses,
+        client_id=client_id,
+        site_id=site_id,
     )
 
 
@@ -503,20 +529,30 @@ async def enroll(
             "malformed token"
         ) from exc
 
-    # Resolve the token's org (no tenant context exists yet) — admin engine,
-    # read-only. This only picks the tenant; it does NOT authorize enrollment.
+    # Resolve the token's org and client (no tenant context exists yet) —
+    # admin engine, read-only. This only picks the tenant and the client the
+    # session is opened on; it does NOT authorize enrollment.
     async with AsyncSession(admin_engine) as session:
-        org_id = (
+        owner = (
             await session.execute(
-                select(EnrollmentToken.org_id).where(EnrollmentToken.id == token_id)
+                select(EnrollmentToken.org_id, EnrollmentToken.client_id).where(
+                    EnrollmentToken.id == token_id
+                )
             )
-        ).scalar_one_or_none()
-    if org_id is None:
+        ).one_or_none()
+    if owner is None:
         raise EnrollmentError(  # i18n-exempt: route answers a fixed enrollment rejected
             "token rejected"
         )
+    org_id, scoped_client = owner
 
-    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
+    # THE TOKEN'S CLIENT AND NOTHING ELSE (MSP clients spec §1.5). Under this
+    # scope `resolve_enrolment_target` cannot see, and so can never link, an
+    # asset row of another client, and the guarded UPDATE below can consume
+    # only a token of this client.
+    async with org_session(
+        org_id, engine=app_engine, clients=ClientScope.only([scoped_client])
+    ) as session:
         # Atomically consume the token: one guarded UPDATE re-checks the hash,
         # revocation, expiry, and use-count and increments in a single statement.
         # Zero rows affected = rejected. This closes the TOCTOU / lost-update
@@ -548,13 +584,16 @@ async def enroll(
                     | (EnrollmentToken.use_count < EnrollmentToken.max_uses),
                 )
                 .values(use_count=EnrollmentToken.use_count + 1)
-                .returning(EnrollmentToken.id)
+                # The client and site come from the row this statement
+                # consumed, not from the unlocked read above.
+                .returning(EnrollmentToken.id, EnrollmentToken.client_id, EnrollmentToken.site_id)
             )
-        ).scalar_one_or_none()
+        ).one_or_none()
         if consumed is None:
             raise EnrollmentError(  # i18n-exempt: route answers a fixed enrollment rejected
                 "token rejected"
             )
+        _, client_id, site_id = consumed
 
         now = datetime.now(UTC)
 
@@ -566,10 +605,15 @@ async def enroll(
         outcome = await resolve_enrolment_target(session, org_id, facts)
         device = None
         if outcome.device_id is not None:
+            # A LINKED ASSET KEEPS ITS OWN SITE. Under this session's scope it is
+            # one of the token's client's, and a person filed it under a site;
+            # the token's site is only where a NEW row goes.
             device = await session.get(Device, outcome.device_id)
         if device is None:
             device = Device(
                 org_id=org_id,
+                client_id=client_id,
+                site_id=site_id,
                 hostname=facts.hostname,
                 os_family=facts.os_family,
                 os_version=facts.os_version,
@@ -639,6 +683,10 @@ async def enroll(
                 "os_family": facts.os_family,
                 "token_id": str(token_id),
                 "cert_fingerprint": issued.fingerprint_sha256,
+                # Where the machine landed: the device's own, which for a
+                # linked asset is the asset's site, not necessarily the token's.
+                "client_id": str(device.client_id),
+                "site_id": str(device.site_id),
             },
         )
         if outcome.device_id is not None:
@@ -696,7 +744,11 @@ async def enroll_via_link(
     capabilities: dict[str, Any] | None = None,
     now: datetime | None = None,
 ) -> EnrollResult:
-    """Enrol a machine through the organisation's install link (spec §1.4).
+    """Enrol a machine through a site's install link (spec §1.4).
+
+    THE LINK'S CLIENT AND SITE (MSP clients spec §1.5): the session is opened
+    on the link's client alone, and the device lands in the link's site. The
+    hourly limit counts the machines that joined that site.
 
     ONE TRANSACTION: the link row is locked `FOR UPDATE`, so two concurrent
     enrollments cannot both be the 50th, and the device, its agent, the audit
@@ -710,16 +762,19 @@ async def enroll_via_link(
     not rolled back with the refusal.
     """
     stamp = now or datetime.now(UTC)
-    org_id = await link_svc.resolve_org(admin_engine, link_code)
-    if org_id is None:
+    target = await link_svc.resolve_target(admin_engine, link_code)
+    if target is None:
         raise LinkNotFound()
+    org_id = target.org_id
 
     limited = False
     retry_after_s = MIN_LINK_RETRY_AFTER_S
     created: tuple[UUID, Any] | None = None
-    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
+    async with org_session(
+        org_id, engine=app_engine, clients=ClientScope.only([target.client_id])
+    ) as session:
         link = await link_svc.live_link_for(
-            session, org_id, code=link_code, source=source, now=stamp, for_update=True
+            session, target.site_id, code=link_code, source=source, now=stamp, for_update=True
         )
         if link is None:
             raise LinkNotFound()
@@ -729,6 +784,7 @@ async def enroll_via_link(
                 .select_from(Device)
                 .where(
                     Device.org_id == org_id,
+                    Device.site_id == link.site_id,
                     Device.link_joined_at > stamp - link_svc.RATE_WINDOW,
                 )
             )
@@ -743,6 +799,7 @@ async def enroll_via_link(
                     select(Device.link_joined_at)
                     .where(
                         Device.org_id == org_id,
+                        Device.site_id == link.site_id,
                         Device.link_joined_at > stamp - link_svc.RATE_WINDOW,
                     )
                     .order_by(Device.link_joined_at)
@@ -765,12 +822,14 @@ async def enroll_via_link(
                     actor_id=None,
                     action="enrollment.link_rate_limited",
                     target_type="install_link",
-                    target_id=str(org_id),
+                    target_id=str(link.site_id),
                     metadata={"hourly_limit": link.hourly_limit, "source_address": str(source)},
                 )
         else:
             device = Device(
                 org_id=org_id,
+                client_id=link.client_id,
+                site_id=link.site_id,
                 hostname=facts.hostname,
                 os_family=facts.os_family,
                 os_version=facts.os_version,

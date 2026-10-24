@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, IPvAnyAddress, field_validato
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_all_clients, require_permission
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.rbac import has_permission
@@ -18,6 +18,7 @@ from app.modules.ipam import candidates as candidates_svc
 from app.modules.remote.capability import can_share_screen
 from app.services import device_review as review_svc
 from app.services.cert_renewal import cert_state
+from app.services.client_sites import NotAcceptingNewRows, SiteNotFound, site_for_new_rows
 from app.services.device_list import DeviceHolder, device_page
 from app.services.dns_name import MAX_DNS_NAME, InvalidDnsName, normalise_dns_name
 
@@ -46,8 +47,8 @@ _ASSET_TYPES = (
 _MACHINE_OWNED = frozenset({"hostname", "os_family", "serial", "fqdn", "architecture"})
 
 
-class AssetCreateRequest(BaseModel):
-    """A record an operator types in.
+class AssetFields(BaseModel):
+    """What an operator types about an asset, on create and on edit.
 
     `extra="forbid"` so `source`, `agent_status` or `id` in the body is a 422
     rather than a silently ignored field. `source` in particular is the first
@@ -90,7 +91,21 @@ class AssetCreateRequest(BaseModel):
             raise ValueError(str(exc)) from None
 
 
-class AssetUpdateRequest(AssetCreateRequest):
+class AssetCreateRequest(AssetFields):
+    """A record an operator types in.
+
+    `site_id` IS REQUIRED (MSP clients spec §1.5): every device belongs to a
+    site, and to the site's client -- which is derived from the site, never
+    sent. Not on `AssetUpdateRequest`: a device's client never changes, and
+    moving one between its client's sites is not this route's.
+    """
+
+    site_id: UUID = Field(
+        description="The site the asset is at; its client is the site's client"
+    )
+
+
+class AssetUpdateRequest(AssetFields):
     """Every field optional; only what was SENT is written.
 
     The two defaulted fields are re-declared as `None` so `exclude_unset` can
@@ -520,7 +535,15 @@ async def promote_asset_candidates(
     Per-address results rather than a batch failure: one stale entry in a
     selection must not silently discard the rest, and "already an asset" is not
     an error -- two operators looking at the same list is the normal case.
+
+    EVERY CLIENT, IN PHASE 1. IPAM has no client yet, so a promoted machine is
+    filed under the internal client and its Principal site (`candidates.py`).
+    A technician limited to some clients is refused here, with the
+    every-client sentence, rather than by RLS at the INSERT with a 500.
+    PHASE 2: the subnet's client, and this gate goes (plan "Fuera de esta
+    fase").
     """
+    require_all_clients(ctx)
     overrides = body.model_dump(exclude_unset=True, exclude={"addresses"})
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -992,14 +1015,26 @@ async def create_asset(
     is what makes it appear in the fleet list and what makes every
     agent-dependent screen omit itself for it.
     """
-    fields = body.model_dump(exclude_none=True)
+    fields = body.model_dump(exclude_none=True, exclude={"site_id"})
     if body.primary_ip is not None:
         fields["primary_ip"] = str(body.primary_ip)
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
+        # LOADED IN THE CALLER'S OWN SESSION: RLS hides another organisation's
+        # site and one of a client outside the caller's scope, and both are
+        # the same 404. The client is the site's; an archived site or client
+        # takes no new asset.
+        try:
+            site = await site_for_new_rows(session, org_id=ctx.org_id, site_id=body.site_id)
+        except SiteNotFound:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such site")) from None
+        except NotAcceptingNewRows as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
         device = Device(
             org_id=ctx.org_id,
+            client_id=site.client_id,
+            site_id=site.id,
             # STAMPED, never taken from the body -- see AssetCreateRequest.
             source="manual",
             # A PERSON TYPED THIS. `provenance` is what separates it from the

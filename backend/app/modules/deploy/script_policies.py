@@ -17,6 +17,7 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
@@ -93,7 +94,9 @@ async def get_policy(session: AsyncSession, org_id: UUID, policy_id: UUID) -> Sc
 
 async def _require_targets(
     session: AsyncSession, org_id: UUID, script_id: UUID, device_group_id: UUID
-) -> None:
+) -> UUID:
+    """The script and the group exist here; returns the GROUP's client, which
+    the schedule takes (trigger `its_client_from_parent`, migration 0231)."""
     script = (
         await session.execute(
             select(Script.id).where(Script.org_id == org_id, Script.id == script_id)
@@ -101,24 +104,63 @@ async def _require_targets(
     ).scalar_one_or_none()
     if script is None:
         raise DeployValidationError(tr("no such script"))
-    group = (
+    group_client = (
         await session.execute(
-            select(DeviceGroup.id).where(
+            select(DeviceGroup.client_id).where(
                 DeviceGroup.org_id == org_id, DeviceGroup.id == device_group_id
             )
         )
     ).scalar_one_or_none()
-    if group is None:
+    if group_client is None:
         raise DeployValidationError(tr("no such device group"))
+    return group_client
 
 
 async def _name_taken(
-    session: AsyncSession, org_id: UUID, name: str, exclude: UUID | None = None
+    session: AsyncSession,
+    org_id: UUID,
+    client_id: UUID,
+    name: str,
+    exclude: UUID | None = None,
 ) -> bool:
-    query = select(ScriptPolicy.id).where(ScriptPolicy.org_id == org_id, ScriptPolicy.name == name)
+    """Is `name` another schedule's in this CLIENT?
+
+    Per client, as `uq_script_policies_client_name` is (migration 0231, Task
+    8b): the check runs under the caller's scope, which may not see another
+    client's schedules -- a per-organisation rule it cannot see would be one
+    only the index could enforce, with a 500, and a refusal that named
+    another client's schedule to a technician who cannot read it.
+    """
+    query = select(ScriptPolicy.id).where(
+        ScriptPolicy.org_id == org_id,
+        ScriptPolicy.client_id == client_id,
+        ScriptPolicy.name == name,
+    )
     if exclude is not None:
         query = query.where(ScriptPolicy.id != exclude)
     return (await session.execute(query)).first() is not None
+
+
+#: The schedule-name key (migration 0231): what holds when two writes race past
+#: `_name_taken`. Its unique violation is the check's own refusal.
+_NAME_KEY = "uq_script_policies_client_name"
+
+
+def _name_exists() -> DeployValidationError:
+    return DeployValidationError(tr("a schedule with that name already exists"))
+
+
+async def _flush_named(session: AsyncSession) -> None:
+    """Flush, answering a race lost on the name key as `_name_taken` does --
+    the route's 422 -- not a 500. Only that key's: another violation in the
+    same flush is not a name clash and stays the error it is."""
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        constraint = getattr(getattr(exc.orig, "__cause__", None), "constraint_name", None)
+        if constraint == _NAME_KEY:
+            raise _name_exists() from None
+        raise
 
 
 async def create_policy(
@@ -135,9 +177,9 @@ async def create_policy(
     keep_runs: int,
     enabled: bool,
 ) -> ScriptPolicy:
-    await _require_targets(session, org_id, script_id, device_group_id)
-    if await _name_taken(session, org_id, name):
-        raise DeployValidationError(tr("a schedule with that name already exists"))
+    client_id = await _require_targets(session, org_id, script_id, device_group_id)
+    if await _name_taken(session, org_id, client_id, name):
+        raise _name_exists()
     row = ScriptPolicy(
         org_id=org_id,
         name=name,
@@ -151,7 +193,7 @@ async def create_policy(
         created_by=actor_id,
     )
     session.add(row)
-    await session.flush()
+    await _flush_named(session)
     await _audit(
         session,
         org_id,
@@ -182,14 +224,15 @@ async def update_policy(
     row = await get_policy(session, org_id, policy_id)
     changed: dict[str, Any] = {}
     if "name" in changes and changes["name"] is not None:
-        if await _name_taken(session, org_id, changes["name"], exclude=row.id):
-            raise DeployValidationError(tr("a schedule with that name already exists"))
+        # The schedule's own client: its group never changes (not editable).
+        if await _name_taken(session, org_id, row.client_id, changes["name"], exclude=row.id):
+            raise _name_exists()
     for field in _EDITABLE:
         value = changes.get(field)
         if value is not None and getattr(row, field) != value:
             setattr(row, field, value)
             changed[field] = value
-    await session.flush()
+    await _flush_named(session)
     if changed:
         await _audit(session, org_id, "script_policy.updated", row.id, changed, actor_id)
     return row

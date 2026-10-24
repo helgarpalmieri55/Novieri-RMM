@@ -505,13 +505,13 @@ en el mismo PR, con el motivo.
 
 | Tabla | Clase | Padre o nota |
 |---|---|---|
-| `clients` | — | La entidad; RLS: `CLIENT_VISIBLE(id)` |
+| `clients` | G | La entidad; no lleva `client_id`, tiene política propia: `CLIENT_VISIBLE(id)` |
 | `sites` | C | |
 | `organizations`, `roles`, `permissions`, `role_permissions` | G | |
 | `users` | O | `NULL` = técnico; con valor = contacto |
 | `user_roles` | G | Su `client_id` es el alcance, no una regla RLS |
 | `device_groups` | C | |
-| `device_group_evaluation` | H | `device_groups` |
+| `device_group_evaluation` | G | Estado del trabajador por organización; no tiene clave a un grupo |
 | `devices` | C | Más `site_id`; `client_id` inmutable |
 | `suggested_asset_match`, `device_tags`, `agents` | H | `devices` |
 | `policies` | O | `device_group_id` |
@@ -524,17 +524,18 @@ en el mismo PR, con el motivo.
 | `domain_events` | O | Lo pone quien emite el evento |
 | `agent_releases`, `dashboard_layouts` | G | |
 | `ai_autonomy_ceiling`, `ai_session`, `ai_message`, `ai_injection_flag`, `ai_settings` | G | Por usuario o de la organización |
-| `ai_action` | O | `device_id` |
+| `ai_action` | H | `devices`, por `target_device_id` (obligatorio) |
 | `approved_action`, `approved_action_script_exemption` | G | Biblioteca |
 | `doc_articles`, `doc_records`, `doc_documents` | O | `NULL` = base de conocimiento de Novieri |
-| `doc_links`, `doc_versions` | H | `doc_articles` / `doc_records` |
-| `doc_document_versions`, `doc_document_links` | H | `doc_documents` |
+| `doc_links`, `doc_versions` | O | Se hereda de `doc_articles` / `doc_records` cuando hay padre; `NULL` si el padre es de Novieri |
+| `doc_document_versions`, `doc_document_links` | O | Se hereda de `doc_documents`; `NULL` si el documento es de Novieri |
 | `inventory_snapshots`, `installed_software`, `inventory_changes`, `hardware_components` | H | `devices` |
 | `mcp_revocation`, `platform_error_group`, `platform_error_event`, `platform_health_sample`, `platform_probe_notice`, `org_vault_keys` | G | |
 | `security_events` | H | `devices` |
 | `push_authorization`, `push_run` | C | |
 | `push_credential_scope`, `push_credential_realm` | H | `credentials`, que tiene que tener cliente |
-| `push_host_key`, `push_batch_target` | H | `devices` |
+| `push_host_key` | O | `devices`; su `device_id` es opcional |
+| `push_batch_target` | H | `jobs` |
 | `push_run_target` | H | `push_run` |
 | `agent_update_rollouts` | G | Operación de la plataforma |
 | `agent_update_rings` | O | `device_group_id` |
@@ -562,9 +563,10 @@ en el mismo PR, con el motivo.
 | `health_profile_assignment` | O | Equipo o grupo |
 | `health_alert`, `device_health_check_state`, `health_flap_state`, `device_health_policy_ack` | H | `devices` |
 | `health_alert_action` | H | `health_alert` |
-| `ipam_site` | — | Se elimina; la reemplaza `sites` (§1.2) |
-| `ipam_vrf`, `ipam_vlan`, `ipam_subnet`, `ipam_scan_authorization` | C | La sede de una VLAN o subred es opcional (`ipam/models.py:173,234`); si existe, tiene que ser del mismo cliente |
-| `ipam_range`, `ipam_address`, `ipam_observation`, `ipam_drift`, `ipam_sweep_run` | H | `ipam_subnet` |
+| `ipam_site` | C (pendiente, fase 2) | Se elimina al fusionarse en `sites` (§1.2) |
+| `ipam_vrf`, `ipam_vlan`, `ipam_subnet` | C | La sede de una VLAN o subred es opcional (`ipam/models.py:173,234`); si existe, tiene que ser del mismo cliente |
+| `ipam_range`, `ipam_sweep_run` | H | `ipam_subnet` |
+| `ipam_scan_authorization`, `ipam_address`, `ipam_observation`, `ipam_drift` | H | `ipam_vrf`: su `vrf_id` es obligatorio; el `subnet_id`, donde existe, es opcional |
 | `vendor`, `software_product` | G | Catálogos compartidos |
 | `license`, `license_compliance_snapshot` | C | |
 | `license_allocation` | H | `license` |
@@ -578,7 +580,7 @@ en el mismo PR, con el motivo.
 | `person_checklist_step` | H | `person_checklist` |
 | `device_person` | H | `devices` |
 | `os_image`, `provision_profile` | G | Módulo oculto |
-| `provision_run` | H | `devices` |
+| `provision_run` | O | `devices`; su `device_id` es opcional |
 | `remote_sessions` | H | `devices` |
 | `remote_policies` | O | `device_group_id` |
 | `ticket_queue`, `ticket_category`, `ticket_number_counter`, `ticket_canned_response` | G | |

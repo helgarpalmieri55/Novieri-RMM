@@ -99,15 +99,25 @@ async def _setup(
         session.add(user)
         await session.flush()
 
-        group = DeviceGroup(org_id=org.id, name="deploy-group")
+        group = DeviceGroup(org_id=org.id, name="deploy-group", client_id=org.id)
         session.add(group)
         await session.flush()
 
         device_a = Device(
-            org_id=org.id, hostname="a1", os_family="windows", device_group_id=group.id
+    org_id=org.id,
+    hostname="a1",
+    os_family="windows",
+    device_group_id=group.id,
+    client_id=org.id,
+    site_id=org.id,
         )
         device_b = Device(
-            org_id=org.id, hostname="b1", os_family="windows", device_group_id=group.id
+    org_id=org.id,
+    hostname="b1",
+    os_family="windows",
+    device_group_id=group.id,
+    client_id=org.id,
+    site_id=org.id,
         )
         session.add_all([device_a, device_b])
         await session.flush()

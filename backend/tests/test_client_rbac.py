@@ -260,51 +260,8 @@ async def test_a_contact_is_refused_at_the_console(api_env: Any) -> None:
         assert user.last_login_at is None
 
 
-# --------------------------------------------------------------------------- #
-# Global configuration: a per-client grant is not a grant on every client
-# --------------------------------------------------------------------------- #
-
-#: The codes whose routes write Novieri-global configuration (spec §1.4):
-#: technicians and their grants, role definitions, incoming mail.
-GLOBAL_WRITE_CODES = {"users.manage", "roles.manage", "email_intake.admin"}
-EVERY_CLIENT = "only a technician with access to every client can do this"
-
-
-async def test_global_configuration_needs_a_scope_of_every_client(api_env: Any) -> None:
-    """Holding `users.manage` on ONE client must not let a technician grant
-    themselves a role on every client (an escalation per-client grants would
-    otherwise open), nor change what every client shares. Derived from the
-    router: every route gated by one of these codes refuses a per-client
-    org-admin, and an every-client org-admin who narrowed with X-Client-Id --
-    and does NOT refuse the same org-admin un-narrowed, which is what makes
-    the refusal about the scope."""
-    from app.core.rbac import route_permission
-    from app.core.router_inspect import flatten
-
-    env = api_env
-    org, _, c = await _seed(env.admin_engine, env, [("org-admin", "X")])
-    per_client = await _headers(env, org)
-    sub = await env.create_user(org, "org-admin")
-    every = await env.headers(org, sub)
-    narrowed = {**every, "X-Client-Id": str(c["X"])}
-
-    routes = [
-        (method, path)
-        for path, route in flatten(env.app.router)
-        if route_permission(route) in GLOBAL_WRITE_CODES
-        for method in getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}
-    ]
-    assert len(routes) >= 20, routes  # users (8), roles (4), email intake (9)
-    for method, path in routes:
-        url = path
-        while "{" in url:
-            url = url[: url.index("{")] + str(uuid4()) + url[url.index("}") + 1 :]
-        for headers in (per_client, narrowed):
-            r = await env.client.request(method, url, headers=headers, json={})
-            assert r.status_code == 403, (method, path, r.text)
-            assert r.json()["detail"] == EVERY_CLIENT, (method, path)
-        r = await env.client.request(method, url, headers=every, json={})
-        assert not (r.status_code == 403 and r.json()["detail"] == EVERY_CLIENT), (method, path)
+# Global configuration (a per-client grant is not a grant on every client) is
+# `tests/test_global_writes.py`, against its one declared list of routes.
 
 
 # --------------------------------------------------------------------------- #

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
@@ -408,8 +408,12 @@ async def set_gate(
     if not (applies_to_patches or applies_to_deployments):
         raise ChangeValidationError(tr("a gate must cover patch approvals, deployments, or both"))
     query = select(ChangeGate).where(ChangeGate.org_id == org_id)
+    # A group's gate is the group's client's; a group-less one is the GLOBAL
+    # "every device" gate (phase 1 writes no client), and a client's
+    # group-less gate is another row (`uq_change_gates_client_group`,
+    # migration 0231, Task 8b).
     query = query.where(
-        ChangeGate.device_group_id.is_(None)
+        and_(ChangeGate.device_group_id.is_(None), ChangeGate.client_id.is_(None))
         if device_group_id is None
         else ChangeGate.device_group_id == device_group_id
     )

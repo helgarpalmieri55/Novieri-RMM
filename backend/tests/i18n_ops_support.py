@@ -18,11 +18,17 @@ from tests.agent_push_fixtures import (
     seed_push_site_server,
 )
 from tests.agent_update_support import seed_device, seed_release, unique_version
-from tests.install_link_fixtures import switch_on
+from tests.install_link_fixtures import link_path, switch_on
 from tests.msi_fixtures import StoreWith, offer, signed_release
 
 PUSH = "/api/v1/agent-push"
-MSI_URL = "/api/v1/install-link/msi"
+
+
+def msi_url(site_id: UUID) -> str:
+    """The MSI route of a site's install link (one link per site)."""
+    return link_path(site_id, "/msi")
+
+
 CONSOLE = "https://itms.example.com"
 
 #: One stable release per platform the install page can offer.

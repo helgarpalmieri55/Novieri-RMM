@@ -537,11 +537,14 @@ CATALOG: dict[str, str] = {
         "la hora del apagado automático debe incluir una zona horaria"
     ),
     "the automatic switch-off must be in the future": "el apagado automático debe ser en el futuro",
-    "at least one network is required to switch the link on; an empty list would not mean "
+    "at least one network is required to switch on the install link of the site {site}: list "
+    "the networks its computers reach the Internet from; an empty list would not mean "
     "'anywhere'": (
-        "hace falta al menos una red para activar el enlace; una lista vacía no significaría "
-        "'cualquier lugar'"
+        "hace falta al menos una red para activar el enlace de instalación de la sede {site}: "
+        "indica las redes desde las que sus equipos salen a Internet; una lista vacía no "
+        "significaría 'cualquier lugar'"
     ),
+    "no such site": "no existe esa sede",
     "The agent has been told to uninstall itself. Its certificate is revoked as soon as it "
     "confirms, or in 24 hours if it does not.": (
         "Se le ha indicado al agente que se desinstale. Su certificado se revoca en cuanto lo "
@@ -1020,6 +1023,13 @@ CATALOG: dict[str, str] = {
         "solo un técnico con acceso a todos los clientes puede hacer esto"
     ),
     "unknown client": "cliente desconocido",
+    "the parent group belongs to another client": "el grupo padre pertenece a otro cliente",
+    "that site is archived": "esa sede está archivada",
+    "that group belongs to another client": "ese grupo pertenece a otro cliente",
+    "a preview needs the group's client: send client_id for a group that is not saved yet": (
+        "una vista previa necesita el cliente del grupo: envía client_id para un grupo que "
+        "aún no está guardado"
+    ),
     "a role cannot be granted on the unassigned client": (
         "no se puede asignar un rol sobre el cliente «Sin asignar»"
     ),
@@ -2453,6 +2463,11 @@ CATALOG: dict[str, str] = {
     "there is a fingerprint to confirm": (
         "no se ha observado ninguna clave de host de {parsed}; ejecuta antes un sondeo "
         "(agent.push_probe) para que haya una huella que confirmar"
+    ),
+    "{address} has a host key in more than one client; choose the client whose machine it "
+    "is and try again": (
+        "{address} tiene una clave de host en más de un cliente; elige el cliente al que "
+        "pertenece el equipo y vuelve a intentarlo"
     ),
     "{parsed} was last probed over WinRM, which has no host key to confirm: a Windows push "
     "authenticates the target with Kerberos (design §2.3). Nothing needs confirming before "

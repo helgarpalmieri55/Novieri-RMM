@@ -503,6 +503,11 @@ async def test_the_ack_handler_ignores_a_result_for_an_unknown_device(
     ) as session:
         job = await session.get(Job, job_id)
         assert job is not None
+        # IN MEMORY ONLY. Since migration 0231 a job's client follows its
+        # target (`its_job_client`), so writing a target that names no device
+        # is refused by the database; the handler is handed the stale job
+        # instead, detached so no autoflush writes it.
+        session.expunge(job)
         job.target_id = uuid4()
         await record_policy_ack(session, job, {})
     assert await _ack(api_env, org.device_id) is None

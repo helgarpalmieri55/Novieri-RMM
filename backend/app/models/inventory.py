@@ -8,7 +8,7 @@ from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Date, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Date, FetchedValue, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, uuid7_pk
@@ -36,6 +36,16 @@ class InventorySnapshot(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     taken_at: Mapped[datetime] = mapped_column()
     raw: Mapped[dict[str, Any]] = mapped_column(default=dict)
@@ -52,6 +62,16 @@ class InstalledSoftware(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     name: Mapped[str] = mapped_column(String(300))
     version: Mapped[str] = mapped_column(String(100), default="")
@@ -65,6 +85,16 @@ class InventoryChange(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     ts: Mapped[datetime] = mapped_column()
     change_type: Mapped[str] = mapped_column(String(30))
@@ -79,6 +109,16 @@ class HardwareComponent(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     type: Mapped[str] = mapped_column(String(20))
     identifier: Mapped[str] = mapped_column(String(200))

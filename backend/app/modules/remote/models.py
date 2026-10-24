@@ -15,6 +15,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -27,7 +28,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, uuid7_pk
+from app.models.base import Base, TimestampMixin, client_org_fk, uuid7_pk
 
 RECORDING_MAX_BYTES = 2 * 1024 * 1024 * 1024
 
@@ -47,6 +48,16 @@ class RemoteSession(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     technician_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     protocol: Mapped[str] = mapped_column(String(8))
@@ -71,6 +82,7 @@ class RemoteSession(TimestampMixin, Base):
 class RemotePolicy(TimestampMixin, Base):
     __tablename__ = "remote_policies"
     __table_args__ = (
+        client_org_fk("remote_policies"),
         UniqueConstraint("org_id", "device_group_id", name="uq_remote_policies_org_group"),
         CheckConstraint(
             "consent_timeout_s BETWEEN 15 AND 120", name="ck_remote_policies_consent_timeout"
@@ -79,6 +91,16 @@ class RemotePolicy(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # device_group_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_group_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("device_groups.id"), default=None
     )

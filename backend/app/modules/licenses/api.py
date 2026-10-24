@@ -46,7 +46,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.tenancy import org_session
@@ -197,7 +197,7 @@ async def list_vendors_route(
 async def create_vendor_route(
     body: VendorCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("licenses.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("licenses.manage")),
 ) -> VendorOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -233,7 +233,7 @@ async def update_vendor_route(
     vendor_id: UUID,
     body: VendorUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("licenses.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("licenses.manage")),
 ) -> VendorOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -274,7 +274,7 @@ async def list_products_route(
 async def create_product_route(
     body: ProductCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("licenses.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("licenses.manage")),
 ) -> ProductOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -327,7 +327,7 @@ async def review_queue_route(
 async def review_queue_map_route(
     body: ReviewMapRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("licenses.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("licenses.manage")),
 ) -> ProductOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -442,7 +442,7 @@ async def update_product_route(
     product_id: UUID,
     body: ProductUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("licenses.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("licenses.manage")),
 ) -> ProductOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients

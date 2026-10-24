@@ -29,7 +29,13 @@ from app.models import Device
 
 async def _device(api_env, org_id: UUID) -> UUID:
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, hostname="paging-host", os_family="windows")
+        device = Device(
+            org_id=org_id,
+            hostname="paging-host",
+            os_family="windows",
+            client_id=org_id,
+            site_id=org_id,
+        )
         session.add(device)
         await session.commit()
         return device.id

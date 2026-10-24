@@ -19,7 +19,13 @@ async def _make_org_with_device(admin_engine: AsyncEngine, slug: str) -> tuple[U
         org = Organization(name=slug, slug=slug)
         session.add(org)
         await session.flush()
-        device = Device(org_id=org.id, hostname=f"host-{slug}", os_family="linux")
+        device = Device(
+            org_id=org.id,
+            hostname=f"host-{slug}",
+            os_family="linux",
+            client_id=org.id,
+            site_id=org.id,
+        )
         session.add(device)
         await session.commit()
         return org.id, device.id
@@ -45,7 +51,9 @@ async def test_insert_with_foreign_org_id_rejected(
 
     with pytest.raises((DBAPIError, ProgrammingError)):
         async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
-            session.add(Device(org_id=org_b, hostname="evil", os_family="linux"))
+            session.add(Device(
+                org_id=org_b, hostname="evil", os_family="linux", client_id=org_b, site_id=org_b
+            ))
             await session.flush()
 
 
@@ -60,10 +68,10 @@ async def test_no_tenant_context_sees_nothing_and_cannot_insert(
         with pytest.raises((DBAPIError, ProgrammingError)):
             await conn.execute(
                 text(
-                    "INSERT INTO devices (id, org_id, hostname, os_family, os_version,"
-                    " architecture, cpu, status, created_at, updated_at)"
-                    f" VALUES (gen_random_uuid(), '{org_a}', 'h', 'linux', '', '', '',"
-                    " 'active', now(), now())"
+                    "INSERT INTO devices (id, org_id, client_id, site_id, hostname, os_family,"
+                    " os_version, architecture, cpu, status, created_at, updated_at)"
+                    f" VALUES (gen_random_uuid(), '{org_a}', '{org_a}', '{org_a}', 'h', 'linux',"
+                    " '', '', '', 'active', now(), now())"
                 )
             )
 

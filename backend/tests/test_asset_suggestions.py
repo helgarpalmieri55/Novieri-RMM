@@ -36,7 +36,9 @@ _PROVENANCE_FOR = {"agent": "agent", "manual": "operator", "discovery": "promote
 async def _pair(api_env: ApiEnv, org_id: UUID, **kw: Any) -> tuple[UUID, UUID, UUID]:
     """A just-enrolled device, an older record, and an open suggestion."""
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        enrolled = Device(org_id=org_id, hostname="wks-001", os_family="linux")
+        enrolled = Device(
+            org_id=org_id, hostname="wks-001", os_family="linux", client_id=org_id, site_id=org_id
+        )
         candidate_source = kw.pop("candidate_source", "manual")
         older = Device(
             org_id=org_id,
@@ -44,6 +46,8 @@ async def _pair(api_env: ApiEnv, org_id: UUID, **kw: Any) -> tuple[UUID, UUID, U
             source=candidate_source,
             provenance=_PROVENANCE_FOR[candidate_source],
             description="the one somebody typed in",
+            client_id=org_id,
+            site_id=org_id,
         )
         session.add_all([enrolled, older])
         await session.flush()

@@ -75,7 +75,7 @@ async def _device(
 ) -> UUID:
     """A device, and -- when `source` is given -- its `device_person` row."""
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, hostname=hostname)
+        device = Device(org_id=org_id, hostname=hostname, client_id=org_id, site_id=org_id)
         session.add(device)
         await session.flush()
         if source is not None:

@@ -234,7 +234,9 @@ async def test_a_dispatched_deploy_job_carries_a_resolvable_artifact_url(
         org = Organization(name=slug, slug=slug)
         session.add(org)
         await session.flush()
-        device = Device(org_id=org.id, hostname="w1", os_family="windows")
+        device = Device(
+            org_id=org.id, hostname="w1", os_family="windows", client_id=org.id, site_id=org.id
+        )
         package = Package(
             org_id=org.id,
             name="Acme Widget",

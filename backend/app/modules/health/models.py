@@ -28,6 +28,7 @@ from uuid import UUID
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -41,7 +42,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 __all__ = [
     "DeviceHealthCheckState",
@@ -236,6 +237,7 @@ class HealthProfileAssignment(Base):
 
     __tablename__ = "health_profile_assignment"
     __table_args__ = (
+        client_org_fk("health_profile_assignment"),
         Index(
             "uq_health_assignment_device",
             "org_id",
@@ -250,10 +252,14 @@ class HealthProfileAssignment(Base):
             unique=True,
             postgresql_where=text("device_group_id IS NOT NULL"),
         ),
+        # The default with no device and no group: one global (the org's) and,
+        # NULLS NOT DISTINCT, one per client (migration 0231, Task 8b).
         Index(
-            "uq_health_assignment_org",
+            "uq_health_assignment_client_org",
             "org_id",
+            "client_id",
             unique=True,
+            postgresql_nulls_not_distinct=True,
             postgresql_where=text("device_id IS NULL AND device_group_id IS NULL"),
         ),
         Index("ix_health_assignment_profile", "org_id", "profile_id"),
@@ -265,6 +271,17 @@ class HealthProfileAssignment(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client (the org-wide
+    # assignment). TWO PARENTS, one trigger each (migration 0231):
+    # its_client_from_parent copies the device's client, its_client_from_group
+    # the group's. The value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     profile_id: Mapped[UUID] = mapped_column(ForeignKey("health_profile.id"))
     device_id: Mapped[UUID | None] = mapped_column(ForeignKey("devices.id"), default=None)
     device_group_id: Mapped[UUID | None] = mapped_column(
@@ -344,6 +361,16 @@ class HealthAlert(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     check_id: Mapped[UUID] = mapped_column(
         ForeignKey("health_check.id", ondelete="RESTRICT")
@@ -411,6 +438,16 @@ class HealthAlertAction(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the health_alert row named by alert_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     alert_id: Mapped[UUID] = mapped_column(ForeignKey("health_alert.id"))
     kind: Mapped[str] = mapped_column(String(12))
     state: Mapped[str] = mapped_column(String(20), server_default="pending", default="pending")
@@ -455,6 +492,16 @@ class DeviceHealthCheckState(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     check_id: Mapped[UUID] = mapped_column(ForeignKey("health_check.id"))
     selector: Mapped[str] = mapped_column(String(200), server_default="", default="")
@@ -483,6 +530,16 @@ class HealthFlapState(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     check_id: Mapped[UUID] = mapped_column(ForeignKey("health_check.id"))
     selector: Mapped[str] = mapped_column(String(200), server_default="", default="")
@@ -617,6 +674,16 @@ class DeviceHealthPolicyAck(Base):
 
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"), primary_key=True)
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     profile_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("health_profile.id"), default=None
     )

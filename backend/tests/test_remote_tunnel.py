@@ -32,7 +32,14 @@ async def _user_id_of(api_env, sub: str) -> UUID:
 async def _session_row(api_env, org_id, technician_id) -> UUID:
     dev_id = uuid4()
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
-        s.add(Device(id=dev_id, org_id=org_id, hostname="h", os_family="linux"))
+        s.add(Device(
+            id=dev_id,
+            org_id=org_id,
+            hostname="h",
+            os_family="linux",
+            client_id=org_id,
+            site_id=org_id,
+        ))
         row = RemoteSession(
             org_id=org_id, device_id=dev_id, technician_id=technician_id,
             protocol="screen", consent_mode="attended", state="connecting",

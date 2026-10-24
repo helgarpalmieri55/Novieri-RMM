@@ -40,8 +40,8 @@ async def _fleet(api_env) -> dict:
     admin = await api_env.create_user(org_id, "org-admin")
     tech = await api_env.create_user(org_id, "technician")
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
-        servers = DeviceGroup(org_id=org_id, name="Servers")
-        laptops = DeviceGroup(org_id=org_id, name="Laptops")
+        servers = DeviceGroup(org_id=org_id, name="Servers", client_id=org_id)
+        laptops = DeviceGroup(org_id=org_id, name="Laptops", client_id=org_id)
         s.add_all([servers, laptops])
         await s.flush()
         s.add_all(
@@ -51,10 +51,20 @@ async def _fleet(api_env) -> dict:
             ]
         )
         srv = Device(
-            org_id=org_id, hostname="srv1", os_family="windows", device_group_id=servers.id
+    org_id=org_id,
+    hostname="srv1",
+    os_family="windows",
+    device_group_id=servers.id,
+    client_id=org_id,
+    site_id=org_id,
         )
         lap = Device(
-            org_id=org_id, hostname="lap1", os_family="windows", device_group_id=laptops.id
+    org_id=org_id,
+    hostname="lap1",
+    os_family="windows",
+    device_group_id=laptops.id,
+    client_id=org_id,
+    site_id=org_id,
         )
         patch = Patch(
             org_id=org_id,

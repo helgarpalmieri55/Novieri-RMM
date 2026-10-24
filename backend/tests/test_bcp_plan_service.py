@@ -25,6 +25,7 @@ from app.modules.bcp.service import (
     review_plan,
     update_plan,
 )
+from tests.client_guard_support import past_the_client_guard
 
 
 async def _org_with_user(admin_engine: AsyncEngine) -> tuple[UUID, UUID]:
@@ -41,14 +42,19 @@ async def _org_with_user(admin_engine: AsyncEngine) -> tuple[UUID, UUID]:
 
 async def _seed_group(admin_engine: AsyncEngine, org_id: UUID, name: str = "Core") -> UUID:
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
-        group = DeviceGroup(org_id=org_id, name=name)
+        group = DeviceGroup(org_id=org_id, name=name, client_id=org_id)
         s.add(group)
         await s.commit()
         return group.id
 
 
 async def _seed_device(
-    admin_engine: AsyncEngine, org_id: UUID, hostname: str, group_id: UUID | None = None
+    admin_engine: AsyncEngine,
+    org_id: UUID,
+    hostname: str,
+    group_id: UUID | None = None,
+    *,
+    around_the_client_guard: bool = False,
 ) -> UUID:
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         device = Device(
@@ -56,8 +62,18 @@ async def _seed_device(
             hostname=hostname,
             os_family="linux",
             device_group_id=group_id,
+            client_id=org_id,
+            site_id=org_id,
         )
-        s.add(device)
+        if around_the_client_guard:
+            # A device naming ANOTHER organisation's group: since migration
+            # 0231 the client guard refuses it, and the tests that pin the
+            # org predicate behind it write one around it
+            # (`tests/client_guard_support.py`).
+            async with past_the_client_guard(s):
+                s.add(device)
+        else:
+            s.add(device)
         await s.commit()
         return device.id
 
@@ -435,7 +451,10 @@ async def testresolve_scope_devices_expands_group_and_includes_direct_device(
     # Crafted cross-tenant pointer: an org-B device whose device_group_id is org-A's
     # group id. resolve_scope_devices MUST exclude it via the Device.org_id
     # predicate — if that predicate were removed, this device would leak in.
-    other_org_leak = await _seed_device(admin_engine, other_org_id, "other-org-host", group_id)
+    # Written around migration 0231's client guard, which now refuses it too.
+    other_org_leak = await _seed_device(
+        admin_engine, other_org_id, "other-org-host", group_id, around_the_client_guard=True
+    )
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         resolved = await resolve_scope_devices(
@@ -580,10 +599,13 @@ async def test_the_plan_org_predicates_hold_where_rls_is_not_doing_the_rejecting
     group_a = await _seed_group(admin_engine, org_a, name="core-a")
     device_a = await _seed_device(admin_engine, org_a, "host-a", group_a)
     device_b = await _seed_device(admin_engine, org_b, "host-b")
-    # The row nothing in the schema forbids: THEIR device naming MY group.
+    # THEIR device naming MY group: until migration 0231's client guard,
+    # nothing in the schema forbade it; written around that guard now
+    # (`tests/client_guard_support.py`).
     async with AsyncSession(admin_engine) as s:
         theirs = (await s.execute(select(Device).where(Device.id == device_b))).scalar_one()
-        theirs.device_group_id = group_a
+        async with past_the_client_guard(s):
+            theirs.device_group_id = group_a
         await s.commit()
 
     # 1. The refusal: org B's device may not enter org A's scope.

@@ -29,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, NoResultFound
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.audit import audit_service
 from app.core.http import read_bounded_body, reject_oversized_content_length
 from app.core.i18n import N_, tr, tr_marked
@@ -51,6 +51,7 @@ from app.modules.agent_distribution.schemas import (
     VersionUnpublishedOut,
 )
 from app.services import enrollment as enrollment_svc
+from app.services.client_sites import NotAcceptingNewRows, SiteNotFound
 
 router = APIRouter(prefix="/agent", tags=["agent-distribution"])
 
@@ -121,7 +122,7 @@ async def list_releases_route(
 async def create_release_route(
     body: ReleaseCreateRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("agent.release.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("agent.release.manage")),
 ) -> ReleaseOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -164,7 +165,7 @@ async def create_release_route(
 async def upload_artifact_route(
     release_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("agent.release.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("agent.release.manage")),
 ) -> ReleaseOut:
     # Cheapest check first, before any database or object-store work. The
     # Content-Length is client-supplied and may be absent or wrong, so the bytes
@@ -237,7 +238,7 @@ async def _unpublish(
 async def delete_release_route(
     release_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("agent.release.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("agent.release.manage")),
 ) -> None:
     await _unpublish(request, ctx, [release_id])
 
@@ -246,7 +247,7 @@ async def delete_release_route(
 async def delete_version_route(
     version: str,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("agent.release.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("agent.release.manage")),
 ) -> VersionUnpublishedOut:
     """Every platform's package of one version, all or none.
 
@@ -306,17 +307,23 @@ async def install_command_route(
                     "command"
                 ),
             )
-        issued = await enrollment_svc.create_token(
-            session,
-            org_id=ctx.org_id,
-            created_by=ctx.user_id,
-            name=f"agent install: {release.version} {release.os}/{release.arch}",
-            expires_in_hours=body.expires_in_hours,
-            # SINGLE USE. The token is a literal in a command an operator
-            # pastes, so it reaches their shell history; a token already spent
-            # by the time that matters is a weak credential by design.
-            max_uses=1,
-        )
+        try:
+            issued = await enrollment_svc.create_token(
+                session,
+                org_id=ctx.org_id,
+                site_id=body.site_id,
+                created_by=ctx.user_id,
+                name=f"agent install: {release.version} {release.os}/{release.arch}",
+                expires_in_hours=body.expires_in_hours,
+                # SINGLE USE. The token is a literal in a command an operator
+                # pastes, so it reaches their shell history; a token already
+                # spent by the time that matters is a weak credential by design.
+                max_uses=1,
+            )
+        except SiteNotFound:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such site")) from None
+        except NotAcceptingNewRows as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
         url = _object_store(request).presign_agent_release_get(
             release.version,
             release.os,
@@ -485,23 +492,29 @@ async def deployment_token_route(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 tr("unknown distribution channel {body_channel}", body_channel=repr(body.channel)),
             )
-        issued = await enrollment_svc.create_token(
-            session,
-            org_id=ctx.org_id,
-            created_by=ctx.user_id,
-            name=(
-                f"managed deployment ({body.channel}): {release.version} "
-                f"{release.os}/{release.arch}"
-                + (f" -- {body.note}" if body.note else "")
-            ),
-            expires_in_hours=body.expires_in_hours,
-            # FINITE, ALWAYS, and it came from the caller rather than from a
-            # default here. `max_uses=None` on this table means unlimited; a
-            # default in this position would be this module choosing the blast
-            # radius on the operator's behalf, and choosing it once for every
-            # rollout regardless of size.
-            max_uses=body.max_uses,
-        )
+        try:
+            issued = await enrollment_svc.create_token(
+                session,
+                org_id=ctx.org_id,
+                site_id=body.site_id,
+                created_by=ctx.user_id,
+                name=(
+                    f"managed deployment ({body.channel}): {release.version} "
+                    f"{release.os}/{release.arch}"
+                    + (f" -- {body.note}" if body.note else "")
+                ),
+                expires_in_hours=body.expires_in_hours,
+                # FINITE, ALWAYS, and it came from the caller rather than from a
+                # default here. `max_uses=None` on this table means unlimited; a
+                # default in this position would be this module choosing the
+                # blast radius on the operator's behalf, and choosing it once for
+                # every rollout regardless of size.
+                max_uses=body.max_uses,
+            )
+        except SiteNotFound:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such site")) from None
+        except NotAcceptingNewRows as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
         await audit_service.record(
             session,
             org_id=ctx.org_id,

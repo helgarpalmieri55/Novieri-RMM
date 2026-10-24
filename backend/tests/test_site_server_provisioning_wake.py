@@ -89,7 +89,13 @@ async def _org_user_device(admin_engine: AsyncEngine) -> tuple[UUID, UUID, UUID]
         await session.flush()
         user = User(org_id=org.id, external_subject=f"sub-{slug}", email=f"{slug}@test.local")
         session.add(user)
-        device = Device(org_id=org.id, hostname=f"host-{slug}", os_family="linux")
+        device = Device(
+            org_id=org.id,
+            hostname=f"host-{slug}",
+            os_family="linux",
+            client_id=org.id,
+            site_id=org.id,
+        )
         session.add(device)
         await session.commit()
         return org.id, user.id, device.id

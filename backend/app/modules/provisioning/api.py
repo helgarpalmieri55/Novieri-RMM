@@ -31,7 +31,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import (
+    AuthContext,
+    require_all_clients,
+    require_permission,
+    require_permission_on_every_client,
+)
 from app.core.i18n import tr
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -169,7 +174,7 @@ async def list_images_route(
 async def create_image_route(
     body: OsImageCreateRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("provisioning.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("provisioning.manage")),
 ) -> OsImageOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -226,7 +231,7 @@ async def list_profiles_route(
 async def create_profile_route(
     body: ProfileUpsertRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("provisioning.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("provisioning.manage")),
 ) -> ProfileOut:
     state = request.app.state
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
@@ -253,7 +258,7 @@ async def update_profile_route(
     profile_id: UUID,
     body: ProfileUpsertRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("provisioning.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("provisioning.manage")),
 ) -> ProfileOut:
     state = request.app.state
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
@@ -303,6 +308,12 @@ async def start_run_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("provisioning.run")),
 ) -> RunStartResponse:
+    # EVERY CLIENT, IN PHASE 1. Imaging is hidden (MSP clients spec §1.4) and a
+    # run provisions into the internal client's Principal site
+    # (`dispatch.start_provision_run`), so a technician limited to some clients
+    # is refused here, with the every-client sentence, rather than by RLS at
+    # the INSERT with a 500. PHASE 2: the client the machine is for.
+    require_all_clients(ctx)
     state = request.app.state
     wake_envelope: dict[str, Any] | None = None
     try:
@@ -326,7 +337,7 @@ async def start_run_route(
         # malformed". `wake_on_lan` additionally requires `site.wake`.
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from None
     except ProvisioningValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
     # `provision.prepare` still has no v1 consumer and `provision.enroll` is
     # dispatched later by the worker. What IS published here is the `site.wake`
     # envelope, and ONLY AFTER the `org_session` block has exited -- a job

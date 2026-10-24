@@ -743,7 +743,9 @@ async def test_list_tickets_filters_by_assigned_to_requester_and_device(api_env)
         category = await _category(
             session, org_id, user_id, type="incident", default_queue_id=queue.id
         )
-        device = Device(org_id=org_id, hostname="host-1", os_family="linux")
+        device = Device(
+            org_id=org_id, hostname="host-1", os_family="linux", client_id=org_id, site_id=org_id
+        )
         session.add(device)
         await session.flush()
 
@@ -885,7 +887,9 @@ async def test_update_explicit_none_on_nullable_field_clears_it(api_env) -> None
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_id, user_id)
-        device = Device(org_id=org_id, hostname="host-1", os_family="linux")
+        device = Device(
+            org_id=org_id, hostname="host-1", os_family="linux", client_id=org_id, site_id=org_id
+        )
         session.add(device)
         await session.flush()
 
@@ -1045,7 +1049,9 @@ async def test_update_cross_org_device_id_raises_not_found(
     org_b, _user_b = await _org_with_user(api_env)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         ticket, _cat, _q = await _create_basic_ticket(session, org_a, user_a)
-        device_b = Device(org_id=org_b, hostname="org-b-host", os_family="linux")
+        device_b = Device(
+            org_id=org_b, hostname="org-b-host", os_family="linux", client_id=org_b, site_id=org_b
+        )
         session.add(device_b)
         await session.flush()
 
@@ -1132,7 +1138,9 @@ async def test_create_cross_org_device_id_raises_not_found(
         category_a = await _category(
             session, org_a, user_a, type="incident", default_queue_id=queue_a.id
         )
-        device_b = Device(org_id=org_b, hostname="org-b-host", os_family="linux")
+        device_b = Device(
+            org_id=org_b, hostname="org-b-host", os_family="linux", client_id=org_b, site_id=org_b
+        )
         session.add(device_b)
         await session.flush()
 

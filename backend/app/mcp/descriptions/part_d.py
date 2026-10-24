@@ -195,10 +195,11 @@ PART_D: dict[str, str] = {
         "Revokes an enrollment token so no further agents can enroll with it. Devices already "
         "enrolled are unaffected."
     ),
-    # --- install-link ---
-    "GET /api/v1/install-link": (
-        "Returns the agent install link's settings: whether it is on, allowed networks, switch-off "
-        "time, hourly join limit and joins since enabled. Never the link itself."
+    # --- sites (install link) ---
+    "GET /api/v1/sites/{site_id}/install-link": (
+        "Returns one site's agent install link settings: whether it is on, allowed networks (the "
+        "site's egress networks), switch-off time, hourly join limit and joins since enabled. "
+        "Never the link itself."
     ),
     # --- jobs ---
     "GET /api/v1/jobs": (

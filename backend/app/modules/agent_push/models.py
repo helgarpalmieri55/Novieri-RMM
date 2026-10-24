@@ -53,11 +53,20 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, Integer, String, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    FetchedValue,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    text,
+)
 from sqlalchemy.dialects.postgresql import CIDR, INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 __all__ = [
     "PushAuthorization",
@@ -199,13 +208,35 @@ class PushHostKey(Base):
 
     __tablename__ = "push_host_key"
     __table_args__ = (
-        # One host-key record per (org, address): a target has one host key at a
-        # time, and re-probing UPDATES the observed half rather than growing rows.
-        Index("uq_push_host_key_address", "org_id", "address", unique=True),
+        client_org_fk("push_host_key"),
+        # One host-key record per (org, client, address): a target has one host
+        # key at a time, and re-probing UPDATES the observed half rather than
+        # growing rows. PER CLIENT (migration 0231, Task 8b): an address names a
+        # host only within one client's network -- two clients' 10.0.0.5 are
+        # two machines. NULLS NOT DISTINCT: one global row (no device) per
+        # address, which may share it with a client's.
+        Index(
+            "uq_push_host_key_client_address",
+            "org_id",
+            "client_id",
+            "address",
+            unique=True,
+            postgresql_nulls_not_distinct=True,
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # device_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     #: The promoted asset this key belongs to, resolved at probe time. Nullable
     #: because a probe records what it saw even if the asset row is later removed;
     #: an install re-resolves the asset through the refusal ladder regardless.
@@ -259,6 +290,16 @@ class PushBatchTarget(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the jobs row named by job_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     #: A uuid minted per push request. Not a FK: there is no batch-header row,
     #: because there is no batch-level state worth a row (see the docstring).
     batch_id: Mapped[UUID] = mapped_column()

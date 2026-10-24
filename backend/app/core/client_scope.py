@@ -106,6 +106,17 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "COMPUTES a person's scope rather than using one: an all-clients grant "
         "(user_roles.client_id NULL) is the every-client scope (spec §2.1-2.2)"
     ),
+    # -- (d) personal: the caller's own row, which belongs to no client --------
+    **_reviewed(
+        "app/core/identity/own_profile.py",
+        "/me is personal: the caller's OWN users row, by the user id the validated token "
+        "resolved (never a request field), and G tables only (grants, roles, audit). A "
+        "person with no grant has the empty scope, which 0231 hides staff rows from "
+        "(Task 6b)",
+        "read_own_profile",
+        "read_own_locale",
+        "update_own_profile",
+    ),
     # -- (a) processes with no person behind them --------------------------
     **_reviewed(
         "app/worker.py",
@@ -178,16 +189,6 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     "app/modules/backup/dedup.py::handle_chunk_query": "gateway: answers an agent's chunk query",
     "app/modules/backup/read.py::handle_read_query": "gateway: answers an agent's read query",
     "app/services/cert_renewal.py::advance_for_device": "gateway: an agent's certificate renewal",
-    **_reviewed(
-        "app/services/enrollment.py",
-        "agent enrollment: no person; the enrollment token or install-link code is the "
-        "authority, and it must be found before its client is known",
-        "enroll",
-        "enroll_via_link",
-    ),
-    "app/services/install_link.py::resolve_live": (
-        "resolves a public install-link code for an unenrolled machine: no person"
-    ),
     **_reviewed(
         "app/modules/agent_distribution/link_page.py",
         "the install link's public page (no sign-in by design): reads only the release "

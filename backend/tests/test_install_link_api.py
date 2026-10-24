@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.client_scope import ClientScope
 from app.models import AuditEvent, InstallLink
-from tests.install_link_fixtures import switch_on
+from tests.install_link_fixtures import link_path, switch_on
 
 
 async def _admin(api_env, org_id):
@@ -20,17 +20,17 @@ async def _admin(api_env, org_id):
 async def test_the_settings_are_admin_tier(api_env) -> None:
     org_id = await api_env.create_org("il")
     tech = await api_env.headers(org_id, await api_env.create_user(org_id, "technician"))
-    assert (await api_env.client.get("/api/v1/install-link", headers=tech)).status_code == 403
-    put = await api_env.client.put("/api/v1/install-link", json={"enabled": False}, headers=tech)
+    assert (await api_env.client.get(link_path(org_id), headers=tech)).status_code == 403
+    put = await api_env.client.put(link_path(org_id), json={"enabled": False}, headers=tech)
     assert put.status_code == 403
-    regenerate = await api_env.client.post("/api/v1/install-link/regenerate", headers=tech)
+    regenerate = await api_env.client.post(link_path(org_id, "/regenerate"), headers=tech)
     assert regenerate.status_code == 403
 
 
 async def test_a_new_org_reads_a_switched_off_link_with_defaults(api_env) -> None:
     org_id = await api_env.create_org("il")
     body = (
-        await api_env.client.get("/api/v1/install-link", headers=await _admin(api_env, org_id))
+        await api_env.client.get(link_path(org_id), headers=await _admin(api_env, org_id))
     ).json()
     assert body == {
         "enabled": False,
@@ -46,7 +46,7 @@ async def test_a_new_org_reads_a_switched_off_link_with_defaults(api_env) -> Non
 async def test_it_cannot_be_switched_on_with_no_network(api_env) -> None:
     org_id = await api_env.create_org("il")
     response = await api_env.client.put(
-        "/api/v1/install-link",
+        link_path(org_id),
         json={"enabled": True, "networks": []},
         headers=await _admin(api_env, org_id),
     )
@@ -67,12 +67,12 @@ async def test_switching_on_mints_a_code_shown_once_and_stored_as_a_hash(api_env
     assert code not in repr(row.__dict__)
 
     headers = await _admin(api_env, org_id)
-    got = (await api_env.client.get("/api/v1/install-link", headers=headers)).json()
+    got = (await api_env.client.get(link_path(org_id), headers=headers)).json()
     assert got["enabled"] is True and got["has_code"] is True
     assert "url" not in got and code not in str(got)
 
     again = await api_env.client.put(
-        "/api/v1/install-link",
+        link_path(org_id),
         json={"enabled": True, "networks": ["10.50.0.0/16", "fd00::/8"], "hourly_limit": 20},
         headers=headers,
     )
@@ -84,7 +84,7 @@ async def test_the_link_url_uses_the_configured_console(api_env) -> None:
     api_env.settings.public_console_url = "https://itms.example.com/"
     headers = await _admin(api_env, org_id)
     response = await api_env.client.put(
-        "/api/v1/install-link", json={"enabled": True, "networks": ["10.0.0.0/8"]}, headers=headers
+        link_path(org_id), json={"enabled": True, "networks": ["10.0.0.0/8"]}, headers=headers
     )
     assert response.json()["url"].startswith("https://itms.example.com/i/")
 
@@ -93,7 +93,7 @@ async def test_regenerate_replaces_the_code(api_env) -> None:
     org_id = await api_env.create_org("il")
     old = await switch_on(api_env, org_id, ["10.50.0.0/16"])
     response = await api_env.client.post(
-        "/api/v1/install-link/regenerate", headers=await _admin(api_env, org_id)
+        link_path(org_id, "/regenerate"), headers=await _admin(api_env, org_id)
     )
     assert response.status_code == 200
     new = response.json()["url"].rsplit("/i/", 1)[1]
@@ -135,7 +135,7 @@ async def test_bad_settings_are_refused_with_a_sentence(api_env) -> None:
         ({"enabled": True, "networks": ["172.19.0.0/16"]}, "proxy"),
         ({"enabled": True, "networks": ["172.19.240.128/25"]}, "proxy"),
     ]:
-        response = await api_env.client.put("/api/v1/install-link", json=body, headers=headers)
+        response = await api_env.client.put(link_path(org_id), json=body, headers=headers)
         assert response.status_code == 422, body
         detail = response.json()["detail"]
         assert isinstance(detail, str), detail
@@ -148,14 +148,14 @@ async def test_every_change_is_audited_and_no_audit_row_carries_the_code(api_env
     code = await switch_on(api_env, org_id, ["10.50.0.0/16"])
     headers = await _admin(api_env, org_id)
     await api_env.client.put(
-        "/api/v1/install-link",
+        link_path(org_id),
         json={"enabled": True, "networks": ["10.60.0.0/16"], "hourly_limit": 10},
         headers=headers,
     )
-    regenerated = await api_env.client.post("/api/v1/install-link/regenerate", headers=headers)
+    regenerated = await api_env.client.post(link_path(org_id, "/regenerate"), headers=headers)
     new_code = regenerated.json()["url"].rsplit("/i/", 1)[1]
     await api_env.client.put(
-        "/api/v1/install-link",
+        link_path(org_id),
         json={"enabled": False, "networks": ["10.60.0.0/16"], "hourly_limit": 10},
         headers=headers,
     )
@@ -198,13 +198,15 @@ async def test_the_view_counts_machines_that_joined_since_it_was_switched_on(api
                     link_joined_at=datetime.now(UTC),
                     link_joined_from="10.50.0.9",
                     review_state="pending",
+                    client_id=org_id,
+                    site_id=org_id,
                 )
                 for i in range(3)
             ]
         )
         await session.commit()
     body = (
-        await api_env.client.get("/api/v1/install-link", headers=await _admin(api_env, org_id))
+        await api_env.client.get(link_path(org_id), headers=await _admin(api_env, org_id))
     ).json()
     assert body["joined_since_enabled"] == 3
     assert body["enabled_at"] is not None
@@ -212,9 +214,10 @@ async def test_the_view_counts_machines_that_joined_since_it_was_switched_on(api
 
 async def test_two_first_saves_at_once_do_not_collide(admin_engine, app_engine) -> None:
     """Two first-ever saves race: neither sees the other's uncommitted row, so
-    both INSERT. The INSERT is idempotent (ON CONFLICT DO NOTHING on org_id), so
+    both INSERT. The INSERT is idempotent (ON CONFLICT DO NOTHING on site_id), so
     the second waits for the first to commit and then locks ITS row -- no
-    IntegrityError on `uq_install_links_org`, and only the first mints a code."""
+    IntegrityError on `uq_install_links_site`, and only the first mints a code.
+    The site is the organisation's Principal one, whose id is the org's."""
     from app.core.tenancy import org_session
     from app.services import install_link as svc
     from tests.ipam_fixtures import seed_org
@@ -223,6 +226,7 @@ async def test_two_first_saves_at_once_do_not_collide(admin_engine, app_engine) 
     now = datetime.now(UTC)
     kwargs = {
         "org_id": org.org_id,
+        "site_id": org.org_id,
         "actor_id": org.user_id,
         "enabled": True,
         "networks": ["10.50.0.0/16"],
@@ -298,10 +302,10 @@ async def test_after_the_automatic_switch_off_the_settings_save_again(api_env) -
     assert audit.meta == {"reason": "scheduled", "disable_at": passed.isoformat()}
 
     headers = await _admin(api_env, org_id)
-    view = (await api_env.client.get("/api/v1/install-link", headers=headers)).json()
+    view = (await api_env.client.get(link_path(org_id), headers=headers)).json()
     assert view["disable_at"] is None
     saved = await api_env.client.put(
-        "/api/v1/install-link",
+        link_path(org_id),
         json={
             "enabled": view["enabled"],
             "networks": [*view["networks"], "10.60.0.0/16"],

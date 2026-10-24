@@ -16,6 +16,7 @@ from uuid import UUID
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -28,7 +29,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, uuid7_pk
+from app.models.base import Base, TimestampMixin, client_org_fk, uuid7_pk
 
 
 class BackupRepository(TimestampMixin, Base):
@@ -79,9 +80,20 @@ class BackupChunk(TimestampMixin, Base):
 
 class BackupPolicy(TimestampMixin, Base):
     __tablename__ = "backup_policies"
+    __table_args__ = (client_org_fk("backup_policies"),)
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # device_group_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     repository_id: Mapped[UUID] = mapped_column(ForeignKey("backup_repositories.id"))
     device_group_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("device_groups.id"), default=None
@@ -99,6 +111,16 @@ class BackupRun(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     repository_id: Mapped[UUID] = mapped_column(ForeignKey("backup_repositories.id"))
     job_id: Mapped[UUID | None] = mapped_column(ForeignKey("jobs.id"), default=None)
@@ -125,6 +147,16 @@ class BackupPoint(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     repository_id: Mapped[UUID] = mapped_column(ForeignKey("backup_repositories.id"))
     backup_run_id: Mapped[UUID] = mapped_column(ForeignKey("backup_runs.id"))
@@ -150,6 +182,16 @@ class RestoreJob(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     backup_point_id: Mapped[UUID] = mapped_column(ForeignKey("backup_points.id"))
     job_id: Mapped[UUID | None] = mapped_column(ForeignKey("jobs.id"), default=None)
@@ -172,11 +214,23 @@ class BackupOffsiteTarget(Base):
 
     __tablename__ = "backup_offsite_targets"
     __table_args__ = (
-        UniqueConstraint("org_id", "name", name="uq_backup_offsite_targets_org_name"),
+        client_org_fk("backup_offsite_targets"),
+        # Per client, the global rows among themselves (migration 0231, Task 8b).
+        UniqueConstraint(
+            "org_id",
+            "client_id",
+            "name",
+            name="uq_backup_offsite_targets_client_name",
+            postgresql_nulls_not_distinct=True,
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     name: Mapped[str] = mapped_column(String(200))
     endpoint: Mapped[str | None] = mapped_column(Text, default=None)
     region: Mapped[str] = mapped_column(String(64), default="us-east-1")
@@ -209,6 +263,16 @@ class BackupPointCopy(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the backup_points row named by point_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     point_id: Mapped[UUID] = mapped_column(ForeignKey("backup_points.id"))
     target_id: Mapped[UUID] = mapped_column(ForeignKey("backup_offsite_targets.id"))
     state: Mapped[str] = mapped_column(String(12), default="pending")
@@ -254,17 +318,25 @@ class BackupRecoveryKey(Base):
 
     __tablename__ = "backup_recovery_keys"
     __table_args__ = (
+        client_org_fk("backup_recovery_keys"),
+        # Per client, the global rows among themselves (migration 0231, Task 8b).
         Index(
-            "uq_backup_recovery_keys_active",
+            "uq_backup_recovery_keys_client_active",
             "org_id",
+            "client_id",
             "fingerprint",
             unique=True,
+            postgresql_nulls_not_distinct=True,
             postgresql_where=text("retired_at IS NULL"),
         ),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     public_key: Mapped[str] = mapped_column(String(64))
     fingerprint: Mapped[str] = mapped_column(String(64))
     challenge_sha256: Mapped[str | None] = mapped_column(String(64), default=None)

@@ -15,6 +15,7 @@ from uuid import UUID
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -82,6 +83,16 @@ class DeploymentResult(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     deployment_id: Mapped[UUID] = mapped_column(ForeignKey("deployments.id"))
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     job_id: Mapped[UUID | None] = mapped_column(ForeignKey("jobs.id"), default=None)
@@ -124,6 +135,16 @@ class ScriptRun(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     script_id: Mapped[UUID] = mapped_column(ForeignKey("scripts.id"))
     script_version: Mapped[int] = mapped_column(Integer)
     target_type: Mapped[str] = mapped_column(String(8))
@@ -153,13 +174,26 @@ class ScriptPolicy(TimestampMixin, Base):
 
     __tablename__ = "script_policies"
     __table_args__ = (
-        UniqueConstraint("org_id", "name", name="uq_script_policies_org_name"),
+        # Per CLIENT, the group's (migration 0231, Task 8b): a technician limited
+        # to one client cannot see another's names, and two clients may both
+        # schedule "Nightly".
+        UniqueConstraint("org_id", "client_id", "name", name="uq_script_policies_client_name"),
         CheckConstraint("interval_hours BETWEEN 1 AND 720", name="ck_script_policies_interval"),
         CheckConstraint("keep_runs BETWEEN 1 AND 500", name="ck_script_policies_keep_runs"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the device_groups row named by device_group_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     name: Mapped[str] = mapped_column(String(200))
     script_id: Mapped[UUID] = mapped_column(ForeignKey("scripts.id"))
     device_group_id: Mapped[UUID] = mapped_column(ForeignKey("device_groups.id"))

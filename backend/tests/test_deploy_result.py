@@ -59,7 +59,9 @@ async def _setup_job(
         session.add(org)
         await session.flush()
 
-        device = Device(org_id=org.id, hostname="h1", os_family="windows")
+        device = Device(
+            org_id=org.id, hostname="h1", os_family="windows", client_id=org.id, site_id=org.id
+        )
         session.add(device)
         await session.flush()
 
@@ -188,7 +190,9 @@ async def test_not_all_terminal_leaves_deployment_state_unchanged(
         deployment = (
             await session.execute(select(Deployment).where(Deployment.id == deployment_id))
         ).scalar_one()
-        other_device = Device(org_id=org_id, hostname="h2", os_family="windows")
+        other_device = Device(
+            org_id=org_id, hostname="h2", os_family="windows", client_id=org_id, site_id=org_id
+        )
         session.add(other_device)
         await session.flush()
         session.add(

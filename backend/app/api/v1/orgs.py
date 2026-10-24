@@ -168,7 +168,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 
-from app.api.deps import AuthContext, bound_auth_context, require_permission
+from app.api.deps import (
+    AuthContext,
+    bound_auth_context,
+    require_permission,
+    require_permission_on_every_client,
+)
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.identity.policy import (
@@ -540,7 +545,7 @@ async def get_current_org(
 async def update_current_org(
     body: OrgUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("orgs.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("orgs.manage")),
 ) -> OrgOut:
     """Update this org's `name` and/or `settings`. `orgs.manage`, server-side.
 

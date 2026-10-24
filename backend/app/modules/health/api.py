@@ -143,7 +143,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.approved_actions import (
     ApprovedAction,
     get_script_exemption,
@@ -613,7 +613,7 @@ async def list_profiles_route(
 async def create_profile_route(
     body: ProfileCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("health.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("health.admin")),
 ) -> ProfileOut:
     """A new profile has no checks and no assignment, so NO device's effective
     policy changed and no push is queued. That is not an oversight: pushing here
@@ -667,7 +667,7 @@ async def update_profile_route(
     profile_id: UUID,
     body: ProfileUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("health.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("health.admin")),
 ) -> ProfileOut:
     """Any write bumps `policy_version` (§2.1) -- including a plain rename, so
     the reconcile below re-pushes even when the check set did not move. That is
@@ -695,7 +695,7 @@ async def update_profile_route(
 async def delete_profile_route(
     profile_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("health.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("health.admin")),
 ) -> None:
     """Refused with 409 -- naming the blockers -- while an assignment or an alert
     still references it (§10). `active=false` is the retirement path for a
@@ -727,7 +727,7 @@ async def clone_profile_route(
     profile_id: UUID,
     body: ProfileClone,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("health.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("health.admin")),
 ) -> ProfileOut:
     """The clone carries NO assignment (§0.2) -- a clone that inherited one
     would silently retarget the source's devices at a profile nobody has
@@ -779,7 +779,7 @@ async def replace_checks_route(
     profile_id: UUID,
     body: ChecksReplace,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("health.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("health.admin")),
 ) -> ProfileChecksOut:
     """Checks are replaced as a SET, never individually (§10).
 
@@ -974,7 +974,7 @@ async def get_settings_route(
 async def update_settings_route(
     body: SettingsUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("health.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("health.admin")),
 ) -> SettingsOut:
     try:
         async with org_session(
@@ -1709,7 +1709,7 @@ async def list_approved_actions_route(
 async def create_approved_action_route(
     body: ApprovedActionCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("health.action.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("health.action.admin")),
 ) -> ApprovedActionOut:
     """`destructive` is DERIVED and stored, never taken from the body (§8.4).
 
@@ -1754,7 +1754,7 @@ async def update_approved_action_route(
     action_id: UUID,
     body: ApprovedActionUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("health.action.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("health.action.admin")),
 ) -> ApprovedActionOut:
     """Every autonomy change is audited with its OLD and new value (§11.3):
     "who set this action to autonomous" is only answerable if the previous value
@@ -1776,7 +1776,7 @@ async def update_approved_action_route(
 async def delete_approved_action_route(
     action_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("health.action.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("health.action.admin")),
 ) -> None:
     try:
         async with org_session(
@@ -1797,7 +1797,7 @@ async def exempt_script_route(
     action_id: UUID,
     body: ExemptScriptIn,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("health.action.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("health.action.admin")),
 ) -> ApprovedActionOut:
     """"This exact script body is not destructive", granted per exact version.
 
@@ -1829,7 +1829,7 @@ async def exempt_script_route(
 async def revoke_script_exemption_route(
     action_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("health.action.admin")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("health.action.admin")),
 ) -> ApprovedActionOut:
     """The matching DELETE (§10's prose; the table lists only the POST).
 

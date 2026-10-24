@@ -289,6 +289,7 @@ async def test_ordinary_token_enrollment_is_a_noop_for_provisioning(
         issued = await create_token(
             session,
             org_id=org_id,
+            site_id=org_id,
             created_by=actor_id,
             name="ordinary",
             expires_in_hours=24,

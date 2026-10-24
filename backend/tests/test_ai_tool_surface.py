@@ -586,8 +586,9 @@ EXPECTED_PASSING_SIX = frozenset(
         # Added 2026-09-28 (install link). Eligible on all six, and deliberately
         # not registered: it names the networks from which a machine may enrol
         # itself into this organisation -- the one fact an actor wanting to
-        # plant a machine would ask for first.
-        "/api/v1/install-link",
+        # plant a machine would ask for first. Per site since 2026-10-23 (MSP
+        # clients spec §1.5): one link per site, the same fact, a site at a time.
+        "/api/v1/sites/{site_id}/install-link",
         # Added 2026-09-23 (scheduled scripts). Eligible, not registered: a
         # run's output is whatever the script printed and may carry secrets.
         "/api/v1/deploy/script-policies/{policy_id}/runs",
@@ -929,8 +930,9 @@ PENDING_TOOL_REVIEW = frozenset(
         # Added 2026-09-28 (install link). Eligible on all six, and deliberately
         # not registered: it names the networks from which a machine may enrol
         # itself into this organisation -- the one fact an actor wanting to
-        # plant a machine would ask for first.
-        "/api/v1/install-link",
+        # plant a machine would ask for first. Per site since 2026-10-23 (MSP
+        # clients spec §1.5): one link per site, the same fact, a site at a time.
+        "/api/v1/sites/{site_id}/install-link",
         # Added 2026-09-23: script output may carry secrets; review first.
         "/api/v1/deploy/script-policies/{policy_id}/runs",
         "/api/v1/platform/errors",

@@ -30,7 +30,9 @@ async def _managed_device(api_env: ApiEnv, org_id: UUID) -> UUID:
     from app.models import Agent
 
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        device = Device(org_id=org_id, hostname="ws-01", os_family="linux")
+        device = Device(
+            org_id=org_id, hostname="ws-01", os_family="linux", client_id=org_id, site_id=org_id
+        )
         session.add(device)
         await session.flush()
         device_id = device.id
@@ -201,6 +203,8 @@ async def test_an_asset_an_operator_already_typed_in_is_not_a_candidate(
                 asset_type="network",
                 lifecycle="unmanageable",
                 primary_ip="172.22.104.1",
+                client_id=org_id,
+                site_id=org_id,
             )
         )
         await session.commit()

@@ -166,6 +166,8 @@ async def seed_device(
             os_family=os_family,
             os_version=os_version,
             device_group_id=device_group_id,
+            client_id=org_id,
+            site_id=org_id,
         )
         session.add(device)
         await session.commit()
@@ -203,7 +205,7 @@ async def seed_device_group(admin_engine: AsyncEngine, org_id: UUID, *, name: st
     from app.models import DeviceGroup
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        group = DeviceGroup(org_id=org_id, name=name)
+        group = DeviceGroup(org_id=org_id, name=name, client_id=org_id)
         session.add(group)
         await session.commit()
         return group.id
@@ -501,9 +503,10 @@ async def seed_service_desk_anchor(
     """One queue, and one SLA policy scoped to it.
 
     The policy is scoped to the QUEUE rather than being a `(NULL, NULL)`
-    wildcard on purpose: `uq_sla_policy_wildcard_both` is a partial unique index
-    on `org_id` alone, so two wildcard policies in one org is an
-    IntegrityError -- and a test that wanted two queues in one org would hit it.
+    wildcard on purpose: `uq_sla_policy_client_wildcard_both` is a partial unique
+    index on `(org_id, client_id)` with NULLs not distinct, so two global
+    wildcard policies in one org is an IntegrityError -- and a test that wanted
+    two queues in one org would hit it.
     """
     from app.models import SlaCalendar, SlaPolicy, TicketCategory, TicketQueue, User
 

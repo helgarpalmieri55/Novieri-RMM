@@ -286,10 +286,10 @@ async def test_one_sla_row_per_ticket(api_env, a_ticket_for) -> None:
 @pytest.mark.parametrize(
     ("index_name", "scoped_to_a_queue", "priority"),
     [
-        ("uq_sla_policy_queue_and_priority", True, "high"),
-        ("uq_sla_policy_queue_wildcard_priority", True, None),
-        ("uq_sla_policy_wildcard_queue_priority", False, "urgent"),
-        ("uq_sla_policy_wildcard_both", False, None),
+        ("uq_sla_policy_client_queue_and_priority", True, "high"),
+        ("uq_sla_policy_client_queue_wildcard_priority", True, None),
+        ("uq_sla_policy_client_wildcard_queue_priority", False, "urgent"),
+        ("uq_sla_policy_client_wildcard_both", False, None),
     ],
 )
 async def test_a_duplicate_policy_is_rejected_at_every_resolution_level(
@@ -321,10 +321,10 @@ async def test_a_duplicate_policy_is_rejected_at_every_resolution_level(
 @pytest.mark.parametrize(
     ("index_name", "scoped_to_a_queue", "priority"),
     [
-        ("uq_sla_policy_queue_and_priority", True, "high"),
-        ("uq_sla_policy_queue_wildcard_priority", True, None),
-        ("uq_sla_policy_wildcard_queue_priority", False, "urgent"),
-        ("uq_sla_policy_wildcard_both", False, None),
+        ("uq_sla_policy_client_queue_and_priority", True, "high"),
+        ("uq_sla_policy_client_queue_wildcard_priority", True, None),
+        ("uq_sla_policy_client_wildcard_queue_priority", False, "urgent"),
+        ("uq_sla_policy_client_wildcard_both", False, None),
     ],
 )
 async def test_an_inactive_duplicate_policy_is_allowed_at_every_resolution_level(

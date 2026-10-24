@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    FetchedValue,
     ForeignKey,
     Index,
     String,
@@ -23,7 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 
 class ChangeRequest(Base):
@@ -100,9 +101,14 @@ class ChangeGate(Base):
 
     __tablename__ = "change_gates"
     __table_args__ = (
+        client_org_fk("change_gates"),
+        # One gate per group, and one group-less ("every device") gate per
+        # client and one global (migration 0231, Task 8b): a group-less gate is
+        # no group's client, so the key names the client itself.
         Index(
-            "uq_change_gates_org_group",
+            "uq_change_gates_client_group",
             "org_id",
+            "client_id",
             "device_group_id",
             unique=True,
             postgresql_nulls_not_distinct=True,
@@ -111,6 +117,16 @@ class ChangeGate(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # device_group_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_group_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("device_groups.id"), default=None
     )

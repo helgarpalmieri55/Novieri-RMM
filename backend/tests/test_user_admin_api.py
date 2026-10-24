@@ -1349,6 +1349,73 @@ async def test_the_last_org_admin_cannot_be_disabled_deleted_or_stripped(
     assert users_env.kc.seen == []
 
 
+async def test_an_org_admin_on_one_client_does_not_keep_the_org_administrable(
+    users_env: Any,
+) -> None:
+    """Found in review. Managing users needs `users.manage` on EVERY client
+    (`require_permission_on_every_client`), so an `org-admin` grant on one
+    client cannot grant anything back. Counting it as "another active
+    org-admin" let the last every-client one strip, disable or delete themself
+    and strand the organization. Only an every-client grant counts."""
+    engine = users_env.admin_engine
+    org = await users_env.create_org("last-admin-scoped")
+    _sub, headers, actor_id = await _admin(users_env, org)
+    org_admin_role = await _global_role_id(engine, "org-admin")
+    scoped = await users_env.create_user(org)
+    scoped_id = await _user_id(engine, scoped)
+    await _assign(engine, org, scoped_id, org_admin_role, await _client(engine, org, "x"))
+    # A SECOND every-client manager does the disable and the delete, so the
+    # refusal is the last-admin rail and not "you cannot do this to yourself".
+    other = await users_env.create_user(org)
+    manager_role = await _seed_role(engine, org, "user-manager", ["users.manage", "users.read"])
+    await _assign(engine, org, await _user_id(engine, other), manager_role)
+    other_headers = await users_env.headers(org, other)
+    (assignment,) = await _assignments(engine, actor_id)
+
+    strip = await users_env.client.delete(
+        f"/api/v1/users/{actor_id}/roles/{assignment.id}", headers=headers
+    )
+    disable = await users_env.client.post(
+        f"/api/v1/users/{actor_id}/disable", headers=other_headers
+    )
+    delete = await users_env.client.delete(f"/api/v1/users/{actor_id}", headers=other_headers)
+
+    assert strip.status_code == 403, strip.text
+    assert disable.status_code == 403, disable.text
+    assert delete.status_code == 403, delete.text
+    row = await _user_row(engine, actor_id)
+    assert row is not None and row.status == "active"
+    assert [a.id for a in await _assignments(engine, actor_id)] == [assignment.id]
+
+
+async def test_an_org_admin_grant_on_one_client_does_not_cover_stripping_the_every_client_one(
+    users_env: Any,
+) -> None:
+    """The variant: the last every-client org-admin ALSO holds org-admin on one
+    client. That grant is "another org-admin row of theirs", so the rail used
+    to assume they kept the role and skip itself -- and the org was stranded."""
+    engine = users_env.admin_engine
+    org = await users_env.create_org("last-admin-both")
+    _sub, headers, actor_id = await _admin(users_env, org)
+    (every_client,) = await _assignments(engine, actor_id)
+    org_admin_role = await _global_role_id(engine, "org-admin")
+    on_x = await _assign(
+        engine, org, actor_id, org_admin_role, await _client(engine, org, "x")
+    )
+
+    strip = await users_env.client.delete(
+        f"/api/v1/users/{actor_id}/roles/{every_client.id}", headers=headers
+    )
+    assert strip.status_code == 403, strip.text
+    # NON-VACUITY: the one-client grant itself is removable -- the every-client
+    # grant is what keeps the organization administrable.
+    spare = await users_env.client.delete(
+        f"/api/v1/users/{actor_id}/roles/{on_x}", headers=headers
+    )
+    assert spare.status_code == 204, spare.text
+    assert [a.id for a in await _assignments(engine, actor_id)] == [every_client.id]
+
+
 async def test_a_second_org_admin_makes_the_first_removable(users_env: Any) -> None:
     """NON-VACUITY for the rail above. A guard written too broadly -- refusing
     every disable of an `org-admin` -- would pass that test while making the

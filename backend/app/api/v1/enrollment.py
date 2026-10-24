@@ -10,6 +10,7 @@ from app.core.client_address import client_address
 from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.services import enrollment as svc
+from app.services.client_sites import NotAcceptingNewRows, SiteNotFound
 
 tokens_router = APIRouter(prefix="/enrollment-tokens", tags=["enrollment"])
 agents_router = APIRouter(prefix="/agents", tags=["enrollment"])
@@ -42,6 +43,11 @@ class TokenCreateRequest(BaseModel):
     (1..2160): it was already required-with-a-default and already capped, and
     tightening a shipped ceiling is a separate decision from closing an open
     one.
+
+    `site_id` IS REQUIRED (MSP clients spec §1.5, §3.2): the token is minted
+    for one site, and a machine enrolled with it lands in that site and its
+    client. The client is derived from the site, never sent: a body that named
+    both could name a pair that does not belong together.
     """
 
     name: str = Field(default="", max_length=200)
@@ -52,6 +58,12 @@ class TokenCreateRequest(BaseModel):
         description=(
             "How many machines this token may enrol. Required, and capped at "
             f"{svc.MAX_TOKEN_USES}: there is no unlimited enrollment token."
+        ),
+    )
+    site_id: UUID = Field(
+        description=(
+            "The site a machine enrolled with this token lands in; its client is the "
+            "site's client"
         ),
     )
 
@@ -65,6 +77,9 @@ class TokenCreatedResponse(BaseModel):
     #: still nullable, because rows issued before the bound existed are
     #: grandfathered rather than rewritten.
     max_uses: int
+    #: Where a machine enrolled with this token lands (MSP clients spec §1.5).
+    client_id: UUID
+    site_id: UUID
 
 
 class TokenListItem(BaseModel):
@@ -85,6 +100,9 @@ class TokenListItem(BaseModel):
     #: `TokenListResponse.unlimited_count` is how the console finds them.
     max_uses: int | None
     use_count: int
+    #: Where a machine enrolled with this token lands (MSP clients spec §1.5).
+    client_id: UUID
+    site_id: UUID
     #: Soft, and permanent. A revoked token is never deleted -- see
     #: `services/enrollment.py::list_tokens` for why the row has to outlive the
     #: credential -- so this is the flag the default listing filters on.
@@ -188,20 +206,31 @@ async def create_token(
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        issued = await svc.create_token(
-            session,
-            org_id=ctx.org_id,
-            created_by=ctx.user_id,
-            name=body.name,
-            expires_in_hours=body.expires_in_hours,
-            max_uses=body.max_uses,
-        )
+        try:
+            # The site is loaded in THIS session, so RLS hides another
+            # organisation's and one of a client outside the caller's scope:
+            # the same 404 for both.
+            issued = await svc.create_token(
+                session,
+                org_id=ctx.org_id,
+                site_id=body.site_id,
+                created_by=ctx.user_id,
+                name=body.name,
+                expires_in_hours=body.expires_in_hours,
+                max_uses=body.max_uses,
+            )
+        except SiteNotFound:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such site")) from None
+        except NotAcceptingNewRows as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
     return TokenCreatedResponse(
         id=issued.id,
         token=issued.token,
         name=issued.name,
         expires_at=issued.expires_at,
         max_uses=issued.max_uses,
+        client_id=issued.client_id,
+        site_id=issued.site_id,
     )
 
 
@@ -274,6 +303,8 @@ async def list_tokens(
                     expires_at=r.expires_at,
                     max_uses=r.max_uses,
                     use_count=r.use_count,
+                    client_id=r.client_id,
+                    site_id=r.site_id,
                     revoked=r.revoked,
                 )
                 for r in page.rows

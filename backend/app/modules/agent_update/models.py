@@ -7,10 +7,20 @@ Every column and index here must match migration 0095 exactly:
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, UniqueConstraint, func, text
+from sqlalchemy import (
+    Boolean,
+    FetchedValue,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 __all__ = [
     "ACTIVE_ROLLOUT_STATES",
@@ -63,11 +73,22 @@ class AgentUpdateRollout(Base):
 class AgentUpdateRing(Base):
     __tablename__ = "agent_update_rings"
     __table_args__ = (
+        client_org_fk("agent_update_rings"),
         UniqueConstraint("rollout_id", "ordinal", name="uq_agent_update_rings_ordinal"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # device_group_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     rollout_id: Mapped[UUID] = mapped_column(ForeignKey("agent_update_rollouts.id"))
     ordinal: Mapped[int] = mapped_column(Integer)
     name: Mapped[str] = mapped_column(String(100))
@@ -90,6 +111,16 @@ class AgentUpdateTarget(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     rollout_id: Mapped[UUID] = mapped_column(ForeignKey("agent_update_rollouts.id"))
     ring_id: Mapped[UUID] = mapped_column(ForeignKey("agent_update_rings.id"))
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))

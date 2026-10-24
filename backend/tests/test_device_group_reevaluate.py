@@ -75,7 +75,7 @@ async def _group(
 ) -> UUID:
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         group = DeviceGroup(
-            org_id=org_id, name=name, rules=rules, precedence=precedence
+            org_id=org_id, name=name, rules=rules, precedence=precedence, client_id=org_id
         )
         session.add(group)
         await session.commit()
@@ -98,6 +98,8 @@ async def _device(
             os_family="windows",
             device_group_id=group_id,
             status=status,
+            client_id=org_id,
+            site_id=org_id,
         )
         session.add(device)
         await session.flush()

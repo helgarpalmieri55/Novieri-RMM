@@ -9,7 +9,14 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Agent, AuditEvent, Device, DomainEvent, InstallLink
-from tests.install_link_fixtures import FACTS, TRAEFIK, make_csr_pem, peer_client, switch_on
+from tests.install_link_fixtures import (
+    FACTS,
+    TRAEFIK,
+    link_path,
+    make_csr_pem,
+    peer_client,
+    switch_on,
+)
 
 NOT_FOUND = {"detail": "Not Found"}
 INSIDE = "203.0.113.5, 10.50.0.9"  # rightmost (Traefik's) is inside 10.50.0.0/16
@@ -78,7 +85,7 @@ async def test_every_refusal_is_the_same_404(api_env, case: str) -> None:
     if case == "off":
         admin = await api_env.headers(org_id, await api_env.create_user(org_id, "org-admin"))
         await api_env.client.put(
-            "/api/v1/install-link",
+            link_path(org_id),
             json={"enabled": False, "networks": ["10.50.0.0/16"]},
             headers=admin,
         )
@@ -117,7 +124,7 @@ async def test_regenerating_stops_the_old_code_at_once(api_env) -> None:
     old = await switch_on(api_env, org_id, ["10.50.0.0/16"])
     admin = await api_env.headers(org_id, await api_env.create_user(org_id, "org-admin"))
     new = (
-        (await api_env.client.post("/api/v1/install-link/regenerate", headers=admin))
+        (await api_env.client.post(link_path(org_id, "/regenerate"), headers=admin))
         .json()["url"]
         .rsplit("/i/", 1)[1]
     )
@@ -138,6 +145,8 @@ async def test_the_fifty_first_enrollment_in_an_hour_is_429_and_audited_once(api
                     review_state="pending",
                     link_joined_from="10.50.0.9",
                     link_joined_at=joined,
+                    client_id=org_id,
+                    site_id=org_id,
                 )
                 for i in range(50)
             ]
@@ -223,6 +232,8 @@ async def test_the_link_path_never_links_onto_an_existing_asset(api_env) -> None
             source="manual",
             provenance="operator",
             nics={"items": [{"identifier": "eth0", "mac": mac}]},
+            client_id=org_id,
+            site_id=org_id,
         )
         session.add(asset)
         await session.commit()
@@ -239,7 +250,12 @@ async def test_the_link_path_never_links_onto_an_existing_asset(api_env) -> None
     token = (
         await api_env.client.post(
             "/api/v1/enrollment-tokens",
-            json={"name": "control", "expires_in_hours": 1, "max_uses": 1},
+            json={
+                "name": "control",
+                "expires_in_hours": 1,
+                "max_uses": 1,
+                "site_id": str(org_id),
+            },
             headers=admin,
         )
     ).json()["token"]
@@ -263,6 +279,8 @@ async def test_retry_after_is_never_below_a_minute(api_env) -> None:
                 review_state="pending",
                 link_joined_from="10.50.0.9",
                 link_joined_at=datetime.now(UTC) - timedelta(minutes=59, seconds=50),
+                client_id=org_id,
+                site_id=org_id,
             )
         )
         await session.commit()

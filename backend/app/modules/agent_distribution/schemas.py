@@ -64,6 +64,11 @@ class InstallCommandRequest(BaseModel):
     #: tenant, and the generated command puts it in an operator's shell
     #: history. A short life is the mitigation -- see the spec §4.4.
     expires_in_hours: int = Field(default=4, ge=1, le=72)
+    #: The site the machine lands in, and with it its client (MSP clients spec
+    #: §1.5): the token this mints is that site's, like every enrollment token.
+    site_id: UUID = Field(
+        description="The site the machine lands in; its client is the site's client"
+    )
 
 
 class InstallCommandOut(BaseModel):
@@ -161,6 +166,12 @@ class DeploymentTokenRequest(BaseModel):
     expires_in_hours: int = Field(ge=1, le=MAX_DEPLOYMENT_HOURS)
     channel: str = Field(default="gpo")
     note: str = Field(default="", max_length=200)
+    #: The site the machines land in, and with it their client (MSP clients
+    #: spec §1.5): the token this mints is that site's, like every enrollment
+    #: token.
+    site_id: UUID = Field(
+        description="The site the machines land in; their client is the site's client"
+    )
 
 
 class DeploymentTokenOut(BaseModel):

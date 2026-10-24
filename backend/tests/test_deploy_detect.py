@@ -26,7 +26,9 @@ async def _org_device_with_software(
         org = Organization(name=slug, slug=slug)
         session.add(org)
         await session.flush()
-        device = Device(org_id=org.id, hostname="wks", os_family="windows")
+        device = Device(
+            org_id=org.id, hostname="wks", os_family="windows", client_id=org.id, site_id=org.id
+        )
         session.add(device)
         await session.flush()
         if with_acme:

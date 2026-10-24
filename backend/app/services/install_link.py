@@ -1,4 +1,4 @@
-"""The install link: one shared, switchable enrollment link per organisation.
+"""The install link: one shared, switchable enrollment link per SITE.
 
 docs/superpowers/specs/2026-09-28-install-link-and-windows-push-design.md §1.
 
@@ -8,6 +8,24 @@ organisation -- as a device waiting for review (§1.5). It is the only
 authorization for its own enrollment, exactly as an enrollment token is (§0,
 invariant 6), and it is handled like one: generated here, hashed, stored only as
 the hash, and shown once.
+
+ONE LINK PER SITE, NOT PER ORGANISATION (MSP clients spec §1.5, plan Task 7).
+`uq_install_links_site` replaced `uq_install_links_org` in migration 0231, the
+link carries its site's client and site, and a machine that joins through it
+lands in them. Everything here is addressed by `site_id`; a site the session
+cannot see is `client_sites.SiteNotFound`, which the route answers with a 404,
+and an archived site or client takes no new settings (`NotAcceptingNewRows`,
+a 409) -- switching a link on would let machines join a site nobody offers.
+
+THE ALLOWED NETWORKS ARE THE SITE'S `egress_networks` -- the public addresses
+that office leaves the Internet from -- not a list of the link's own. The
+settings route still takes `networks` -- optional, and absent means the site's
+stay as they are -- and writes them to the site. The link's
+own `install_links.networks` column stays in the table and NOTHING READS IT any
+more: `save` still writes it, as a copy of what it wrote to the site, only
+because migration 0170's `ck_install_links_on_needs_code_and_network` refuses a
+switched-on link without one. Dropping the column and that check is on the
+phase-2 cleanup list.
 
 WHAT BOUNDS IT (§1.6): the network list, the hourly limit, the on/off switch,
 the optional automatic switch-off, regeneration -- and the review gate, which is
@@ -35,7 +53,8 @@ from app.core.client_address import IPAddress, IPNetwork, address_in
 from app.core.client_scope import ClientScope
 from app.core.i18n import tr
 from app.core.tenancy import org_session
-from app.models import Device, InstallLink
+from app.models import Device, InstallLink, Site
+from app.services.client_sites import SiteNotFound, site_for_new_rows
 
 #: `secrets.token_urlsafe(24)` is 32 characters of [A-Za-z0-9_-]: 192 bits.
 CODE_BYTES = 24
@@ -53,6 +72,15 @@ _CODE_ALPHABET = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 
 class InstallLinkError(ValueError):
     """A setting the operator can correct. The route answers 422 with it."""
+
+
+@dataclass(frozen=True)
+class LinkTarget:
+    """Where a code enrols a machine: its link's organisation, client and site."""
+
+    org_id: UUID
+    client_id: UUID
+    site_id: UUID
 
 
 def new_code() -> str:
@@ -178,28 +206,49 @@ class LinkView:
     joined_since_enabled: int
 
 
+async def _site(session: AsyncSession, site_id: UUID) -> Site:
+    """The site, as the session sees it, for a READ -- RLS hides another
+    organisation's and a client outside the session's scope, and both are
+    `SiteNotFound`. A write takes `client_sites.site_for_new_rows` instead,
+    which also refuses an archived site or client."""
+    site = (
+        await session.execute(select(Site).where(Site.id == site_id))
+    ).scalar_one_or_none()
+    if site is None:
+        raise SiteNotFound(site_id)
+    return site
+
+
 async def _row(
-    session: AsyncSession, org_id: UUID, *, for_update: bool = False
+    session: AsyncSession, site_id: UUID, *, for_update: bool = False
 ) -> InstallLink | None:
-    query = select(InstallLink).where(InstallLink.org_id == org_id)
+    query = select(InstallLink).where(InstallLink.site_id == site_id)
     if for_update:
         query = query.with_for_update()
     return (await session.execute(query)).scalar_one_or_none()
 
 
-async def _locked_row(session: AsyncSession, org_id: UUID, actor_id: UUID | None) -> InstallLink:
-    """This org's row, created if missing, and locked FOR UPDATE.
+async def _locked_row(session: AsyncSession, site: Site, actor_id: UUID | None) -> InstallLink:
+    """This site's row, created if missing, and locked FOR UPDATE.
 
     INSERT ... ON CONFLICT DO NOTHING first, so two first-ever saves racing
     each other cannot both INSERT: the second waits on the first's row and
-    then locks it, instead of dying on `uq_install_links_org` with a 500.
+    then locks it, instead of dying on `uq_install_links_site` with a 500.
+    The row takes its site's client: `fk_install_links_site_client` holds the
+    pair together.
     """
     await session.execute(
         pg_insert(InstallLink)
-        .values(org_id=org_id, created_by=actor_id, networks=[])
-        .on_conflict_do_nothing(index_elements=["org_id"])
+        .values(
+            org_id=site.org_id,
+            client_id=site.client_id,
+            site_id=site.id,
+            created_by=actor_id,
+            networks=[],
+        )
+        .on_conflict_do_nothing(index_elements=["site_id"])
     )
-    row = await _row(session, org_id, for_update=True)
+    row = await _row(session, site.id, for_update=True)
     if row is None:  # pragma: no cover - the INSERT above guarantees a row
         raise RuntimeError(  # i18n-exempt: internal invariant, unhandled 500
             "install_links row missing after insert"
@@ -207,31 +256,36 @@ async def _locked_row(session: AsyncSession, org_id: UUID, actor_id: UUID | None
     return row
 
 
-async def _joined_since(session: AsyncSession, org_id: UUID, since: datetime) -> int:
+async def _joined_since(session: AsyncSession, site_id: UUID, since: datetime) -> int:
     count = (
         await session.execute(
             select(func.count())
             .select_from(Device)
-            .where(Device.org_id == org_id, Device.link_joined_at >= since)
+            .where(Device.site_id == site_id, Device.link_joined_at >= since)
         )
     ).scalar_one()
     return int(count)
 
 
-async def view(session: AsyncSession, org_id: UUID, now: datetime) -> LinkView:
-    row = await _row(session, org_id)
+def _networks(site: Site) -> list[str]:
+    return [str(n) for n in site.egress_networks]
+
+
+async def view(session: AsyncSession, site_id: UUID, now: datetime) -> LinkView:
+    site = await _site(session, site_id)
+    row = await _row(session, site_id)
     if row is None:
-        return LinkView(False, False, [], None, DEFAULT_HOURLY_LIMIT, None, 0)
+        return LinkView(False, False, _networks(site), None, DEFAULT_HOURLY_LIMIT, None, 0)
     live = is_live(row, now)
     joined = (
-        await _joined_since(session, org_id, row.enabled_at)
+        await _joined_since(session, site_id, row.enabled_at)
         if live and row.enabled_at is not None
         else 0
     )
     return LinkView(
         enabled=live,
         has_code=row.code_hash is not None,
-        networks=[str(n) for n in row.networks],
+        networks=_networks(site),
         disable_at=row.disable_at,
         hourly_limit=row.hourly_limit,
         enabled_at=row.enabled_at if live else None,
@@ -241,19 +295,22 @@ async def view(session: AsyncSession, org_id: UUID, now: datetime) -> LinkView:
 
 async def _audit(
     session: AsyncSession,
-    org_id: UUID,
+    link: InstallLink,
     actor_id: UUID | None,
     action: str,
     metadata: dict[str, Any],
 ) -> None:
     await audit_service.record(
         session,
-        org_id=org_id,
+        org_id=link.org_id,
         actor_type="user" if actor_id is not None else "system",
         actor_id=actor_id,
         action=action,
         target_type="install_link",
-        target_id=str(org_id),
+        # The SITE: one link per site. The organisation's Principal site has
+        # the organisation's id (plan Global Constraints), which is what this
+        # field held when there was one link per organisation.
+        target_id=str(link.site_id),
         metadata=metadata,
     )
 
@@ -262,9 +319,10 @@ async def save(
     session: AsyncSession,
     *,
     org_id: UUID,
+    site_id: UUID,
     actor_id: UUID,
     enabled: bool,
-    networks: list[str],
+    networks: list[str] | None,
     disable_at: datetime | None,
     hourly_limit: int,
     now: datetime,
@@ -272,10 +330,20 @@ async def save(
 ) -> str | None:
     """Write the settings. Returns the code if this call minted one, else None.
 
+    `networks` ARE THE SITE'S `egress_networks`, and are written there: the
+    link answers requests from the networks of the office it belongs to.
+    `None` leaves them as they are -- switching a link off is not an
+    instruction to forget where the office is.
+
     Validation happens BEFORE the row is touched, so a refused save changes
     nothing and audits nothing.
     """
-    nets = normalise_networks(networks, trusted_proxies=trusted_proxies)
+    site = await site_for_new_rows(session, org_id=org_id, site_id=site_id)
+    nets = (
+        _networks(site)
+        if networks is None
+        else normalise_networks(networks, trusted_proxies=trusted_proxies)
+    )
     if not MIN_HOURLY_LIMIT <= hourly_limit <= MAX_HOURLY_LIMIT:
         raise InstallLinkError(
             tr(
@@ -294,15 +362,17 @@ async def save(
     if enabled and not nets:
         raise InstallLinkError(
             tr(
-                "at least one network is required to switch the link on; an empty list would "
-                "not mean 'anywhere'",
+                "at least one network is required to switch on the install link of the site "
+                "{site}: list the networks its computers reach the Internet from; an empty list "
+                "would not mean 'anywhere'",
+                site=site.name,
             )
         )
 
-    row = await _locked_row(session, org_id, actor_id)
+    row = await _locked_row(session, site, actor_id)
     was_on = is_live(row, now)
     before = {
-        "networks": [str(n) for n in row.networks],
+        "networks": _networks(site),
         "disable_at": row.disable_at.isoformat() if row.disable_at else None,
         "hourly_limit": row.hourly_limit,
     }
@@ -311,6 +381,10 @@ async def save(
     if enabled and row.code_hash is None:
         minted = new_code()
         row.code_hash = hash_code(minted)
+    if _networks(site) != nets:
+        site.egress_networks = nets
+    # A copy nothing reads; 0170's CHECK requires it of a switched-on link
+    # (module docstring).
     row.networks = nets
     row.disable_at = disable_at
     row.hourly_limit = hourly_limit
@@ -328,32 +402,35 @@ async def save(
         "hourly_limit": hourly_limit,
     }
     if minted is not None:
-        await _audit(session, org_id, actor_id, "enrollment.link_created", {})
+        await _audit(session, row, actor_id, "enrollment.link_created", {})
     changed = {k: {"before": before[k], "after": after[k]} for k in after if before[k] != after[k]}
     if changed:
-        await _audit(session, org_id, actor_id, "enrollment.link_settings_changed", changed)
+        await _audit(session, row, actor_id, "enrollment.link_settings_changed", changed)
     if enabled and not was_on:
-        await _audit(session, org_id, actor_id, "enrollment.link_enabled", {"networks": nets})
+        await _audit(session, row, actor_id, "enrollment.link_enabled", {"networks": nets})
     if was_on and not enabled:
-        await _audit(session, org_id, actor_id, "enrollment.link_disabled", {"reason": "operator"})
+        await _audit(session, row, actor_id, "enrollment.link_disabled", {"reason": "operator"})
     return minted
 
 
-async def regenerate(session: AsyncSession, *, org_id: UUID, actor_id: UUID, now: datetime) -> str:
+async def regenerate(
+    session: AsyncSession, *, org_id: UUID, site_id: UUID, actor_id: UUID, now: datetime
+) -> str:
     """A new code; the old one stops working the moment this commits."""
-    row = await _locked_row(session, org_id, actor_id)
+    site = await site_for_new_rows(session, org_id=org_id, site_id=site_id)
+    row = await _locked_row(session, site, actor_id)
     code = new_code()
     row.code_hash = hash_code(code)
     row.updated_at = now
     await session.flush()
     await _audit(
-        session, org_id, actor_id, "enrollment.link_regenerated", {"enabled": bool(row.enabled)}
+        session, row, actor_id, "enrollment.link_regenerated", {"enabled": bool(row.enabled)}
     )
     return code
 
 
-async def code_state(session: AsyncSession, org_id: UUID, *, code: str, now: datetime) -> str:
-    """What `code` is to this organisation right now, for an ADMINISTRATOR's
+async def code_state(session: AsyncSession, site_id: UUID, *, code: str, now: datetime) -> str:
+    """What `code` is to this site's link right now, for an ADMINISTRATOR's
     request (the Group Policy MSI, GPO MSI spec 2026-09-30 §2.2): `live` -- it
     is the current code and the link is on; `off` -- the link is off, or has
     no code; `other` -- the link is on and this is not its code.
@@ -362,7 +439,8 @@ async def code_state(session: AsyncSession, org_id: UUID, *, code: str, now: dat
     stored. The allowed networks are NOT checked here -- this answers an
     authenticated administrator in the console, not a machine joining.
     """
-    row = await _row(session, org_id)
+    await _site(session, site_id)  # SiteNotFound for a site the session cannot see
+    row = await _row(session, site_id)
     if row is None or not is_live(row, now):
         return "off"
     if not looks_like_code(code) or row.code_hash != hash_code(code):
@@ -370,38 +448,47 @@ async def code_state(session: AsyncSession, org_id: UUID, *, code: str, now: dat
     return "live"
 
 
-async def resolve_org(admin_engine: AsyncEngine, code: str) -> UUID | None:
-    """Which organisation this code belongs to -- or None.
+async def resolve_target(admin_engine: AsyncEngine, code: str) -> LinkTarget | None:
+    """Which organisation, client and site this code belongs to -- or None.
 
-    ADMIN ENGINE, READ-ONLY, and it only picks the tenant: exactly the role
-    `services/enrollment.py::enroll` gives the token id. Whether the link may
-    be USED is decided inside that tenant's own session by `live_link_for`.
+    ADMIN ENGINE, READ-ONLY, and it only picks the tenant and the client the
+    session is then opened on: exactly the role `services/enrollment.py::
+    enroll` gives the token id. Whether the link may be USED is decided inside
+    that client's own session by `live_link_for`.
     """
     if not looks_like_code(code):
         return None
     async with AsyncSession(admin_engine) as session:
-        org_id: UUID | None = (
+        found = (
             await session.execute(
-                select(InstallLink.org_id).where(InstallLink.code_hash == hash_code(code))
+                select(InstallLink.org_id, InstallLink.client_id, InstallLink.site_id).where(
+                    InstallLink.code_hash == hash_code(code)
+                )
             )
-        ).scalar_one_or_none()
-    return org_id
+        ).one_or_none()
+    if found is None:
+        return None
+    return LinkTarget(org_id=found.org_id, client_id=found.client_id, site_id=found.site_id)
 
 
 async def live_link_for(
     session: AsyncSession,
-    org_id: UUID,
+    site_id: UUID,
     *,
     code: str,
     source: IPAddress | None,
     now: datetime,
     for_update: bool = False,
 ) -> InstallLink | None:
-    """The link, if it may be used right now by a request from `source`."""
-    row = await _row(session, org_id, for_update=for_update)
+    """The link, if it may be used right now by a request from `source`: one
+    of its site's egress networks."""
+    row = await _row(session, site_id, for_update=for_update)
     if row is None or row.code_hash != hash_code(code) or not is_live(row, now):
         return None
-    if not address_in(source, row.networks):
+    site = (
+        await session.execute(select(Site).where(Site.id == site_id))
+    ).scalar_one_or_none()
+    if site is None or not address_in(source, site.egress_networks):
         return None
     return row
 
@@ -414,33 +501,54 @@ async def resolve_live(
     source: IPAddress | None,
     now: datetime,
 ) -> UUID | None:
-    org_id = await resolve_org(admin_engine, code)
-    if org_id is None:
+    """The organisation whose live link this code is, for a request from
+    `source` -- or None. The session sees the link's client alone."""
+    target = await resolve_target(admin_engine, code)
+    if target is None:
         return None
-    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
-        row = await live_link_for(session, org_id, code=code, source=source, now=now)
-    return org_id if row is not None else None
+    async with org_session(
+        target.org_id, engine=app_engine, clients=ClientScope.only([target.client_id])
+    ) as session:
+        row = await live_link_for(session, target.site_id, code=code, source=source, now=now)
+    return target.org_id if row is not None else None
 
 
-async def switch_off_due(session: AsyncSession, org_id: UUID, now: datetime) -> bool:
-    """The worker beat's half of the automatic switch-off: record it."""
-    row = await _row(session, org_id, for_update=True)
-    if row is None or not row.enabled or row.disable_at is None or row.disable_at > now:
-        return False
-    disable_at = row.disable_at
-    row.enabled = False
-    row.enabled_at = None
-    # Cleared, not kept (final review M2): a date in the past would refuse
-    # every later save that echoes it back ("must be in the future") until
-    # someone emptied the field. The audit row below keeps the value.
-    row.disable_at = None
-    row.updated_at = now
-    await session.flush()
-    await _audit(
-        session,
-        org_id,
-        None,
-        "enrollment.link_disabled",
-        {"reason": "scheduled", "disable_at": disable_at.isoformat()},
+async def switch_off_due(session: AsyncSession, org_id: UUID, now: datetime) -> int:
+    """The worker beat's half of the automatic switch-off: record it, for
+    every link of this organisation whose time has passed. Returns how many."""
+    rows = (
+        (
+            await session.execute(
+                select(InstallLink)
+                .where(
+                    InstallLink.org_id == org_id,
+                    InstallLink.enabled.is_(True),
+                    InstallLink.disable_at.is_not(None),
+                    InstallLink.disable_at <= now,
+                )
+                .order_by(InstallLink.id)
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
     )
-    return True
+    for row in rows:
+        disable_at = row.disable_at
+        assert disable_at is not None  # the query's own predicate
+        row.enabled = False
+        row.enabled_at = None
+        # Cleared, not kept (final review M2): a date in the past would refuse
+        # every later save that echoes it back ("must be in the future") until
+        # someone emptied the field. The audit row below keeps the value.
+        row.disable_at = None
+        row.updated_at = now
+        await session.flush()
+        await _audit(
+            session,
+            row,
+            None,
+            "enrollment.link_disabled",
+            {"reason": "scheduled", "disable_at": disable_at.isoformat()},
+        )
+    return len(rows)

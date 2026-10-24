@@ -16,6 +16,7 @@ from sqlalchemy import (
     ARRAY,
     Boolean,
     CheckConstraint,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -28,7 +29,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, uuid7_pk
+from app.models.base import Base, TimestampMixin, client_org_fk, uuid7_pk
 
 
 class Patch(TimestampMixin, Base):
@@ -63,6 +64,16 @@ class DevicePatchStatus(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     patch_id: Mapped[UUID] = mapped_column(ForeignKey("patches.id"))
     state: Mapped[str] = mapped_column(String(16))
@@ -74,11 +85,22 @@ class DevicePatchStatus(TimestampMixin, Base):
 class PatchPolicy(TimestampMixin, Base):
     __tablename__ = "patch_policies"
     __table_args__ = (
+        client_org_fk("patch_policies"),
         UniqueConstraint("org_id", "device_group_id", name="uq_patch_policies_org_group"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. While
+    # device_group_id is set, trigger its_client_from_parent copies its client
+    # (migration 0231), so the value is read back after the INSERT.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_group_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("device_groups.id"), default=None
     )
@@ -94,13 +116,24 @@ class PatchPolicy(TimestampMixin, Base):
 class PatchApproval(TimestampMixin, Base):
     __tablename__ = "patch_approvals"
     __table_args__ = (
+        client_org_fk("patch_approvals"),
+        # Per client, the global rows among themselves (migration 0231, Task 8b).
         UniqueConstraint(
-            "org_id", "patch_id", "ring_name", name="uq_patch_approvals_org_patch_ring"
+            "org_id",
+            "client_id",
+            "patch_id",
+            "ring_name",
+            name="uq_patch_approvals_client_patch_ring",
+            postgresql_nulls_not_distinct=True,
         ),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (O): NULL is every client. Set by the application.
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("clients.id"), default=None, index=True
+    )
     patch_id: Mapped[UUID] = mapped_column(ForeignKey("patches.id"))
     ring_name: Mapped[str] = mapped_column(String(40))
     # NULL means a system auto-approval (PD-02); see migration 0012.
@@ -142,6 +175,16 @@ class PatchReboot(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     origin: Mapped[str] = mapped_column(String(8))
     state: Mapped[str] = mapped_column(String(12), default="pending")
@@ -165,6 +208,16 @@ class PatchRun(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the devices row named by device_id (migration 0231): never
+    # sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     job_id: Mapped[UUID] = mapped_column(ForeignKey("jobs.id"))
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"))
     results: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)

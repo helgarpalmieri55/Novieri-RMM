@@ -54,7 +54,9 @@ async def _seed(session: AsyncSession, slug: str, *, title: str, filename: str) 
     session.add(org)
     await session.flush()
 
-    device = Device(org_id=org.id, hostname=f"{slug}-dev", os_family="linux")
+    device = Device(
+        org_id=org.id, hostname=f"{slug}-dev", os_family="linux", client_id=org.id, site_id=org.id
+    )
     session.add(device)
     await session.flush()
 

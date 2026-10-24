@@ -379,9 +379,22 @@ async def evaluate_rules(
     references, and an empty rule group has none), so without this predicate
     the next sweep would repopulate it and falsify that sentence. The spec does
     not say this; it follows from §7.1.
+
+    ONLY THE DEVICE'S OWN CLIENT'S GROUPS COMPETE (MSP clients spec §1.5): a
+    group organises one client's devices, and `its_device_client_guard` refuses
+    a device in another client's group. A rule of another client that matched
+    would otherwise win and fail the ingest on that trigger.
     """
     groups = (
-        (await session.execute(rule_bearing_groups_query(org_id))).scalars().all()
+        (
+            await session.execute(
+                rule_bearing_groups_query(org_id).where(
+                    DeviceGroup.client_id == device.client_id
+                )
+            )
+        )
+        .scalars()
+        .all()
     )
     group = claim_group(groups, doc)
     if group is None:

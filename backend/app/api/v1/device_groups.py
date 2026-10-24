@@ -53,9 +53,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.api.deps import AuthContext, require_permission
+from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job
 from app.modules.health.sweep import run_policy_reconcile
@@ -371,6 +372,11 @@ class GroupCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=200)
+    #: THE CLIENT WHOSE DEVICES THE GROUP ORGANISES (MSP clients spec §1.5).
+    #: Required, and fixed for the group's life: a group holds one client's
+    #: devices, its parent is of the same client, and its rules claim only
+    #: that client's machines.
+    client_id: UUID = Field(description="The client whose devices this group organises")
     description: str = Field(default="", max_length=10_000)
     parent_group_id: UUID | None = Field(default=None)
     #: WHICH RULE WINS once cycle 2 can author one. Settable now because
@@ -431,7 +437,11 @@ class MemberResultOut(BaseModel):
 
     device_id: UUID = Field(description="The device this row is about")
     moved: bool = Field(description="True when this call changed the device's group")
-    reason: str = Field(description="Why: added, already a member, or no such device")
+    reason: str = Field(
+        description=(
+            "Why: added, already a member, no such device, or belongs to another client"
+        )
+    )
 
 
 class MembersAddResponse(BaseModel):
@@ -476,6 +486,7 @@ async def create_group(
             group = await create_device_group(
                 session,
                 org_id=ctx.org_id,
+                client_id=body.client_id,
                 actor_id=ctx.user_id,
                 name=body.name,
                 description=body.description,
@@ -490,7 +501,12 @@ async def create_group(
 
 
 class RulePreviewRequest(BaseModel):
-    """A candidate rules document, and optionally the group it is for."""
+    """A candidate rules document, and the group it is for or its client.
+
+    A PREVIEW RUNS OVER ONE CLIENT'S DEVICES, as the sweep claims them (MSP
+    clients spec §1.5): the saved group's client, or `client_id` for a group
+    not saved yet -- required then, as it is on `GroupCreateRequest`.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -503,6 +519,21 @@ class RulePreviewRequest(BaseModel):
     group_id: UUID | None = Field(
         default=None, description="The group being edited, when there is one"
     )
+    client_id: UUID | None = Field(
+        default=None,
+        description="The client of a group not saved yet; required when group_id is absent",
+    )
+
+    @model_validator(mode="after")
+    def _names_its_client(self) -> "RulePreviewRequest":
+        if self.group_id is None and self.client_id is None:
+            raise ValueError(
+                tr(
+                    "a preview needs the group's client: send client_id for a group that is "
+                    "not saved yet"
+                )
+            )
+        return self
 
 
 class RuleMatchOut(BaseModel):
@@ -583,6 +614,7 @@ async def preview_group_rules(
                 org_id=ctx.org_id,
                 rules=body.rules.model_dump(),
                 group_id=body.group_id,
+                client_id=body.client_id,
             )
         except DeviceGroupError as exc:
             raise _http(exc) from None

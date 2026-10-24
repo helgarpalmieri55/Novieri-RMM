@@ -58,7 +58,9 @@ async def _org_with_two_users(admin_engine: AsyncEngine) -> tuple[UUID, UUID, UU
 
 async def _seed_deployment(admin_engine: AsyncEngine, org_id: UUID) -> UUID:
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
-        device = Device(org_id=org_id, hostname="h1", os_family="windows")
+        device = Device(
+            org_id=org_id, hostname="h1", os_family="windows", client_id=org_id, site_id=org_id
+        )
         s.add(device)
         await s.flush()
         package = Package(
@@ -81,7 +83,9 @@ async def _seed_deployment(admin_engine: AsyncEngine, org_id: UUID) -> UUID:
 
 async def _seed_patch_run(admin_engine: AsyncEngine, org_id: UUID) -> UUID:
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
-        device = Device(org_id=org_id, hostname="h2", os_family="windows")
+        device = Device(
+            org_id=org_id, hostname="h2", os_family="windows", client_id=org_id, site_id=org_id
+        )
         s.add(device)
         await s.flush()
         patch = Patch(

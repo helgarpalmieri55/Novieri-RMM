@@ -78,7 +78,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Select, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_all_clients, require_permission
 from app.core.audit import audit_service
 from app.core.config import Settings
 from app.core.i18n import tr
@@ -454,7 +454,11 @@ async def revoke_connection(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
         # The route is gated on `mcp.use`, which "me" needs; "everyone" also
-        # needs `orgs.manage`. Refused before anything is written.
+        # needs `orgs.manage`, and -- because it writes the organization's
+        # revocation list, which is no one client's -- a scope of every client
+        # (MSP clients spec §2.2). Refused before anything is written.
+        if body.scope == "everyone":
+            require_all_clients(ctx)
         if body.scope == "everyone" and not await has_permission(
             session, ctx.user_id, "orgs.manage"
         ):

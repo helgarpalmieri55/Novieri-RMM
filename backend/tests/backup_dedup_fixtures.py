@@ -99,7 +99,13 @@ async def seed_dedup_org(
         user = User(org_id=org.id, external_subject=f"sub-{slug}", email=f"{slug}@test.local")
         session.add(user)
         devices = [
-            Device(org_id=org.id, hostname=f"host-{slug}-{i}", os_family="linux")
+            Device(
+                org_id=org.id,
+                hostname=f"host-{slug}-{i}",
+                os_family="linux",
+                client_id=org.id,
+                site_id=org.id,
+            )
             for i in range(device_count)
         ]
         for d in devices:

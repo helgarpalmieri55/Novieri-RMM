@@ -62,7 +62,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.attachments import sanitize_attachment_filename as _sanitize_attachment_filename
 from app.core.audit import audit_service
 from app.core.csv_export import escape_formula
@@ -598,7 +598,7 @@ async def list_fx_rates_route(
 async def create_fx_rate_route(
     body: FxRateCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("budget.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("budget.manage")),
 ) -> FxRateOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -622,7 +622,7 @@ async def update_fx_rate_route(
     fx_rate_id: UUID,
     body: FxRateUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("budget.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("budget.manage")),
 ) -> FxRateOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients

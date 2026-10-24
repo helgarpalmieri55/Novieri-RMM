@@ -85,7 +85,9 @@ async def _org_device_user(admin_engine: AsyncEngine):
         org = Organization(name="rc", slug=f"rc-{uuid4().hex[:6]}")
         s.add(org)
         await s.flush()
-        dev = Device(org_id=org.id, hostname="h", os_family="linux")
+        dev = Device(
+            org_id=org.id, hostname="h", os_family="linux", client_id=org.id, site_id=org.id
+        )
         s.add(dev)
         usr = User(org_id=org.id, external_subject=f"s{uuid4().hex[:6]}", email="a@b.c")
         s.add(usr)

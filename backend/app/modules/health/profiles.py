@@ -75,6 +75,7 @@ from sqlalchemy.sql import text
 
 from app.core.approved_actions import ApprovedAction
 from app.core.audit import audit_service
+from app.core.global_rows import refuse_if_still_readable, refuse_unless_every_client
 from app.core.i18n import tr
 from app.modules.health.alerts import clear_alert
 from app.modules.health.errors import (
@@ -154,9 +155,11 @@ _ASSIGNMENT_INDEX_BY_LEVEL: dict[str, tuple[str, list[str], str]] = {
         ["org_id", "device_group_id"],
         "device_group_id IS NOT NULL",
     ),
+    # The default: global (the org's), and per client under NULLS NOT DISTINCT
+    # (migration 0231, Task 8b) -- the org's default conflicts with the org's.
     "org": (
-        "uq_health_assignment_org",
-        ["org_id"],
+        "uq_health_assignment_client_org",
+        ["org_id", "client_id"],
         "device_id IS NULL AND device_group_id IS NULL",
     ),
 }
@@ -1367,6 +1370,11 @@ async def create_assignment(
         raise HealthValidationError(
             tr("an assignment names a device OR a group OR neither (the org default), never both")
         )
+    if device_id is None and device_group_id is None:
+        # The org default has no parent, so no client: a global row, written by
+        # the bulk INSERT below that `app.core.global_rows`'s flush guard never
+        # sees. Refused before anything is read, as `require_all_clients` is.
+        refuse_unless_every_client(session, "health_profile_assignment")
     await get_profile(session, org_id, profile_id)
     await _reject_cross_org_target(
         session, org_id, device_id=device_id, device_group_id=device_group_id
@@ -1450,9 +1458,11 @@ async def _assignment_at_level(
     elif device_group_id is not None:
         query = query.where(HealthProfileAssignment.device_group_id == device_group_id)
     else:
+        # The org's default, the global row (a client's has its own key).
         query = query.where(
             HealthProfileAssignment.device_id.is_(None),
             HealthProfileAssignment.device_group_id.is_(None),
+            HealthProfileAssignment.client_id.is_(None),
         )
     return (await session.execute(query)).scalar_one_or_none()
 
@@ -1478,6 +1488,16 @@ async def delete_assignment(
         )
     ).one_or_none()
     if deleted is None:
+        # A bulk DELETE, which `app.core.global_rows`'s flush guard never sees:
+        # the org-default assignment (no device, no group) is a global row, and
+        # RLS let a limited scope read it but made this match nothing. That is
+        # a refusal (403), not a "not found".
+        await refuse_if_still_readable(
+            session,
+            HealthProfileAssignment,
+            HealthProfileAssignment.org_id == org_id,
+            HealthProfileAssignment.id == assignment_id,
+        )
         raise HealthNotFoundError(
             tr("health profile assignment {assignment_id} not found", assignment_id=assignment_id)
         )

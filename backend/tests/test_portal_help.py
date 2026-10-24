@@ -187,7 +187,9 @@ async def test_a_requester_reads_a_portal_article_as_title_and_body_only(api_env
     )
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
         async with session.begin():
-            device = Device(org_id=org_id, hostname="fs-01", os_family="linux")
+            device = Device(
+                org_id=org_id, hostname="fs-01", os_family="linux", client_id=org_id, site_id=org_id
+            )
             session.add(device)
             await session.flush()
             device_id = device.id

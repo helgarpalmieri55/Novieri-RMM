@@ -16,7 +16,16 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ARRAY, CheckConstraint, ForeignKey, Index, String, Text, text
+from sqlalchemy import (
+    ARRAY,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import CIDR
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -50,6 +59,10 @@ class Client(TimestampMixin, Base):
             unique=True,
             postgresql_where=text("kind = 'unassigned'"),
         ),
+        # Migration 0231: the target of every `fk_<table>_client_org`, which
+        # makes a row's client a client of the row's own organization. A
+        # foreign key check ignores RLS, so nothing else can say it.
+        UniqueConstraint("id", "org_id", name="uq_clients_id_org"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
@@ -71,7 +84,13 @@ class Client(TimestampMixin, Base):
 
 class Site(TimestampMixin, Base):
     __tablename__ = "sites"
-    __table_args__ = (Index("uq_sites_client_name", "client_id", text("lower(name)"), unique=True),)
+    __table_args__ = (
+        Index("uq_sites_client_name", "client_id", text("lower(name)"), unique=True),
+        # Migration 0231: the target of `fk_<table>_site_client` on devices,
+        # enrollment tokens and install links -- a row's site is one of the
+        # row's client's, and a site holding such a row cannot change client.
+        UniqueConstraint("id", "client_id", name="uq_sites_id_client"),
+    )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))

@@ -23,7 +23,7 @@ from app.models import InstallLink
 from app.models.core import AgentRelease
 from app.modules.agent_distribution import link_page
 from app.modules.agent_distribution.link_page import LinkRelease, pick_link_releases
-from tests.install_link_fixtures import TRAEFIK, peer_client, switch_on
+from tests.install_link_fixtures import TRAEFIK, link_path, peer_client, switch_on
 
 INSIDE = "203.0.113.5, 10.50.0.9"
 SHA = "b" * 64
@@ -89,7 +89,7 @@ async def test_every_route_answers_the_same_404(api_env, releases, suffix: str, 
     if case == "off":
         admin = await api_env.headers(org_id, await api_env.create_user(org_id, "org-admin"))
         await api_env.client.put(
-            "/api/v1/install-link",
+            link_path(org_id),
             json={"enabled": False, "networks": ["10.50.0.0/16"]},
             headers=admin,
         )

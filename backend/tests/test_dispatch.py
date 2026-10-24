@@ -53,7 +53,9 @@ async def _org_device(admin_engine: AsyncEngine) -> tuple[UUID, UUID]:
         org = Organization(name=slug, slug=slug)
         session.add(org)
         await session.flush()
-        device = Device(org_id=org.id, hostname="d1", os_family="linux")
+        device = Device(
+            org_id=org.id, hostname="d1", os_family="linux", client_id=org.id, site_id=org.id
+        )
         session.add(device)
         await session.commit()
         return org.id, device.id
@@ -62,7 +64,9 @@ async def _org_device(admin_engine: AsyncEngine) -> tuple[UUID, UUID]:
 async def _device_in(api_env, org_id: UUID, hostname: str = "d1") -> UUID:
     """A device row in an EXISTING org, written on the admin engine."""
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, hostname=hostname, os_family="linux")
+        device = Device(
+            org_id=org_id, hostname=hostname, os_family="linux", client_id=org_id, site_id=org_id
+        )
         session.add(device)
         await session.commit()
         return device.id
@@ -181,7 +185,9 @@ async def test_message_for_another_devices_job_is_refused_and_audited(
 ) -> None:
     org_id, device_a = await _org_device(admin_engine)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        device_b_row = Device(org_id=org_id, hostname="d2", os_family="linux")
+        device_b_row = Device(
+            org_id=org_id, hostname="d2", os_family="linux", client_id=org_id, site_id=org_id
+        )
         session.add(device_b_row)
         await session.commit()
         device_b = device_b_row.id
