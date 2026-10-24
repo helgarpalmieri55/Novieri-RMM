@@ -372,6 +372,7 @@ export const agentPush: Shape<typeof en> = {
   },
   chip: {
     no_asset: "Nadie lo ha avalado",
+    ambiguous_asset: "Dirección en más de un cliente",
     no_authorization: "Dirección no autorizada",
     credential_not_scoped: "Credencial no permitida aquí",
     no_site_server: "Sin servidor de sitio en su segmento",
@@ -414,6 +415,7 @@ export const agentPush: Shape<typeof en> = {
   },
   refusal: {
     no_asset: "Nadie ha avalado este equipo: agrégalo como activo o promuévelo desde Descubiertos.",
+    ambiguous_asset: "Equipos de más de un cliente tienen esta dirección: elige el cliente en el selector de clientes y vuelve a intentarlo.",
     no_authorization: "Su dirección no está en un rango autorizado para la instalación remota.",
     credential_not_scoped: "La credencial elegida no está permitida en esta dirección.",
     no_site_server: "Ningún servidor de sitio atiende el segmento de red de este equipo.",

@@ -2712,6 +2712,17 @@ CATALOG: dict[str, str] = {
         "registro del dispositivo y promuévelo (assets.manage), que es como una persona lo "
         "avala"
     ),
+    "device records of more than one client, each vouched for by a person, hold this "
+    "address, so it does not name one machine and nothing is chosen for you. Choose the "
+    "client in the client selector and push again: inside one client the address names "
+    "that client's machine, and only that client's site server may carry the credential "
+    "to it": (
+        "registros de dispositivo de más de un cliente, cada uno avalado por una persona, "
+        "tienen esta dirección, así que no nombra un solo equipo y no se elige ninguno por ti. "
+        "Elige el cliente en el selector de clientes e instala de nuevo: dentro de un cliente "
+        "la dirección nombra el equipo de ese cliente, y solo un servidor de sitio de ese "
+        "cliente puede llevarle la credencial"
+    ),
     "no active push authorization covers this address. Deny by default: authorizing an "
     "IPAM scan of the same prefix authorizes nothing here, because authorizing an ICMP "
     "echo is not authorizing an administrative login. A holder of agent.push.scope.manage "

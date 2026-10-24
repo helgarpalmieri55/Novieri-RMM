@@ -122,8 +122,14 @@ async def _world(
 
 async def _pick(app_engine: AsyncEngine, org: PushOrg, transport: str | None):
     async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
+        # The seeded site servers are the internal client's (id = org id),
+        # the client the target asset is in.
         return await _site_server_for(
-            session, org.org_id, parse_target_address(TARGET), transport=transport
+            session,
+            org.org_id,
+            parse_target_address(TARGET),
+            transport=transport,
+            client_id=org.org_id,
         )
 
 

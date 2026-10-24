@@ -31,6 +31,7 @@ __all__ = [
     "CURRENT_PUSH_CAPABILITIES",
     "seed_push_site_server",
     "seed_asset",
+    "seed_client",
     "seed_confirmed_host_key",
     "seed_credential",
     "seed_org",
@@ -57,6 +58,26 @@ class PushOrg:
 
     org_id: UUID
     user_id: UUID
+
+
+async def seed_client(
+    env_or_engine: Any, org_id: UUID, name: str | None = None
+) -> tuple[UUID, UUID]:
+    """A customer client and its one site, on the admin engine. Returns
+    (client_id, site_id) -- for a test that needs a second client's devices."""
+    from app.models import Client, Site
+
+    engine: AsyncEngine = admin_engine_of(env_or_engine)
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        client = Client(
+            org_id=org_id, name=name or f"Cliente {uuid4().hex[:6]}", kind="customer"
+        )
+        session.add(client)
+        await session.flush()
+        site = Site(org_id=org_id, client_id=client.id, name="Principal")
+        session.add(site)
+        await session.commit()
+        return client.id, site.id
 
 
 async def seed_org(env_or_engine: Any, tag: str = "push") -> PushOrg:
@@ -88,6 +109,8 @@ async def seed_asset(
     provenance: str = "promoted",
     fqdn: str | None = None,
     review_state: str = "approved",
+    client_id: UUID | None = None,
+    site_id: UUID | None = None,
 ) -> UUID:
     """A `devices` row (spec §3 condition 1).
 
@@ -108,6 +131,9 @@ async def seed_asset(
     `fqdn` is the DNS name a WinRM push authenticates to (`HTTP/<fqdn>`, design
     §2.3); `review_state` is the install-link review gate (PR 1 D9) the first
     bound also requires to be `approved`.
+
+    `client_id`/`site_id` default to the internal client and its Principal
+    site (id = org id); `seed_client` makes another client to name instead.
     """
     from app.models import Device
 
@@ -123,8 +149,8 @@ async def seed_asset(
             provenance=provenance,
             fqdn=fqdn,
             review_state=review_state,
-            client_id=org_id,
-            site_id=org_id,
+            client_id=org_id if client_id is None else client_id,
+            site_id=org_id if site_id is None else site_id,
         )
         session.add(device)
         await session.commit()
@@ -325,14 +351,20 @@ async def seed_push_site_server(
     segments: list[str],
     capabilities: dict[str, bool] | None = None,
     enabled: bool = True,
+    client_id: UUID | None = None,
+    site_id: UUID | None = None,
 ) -> tuple[UUID, UUID]:
     """A site-server device, its agent advertising `capabilities` (the current
     release's by default), and the `site_server` row. Returns (site_server_id,
-    device_id)."""
+    device_id). The device is in the internal client unless `client_id` and
+    `site_id` name another (the row inherits its client from the device)."""
     from tests.ipam_fixtures import seed_agent, seed_device
     from tests.site_server_fixtures import seed_site_server
 
-    device_id = await seed_device(env_or_engine, org_id)
+    placed: dict[str, UUID] = {}
+    if client_id is not None:
+        placed = {"client_id": client_id, "site_id": site_id or client_id}
+    device_id = await seed_device(env_or_engine, org_id, **placed)
     await seed_agent(
         env_or_engine,
         org_id,

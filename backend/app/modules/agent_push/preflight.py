@@ -27,7 +27,10 @@ THE FOUR BOUNDS, and each is a different question:
      **AND WHOSE `provenance` IS NOT `sweep`**. The clause's words are "a
      promoted asset row", and since 2026-08-26 "a `devices` row exists" no
      longer means that -- see `VOUCHED_PROVENANCE` below, which is the most
-     important comment in this file.
+     important comment in this file. **`ambiguous_asset`** is its sibling:
+     vouched-for rows of MORE THAN ONE CLIENT hold the address (two customers
+     on the same private range), so the address does not name one machine
+     and the ladder refuses rather than choose by row id.
   2. **`no_authorization`** -- (d), second. An ACTIVE `push_authorization`
      must cover the address. Deny by default, and NOT implied by an
      `ipam_scan_authorization` over the same prefix (spec §3, D9).
@@ -45,7 +48,11 @@ THE FOUR BOUNDS, and each is a different question:
      addresses it could have observed anyway, and a push originator holds a
      plaintext administrative credential. `select_sweeper`'s "any agent with a
      current observation in the subnet" is REJECTED here for that reason and
-     that reason alone (spec §2.1, D3).
+     that reason alone (spec §2.1, D3). **AND THE SITE SERVER IS THE TARGET'S
+     OWN CLIENT'S** (MSP clients, invariant 5a): the originator receives the
+     decrypted credential, so a push to X's machine never goes through Y's
+     site server -- not even for a technician who may act on every client,
+     and not even when Y's declared segment is the more specific match.
 
 **EVERY FAILING REASON IS COLLECTED, NOT THE FIRST.** Spec §9: "a refusal that
 does not say which is a refusal nobody can act on". An operator told only the
@@ -126,6 +133,15 @@ REFUSAL_REASONS: dict[str, str] = {
             "sweep recorded on its own, which is an ICMP echo reply and may be a "
             "printer, a phone or the coffee machine. Open the device record and "
             "promote it (assets.manage), which is how a human vouches for it"
+        )
+    ),
+    "ambiguous_asset": (
+        N_(
+            "device records of more than one client, each vouched for by a person, hold "
+            "this address, so it does not name one machine and nothing is chosen for you. "
+            "Choose the client in the client selector and push again: inside one client "
+            "the address names that client's machine, and only that client's site server "
+            "may carry the credential to it"
         )
     ),
     "no_authorization": (
@@ -323,26 +339,47 @@ def _validated_batch(targets: object) -> list[IPAddress]:
 VOUCHED_PROVENANCE = ("agent", "operator", "promoted")
 
 
-async def _asset_for(
-    session: AsyncSession, org_id: UUID, address: IPAddress
-) -> UUID | None:
-    """The vouched-for `devices` row at this address, or `None` (spec §3, cond. 1).
+@dataclass(frozen=True)
+class _Asset:
+    """The vouched-for machine an address names, and its client.
 
-    ORDERED, so a fixture with two assets on one address cannot make this
-    return a different machine between runs. `devices.primary_ip` is `inet`,
-    so this is an address comparison and not a string one.
+    `ambiguous` is the `ambiguous_asset` refusal: rows of more than one client
+    hold the address, so `device_id` and `client_id` are both `None` -- no
+    machine is chosen, and so no client's site server either.
+    """
+
+    device_id: UUID | None = None
+    client_id: UUID | None = None
+    ambiguous: bool = False
+
+
+async def _vouched_asset(session: AsyncSession, org_id: UUID, address: IPAddress) -> _Asset:
+    """The vouched-for `devices` row at this address (spec §3, cond. 1).
+
+    **ONE CLIENT OR NONE.** Inside an MSP organization two customers can use
+    the same private range, so one address may be held by machines of two
+    clients. The session's scope decides which rows exist here (RLS): a
+    request narrowed to X sees X's machine only. When the rows this session
+    sees belong to MORE THAN ONE client, the address names no single machine
+    and the answer is `ambiguous` -- never "the lowest id", which would push
+    to whichever customer's machine happened to be recorded first.
+
+    Within one client the rows are ORDERED, so two records of one machine (a
+    re-image) cannot make this return a different one between runs.
+    `devices.primary_ip` is `inet`, so this is an address comparison and not
+    a string one.
 
     See `VOUCHED_PROVENANCE` for why the provenance predicate is here and why
     it is the load-bearing half of this query.
     """
-    row = (
+    rows = (
         await session.execute(
             text(
-                "SELECT id FROM devices"
+                "SELECT id, client_id FROM devices"
                 " WHERE org_id = :org AND primary_ip = CAST(:addr AS inet)"
                 "   AND provenance = ANY(CAST(:vouched AS text[]))"
                 "   AND review_state = 'approved'"
-                " ORDER BY id LIMIT 1"
+                " ORDER BY id"
             ),
             {
                 "org": str(org_id),
@@ -350,8 +387,20 @@ async def _asset_for(
                 "vouched": list(VOUCHED_PROVENANCE),
             },
         )
-    ).first()
-    return None if row is None else UUID(str(row.id))
+    ).all()
+    if not rows:
+        return _Asset()
+    if len({str(row.client_id) for row in rows}) > 1:
+        return _Asset(ambiguous=True)
+    return _Asset(device_id=UUID(str(rows[0].id)), client_id=UUID(str(rows[0].client_id)))
+
+
+async def _asset_for(
+    session: AsyncSession, org_id: UUID, address: IPAddress
+) -> UUID | None:
+    """The vouched-for machine at this address, or `None` -- for no row, and
+    for rows of more than one client (`_vouched_asset`)."""
+    return (await _vouched_asset(session, org_id, address)).device_id
 
 
 async def _authorization_for(
@@ -437,11 +486,26 @@ async def _advertises(
 
 
 async def _site_server_for(
-    session: AsyncSession, org_id: UUID, address: IPAddress, *, transport: str | None
+    session: AsyncSession,
+    org_id: UUID,
+    address: IPAddress,
+    *,
+    transport: str | None,
+    client_id: UUID | None,
 ) -> tuple[UUID, UUID] | None:
-    """The enabled site server whose declared segments contain this address,
-    and -- for a `winrm` target -- whose agent advertises the WinRM push
-    capability.
+    """The enabled site server OF `client_id` whose declared segments contain
+    this address, and -- for a `winrm` target -- whose agent advertises the
+    WinRM push capability.
+
+    **THE CLIENT IS A FILTER, AND IT IS THE TARGET ASSET'S** (MSP clients,
+    invariant 5a). The originator receives the decrypted push credential, so
+    it must be a machine of the client whose machine is being pushed to.
+    Applied in the query, not left to RLS: the pacer works under the
+    every-client scope, and so does a technician who holds every client, and
+    for both a site server of another client declared for a MORE SPECIFIC
+    segment would otherwise come first. `client_id=None` means "any client
+    this session sees" and is used ONLY to name a refusal when the target has
+    no single asset (`evaluate_targets` never takes an originator from it).
 
     **`list_site_servers` IS REUSED RATHER THAN RE-QUERIED**, and that matters
     for a reason the site-server module already wrote down: containment makes
@@ -475,7 +539,7 @@ async def _site_server_for(
     if address.version != 4:
         return None
     candidates = await list_site_servers(
-        session, org_id, enabled=True, segment=f"{address}/32"
+        session, org_id, enabled=True, segment=f"{address}/32", client_id=client_id
     )
     required = None if transport is None else _TRANSPORT_CAPABILITY[transport]
     for candidate in candidates:
@@ -526,8 +590,11 @@ async def evaluate_targets(
     decisions: list[TargetDecision] = []
     for address in addresses:
         refusals: list[str] = []
-        device_id = await _asset_for(session, org_id, address)
-        if device_id is None:
+        asset = await _vouched_asset(session, org_id, address)
+        device_id = asset.device_id
+        if asset.ambiguous:
+            refusals.append("ambiguous_asset")
+        elif device_id is None:
             refusals.append("no_asset")
         authorization_id = await _authorization_for(session, org_id, address, stamp)
         if authorization_id is None:
@@ -538,20 +605,32 @@ async def evaluate_targets(
         if scope_id is None:
             refusals.append("credential_not_scoped")
         transport = await _asset_transport(session, org_id, device_id)
+        # THE TARGET'S CLIENT CHOOSES THE ORIGINATOR (invariant 5a). With no
+        # single asset there is no client: the site-server bound is still
+        # evaluated -- across the clients this session sees -- so the refusal
+        # names every missing bound as it always did, but no originator is
+        # ever taken from that answer: the address is already refused.
         originator = await _site_server_for(
-            session, org_id, address, transport=transport
+            session, org_id, address, transport=transport, client_id=asset.client_id
         )
         if originator is None:
             # Named for its remedy: when the capability filter is what emptied
             # the candidate list, the fix is upgrading that site server, not
             # declaring one -- and it is recorded instead of, never as well
             # as, `no_site_server`.
-            if await _site_server_for(session, org_id, address, transport=None) is None:
+            if (
+                await _site_server_for(
+                    session, org_id, address, transport=None, client_id=asset.client_id
+                )
+                is None
+            ):
                 refusals.append("no_site_server")
             elif transport == "winrm":
                 refusals.append("no_winrm_site_server")
             else:
                 refusals.append("site_server_too_old")
+        if asset.client_id is None:
+            originator = None
         decisions.append(
             TargetDecision(
                 address=str(address),

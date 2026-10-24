@@ -421,6 +421,9 @@ def test_every_named_reason_carries_a_remedy() -> None:
         # Review Minor 1: an SSH target whose segment is served only by a site
         # server too old to hand the placed binary its enroll URL.
         "site_server_too_old",
+        # MSP clients (invariant 5a): vouched-for rows of more than one client
+        # hold the address, so it names no single machine.
+        "ambiguous_asset",
     }
     for reason, help_text in REFUSAL_REASONS.items():
         assert len(help_text) > 80, reason

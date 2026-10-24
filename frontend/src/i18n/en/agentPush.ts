@@ -369,6 +369,7 @@ export const agentPush = {
   },
   chip: {
     no_asset: "Nobody vouched for it",
+    ambiguous_asset: "Address in more than one client",
     no_authorization: "Address not authorized",
     credential_not_scoped: "Credential not allowed here",
     no_site_server: "No site server for its segment",
@@ -411,6 +412,7 @@ export const agentPush = {
   },
   refusal: {
     no_asset: "Nobody has vouched for this machine: add it as an asset, or promote it from Discovered.",
+    ambiguous_asset: "Machines of more than one client have this address: choose the client in the client selector and try again.",
     no_authorization: "Its address is not in a range authorized for push install.",
     credential_not_scoped: "The chosen credential is not allowed on this address.",
     no_site_server: "No site server serves this machine's network segment.",
