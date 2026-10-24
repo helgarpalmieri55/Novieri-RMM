@@ -13,6 +13,7 @@ import { formatDateTime } from "../../lib/datetime";
 import type { Me, SecurityEventFilters } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { saveBlob } from "../../lib/download";
+import { RESYNC_KIND } from "../../lib/resync";
 import { useLiveEvents } from "../../lib/ws";
 import { Icon } from "../../shell/icons";
 import { variantKind } from "../jobs/jobState";
@@ -179,8 +180,9 @@ export function SecurityPage() {
     enabled: selected != null,
   });
 
+  // A resync too (final review W1): an ingest announced during a socket gap.
   useLiveEvents((event) => {
-    if (event.kind === "security_events_ingested") {
+    if (event.kind === "security_events_ingested" || event.kind === RESYNC_KIND) {
       void queryClient.invalidateQueries({ queryKey: ["security-events"] });
     }
   });
