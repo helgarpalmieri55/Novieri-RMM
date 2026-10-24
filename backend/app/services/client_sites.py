@@ -15,6 +15,23 @@ the caller. Two refusals, the same everywhere:
 
 Reads are not refused here: an archived site's link settings and an archived
 client's devices stay readable.
+
+THE CHECK HOLDS UNTIL COMMIT (final review, T9R2 N1). The client is read FOR
+SHARE, and the site with it, so the "not archived" answer cannot go stale
+under a writer: an archive holds the client's row FOR NO KEY UPDATE (and
+`archive_site` the site's), which FOR SHARE waits for and then re-reads -- a
+contact, site, token or asset filed during an archive in flight is refused
+409 once it commits, never committed into an archived client. The other way
+round, the archive waits for the writer and then finds its row (a token it
+revokes, a contact it switches off).
+
+LOCK ORDER: these are the FIRST locks of the transaction that takes them --
+site, then client -- and archives take the client (`archive_client`) or the
+site then the client (`archive_site`) first too, before any token, link,
+contact or audit lock. A path that already holds the audit chain's lock when
+it gets here would invert that order; push install minting a token per target
+after the previous target's audit is the one such path (a cycle there needs an
+archive of a client with no active device, and resolves as one 40P01).
 """
 
 from uuid import UUID
@@ -73,16 +90,40 @@ def refuse_if_closed(site: Site, client_status: str) -> None:
         raise NotAcceptingNewRows(tr("that client is archived"))
 
 
-async def site_for_new_rows(session: AsyncSession, *, org_id: UUID, site_id: UUID) -> Site:
-    """The site a new row is filed under, with its client checked too.
+async def site_for_new_rows(
+    session: AsyncSession, *, org_id: UUID, site_id: UUID, for_update: bool = False
+) -> Site:
+    """The site a new row is filed under, with its client checked too --
+    both LOCKED until commit (module docstring): the site FOR SHARE, or FOR NO
+    KEY UPDATE when the caller changes the site row itself (`for_update`:
+    editing or archiving it, its install link's networks) -- a FOR SHARE it
+    then upgraded would deadlock two such callers -- and the client FOR SHARE.
+    Read with `populate_existing`, so a site this session already holds is
+    re-read from the locked row: what is checked is what was waited for.
 
     The `org_id` predicate mirrors RLS rather than relying on it, so a caller
     on the admin engine cannot file a row under another organisation's site.
     """
-    found = await site_and_client_status(session, site_id, org_id=org_id)
-    if found is None:
+    query = (
+        select(Site)
+        .where(Site.id == site_id, Site.org_id == org_id)
+        .execution_options(populate_existing=True)
+    )
+    query = (
+        query.with_for_update(key_share=True) if for_update else query.with_for_update(read=True)
+    )
+    site = (await session.execute(query)).scalar_one_or_none()
+    if site is None:
         raise SiteNotFound(site_id)
-    site, client_status = found
+    client_status = (
+        await session.execute(
+            select(Client.status)
+            .where(Client.id == site.client_id, Client.org_id == org_id)
+            .with_for_update(read=True)
+        )
+    ).scalar_one_or_none()
+    if client_status is None:
+        raise SiteNotFound(site_id)
     refuse_if_closed(site, client_status)
     return site
 
@@ -90,10 +131,14 @@ async def site_for_new_rows(session: AsyncSession, *, org_id: UUID, site_id: UUI
 async def client_for_new_rows(
     session: AsyncSession, *, org_id: UUID, client_id: UUID
 ) -> Client:
-    """The client a new row is filed under."""
+    """The client a new row is filed under, read FOR SHARE and held until
+    commit (module docstring)."""
     client = (
         await session.execute(
-            select(Client).where(Client.id == client_id, Client.org_id == org_id)
+            select(Client)
+            .where(Client.id == client_id, Client.org_id == org_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     if client is None:

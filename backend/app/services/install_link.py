@@ -344,7 +344,8 @@ async def save(
     Validation happens BEFORE the row is touched, so a refused save changes
     nothing and audits nothing.
     """
-    site = await site_for_new_rows(session, org_id=org_id, site_id=site_id)
+    # FOR NO KEY UPDATE: the networks are written to the site's own row.
+    site = await site_for_new_rows(session, org_id=org_id, site_id=site_id, for_update=True)
     nets = (
         _networks(site)
         if networks is None

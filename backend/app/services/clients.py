@@ -452,6 +452,12 @@ async def archive_client(
         session, org_id=org_id, now=now, client_id=client_id
     )
     links = await link_svc.lock_links(session, org_id=org_id, client_id=client_id)
+    # ITS CONTACTS TOO, AND BEFORE ANY AUDIT WRITE (final review, T9R2 N1).
+    # The audit chain's lock is taken by the first event below and held to
+    # commit; a contact row locked after it would wait on a PATCH that, holding
+    # that row, waits on the chain -- a 40P01. `update_contact` reads the
+    # client FOR SHARE first, so it cannot even be holding the row by now.
+    contacts = await _lock_contacts(session, org_id, client_id)
     active = (
         await session.execute(
             select(func.count())
@@ -475,7 +481,7 @@ async def archive_client(
     switched = await link_svc.switch_off(
         session, actor_id=actor_id, reason="client_archived", now=now, links=links
     )
-    contacts = await _disable_contacts(session, org_id, actor_id, client_id)
+    disabled = await _disable_contacts(session, org_id, actor_id, client_id, contacts)
     await audit_service.record(
         session,
         org_id=org_id,
@@ -488,34 +494,46 @@ async def archive_client(
             "name": client.name,
             "tokens_revoked": revoked,
             "links_switched_off": switched,
-            "contacts_disabled": contacts,
+            "contacts_disabled": disabled,
         },
     )
     return client
 
 
+async def _lock_contacts(session: AsyncSession, org_id: UUID, client_id: UUID) -> list[User]:
+    """Every contact of the client, locked FOR NO KEY UPDATE in id order --
+    NO KEY UPDATE for the reason the client's own lock gives: a row written
+    meanwhile that refers to the contact takes KEY SHARE on it, which this
+    does not block. Re-read from the locked rows (`populate_existing`)."""
+    return list(
+        (
+            await session.execute(
+                select(User)
+                .where(
+                    User.org_id == org_id,
+                    User.client_id == client_id,
+                    User.kind == CONTACT_KIND,
+                )
+                .order_by(User.id)
+                .with_for_update(key_share=True)
+                .execution_options(populate_existing=True)
+            )
+        ).scalars()
+    )
+
+
 async def _disable_contacts(
-    session: AsyncSession, org_id: UUID, actor_id: UUID, client_id: UUID
+    session: AsyncSession, org_id: UUID, actor_id: UUID, client_id: UUID, contacts: list[User]
 ) -> int:
     """Switch off an archived client's active contacts (review 1, concern 3),
     each audited `contact.updated` with `reason="client_archived"` -- the
     code a person's own switch-off records, so the contact's history reads as
     one list. Its people keep no way in through the portal (project 2) to a
-    client nobody serves."""
-    contacts = (
-        await session.execute(
-            select(User)
-            .where(
-                User.org_id == org_id,
-                User.client_id == client_id,
-                User.kind == CONTACT_KIND,
-                User.status == "active",
-            )
-            .order_by(User.id)
-        )
-    ).scalars()
+    client nobody serves. `contacts` are `_lock_contacts`' rows."""
     count = 0
     for user in contacts:
+        if user.status != "active":
+            continue
         user.status = "disabled"
         await session.flush()
         await audit_service.record(
@@ -682,7 +700,8 @@ async def update_site(
             f"update_site cannot write {sorted(unknown)}"
         )
     try:
-        site = await site_for_new_rows(session, org_id=org_id, site_id=site_id)
+        # FOR NO KEY UPDATE: this writes the site's row (`client_sites`).
+        site = await site_for_new_rows(session, org_id=org_id, site_id=site_id, for_update=True)
     except SiteNotFound:
         raise ClientError(404, tr("no such site")) from None
     except NotAcceptingNewRows as exc:
@@ -726,8 +745,14 @@ async def archive_site(
     under it. Otherwise its live tokens are revoked and its install link
     switched off in the same transaction, each audited.
     """
+    # THE SITE'S ROW FIRST, AND ITS STATE READ FROM THE LOCKED ROW (final
+    # review, T9R2 N4): FOR NO KEY UPDATE (a device's foreign key takes KEY
+    # SHARE), then its client FOR SHARE. A second DELETE racing this one waits
+    # here and then re-reads `archived_at` -- a 409, not a second archive with
+    # a second audit event. Then its tokens and its link, BEFORE the count, as
+    # in `archive_client` (review 1, concern 5).
     try:
-        site = await site_for_new_rows(session, org_id=org_id, site_id=site_id)
+        site = await site_for_new_rows(session, org_id=org_id, site_id=site_id, for_update=True)
     except SiteNotFound:
         raise ClientError(404, tr("no such site")) from None
     except NotAcceptingNewRows as exc:
@@ -736,10 +761,6 @@ async def archive_site(
         raise ClientError(
             409, tr("the Principal site of the organization's own client cannot be archived")
         )
-    # The site's row (NO KEY UPDATE: a device's foreign key takes KEY SHARE),
-    # then its tokens and its link, BEFORE the count -- as in
-    # `archive_client` (review 1, concern 5).
-    await session.execute(select(Site.id).where(Site.id == site_id).with_for_update(key_share=True))
     tokens = await enrollment_svc.lock_live_tokens(session, org_id=org_id, now=now, site_id=site_id)
     links = await link_svc.lock_links(session, org_id=org_id, site_id=site_id)
     devices = (
@@ -893,20 +914,40 @@ async def update_contact(
         raise ValueError(  # i18n-exempt: caller contract, unhandled 500
             f"update_contact cannot write {sorted(unknown)}"
         )
-    found = (
+    owner = (
         await session.execute(
-            select(User, Client.status)
-            .join(Client, Client.id == User.client_id)
-            .where(User.id == contact_id, User.org_id == org_id, User.kind == CONTACT_KIND)
+            select(User.client_id).where(
+                User.id == contact_id, User.org_id == org_id, User.kind == CONTACT_KIND
+            )
         )
-    ).one_or_none()
-    if found is None:
+    ).scalar_one_or_none()
+    if owner is None:
         raise ClientError(404, tr("no such contact"))
-    user: User = found[0]
-    client_status: str = found[1]
+    # ITS CLIENT FOR SHARE, BEFORE THE CONTACT'S ROW (final review, T9R2 N1):
+    # an archive holds the client FOR NO KEY UPDATE, so this waits for one in
+    # flight and then reads "archived" (409) -- rather than reading "active",
+    # writing the contact, and re-enabling a contact of an archived client
+    # once the archive commits. And with the client first, this never holds
+    # the contact's row while the archive waits for it.
+    client_status = (
+        await session.execute(
+            select(Client.status)
+            .where(Client.id == owner, Client.org_id == org_id)
+            .with_for_update(read=True)
+        )
+    ).scalar_one_or_none()
+    if client_status is None:
+        raise ClientError(404, tr("no such contact"))
     if client_status == CLIENT_ARCHIVED:
         raise ClientError(409, tr("that client is archived"))
-    assert user.client_id is not None  # the join above
+    user = (
+        await session.execute(
+            select(User)
+            .where(User.id == contact_id, User.org_id == org_id)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    assert user.client_id is not None  # a contact always has its client
     wanted: dict[str, Any] = {}
     for key, value in changes.items():
         if key == "email":

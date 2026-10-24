@@ -9,7 +9,7 @@ sites and contacts, need the code on that client.
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -1108,10 +1108,16 @@ async def _archive_racing_an_enrollment(env, *, site_archive: bool) -> int:
     and refuses -- rather than counting zero, archiving, and leaving a machine
     in a client or site nobody serves.
 
-    Returns the archive's HTTP status once the enrollment has committed."""
+    DETERMINISTIC (final review, T9R2 N3): the enrollment's transaction stays
+    open until the archive is SEEN waiting on it, in the token lock
+    (`pg_blocking_pids`), rather than for a fixed second that a slow runner
+    might not give the archive. Returns the archive's HTTP status once the
+    enrollment has committed."""
     import asyncio
 
     from sqlalchemy import update as sql_update
+
+    from tests.race_helpers import backend_pid, normalised, until_blocked_by
 
     org, h = await _admin(env)
     cid = await _create(env, h, "Racing")
@@ -1132,12 +1138,15 @@ async def _archive_racing_an_enrollment(env, *, site_archive: bool) -> int:
         url = f"/api/v1/sites/{site}" if site_archive else f"/api/v1/clients/{cid}/archive"
         method = "DELETE" if site_archive else "POST"
         archive = asyncio.create_task(env.client.request(method, url, headers=h))
-        await asyncio.sleep(1.0)
-        waited = not archive.done()
+        waiting = await until_blocked_by(env.app_engine, await backend_pid(enrolling))
+        assert not archive.done()
+        assert all(
+            "FROM ENROLLMENT_TOKENS" in normalised(q) and "FOR UPDATE" in normalised(q)
+            for q in waiting
+        ), waiting
         enrolling.add(Device(org_id=org, client_id=UUID(cid), site_id=UUID(site), hostname="racer"))
         await enrolling.commit()
     response = await asyncio.wait_for(archive, timeout=30)
-    assert waited, "the archive did not wait for the enrollment's token lock"
     return response.status_code
 
 
@@ -1147,3 +1156,327 @@ async def test_archiving_a_client_waits_for_an_enrollment_in_flight(api_env) -> 
 
 async def test_archiving_a_site_waits_for_an_enrollment_in_flight(api_env) -> None:
     assert await _archive_racing_an_enrollment(api_env, site_archive=True) == 409
+
+
+
+# --------------------------------------------------------------------------- #
+# Archive races (final review, T9R2 N1/N4): the client's row, then the site's,
+# is the one lock every writer of a new row and every archive meets first.
+# Each test holds one side's transaction open until the other is SEEN waiting
+# on it (`tests/race_helpers.py`), then commits, so the interleaving is the
+# one named -- never whichever a scheduler happened to pick.
+# --------------------------------------------------------------------------- #
+
+
+async def _actor_id(env, org: UUID) -> UUID:
+    sub = await env.create_user(org, "org-admin")
+    async with AsyncSession(env.admin_engine) as s:
+        return (
+            await s.execute(select(User.id).where(User.external_subject == sub))
+        ).scalar_one()
+
+
+async def _held_archive(env, org: UUID, cid: str):
+    """Archive `cid` through the service in a transaction the caller keeps
+    open: `async with _held_archive(...) as pid:` -- it commits on exit."""
+    import contextlib
+    from datetime import UTC, datetime
+
+    from app.core.client_scope import ClientScope
+    from app.core.tenancy import org_session
+    from app.services.clients import archive_client
+    from tests.race_helpers import backend_pid
+
+    actor = await _actor_id(env, org)
+
+    @contextlib.asynccontextmanager
+    async def held():
+        async with org_session(org, engine=env.app_engine, clients=ClientScope.all()) as session:
+            await archive_client(
+                session, org_id=org, actor_id=actor, client_id=UUID(cid), now=datetime.now(UTC)
+            )
+            yield await backend_pid(session)
+
+    return held()
+
+
+async def _contact(env, h, cid: str, email: str) -> str:
+    r = await env.client.post(f"/api/v1/clients/{cid}/contacts", json={"email": email}, headers=h)
+    assert r.status_code == 201, r.text
+    return str(r.json()["id"])
+
+
+async def _status(env, user_id: str) -> str:
+    async with AsyncSession(env.admin_engine) as s:
+        return str(
+            (await s.execute(select(User.status).where(User.id == UUID(user_id)))).scalar_one()
+        )
+
+
+async def test_a_contact_patched_during_an_archive_is_refused_not_re_enabled(api_env) -> None:
+    """T9R2 N1. A switched-off contact; the archive is in flight and has not
+    committed; a PATCH switching the contact back on waits on the CLIENT's
+    row (it reads its client FOR SHARE before touching the contact), then
+    sees the archive and is a 409. Without that lock the PATCH read "active",
+    wrote the contact -- which the archive, having nothing to switch off, had
+    not touched -- waited only on the audit chain, and committed an active
+    contact of an archived client."""
+    import asyncio
+
+    from tests.race_helpers import normalised, until_blocked_by
+
+    env = api_env
+    org, h = await _admin(env)
+    cid = await _create(env, h, "Leaving")
+    contact = await _contact(env, h, cid, "racer@leaving.co")
+    off = await env.client.patch(
+        f"/api/v1/contacts/{contact}", json={"status": "disabled"}, headers=h
+    )
+    assert off.status_code == 200, off.text
+
+    async with await _held_archive(env, org, cid) as archiver:
+        patch = asyncio.create_task(
+            env.client.patch(
+                f"/api/v1/contacts/{contact}", json={"status": "active"}, headers=h
+            )
+        )
+        waiting = await until_blocked_by(env.app_engine, archiver)
+        assert not patch.done()
+        assert all(
+            "FROM CLIENTS" in normalised(q) and "FOR SHARE" in normalised(q) for q in waiting
+        ), waiting
+    response = await asyncio.wait_for(patch, timeout=30)
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "that client is archived"
+    assert await _status(env, contact) == "disabled"
+
+
+async def test_an_archive_waits_for_a_contact_patch_in_flight(api_env) -> None:
+    """The other order. A PATCH holding its transaction open holds its
+    client's row FOR SHARE; the archive waits on that row -- before any token,
+    contact or audit lock, so no cycle can form (the 40P01 of T9R2 N1) -- and
+    once the PATCH commits it archives and disables the contact."""
+    import asyncio
+
+    from app.core.client_scope import ClientScope
+    from app.core.tenancy import org_session
+    from app.services.clients import update_contact
+    from tests.race_helpers import backend_pid, normalised, until_blocked_by
+
+    env = api_env
+    org, h = await _admin(env)
+    cid = await _create(env, h, "Leaving")
+    contact = await _contact(env, h, cid, "editing@leaving.co")
+    actor = await _actor_id(env, org)
+
+    async with org_session(org, engine=env.app_engine, clients=ClientScope.all()) as session:
+        await update_contact(
+            session,
+            org_id=org,
+            actor_id=actor,
+            contact_id=UUID(contact),
+            changes={"display_name": "Renamed mid-archive"},
+        )
+        archive = asyncio.create_task(
+            env.client.post(f"/api/v1/clients/{cid}/archive", headers=h)
+        )
+        waiting = await until_blocked_by(env.app_engine, await backend_pid(session))
+        assert not archive.done()
+        assert all(
+            "FROM CLIENTS" in normalised(q) and "FOR NO KEY UPDATE" in normalised(q)
+            for q in waiting
+        ), waiting
+    response = await asyncio.wait_for(archive, timeout=30)
+    assert response.status_code == 200, response.text
+    assert await _status(env, contact) == "disabled"
+
+
+async def test_new_rows_filed_during_an_archive_are_refused(api_env) -> None:
+    """T9R2 N1 and its sibling: every path that files a new row under a
+    client reads that client FOR SHARE (`client_sites`), which waits for an
+    archive in flight and then sees it. Without the lock each read "active",
+    waited only on the audit chain, and committed a contact, a site, an
+    enrollment token or a hand-typed asset into an archived client."""
+    import asyncio
+
+    from tests.race_helpers import normalised, until_blocked_by
+
+    env = api_env
+    org, h = await _admin(env)
+    cid = await _create(env, h, "Leaving")
+    site = await _principal(env, h, cid)
+    racers = {
+        "contact": ("POST", f"/api/v1/clients/{cid}/contacts", {"email": "late@leaving.co"}),
+        "site": ("POST", f"/api/v1/clients/{cid}/sites", {"name": "Late"}),
+        "token": (
+            "POST",
+            "/api/v1/enrollment-tokens",
+            {"name": "late", "max_uses": 1, "expires_in_hours": 1, "site_id": site},
+        ),
+        "asset": ("POST", "/api/v1/devices", {"description": "boxed laptop", "site_id": site}),
+    }
+    async with await _held_archive(env, org, cid) as archiver:
+        tasks = {
+            name: asyncio.create_task(env.client.request(method, url, json=body, headers=h))
+            for name, (method, url, body) in racers.items()
+        }
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 30
+        while True:
+            waiting = await until_blocked_by(env.app_engine, archiver)
+            if len(waiting) == len(racers):
+                break
+            assert loop.time() < deadline, waiting
+            await asyncio.sleep(0.02)
+        assert not any(task.done() for task in tasks.values())
+        assert all(
+            "FROM CLIENTS" in normalised(q) and "FOR SHARE" in normalised(q) for q in waiting
+        ), waiting
+    for name, task in tasks.items():
+        response = await asyncio.wait_for(task, timeout=30)
+        assert response.status_code == 409, (name, response.text)
+        assert response.json()["detail"] == "that client is archived", name
+    async with AsyncSession(env.admin_engine) as s:
+        late = (
+            await s.execute(
+                select(func.count()).select_from(User).where(User.email == "late@leaving.co")
+            )
+        ).scalar_one()
+        tokens = (
+            await s.execute(
+                select(func.count())
+                .select_from(EnrollmentToken)
+                .where(EnrollmentToken.site_id == UUID(site), EnrollmentToken.revoked.is_(False))
+            )
+        ).scalar_one()
+    assert (late, tokens) == (0, 0)
+
+
+async def test_a_token_minted_before_an_archive_is_revoked_by_it(api_env) -> None:
+    """The enrollment side's lock order, and no deadlock: a token mint in
+    flight holds its client FOR SHARE, the archive waits on that row (not on
+    the token, which it cannot see yet), and once the mint commits the
+    archive finds the token live and revokes it."""
+    import asyncio
+
+    from app.core.client_scope import ClientScope
+    from app.core.tenancy import org_session
+    from app.services.enrollment import create_token
+    from tests.race_helpers import backend_pid, normalised, until_blocked_by
+
+    env = api_env
+    org, h = await _admin(env)
+    cid = await _create(env, h, "Leaving")
+    site = await _principal(env, h, cid)
+    actor = await _actor_id(env, org)
+
+    async with org_session(org, engine=env.app_engine, clients=ClientScope.all()) as session:
+        issued = await create_token(
+            session,
+            org_id=org,
+            site_id=UUID(site),
+            created_by=actor,
+            name="in flight",
+            expires_in_hours=1,
+            max_uses=1,
+        )
+        archive = asyncio.create_task(
+            env.client.post(f"/api/v1/clients/{cid}/archive", headers=h)
+        )
+        waiting = await until_blocked_by(env.app_engine, await backend_pid(session))
+        assert all("FROM CLIENTS" in normalised(q) for q in waiting), waiting
+    response = await asyncio.wait_for(archive, timeout=30)
+    assert response.status_code == 200, response.text
+    async with AsyncSession(env.admin_engine) as s:
+        revoked = (
+            await s.execute(
+                select(EnrollmentToken.revoked).where(EnrollmentToken.id == issued.id)
+            )
+        ).scalar_one()
+    assert revoked is True
+
+
+async def test_two_site_archives_racing_end_in_one_200_and_one_409(api_env) -> None:
+    """T9R2 N4. The second DELETE waits on the site's row and RE-READS it once
+    the first commits: a 409, and one `client.site_archived` event -- not a
+    second archive of an archived site with a second audit event."""
+    import asyncio
+    from datetime import UTC, datetime
+
+    from app.core.client_scope import ClientScope
+    from app.core.tenancy import org_session
+    from app.services.clients import archive_site
+    from tests.race_helpers import backend_pid, normalised, until_blocked_by
+
+    env = api_env
+    org, h = await _admin(env)
+    cid = await _create(env, h, "Branching")
+    site = (
+        await env.client.post(f"/api/v1/clients/{cid}/sites", json={"name": "Sucursal"}, headers=h)
+    ).json()["id"]
+    actor = await _actor_id(env, org)
+
+    async with org_session(org, engine=env.app_engine, clients=ClientScope.all()) as session:
+        await archive_site(
+            session, org_id=org, actor_id=actor, site_id=UUID(site), now=datetime.now(UTC)
+        )
+        second = asyncio.create_task(env.client.delete(f"/api/v1/sites/{site}", headers=h))
+        waiting = await until_blocked_by(env.app_engine, await backend_pid(session))
+        assert not second.done()
+        assert all(
+            "FROM SITES" in normalised(q) and "FOR NO KEY UPDATE" in normalised(q)
+            for q in waiting
+        ), waiting
+    response = await asyncio.wait_for(second, timeout=30)
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "that site is archived"
+    archived = [
+        e for e in await _audits(env, org, "client.site_archived") if e.target_id == site
+    ]
+    assert len(archived) == 1
+
+
+async def test_an_archive_locks_its_contacts_before_the_audit_chain(api_env) -> None:
+    """T9R2 N1, the deadlock itself. A writer may hold a contact's row without
+    the client's lock -- the portal's admission writes `last_login_at` on
+    every request -- and then append to the audit chain. The archive must
+    wait for that row BEFORE it takes the chain's lock (its first event is the
+    token revocation): it locks the client's contacts right after the tokens
+    and links. Locked after the chain, as it was, this interleaving is a cycle
+    -- the writer waits on the chain, the archive on the row -- and Postgres
+    kills one side with 40P01."""
+    import asyncio
+
+    from sqlalchemy import text
+
+    from app.core.client_scope import ClientScope
+    from app.core.tenancy import org_session
+    from tests.race_helpers import backend_pid, normalised, until_blocked_by
+
+    env = api_env
+    org, h = await _admin(env)
+    cid = await _create(env, h, "Leaving")
+    await _mint_token(env, h, await _principal(env, h, cid))  # revoked, and audited, first
+    contact = await _contact(env, h, cid, "signed-in@leaving.co")
+
+    async with org_session(org, engine=env.app_engine, clients=ClientScope.all()) as session:
+        await session.execute(
+            update(User).where(User.id == UUID(contact)).values(last_login_at=func.now())
+        )
+        archive = asyncio.create_task(
+            env.client.post(f"/api/v1/clients/{cid}/archive", headers=h)
+        )
+        waiting = await until_blocked_by(env.app_engine, await backend_pid(session))
+        assert not archive.done()
+        assert all(
+            "FROM USERS" in normalised(q) and "FOR NO KEY UPDATE" in normalised(q)
+            for q in waiting
+        ), waiting
+        # The writer's own audit event: the chain is free, because the archive
+        # has not reached it.
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext('audit:' || :org))"), {"org": str(org)}
+        )
+    response = await asyncio.wait_for(archive, timeout=30)
+    assert response.status_code == 200, response.text
+    assert await _status(env, contact) == "disabled"
