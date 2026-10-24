@@ -1,4 +1,5 @@
-"""Operator UI WebSocket: live job/device status for the authenticated org.
+"""Operator UI WebSocket: live job/device status for the clients in the
+authenticated person's scope.
 
 Authentication uses the same OIDC bearer token as the HTTP API, carried in the
 **WebSocket subprotocol header**, not in the query string. Events come from the
@@ -15,6 +16,17 @@ pattern, `ui:{org}:*`; a list subscribes to each client's channel and
 `ui:{org}:global`. A malformed parameter closes 4400; an empty scope -- no
 grant at all, or a client outside the scope -- closes 4403 and subscribes to
 nothing.
+
+THE DOOR IS RE-RUN WHILE THE SOCKET IS OPEN (MSP clients, final review). A
+scope read once at connect would keep a revoked grant, a disabled account or
+an expired token receiving that client's live events -- a job's full result
+body among them -- for as long as the socket stayed open. So every
+`RECHECK_INTERVAL_S` the socket re-reads the person exactly as at connect
+(`read_door_identity`, then `?client=`): refused, or a scope that is no longer
+the one subscribed, closes 4403 -- any difference, a wider one included, since
+the console reconnects with backoff and subscribes to what is current. And
+once the token's `exp` has passed it closes 4401, checked on every turn of
+the loop: the token is what admitted the socket, and it says when it stops.
 
 WHY THE SUBPROTOCOL, AND WHAT IT REPLACED. A browser cannot set headers on a
 WebSocket handshake, so this endpoint originally took `?token=<jwt>`. That put
@@ -42,6 +54,7 @@ the token while a URL-borne one does.
 
 import asyncio
 import logging
+import time
 from typing import Any
 from uuid import UUID
 
@@ -51,7 +64,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.client_scope import ClientScope, parse_client_header
 from app.core.identity.door import read_door_identity
-from app.core.security import TokenValidationError, require_console_token, validate_token
+from app.core.security import (
+    TokenClaims,
+    TokenValidationError,
+    require_console_token,
+    validate_token,
+)
 from app.core.ws_auth import AUTH_SUBPROTOCOL, token_from_subprotocols
 from app.gateway.dispatch import ui_channel, ui_channel_pattern, ui_global_channel
 from app.models import Organization
@@ -60,10 +78,16 @@ logger = logging.getLogger("its.ui-ws")
 
 router = APIRouter(tags=["ws"])
 
-#: Close codes beyond the token door's 4401. 4400: the `client` parameter is
-#: not one UUID. 4403: the identity is not admitted, or its scope is empty.
+#: Close codes. 4401: the token is not genuine, or it has expired since. 4400:
+#: the `client` parameter is not one UUID. 4403: the identity is not admitted,
+#: its scope is empty, or -- on a re-check -- its scope changed.
+CLOSE_UNAUTHENTICATED = 4401
 CLOSE_BAD_CLIENT = 4400
 CLOSE_FORBIDDEN = 4403
+
+#: How often an open socket re-runs the door (module docstring). A module
+#: constant so a test can shorten it; one tenant read per socket per minute.
+RECHECK_INTERVAL_S = 60.0
 
 
 def _requested_client(websocket: WebSocket) -> UUID | None:
@@ -77,6 +101,28 @@ def _requested_client(websocket: WebSocket) -> UUID | None:
     return parse_client_header(values[0])
 
 
+async def _door_scope(
+    websocket: WebSocket, *, org_id: UUID, claims: TokenClaims
+) -> ClientScope | None:
+    """The door (`read_door_identity`), at connect and at every re-check:
+    `None` when the identity is refused, else every client the person holds
+    any role in."""
+    state = websocket.app.state
+    identity = await read_door_identity(
+        door="console-ws",
+        org_id=org_id,
+        claims=claims,
+        settings=state.settings,
+        engine=state.app_engine,
+    )
+    return None if identity.refusal is not None else identity.clients
+
+
+def _narrowed(scope: ClientScope, requested: UUID | None) -> ClientScope:
+    """`?client=` intersected with the scope: never wider, possibly EMPTY."""
+    return scope if requested is None else scope.intersect(ClientScope.only([requested]))
+
+
 @router.websocket("/ws")
 async def ui_websocket(websocket: WebSocket) -> None:
     state = websocket.app.state
@@ -88,7 +134,7 @@ async def ui_websocket(websocket: WebSocket) -> None:
         claims = await validate_token(token, settings=state.settings, jwks=state.jwks)
         require_console_token(claims, state.settings)
     except TokenValidationError:
-        await websocket.close(code=4401)
+        await websocket.close(code=CLOSE_UNAUTHENTICATED)
         return
 
     async with AsyncSession(state.admin_engine) as session:
@@ -98,7 +144,7 @@ async def ui_websocket(websocket: WebSocket) -> None:
             )
         ).scalar_one_or_none()
     if org_id is None:
-        await websocket.close(code=4401)
+        await websocket.close(code=CLOSE_UNAUTHENTICATED)
         return
 
     # ADMISSION, DOOR 2 OF 3 (spec §3.2): the org's email-domain rule, then
@@ -125,14 +171,8 @@ async def ui_websocket(websocket: WebSocket) -> None:
     # yet expired. Such a `sub` holds no grant, though, so its scope is empty
     # and the scope check below refuses it -- exactly as the HTTP door shows
     # it zero rows.
-    identity = await read_door_identity(
-        door="console-ws",
-        org_id=org_id,
-        claims=claims,
-        settings=state.settings,
-        engine=state.app_engine,
-    )
-    if identity.refusal is not None:
+    admitted = await _door_scope(websocket, org_id=org_id, claims=claims)
+    if admitted is None:
         await websocket.close(code=CLOSE_FORBIDDEN)
         return
 
@@ -145,9 +185,7 @@ async def ui_websocket(websocket: WebSocket) -> None:
     except ValueError:
         await websocket.close(code=CLOSE_BAD_CLIENT)
         return
-    scope = identity.clients
-    if requested is not None:
-        scope = scope.intersect(ClientScope.only([requested]))
+    scope = _narrowed(admitted, requested)
     if scope.is_empty:
         await websocket.close(code=CLOSE_FORBIDDEN)
         return
@@ -168,10 +206,24 @@ async def ui_websocket(websocket: WebSocket) -> None:
         )
     receive_task: asyncio.Task[Any] = asyncio.create_task(websocket.receive())
     poll_task: asyncio.Task[Any] | None = None
+    loop = asyncio.get_running_loop()
+    next_check = loop.time() + RECHECK_INTERVAL_S
+    close_code: int | None = None
     try:
         while True:
+            # The token first, every turn: past its `exp`, nothing more is sent.
+            if time.time() >= claims.exp:
+                close_code = CLOSE_UNAUTHENTICATED
+                break
+            if loop.time() >= next_check:
+                current = await _door_scope(websocket, org_id=org_id, claims=claims)
+                if current is None or _narrowed(current, requested) != scope:
+                    close_code = CLOSE_FORBIDDEN
+                    break
+                next_check = loop.time() + RECHECK_INTERVAL_S
+            wait = min(1.0, next_check - loop.time(), claims.exp - time.time())
             current_poll: asyncio.Task[Any] = asyncio.create_task(
-                pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                pubsub.get_message(ignore_subscribe_messages=True, timeout=max(wait, 0.05))
             )
             poll_task = current_poll
             done, _ = await asyncio.wait(
@@ -199,3 +251,8 @@ async def ui_websocket(websocket: WebSocket) -> None:
         await pubsub.unsubscribe()
         await pubsub.punsubscribe()
         await pubsub.aclose()
+    if close_code is not None:
+        try:
+            await websocket.close(code=close_code)
+        except Exception:  # noqa: BLE001 - the peer may already be gone
+            pass

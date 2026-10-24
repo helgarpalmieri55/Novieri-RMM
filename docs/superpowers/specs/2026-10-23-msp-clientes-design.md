@@ -640,7 +640,13 @@ Las dos precisiones de §1.3 (el permiso de portal de un contacto) y de §2.3
    `all` el WebSocket se suscribe al patrón `ui:{org}:*`; con una lista, al
    canal de cada cliente y al global. El cliente elegido en el selector viaja
    como parámetro `?client=`: un valor mal formado cierra con 4400, y un
-   alcance vacío con 4403.
+   alcance vacío con 4403. El socket abierto vuelve a pasar por la puerta
+   cada 60 s (`RECHECK_INTERVAL_S` en `backend/app/api/v1/ws.py`): si la
+   persona ya no se admite (desactivada, dominio) o su alcance, estrechado
+   por `?client=`, ya no es el suscrito, cierra con 4403 y la consola se
+   vuelve a conectar; cuando vence el `exp` del token, cierra con 4401. En
+   HTTP, `X-Client-Id` enviado dos veces es un 400, igual que `?client=`
+   dos veces en el WebSocket.
 
 9. **Lo que la fase 1 aísla, y lo que todavía no** (revisión final de la
    fase 1, 2026-10-24). La base de datos impone 5a en las tablas de

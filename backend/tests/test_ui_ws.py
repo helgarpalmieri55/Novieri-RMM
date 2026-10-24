@@ -600,3 +600,175 @@ async def test_a_client_outside_the_scope_closes_4403(api_env) -> None:
     sent = await _ws_messages(api_env, token=token, query=f"client={y}".encode())
     assert _closes(sent) == [4403]
     assert not _accepted(sent)
+
+
+# --------------------------------------------------------------------------- #
+# A scope of more than one client (Task 10 review M1), and the LIVE RE-CHECK
+# (final review, T10R-I1): the scope was evaluated once, at connect, so a
+# revoked grant, a disabled account or an expired token kept receiving that
+# client's live events -- a job's full result body among them -- for as long
+# as the socket stayed open. The door is re-run every `RECHECK_INTERVAL_S`.
+# --------------------------------------------------------------------------- #
+
+
+async def _three_clients(api_env, prefix: str):
+    from tests.client_scope_support import client_with_site
+
+    org_id = await api_env.create_org(prefix)
+    clients = []
+    for name in ("Cliente X", "Cliente Y", "Cliente Z"):
+        client_id, _site = await client_with_site(api_env, org_id, name)
+        clients.append(client_id)
+    return org_id, tuple(clients)
+
+
+async def _hears(ws) -> dict:
+    return json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+
+
+async def _closed_with(ws, timeout: float = 10.0) -> int | None:
+    """Wait for the server to close the socket; its close code."""
+    try:
+        while True:
+            await asyncio.wait_for(ws.recv(), timeout=timeout)
+    except websockets.ConnectionClosed as closed:
+        return closed.rcvd.code if closed.rcvd is not None else None
+
+
+@pytest.fixture()
+def fast_recheck(monkeypatch):
+    """Re-run the door every 0.2 s instead of every minute."""
+    from app.api.v1 import ws as ws_module
+
+    monkeypatch.setattr(ws_module, "RECHECK_INTERVAL_S", 0.2)
+
+
+async def test_a_two_client_technician_hears_both_and_not_a_third(api_env, live_api) -> None:
+    org_id, (x, y, z) = await _three_clients(api_env, "ws-xyz")
+    token = await _token(api_env, org_id, await _technician_on(api_env, org_id, x, y))
+    redis = aioredis.from_url(REDIS_URL, decode_responses=True)
+    try:
+        async with websockets.connect(
+            f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=_auth(token)
+        ) as ws:
+            await asyncio.sleep(0.3)
+            await publish_ui_event(redis, org_id, z, {"kind": "for-z"})
+            await _nothing_within(ws)
+            await publish_ui_event(redis, org_id, x, {"kind": "for-x"})
+            first = await _hears(ws)
+            await publish_ui_event(redis, org_id, y, {"kind": "for-y"})
+            second = await _hears(ws)
+    finally:
+        await redis.aclose()
+    assert (first, second) == ({"kind": "for-x"}, {"kind": "for-y"})
+
+
+async def test_the_client_parameter_drops_the_other_client_of_a_two_client_scope(
+    api_env, live_api
+) -> None:
+    org_id, (x, y, _z) = await _three_clients(api_env, "ws-xy-narrow")
+    token = await _token(api_env, org_id, await _technician_on(api_env, org_id, x, y))
+    redis = aioredis.from_url(REDIS_URL, decode_responses=True)
+    try:
+        async with websockets.connect(
+            f"ws://127.0.0.1:{live_api}/api/v1/ws?client={x}", subprotocols=_auth(token)
+        ) as ws:
+            await asyncio.sleep(0.3)
+            await publish_ui_event(redis, org_id, y, {"kind": "for-y"})
+            await _nothing_within(ws)
+            await publish_ui_event(redis, org_id, x, {"kind": "for-x"})
+            heard = await _hears(ws)
+    finally:
+        await redis.aclose()
+    assert heard == {"kind": "for-x"}
+
+
+async def test_an_unchanged_scope_keeps_the_socket_open(
+    api_env, live_api, fast_recheck
+) -> None:
+    """The control for the closes below: several re-checks pass with nothing
+    changed, and the socket still hears its clients."""
+    org_id, (x, y, _z) = await _three_clients(api_env, "ws-steady")
+    token = await _token(api_env, org_id, await _technician_on(api_env, org_id, x, y))
+    redis = aioredis.from_url(REDIS_URL, decode_responses=True)
+    try:
+        async with websockets.connect(
+            f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=_auth(token)
+        ) as ws:
+            await asyncio.sleep(1.5)  # several re-checks at 0.2 s
+            await publish_ui_event(redis, org_id, y, {"kind": "for-y"})
+            heard = await _hears(ws)
+    finally:
+        await redis.aclose()
+    assert heard == {"kind": "for-y"}
+
+
+async def test_a_revoked_grant_closes_the_socket_4403(api_env, live_api, fast_recheck) -> None:
+    """Y's grant is revoked while the socket is open: the next re-check sees
+    a scope that no longer covers what is subscribed and closes 4403 -- no Y
+    event after it. The console reconnects and subscribes to what is left."""
+    from sqlalchemy import delete, select
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models import User, UserRole
+
+    org_id, (x, y, _z) = await _three_clients(api_env, "ws-revoke")
+    sub = await _technician_on(api_env, org_id, x, y)
+    token = await _token(api_env, org_id, sub)
+    redis = aioredis.from_url(REDIS_URL, decode_responses=True)
+    try:
+        async with websockets.connect(
+            f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=_auth(token)
+        ) as ws:
+            await asyncio.sleep(0.3)
+            await publish_ui_event(redis, org_id, y, {"kind": "before"})
+            assert await _hears(ws) == {"kind": "before"}
+            async with AsyncSession(api_env.admin_engine) as s:
+                user_id = (
+                    await s.execute(select(User.id).where(User.external_subject == sub))
+                ).scalar_one()
+                await s.execute(
+                    delete(UserRole).where(UserRole.user_id == user_id, UserRole.client_id == y)
+                )
+                await s.commit()
+            code = await _closed_with(ws)
+    finally:
+        await redis.aclose()
+    assert code == 4403
+
+
+async def test_a_disabled_person_is_closed_4403(api_env, live_api, fast_recheck) -> None:
+    from sqlalchemy import update
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models import User
+
+    org_id, (x, _y, _z) = await _three_clients(api_env, "ws-disabled")
+    sub = await _technician_on(api_env, org_id, x)
+    token = await _token(api_env, org_id, sub)
+    async with websockets.connect(
+        f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=_auth(token)
+    ) as ws:
+        await asyncio.sleep(0.3)
+        async with AsyncSession(api_env.admin_engine) as s:
+            await s.execute(
+                update(User).where(User.external_subject == sub).values(status="disabled")
+            )
+            await s.commit()
+        code = await _closed_with(ws)
+    assert code == 4403
+
+
+async def test_an_expired_token_is_closed_4401(api_env, live_api) -> None:
+    """Checked on every turn of the loop, not only at the re-check: the token
+    is what admitted the socket, and it says when it stops."""
+    org_id, (x, _y, _z) = await _three_clients(api_env, "ws-expiry")
+    sub = await _technician_on(api_env, org_id, x)
+    token = api_env.idp.token(
+        sub, await api_env.org_slug(org_id), email=f"{sub}@test.local", exp_in=2
+    )
+    async with websockets.connect(
+        f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=_auth(token)
+    ) as ws:
+        code = await _closed_with(ws)
+    assert code == 4401
