@@ -7,13 +7,22 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission_on_every_client
 from app.core.audit import audit_service
 from app.core.tenancy import org_session
 from app.models import AuditEvent
 from app.services.user_names import resolve_display_names
 
 router = APIRouter(prefix="/audit", tags=["audit"])
+
+#: THE AUDIT LOG IS EVERY CLIENT'S (MSP clients spec, invariant 5a).
+#: `audit_events` is a G table -- one chain per organization, which RLS cannot
+#: scope by client -- and its events name every client's devices, addresses,
+#: fingerprints and people. Holding `audit.read` on ONE client would therefore
+#: be reading every client's records, so both reads need `audit.read` on every
+#: client (`require_permission_on_every_client`) until the audit log carries a
+#: client (phase 2, spec §2.5). `tests/test_global_writes.py::GLOBAL_READS`.
+_AUDIT_READ = require_permission_on_every_client("audit.read")
 
 
 class AuditEventOut(BaseModel):
@@ -96,7 +105,7 @@ def _target_name(names: dict[UUID, str], event: AuditEvent) -> str | None:
 @router.get("", response_model=AuditListResponse)
 async def list_events(
     request: Request,
-    ctx: AuthContext = Depends(require_permission("audit.read")),
+    ctx: AuthContext = Depends(_AUDIT_READ),
     action: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -160,7 +169,7 @@ async def list_events(
 @router.get("/verify", response_model=AuditVerifyResponse)
 async def verify_chain(
     request: Request,
-    ctx: AuthContext = Depends(require_permission("audit.read")),
+    ctx: AuthContext = Depends(_AUDIT_READ),
 ) -> AuditVerifyResponse:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
