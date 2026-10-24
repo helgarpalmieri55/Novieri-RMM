@@ -354,8 +354,12 @@ PATHS: dict[str, tuple[str, Make]] = {
             org_id=w.org, profile_id=w.profile, device_group_id=s.group
         ),
     ),
+    # ONE ADDRESS PER CONTACT (migration 0232's `its_contact_email_unique`,
+    # Task 9 review 1): X's and Y's contacts cannot share one. The address is
+    # never what a statement here filters on -- every probe names its row by
+    # id -- so the client is still the only discriminator that matters.
     "O-users-contacts": ("users", lambda w, s: User(
-        org_id=w.org, external_subject=uuid4().hex, email="c@test.local",
+        org_id=w.org, external_subject=uuid4().hex, email=f"c-{uuid4().hex[:8]}@test.local",
         kind="contact", client_id=s.client,
     )),
 }

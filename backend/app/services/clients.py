@@ -77,6 +77,9 @@ PENDING_SUBJECT = "contact-pending:"
 _NAME_KEY = "uq_clients_org_name"
 _DOMAIN_KEY = "uq_clients_email_domain"
 _SITE_NAME_KEY = "uq_sites_client_name"
+#: A contact's address held by another user (`its_contact_email_unique`,
+#: migration 0232).
+_CONTACT_EMAIL_KEY = "uq_users_contact_email"
 
 #: One DNS label; a domain is two or more, the last not all digits.
 _LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
@@ -381,6 +384,15 @@ async def update_client(
             wanted[key] = value
         else:
             wanted[key] = value.strip()
+    # THE UNASSIGNED CLIENT (review 1, M6): unknown senders land there because
+    # no client's domain matched (spec §3.3), so a domain of its own would be a
+    # contradiction, and it serves nobody, so an optional module there means
+    # nothing. An empty list is what it holds already, and passes.
+    if client.kind == CLIENT_KIND_UNASSIGNED:
+        if wanted.get("email_domains"):
+            raise ClientError(422, tr("the unassigned client takes no email domains"))
+        if wanted.get("enabled_modules"):
+            raise ClientError(422, tr("the unassigned client has no optional modules"))
     changed = {
         key: {"before": getattr(client, key), "after": value}
         for key, value in wanted.items()
@@ -415,9 +427,15 @@ async def archive_client(
     unassigned clients and while any of its devices is active; otherwise its
     live enrollment tokens are revoked and its install links switched off in
     the same transaction, each audited."""
+    # FOR NO KEY UPDATE, not FOR UPDATE: a device written meanwhile takes a KEY
+    # SHARE lock on its client through its foreign key, which FOR UPDATE would
+    # block -- and with the token lock below that is a deadlock with an
+    # enrollment in flight. NO KEY UPDATE still serialises two archives.
     client = (
         await session.execute(
-            select(Client).where(Client.id == client_id, Client.org_id == org_id).with_for_update()
+            select(Client)
+            .where(Client.id == client_id, Client.org_id == org_id)
+            .with_for_update(key_share=True)
         )
     ).scalar_one_or_none()
     if client is None:
@@ -426,6 +444,14 @@ async def archive_client(
         raise ClientError(409, tr("the internal and unassigned clients cannot be archived"))
     if client.status == CLIENT_ARCHIVED:
         raise ClientError(409, tr("that client is archived"))
+    # THE LOCKS BEFORE THE COUNT (review 1, concern 5): an enrollment in flight
+    # holds its token's (or its link's) row lock until its device commits, so
+    # taking them first makes the count below see that device -- or makes the
+    # enrollment find its token revoked and its link off.
+    tokens = await enrollment_svc.lock_live_tokens(
+        session, org_id=org_id, now=now, client_id=client_id
+    )
+    links = await link_svc.lock_links(session, org_id=org_id, client_id=client_id)
     active = (
         await session.execute(
             select(func.count())
@@ -443,22 +469,13 @@ async def archive_client(
         )
     client.status = CLIENT_ARCHIVED
     await session.flush()
-    tokens = await enrollment_svc.revoke_live_tokens(
-        session,
-        org_id=org_id,
-        actor_id=actor_id,
-        reason="client_archived",
-        now=now,
-        client_id=client_id,
+    revoked = await enrollment_svc.revoke_tokens(
+        session, org_id=org_id, actor_id=actor_id, reason="client_archived", tokens=tokens
     )
-    links = await link_svc.switch_off(
-        session,
-        org_id=org_id,
-        actor_id=actor_id,
-        reason="client_archived",
-        now=now,
-        client_id=client_id,
+    switched = await link_svc.switch_off(
+        session, actor_id=actor_id, reason="client_archived", now=now, links=links
     )
+    contacts = await _disable_contacts(session, org_id, actor_id, client_id)
     await audit_service.record(
         session,
         org_id=org_id,
@@ -467,9 +484,56 @@ async def archive_client(
         action="client.archived",
         target_type="client",
         target_id=str(client_id),
-        metadata={"name": client.name, "tokens_revoked": tokens, "links_switched_off": links},
+        metadata={
+            "name": client.name,
+            "tokens_revoked": revoked,
+            "links_switched_off": switched,
+            "contacts_disabled": contacts,
+        },
     )
     return client
+
+
+async def _disable_contacts(
+    session: AsyncSession, org_id: UUID, actor_id: UUID, client_id: UUID
+) -> int:
+    """Switch off an archived client's active contacts (review 1, concern 3),
+    each audited `contact.updated` with `reason="client_archived"` -- the
+    code a person's own switch-off records, so the contact's history reads as
+    one list. Its people keep no way in through the portal (project 2) to a
+    client nobody serves."""
+    contacts = (
+        await session.execute(
+            select(User)
+            .where(
+                User.org_id == org_id,
+                User.client_id == client_id,
+                User.kind == CONTACT_KIND,
+                User.status == "active",
+            )
+            .order_by(User.id)
+        )
+    ).scalars()
+    count = 0
+    for user in contacts:
+        user.status = "disabled"
+        await session.flush()
+        await audit_service.record(
+            session,
+            org_id=org_id,
+            actor_type="user",
+            actor_id=actor_id,
+            action="contact.updated",
+            target_type="user",
+            target_id=str(user.id),
+            metadata={
+                "client_id": str(client_id),
+                "changed": {"status": {"before": "active", "after": "disabled"}},
+                "reason": "client_archived",
+            },
+        )
+        count += 1
+    return count
 
 
 # --------------------------------------------------------------------------- #
@@ -672,6 +736,12 @@ async def archive_site(
         raise ClientError(
             409, tr("the Principal site of the organization's own client cannot be archived")
         )
+    # The site's row (NO KEY UPDATE: a device's foreign key takes KEY SHARE),
+    # then its tokens and its link, BEFORE the count -- as in
+    # `archive_client` (review 1, concern 5).
+    await session.execute(select(Site.id).where(Site.id == site_id).with_for_update(key_share=True))
+    tokens = await enrollment_svc.lock_live_tokens(session, org_id=org_id, now=now, site_id=site_id)
+    links = await link_svc.lock_links(session, org_id=org_id, site_id=site_id)
     devices = (
         await session.execute(
             select(func.count())
@@ -689,11 +759,11 @@ async def archive_site(
         )
     site.archived_at = now
     await session.flush()
-    tokens = await enrollment_svc.revoke_live_tokens(
-        session, org_id=org_id, actor_id=actor_id, reason="site_archived", now=now, site_id=site_id
+    revoked = await enrollment_svc.revoke_tokens(
+        session, org_id=org_id, actor_id=actor_id, reason="site_archived", tokens=tokens
     )
-    links = await link_svc.switch_off(
-        session, org_id=org_id, actor_id=actor_id, reason="site_archived", now=now, site_id=site_id
+    switched = await link_svc.switch_off(
+        session, actor_id=actor_id, reason="site_archived", now=now, links=links
     )
     await _audit_site(
         session,
@@ -701,7 +771,7 @@ async def archive_site(
         actor_id,
         "client.site_archived",
         site,
-        {"name": site.name, "tokens_revoked": tokens, "links_switched_off": links},
+        {"name": site.name, "tokens_revoked": revoked, "links_switched_off": switched},
     )
     return SiteRow(site=site, device_count=0)
 
@@ -723,22 +793,34 @@ async def list_contacts(session: AsyncSession, *, org_id: UUID, client_id: UUID)
 
 
 async def _contact_email_taken(
-    session: AsyncSession, client_id: UUID, email: str, exclude: UUID | None
+    session: AsyncSession, org_id: UUID, email: str, exclude: UUID | None
 ) -> bool:
-    """Per CLIENT, not per organisation: one person may be a contact of two
-    clients, and a technician limited to one cannot see the other's."""
-    query = select(User.id).where(
-        User.client_id == client_id,
-        User.kind == CONTACT_KIND,
-        func.lower(User.email) == email,
-    )
+    """Whether a user THIS SESSION CAN SEE -- staff, or a contact of a client in
+    scope -- already has the address (review 1, I1). One address is one
+    person: inbound mail files a message under its sender's client (spec §3.3)
+    and quarantines a sender two users share. A contact of a client outside
+    the scope is caught by the database instead (`its_contact_email_unique`,
+    migration 0232), with the same 409."""
+    query = select(User.id).where(User.org_id == org_id, func.lower(User.email) == email)
     if exclude is not None:
         query = query.where(User.id != exclude)
     return (await session.execute(query.limit(1))).scalar_one_or_none() is not None
 
 
 def _contact_refusal() -> ClientError:
-    return ClientError(409, tr("this client already has a contact with that email address"))
+    return ClientError(
+        409, tr("that email address already belongs to another user of the organization")
+    )
+
+
+async def _flush_contact(session: AsyncSession) -> None:
+    """Flush a contact write, answering `its_contact_email_unique` with the 409."""
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if _constraint(exc) == _CONTACT_EMAIL_KEY:
+            raise _contact_refusal() from None
+        raise
 
 
 async def create_contact(
@@ -762,7 +844,7 @@ async def create_contact(
     if client.kind == CLIENT_KIND_UNASSIGNED:
         raise ClientError(422, tr("the unassigned client cannot have contacts"))
     address = _email(email)
-    if await _contact_email_taken(session, client_id, address, None):
+    if await _contact_email_taken(session, org_id, address, None):
         raise _contact_refusal()
     user = User(
         org_id=org_id,
@@ -775,7 +857,7 @@ async def create_contact(
         external_subject=f"{PENDING_SUBJECT}{uuid4()}",
     )
     session.add(user)
-    await session.flush()
+    await _flush_contact(session)
     await audit_service.record(
         session,
         org_id=org_id,
@@ -803,21 +885,28 @@ async def update_contact(
     changes: Mapping[str, Any],
 ) -> User:
     """Edit or switch off a contact of a visible client. A staff row is not a
-    contact, and is 404 here whatever the scope sees."""
+    contact, and is 404 here whatever the scope sees. A contact of an
+    archived client is not edited (409, review 1 M4), as `create_contact`
+    refuses one: re-enabling it would undo part of the archive."""
     unknown = set(changes) - set(CONTACT_FIELDS)
     if unknown:
         raise ValueError(  # i18n-exempt: caller contract, unhandled 500
             f"update_contact cannot write {sorted(unknown)}"
         )
-    user = (
+    found = (
         await session.execute(
-            select(User).where(
-                User.id == contact_id, User.org_id == org_id, User.kind == CONTACT_KIND
-            )
+            select(User, Client.status)
+            .join(Client, Client.id == User.client_id)
+            .where(User.id == contact_id, User.org_id == org_id, User.kind == CONTACT_KIND)
         )
-    ).scalar_one_or_none()
-    if user is None or user.client_id is None:
+    ).one_or_none()
+    if found is None:
         raise ClientError(404, tr("no such contact"))
+    user: User = found[0]
+    client_status: str = found[1]
+    if client_status == CLIENT_ARCHIVED:
+        raise ClientError(409, tr("that client is archived"))
+    assert user.client_id is not None  # the join above
     wanted: dict[str, Any] = {}
     for key, value in changes.items():
         if key == "email":
@@ -837,14 +926,12 @@ async def update_contact(
         for key, value in wanted.items()
         if getattr(user, key) != value
     }
-    if "email" in changed and await _contact_email_taken(
-        session, user.client_id, wanted["email"], user.id
-    ):
+    if "email" in changed and await _contact_email_taken(session, org_id, wanted["email"], user.id):
         raise _contact_refusal()
     if changed:
         for key, diff in changed.items():
             setattr(user, key, diff["after"])
-        await session.flush()
+        await _flush_contact(session)
         await audit_service.record(
             session,
             org_id=org_id,

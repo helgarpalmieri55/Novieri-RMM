@@ -468,26 +468,26 @@ async def revoke_token(
     return True
 
 
-async def revoke_live_tokens(
+async def lock_live_tokens(
     session: AsyncSession,
     *,
     org_id: UUID,
-    actor_id: UUID,
-    reason: str,
     now: datetime,
     client_id: UUID | None = None,
     site_id: UUID | None = None,
-) -> int:
-    """Revoke every unrevoked, unexpired token of one client or one site, each
-    audited `enrollment.token_revoked` with `reason`. Returns how many.
+) -> list[EnrollmentToken]:
+    """Every unrevoked, unexpired token of one client or one site, locked FOR
+    UPDATE.
 
-    For archiving (MSP clients Task 9). `enroll` already refuses a token whose
-    site or client is archived; revoking them as well is what the token list
-    then shows, and what survives an unarchive should one ever exist.
+    For archiving (MSP clients Task 9). TAKEN BEFORE THE ARCHIVE COUNTS
+    DEVICES (review 1, concern 5): an enrollment holds its token's row lock
+    from the guarded UPDATE that consumes it until it commits its device, so
+    the archive either waits for that device and counts it, or holds the lock
+    first and the enrollment's UPDATE then finds the token revoked.
     """
     if (client_id is None) == (site_id is None):
         raise ValueError(  # i18n-exempt: caller contract, unhandled 500
-            "revoke_live_tokens takes exactly one of client_id / site_id"
+            "lock_live_tokens takes exactly one of client_id / site_id"
         )
     query = select(EnrollmentToken).where(
         EnrollmentToken.org_id == org_id,
@@ -498,12 +498,25 @@ async def revoke_live_tokens(
         query = query.where(EnrollmentToken.client_id == client_id)
     else:
         query = query.where(EnrollmentToken.site_id == site_id)
-    rows = (
-        (await session.execute(query.order_by(EnrollmentToken.id).with_for_update()))
-        .scalars()
-        .all()
-    )
-    for row in rows:
+    rows = await session.execute(query.order_by(EnrollmentToken.id).with_for_update())
+    return list(rows.scalars())
+
+
+async def revoke_tokens(
+    session: AsyncSession,
+    *,
+    org_id: UUID,
+    actor_id: UUID,
+    reason: str,
+    tokens: Sequence[EnrollmentToken],
+) -> int:
+    """Revoke tokens `lock_live_tokens` returned, each audited
+    `enrollment.token_revoked` with `reason`. Returns how many.
+
+    `enroll` already refuses a token whose site or client is archived;
+    revoking them as well is what the token list then shows.
+    """
+    for row in tokens:
         row.revoked = True
         await session.flush()
         await audit_service.record(
@@ -520,7 +533,7 @@ async def revoke_live_tokens(
                 "site_id": str(row.site_id),
             },
         )
-    return len(rows)
+    return len(tokens)
 
 
 async def revoke_agent(

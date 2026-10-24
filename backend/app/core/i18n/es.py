@@ -1062,8 +1062,14 @@ CATALOG: dict[str, str] = {
     "this site has {count} devices; a site with devices cannot be archived": (
         "esta sede tiene {count} equipos; una sede con equipos no se puede archivar"
     ),
-    "this client already has a contact with that email address": (
-        "este cliente ya tiene un contacto con esa dirección de correo"
+    "that email address already belongs to another user of the organization": (
+        "esa dirección de correo ya pertenece a otro usuario de la organización"
+    ),
+    "the unassigned client takes no email domains": (
+        "el cliente «Sin asignar» no admite dominios de correo"
+    ),
+    "the unassigned client has no optional modules": (
+        "el cliente «Sin asignar» no tiene módulos opcionales"
     ),
     "the unassigned client cannot have contacts": (
         "el cliente «Sin asignar» no puede tener contactos"

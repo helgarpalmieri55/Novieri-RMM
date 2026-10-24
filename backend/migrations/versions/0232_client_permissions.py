@@ -1,4 +1,5 @@
-"""Client permissions, and one email domain per client (MSP clients spec §1.1, §2.1, §4).
+"""Client permissions; one email domain per client and one address per contact (MSP
+clients spec §1.1, §1.3, §2.1, §3.3, §4).
 
 THE THREE CODES. `clients.read`, `clients.manage` and `sites.manage` gate the
 clients, sites and contacts API (Task 9, `app/api/v1/clients.py`). Seeded the
@@ -18,14 +19,39 @@ clientes de la misma organización", and §4 answers a duplicate with 409. The
 application checks it, but under the CALLER'S scope: a technician limited to
 client X editing X's domains cannot see Y's, so that check passes a domain Y
 already holds, and inbound mail from it (spec §3.3) would match two clients.
-`its_client_domains_unique` is the rule where it binds: a BEFORE trigger,
-SECURITY DEFINER so it reads every client of the organisation whatever the
-session's scope, serialised per organisation by an advisory lock so two
-concurrent saves cannot both pass. It raises `unique_violation` naming
-`uq_clients_email_domain`, which `app/services/clients.py` answers with the
-same 409 as its own check. That 409 tells a limited technician that SOME
-client holds the domain -- the oracle spec §4's rule implies, and no more:
-neither the client nor its id is in the message.
+`its_client_domains_unique` is the rule where it binds: SECURITY DEFINER so it
+reads every client of the organisation whatever the session's scope,
+serialised per organisation by an advisory lock so two concurrent saves cannot
+both pass. It raises `unique_violation` naming `uq_clients_email_domain`,
+which `app/services/clients.py` answers with the same 409 as its own check.
+That 409 tells a limited technician that SOME client holds the domain -- the
+oracle spec §4's rule implies, and no more: neither the client nor its id is
+in the message.
+
+AN AFTER TRIGGER, NOT A BEFORE ONE (Task 9 review 1, M2). A BEFORE trigger runs
+ahead of the row's RLS WITH CHECK, so a raw INSERT naming ANOTHER organisation
+would answer "unique violation" or "row-level security" according to that
+organisation's domains: a cross-tenant existence oracle for anyone holding
+`app_user`. An AFTER ROW trigger never fires for a row RLS refused. The row it
+checks is already in the table, hence `id <> NEW.id`.
+
+ONE ADDRESS, ONE PERSON (Task 9 review 1, I1). Inbound mail files a message
+under its sender's client (spec §3.3 step 1) and quarantines a sender two
+users share (`app/modules/email_intake/identity.py`). So a CONTACT's address
+may equal no other `users` row's in the organisation -- staff or contact, of
+any client, visible to the writer or not. `its_contact_email_unique` holds it
+the same way as the domains: AFTER INSERT OR UPDATE OF email, kind on `users`,
+SECURITY DEFINER, an advisory lock of its own, `unique_violation` naming
+`uq_users_contact_email`, the service's 409. The 409 tells a limited
+technician that some user of the organisation has the address; the message
+names neither the user nor the client.
+
+IT IS ONE-DIRECTIONAL, deliberately: it checks only when the row WRITTEN is a
+contact. A staff row written later with a contact's address is NOT refused,
+because first-login provisioning (`app/api/deps.py::admit`) writes whatever
+address the identity provider asserts, and a technician's sign-in must never
+fail on a client's data. That pair is the one ambiguity left, and intake
+quarantines it rather than guessing.
 
 A CONTACT'S STATUS IS ITS CLIENT'S. `its_user_identity_guard` (0231, shipped)
 refused ANY change of `users.status` outside the every-client scope, which
@@ -82,13 +108,15 @@ def upgrade() -> None:
             f"WHERE r.name = '{role}' AND r.org_id IS NULL AND p.code IN ({code_list})"
         )
 
+    # AFTER, so RLS has accepted the row first (module docstring, M2). The
+    # return value of an AFTER ROW trigger is ignored.
     op.execute(
         """
         CREATE FUNCTION its_client_domains_unique() RETURNS trigger
         LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
         BEGIN
             IF cardinality(NEW.email_domains) = 0 THEN
-                RETURN NEW;
+                RETURN NULL;
             END IF;
             -- The two-key form: a key space apart from the audit chain's
             -- one-key `pg_advisory_xact_lock(hashtext('audit:' || org))`.
@@ -103,13 +131,45 @@ def upgrade() -> None:
                 RAISE EXCEPTION 'an email domain of client % belongs to another client', NEW.id
                     USING ERRCODE = 'unique_violation', CONSTRAINT = 'uq_clients_email_domain';
             END IF;
-            RETURN NEW;
+            RETURN NULL;
         END $$
         """
     )
     op.execute(
-        "CREATE TRIGGER its_client_domains_unique BEFORE INSERT OR UPDATE OF email_domains "
+        "CREATE TRIGGER its_client_domains_unique AFTER INSERT OR UPDATE OF email_domains "
         "ON clients FOR EACH ROW EXECUTE FUNCTION its_client_domains_unique()"
+    )
+
+    # A contact's address is no other user's (module docstring, I1). Staff
+    # rows are not checked: first-login provisioning must never fail on a
+    # contact's address. Case-free, like `ix_users_org_lower_email` and the
+    # sender match in `email_intake/identity.py`.
+    op.execute(
+        """
+        CREATE FUNCTION its_contact_email_unique() RETURNS trigger
+        LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+        BEGIN
+            IF NEW.kind IS DISTINCT FROM 'contact' THEN
+                RETURN NULL;
+            END IF;
+            PERFORM pg_advisory_xact_lock(
+                hashtext('its_contact_email'), hashtext(NEW.org_id::text)
+            );
+            IF EXISTS (
+                SELECT 1 FROM users
+                WHERE org_id = NEW.org_id AND id <> NEW.id
+                  AND lower(email) = lower(NEW.email)
+            ) THEN
+                RAISE EXCEPTION 'the address of contact % belongs to another user', NEW.id
+                    USING ERRCODE = 'unique_violation', CONSTRAINT = 'uq_users_contact_email';
+            END IF;
+            RETURN NULL;
+        END $$
+        """
+    )
+    op.execute(
+        "CREATE TRIGGER its_contact_email_unique AFTER INSERT OR UPDATE OF email, kind "
+        "ON users FOR EACH ROW EXECUTE FUNCTION its_contact_email_unique()"
     )
 
     # What a `users` row IS -- staff or contact (and with it, through
@@ -175,6 +235,8 @@ def downgrade() -> None:
         END $$
         """
     )
+    op.execute("DROP TRIGGER its_contact_email_unique ON users")
+    op.execute("DROP FUNCTION its_contact_email_unique()")
     op.execute("DROP TRIGGER its_client_domains_unique ON clients")
     op.execute("DROP FUNCTION its_client_domains_unique()")
     code_list = ", ".join(f"'{c}'" for c in _ALL)

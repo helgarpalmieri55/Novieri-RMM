@@ -576,43 +576,58 @@ async def switch_off_due(session: AsyncSession, org_id: UUID, now: datetime) -> 
     return len(rows)
 
 
-async def switch_off(
+async def lock_links(
     session: AsyncSession,
     *,
     org_id: UUID,
-    actor_id: UUID,
-    reason: str,
-    now: datetime,
     client_id: UUID | None = None,
     site_id: UUID | None = None,
-) -> int:
-    """Switch off every link of one client or one site, each audited
-    `enrollment.link_disabled` with `reason`. Returns how many.
+) -> list[InstallLink]:
+    """Every link of one client or one site, locked FOR UPDATE.
 
-    For archiving (MSP clients Task 9): an archived site or client enrols
-    nothing (`live_link_for` refuses it regardless), and switching its links
-    off as well leaves the console saying so rather than showing a link "on"
-    that no machine can use. The code is kept: a switched-off link is not a
-    regenerated one.
+    For archiving (MSP clients Task 9). TAKEN BEFORE THE ARCHIVE COUNTS
+    DEVICES (review 1, concern 5): `enroll_via_link` holds its link's row lock
+    (`live_link_for(..., for_update=True)`) until it commits its device, so
+    the archive either waits for that device and counts it, or holds the lock
+    first and the enrollment then reads the link switched off.
     """
     if (client_id is None) == (site_id is None):
         raise ValueError(  # i18n-exempt: caller contract, unhandled 500
-            "switch_off takes exactly one of client_id / site_id"
+            "lock_links takes exactly one of client_id / site_id"
         )
-    query = select(InstallLink).where(
-        InstallLink.org_id == org_id, InstallLink.enabled.is_(True)
-    )
+    query = select(InstallLink).where(InstallLink.org_id == org_id)
     if client_id is not None:
         query = query.where(InstallLink.client_id == client_id)
     else:
         query = query.where(InstallLink.site_id == site_id)
-    rows = (
-        (await session.execute(query.order_by(InstallLink.id).with_for_update())).scalars().all()
-    )
-    for row in rows:
+    rows = await session.execute(query.order_by(InstallLink.id).with_for_update())
+    return list(rows.scalars())
+
+
+async def switch_off(
+    session: AsyncSession,
+    *,
+    actor_id: UUID,
+    reason: str,
+    now: datetime,
+    links: Sequence[InstallLink],
+) -> int:
+    """Switch off the links `lock_links` returned that are on, each audited
+    `enrollment.link_disabled` with `reason`. Returns how many.
+
+    An archived site or client enrols nothing (`live_link_for` refuses it
+    regardless); switching its links off as well leaves the console saying so
+    rather than showing a link "on" that no machine can use. The code is kept:
+    a switched-off link is not a regenerated one.
+    """
+    switched = 0
+    for row in links:
+        if not row.enabled:
+            continue
         row.enabled = False
         row.enabled_at = None
         row.updated_at = now
         await session.flush()
         await _audit(session, row, actor_id, "enrollment.link_disabled", {"reason": reason})
-    return len(rows)
+        switched += 1
+    return switched

@@ -184,10 +184,16 @@ async def test_cannot_archive_system_clients(api_env) -> None:
 
 
 async def test_cannot_delete_a_site_with_devices(api_env) -> None:
+    """A CUSTOMER's site holding a device (review M5): the internal client's
+    Principal site is refused on its own rule, which has its own test
+    (`test_the_internal_clients_principal_site_is_never_archived`), so it
+    cannot stand in for this one."""
     env = api_env
     org, h = await _admin(env)
-    await _device(env, org, org, org)
-    assert (await env.client.delete(f"/api/v1/sites/{org}", headers=h)).status_code == 409
+    cid = await _create(env, h, "Acme")
+    site = await _principal(env, h, cid)
+    await _device(env, org, cid, site)
+    assert (await env.client.delete(f"/api/v1/sites/{site}", headers=h)).status_code == 409
 
 
 async def test_a_restricted_technician_gets_404_for_another_client(api_env) -> None:
@@ -853,8 +859,291 @@ async def test_contacts_are_refused_on_the_unassigned_client_and_duplicated_emai
         f"/api/v1/clients/{x}/contacts", json={"email": "A@x.co"}, headers=h
     )
     assert dup.status_code == 409, dup.text
-    # The same person may be a contact of two clients: the key is per client.
+    # A DELIBERATE RULE CHANGE (Task 9 review 1, I1), not a weakening: the
+    # same address may no longer be a contact of two clients. Inbound mail
+    # (spec §3.3 step 1) files a message under its sender's client, and an
+    # address held twice quarantines every message from it.
     elsewhere = await env.client.post(
         f"/api/v1/clients/{y}/contacts", json={"email": "a@x.co"}, headers=h
     )
-    assert elsewhere.status_code == 201, elsewhere.text
+    assert elsewhere.status_code == 409, elsewhere.text
+
+
+# --------------------------------------------------------------------------- #
+# Task 9 review 1
+# --------------------------------------------------------------------------- #
+
+ADDRESS_TAKEN = "that email address already belongs to another user of the organization"
+
+
+async def test_a_contact_cannot_take_a_staff_members_email(api_env) -> None:
+    """I1: a contact's address may not be any other user's in the
+    organisation -- a technician's included, whose mail would otherwise be
+    quarantined as ambiguous (`email_intake/identity.py`)."""
+    env = api_env
+    org, h = await _admin(env)
+    x = await _create(env, h, "X")
+    staff = await env.create_user(org, "technician")
+    hx = await _granted_on(env, org, x)
+    for headers in (h, hx):
+        r = await env.client.post(
+            f"/api/v1/clients/{x}/contacts", json={"email": f"{staff}@TEST.local"}, headers=headers
+        )
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"] == ADDRESS_TAKEN
+
+
+async def test_a_contact_cannot_take_an_unseen_clients_contacts_email(api_env) -> None:
+    """I1: a technician limited to X cannot see Y's contacts, so the
+    application's check misses them; the database (`its_contact_email_unique`,
+    migration 0232) refuses the address all the same, on create and on edit."""
+    env = api_env
+    org, h = await _admin(env)
+    x = await _create(env, h, "X")
+    y = await _create(env, h, "Y")
+    theirs = await env.client.post(
+        f"/api/v1/clients/{y}/contacts", json={"email": "bea@y.co"}, headers=h
+    )
+    assert theirs.status_code == 201, theirs.text
+    hx = await _granted_on(env, org, x)
+    created = await env.client.post(
+        f"/api/v1/clients/{x}/contacts", json={"email": "BEA@y.co"}, headers=hx
+    )
+    assert created.status_code == 409, created.text
+    assert created.json()["detail"] == ADDRESS_TAKEN
+    mine = await env.client.post(
+        f"/api/v1/clients/{x}/contacts", json={"email": "cam@x.co"}, headers=hx
+    )
+    assert mine.status_code == 201, mine.text
+    edited = await env.client.patch(
+        f"/api/v1/contacts/{mine.json()['id']}", json={"email": "bea@y.co"}, headers=hx
+    )
+    assert edited.status_code == 409, edited.text
+    assert edited.json()["detail"] == ADDRESS_TAKEN
+
+
+async def test_a_technician_signing_in_with_a_contacts_address_is_never_refused(
+    api_env,
+) -> None:
+    """I1 is ONE-DIRECTIONAL: it holds a contact's address against every other
+    user, never a staff row against a contact's. First-login provisioning
+    (`app/api/deps.py::admit`) writes whatever address the identity provider
+    asserts, and a sign-in must not fail on a contact's data."""
+    env = api_env
+    org, h = await _admin(env)
+    x = await _create(env, h, "X")
+    contact = await env.client.post(
+        f"/api/v1/clients/{x}/contacts", json={"email": "dual@x.co"}, headers=h
+    )
+    assert contact.status_code == 201, contact.text
+    slug = await env.org_slug(org)
+    token = env.idp.token("sub-new-technician", slug, email="dual@x.co")
+    me = await env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200, me.text
+    async with AsyncSession(env.admin_engine) as s:
+        kinds = sorted(
+            (
+                await s.execute(
+                    select(User.kind).where(User.org_id == org, User.email == "dual@x.co")
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert kinds == ["contact", "staff"]
+
+
+async def test_the_uniqueness_triggers_fire_after_rls(api_env) -> None:
+    """M2: `its_client_domains_unique` and `its_contact_email_unique` are
+    SECURITY DEFINER and read every row of an organisation. Fired BEFORE the
+    row's RLS check, a raw INSERT naming ANOTHER organisation would answer
+    "unique violation" or "row-level security" depending on that
+    organisation's data -- an oracle across tenants. AFTER triggers never run
+    for a row RLS refused."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    from app.core.client_scope import ClientScope
+    from app.core.tenancy import org_session
+
+    env = api_env
+    victim, hv = await _admin(env)
+    await _create(env, hv, "Victim Co", email_domains=["victim.co"])
+    victim_staff = await env.create_user(victim, "technician")
+    attacker = await env.create_org("cli-attacker")
+    probes = [
+        (
+            "INSERT INTO clients (id, org_id, name, kind, email_domains) "
+            "VALUES (gen_random_uuid(), :o, 'probe', 'customer', ARRAY['victim.co'])",
+            {"o": victim},
+        ),
+        (
+            "INSERT INTO users (id, org_id, external_subject, email, kind, client_id) "
+            "VALUES (gen_random_uuid(), :o, 'probe', :e, 'contact', :o)",
+            {"o": victim, "e": f"{victim_staff}@test.local"},
+        ),
+    ]
+    for sql, params in probes:
+        try:
+            async with org_session(
+                attacker, clients=ClientScope.all(), engine=env.app_engine
+            ) as session:
+                await session.execute(text(sql), params)
+        except DBAPIError as exc:
+            assert "row-level security" in str(exc), str(exc)
+        else:
+            raise AssertionError(f"{sql} was not refused")
+    async with env.admin_engine.connect() as conn:
+        timing = dict(
+            (
+                await conn.execute(
+                    text(
+                        "SELECT tgname, (tgtype & 2) = 0 FROM pg_trigger "
+                        "WHERE tgname IN ('its_client_domains_unique', 'its_contact_email_unique')"
+                    )
+                )
+            ).all()
+        )
+    assert timing == {"its_client_domains_unique": True, "its_contact_email_unique": True}
+
+
+async def test_an_archived_clients_contact_is_not_edited(api_env) -> None:
+    """M4: as `create_contact` refuses an archived client, so does the edit --
+    re-enabling a contact of a client nobody serves any more included."""
+    env = api_env
+    org, h = await _admin(env)
+    cid = await _create(env, h, "Gone")
+    contact = await env.client.post(
+        f"/api/v1/clients/{cid}/contacts", json={"email": "eva@gone.co"}, headers=h
+    )
+    assert contact.status_code == 201, contact.text
+    assert (await env.client.post(f"/api/v1/clients/{cid}/archive", headers=h)).status_code == 200
+    for body in ({"status": "active"}, {"display_name": "Eva"}):
+        r = await env.client.patch(f"/api/v1/contacts/{contact.json()['id']}", json=body, headers=h)
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"] == "that client is archived"
+
+
+async def test_the_unassigned_client_takes_no_domains_and_no_modules(api_env) -> None:
+    """M6: unknown senders land on the unassigned client because no domain
+    matched (spec §3.3), and it serves nobody, so an optional module there
+    means nothing. Its name may still change."""
+    env = api_env
+    org, h = await _admin(env)
+    async with AsyncSession(env.admin_engine) as s:
+        unassigned = (
+            await s.execute(
+                select(Client.id).where(Client.org_id == org, Client.kind == "unassigned")
+            )
+        ).scalar_one()
+    domains = await env.client.patch(
+        f"/api/v1/clients/{unassigned}", json={"email_domains": ["x.co"]}, headers=h
+    )
+    assert domains.status_code == 422, domains.text
+    assert domains.json()["detail"] == "the unassigned client takes no email domains"
+    modules = await env.client.patch(
+        f"/api/v1/clients/{unassigned}", json={"enabled_modules": ["budget"]}, headers=h
+    )
+    assert modules.status_code == 422, modules.text
+    assert modules.json()["detail"] == "the unassigned client has no optional modules"
+    renamed = await env.client.patch(
+        f"/api/v1/clients/{unassigned}",
+        json={"name": "Sin cliente", "email_domains": [], "enabled_modules": []},
+        headers=h,
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert (renamed.json()["email_domains"], renamed.json()["enabled_modules"]) == ([], [])
+
+
+async def test_archiving_a_client_switches_off_its_contacts(api_env) -> None:
+    """Concern 3: an archived client's people do not keep access through the
+    portal (project 2). Each active contact is disabled in the archive's own
+    transaction and audited; one already disabled is left as it was."""
+    env = api_env
+    org, h = await _admin(env)
+    cid = await _create(env, h, "Leaving")
+    on = (
+        await env.client.post(
+            f"/api/v1/clients/{cid}/contacts", json={"email": "on@l.co"}, headers=h
+        )
+    ).json()["id"]
+    off = (
+        await env.client.post(
+            f"/api/v1/clients/{cid}/contacts", json={"email": "off@l.co"}, headers=h
+        )
+    ).json()["id"]
+    assert (
+        await env.client.patch(f"/api/v1/contacts/{off}", json={"status": "disabled"}, headers=h)
+    ).status_code == 200
+    other = await _create(env, h, "Staying")
+    kept = (
+        await env.client.post(
+            f"/api/v1/clients/{other}/contacts", json={"email": "kept@s.co"}, headers=h
+        )
+    ).json()["id"]
+
+    assert (await env.client.post(f"/api/v1/clients/{cid}/archive", headers=h)).status_code == 200
+
+    async with AsyncSession(env.admin_engine) as s:
+        statuses = dict(
+            (
+                await s.execute(
+                    select(User.id, User.status).where(
+                        User.id.in_([UUID(on), UUID(off), UUID(kept)])
+                    )
+                )
+            ).all()
+        )
+    assert statuses == {UUID(on): "disabled", UUID(off): "disabled", UUID(kept): "active"}
+    archived = [e for e in await _audits(env, org, "contact.updated") if e.meta.get("reason")]
+    assert [(e.target_id, e.meta["reason"], e.meta["changed"]) for e in archived] == [
+        (on, "client_archived", {"status": {"before": "active", "after": "disabled"}})
+    ]
+
+
+async def _archive_racing_an_enrollment(env, *, site_archive: bool) -> int:
+    """Concern 5. An enrollment that has consumed its token but not yet
+    written its device holds the token's row lock. The archive must take that
+    lock BEFORE it counts devices, so it waits, then counts the new device
+    and refuses -- rather than counting zero, archiving, and leaving a machine
+    in a client or site nobody serves.
+
+    Returns the archive's HTTP status once the enrollment has committed."""
+    import asyncio
+
+    from sqlalchemy import update as sql_update
+
+    org, h = await _admin(env)
+    cid = await _create(env, h, "Racing")
+    site = await _principal(env, h, cid)
+    if site_archive:
+        site = (
+            await env.client.post(
+                f"/api/v1/clients/{cid}/sites", json={"name": "Sucursal"}, headers=h
+            )
+        ).json()["id"]
+    token_id, _ = await _mint_token(env, h, site)
+    async with AsyncSession(env.admin_engine) as enrolling:
+        await enrolling.execute(
+            sql_update(EnrollmentToken)
+            .where(EnrollmentToken.id == UUID(token_id))
+            .values(use_count=EnrollmentToken.use_count + 1)
+        )
+        url = f"/api/v1/sites/{site}" if site_archive else f"/api/v1/clients/{cid}/archive"
+        method = "DELETE" if site_archive else "POST"
+        archive = asyncio.create_task(env.client.request(method, url, headers=h))
+        await asyncio.sleep(1.0)
+        waited = not archive.done()
+        enrolling.add(Device(org_id=org, client_id=UUID(cid), site_id=UUID(site), hostname="racer"))
+        await enrolling.commit()
+    response = await asyncio.wait_for(archive, timeout=30)
+    assert waited, "the archive did not wait for the enrollment's token lock"
+    return response.status_code
+
+
+async def test_archiving_a_client_waits_for_an_enrollment_in_flight(api_env) -> None:
+    assert await _archive_racing_an_enrollment(api_env, site_archive=False) == 409
+
+
+async def test_archiving_a_site_waits_for_an_enrollment_in_flight(api_env) -> None:
+    assert await _archive_racing_an_enrollment(api_env, site_archive=True) == 409

@@ -24,6 +24,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.client_scope import ClientScope
+from app.core.identity import ACTIVE_STATUS
 from app.core.tenancy import org_session
 from app.models import User
 from app.modules.email_intake.models import EmailMailbox
@@ -92,11 +93,23 @@ async def resolve_sender(
 
     # Uses ix_users_org_lower_email (migration 0032). LIMIT 2, not LIMIT 1:
     # the second row is what makes ambiguity detectable at all.
+    #
+    # ACTIVE USERS ONLY (MSP clients Task 9 review 1, concern 2). `users.status`
+    # is the admission gate at every console door, and the mailbox is a door
+    # too: a disabled or deleted technician, or a contact switched off (by
+    # hand, or by archiving its client), no longer opens or comments on
+    # tickets by email. Only active users count towards ambiguity either, so a
+    # switched-off account sharing an address does not quarantine the active
+    # one's mail.
     matches = list(
         (
             await session.execute(
                 select(User.id)
-                .where(User.org_id == org_id, func.lower(User.email) == address)
+                .where(
+                    User.org_id == org_id,
+                    func.lower(User.email) == address,
+                    User.status == ACTIVE_STATUS,
+                )
                 .limit(2)
             )
         )
@@ -104,6 +117,17 @@ async def resolve_sender(
         .all()
     )
     if not matches:
+        inactive = (
+            await session.execute(
+                select(User.id)
+                .where(User.org_id == org_id, func.lower(User.email) == address)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if inactive is not None:
+            # Said apart from "unknown", so the intake log answers "why did
+            # this person's mail stop becoming tickets".
+            return SenderResolution(None, f"inactive sender: {address}")
         return SenderResolution(None, f"unknown sender: {address}")
     if len(matches) > 1:
         # NEVER guess which human sent it (spec §5.1). Two users in one org

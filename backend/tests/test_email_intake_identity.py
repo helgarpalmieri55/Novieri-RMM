@@ -240,3 +240,42 @@ async def test_an_unknown_token_resolves_to_none(api_env, a_ticket_for) -> None:
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         other_token = mint_email_token()
         assert await resolve_ticket_by_token(session, org_id, other_token) is None
+
+
+async def _set_status(api_env, user_id, status: str) -> None:
+    from sqlalchemy import update
+
+    from app.models import User
+
+    async with admin_session(engine=api_env.admin_engine) as session:
+        await session.execute(update(User).where(User.id == user_id).values(status=status))
+
+
+async def test_a_disabled_or_deleted_sender_does_not_resolve(api_env) -> None:
+    """MSP clients Task 9 review (concern 2): `users.status` is the admission
+    gate at every console door, and the mailbox is a door too. A switched-off
+    contact or technician no longer opens or comments on tickets by email;
+    the message is quarantined, with a reason that says why."""
+    org_id = await api_env.create_org()
+    disabled = await _seed_user(api_env, org_id, email="gone@acme.test")
+    deleted = await _seed_user(api_env, org_id, email="left@acme.test")
+    await _set_status(api_env, disabled, "disabled")
+    await _set_status(api_env, deleted, "deleted")
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
+        for address in ("gone@acme.test", "left@acme.test"):
+            result = await resolve_sender(session, org_id, address)
+            assert result.user_id is None, address
+            assert result.reason == f"inactive sender: {address}"
+
+
+async def test_an_active_user_is_not_shadowed_by_an_inactive_one(api_env) -> None:
+    """Only active users take part, ambiguity included: a disabled account
+    sharing an address with an active one does not quarantine the active
+    one's mail."""
+    org_id = await api_env.create_org()
+    active = await _seed_user(api_env, org_id, email="shared@acme.test")
+    inactive = await _seed_user(api_env, org_id, email="shared@acme.test")
+    await _set_status(api_env, inactive, "disabled")
+    async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
+        result = await resolve_sender(session, org_id, "Shared@Acme.test")
+    assert result.user_id == active

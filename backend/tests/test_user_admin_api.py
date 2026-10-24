@@ -1765,3 +1765,59 @@ def test_the_settings_the_surface_depends_on_exist() -> None:
     assert "keycloak_admin_client_id" in fields
     assert "keycloak_admin_secret_path" in fields
     assert "console_email_domain" in fields
+
+
+# --------------------------------------------------------------------------- #
+# MSP clients Task 9 review (concern 1): user administration is STAFF only
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_contact_is_not_a_user_this_surface_administers(users_env: Any) -> None:
+    """A contact (`users.kind = 'contact'`, spec §1.3) is managed from its
+    client's page (`/api/v1/contacts/{id}`), never here: it is not listed, and
+    every read and write addressed to its id is a 404 that reaches neither
+    Keycloak (its subject is a placeholder no identity provider issued) nor
+    the row."""
+    org = await users_env.create_org("ua-contact")
+    _sub, headers, _admin_id = await _admin(users_env, org)
+    technician = await _global_role_id(users_env.admin_engine, "technician")
+    async with AsyncSession(users_env.admin_engine, expire_on_commit=False) as session:
+        client = Client(org_id=org, name="Cliente X", kind="customer")
+        session.add(client)
+        await session.flush()
+        contact = User(
+            org_id=org,
+            kind="contact",
+            client_id=client.id,
+            email="ana@x.test",
+            external_subject=f"contact-pending:{uuid4()}",
+        )
+        session.add(contact)
+        await session.flush()
+        grant = UserRole(org_id=org, user_id=contact.id, role_id=technician)
+        session.add(grant)
+        await session.commit()
+
+    listed = await users_env.client.get("/api/v1/users", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert _listed(listed.json(), contact.id) is None
+
+    calls = [
+        ("GET", f"/api/v1/users/{contact.id}/effective-permissions", None),
+        ("POST", f"/api/v1/users/{contact.id}/roles", {"role_id": str(technician)}),
+        ("DELETE", f"/api/v1/users/{contact.id}/roles/{grant.id}", None),
+        ("POST", f"/api/v1/users/{contact.id}/disable", None),
+        ("POST", f"/api/v1/users/{contact.id}/enable", None),
+        ("POST", f"/api/v1/users/{contact.id}/reset-password", None),
+        ("POST", f"/api/v1/users/{contact.id}/resend-enrolment", None),
+        ("DELETE", f"/api/v1/users/{contact.id}", None),
+    ]
+    answers = []
+    for method, path, body in calls:
+        response = await users_env.client.request(method, path, json=body, headers=headers)
+        answers.append((method, path, response.status_code))
+    assert [a for a in answers if a[2] != 404] == []
+    assert users_env.kc.seen == []
+    row = await _user_row(users_env.admin_engine, contact.id)
+    assert row is not None and (row.kind, row.status) == ("contact", "active")
+    assert [a.id for a in await _assignments(users_env.admin_engine, contact.id)] == [grant.id]
