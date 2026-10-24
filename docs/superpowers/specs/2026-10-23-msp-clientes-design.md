@@ -119,6 +119,15 @@ usuario con `kind = contact` con 403, antes de mirar sus permisos. El portal
 (`backend/app/modules/portal/principal.py`) solo admite `kind = contact` o a un
 técnico con permiso de portal, como hoy.
 
+*Precisado al implementar (§7):* un contacto también necesita un permiso de
+portal (`portal.ticket.read` o `portal.ticket.write`) **dentro de su cliente**,
+es decir, en una asignación de su cliente o de todos los clientes; una
+asignación en otro cliente no cuenta. Sin ese permiso el portal responde 403:
+falla cerrado. Los contactos se crean sin asignaciones, y la administración de
+usuarios (`/users`) solo maneja técnicos, así que hoy ningún contacto pasa la
+puerta del portal. Cómo inician sesión, y con qué permiso, lo decide el
+proyecto 2.
+
 **Cómo se autentica un contacto no es parte de este proyecto**: lo define el
 proyecto 2. Aquí los contactos se crean, editan y desactivan como datos, desde la
 ficha del cliente, pero todavía no pueden iniciar sesión.
@@ -249,6 +258,31 @@ cero filas y no puede escribir, igual que hoy pasa sin `app.current_org`
     creación y el archivado de clientes, que ya exigen alcance `all` (§2.1).
     `app/api/deps.py` y `app/modules/portal/principal.py` sí están en la lista,
     solo para resolver la identidad (§2.2).
+- *Precisado al implementar (§7):* la lista es **por función**, no por archivo
+  (`ALL_SCOPE_ALLOWLIST`, `backend/app/core/client_scope.py`), y estas son
+  todas las puertas que convierten un token en una persona y su alcance. Cada
+  una lee la identidad y las asignaciones con `ClientScope.all()`, porque el
+  alcance se calcula justamente a partir de esas filas:
+  - `app/api/deps.py::admit`: la puerta 1, para las peticiones HTTP de la
+    consola y de MCP, y para el inicio de sesión del portal. La consola rechaza
+    a un contacto; el portal lo admite.
+  - `app/core/identity/door.py::read_door_identity`: las puertas 2 y 3, el
+    WebSocket de la consola (`app/api/v1/ws.py`) y el túnel de control remoto
+    (`app/modules/remote/tunnel.py`). Las dos rechazan a un contacto.
+  - `app/core/identity/door.py::person_scope` y `app/core/rbac.py::clients_holding`:
+    dónde tiene una persona ya admitida un permiso concreto. Los usan
+    `require_permission`, la puerta del portal y el servidor MCP, y su
+    resultado solo se intersecta con el alcance de la persona; nunca lo amplía.
+  - `app/core/identity/own_profile.py`: `GET` y `PATCH /me`. El perfil es de la
+    persona, no de un cliente, y solo toca su propia fila de `users` y tablas
+    G (asignaciones, roles, auditoría).
+
+  `app/modules/portal/principal.py` no necesita el alcance "todos": usa `admit`
+  y `person_scope`. El servidor MCP reenvía `X-Client-Id` en cada llamada
+  interna a la API (`app/mcp/invoke.py`), para que la ruta no vuelva a admitir
+  a la persona sin estrechar. Y las rutas de crear y archivar clientes tampoco
+  lo usan: `require_permission_on_every_client` (§7, punto 3) ya les da
+  alcance `all`.
 - `portal_session` (`backend/app/core/tenancy.py:44`) fija además
   `client_scope = list` con el `client_id` del contacto.
 - `admin_session` no cambia: se salta RLS y ya exige escribir un evento de
@@ -487,6 +521,126 @@ reglas del repositorio.
   solo los suyos.
 - **La marca propia en el portal de cada cliente.**
 - **La co-administración,** es decir, TI del cliente en la consola.
+
+---
+
+## 7. Refinamientos durante la implementación
+
+Al construir la fase 1 (plan
+`docs/superpowers/plans/2026-10-23-msp-clientes-fase1-nucleo.md`) el diseño se
+precisó en estos puntos. Ninguno cambia una decisión del operador (P1 a P8):
+cada uno concreta una regla de este documento y dice dónde vive en el código.
+Las dos precisiones de §1.3 (el permiso de portal de un contacto) y de §2.3
+(la lista completa de puertas de identidad) están en su propia sección.
+
+1. **El alcance de una petición son los clientes donde el técnico tiene el
+   permiso de la ruta** (Task 4). §2.2 calculaba un solo alcance con todas las
+   asignaciones. Se calcula por permiso: `require_permission(code)`
+   (`backend/app/api/deps.py`) deja pasar a quien tiene `code` en algún cliente,
+   igual que antes dejaba pasar una asignación de toda la organización, y la
+   petición ve solo los clientes donde lo tiene, intersectados con
+   `X-Client-Id`. Una asignación con `client_id IS NULL` da `all`. Así, un
+   técnico con el rol de técnico en X y de solo lectura en Z ejecuta un trabajo
+   con alcance [X], y los registros de Z dan 404 por RLS, sin una comprobación
+   por registro que alguien pueda olvidar. Las rutas que no piden permiso
+   (`bound_auth_context`) usan todos los clientes donde la persona tiene algún
+   rol.
+
+2. **El cliente interno y su sede "Principal" tienen el id de la
+   organización** (plan, Global Constraints). El cliente `internal` de una
+   organización y su sede Principal tienen `id = organizations.id`; el cliente
+   `unassigned` tiene un id aleatorio. Así, el código que todavía no elige
+   cliente archiva lo que crea en el cliente interno sin consultar nada: en la
+   fase 1, la promoción de IPAM y el aprovisionamiento, que además exigen
+   alcance `all`; y la consola, hasta el selector de la fase 3, envía ese id
+   como cliente y como sede (`frontend/src/lib/internalClient.ts`: tokens de
+   inscripción, enlace de instalación, comandos de instalación, activos a
+   mano, grupos de equipos). Por la misma razón, la sede Principal del cliente
+   interno no se puede archivar (409). El editor de asignaciones de la pestaña
+   Usuarios ya no ofrece grupos de equipos, que dejaron de dar permisos
+   (§2.1): ofrece los clientes de `GET /clients`, o todos; la fase 3 lo
+   rediseña (§3.4).
+
+3. **Escribir configuración global exige alcance "todos los clientes"**
+   (Task 4, decisión C1). Las rutas que escriben configuración de Novieri
+   (organización y correo saliente, técnicos y roles, notificaciones, correo
+   entrante, paquetes del agente, IA y MCP, monitor de errores, crear y archivar
+   clientes...) usan `require_permission_on_every_client(code)`: tener el
+   permiso en un cliente no basta, y una petición estrechada con `X-Client-Id`
+   tampoco pasa, tenga lo que tenga la persona. Responde 403 antes de validar
+   el cuerpo, así que un técnico limitado no aprende nada de un 422. La lista
+   está declarada una vez, en `backend/tests/test_global_writes.py`, que la
+   compara con el router en los dos sentidos. Consecuencia para la fase 3: el
+   selector de cliente no debe enviar `X-Client-Id` en las pantallas de
+   configuración global, o esas escrituras darán 403.
+
+4. **Filas globales (tablas O con `client_id` nulo): se leen con cualquier
+   alcance no vacío y solo se escriben con alcance `all`** (Tasks 6 y 6b). §2.2
+   ya lo decía para la escritura; la implementación añade dos cosas:
+   - La lectura exige un alcance no vacío: una sesión sin alcance tampoco ve
+     las filas globales (falla cerrado, §2.2).
+   - Una escritura rechazada no es silenciosa. RLS reducía a cero filas un
+     `DELETE` de una fila global, y la API respondía 200 y auditaba un borrado
+     que no había ocurrido. `backend/app/core/global_rows.py` rechaza, antes de
+     enviar SQL, borrar, cambiar o crear una fila global con un alcance que no
+     es `all`. La transacción, con su evento de auditoría, se deshace, y la
+     respuesta es 403 con la frase de "todos los clientes" del punto 3. No
+     queda evento de auditoría, porque no ocurrió nada.
+
+5. **Las claves naturales son únicas por cliente** (Task 8b). Una clave única
+   por organización en una tabla cuyas filas son de clientes es una regla que
+   un técnico limitado no puede ver: su comprobación previa corre bajo su RLS y
+   no encuentra la fila del otro cliente, el `INSERT` choca con el índice, y el
+   500 resultante revela, intento a intento, los valores de ese otro cliente.
+   Además, dos clientes no podrían usar el mismo nombre. Por eso cada clave
+   única de una tabla de la fase 1 incluye el cliente, `(org_id, client_id,
+   ...)`: el nombre de un grupo de equipos o de una política de scripts, la
+   dirección de `push_host_key`, el nombre de un destino de respaldo externo,
+   los niveles de `sla_policy`, entre otras. En las tablas O la clave es
+   `UNIQUE NULLS NOT DISTINCT`: las filas globales siguen siendo únicas entre
+   sí, y una fila global y una de cliente pueden compartir valor.
+   `backend/tests/test_client_catalog.py` falla con cualquier clave única de
+   una tabla de la fase 1 que no tenga columna de cliente, salvo tres
+   excepciones razonadas: el sujeto del proveedor de identidad en `users`, el
+   Message-ID del correo entrante y el ordinal de un anillo dentro de un
+   despliegue del agente.
+
+6. **Contactos** (Task 9).
+   - La dirección de correo de un contacto no puede coincidir con la de ningún
+     otro usuario de la organización, técnico o contacto, de cualquier
+     cliente, lo vea o no quien escribe (trigger `its_contact_email_unique`,
+     migración 0232; 409). El correo entrante asigna un mensaje al cliente de
+     su remitente (§3.3), y una dirección compartida lo haría ambiguo. La regla
+     va en un solo sentido: un técnico nunca se rechaza por la dirección de un
+     contacto, para que su primer inicio de sesión no falle por datos de un
+     cliente. Consecuencia: una misma dirección ya no puede ser contacto de dos
+     clientes.
+   - Desactivar un contacto (`PATCH /contacts/{id}`) lo puede hacer el técnico
+     de ese cliente, con `clients.manage` en él. Cambiar el estado de un
+     técnico sigue exigiendo alcance `all`.
+   - Archivar un cliente desactiva sus contactos activos, con auditoría, y un
+     contacto de un cliente archivado no se edita (409).
+   - La administración de usuarios (`/users`) maneja solo técnicos: el id de
+     un contacto da 404 allí.
+
+7. **`DELETE /sites/{id}` archiva la sede, no la borra.** Como los clientes,
+   una sede no se borra: se marca `archived_at`. Da 409 mientras tenga equipos,
+   también retirados, y para la sede Principal del cliente interno (punto 2).
+   Al archivarla se revocan sus tokens de inscripción vivos y se apaga su
+   enlace de instalación, en la misma transacción y con auditoría. Una sede o
+   un cliente archivado no acepta filas nuevas: crear un token, un enlace o un
+   equipo en ella da 409.
+
+8. **Canal en vivo por cliente y un canal global** (Task 10). §2.6 queda así:
+   cada cliente tiene su canal, `ui:{org}:{cliente}`, y la organización tiene
+   además `ui:{org}:global` para los eventos de filas sin cliente; todo
+   alcance se suscribe a él. `ui_channel` exige el cliente
+   (`backend/app/gateway/dispatch.py`): un evento sin cliente va al canal
+   global por una llamada explícita, nunca porque faltara el dato. Con alcance
+   `all` el WebSocket se suscribe al patrón `ui:{org}:*`; con una lista, al
+   canal de cada cliente y al global. El cliente elegido en el selector viaja
+   como parámetro `?client=`: un valor mal formado cierra con 4400, y un
+   alcance vacío con 4403.
 
 ---
 

@@ -112,6 +112,13 @@ one, stop and surface it rather than implementing around it.
 6. **RBAC is checked on every privileged endpoint and every job dispatch.**
    Authorization is server-side; the frontend never gates security.
 
+**5a. Dentro de una organización, todo dato de un cliente está limitado a los
+clientes del alcance de la sesión, y eso lo impone la base de datos mediante
+RLS, no solo el código.** *(Approved by the operator 2026-10-23.)* Un técnico
+limitado a ciertos clientes no puede leer ni escribir filas de otro. Una sesión
+sin alcance ve cero filas. Solo los procesos internos usan el alcance "todos", y
+cada uso está en una lista revisada.
+
 **1b. A device managed over a third-party management protocol (Apple MDM,
 Android EMM) is commanded over that protocol's trust model, never over the
 signed-job engine, and the two paths never meet.** *(Added 2026-08-16, on the
