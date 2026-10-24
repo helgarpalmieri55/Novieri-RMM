@@ -34,7 +34,7 @@ async def _group(
 ) -> UUID:
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         group = DeviceGroup(
-            org_id=org_id, name=name, rules=rules, precedence=precedence
+            org_id=org_id, name=name, rules=rules, precedence=precedence, client_id=org_id
         )
         session.add(group)
         await session.flush()
@@ -44,7 +44,12 @@ async def _group(
 async def _device(app_engine, org_id: UUID, group_id: UUID | None = None) -> UUID:
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         device = Device(
-            org_id=org_id, hostname="r1", os_family="windows", device_group_id=group_id
+    org_id=org_id,
+    hostname="r1",
+    os_family="windows",
+    device_group_id=group_id,
+    client_id=org_id,
+    site_id=org_id,
         )
         session.add(device)
         await session.flush()
@@ -312,10 +317,14 @@ async def test_the_org_id_predicate_is_the_only_scope_on_the_admin_engine(
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         # The neighbour's rule sorts FIRST, so an unscoped evaluator picks it.
         neighbour = DeviceGroup(
-            org_id=theirs, name="aaa-theirs", rules=windows, precedence=-100
+            org_id=theirs, name="aaa-theirs", rules=windows, precedence=-100, client_id=theirs
         )
-        ours = DeviceGroup(org_id=mine, name="zzz-mine", rules=windows, precedence=0)
-        device = Device(org_id=mine, hostname="r1", os_family="windows")
+        ours = DeviceGroup(
+            org_id=mine, name="zzz-mine", rules=windows, precedence=0, client_id=mine
+        )
+        device = Device(
+            org_id=mine, hostname="r1", os_family="windows", client_id=mine, site_id=mine
+        )
         session.add_all([neighbour, ours, device])
         await session.commit()
         neighbour_id, our_id, device_id = neighbour.id, ours.id, device.id

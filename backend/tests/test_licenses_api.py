@@ -70,7 +70,9 @@ async def _create_license(
 
 async def _add_device(api_env: ApiEnv, org_id: UUID, hostname: str = "lic-dev-1") -> UUID:
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, hostname=hostname, os_family="windows")
+        device = Device(
+            org_id=org_id, hostname=hostname, os_family="windows", client_id=org_id, site_id=org_id
+        )
         session.add(device)
         await session.commit()
         return device.id

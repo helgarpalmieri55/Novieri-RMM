@@ -74,6 +74,8 @@ async def _device(
             hostname=hostname,
             os_family="windows",
             device_group_id=group_id,
+            client_id=org_id,
+            site_id=org_id,
         )
         session.add(device)
         await session.commit()
@@ -127,7 +129,7 @@ async def test_every_write_takes_devices_manage_and_technician_is_refused(
     """
     org_id = await api_env.create_org("dgw")
     admin = await _admin(api_env, org_id)
-    group = await _create(api_env, admin, name="servers")
+    group = await _create(api_env, admin, client_id=str(org_id), name="servers")
 
     reader = await api_env.headers(
         org_id, await api_env.create_user(org_id, "read-only")
@@ -139,7 +141,9 @@ async def test_every_write_takes_devices_manage_and_technician_is_refused(
 
     for headers in (reader, tech, nobody):
         assert (
-            await api_env.client.post(GROUPS, headers=headers, json={"name": "x"})
+            await api_env.client.post(
+                GROUPS, headers=headers, json={"name": "x", "client_id": str(org_id)}
+            )
         ).status_code == 403
         assert (
             await api_env.client.patch(
@@ -187,7 +191,12 @@ async def test_create_returns_the_group_and_a_duplicate_name_is_a_409(
     headers = await _admin(api_env, org_id)
 
     created = await _create(
-        api_env, headers, name="servers", description="the loud ones", precedence=3
+        api_env,
+        headers,
+        client_id=str(org_id),
+        name="servers",
+        description="the loud ones",
+        precedence=3,
     )
     assert created["name"] == "servers"
     assert created["precedence"] == 3
@@ -195,7 +204,9 @@ async def test_create_returns_the_group_and_a_duplicate_name_is_a_409(
     assert created["dynamic"] is False
     assert created["archived_at"] is None
 
-    clash = await api_env.client.post(GROUPS, headers=headers, json={"name": "servers"})
+    clash = await api_env.client.post(
+        GROUPS, headers=headers, json={"name": "servers", "client_id": str(org_id)}
+    )
     assert clash.status_code == 409, clash.text
     assert "already exists" in clash.json()["detail"]
 
@@ -239,9 +250,9 @@ async def test_self_parent_and_cycles_of_two_and_three_are_each_422(
     """
     org_id = await api_env.create_org("dgw")
     headers = await _admin(api_env, org_id)
-    a = await _create(api_env, headers, name="a")
-    b = await _create(api_env, headers, name="b", parent_group_id=a["id"])
-    c = await _create(api_env, headers, name="c", parent_group_id=b["id"])
+    a = await _create(api_env, headers, client_id=str(org_id), name="a")
+    b = await _create(api_env, headers, client_id=str(org_id), name="b", parent_group_id=a["id"])
+    c = await _create(api_env, headers, client_id=str(org_id), name="c", parent_group_id=b["id"])
 
     itself = await api_env.client.patch(
         f"{GROUPS}/{a['id']}", headers=headers, json={"parent_group_id": a["id"]}
@@ -279,13 +290,19 @@ async def test_a_reparent_that_would_push_a_leaf_past_the_bound_is_refused(
     parent: str | None = None
     for level in range(MAX_GROUP_DEPTH - 1):
         row = await _create(
-            api_env, headers, name=f"level-{level:02d}", parent_group_id=parent
+            api_env,
+            headers,
+            client_id=str(org_id),
+            name=f"level-{level:02d}",
+            parent_group_id=parent,
         )
         chain.append(row["id"])
         parent = row["id"]
 
-    root = await _create(api_env, headers, name="subtree-root")
-    await _create(api_env, headers, name="subtree-leaf", parent_group_id=root["id"])
+    root = await _create(api_env, headers, client_id=str(org_id), name="subtree-root")
+    await _create(
+        api_env, headers, client_id=str(org_id), name="subtree-leaf", parent_group_id=root["id"]
+    )
 
     too_deep = await api_env.client.patch(
         f"{GROUPS}/{root['id']}", headers=headers, json={"parent_group_id": chain[-1]}
@@ -319,7 +336,7 @@ async def test_a_parent_in_another_org_is_refused_on_the_admin_engine(
     headers = await _admin(api_env, mine)
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        neighbour = DeviceGroup(org_id=theirs, name="their-parent")
+        neighbour = DeviceGroup(org_id=theirs, name="their-parent", client_id=theirs)
         session.add(neighbour)
         await session.commit()
         neighbour_id = neighbour.id
@@ -330,7 +347,11 @@ async def test_a_parent_in_another_org_is_refused_on_the_admin_engine(
         response = await api_env.client.post(
             GROUPS,
             headers=headers,
-            json={"name": "mine", "parent_group_id": str(neighbour_id)},
+            json={
+                "name": "mine",
+                "client_id": str(mine),
+                "parent_group_id": str(neighbour_id),
+            },
         )
     finally:
         api_env.app.state.app_engine = original
@@ -354,7 +375,7 @@ async def test_a_neighbours_group_cannot_be_read_or_written_on_the_admin_engine(
     headers = await _admin(api_env, mine)
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        victim = DeviceGroup(org_id=theirs, name="their-group")
+        victim = DeviceGroup(org_id=theirs, name="their-group", client_id=theirs)
         session.add(victim)
         await session.commit()
         victim_id = victim.id
@@ -398,7 +419,7 @@ async def test_a_neighbours_device_cannot_be_pulled_into_my_group(
     victim_device = await _device(api_env, theirs, "their-laptop")
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        group = DeviceGroup(org_id=mine, name="mine")
+        group = DeviceGroup(org_id=mine, name="mine", client_id=mine)
         session.add(group)
         await session.commit()
         group_id = group.id
@@ -440,7 +461,7 @@ async def test_membership_answers_per_id_and_never_discards_the_rest(
     screen is the normal case."""
     org_id = await api_env.create_org("dgw")
     headers = await _admin(api_env, org_id)
-    group = await _create(api_env, headers, name="servers")
+    group = await _create(api_env, headers, client_id=str(org_id), name="servers")
     first = await _device(api_env, org_id, "one")
     second = await _device(api_env, org_id, "two")
     missing = uuid4()
@@ -494,6 +515,7 @@ async def test_a_rule_bearing_group_refuses_a_hand_placement(api_env: Any) -> No
             org_id=org_id,
             name="dynamic",
             rules={"all": [{"fact": "os_family", "op": "eq", "value": "windows"}]},
+            client_id=org_id,
         )
         session.add(group)
         await session.commit()
@@ -532,11 +554,13 @@ async def _seed_blocker(
                     hostname="member",
                     os_family="windows",
                     device_group_id=group_id,
+                    client_id=org_id,
+                    site_id=org_id,
                 )
             )
         elif kind == "child_groups":
             session.add(
-                DeviceGroup(org_id=org_id, name="child", parent_group_id=group_id)
+                DeviceGroup(org_id=org_id, name="child", parent_group_id=group_id, client_id=org_id)
             )
         elif kind == "policies":
             session.add(
@@ -622,7 +646,7 @@ async def test_each_live_reference_blocks_the_archive_on_its_own(api_env: Any) -
     for kind in kinds:
         org_id = await api_env.create_org("dgw")
         headers = await _admin(api_env, org_id)
-        group = await _create(api_env, headers, name="target")
+        group = await _create(api_env, headers, client_id=str(org_id), name="target")
         await _seed_blocker(api_env, org_id, UUID(group["id"]), kind)
 
         refused = await api_env.client.delete(f"{GROUPS}/{group['id']}", headers=headers)
@@ -675,7 +699,7 @@ async def test_a_role_grant_no_longer_names_a_group(api_env: Any) -> None:
 
     org_id = await api_env.create_org("dgw")
     headers = await _admin(api_env, org_id)
-    group = await _create(api_env, headers, name="target")
+    group = await _create(api_env, headers, client_id=str(org_id), name="target")
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
         role = (
             await session.execute(
@@ -718,7 +742,7 @@ async def test_an_archived_group_leaves_the_list_stays_readable_and_frees_its_na
     """
     org_id = await api_env.create_org("dgw")
     headers = await _admin(api_env, org_id)
-    group = await _create(api_env, headers, name="retired")
+    group = await _create(api_env, headers, client_id=str(org_id), name="retired")
 
     assert (
         await api_env.client.delete(f"{GROUPS}/{group['id']}", headers=headers)
@@ -737,7 +761,7 @@ async def test_an_archived_group_leaves_the_list_stays_readable_and_frees_its_na
     still_readable = await api_env.client.get(f"{GROUPS}/{group['id']}", headers=headers)
     assert still_readable.status_code == 200, still_readable.text
 
-    reused = await _create(api_env, headers, name="retired")
+    reused = await _create(api_env, headers, client_id=str(org_id), name="retired")
     assert reused["id"] != group["id"]
 
     collision = await api_env.client.post(
@@ -774,7 +798,7 @@ async def test_a_group_targeted_job_aimed_at_an_archived_group_finds_no_devices(
     """
     org_id = await api_env.create_org("dgw")
     headers = await _admin(api_env, org_id)
-    group = await _create(api_env, headers, name="doomed")
+    group = await _create(api_env, headers, client_id=str(org_id), name="doomed")
     device_id = await _device(api_env, org_id, "member", UUID(group["id"]))
 
     async def targets() -> list[UUID]:
@@ -822,7 +846,7 @@ async def test_an_archived_group_cannot_become_a_new_rbac_scope(api_env: Any) ->
     """
     org_id = await api_env.create_org("dgw")
     headers = await _admin(api_env, org_id)
-    group = await _create(api_env, headers, name="retired")
+    group = await _create(api_env, headers, client_id=str(org_id), name="retired")
     assert (
         await api_env.client.delete(f"{GROUPS}/{group['id']}", headers=headers)
     ).status_code == 204
@@ -869,7 +893,7 @@ async def test_every_write_appends_exactly_one_event_and_the_chain_still_verifie
     org_id = await api_env.create_org("dgw")
     headers = await _admin(api_env, org_id)
 
-    group = await _create(api_env, headers, name="servers", precedence=2)
+    group = await _create(api_env, headers, client_id=str(org_id), name="servers", precedence=2)
     device_id = await _device(api_env, org_id, "one")
     await api_env.client.post(
         f"{GROUPS}/{group['id']}/members",
@@ -928,8 +952,8 @@ async def test_a_reparent_records_both_ends_of_the_move(api_env: Any) -> None:
     a string because audit metadata is JSON."""
     org_id = await api_env.create_org("dgw")
     headers = await _admin(api_env, org_id)
-    parent = await _create(api_env, headers, name="parent")
-    child = await _create(api_env, headers, name="child")
+    parent = await _create(api_env, headers, client_id=str(org_id), name="parent")
+    child = await _create(api_env, headers, client_id=str(org_id), name="child")
 
     moved = await api_env.client.patch(
         f"{GROUPS}/{child['id']}", headers=headers, json={"parent_group_id": parent["id"]}
@@ -956,7 +980,7 @@ async def test_archived_at_is_a_real_instant_and_unarchive_clears_it(
 ) -> None:
     org_id = await api_env.create_org("dgw")
     headers = await _admin(api_env, org_id)
-    group = await _create(api_env, headers, name="temporary")
+    group = await _create(api_env, headers, client_id=str(org_id), name="temporary")
     before = datetime.now(UTC)
 
     await api_env.client.delete(f"{GROUPS}/{group['id']}", headers=headers)

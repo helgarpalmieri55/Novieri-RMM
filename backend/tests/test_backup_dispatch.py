@@ -93,12 +93,17 @@ async def _setup(
         session.add(user)
         await session.flush()
 
-        group = DeviceGroup(org_id=org.id, name="backup-group")
+        group = DeviceGroup(org_id=org.id, name="backup-group", client_id=org.id)
         session.add(group)
         await session.flush()
 
         device = Device(
-            org_id=org.id, hostname="d1", os_family=os_family, device_group_id=group.id
+    org_id=org.id,
+    hostname="d1",
+    os_family=os_family,
+    device_group_id=group.id,
+    client_id=org.id,
+    site_id=org.id,
         )
         session.add(device)
         await session.flush()
@@ -221,7 +226,9 @@ async def test_no_policy_dispatches_nothing(
         org = Organization(name=slug, slug=slug)
         session.add(org)
         await session.flush()
-        device = Device(org_id=org.id, hostname="d1", os_family="windows")
+        device = Device(
+            org_id=org.id, hostname="d1", os_family="windows", client_id=org.id, site_id=org.id
+        )
         session.add(device)
         await session.commit()
         org_id, device_id = org.id, device.id

@@ -790,12 +790,16 @@ class EnrollmentToken(Base):
 
 
 class InstallLink(Base):
-    """One organisation's install link (install-link spec §1.1).
+    """One site's install link (install-link spec §1.1; one per site since MSP
+    clients spec §1.5).
 
     THE CODE IS NOT HERE. `code_hash` is `sha256(code)` hex; the code itself is
     returned once, by the response that minted it, exactly as an enrollment
     token is. Unique across orgs because the public page and `/enroll/v1`
-    resolve the organisation FROM the hash.
+    resolve the organisation, client and site FROM the hash.
+
+    `networks` IS READ BY NOTHING: the allowed networks are the site's
+    `egress_networks` (`services/install_link.py`'s module docstring).
     """
 
     __tablename__ = "install_links"

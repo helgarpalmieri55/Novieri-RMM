@@ -42,6 +42,11 @@ class TokenCreateRequest(BaseModel):
     (1..2160): it was already required-with-a-default and already capped, and
     tightening a shipped ceiling is a separate decision from closing an open
     one.
+
+    `site_id` IS REQUIRED (MSP clients spec §1.5, §3.2): the token is minted
+    for one site, and a machine enrolled with it lands in that site and its
+    client. The client is derived from the site, never sent: a body that named
+    both could name a pair that does not belong together.
     """
 
     name: str = Field(default="", max_length=200)
@@ -52,6 +57,12 @@ class TokenCreateRequest(BaseModel):
         description=(
             "How many machines this token may enrol. Required, and capped at "
             f"{svc.MAX_TOKEN_USES}: there is no unlimited enrollment token."
+        ),
+    )
+    site_id: UUID = Field(
+        description=(
+            "The site a machine enrolled with this token lands in; its client is the "
+            "site's client"
         ),
     )
 
@@ -65,6 +76,9 @@ class TokenCreatedResponse(BaseModel):
     #: still nullable, because rows issued before the bound existed are
     #: grandfathered rather than rewritten.
     max_uses: int
+    #: Where a machine enrolled with this token lands (MSP clients spec §1.5).
+    client_id: UUID
+    site_id: UUID
 
 
 class TokenListItem(BaseModel):
@@ -188,20 +202,29 @@ async def create_token(
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        issued = await svc.create_token(
-            session,
-            org_id=ctx.org_id,
-            created_by=ctx.user_id,
-            name=body.name,
-            expires_in_hours=body.expires_in_hours,
-            max_uses=body.max_uses,
-        )
+        try:
+            # The site is loaded in THIS session, so RLS hides another
+            # organisation's and one of a client outside the caller's scope:
+            # the same 404 for both.
+            issued = await svc.create_token(
+                session,
+                org_id=ctx.org_id,
+                site_id=body.site_id,
+                created_by=ctx.user_id,
+                name=body.name,
+                expires_in_hours=body.expires_in_hours,
+                max_uses=body.max_uses,
+            )
+        except svc.TokenSiteNotFound:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such site")) from None
     return TokenCreatedResponse(
         id=issued.id,
         token=issued.token,
         name=issued.name,
         expires_at=issued.expires_at,
         max_uses=issued.max_uses,
+        client_id=issued.client_id,
+        site_id=issued.site_id,
     )
 
 

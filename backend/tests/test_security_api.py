@@ -12,7 +12,9 @@ from app.modules.security_logs.api import _filtered_query
 async def _seed(api_env, org_id: UUID, hostname: str = "sec-host") -> UUID:
     now = datetime.now(UTC)
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, hostname=hostname, os_family="windows")
+        device = Device(
+            org_id=org_id, hostname=hostname, os_family="windows", client_id=org_id, site_id=org_id
+        )
         session.add(device)
         await session.flush()
         events = [
@@ -135,7 +137,13 @@ async def test_access_evidence_csv_escapes_free_text_columns(api_env) -> None:
     org_id = await api_env.create_org("sapi")
     now = datetime.now(UTC)
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, hostname="=cmd|' /C calc'!A1", os_family="windows")
+        device = Device(
+            org_id=org_id,
+            hostname="=cmd|' /C calc'!A1",
+            os_family="windows",
+            client_id=org_id,
+            site_id=org_id,
+        )
         session.add(device)
         await session.flush()
         session.add(
@@ -327,7 +335,13 @@ async def test_the_event_query_is_tenant_scoped_where_rls_is_not_the_thing_rejec
             session.add(org)
             await session.flush()
             orgs[key] = org.id
-            device = Device(org_id=org.id, hostname=f"host-{key}", os_family="windows")
+            device = Device(
+                org_id=org.id,
+                hostname=f"host-{key}",
+                os_family="windows",
+                client_id=org.id,
+                site_id=org.id,
+            )
             session.add(device)
             await session.flush()
             devices[key] = device.id

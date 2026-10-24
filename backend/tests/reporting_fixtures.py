@@ -166,6 +166,8 @@ async def seed_device(
             os_family=os_family,
             os_version=os_version,
             device_group_id=device_group_id,
+            client_id=org_id,
+            site_id=org_id,
         )
         session.add(device)
         await session.commit()
@@ -203,7 +205,7 @@ async def seed_device_group(admin_engine: AsyncEngine, org_id: UUID, *, name: st
     from app.models import DeviceGroup
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        group = DeviceGroup(org_id=org_id, name=name)
+        group = DeviceGroup(org_id=org_id, name=name, client_id=org_id)
         session.add(group)
         await session.commit()
         return group.id

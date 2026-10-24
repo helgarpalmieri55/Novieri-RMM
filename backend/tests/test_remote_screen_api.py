@@ -24,7 +24,13 @@ from app.modules.remote.relay import registration_key
 
 async def _device(api_env, org_id: UUID, *, capabilities: dict | None = None) -> UUID:
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
-        dev = Device(org_id=org_id, hostname="wks-screen", os_family="windows")
+        dev = Device(
+            org_id=org_id,
+            hostname="wks-screen",
+            os_family="windows",
+            client_id=org_id,
+            site_id=org_id,
+        )
         s.add(dev)
         await s.flush()
         if capabilities is not None:

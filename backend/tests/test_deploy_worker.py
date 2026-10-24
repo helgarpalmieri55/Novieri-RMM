@@ -54,7 +54,9 @@ async def _make_windowed_deployment(
     have the package installed, so a real (unmocked) dispatch would produce
     exactly one dispatched job when its window is open."""
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, hostname="d1", os_family="windows")
+        device = Device(
+            org_id=org_id, hostname="d1", os_family="windows", client_id=org_id, site_id=org_id
+        )
         session.add(device)
         await session.flush()
 

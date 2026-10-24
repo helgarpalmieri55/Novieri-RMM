@@ -197,6 +197,11 @@ async def start_provision_run(
 
     run = ProvisionRun(
         org_id=org_id,
+        # The internal client, like the token below (PHASE 2: the machine's
+        # client). Not NULL, which an O table reads as every client: the agent
+        # enrols under its token's client alone, and binding this run to the
+        # device it produced is an UPDATE that client's scope has to reach.
+        client_id=org_id,
         profile_id=profile_id,
         target_ref=target_ref,
         state="pending",
@@ -210,6 +215,11 @@ async def start_provision_run(
     issued = await create_token(
         session,
         org_id=org_id,
+        # PHASE 2: the client the machine is provisioned for (plan "Fuera de
+        # esta fase"). Imaging is hidden in phase 1 (MSP clients spec §1.4), so
+        # the machine joins the internal client's Principal site, whose id is
+        # the organisation's (plan Global Constraints: id convention).
+        site_id=org_id,
         created_by=actor_id,
         name=f"provision:{run.id}",
         expires_in_hours=24,

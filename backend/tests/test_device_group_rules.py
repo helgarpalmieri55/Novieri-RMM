@@ -84,6 +84,8 @@ async def _device_with_doc(
             hostname=hostname,
             os_family="windows",
             device_group_id=group_id,
+            client_id=org_id,
+            site_id=org_id,
         )
         session.add(device)
         await session.flush()
@@ -134,7 +136,7 @@ async def test_a_rules_document_creates_a_dynamic_group_and_reads_back_typed(
     org_id = await api_env.create_org("dgr")
     headers = await _admin(api_env, org_id)
 
-    created = await _create(api_env, headers, name="windows", rules=WINDOWS)
+    created = await _create(api_env, headers, client_id=str(org_id), name="windows", rules=WINDOWS)
     assert created["dynamic"] is True
 
     detail = await api_env.client.get(f"{GROUPS}/{created['id']}", headers=headers)
@@ -159,12 +161,12 @@ async def test_a_typod_fact_under_ne_is_refused_at_authorship(api_env: Any) -> N
     typo = {"all": [{"fact": "os_familly", "op": "ne", "value": "windows"}]}
 
     created = await api_env.client.post(
-        GROUPS, headers=headers, json={"name": "oops", "rules": typo}
+        GROUPS, headers=headers, json={"name": "oops", "client_id": str(org_id), "rules": typo}
     )
     assert created.status_code == 422, created.text
     assert "os_familly" in created.text
 
-    live = await _create(api_env, headers, name="fine")
+    live = await _create(api_env, headers, client_id=str(org_id), name="fine")
     updated = await api_env.client.patch(
         f"{GROUPS}/{live['id']}", headers=headers, json={"rules": typo}
     )
@@ -194,7 +196,9 @@ async def test_the_documents_the_evaluator_cannot_run_are_each_422(
 
     async def refused(rules: Any) -> int:
         response = await api_env.client.post(
-            GROUPS, headers=headers, json={"name": f"g-{uuid4().hex[:8]}", "rules": rules}
+            GROUPS,
+            headers=headers,
+            json={"name": f"g-{uuid4().hex[:8]}", "client_id": str(org_id), "rules": rules},
         )
         return response.status_code
 
@@ -242,7 +246,7 @@ async def test_preview_counts_exactly_writes_nothing_and_truncates_its_sample(
     """
     org_id = await api_env.create_org("dgr")
     headers = await _admin(api_env, org_id)
-    home = await _create(api_env, headers, name="home")
+    home = await _create(api_env, headers, client_id=str(org_id), name="home")
 
     for index in range(30):
         await _device_with_doc(
@@ -342,7 +346,7 @@ async def test_preview_takes_devices_manage_and_not_devices_read(api_env: Any) -
 
     # Non-vacuous: `read-only` holds `devices.read` and the DETAIL route answers
     # it, so the 403s above are about this route's gate and not about the token.
-    group = await _create(api_env, admin, name="g")
+    group = await _create(api_env, admin, client_id=str(org_id), name="g")
     assert (
         await api_env.client.get(f"{GROUPS}/{group['id']}", headers=reader)
     ).status_code == 200
@@ -432,7 +436,7 @@ async def test_preview_for_a_neighbours_group_is_a_404_on_the_admin_engine(
     headers = await _admin(api_env, mine)
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        victim = DeviceGroup(org_id=theirs, name="their-group")
+        victim = DeviceGroup(org_id=theirs, name="their-group", client_id=theirs)
         session.add(victim)
         await session.commit()
         victim_id = victim.id
@@ -467,7 +471,7 @@ async def test_rules_are_refused_on_a_group_holding_hand_placed_devices(
     """
     org_id = await api_env.create_org("dgr")
     headers = await _admin(api_env, org_id)
-    group = await _create(api_env, headers, name="hand-picked")
+    group = await _create(api_env, headers, client_id=str(org_id), name="hand-picked")
     for index in range(3):
         await _device_with_doc(
             api_env, org_id, f"h-{index}", doc=FULL_DOC, group_id=UUID(group["id"])
@@ -512,7 +516,9 @@ async def test_clearing_the_rules_moves_nobody_and_makes_the_group_static(
     """
     org_id = await api_env.create_org("dgr")
     headers = await _admin(api_env, org_id)
-    group = await _create(api_env, headers, name="rule-driven", rules=WINDOWS)
+    group = await _create(
+        api_env, headers, client_id=str(org_id), name="rule-driven", rules=WINDOWS
+    )
     held = await _device_with_doc(
         api_env, org_id, "claimed", doc=FULL_DOC, group_id=UUID(group["id"])
     )
@@ -547,7 +553,9 @@ async def test_an_edit_that_does_not_mention_rules_leaves_them_alone(
     document would be the quietest fleet re-segmentation in the product."""
     org_id = await api_env.create_org("dgr")
     headers = await _admin(api_env, org_id)
-    group = await _create(api_env, headers, name="rule-driven", rules=WINDOWS)
+    group = await _create(
+        api_env, headers, client_id=str(org_id), name="rule-driven", rules=WINDOWS
+    )
 
     renamed = await api_env.client.patch(
         f"{GROUPS}/{group['id']}", headers=headers, json={"name": "renamed"}
@@ -571,7 +579,7 @@ async def test_a_rules_write_records_the_document_on_both_sides(api_env: Any) ->
     """
     org_id = await api_env.create_org("dgr")
     headers = await _admin(api_env, org_id)
-    group = await _create(api_env, headers, name="win", rules=WINDOWS)
+    group = await _create(api_env, headers, client_id=str(org_id), name="win", rules=WINDOWS)
     later = {"all": [{"fact": "os_family", "op": "eq", "value": "linux"}]}
     assert (
         await api_env.client.patch(
@@ -617,8 +625,10 @@ async def test_a_static_group_is_written_with_sql_null_and_not_jsonb_null(
     """
     org_id = await api_env.create_org("dgr")
     headers = await _admin(api_env, org_id)
-    static = await _create(api_env, headers, name="hand-picked")
-    dynamic = await _create(api_env, headers, name="rule-driven", rules=WINDOWS)
+    static = await _create(api_env, headers, client_id=str(org_id), name="hand-picked")
+    dynamic = await _create(
+        api_env, headers, client_id=str(org_id), name="rule-driven", rules=WINDOWS
+    )
 
     async with AsyncSession(api_env.admin_engine) as session:
         kinds = dict(

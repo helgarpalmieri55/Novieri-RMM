@@ -57,7 +57,7 @@ from app.core.i18n import N_, tr, tr_marked
 from app.core.storage import ObjectStore
 from app.core.vault import VaultService
 from app.jobs.engine import DeviceAwaitingReview, JobEngine
-from app.models import Job
+from app.models import Device, Job
 from app.models.core import AgentRelease
 from app.modules.agent_push import credential_realm
 from app.modules.agent_push import host_key as host_key_service
@@ -812,9 +812,21 @@ async def _dispatch_install(
     # A single-use, <=30-minute token (spec §7.1). It DELIVERS no identity: the
     # installed agent enrols itself with its own keypair, and the token's name
     # ties the eventual enrolment back to this push for `push.enrolled`.
+    #
+    # THE TARGET ROW'S SITE (MSP clients spec §1.5). The agent enrols under
+    # the token's client alone, so the asset row it is meant to join has to
+    # be of that client -- it is, because the token is minted for its site.
+    target_site = (
+        await session.execute(
+            select(Device.site_id).where(
+                Device.id == decision.device_id, Device.org_id == org_id
+            )
+        )
+    ).scalar_one()
     issued = await create_token(
         session,
         org_id=org_id,
+        site_id=target_site,
         created_by=actor_id,
         name=f"push:{batch_id}:{decision.address}",
         expires_in_hours=None,

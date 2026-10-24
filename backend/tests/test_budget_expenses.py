@@ -795,7 +795,9 @@ async def test_bare_link_type_patch_re_resolves_successfully_against_the_new_typ
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         cat = await _seed_category(session, org_id, user_id)
-        device = Device(org_id=org_id, hostname="host-1", os_family="linux")
+        device = Device(
+            org_id=org_id, hostname="host-1", os_family="linux", client_id=org_id, site_id=org_id
+        )
         session.add(device)
         await session.flush()
 

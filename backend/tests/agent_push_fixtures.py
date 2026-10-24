@@ -123,6 +123,8 @@ async def seed_asset(
             provenance=provenance,
             fqdn=fqdn,
             review_state=review_state,
+            client_id=org_id,
+            site_id=org_id,
         )
         session.add(device)
         await session.commit()

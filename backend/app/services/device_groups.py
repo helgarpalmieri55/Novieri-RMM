@@ -42,12 +42,14 @@ from uuid import UUID
 from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.models import (
     BackupPolicy,
+    Client,
     Credential,
     Device,
     DeviceGroup,
@@ -362,10 +364,38 @@ async def _subtree_height(
     return height
 
 
+#: SQLSTATE `check_violation`: what `its_group_client_guard` (migration 0231)
+#: raises when a group's parent is of another client.
+_CHECK_VIOLATION = "23514"
+
+
+def _parent_of_another_client() -> DeviceGroupError:
+    return DeviceGroupError(422, tr("the parent group belongs to another client"))
+
+
+async def _flush_guarded(session: AsyncSession) -> None:
+    """Flush, answering the client guard as the refusal it is.
+
+    `_assert_parent_is_legal` refuses a parent of another client before any
+    write; the trigger is what holds when two requests race past it, and its
+    `check_violation` is a 422 with the same sentence, not a 500.
+    """
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        if getattr(exc.orig, "sqlstate", None) == _CHECK_VIOLATION:
+            raise _parent_of_another_client() from None
+        raise
+
+
 async def _assert_parent_is_legal(
-    session: AsyncSession, org_id: UUID, group_id: UUID, parent_id: UUID
+    session: AsyncSession, org_id: UUID, group_id: UUID, parent_id: UUID, *, client_id: UUID
 ) -> None:
-    """Self-parent, cycle, cross-org and depth -- all four at write time.
+    """Self-parent, cycle, cross-org, cross-client and depth -- all at write time.
+
+    A GROUP ORGANISES ONE CLIENT'S DEVICES (MSP clients spec §1.5), so its
+    parent has to be of the same client: `its_group_client_guard` holds that in
+    the database, and this says it first, with a sentence.
 
     `parent_group_id` is a bare self-FK with no constraint of any kind, so the
     schema permits every one of these. `health/resolution.py` SURVIVES a cycle
@@ -391,6 +421,8 @@ async def _assert_parent_is_legal(
         raise DeviceGroupError(422, tr("no such parent group in this organization"))
     if parent.archived_at is not None:
         raise DeviceGroupError(422, tr("the parent group is archived"))
+    if parent.client_id != client_id:
+        raise _parent_of_another_client()
 
     ancestor = parent.parent_group_id
     walked = 0
@@ -493,6 +525,7 @@ async def create_device_group(
     session: AsyncSession,
     *,
     org_id: UUID,
+    client_id: UUID,
     actor_id: UUID,
     name: str,
     description: str = "",
@@ -513,12 +546,25 @@ async def create_device_group(
 
     A NEW GROUP CANNOT COLLIDE WITH THE STATIC-XOR-DYNAMIC RULE, because it
     holds no devices yet. `update_device_group` is where that refusal lives.
+
+    `client_id` IS REQUIRED (MSP clients spec §1.5): a group organises one
+    client's devices. A client the session cannot see -- another
+    organisation's, or one outside the caller's scope -- is a 404, the same
+    for both; its parent, if any, has to be of the same client.
     """
+    visible = (
+        await session.execute(
+            select(Client.id).where(Client.id == client_id, Client.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+    if visible is None:
+        raise DeviceGroupError(404, tr("unknown client"))
     if not await _live_name_is_free(session, org_id, name, excluding=None):
         raise DeviceGroupError(409, tr("a group of that name already exists"))
 
     group = DeviceGroup(
         org_id=org_id,
+        client_id=client_id,
         name=name,
         description=description,
         precedence=precedence,
@@ -527,9 +573,11 @@ async def create_device_group(
     session.add(group)
     await session.flush()
     if parent_group_id is not None:
-        await _assert_parent_is_legal(session, org_id, group.id, parent_group_id)
+        await _assert_parent_is_legal(
+            session, org_id, group.id, parent_group_id, client_id=client_id
+        )
         group.parent_group_id = parent_group_id
-        await session.flush()
+        await _flush_guarded(session)
 
     await audit_service.record(
         session,
@@ -615,7 +663,9 @@ async def update_device_group(
                 raise DeviceGroupError(409, tr("a group of that name already exists"))
         if field == "parent_group_id":
             if new is not None:
-                await _assert_parent_is_legal(session, org_id, group_id, new)
+                await _assert_parent_is_legal(
+                    session, org_id, group_id, new, client_id=group.client_id
+                )
             reparented = True
         if field == "rules" and new is not None:
             # STATIC XOR DYNAMIC, ENFORCED (§5.2, §10.3). `evaluate_rules`
@@ -665,7 +715,7 @@ async def update_device_group(
         target_id=str(group_id),
         metadata={"changed": recorded},
     )
-    await session.flush()
+    await _flush_guarded(session)
     return group, reparented
 
 
@@ -1276,7 +1326,12 @@ async def reevaluate_org_membership(
             if doc is None:
                 without_inventory += 1
                 continue
-            claimed = claim_group(groups, doc)
+            # ONLY THE DEVICE'S OWN CLIENT'S GROUPS (MSP clients spec §1.5),
+            # as in `evaluate_rules`: the list is fetched once per org, so the
+            # client is filtered here, in the same `(precedence, name)` order.
+            claimed = claim_group(
+                [g for g in groups if g.client_id == device.client_id], doc
+            )
             # NO MATCH PRESERVES THE PLACEMENT. `evaluate_rules` only ever
             # ASSIGNS -- it never unassigns -- and §7.2 depends on exactly
             # that: clearing a group's rules has to leave its members where
@@ -1546,6 +1601,11 @@ async def add_group_members(
             continue
         if device.device_group_id == group.id:
             results.append(MemberResult(device_id, False, "already a member"))
+            continue
+        if device.client_id != group.client_id:
+            # A group organises one client's devices (MSP clients spec §1.5);
+            # `its_device_client_guard` would refuse the whole flush.
+            results.append(MemberResult(device_id, False, "belongs to another client"))
             continue
         device.device_group_id = group.id
         session.add(device)

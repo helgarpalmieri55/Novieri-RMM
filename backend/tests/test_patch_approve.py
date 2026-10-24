@@ -39,8 +39,8 @@ async def _setup(
         user = User(org_id=org.id, external_subject=f"s-{slug}", email=f"{slug}@x.test")
         session.add(user)
 
-        test_group = DeviceGroup(org_id=org.id, name="test-ring-group")
-        broad_group = DeviceGroup(org_id=org.id, name="broad-ring-group")
+        test_group = DeviceGroup(org_id=org.id, name="test-ring-group", client_id=org.id)
+        broad_group = DeviceGroup(org_id=org.id, name="broad-ring-group", client_id=org.id)
         session.add_all([test_group, broad_group])
         await session.flush()
 
@@ -54,10 +54,14 @@ async def _setup(
         device_test = Device(
             org_id=org.id, hostname="h-test", os_family="windows",
             device_group_id=test_group.id,
+            client_id=org.id,
+            site_id=org.id,
         )
         device_broad = Device(
             org_id=org.id, hostname="h-broad", os_family="windows",
             device_group_id=broad_group.id,
+            client_id=org.id,
+            site_id=org.id,
         )
         session.add_all([device_test, device_broad])
         await session.flush()
@@ -162,6 +166,8 @@ async def test_revoke_flips_approved_back_to_missing_but_leaves_installed(
         installed_device = Device(
             org_id=org_id, hostname="h-installed", os_family="windows",
             device_group_id=(await session.get(Device, device_test_id)).device_group_id,
+            client_id=org_id,
+            site_id=org_id,
         )
         session.add(installed_device)
         await session.flush()

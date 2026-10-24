@@ -20,7 +20,9 @@ async def _org_user(admin_engine: AsyncEngine) -> tuple[UUID, UUID, UUID]:
         session.add(org)
         await session.flush()
         user = User(org_id=org.id, external_subject=f"s-{slug}", email=f"{slug}@x.test")
-        device = Device(org_id=org.id, hostname="doc-dev", os_family="linux")
+        device = Device(
+            org_id=org.id, hostname="doc-dev", os_family="linux", client_id=org.id, site_id=org.id
+        )
         session.add_all([user, device])
         await session.commit()
         return org.id, user.id, device.id

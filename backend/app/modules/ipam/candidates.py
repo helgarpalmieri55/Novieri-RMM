@@ -270,6 +270,11 @@ async def promote(
             # moves is when it runs.
             id=uuid7(),
             org_id=org_id,
+            # PHASE 2: the subnet's client/site (plan "Fuera de esta fase").
+            # IPAM has no client yet, so the internal client and its Principal
+            # site, which carry the organisation's id (id convention).
+            client_id=org_id,
+            site_id=org_id,
             source="discovery",
             # A PERSON PICKED THIS ONE. That is the whole difference between
             # this path and `auto_create_from_sweep`, and after 2026-08-26 it is
@@ -557,6 +562,11 @@ async def auto_create_from_sweep(
 
         device = Device(
             org_id=org_id,
+            # PHASE 2: the subnet's client/site (plan "Fuera de esta fase").
+            # IPAM has no client yet, so the internal client and its Principal
+            # site, which carry the organisation's id (id convention).
+            client_id=org_id,
+            site_id=org_id,
             # HOW it arrived is still discovery; WHO stood behind it is nobody.
             source="discovery",
             provenance="sweep",

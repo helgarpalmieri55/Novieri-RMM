@@ -38,12 +38,20 @@ def peer_client(api_env: Any, peer: str) -> httpx.AsyncClient:
     )
 
 
+def link_path(site_id: UUID, tail: str = "") -> str:
+    """A site's install link route (MSP clients spec §1.5: one link per site).
+    The organisation's Principal site has the organisation's id, so
+    `link_path(org_id)` is the link every test before per-site links used."""
+    return f"/api/v1/sites/{site_id}/install-link{tail}"
+
+
 async def switch_on(api_env: Any, org_id: UUID, networks: list[str], **extra: Any) -> str:
-    """Switch the link on through the API as an org-admin; return the code."""
+    """Switch the Principal site's link on through the API as an org-admin;
+    return the code."""
     admin = await api_env.create_user(org_id, "org-admin")
     headers = await api_env.headers(org_id, admin)
     body = {"enabled": True, "networks": networks, "hourly_limit": 50} | extra
-    response = await api_env.client.put("/api/v1/install-link", json=body, headers=headers)
+    response = await api_env.client.put(link_path(org_id), json=body, headers=headers)
     assert response.status_code == 200, response.text
     url = response.json()["url"]
     assert url is not None

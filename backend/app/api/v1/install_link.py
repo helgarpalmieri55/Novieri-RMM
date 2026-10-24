@@ -1,27 +1,40 @@
-"""The install link's settings (spec 2026-09-28 §1.1).
+"""A site's install link settings (spec 2026-09-28 §1.1).
 
 GATED `enrollment.link.manage` ON EVERY VERB, INCLUDING THE READ: the settings
 say which networks may enrol machines into this organisation, which is not a
 fact a technician needs.
+
+ADDRESSED BY SITE (MSP clients spec §1.5, §3.2): `/sites/{site_id}/install-
+link`. There is one link per site, and a machine that joins through it lands in
+that site and its client. The organisation-level `/install-link` this replaced
+is gone, so it answers 404: a console that still calls it cannot switch on a
+link that would enrol machines into no client. A site the caller cannot see --
+another organisation's, or a client outside their scope -- is a 404 too.
 """
 
 from datetime import UTC, datetime
 from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.deps import AuthContext, require_permission
+from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.modules.agent_distribution import msi as msi_svc
 from app.modules.agent_distribution.api import _object_store
 from app.services import install_link as svc
 
-router = APIRouter(prefix="/install-link", tags=["install-link"])
+router = APIRouter(prefix="/sites/{site_id}/install-link", tags=["install-link"])
+
+
+def _no_site() -> HTTPException:
+    return HTTPException(status.HTTP_404_NOT_FOUND, tr("no such site"))
 
 
 class InstallLinkOut(BaseModel):
-    """This organisation's install link, WITHOUT the link itself.
+    """One site's install link, WITHOUT the link itself.
 
     The full link is shown once, by the response that created its code
     (`InstallLinkSaved.url`); after that only its hash exists.
@@ -31,7 +44,9 @@ class InstallLinkOut(BaseModel):
 
     enabled: bool = Field(description="On right now: switched on and not past its switch-off time")
     has_code: bool = Field(description="Whether a link has ever been generated")
-    networks: list[str] = Field(description="The networks a request must come from")
+    networks: list[str] = Field(
+        description="The networks a request must come from: the site's egress networks"
+    )
     disable_at: datetime | None = Field(description="When the link switches itself off")
     hourly_limit: int = Field(description="Most machines that may join per rolling hour")
     enabled_at: datetime | None = Field(description="When it was switched on, while it is on")
@@ -97,22 +112,29 @@ def _base(request: Request) -> str:
 
 @router.get("", response_model=InstallLinkOut)
 async def get_install_link(
+    site_id: UUID,
     request: Request,
     ctx: AuthContext = Depends(require_permission("enrollment.link.manage")),
 ) -> InstallLinkOut:
-    """The install link's settings: whether it is on, where it answers, its limit."""
+    """A site's install link settings: whether it is on, where it answers, its limit."""
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        return _out(await svc.view(session, ctx.org_id, datetime.now(UTC)))
+        try:
+            return _out(await svc.view(session, site_id, datetime.now(UTC)))
+        except svc.LinkSiteNotFound:
+            raise _no_site() from None
 
 
 @router.put("", response_model=InstallLinkSaved)
 async def put_install_link(
+    site_id: UUID,
     body: InstallLinkUpdate,
     request: Request,
     ctx: AuthContext = Depends(require_permission("enrollment.link.manage")),
 ) -> InstallLinkSaved:
+    """Change a site's install link. `networks` are written to the site's
+    egress networks, which are what the link answers from."""
     now = datetime.now(UTC)
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -120,7 +142,7 @@ async def put_install_link(
         try:
             minted = await svc.save(
                 session,
-                org_id=ctx.org_id,
+                site_id=site_id,
                 actor_id=ctx.user_id,
                 enabled=body.enabled,
                 networks=body.networks,
@@ -129,14 +151,17 @@ async def put_install_link(
                 now=now,
                 trusted_proxies=request.app.state.trusted_proxies,
             )
+        except svc.LinkSiteNotFound:
+            raise _no_site() from None
         except svc.InstallLinkError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
-        view = await svc.view(session, ctx.org_id, now)
+        view = await svc.view(session, site_id, now)
     return _saved(view, svc.link_url(_base(request), minted) if minted else None)
 
 
 @router.post("/regenerate", response_model=InstallLinkSaved)
 async def regenerate_install_link(
+    site_id: UUID,
     request: Request,
     ctx: AuthContext = Depends(require_permission("enrollment.link.manage")),
 ) -> InstallLinkSaved:
@@ -144,8 +169,11 @@ async def regenerate_install_link(
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        code = await svc.regenerate(session, org_id=ctx.org_id, actor_id=ctx.user_id, now=now)
-        view = await svc.view(session, ctx.org_id, now)
+        try:
+            code = await svc.regenerate(session, site_id=site_id, actor_id=ctx.user_id, now=now)
+        except svc.LinkSiteNotFound:
+            raise _no_site() from None
+        view = await svc.view(session, site_id, now)
     return _saved(view, svc.link_url(_base(request), code))
 
 
@@ -155,12 +183,13 @@ async def regenerate_install_link(
     responses={200: {"content": {msi_svc.MSI_MEDIA_TYPE: {}}}},
 )
 async def download_install_link_msi(
+    site_id: UUID,
     body: InstallLinkMsiRequest,
     request: Request,
     ctx: AuthContext = Depends(require_permission("enrollment.link.manage")),
 ) -> Response:
     """The MSI for Group Policy software installation: the published agent and
-    this organisation's install link, built for this request and not kept.
+    this site's install link, built for this request and not kept.
 
     The console address is ITS_PUBLIC_CONSOLE_URL and nothing else -- never
     `_base(request)`'s Host fallback: the file goes to every computer in the
@@ -172,6 +201,7 @@ async def download_install_link_msi(
             lambda: org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients),
             _object_store(request),
             org_id=ctx.org_id,
+            site_id=site_id,
             actor_id=ctx.user_id,
             code=body.code,
             arch=body.arch,

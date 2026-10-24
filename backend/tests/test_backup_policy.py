@@ -13,10 +13,17 @@ async def _setup(admin_engine: AsyncEngine):
         org = Organization(name="bp", slug=f"bp-{uuid4().hex[:6]}")
         s.add(org)
         await s.flush()
-        grp = DeviceGroup(org_id=org.id, name="servers")
+        grp = DeviceGroup(org_id=org.id, name="servers", client_id=org.id)
         s.add(grp)
         await s.flush()
-        dev = Device(org_id=org.id, hostname="h", os_family="linux", device_group_id=grp.id)
+        dev = Device(
+            org_id=org.id,
+            hostname="h",
+            os_family="linux",
+            device_group_id=grp.id,
+            client_id=org.id,
+            site_id=org.id,
+        )
         s.add(dev)
         repo = BackupRepository(
             org_id=org.id, name="primary", storage_ref="x", encryption_key_ref="x"

@@ -60,6 +60,8 @@ async def test_the_auto_off_beat_records_a_passed_switch_off_once(
                     networks=["10.0.0.0/8"],
                     disable_at=NOW - timedelta(minutes=1),
                     enabled_at=NOW - timedelta(hours=3),
+                    client_id=due,
+                    site_id=due,
                 ),
                 InstallLink(
                     org_id=later,
@@ -68,6 +70,8 @@ async def test_the_auto_off_beat_records_a_passed_switch_off_once(
                     networks=["10.0.0.0/8"],
                     disable_at=NOW + timedelta(days=1),
                     enabled_at=NOW - timedelta(hours=3),
+                    client_id=later,
+                    site_id=later,
                 ),
             ]
         )

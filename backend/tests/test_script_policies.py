@@ -305,7 +305,7 @@ async def test_the_api_is_gated_and_validates(api_env) -> None:
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
         from app.models import DeviceGroup
 
-        group = DeviceGroup(org_id=org_id, name="laptops")
+        group = DeviceGroup(org_id=org_id, name="laptops", client_id=org_id)
         script = Script(
             org_id=org_id, name="s", os_family="windows", interpreter="powershell", body="exit 0"
         )

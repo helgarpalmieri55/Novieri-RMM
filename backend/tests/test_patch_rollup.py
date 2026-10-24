@@ -39,7 +39,9 @@ from app.modules.patch.reporting import device_rollup, update_rollup
 
 async def _device(api_env, org_id: UUID, hostname: str, os_family: str = "windows") -> UUID:
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
-        dev = Device(org_id=org_id, hostname=hostname, os_family=os_family)
+        dev = Device(
+            org_id=org_id, hostname=hostname, os_family=os_family, client_id=org_id, site_id=org_id
+        )
         s.add(dev)
         await s.commit()
         return dev.id
@@ -610,7 +612,7 @@ async def test_cleared_rings_are_in_rollout_order_the_policies_declare(
     patch_id = await _patch(api_env, org_id, "KB-ORDER")
     await _status(api_env, org_id, device_id, patch_id, "missing")
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
-        group = DeviceGroup(org_id=org_id, name="pilot-group")
+        group = DeviceGroup(org_id=org_id, name="pilot-group", client_id=org_id)
         s.add(group)
         await s.flush()
         s.add(PatchPolicy(org_id=org_id, device_group_id=None, ring_name="broad", ring_order=100))

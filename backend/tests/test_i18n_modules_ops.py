@@ -24,10 +24,10 @@ from app.modules.agent_distribution import msi as msi_svc
 from app.modules.agent_push import preflight as push_preflight
 from app.services import msi_build
 from tests.i18n_ops_support import (
-    MSI_URL,
     PUSH,
     RELEASES,
     active_rollout_release,
+    msi_url,
     msi_world,
     push_world,
 )
@@ -143,7 +143,8 @@ async def test_agent_distribution_a_release_that_does_not_exist(
         headers,
         status=404,
         english="no such agent release",
-        json_body={},
+        # A well-formed body, so the 404 is the release's: it is looked up first.
+        json_body={"site_id": str(uuid4())},
     )
 
 
@@ -303,12 +304,12 @@ async def test_agent_distribution_the_msi_503_is_whole_in_spanish(
 ) -> None:
     """The builder's refusal reaches an administrator inside a 503. Under `es` the
     WHOLE detail is Spanish: msi.py's wrapper sentence and the builder's reason."""
-    _org, code, _release, _store, admin = await msi_world(api_env, monkeypatch)
+    org, code, _release, _store, admin = await msi_world(api_env, monkeypatch)
     monkeypatch.setattr(msi_build.shutil, "which", lambda _name: None)
     body = {"code": code, "arch": "amd64"}
 
     english = await api_env.client.post(
-        MSI_URL, json=body, headers={**admin, "Accept-Language": "en"}
+        msi_url(org), json=body, headers={**admin, "Accept-Language": "en"}
     )
     assert english.status_code == 503
     assert english.json()["detail"] == (
@@ -317,7 +318,7 @@ async def test_agent_distribution_the_msi_503_is_whole_in_spanish(
     )
 
     spanish = await api_env.client.post(
-        MSI_URL, json=body, headers={**admin, "Accept-Language": "es"}
+        msi_url(org), json=body, headers={**admin, "Accept-Language": "es"}
     )
     assert spanish.status_code == 503
     assert spanish.headers["Content-Language"] == "es"
@@ -333,10 +334,10 @@ async def test_agent_distribution_the_build_thread_words_its_refusals_in_the_req
 ) -> None:
     """The build runs on its own pool thread, which starts with an empty context;
     without a copied context its tr() would answer in English to a Spanish request."""
-    _org, code, release, _store, admin = await msi_world(api_env, monkeypatch)
+    org, code, release, _store, admin = await msi_world(api_env, monkeypatch)
     api_env.app.state.object_store.objects[(release.version, "windows", "amd64")] = b"tampered"
     spanish = await api_env.client.post(
-        MSI_URL,
+        msi_url(org),
         json={"code": code, "arch": "amd64"},
         headers={**admin, "Accept-Language": "es"},
     )
@@ -347,14 +348,14 @@ async def test_agent_distribution_the_build_thread_words_its_refusals_in_the_req
     # And the language does not stick to the pool thread: the next request, in
     # English, on the same thread, is worded in English.
     english = await api_env.client.post(
-        MSI_URL,
+        msi_url(org),
         json={"code": code, "arch": "amd64"},
         headers={**admin, "Accept-Language": "en"},
     )
     assert english.status_code == 409
     assert english.json()["detail"].startswith("The stored agent 1.7.0 for Windows")
     again = await api_env.client.post(
-        MSI_URL,
+        msi_url(org),
         json={"code": code, "arch": "amd64"},
         headers={**admin, "Accept-Language": "es"},
     )

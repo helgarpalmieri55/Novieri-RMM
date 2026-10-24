@@ -29,11 +29,13 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/enrollment-tokens"): (
         "mints an enrollment token and returns its plaintext, which lets a machine join the fleet"
     ),
-    ("PUT", "/api/v1/install-link"): (
-        "can generate the install link and returns its code, which lets a machine join the fleet"
+    ("PUT", "/api/v1/sites/{site_id}/install-link"): (
+        "can generate a site's install link and returns its code, which lets a machine join the "
+        "fleet"
     ),
-    ("POST", "/api/v1/install-link/regenerate"): (
-        "rotates the install link and returns its new code, which lets a machine join the fleet"
+    ("POST", "/api/v1/sites/{site_id}/install-link/regenerate"): (
+        "rotates a site's install link and returns its new code, which lets a machine join the "
+        "fleet"
     ),
     ("POST", "/api/v1/agent/releases/{release_id}/install-command"): (
         "mints an enrollment token and returns it inside an install command"
@@ -65,7 +67,7 @@ NEVER_EXPOSED: frozenset[tuple[str, str]] = frozenset(NEVER_EXPOSED_REASONS)
 # `UploadFile`/`File()`/`Form()`, of which there are none.
 FILE_OR_STREAM: dict[tuple[str, str], str] = {
     # Downloads: a non-JSON response body.
-    ("POST", "/api/v1/install-link/msi"): "returns an MSI installer file",
+    ("POST", "/api/v1/sites/{site_id}/install-link/msi"): "returns an MSI installer file",
     ("GET", "/api/v1/export/devices.csv"): "returns a CSV file",
     ("GET", "/api/v1/export/devices.xlsx"): "returns an XLSX file",
     ("GET", "/api/v1/export/software.csv"): "returns a CSV file",

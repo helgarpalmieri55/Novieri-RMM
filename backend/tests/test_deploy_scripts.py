@@ -96,12 +96,17 @@ async def _setup(admin_engine: AsyncEngine) -> tuple[UUID, UUID, UUID, UUID]:
         session.add(user)
         await session.flush()
 
-        group = DeviceGroup(org_id=org.id, name="script-group")
+        group = DeviceGroup(org_id=org.id, name="script-group", client_id=org.id)
         session.add(group)
         await session.flush()
 
         device = Device(
-            org_id=org.id, hostname="d1", os_family="windows", device_group_id=group.id
+    org_id=org.id,
+    hostname="d1",
+    os_family="windows",
+    device_group_id=group.id,
+    client_id=org.id,
+    site_id=org.id,
         )
         session.add(device)
         await session.flush()

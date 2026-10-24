@@ -71,7 +71,9 @@ async def _device(
     keeps them apart.
     """
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, hostname=hostname, **fields)
+        device = Device(
+            org_id=org_id, hostname=hostname, **fields, client_id=org_id, site_id=org_id
+        )
         session.add(device)
         await session.flush()
         if agent_status is not None:
@@ -399,7 +401,7 @@ async def test_the_route_serves_the_page_the_strip_and_the_tiles(api_env) -> Non
             ("wks-gamma", "offline"),
             ("wks-delta", "online"),
         ):
-            device = Device(org_id=org_id, hostname=hostname)
+            device = Device(org_id=org_id, hostname=hostname, client_id=org_id, site_id=org_id)
             session.add(device)
             await session.flush()
             if status is not None:
@@ -475,10 +477,11 @@ async def test_the_route_says_how_and_from_where_a_pending_row_joined(api_env) -
         session.add_all(
             [
                 Device(org_id=org_id, hostname="new-1", review_state="pending",
-                       link_joined_from="10.50.0.9", link_joined_at=joined),
-                Device(org_id=org_id, hostname="old-1"),
+                       link_joined_from="10.50.0.9", link_joined_at=joined,
+                       client_id=org_id, site_id=org_id),
+                Device(org_id=org_id, hostname="old-1", client_id=org_id, site_id=org_id),
                 Device(org_id=org_id, hostname="gone-1", review_state="rejected",
-                       rejected_at=joined),
+                       rejected_at=joined, client_id=org_id, site_id=org_id),
             ]
         )
         await session.commit()
@@ -506,8 +509,15 @@ async def test_a_rejected_row_cannot_be_read_or_edited_by_id(api_env) -> None:
     the review state and nothing else."""
     org_id = await api_env.create_org("dl-review-byid")
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
-        gone = Device(org_id=org_id, hostname="gone-1", review_state="rejected", rejected_at=NOW)
-        kept = Device(org_id=org_id, hostname="kept-1")
+        gone = Device(
+            org_id=org_id,
+            hostname="gone-1",
+            review_state="rejected",
+            rejected_at=NOW,
+            client_id=org_id,
+            site_id=org_id,
+        )
+        kept = Device(org_id=org_id, hostname="kept-1", client_id=org_id, site_id=org_id)
         session.add_all([gone, kept])
         await session.commit()
     headers = await api_env.headers(org_id, await api_env.create_user(org_id, "org-admin"))

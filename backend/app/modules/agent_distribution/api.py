@@ -306,17 +306,21 @@ async def install_command_route(
                     "command"
                 ),
             )
-        issued = await enrollment_svc.create_token(
-            session,
-            org_id=ctx.org_id,
-            created_by=ctx.user_id,
-            name=f"agent install: {release.version} {release.os}/{release.arch}",
-            expires_in_hours=body.expires_in_hours,
-            # SINGLE USE. The token is a literal in a command an operator
-            # pastes, so it reaches their shell history; a token already spent
-            # by the time that matters is a weak credential by design.
-            max_uses=1,
-        )
+        try:
+            issued = await enrollment_svc.create_token(
+                session,
+                org_id=ctx.org_id,
+                site_id=body.site_id,
+                created_by=ctx.user_id,
+                name=f"agent install: {release.version} {release.os}/{release.arch}",
+                expires_in_hours=body.expires_in_hours,
+                # SINGLE USE. The token is a literal in a command an operator
+                # pastes, so it reaches their shell history; a token already
+                # spent by the time that matters is a weak credential by design.
+                max_uses=1,
+            )
+        except enrollment_svc.TokenSiteNotFound:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such site")) from None
         url = _object_store(request).presign_agent_release_get(
             release.version,
             release.os,
@@ -485,23 +489,27 @@ async def deployment_token_route(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 tr("unknown distribution channel {body_channel}", body_channel=repr(body.channel)),
             )
-        issued = await enrollment_svc.create_token(
-            session,
-            org_id=ctx.org_id,
-            created_by=ctx.user_id,
-            name=(
-                f"managed deployment ({body.channel}): {release.version} "
-                f"{release.os}/{release.arch}"
-                + (f" -- {body.note}" if body.note else "")
-            ),
-            expires_in_hours=body.expires_in_hours,
-            # FINITE, ALWAYS, and it came from the caller rather than from a
-            # default here. `max_uses=None` on this table means unlimited; a
-            # default in this position would be this module choosing the blast
-            # radius on the operator's behalf, and choosing it once for every
-            # rollout regardless of size.
-            max_uses=body.max_uses,
-        )
+        try:
+            issued = await enrollment_svc.create_token(
+                session,
+                org_id=ctx.org_id,
+                site_id=body.site_id,
+                created_by=ctx.user_id,
+                name=(
+                    f"managed deployment ({body.channel}): {release.version} "
+                    f"{release.os}/{release.arch}"
+                    + (f" -- {body.note}" if body.note else "")
+                ),
+                expires_in_hours=body.expires_in_hours,
+                # FINITE, ALWAYS, and it came from the caller rather than from a
+                # default here. `max_uses=None` on this table means unlimited; a
+                # default in this position would be this module choosing the
+                # blast radius on the operator's behalf, and choosing it once for
+                # every rollout regardless of size.
+                max_uses=body.max_uses,
+            )
+        except enrollment_svc.TokenSiteNotFound:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such site")) from None
         await audit_service.record(
             session,
             org_id=ctx.org_id,

@@ -537,11 +537,14 @@ CATALOG: dict[str, str] = {
         "la hora del apagado automático debe incluir una zona horaria"
     ),
     "the automatic switch-off must be in the future": "el apagado automático debe ser en el futuro",
-    "at least one network is required to switch the link on; an empty list would not mean "
+    "at least one network is required to switch on the install link of the site {site}: list "
+    "the networks its computers reach the Internet from; an empty list would not mean "
     "'anywhere'": (
-        "hace falta al menos una red para activar el enlace; una lista vacía no significaría "
-        "'cualquier lugar'"
+        "hace falta al menos una red para activar el enlace de instalación de la sede {site}: "
+        "indica las redes desde las que sus equipos salen a Internet; una lista vacía no "
+        "significaría 'cualquier lugar'"
     ),
+    "no such site": "no existe esa sede",
     "The agent has been told to uninstall itself. Its certificate is revoked as soon as it "
     "confirms, or in 24 hours if it does not.": (
         "Se le ha indicado al agente que se desinstale. Su certificado se revoca en cuanto lo "
@@ -1020,6 +1023,7 @@ CATALOG: dict[str, str] = {
         "solo un técnico con acceso a todos los clientes puede hacer esto"
     ),
     "unknown client": "cliente desconocido",
+    "the parent group belongs to another client": "el grupo padre pertenece a otro cliente",
     "a role cannot be granted on the unassigned client": (
         "no se puede asignar un rol sobre el cliente «Sin asignar»"
     ),

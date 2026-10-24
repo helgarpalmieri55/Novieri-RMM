@@ -47,7 +47,13 @@ async def _device(
 ) -> UUID:
     now = datetime.now(UTC)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, hostname=f"h-{uuid4().hex[:6]}", os_family=os_family)
+        device = Device(
+            org_id=org_id,
+            hostname=f"h-{uuid4().hex[:6]}",
+            os_family=os_family,
+            client_id=org_id,
+            site_id=org_id,
+        )
         session.add(device)
         await session.flush()
         if agent_status is not None:

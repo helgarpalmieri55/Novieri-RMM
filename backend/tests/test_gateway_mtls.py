@@ -65,7 +65,12 @@ async def _enroll_device(api_env, tmp_path: Path) -> dict:
     token = (
         await api_env.client.post(
             "/api/v1/enrollment-tokens",
-            json={"name": "gw-test", "expires_in_hours": 1, "max_uses": 1},
+            json={
+                "name": "gw-test",
+                "expires_in_hours": 1,
+                "max_uses": 1,
+                "site_id": str(org_id),
+            },
             headers=headers,
         )
     ).json()["token"]

@@ -39,10 +39,22 @@ _SWITCH: dict[str, Any] = {
 }
 
 
+def _at(site_id: UUID, body: dict[str, Any]) -> dict[str, Any]:
+    """`body` at a site: the create route requires one (MSP clients spec §1.5).
+    The organisation's Principal site has the organisation's id."""
+    return {**body, "site_id": str(site_id)}
+
+
 async def _enrolled_device(api_env: ApiEnv, org_id: UUID) -> UUID:
     """A device that HAS an agent, for the edit-refusal cases."""
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        device = Device(org_id=org_id, hostname="managed-01", os_family="linux")
+        device = Device(
+            org_id=org_id,
+            hostname="managed-01",
+            os_family="linux",
+            client_id=org_id,
+            site_id=org_id,
+        )
         session.add(device)
         await session.flush()
         device_id = device.id
@@ -64,7 +76,7 @@ async def test_creating_an_asset_requires_manage(api_env: ApiEnv) -> None:
     org_id = await api_env.create_org("assets")
     reader = await api_env.create_user(org_id, "read-only")
     resp = await api_env.client.post(
-        "/api/v1/devices", json=_SWITCH, headers=await api_env.headers(org_id, reader)
+        "/api/v1/devices", json=_at(org_id, _SWITCH), headers=await api_env.headers(org_id, reader)
     )
     assert resp.status_code == 403, resp.text
 
@@ -77,7 +89,7 @@ async def test_an_operator_can_add_a_boxed_laptop_with_no_hostname_at_all(
     admin = await api_env.create_user(org_id, "org-admin")
     resp = await api_env.client.post(
         "/api/v1/devices",
-        json={"description": "boxed laptop, PO 4471", "lifecycle": "stock"},
+        json=_at(org_id, {"description": "boxed laptop, PO 4471", "lifecycle": "stock"}),
         headers=await api_env.headers(org_id, admin),
     )
     assert resp.status_code == 201, resp.text
@@ -95,13 +107,13 @@ async def test_a_manual_asset_is_marked_manual_and_cannot_claim_otherwise(
     admin = await api_env.create_user(org_id, "org-admin")
     resp = await api_env.client.post(
         "/api/v1/devices",
-        json={**_SWITCH, "source": "agent"},
+        json=_at(org_id, {**_SWITCH, "source": "agent"}),
         headers=await api_env.headers(org_id, admin),
     )
     assert resp.status_code == 422, resp.text
 
     ok = await api_env.client.post(
-        "/api/v1/devices", json=_SWITCH, headers=await api_env.headers(org_id, admin)
+        "/api/v1/devices", json=_at(org_id, _SWITCH), headers=await api_env.headers(org_id, admin)
     )
     assert ok.status_code == 201, ok.text
     assert ok.json()["source"] == "manual"
@@ -119,7 +131,7 @@ async def test_an_unknown_lifecycle_is_refused_where_the_operator_can_see_it(
     admin = await api_env.create_user(org_id, "org-admin")
     resp = await api_env.client.post(
         "/api/v1/devices",
-        json={**_SWITCH, "lifecycle": "decommissioned"},
+        json=_at(org_id, {**_SWITCH, "lifecycle": "decommissioned"}),
         headers=await api_env.headers(org_id, admin),
     )
     assert resp.status_code == 422, resp.text
@@ -135,7 +147,7 @@ async def test_creating_and_editing_an_asset_are_both_audited(
     admin = await api_env.create_user(org_id, "org-admin")
     headers = await api_env.headers(org_id, admin)
     created = (
-        await api_env.client.post("/api/v1/devices", json=_SWITCH, headers=headers)
+        await api_env.client.post("/api/v1/devices", json=_at(org_id, _SWITCH), headers=headers)
     ).json()
 
     resp = await api_env.client.patch(
@@ -202,7 +214,9 @@ async def test_editing_someone_elses_asset_is_a_404(api_env: ApiEnv) -> None:
     admin_b = await api_env.create_user(org_b, "org-admin")
     created = (
         await api_env.client.post(
-            "/api/v1/devices", json=_SWITCH, headers=await api_env.headers(org_a, admin_a)
+            "/api/v1/devices",
+            json=_at(org_a, _SWITCH),
+            headers=await api_env.headers(org_a, admin_a),
         )
     ).json()
 
@@ -226,7 +240,9 @@ async def test_a_created_asset_belongs_to_the_callers_org(api_env: ApiEnv) -> No
     admin_a = await api_env.create_user(org_a, "org-admin")
     created = (
         await api_env.client.post(
-            "/api/v1/devices", json=_SWITCH, headers=await api_env.headers(org_a, admin_a)
+            "/api/v1/devices",
+            json=_at(org_a, _SWITCH),
+            headers=await api_env.headers(org_a, admin_a),
         )
     ).json()
 
@@ -260,7 +276,9 @@ async def test_an_operator_can_record_a_dns_name_and_it_is_stored_lower_cased(
     headers = await api_env.headers(org_id, admin)
     resp = await api_env.client.post(
         "/api/v1/devices",
-        json={"hostname": "PC1", "primary_ip": "10.20.4.31", "fqdn": "PC1.Corp.Example.com"},
+        json=_at(
+            org_id, {"hostname": "PC1", "primary_ip": "10.20.4.31", "fqdn": "PC1.Corp.Example.com"}
+        ),
         headers=headers,
     )
     assert resp.status_code == 201, resp.text
@@ -303,7 +321,9 @@ async def test_a_dns_name_that_is_not_a_hostname_is_refused(api_env: ApiEnv) -> 
     ]
     for value in bad:
         resp = await api_env.client.post(
-            "/api/v1/devices", json={"description": "x", "fqdn": value}, headers=headers
+            "/api/v1/devices",
+            json=_at(org_id, {"description": "x", "fqdn": value}),
+            headers=headers,
         )
         assert resp.status_code == 422, (value, resp.text)
 
@@ -315,7 +335,7 @@ async def test_a_dns_name_can_be_cleared(api_env: ApiEnv) -> None:
     created = (
         await api_env.client.post(
             "/api/v1/devices",
-            json={"description": "x", "fqdn": "pc1.corp.example.com"},
+            json=_at(org_id, {"description": "x", "fqdn": "pc1.corp.example.com"}),
             headers=headers,
         )
     ).json()
@@ -336,7 +356,7 @@ async def test_setting_a_dns_name_is_audited_by_field_name(api_env: ApiEnv) -> N
     admin = await api_env.create_user(org_id, "org-admin")
     headers = await api_env.headers(org_id, admin)
     created = (
-        await api_env.client.post("/api/v1/devices", json=_SWITCH, headers=headers)
+        await api_env.client.post("/api/v1/devices", json=_at(org_id, _SWITCH), headers=headers)
     ).json()
     resp = await api_env.client.patch(
         f"/api/v1/devices/{created['id']}",
@@ -378,14 +398,16 @@ async def test_an_operator_can_declare_the_architecture_a_push_installs_for(
     headers = await api_env.headers(org_id, admin)
     created = await api_env.client.post(
         "/api/v1/devices",
-        json={"hostname": "PC1", "os_family": "windows", "architecture": "amd64"},
+        json=_at(org_id, {"hostname": "PC1", "os_family": "windows", "architecture": "amd64"}),
         headers=headers,
     )
     assert created.status_code == 201, created.text
     assert created.json()["architecture"] == "amd64"
 
     refused = await api_env.client.post(
-        "/api/v1/devices", json={"description": "x", "architecture": "sparc"}, headers=headers
+        "/api/v1/devices",
+        json=_at(org_id, {"description": "x", "architecture": "sparc"}),
+        headers=headers,
     )
     assert refused.status_code == 422, refused.text
 
@@ -439,8 +461,8 @@ async def test_a_dns_name_change_is_audited_with_both_values(api_env) -> None:
     headers = await api_env.headers(org_id, admin)
     created = await api_env.client.post(
         "/api/v1/devices",
-        json={"hostname": "pc1", "primary_ip": "10.9.0.5", "asset_type": "computer",
-              "fqdn": "pc1.corp.example.com"},
+        json=_at(org_id, {"hostname": "pc1", "primary_ip": "10.9.0.5", "asset_type": "computer",
+                          "fqdn": "pc1.corp.example.com"}),
         headers=headers,
     )
     assert created.status_code == 201, created.text

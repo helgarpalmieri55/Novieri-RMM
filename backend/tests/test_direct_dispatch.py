@@ -154,7 +154,9 @@ async def _add_device(api_env, org_id: UUID, name: str = "dd-1") -> UUID:
     from app.models import Device
 
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, hostname=name, os_family="windows")
+        device = Device(
+            org_id=org_id, hostname=name, os_family="windows", client_id=org_id, site_id=org_id
+        )
         session.add(device)
         await session.commit()
         return device.id

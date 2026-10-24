@@ -142,7 +142,9 @@ async def _fixture(
         session.add(org)
         await session.flush()
 
-        device = Device(org_id=org.id, hostname="w1", os_family="windows")
+        device = Device(
+            org_id=org.id, hostname="w1", os_family="windows", client_id=org.id, site_id=org.id
+        )
         session.add(device)
         await session.flush()
 
@@ -401,7 +403,7 @@ async def test_one_grant_per_dispatch_not_one_per_device(
         org = Organization(name=slug, slug=slug)
         session.add(org)
         await session.flush()
-        group = DeviceGroup(org_id=org.id, name="g")
+        group = DeviceGroup(org_id=org.id, name="g", client_id=org.id)
         session.add(group)
         await session.flush()
         for host in ("g1", "g2", "g3"):
@@ -411,6 +413,8 @@ async def test_one_grant_per_dispatch_not_one_per_device(
                     hostname=host,
                     os_family="windows",
                     device_group_id=group.id,
+                    client_id=org.id,
+                    site_id=org.id,
                 )
             )
         package = Package(
@@ -627,7 +631,13 @@ async def test_the_url_never_reaches_the_jobs_api(api_env) -> None:
         assert uploaded.status_code == 200, uploaded.text
 
         async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
-            device = Device(org_id=org_id, hostname="redact-1", os_family="windows")
+            device = Device(
+                org_id=org_id,
+                hostname="redact-1",
+                os_family="windows",
+                client_id=org_id,
+                site_id=org_id,
+            )
             s.add(device)
             await s.commit()
             device_id = device.id

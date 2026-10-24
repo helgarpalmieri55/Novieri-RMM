@@ -75,7 +75,7 @@ async def _setup(
         session.add(org)
         await session.flush()
 
-        group = DeviceGroup(org_id=org.id, name="test-ring-group")
+        group = DeviceGroup(org_id=org.id, name="test-ring-group", client_id=org.id)
         session.add(group)
         await session.flush()
 
@@ -91,7 +91,12 @@ async def _setup(
         )
 
         device = Device(
-            org_id=org.id, hostname="h1", os_family="windows", device_group_id=group.id
+    org_id=org.id,
+    hostname="h1",
+    os_family="windows",
+    device_group_id=group.id,
+    client_id=org.id,
+    site_id=org.id,
         )
         session.add(device)
         await session.flush()

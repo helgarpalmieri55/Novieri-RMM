@@ -30,13 +30,15 @@ from tests.mcp_support import MCP_AUD, marked_client, mcp_token
 NEVER_EN = "this action is never available to an AI app"
 NEVER_ES = "esta acción nunca está disponible para una aplicación de IA"
 
-# Global Constraints, "Never exposed, refused twice" -- verbatim.
+# Global Constraints, "Never exposed, refused twice" -- verbatim, but for the
+# install link's two routes, which moved under the site they belong to on
+# 2026-10-23 (MSP clients spec §1.5: one link per site). Same two acts.
 GLOBAL_CONSTRAINTS_NEVER_EXPOSED = {
     ("POST", "/api/v1/credentials/{credential_id}/checkout"),
     ("GET", "/api/v1/licenses/{license_id}/key"),
     ("POST", "/api/v1/enrollment-tokens"),
-    ("PUT", "/api/v1/install-link"),
-    ("POST", "/api/v1/install-link/regenerate"),
+    ("PUT", "/api/v1/sites/{site_id}/install-link"),
+    ("POST", "/api/v1/sites/{site_id}/install-link/regenerate"),
     ("POST", "/api/v1/agent/releases/{release_id}/install-command"),
     ("POST", "/api/v1/agent/releases/{release_id}/deployment-token"),
     ("POST", "/api/v1/backup/recovery-keys/{key_id}/challenge"),
@@ -176,11 +178,13 @@ async def test_the_refusal_does_not_depend_on_authentication(mcp_env) -> None:
 
 
 async def test_the_same_path_with_another_method_is_not_refused(mcp_env) -> None:
-    # `PUT /install-link` is never exposed; `GET /install-link` is an ordinary read.
-    _, slug, sub = await _org_admin(mcp_env)
+    # `PUT /sites/{id}/install-link` is never exposed; `GET` on the same path
+    # is an ordinary read. The Principal site has the organisation's id.
+    org_id, slug, sub = await _org_admin(mcp_env)
     async with marked_client(mcp_env) as client:
         resp = await client.get(
-            "/api/v1/install-link", headers=_bearer(mcp_token(mcp_env, slug, sub))
+            f"/api/v1/sites/{org_id}/install-link",
+            headers=_bearer(mcp_token(mcp_env, slug, sub)),
         )
     assert resp.status_code == 200, resp.text
 

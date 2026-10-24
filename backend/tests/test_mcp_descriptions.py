@@ -20,7 +20,7 @@ PARTS: dict[str, frozenset[str]] = {
         {"subscriptions", "ai", "provisioning", "users", "email-intake", "device-groups",
          "approved-actions", "jobs", "platform", "roles", "reports", "remote", "vendors",
          "dashboard", "orgs", "settings", "enrollment-tokens", "me", "audit", "software",
-         "security-events", "agents", "install-link", "permissions"}
+         "security-events", "agents", "sites", "permissions"}
     ),
 }
 

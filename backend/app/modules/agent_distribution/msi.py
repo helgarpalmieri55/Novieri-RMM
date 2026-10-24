@@ -401,7 +401,7 @@ class _Checked:
 async def _check(
     session: AsyncSession,
     *,
-    org_id: UUID,
+    site_id: UUID,
     code: str,
     arch: str,
     console: str | None,
@@ -409,7 +409,10 @@ async def _check(
     now: datetime,
 ) -> _Checked:
     """Everything the database answers, in one short transaction."""
-    state = await link_svc.code_state(session, org_id, code=code, now=now)
+    try:
+        state = await link_svc.code_state(session, site_id, code=code, now=now)
+    except link_svc.LinkSiteNotFound:
+        raise MsiRefused(404, tr("no such site")) from None
     if state == "off":
         raise MsiRefused(
             409,
@@ -446,6 +449,7 @@ async def msi_for_link(
     store: ObjectStore,
     *,
     org_id: UUID,
+    site_id: UUID,
     actor_id: UUID,
     code: str,
     arch: str,
@@ -464,7 +468,7 @@ async def msi_for_link(
         async with open_session() as session:
             checked = await _check(
                 session,
-                org_id=org_id,
+                site_id=site_id,
                 code=code,
                 arch=arch,
                 console=console,
@@ -505,7 +509,8 @@ async def msi_for_link(
                 actor_id=actor_id,
                 action=AUDIT_ACTION,
                 target_type="install_link",
-                target_id=str(org_id),
+                # The site: one link per site (see `install_link._audit`).
+                target_id=str(site_id),
                 # NEVER the code. What was handed out, and how to recognise the file.
                 metadata={
                     "arch": arch,

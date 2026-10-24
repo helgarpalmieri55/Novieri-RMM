@@ -371,6 +371,11 @@ class GroupCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=200)
+    #: THE CLIENT WHOSE DEVICES THE GROUP ORGANISES (MSP clients spec §1.5).
+    #: Required, and fixed for the group's life: a group holds one client's
+    #: devices, its parent is of the same client, and its rules claim only
+    #: that client's machines.
+    client_id: UUID = Field(description="The client whose devices this group organises")
     description: str = Field(default="", max_length=10_000)
     parent_group_id: UUID | None = Field(default=None)
     #: WHICH RULE WINS once cycle 2 can author one. Settable now because
@@ -431,7 +436,11 @@ class MemberResultOut(BaseModel):
 
     device_id: UUID = Field(description="The device this row is about")
     moved: bool = Field(description="True when this call changed the device's group")
-    reason: str = Field(description="Why: added, already a member, or no such device")
+    reason: str = Field(
+        description=(
+            "Why: added, already a member, no such device, or belongs to another client"
+        )
+    )
 
 
 class MembersAddResponse(BaseModel):
@@ -476,6 +485,7 @@ async def create_group(
             group = await create_device_group(
                 session,
                 org_id=ctx.org_id,
+                client_id=body.client_id,
                 actor_id=ctx.user_id,
                 name=body.name,
                 description=body.description,

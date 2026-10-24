@@ -65,7 +65,9 @@ async def _setup_restore_job(
         session.add(org)
         await session.flush()
 
-        device = Device(org_id=org.id, hostname="h1", os_family="windows")
+        device = Device(
+            org_id=org.id, hostname="h1", os_family="windows", client_id=org.id, site_id=org.id
+        )
         session.add(device)
         await session.flush()
 

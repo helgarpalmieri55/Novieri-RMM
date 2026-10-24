@@ -106,9 +106,15 @@ async def test_scan_sweep_dispatches_never_scanned_and_skips_recent(
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         # org-default policy: scan every 24h
         session.add(PatchPolicy(org_id=org_id, scan_interval_hours=24))
-        never_scanned = Device(org_id=org_id, hostname="never", os_family="linux")
-        recently_scanned = Device(org_id=org_id, hostname="recent", os_family="linux")
-        stale_scanned = Device(org_id=org_id, hostname="stale", os_family="linux")
+        never_scanned = Device(
+            org_id=org_id, hostname="never", os_family="linux", client_id=org_id, site_id=org_id
+        )
+        recently_scanned = Device(
+            org_id=org_id, hostname="recent", os_family="linux", client_id=org_id, site_id=org_id
+        )
+        stale_scanned = Device(
+            org_id=org_id, hostname="stale", os_family="linux", client_id=org_id, site_id=org_id
+        )
         session.add_all([never_scanned, recently_scanned, stale_scanned])
         await session.flush()
         never_id, recent_id, stale_id = (
@@ -370,7 +376,9 @@ async def _one_device_org(
     org_id = await _make_org(admin_engine, prefix)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         session.add(PatchPolicy(org_id=org_id, scan_interval_hours=24))
-        device = Device(org_id=org_id, hostname=prefix, os_family="linux")
+        device = Device(
+            org_id=org_id, hostname=prefix, os_family="linux", client_id=org_id, site_id=org_id
+        )
         session.add(device)
         await session.flush()
         device_id = device.id

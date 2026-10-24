@@ -179,16 +179,6 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     "app/modules/backup/read.py::handle_read_query": "gateway: answers an agent's read query",
     "app/services/cert_renewal.py::advance_for_device": "gateway: an agent's certificate renewal",
     **_reviewed(
-        "app/services/enrollment.py",
-        "agent enrollment: no person; the enrollment token or install-link code is the "
-        "authority, and it must be found before its client is known",
-        "enroll",
-        "enroll_via_link",
-    ),
-    "app/services/install_link.py::resolve_live": (
-        "resolves a public install-link code for an unenrolled machine: no person"
-    ),
-    **_reviewed(
         "app/modules/agent_distribution/link_page.py",
         "the install link's public page (no sign-in by design): reads only the release "
         "catalogue",

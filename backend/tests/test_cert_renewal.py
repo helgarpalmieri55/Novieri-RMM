@@ -98,7 +98,12 @@ async def enroll_device(api_env, hostname: str = "renewal-agent") -> dict:
     token = (
         await api_env.client.post(
             "/api/v1/enrollment-tokens",
-            json={"name": "cert-test", "expires_in_hours": 1, "max_uses": 1},
+            json={
+                "name": "cert-test",
+                "expires_in_hours": 1,
+                "max_uses": 1,
+                "site_id": str(org_id),
+            },
             headers=headers,
         )
     ).json()["token"]

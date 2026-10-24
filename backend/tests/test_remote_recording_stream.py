@@ -104,7 +104,9 @@ async def test_truncated_recording_is_flagged_and_audited(
         org = Organization(name="rc", slug=f"rc-{uuid4().hex[:6]}")
         s.add(org)
         await s.flush()
-        dev = Device(org_id=org.id, hostname="h", os_family="windows")
+        dev = Device(
+            org_id=org.id, hostname="h", os_family="windows", client_id=org.id, site_id=org.id
+        )
         usr = User(org_id=org.id, external_subject=f"s{uuid4().hex[:6]}", email="a@b.c")
         s.add_all([dev, usr])
         await s.commit()

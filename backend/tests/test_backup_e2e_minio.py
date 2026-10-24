@@ -103,7 +103,9 @@ async def _seed(admin_engine: AsyncEngine, app_engine: AsyncEngine, vault: Local
         s.add(org)
         await s.flush()
         user = User(org_id=org.id, external_subject=f"sub-{slug}", email=f"{slug}@x.test")
-        device = Device(org_id=org.id, hostname="fs-e2e", os_family="linux")
+        device = Device(
+            org_id=org.id, hostname="fs-e2e", os_family="linux", client_id=org.id, site_id=org.id
+        )
         s.add_all([user, device])
         await s.commit()
         org_id, user_id, device_id = org.id, user.id, device.id

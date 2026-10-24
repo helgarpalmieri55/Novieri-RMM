@@ -25,10 +25,17 @@ async def _dev(admin_engine, *, auto=False):
         org = Organization(name="pi", slug=f"pi-{uuid4().hex[:6]}")
         s.add(org)
         await s.flush()
-        grp = DeviceGroup(org_id=org.id, name="g")
+        grp = DeviceGroup(org_id=org.id, name="g", client_id=org.id)
         s.add(grp)
         await s.flush()
-        dev = Device(org_id=org.id, hostname="h", os_family="windows", device_group_id=grp.id)
+        dev = Device(
+            org_id=org.id,
+            hostname="h",
+            os_family="windows",
+            device_group_id=grp.id,
+            client_id=org.id,
+            site_id=org.id,
+        )
         s.add(dev)
         if auto:
             s.add(

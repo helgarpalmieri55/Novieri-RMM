@@ -268,7 +268,7 @@ async def test_an_install_command_is_refused_before_the_bytes_exist(
 
     resp = await api_env.client.post(
         f"/api/v1/agent/releases/{created['id']}/install-command",
-        json={"expires_in_hours": 4},
+        json={"expires_in_hours": 4, "site_id": str(org_id)},
         headers=headers,
     )
     assert resp.status_code == 409, resp.text
@@ -445,7 +445,7 @@ async def _mint(
     created = await _publish_with_artifact(api_env, org_id, headers, **overrides)
     resp = await api_env.client.post(
         f"/api/v1/agent/releases/{created['id']}/install-command",
-        json={"expires_in_hours": 4},
+        json={"expires_in_hours": 4, "site_id": str(org_id)},
         headers=headers,
     )
     assert resp.status_code == 200, resp.text

@@ -59,11 +59,41 @@ async def _seed_org(admin_engine: AsyncEngine, slug: str) -> dict[str, UUID]:
         session.add(repo)
         await session.flush()
 
-        d1 = Device(org_id=org.id, hostname=f"{slug}-d1", os_family="windows")
-        d2 = Device(org_id=org.id, hostname=f"{slug}-d2", os_family="windows")
-        d3 = Device(org_id=org.id, hostname=f"{slug}-d3", os_family="windows")
-        d4 = Device(org_id=org.id, hostname=f"{slug}-d4", os_family="windows")
-        d5 = Device(org_id=org.id, hostname=f"{slug}-d5", os_family="windows")
+        d1 = Device(
+            org_id=org.id,
+            hostname=f"{slug}-d1",
+            os_family="windows",
+            client_id=org.id,
+            site_id=org.id,
+        )
+        d2 = Device(
+            org_id=org.id,
+            hostname=f"{slug}-d2",
+            os_family="windows",
+            client_id=org.id,
+            site_id=org.id,
+        )
+        d3 = Device(
+            org_id=org.id,
+            hostname=f"{slug}-d3",
+            os_family="windows",
+            client_id=org.id,
+            site_id=org.id,
+        )
+        d4 = Device(
+            org_id=org.id,
+            hostname=f"{slug}-d4",
+            os_family="windows",
+            client_id=org.id,
+            site_id=org.id,
+        )
+        d5 = Device(
+            org_id=org.id,
+            hostname=f"{slug}-d5",
+            os_family="windows",
+            client_id=org.id,
+            site_id=org.id,
+        )
         session.add_all([d1, d2, d3, d4, d5])
         await session.flush()
 

@@ -71,7 +71,7 @@ async def _device(
     window: str | None = WINDOW,
 ) -> UUID:
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        group = DeviceGroup(org_id=org_id, name=f"g-{uuid4().hex[:6]}")
+        group = DeviceGroup(org_id=org_id, name=f"g-{uuid4().hex[:6]}", client_id=org_id)
         session.add(group)
         await session.flush()
         session.add(
@@ -89,6 +89,8 @@ async def _device(
             hostname=f"wks-{uuid4().hex[:6]}",
             os_family="windows",
             device_group_id=group.id,
+            client_id=org_id,
+            site_id=org_id,
         )
         session.add(device)
         await session.flush()

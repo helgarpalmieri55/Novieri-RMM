@@ -79,7 +79,9 @@ async def _setup_base(
         session.add(user)
         await session.flush()
 
-        device = Device(org_id=org.id, hostname="d1", os_family="linux")
+        device = Device(
+            org_id=org.id, hostname="d1", os_family="linux", client_id=org.id, site_id=org.id
+        )
         session.add(device)
         await session.flush()
 

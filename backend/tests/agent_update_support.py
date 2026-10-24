@@ -14,7 +14,7 @@ SHA = "ab" * 32
 
 async def seed_group(admin_engine: AsyncEngine, org_id: UUID, name: str) -> UUID:
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
-        g = DeviceGroup(org_id=org_id, name=f"{name}-{uuid4().hex[:6]}")
+        g = DeviceGroup(org_id=org_id, name=f"{name}-{uuid4().hex[:6]}", client_id=org_id)
         s.add(g)
         await s.commit()
         return g.id
@@ -38,6 +38,8 @@ async def seed_device(
             os_family=os_family,
             architecture=arch,
             device_group_id=group_id,
+            client_id=org_id,
+            site_id=org_id,
         )
         s.add(d)
         await s.flush()

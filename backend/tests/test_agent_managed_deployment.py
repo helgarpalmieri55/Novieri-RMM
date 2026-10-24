@@ -196,7 +196,10 @@ async def test_a_deployment_token_cannot_be_minted_unbounded(api_env: ApiEnv) ->
         {"max_uses": 50, "expires_in_hours": 337},  # over 14 days
         {"max_uses": 50, "expires_in_hours": 0},
     ):
-        resp = await api_env.client.post(path, json=body, headers=headers)
+        # The site is always given, so each refusal is about the bounds alone.
+        resp = await api_env.client.post(
+            path, json=body | {"site_id": str(org_id)}, headers=headers
+        )
         assert resp.status_code == 422, f"{body} -> {resp.status_code} {resp.text}"
 
 
@@ -212,7 +215,7 @@ async def test_a_minted_deployment_token_is_bounded_in_the_database(
 
     resp = await api_env.client.post(
         f"/api/v1/agent/releases/{created['id']}/deployment-token",
-        json={"max_uses": 300, "expires_in_hours": 72},
+        json={"max_uses": 300, "expires_in_hours": 72, "site_id": str(org_id)},
         headers=headers,
     )
     assert resp.status_code == 200, resp.text
@@ -237,7 +240,7 @@ async def test_minting_a_deployment_token_requires_enrollment_manage(
 
     resp = await api_env.client.post(
         f"/api/v1/agent/releases/{created['id']}/deployment-token",
-        json={"max_uses": 10, "expires_in_hours": 24},
+        json={"max_uses": 10, "expires_in_hours": 24, "site_id": str(org_id)},
         headers=await api_env.headers(org_id, reader),
     )
     assert resp.status_code == 403, resp.text
@@ -418,7 +421,7 @@ async def test_both_acts_are_audited(api_env: ApiEnv) -> None:
     )
     await api_env.client.post(
         f"/api/v1/agent/releases/{created['id']}/deployment-token",
-        json={"max_uses": 25, "expires_in_hours": 48},
+        json={"max_uses": 25, "expires_in_hours": 48, "site_id": str(org_id)},
         headers=headers,
     )
 

@@ -13,7 +13,7 @@ from app.core.i18n import tr
 from app.core.rbac import has_permission
 from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job, publish_revoke
-from app.models import Agent, Device, SuggestedAssetMatch
+from app.models import Agent, Device, Site, SuggestedAssetMatch
 from app.modules.ipam import candidates as candidates_svc
 from app.modules.remote.capability import can_share_screen
 from app.services import device_review as review_svc
@@ -46,8 +46,8 @@ _ASSET_TYPES = (
 _MACHINE_OWNED = frozenset({"hostname", "os_family", "serial", "fqdn", "architecture"})
 
 
-class AssetCreateRequest(BaseModel):
-    """A record an operator types in.
+class AssetFields(BaseModel):
+    """What an operator types about an asset, on create and on edit.
 
     `extra="forbid"` so `source`, `agent_status` or `id` in the body is a 422
     rather than a silently ignored field. `source` in particular is the first
@@ -90,7 +90,21 @@ class AssetCreateRequest(BaseModel):
             raise ValueError(str(exc)) from None
 
 
-class AssetUpdateRequest(AssetCreateRequest):
+class AssetCreateRequest(AssetFields):
+    """A record an operator types in.
+
+    `site_id` IS REQUIRED (MSP clients spec §1.5): every device belongs to a
+    site, and to the site's client -- which is derived from the site, never
+    sent. Not on `AssetUpdateRequest`: a device's client never changes, and
+    moving one between its client's sites is not this route's.
+    """
+
+    site_id: UUID = Field(
+        description="The site the asset is at; its client is the site's client"
+    )
+
+
+class AssetUpdateRequest(AssetFields):
     """Every field optional; only what was SENT is written.
 
     The two defaulted fields are re-declared as `None` so `exclude_unset` can
@@ -992,14 +1006,26 @@ async def create_asset(
     is what makes it appear in the fleet list and what makes every
     agent-dependent screen omit itself for it.
     """
-    fields = body.model_dump(exclude_none=True)
+    fields = body.model_dump(exclude_none=True, exclude={"site_id"})
     if body.primary_ip is not None:
         fields["primary_ip"] = str(body.primary_ip)
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
+        # LOADED IN THE CALLER'S OWN SESSION: RLS hides another organisation's
+        # site and one of a client outside the caller's scope, and both are
+        # the same 404. The client is the site's.
+        site = (
+            await session.execute(
+                select(Site).where(Site.id == body.site_id, Site.org_id == ctx.org_id)
+            )
+        ).scalar_one_or_none()
+        if site is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such site"))
         device = Device(
             org_id=ctx.org_id,
+            client_id=site.client_id,
+            site_id=site.id,
             # STAMPED, never taken from the body -- see AssetCreateRequest.
             source="manual",
             # A PERSON TYPED THIS. `provenance` is what separates it from the

@@ -523,7 +523,13 @@ async def test_patch_a_restart_the_platform_cannot_book(api_env: Any) -> None:
     org_id = await api_env.create_org("i18n-patch")
     headers = await api_env.headers(org_id, await api_env.create_user(org_id, "org-admin"))
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, hostname=f"wks-{uuid4().hex[:6]}", os_family="windows")
+        device = Device(
+            org_id=org_id,
+            hostname=f"wks-{uuid4().hex[:6]}",
+            os_family="windows",
+            client_id=org_id,
+            site_id=org_id,
+        )
         session.add(device)
         await session.commit()
         device_id = device.id
@@ -560,7 +566,8 @@ async def test_inventory_a_rule_the_author_must_fix_is_worded_in_the_request_lan
     "Value error, " and shows the rest."""
     env, headers = admin
     typo = {"all": [{"fact": "os_familly", "op": "ne", "value": "windows"}]}
-    body = {"name": "oops", "rules": typo}
+    # A client is named, so the only error in the body is the rule's.
+    body = {"name": "oops", "client_id": str(uuid4()), "rules": typo}
 
     async def messages(lang: str) -> list[str]:
         response = await env.client.post(
@@ -730,7 +737,13 @@ async def test_patch_a_closed_restarts_reason_is_said_in_spanish_and_stored_in_e
     devices: dict[str, UUID] = {}
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
         for state, (english, _spanish) in cases.items():
-            device = Device(org_id=org_id, hostname=f"wks-{state}", os_family="windows")
+            device = Device(
+                org_id=org_id,
+                hostname=f"wks-{state}",
+                os_family="windows",
+                client_id=org_id,
+                site_id=org_id,
+            )
             session.add(device)
             await session.flush()
             session.add(

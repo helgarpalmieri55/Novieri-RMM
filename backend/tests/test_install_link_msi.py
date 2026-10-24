@@ -17,11 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import AuditEvent
 from app.modules.agent_distribution import msi as msi_svc
 from app.services import msi_build
-from tests.install_link_fixtures import switch_on
+from tests.install_link_fixtures import link_path, switch_on
 from tests.msi_fixtures import StoreWith, need_msitools, offer, signed_release
 
 CONSOLE = "https://itms.example.com"
-URL = "/api/v1/install-link/msi"
 
 
 async def _setup(api_env, monkeypatch, *, version: str = "1.7.0", key: bool = True):
@@ -38,7 +37,8 @@ async def _setup(api_env, monkeypatch, *, version: str = "1.7.0", key: bool = Tr
     store = StoreWith({(release.version, "windows", "amd64"): release.data})
     api_env.app.state.object_store = store
     admin = await api_env.headers(org_id, await api_env.create_user(org_id, "org-admin"))
-    return org_id, code, release, store, admin
+    # The MSI route of the Principal site's link, which `switch_on` switched on.
+    return org_id, code, release, store, admin, link_path(org_id, "/msi")
 
 
 async def _audits(api_env, org_id) -> list[AuditEvent]:
@@ -56,9 +56,9 @@ async def _audits(api_env, org_id) -> list[AuditEvent]:
 
 
 async def test_it_needs_enrollment_link_manage(api_env, monkeypatch) -> None:
-    org_id, code, _, _, admin = await _setup(api_env, monkeypatch)
+    org_id, code, _, _, admin, url = await _setup(api_env, monkeypatch)
     tech = await api_env.headers(org_id, await api_env.create_user(org_id, "technician"))
-    response = await api_env.client.post(URL, json={"code": code, "arch": "amd64"}, headers=tech)
+    response = await api_env.client.post(url, json={"code": code, "arch": "amd64"}, headers=tech)
     assert response.status_code == 403
 
 
@@ -67,8 +67,8 @@ async def test_the_msi_carries_the_agent_and_the_link_and_is_audited_without_the
 ) -> None:
     need_msitools()
     caplog.set_level(logging.DEBUG)
-    org_id, code, release, store, admin = await _setup(api_env, monkeypatch)
-    response = await api_env.client.post(URL, json={"code": code, "arch": "amd64"}, headers=admin)
+    org_id, code, release, store, admin, url = await _setup(api_env, monkeypatch)
+    response = await api_env.client.post(url, json={"code": code, "arch": "amd64"}, headers=admin)
     assert response.status_code == 200, response.text
     assert response.headers["content-type"] == "application/x-msi"
     assert response.headers["cache-control"] == "no-store"
@@ -103,22 +103,22 @@ async def test_the_msi_carries_the_agent_and_the_link_and_is_audited_without_the
 
 
 async def test_it_is_off_when_the_link_is_off(api_env, monkeypatch) -> None:
-    org_id, code, _, store, admin = await _setup(api_env, monkeypatch)
+    org_id, code, _, store, admin, url = await _setup(api_env, monkeypatch)
     off = await api_env.client.put(
-        "/api/v1/install-link", json={"enabled": False, "networks": ["10.50.0.0/16"]}, headers=admin
+        link_path(org_id), json={"enabled": False, "networks": ["10.50.0.0/16"]}, headers=admin
     )
     assert off.status_code == 200
-    response = await api_env.client.post(URL, json={"code": code, "arch": "amd64"}, headers=admin)
+    response = await api_env.client.post(url, json={"code": code, "arch": "amd64"}, headers=admin)
     assert response.status_code == 409
     assert "install link is off" in response.json()["detail"]
     assert store.reads == [] and await _audits(api_env, org_id) == []
 
 
 async def test_a_code_that_is_not_the_current_one_is_refused(api_env, monkeypatch) -> None:
-    org_id, code, _, store, admin = await _setup(api_env, monkeypatch)
-    regenerated = await api_env.client.post("/api/v1/install-link/regenerate", headers=admin)
+    org_id, code, _, store, admin, url = await _setup(api_env, monkeypatch)
+    regenerated = await api_env.client.post(link_path(org_id, "/regenerate"), headers=admin)
     assert regenerated.status_code == 200
-    response = await api_env.client.post(URL, json={"code": code, "arch": "amd64"}, headers=admin)
+    response = await api_env.client.post(url, json={"code": code, "arch": "amd64"}, headers=admin)
     assert response.status_code == 409
     assert "not this organisation's current install link" in response.json()["detail"]
     assert code not in response.text
@@ -126,45 +126,45 @@ async def test_a_code_that_is_not_the_current_one_is_refused(api_env, monkeypatc
 
 
 async def test_an_agent_older_than_the_msi_mode_is_not_wrapped(api_env, monkeypatch) -> None:
-    org_id, code, _, store, admin = await _setup(api_env, monkeypatch, version="1.6.3")
-    response = await api_env.client.post(URL, json={"code": code, "arch": "amd64"}, headers=admin)
+    org_id, code, _, store, admin, url = await _setup(api_env, monkeypatch, version="1.6.3")
+    response = await api_env.client.post(url, json={"code": code, "arch": "amd64"}, headers=admin)
     assert response.status_code == 409
     assert "1.7.0 or later" in response.json()["detail"]
     assert store.reads == []
 
 
 async def test_without_the_release_public_key_nothing_is_built(api_env, monkeypatch) -> None:
-    org_id, code, _, store, admin = await _setup(api_env, monkeypatch, key=False)
-    response = await api_env.client.post(URL, json={"code": code, "arch": "amd64"}, headers=admin)
+    org_id, code, _, store, admin, url = await _setup(api_env, monkeypatch, key=False)
+    response = await api_env.client.post(url, json={"code": code, "arch": "amd64"}, headers=admin)
     assert response.status_code == 503
     assert "ITS_AGENT_RELEASE_PUBLIC_KEY" in response.json()["detail"]
     assert store.reads == [] and await _audits(api_env, org_id) == []
 
 
 async def test_bytes_that_are_not_the_published_release_are_refused(api_env, monkeypatch) -> None:
-    org_id, code, release, store, admin = await _setup(api_env, monkeypatch)
+    org_id, code, release, store, admin, url = await _setup(api_env, monkeypatch)
     store.objects[(release.version, "windows", "amd64")] = release.data + b"tampered"
-    response = await api_env.client.post(URL, json={"code": code, "arch": "amd64"}, headers=admin)
+    response = await api_env.client.post(url, json={"code": code, "arch": "amd64"}, headers=admin)
     assert response.status_code == 409
     assert "does not match its published SHA-256" in response.json()["detail"]
     assert await _audits(api_env, org_id) == []
 
 
 async def test_a_signature_under_another_key_is_refused(api_env, monkeypatch) -> None:
-    org_id, code, _, _, admin = await _setup(api_env, monkeypatch)
+    org_id, code, _, _, admin, url = await _setup(api_env, monkeypatch)
     monkeypatch.setattr(
         api_env.app.state.settings, "agent_release_public_key", signed_release().public_key
     )
-    response = await api_env.client.post(URL, json={"code": code, "arch": "amd64"}, headers=admin)
+    response = await api_env.client.post(url, json={"code": code, "arch": "amd64"}, headers=admin)
     assert response.status_code == 409
     assert "valid release signature" in response.json()["detail"]
     assert await _audits(api_env, org_id) == []
 
 
 async def test_a_console_reached_by_ip_address_gets_no_msi(api_env, monkeypatch) -> None:
-    org_id, code, _, store, admin = await _setup(api_env, monkeypatch)
+    org_id, code, _, store, admin, url = await _setup(api_env, monkeypatch)
     monkeypatch.setattr(api_env.app.state.settings, "public_console_url", "https://10.0.0.5")
-    response = await api_env.client.post(URL, json={"code": code, "arch": "amd64"}, headers=admin)
+    response = await api_env.client.post(url, json={"code": code, "arch": "amd64"}, headers=admin)
     assert response.status_code == 409
     assert "DNS name" in response.json()["detail"]
     assert store.reads == []
@@ -176,10 +176,10 @@ async def test_without_its_public_console_url_there_is_no_msi_whatever_the_host_
     """The MSI goes to every computer in the domain, so its console address
     comes from configuration and never from the request (CLAUDE.md 2a(b)'s
     spirit): a forged Host header must not be able to aim a fleet."""
-    org_id, code, _, store, admin = await _setup(api_env, monkeypatch)
+    org_id, code, _, store, admin, url = await _setup(api_env, monkeypatch)
     monkeypatch.setattr(api_env.app.state.settings, "public_console_url", None)
     response = await api_env.client.post(
-        URL,
+        url,
         json={"code": code, "arch": "amd64"},
         headers={**admin, "Host": "itms.example.com"},
     )
@@ -190,11 +190,11 @@ async def test_without_its_public_console_url_there_is_no_msi_whatever_the_host_
 
 
 async def test_a_console_url_with_a_path_says_so(api_env, monkeypatch) -> None:
-    org_id, code, _, store, admin = await _setup(api_env, monkeypatch)
+    org_id, code, _, store, admin, url = await _setup(api_env, monkeypatch)
     monkeypatch.setattr(
         api_env.app.state.settings, "public_console_url", "https://itms.example.com/console"
     )
-    response = await api_env.client.post(URL, json={"code": code, "arch": "amd64"}, headers=admin)
+    response = await api_env.client.post(url, json={"code": code, "arch": "amd64"}, headers=admin)
     assert response.status_code == 409
     detail = response.json()["detail"]
     assert "ITS_PUBLIC_CONSOLE_URL" in detail and "path" in detail
@@ -204,7 +204,7 @@ async def test_a_console_url_with_a_path_says_so(api_env, monkeypatch) -> None:
 
 
 async def test_a_trailing_slash_on_the_console_url_is_fine(api_env, monkeypatch) -> None:
-    org_id, code, _, _, admin = await _setup(api_env, monkeypatch)
+    org_id, code, _, _, admin, url = await _setup(api_env, monkeypatch)
     monkeypatch.setattr(api_env.app.state.settings, "public_console_url", CONSOLE + "/")
     seen: list[str] = []
 
@@ -213,7 +213,7 @@ async def test_a_trailing_slash_on_the_console_url_is_fine(api_env, monkeypatch)
         return b"MSI"
 
     monkeypatch.setattr(msi_svc, "build_msi", fake_build)
-    response = await api_env.client.post(URL, json={"code": code, "arch": "amd64"}, headers=admin)
+    response = await api_env.client.post(url, json={"code": code, "arch": "amd64"}, headers=admin)
     assert response.status_code == 200, response.text
     assert seen == [CONSOLE]
 
@@ -221,7 +221,7 @@ async def test_a_trailing_slash_on_the_console_url_is_fine(api_env, monkeypatch)
 async def test_the_build_runs_with_no_database_session_open(api_env, monkeypatch) -> None:
     """Up to a minute of wixl must not pin a pooled connection in an open
     transaction, nor a thread of the default executor, which ObjectStore uses."""
-    org_id, code, _, _, admin = await _setup(api_env, monkeypatch)
+    org_id, code, _, _, admin, url = await _setup(api_env, monkeypatch)
     engines = [api_env.app.state.app_engine, api_env.app.state.admin_engine]
     during: list[tuple[list[int], str]] = []
 
@@ -232,7 +232,7 @@ async def test_the_build_runs_with_no_database_session_open(api_env, monkeypatch
         return b"MSI-bytes"
 
     monkeypatch.setattr(msi_svc, "build_msi", fake_build)
-    response = await api_env.client.post(URL, json={"code": code, "arch": "amd64"}, headers=admin)
+    response = await api_env.client.post(url, json={"code": code, "arch": "amd64"}, headers=admin)
     assert response.status_code == 200, response.text
     [(checked_out, thread)] = during
     assert checked_out == [0, 0]
@@ -243,20 +243,20 @@ async def test_the_build_runs_with_no_database_session_open(api_env, monkeypatch
 
 
 async def test_a_failed_build_is_not_audited(api_env, monkeypatch) -> None:
-    org_id, code, _, _, admin = await _setup(api_env, monkeypatch)
+    org_id, code, _, _, admin, url = await _setup(api_env, monkeypatch)
 
     def failing_build(*_: Any, **__: Any) -> bytes:
         raise msi_svc.MsiRefused(503, "The MSI could not be built: wixl failed")
 
     monkeypatch.setattr(msi_svc, "build_msi", failing_build)
-    response = await api_env.client.post(URL, json={"code": code, "arch": "amd64"}, headers=admin)
+    response = await api_env.client.post(url, json={"code": code, "arch": "amd64"}, headers=admin)
     assert response.status_code == 503
     assert await _audits(api_env, org_id) == []
 
 
 async def test_when_every_build_slot_is_busy_the_next_request_is_503(api_env, monkeypatch) -> None:
     """The next request is answered at once, never queued behind a build."""
-    org_id, code, _, _, admin = await _setup(api_env, monkeypatch)
+    org_id, code, _, _, admin, url = await _setup(api_env, monkeypatch)
     slots = msi_build.MAX_CONCURRENT_BUILDS
     release = threading.Event()
     started: list[str] = []
@@ -271,7 +271,7 @@ async def test_when_every_build_slot_is_busy_the_next_request_is_503(api_env, mo
     monkeypatch.setattr(msi_svc, "build_msi", slow_build)
     body = {"code": code, "arch": "amd64"}
     busy = [
-        asyncio.create_task(api_env.client.post(URL, json=body, headers=admin))
+        asyncio.create_task(api_env.client.post(url, json=body, headers=admin))
         for _ in range(slots)
     ]
     try:
@@ -281,7 +281,7 @@ async def test_when_every_build_slot_is_busy_the_next_request_is_503(api_env, mo
             await asyncio.sleep(0.01)
         assert len(started) == slots
 
-        refused = await asyncio.wait_for(api_env.client.post(URL, json=body, headers=admin), 5)
+        refused = await asyncio.wait_for(api_env.client.post(url, json=body, headers=admin), 5)
         assert refused.status_code == 503
         assert "try again" in refused.json()["detail"].lower()
         assert refused.headers["retry-after"] == "60"
@@ -292,18 +292,18 @@ async def test_when_every_build_slot_is_busy_the_next_request_is_503(api_env, mo
     assert len(await _audits(api_env, org_id)) == slots
 
     # The slots are free again afterwards.
-    again = await api_env.client.post(URL, json=body, headers=admin)
+    again = await api_env.client.post(url, json=body, headers=admin)
     assert again.status_code == 200
 
 
 async def test_an_unknown_arch_is_a_422_and_the_code_is_never_in_the_url(
     api_env, monkeypatch
 ) -> None:
-    _, code, _, _, admin = await _setup(api_env, monkeypatch)
-    response = await api_env.client.post(URL, json={"code": code, "arch": "x86"}, headers=admin)
+    _, code, _, _, admin, url = await _setup(api_env, monkeypatch)
+    response = await api_env.client.post(url, json={"code": code, "arch": "x86"}, headers=admin)
     assert response.status_code == 422
-    # POST only: a GET would put the code in a URL, which access logs keep.
-    assert (await api_env.client.get(URL, headers=admin)).status_code == 405
+    # POST only: a GET would put the code in a url, which access logs keep.
+    assert (await api_env.client.get(url, headers=admin)).status_code == 405
 
 
 async def test_a_slot_whose_build_outlives_its_request_is_freed_when_the_build_ends() -> None:

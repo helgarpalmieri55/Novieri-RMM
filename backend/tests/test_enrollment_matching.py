@@ -71,6 +71,8 @@ async def _asset(api_env: ApiEnv, org_id: UUID, **kw: Any) -> UUID:
             if macs
             else None,
             **kw,
+            client_id=org_id,
+            site_id=org_id,
         )
         session.add(device)
         await session.flush()
@@ -228,7 +230,7 @@ async def _enrol(api_env: ApiEnv, org_id: UUID, admin: str, **fact_kw: Any) -> d
 
     created = await api_env.client.post(
         "/api/v1/enrollment-tokens",
-        json={"name": "match", "expires_in_hours": 24, "max_uses": 1},
+        json={"name": "match", "expires_in_hours": 24, "max_uses": 1, "site_id": str(org_id)},
         headers=await api_env.headers(org_id, admin),
     )
     token = created.json()["token"]
