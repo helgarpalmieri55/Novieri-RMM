@@ -236,6 +236,8 @@ describe("Settings — Users tab", () => {
     expect(calls.assignUserRole).not.toHaveBeenCalled();
 
     // A client chosen, then other text typed over it: still not a choice.
+    // (Back to the picker first: the click above left it.)
+    await user.click(field);
     await user.click(await within(panel).findByRole("option", { name: /Warehouse/ }));
     expect(within(panel).getByRole("button", { name: "Assign role on Warehouse" })).toBeEnabled();
     await user.clear(field);

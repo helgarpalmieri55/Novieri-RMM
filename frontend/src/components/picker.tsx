@@ -140,7 +140,17 @@ export function EntityPicker({
         disabled={disabled}
         placeholder={placeholder ?? t("components.picker.search")}
         value={shown}
-        onFocus={() => setOpen(true)}
+        onFocus={() => {
+          // Back before the deferred blur close (below) ran: that close is
+          // for a picker that was LEFT, and this one was not -- cancelled,
+          // or it would shut the list (and drop the typed text) under the
+          // person who just came back to it.
+          if (blurTimeout.current != null) {
+            window.clearTimeout(blurTimeout.current);
+            blurTimeout.current = null;
+          }
+          setOpen(true);
+        }}
         onClick={() => setOpen(true)}
         onChange={(event) => {
           setQuery(event.target.value);
