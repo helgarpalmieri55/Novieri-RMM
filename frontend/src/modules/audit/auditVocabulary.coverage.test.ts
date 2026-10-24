@@ -415,6 +415,11 @@ const DYNAMIC: Dynamic[] = [
     codes: ["user.enabled", "user.disabled", "user.enrolment_resent", "user.password_reset_requested"],
   },
   {
+    file: "services/clients.py",
+    how: "_audit_site() wrapper literals",
+    codes: ["client.site_archived", "client.site_created", "client.site_updated"],
+  },
+  {
     file: "services/install_link.py",
     how: "_audit() wrapper literals",
     codes: [
@@ -474,6 +479,7 @@ const REVIEWED_NON_LITERAL_ACTIONS: Record<string, number> = {
   "modules/service_desk/canned.py": 1,
   "modules/user_admin/service.py": 1,
   "services/device_review.py": 1,
+  "services/clients.py": 1,
   "services/install_link.py": 1,
 };
 

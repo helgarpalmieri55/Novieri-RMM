@@ -334,7 +334,7 @@ async def create_client(
             "principal_site_id": str(site.id),
         },
     )
-    await _audit_site(session, org_id, actor_id, "site.created", site, {"name": site.name})
+    await _audit_site(session, org_id, actor_id, "client.site_created", site, {"name": site.name})
     return client
 
 
@@ -590,7 +590,7 @@ async def create_site(
     )
     session.add(site)
     await _flush_site(session)
-    await _audit_site(session, org_id, actor_id, "site.created", site, {"name": name})
+    await _audit_site(session, org_id, actor_id, "client.site_created", site, {"name": name})
     return SiteRow(site=site, device_count=0)
 
 
@@ -644,7 +644,9 @@ async def update_site(
         for key, diff in changed.items():
             setattr(site, key, diff["after"])
         await _flush_site(session)
-        await _audit_site(session, org_id, actor_id, "site.updated", site, {"changed": changed})
+        await _audit_site(
+            session, org_id, actor_id, "client.site_updated", site, {"changed": changed}
+        )
     return await _site_row(session, org_id, site_id)
 
 
@@ -697,7 +699,7 @@ async def archive_site(
         session,
         org_id,
         actor_id,
-        "site.archived",
+        "client.site_archived",
         site,
         {"name": site.name, "tokens_revoked": tokens, "links_switched_off": links},
     )

@@ -448,7 +448,7 @@ async def test_client_writes_are_audited(api_env) -> None:
 
     created = await _audits(env, org, "client.created")
     assert [(e.target_type, e.target_id) for e in created] == [("client", cid)]
-    principal = await _audits(env, org, "site.created")
+    principal = await _audits(env, org, "client.site_created")
     assert [e.meta["client_id"] for e in principal] == [cid]
     updated = await _audits(env, org, "client.updated")
     assert [(e.target_id, sorted(e.meta["changed"])) for e in updated] == [
@@ -618,8 +618,8 @@ async def test_sites_are_created_edited_and_validated(api_env) -> None:
     )
     assert moved.status_code == 422
 
-    assert [e.target_id for e in await _audits(env, org, "site.updated")] == [site["id"]]
-    assert site["id"] in [e.target_id for e in await _audits(env, org, "site.created")]
+    assert [e.target_id for e in await _audits(env, org, "client.site_updated")] == [site["id"]]
+    assert site["id"] in [e.target_id for e in await _audits(env, org, "client.site_created")]
 
 
 async def test_the_unassigned_and_archived_clients_take_no_site(api_env) -> None:
@@ -669,7 +669,7 @@ async def test_archiving_a_site_hides_it_and_disables_its_token_and_link(api_env
             await s.execute(select(InstallLink.enabled).where(InstallLink.site_id == UUID(branch)))
         ).scalar_one()
     assert (revoked[UUID(token_id)], revoked[UUID(principal_token)], link) == (True, False, False)
-    assert [e.target_id for e in await _audits(env, org, "site.archived")] == [branch]
+    assert [e.target_id for e in await _audits(env, org, "client.site_archived")] == [branch]
     assert [
         (e.target_id, e.meta["reason"]) for e in await _audits(env, org, "enrollment.token_revoked")
     ] == [(token_id, "site_archived")]
