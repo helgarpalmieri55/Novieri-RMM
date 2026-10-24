@@ -642,6 +642,42 @@ Las dos precisiones de §1.3 (el permiso de portal de un contacto) y de §2.3
    como parámetro `?client=`: un valor mal formado cierra con 4400, y un
    alcance vacío con 4403.
 
+9. **Lo que la fase 1 aísla, y lo que todavía no** (revisión final de la
+   fase 1, 2026-10-24). La base de datos impone 5a en las tablas de
+   `client_scope_catalog.PHASE_1` (`backend/app/core/client_scope_catalog.py`),
+   y solo en ellas. Las familias de `PENDING_PHASE_2` — tickets, personas,
+   licencias, suscripciones, despliegues, IPAM, autorizaciones y ejecuciones
+   de instalación remota, repositorios de respaldo, y los módulos opcionales
+   de continuidad (BCP), presupuesto y gestión de cambios — no tienen todavía
+   la política de cliente y siguen visibles para toda la organización hasta
+   la fase 2: un técnico limitado al cliente X lee y escribe, por la API, MCP
+   o la IA, las de Y. **Hasta la fase 2 los técnicos solo deben tener
+   asignaciones de "todos los clientes"**; una asignación limitada a un
+   cliente no limita esas familias. Lo mismo vale para lo que esas escrituras
+   ponen en marcha después: los procesos de la lista `ALL_SCOPE_ALLOWLIST`
+   trabajan con alcance `all`, así que, por ejemplo, la configuración de
+   barrido de una subred que guarda un técnico limitado
+   (`PUT /ipam/subnets/{id}/sweep-settings`) la ejecuta más tarde el barrido
+   programado de IPAM (`worker.py::ipam_sweep_dispatch_org`) sobre la subred
+   que sea, de cualquier cliente; y así los barridos de cumplimiento de
+   licencias, las alertas de suscripciones y el SLA de los tickets.
+   Lo que sí se cerró en la fase 1, aunque esas tablas sigan pendientes:
+   - Tres lecturas de tablas globales que guardan datos de todos los
+     clientes exigen el permiso en todos los clientes
+     (`require_permission_on_every_client`): `GET /audit` y
+     `GET /audit/verify` (`audit.read`), el registro de correo entrante
+     `GET /email-intake/messages` (`email_intake.read`) y el de entregas de
+     notificaciones `GET /notifications/deliveries` (`notification.read`). La
+     lista está en `backend/tests/test_global_writes.py::GLOBAL_READS`, que la
+     compara con el router en los dos sentidos, como la de escrituras del
+     punto 3.
+   - Una instalación remota no sale del cliente del equipo: el servidor de
+     sitio que la origina, y que recibe la credencial descifrada, es del
+     cliente del activo, también con alcance `all` y en el ritmo de las
+     ejecuciones (`agent_push/preflight.py`). Si equipos avalados de dos
+     clientes tienen la misma dirección, se rechaza con `ambiguous_asset`
+     en lugar de elegir uno.
+
 ---
 
 ## Anexo A — Clasificación de las tablas
