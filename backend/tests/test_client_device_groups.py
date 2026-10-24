@@ -1,19 +1,35 @@
 """MSP clients spec §1.5: a device group organises ONE client's devices, and an
 asset typed by hand belongs to its site's client."""
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
-from app.models import Client, Device, DeviceGroup, InventorySnapshot, Organization, Site
+from app.models import (
+    Client,
+    Device,
+    DeviceGroup,
+    InventorySnapshot,
+    Organization,
+    Site,
+    User,
+)
 from app.modules.inventory.rules import evaluate_rules
 from app.modules.inventory.schema import InventoryDocument
-from app.services.device_groups import reevaluate_org_membership
+from app.services.device_groups import (
+    DeviceGroupError,
+    create_device_group,
+    reevaluate_org_membership,
+)
+from tests.client_scope_support import EVERY_CLIENT, client_with_site, everything_on
+from tests.test_agent_release_api import _StubStore
 from tests.test_inventory_schema import FULL_DOC
 
 GROUPS = "/api/v1/device-groups"
@@ -229,3 +245,230 @@ async def test_an_asset_needs_a_site_and_takes_its_client(api_env) -> None:
         headers=headers,
     )
     assert refused.status_code == 404, refused.text
+
+
+# --------------------------------------------------------------------------- #
+# Review I1: the preview runs over the group's client, as the sweep does.
+# --------------------------------------------------------------------------- #
+
+PREVIEW = f"{GROUPS}/preview"
+
+
+async def test_the_preview_counts_only_the_groups_clients_devices(api_env) -> None:
+    """The preview claims to run the sweep's matcher, and the sweep only lets a
+    group claim its own client's devices: an internal machine matching the rule
+    is not in a customer group's count, saved or not."""
+    org = await api_env.create_org("cdg")
+    client_id, site_id = await _customer(api_env.admin_engine, org)
+    await _inventoried(api_env.admin_engine, org, org, org, "wks-internal")
+    customer = await _inventoried(api_env.admin_engine, org, client_id, site_id, "wks-customer")
+    headers = await _admin(api_env, org)
+
+    unsaved = await api_env.client.post(
+        PREVIEW, headers=headers, json={"rules": WINDOWS, "client_id": str(client_id)}
+    )
+    assert unsaved.status_code == 200, unsaved.text
+    assert unsaved.json()["matched"] == 1
+    assert [m["device_id"] for m in unsaved.json()["sample"]] == [str(customer)]
+
+    group = await api_env.client.post(
+        GROUPS, headers=headers, json={"name": "c", "client_id": str(client_id)}
+    )
+    saved = await api_env.client.post(
+        PREVIEW, headers=headers, json={"rules": WINDOWS, "group_id": group.json()["id"]}
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["matched"] == 1
+
+    # The internal client's preview sees the internal machine only.
+    internal = await api_env.client.post(
+        PREVIEW, headers=headers, json={"rules": WINDOWS, "client_id": str(org)}
+    )
+    assert internal.json()["matched"] == 1
+
+
+async def test_a_preview_names_its_client(api_env) -> None:
+    org = await api_env.create_org("cdg")
+    headers = await _admin(api_env, org)
+    nameless = await api_env.client.post(PREVIEW, headers=headers, json={"rules": WINDOWS})
+    assert nameless.status_code == 422, nameless.text
+
+    other = await api_env.create_org("cdg-other")
+    their_client, _ = await _customer(api_env.admin_engine, other)
+    theirs = await api_env.client.post(
+        PREVIEW, headers=headers, json={"rules": WINDOWS, "client_id": str(their_client)}
+    )
+    assert theirs.status_code == 404, theirs.text
+
+
+# --------------------------------------------------------------------------- #
+# Review I2: a group's name is unique within its client.
+# --------------------------------------------------------------------------- #
+
+
+async def test_two_clients_may_each_have_a_group_of_the_same_name(api_env) -> None:
+    org = await api_env.create_org("cdg")
+    x, _ = await _customer(api_env.admin_engine, org)
+    y, _ = await _customer(api_env.admin_engine, org)
+    headers = await _admin(api_env, org)
+    for client in (x, y):
+        created = await api_env.client.post(
+            GROUPS, headers=headers, json={"name": "Servers", "client_id": str(client)}
+        )
+        assert created.status_code == 201, created.text
+
+    again = await api_env.client.post(
+        GROUPS, headers=headers, json={"name": "Servers", "client_id": str(x)}
+    )
+    assert again.status_code == 409, again.text
+    assert "already exists" in again.json()["detail"]
+
+
+async def test_a_name_another_client_uses_is_free_for_a_technician_who_cannot_see_it(
+    api_env,
+) -> None:
+    """The name check runs under the technician's scope, so it cannot see
+    client Y's group. Under a per-org index the INSERT then died on the unique
+    violation: a 500 where an every-client admin got a 409 -- an oracle for Y's
+    group names. Per client, it is simply free."""
+    org = await api_env.create_org("cdg")
+    x, _ = await _customer(api_env.admin_engine, org)
+    y, _ = await _customer(api_env.admin_engine, org)
+    admin = await _admin(api_env, org)
+    taken = await api_env.client.post(
+        GROUPS, headers=admin, json={"name": "Servers", "client_id": str(y)}
+    )
+    assert taken.status_code == 201, taken.text
+
+    tech = await everything_on(api_env, org, x)
+    created = await api_env.client.post(
+        GROUPS, headers=tech, json={"name": "Servers", "client_id": str(x)}
+    )
+    assert created.status_code == 201, created.text
+
+
+async def test_a_rename_is_checked_within_the_groups_client(api_env) -> None:
+    org = await api_env.create_org("cdg")
+    x, _ = await _customer(api_env.admin_engine, org)
+    y, _ = await _customer(api_env.admin_engine, org)
+    headers = await _admin(api_env, org)
+    await api_env.client.post(
+        GROUPS, headers=headers, json={"name": "Servers", "client_id": str(y)}
+    )
+    mine = await api_env.client.post(
+        GROUPS, headers=headers, json={"name": "Desktops", "client_id": str(x)}
+    )
+    other = await api_env.client.post(
+        GROUPS, headers=headers, json={"name": "Laptops", "client_id": str(x)}
+    )
+    renamed = await api_env.client.patch(
+        f"{GROUPS}/{mine.json()['id']}", headers=headers, json={"name": "Servers"}
+    )
+    assert renamed.status_code == 200, renamed.text
+    clash = await api_env.client.patch(
+        f"{GROUPS}/{other.json()['id']}", headers=headers, json={"name": "Servers"}
+    )
+    assert clash.status_code == 409, clash.text
+
+
+# --------------------------------------------------------------------------- #
+# Review M4: nothing new lands in an archived client.
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_group_is_not_created_for_an_archived_client(api_env) -> None:
+    org = await api_env.create_org("cdg")
+    client_id, _ = await client_with_site(api_env, org, client_archived=True)
+    response = await api_env.client.post(
+        GROUPS,
+        headers=await _admin(api_env, org),
+        json={"name": "servers", "client_id": str(client_id)},
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "that client is archived"
+
+
+async def test_an_asset_is_not_created_at_a_site_of_an_archived_client(api_env) -> None:
+    org = await api_env.create_org("cdg")
+    _, site_id = await client_with_site(api_env, org, client_archived=True)
+    response = await api_env.client.post(
+        "/api/v1/devices",
+        headers=await _admin(api_env, org),
+        json={"description": "boxed laptop", "site_id": str(site_id)},
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "that client is archived"
+
+
+# --------------------------------------------------------------------------- #
+# Review I5: the phase-1 internal-client fallbacks need every client.
+# --------------------------------------------------------------------------- #
+
+
+async def test_promoting_a_discovered_machine_needs_every_client(api_env) -> None:
+    """Phase 1 files a promoted machine under the internal client (IPAM has no
+    client yet), so a technician limited to one client is refused up front with
+    the every-client sentence -- not a 500 from the row RLS would refuse."""
+    org = await api_env.create_org("cdg")
+    x, _ = await _customer(api_env.admin_engine, org)
+    body = {"addresses": ["10.77.0.5"]}
+    path = "/api/v1/devices/candidates/promote"
+    narrowed = await api_env.client.post(
+        path, headers=await everything_on(api_env, org, x), json=body
+    )
+    assert narrowed.status_code == 403, narrowed.text
+    assert narrowed.json()["detail"] == EVERY_CLIENT
+
+    everyone = await api_env.client.post(path, headers=await _admin(api_env, org), json=body)
+    assert everyone.status_code == 200, everyone.text
+
+
+async def test_starting_a_provisioning_run_needs_every_client(api_env) -> None:
+    """Imaging is hidden in phase 1 and provisions into the internal client: a
+    technician limited to one client is refused before any profile is read."""
+    org = await api_env.create_org("cdg")
+    x, _ = await _customer(api_env.admin_engine, org)
+    path = f"/api/v1/provisioning/profiles/{uuid4()}/run"
+    # A stub store: the route builds one before it reads the profile.
+    api_env.app.state.object_store = _StubStore()
+    narrowed = await api_env.client.post(
+        path, headers=await everything_on(api_env, org, x), json={}
+    )
+    assert narrowed.status_code == 403, narrowed.text
+    assert narrowed.json()["detail"] == EVERY_CLIENT
+
+    # Every client: past the gate, to the profile that does not exist.
+    everyone = await api_env.client.post(path, headers=await _admin(api_env, org), json={})
+    assert everyone.status_code == 422, everyone.text
+
+
+async def test_two_creates_racing_for_one_name_end_in_a_409_not_a_500(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """I2's backstop. Neither create sees the other's uncommitted row, so both
+    pass the name check; the second INSERT waits on the live-name index and,
+    once the first commits, fails on it. That unique violation is the same 409
+    the check gives, not an IntegrityError out of the route."""
+    org = await _org(admin_engine)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        actor = User(org_id=org, external_subject=f"sub-{uuid4().hex[:8]}", email="r@test.local")
+        s.add(actor)
+        await s.commit()
+        actor_id = actor.id
+
+    async def create() -> DeviceGroup:
+        async with org_session(org, engine=app_engine, clients=ClientScope.all()) as session:
+            return await create_device_group(
+                session, org_id=org, client_id=org, actor_id=actor_id, name="Servers"
+            )
+
+    async with org_session(org, engine=app_engine, clients=ClientScope.all()) as session:
+        await create_device_group(
+            session, org_id=org, client_id=org, actor_id=actor_id, name="Servers"
+        )
+        racing = asyncio.create_task(create())
+        await asyncio.sleep(0.5)  # let it pass the check and block on the index
+        assert not racing.done()
+    with pytest.raises(DeviceGroupError) as refused:
+        await racing
+    assert refused.value.status_code == 409

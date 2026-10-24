@@ -13,11 +13,14 @@ ONE LINK PER SITE, NOT PER ORGANISATION (MSP clients spec §1.5, plan Task 7).
 `uq_install_links_site` replaced `uq_install_links_org` in migration 0231, the
 link carries its site's client and site, and a machine that joins through it
 lands in them. Everything here is addressed by `site_id`; a site the session
-cannot see is `LinkSiteNotFound`, which the route answers with a 404.
+cannot see is `client_sites.SiteNotFound`, which the route answers with a 404,
+and an archived site or client takes no new settings (`NotAcceptingNewRows`,
+a 409) -- switching a link on would let machines join a site nobody offers.
 
 THE ALLOWED NETWORKS ARE THE SITE'S `egress_networks` -- the public addresses
 that office leaves the Internet from -- not a list of the link's own. The
-settings route still takes `networks`, and writes them to the site. The link's
+settings route still takes `networks` -- optional, and absent means the site's
+stay as they are -- and writes them to the site. The link's
 own `install_links.networks` column stays in the table and NOTHING READS IT any
 more: `save` still writes it, as a copy of what it wrote to the site, only
 because migration 0170's `ck_install_links_on_needs_code_and_network` refuses a
@@ -51,6 +54,7 @@ from app.core.client_scope import ClientScope
 from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.models import Device, InstallLink, Site
+from app.services.client_sites import SiteNotFound, site_for_new_rows
 
 #: `secrets.token_urlsafe(24)` is 32 characters of [A-Za-z0-9_-]: 192 bits.
 CODE_BYTES = 24
@@ -68,12 +72,6 @@ _CODE_ALPHABET = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 
 class InstallLinkError(ValueError):
     """A setting the operator can correct. The route answers 422 with it."""
-
-
-class LinkSiteNotFound(LookupError):
-    """The site does not exist, or the session cannot see it (another
-    organisation's, or a client outside the caller's scope). The route answers
-    404, the same for both."""
 
 
 @dataclass(frozen=True)
@@ -209,13 +207,15 @@ class LinkView:
 
 
 async def _site(session: AsyncSession, site_id: UUID) -> Site:
-    """The site, as the session sees it -- RLS hides another organisation's
-    and a client outside the session's scope, and both are `LinkSiteNotFound`."""
+    """The site, as the session sees it, for a READ -- RLS hides another
+    organisation's and a client outside the session's scope, and both are
+    `SiteNotFound`. A write takes `client_sites.site_for_new_rows` instead,
+    which also refuses an archived site or client."""
     site = (
         await session.execute(select(Site).where(Site.id == site_id))
     ).scalar_one_or_none()
     if site is None:
-        raise LinkSiteNotFound(site_id)
+        raise SiteNotFound(site_id)
     return site
 
 
@@ -318,10 +318,11 @@ async def _audit(
 async def save(
     session: AsyncSession,
     *,
+    org_id: UUID,
     site_id: UUID,
     actor_id: UUID,
     enabled: bool,
-    networks: list[str],
+    networks: list[str] | None,
     disable_at: datetime | None,
     hourly_limit: int,
     now: datetime,
@@ -331,12 +332,18 @@ async def save(
 
     `networks` ARE THE SITE'S `egress_networks`, and are written there: the
     link answers requests from the networks of the office it belongs to.
+    `None` leaves them as they are -- switching a link off is not an
+    instruction to forget where the office is.
 
     Validation happens BEFORE the row is touched, so a refused save changes
     nothing and audits nothing.
     """
-    site = await _site(session, site_id)
-    nets = normalise_networks(networks, trusted_proxies=trusted_proxies)
+    site = await site_for_new_rows(session, org_id=org_id, site_id=site_id)
+    nets = (
+        _networks(site)
+        if networks is None
+        else normalise_networks(networks, trusted_proxies=trusted_proxies)
+    )
     if not MIN_HOURLY_LIMIT <= hourly_limit <= MAX_HOURLY_LIMIT:
         raise InstallLinkError(
             tr(
@@ -407,10 +414,11 @@ async def save(
 
 
 async def regenerate(
-    session: AsyncSession, *, site_id: UUID, actor_id: UUID, now: datetime
+    session: AsyncSession, *, org_id: UUID, site_id: UUID, actor_id: UUID, now: datetime
 ) -> str:
     """A new code; the old one stops working the moment this commits."""
-    row = await _locked_row(session, await _site(session, site_id), actor_id)
+    site = await site_for_new_rows(session, org_id=org_id, site_id=site_id)
+    row = await _locked_row(session, site, actor_id)
     code = new_code()
     row.code_hash = hash_code(code)
     row.updated_at = now
@@ -431,7 +439,7 @@ async def code_state(session: AsyncSession, site_id: UUID, *, code: str, now: da
     stored. The allowed networks are NOT checked here -- this answers an
     authenticated administrator in the console, not a machine joining.
     """
-    await _site(session, site_id)  # LinkSiteNotFound for a site the session cannot see
+    await _site(session, site_id)  # SiteNotFound for a site the session cannot see
     row = await _row(session, site_id)
     if row is None or not is_live(row, now):
         return "off"

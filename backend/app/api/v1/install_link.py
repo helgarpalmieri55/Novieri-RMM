@@ -25,6 +25,7 @@ from app.core.tenancy import org_session
 from app.modules.agent_distribution import msi as msi_svc
 from app.modules.agent_distribution.api import _object_store
 from app.services import install_link as svc
+from app.services.client_sites import NotAcceptingNewRows, SiteNotFound
 
 router = APIRouter(prefix="/sites/{site_id}/install-link", tags=["install-link"])
 
@@ -76,7 +77,10 @@ class InstallLinkUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool
-    networks: list[str] = Field(default_factory=list)
+    #: THE SITE'S egress networks. Absent or null leaves them as they are:
+    #: switching a link off is not an instruction to forget where the office
+    #: is (Task 7 review M2).
+    networks: list[str] | None = None
     disable_at: datetime | None = None
     hourly_limit: int = svc.DEFAULT_HOURLY_LIMIT
 
@@ -122,7 +126,7 @@ async def get_install_link(
     ) as session:
         try:
             return _out(await svc.view(session, site_id, datetime.now(UTC)))
-        except svc.LinkSiteNotFound:
+        except SiteNotFound:
             raise _no_site() from None
 
 
@@ -142,6 +146,7 @@ async def put_install_link(
         try:
             minted = await svc.save(
                 session,
+                org_id=ctx.org_id,
                 site_id=site_id,
                 actor_id=ctx.user_id,
                 enabled=body.enabled,
@@ -151,8 +156,10 @@ async def put_install_link(
                 now=now,
                 trusted_proxies=request.app.state.trusted_proxies,
             )
-        except svc.LinkSiteNotFound:
+        except SiteNotFound:
             raise _no_site() from None
+        except NotAcceptingNewRows as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
         except svc.InstallLinkError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         view = await svc.view(session, site_id, now)
@@ -170,9 +177,13 @@ async def regenerate_install_link(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
         try:
-            code = await svc.regenerate(session, site_id=site_id, actor_id=ctx.user_id, now=now)
-        except svc.LinkSiteNotFound:
+            code = await svc.regenerate(
+                session, org_id=ctx.org_id, site_id=site_id, actor_id=ctx.user_id, now=now
+            )
+        except SiteNotFound:
             raise _no_site() from None
+        except NotAcceptingNewRows as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
         view = await svc.view(session, site_id, now)
     return _saved(view, svc.link_url(_base(request), code))
 

@@ -51,6 +51,7 @@ from app.modules.agent_distribution.schemas import (
     VersionUnpublishedOut,
 )
 from app.services import enrollment as enrollment_svc
+from app.services.client_sites import NotAcceptingNewRows, SiteNotFound
 
 router = APIRouter(prefix="/agent", tags=["agent-distribution"])
 
@@ -319,8 +320,10 @@ async def install_command_route(
                 # spent by the time that matters is a weak credential by design.
                 max_uses=1,
             )
-        except enrollment_svc.TokenSiteNotFound:
+        except SiteNotFound:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such site")) from None
+        except NotAcceptingNewRows as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
         url = _object_store(request).presign_agent_release_get(
             release.version,
             release.os,
@@ -508,8 +511,10 @@ async def deployment_token_route(
                 # every rollout regardless of size.
                 max_uses=body.max_uses,
             )
-        except enrollment_svc.TokenSiteNotFound:
+        except SiteNotFound:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such site")) from None
+        except NotAcceptingNewRows as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
         await audit_service.record(
             session,
             org_id=ctx.org_id,

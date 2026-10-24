@@ -444,6 +444,17 @@ def upgrade() -> None:
         )
     op.execute("ALTER TABLE install_links DROP CONSTRAINT uq_install_links_org")
     op.execute("ALTER TABLE install_links ADD CONSTRAINT uq_install_links_site UNIQUE (site_id)")
+    # A group organises ONE client's devices (spec §1.5), so its live name is
+    # unique within that client, not across the organisation. Per organisation
+    # (0072), a technician limited to client X could not see that client Y
+    # already uses a name -- the application's check runs under their scope --
+    # and the INSERT died on this index: a 500 where an every-client admin got
+    # a 409, which told the technician Y's group names one guess at a time.
+    op.execute("DROP INDEX uq_device_groups_org_live_name")
+    op.execute(
+        "CREATE UNIQUE INDEX uq_device_groups_client_live_name "
+        "ON device_groups (org_id, client_id, name) WHERE archived_at IS NULL"
+    )
     op.execute(
         "CREATE TRIGGER its_device_client_guard BEFORE INSERT OR UPDATE ON devices "
         "FOR EACH ROW EXECUTE FUNCTION its_device_client_guard()"
@@ -568,6 +579,15 @@ def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_enrollment_tokens_site_id")
     op.execute("ALTER TABLE install_links DROP CONSTRAINT uq_install_links_site")
     op.execute("ALTER TABLE install_links ADD CONSTRAINT uq_install_links_org UNIQUE (org_id)")
+    # Fails if two clients of one organisation share a live group name, as
+    # 0231's own `uq_install_links_org` restore fails with several links per
+    # organisation: downgrade is CI's round trip, never production's rollback
+    # (restore-from-backup, CLAUDE.md).
+    op.execute("DROP INDEX uq_device_groups_client_live_name")
+    op.execute(
+        "CREATE UNIQUE INDEX uq_device_groups_org_live_name "
+        "ON device_groups (org_id, name) WHERE archived_at IS NULL"
+    )
     for table in SITE_TABLES:
         op.execute(f"ALTER TABLE {table} DROP COLUMN site_id")
     for table in C_TABLES:

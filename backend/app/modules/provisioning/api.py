@@ -31,7 +31,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 
-from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
+from app.api.deps import (
+    AuthContext,
+    require_all_clients,
+    require_permission,
+    require_permission_on_every_client,
+)
 from app.core.i18n import tr
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -303,6 +308,12 @@ async def start_run_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("provisioning.run")),
 ) -> RunStartResponse:
+    # EVERY CLIENT, IN PHASE 1. Imaging is hidden (MSP clients spec §1.4) and a
+    # run provisions into the internal client's Principal site
+    # (`dispatch.start_provision_run`), so a technician limited to some clients
+    # is refused here, with the every-client sentence, rather than by RLS at
+    # the INSERT with a 500. PHASE 2: the client the machine is for.
+    require_all_clients(ctx)
     state = request.app.state
     wake_envelope: dict[str, Any] | None = None
     try:

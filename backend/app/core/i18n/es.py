@@ -1024,6 +1024,12 @@ CATALOG: dict[str, str] = {
     ),
     "unknown client": "cliente desconocido",
     "the parent group belongs to another client": "el grupo padre pertenece a otro cliente",
+    "that site is archived": "esa sede está archivada",
+    "that group belongs to another client": "ese grupo pertenece a otro cliente",
+    "a preview needs the group's client: send client_id for a group that is not saved yet": (
+        "una vista previa necesita el cliente del grupo: envía client_id para un grupo que "
+        "aún no está guardado"
+    ),
     "a role cannot be granted on the unassigned client": (
         "no se puede asignar un rol sobre el cliente «Sin asignar»"
     ),

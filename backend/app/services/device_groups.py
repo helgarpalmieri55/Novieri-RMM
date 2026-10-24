@@ -66,6 +66,7 @@ from app.modules.inventory.rules import (
     rule_bearing_groups_query,
 )
 from app.modules.inventory.schema import InventoryDocument
+from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
 
 logger = logging.getLogger("its.device_groups")
 
@@ -284,17 +285,28 @@ async def get_device_group(
 
 
 async def _live_name_is_free(
-    session: AsyncSession, org_id: UUID, name: str, *, excluding: UUID | None
+    session: AsyncSession,
+    org_id: UUID,
+    client_id: UUID,
+    name: str,
+    *,
+    excluding: UUID | None,
 ) -> bool:
-    """Is `name` unused by a LIVE group of this org?
+    """Is `name` unused by a LIVE group of this org's CLIENT?
 
     Checked in application code as well as by the partial unique index, so the
     refusal is a 409 with a sentence in it rather than a 500 out of an
     `IntegrityError` (§5.4). The index is still what makes it true under a
     race; this is what makes it legible.
+
+    WITHIN THE CLIENT, as the index is since migration 0231: a group organises
+    one client's devices, and the check runs under the caller's scope, which
+    may not see another client's groups at all -- a per-organisation rule it
+    cannot see would be a rule only the database could enforce, with a 500.
     """
     query = select(DeviceGroup.id).where(
         DeviceGroup.org_id == org_id,
+        DeviceGroup.client_id == client_id,
         DeviceGroup.name == name,
         DeviceGroup.archived_at.is_(None),
     )
@@ -367,6 +379,10 @@ async def _subtree_height(
 #: SQLSTATE `check_violation`: what `its_group_client_guard` (migration 0231)
 #: raises when a group's parent is of another client.
 _CHECK_VIOLATION = "23514"
+#: SQLSTATE `unique_violation`, and the one index on this table it is ours to
+#: answer: a live name taken within the client (migration 0231).
+_UNIQUE_VIOLATION = "23505"
+_LIVE_NAME_INDEX = "uq_device_groups_client_live_name"
 
 
 def _parent_of_another_client() -> DeviceGroupError:
@@ -374,17 +390,25 @@ def _parent_of_another_client() -> DeviceGroupError:
 
 
 async def _flush_guarded(session: AsyncSession) -> None:
-    """Flush, answering the client guard as the refusal it is.
+    """Flush, answering the database's two backstops as the refusals they are.
 
     `_assert_parent_is_legal` refuses a parent of another client before any
     write; the trigger is what holds when two requests race past it, and its
     `check_violation` is a 422 with the same sentence, not a 500.
+    `_live_name_is_free` refuses a taken name the same way, and the live-name
+    index is what holds under a race: its `unique_violation` is the same 409.
+    Only THAT index's: another unique violation in the same flush is not a
+    name clash and stays the error it is.
     """
     try:
         await session.flush()
     except IntegrityError as exc:
-        if getattr(exc.orig, "sqlstate", None) == _CHECK_VIOLATION:
+        sqlstate = getattr(exc.orig, "sqlstate", None)
+        if sqlstate == _CHECK_VIOLATION:
             raise _parent_of_another_client() from None
+        constraint = getattr(getattr(exc.orig, "__cause__", None), "constraint_name", None)
+        if sqlstate == _UNIQUE_VIOLATION and constraint == _LIVE_NAME_INDEX:
+            raise DeviceGroupError(409, tr("a group of that name already exists")) from None
         raise
 
 
@@ -550,16 +574,16 @@ async def create_device_group(
     `client_id` IS REQUIRED (MSP clients spec §1.5): a group organises one
     client's devices. A client the session cannot see -- another
     organisation's, or one outside the caller's scope -- is a 404, the same
-    for both; its parent, if any, has to be of the same client.
+    for both, and an archived client takes no new group (409); its parent, if
+    any, has to be of the same client, and its name is unique within it.
     """
-    visible = (
-        await session.execute(
-            select(Client.id).where(Client.id == client_id, Client.org_id == org_id)
-        )
-    ).scalar_one_or_none()
-    if visible is None:
-        raise DeviceGroupError(404, tr("unknown client"))
-    if not await _live_name_is_free(session, org_id, name, excluding=None):
+    try:
+        await client_for_new_rows(session, org_id=org_id, client_id=client_id)
+    except ClientNotFound:
+        raise DeviceGroupError(404, tr("unknown client")) from None
+    except NotAcceptingNewRows as exc:
+        raise DeviceGroupError(409, exc.detail) from None
+    if not await _live_name_is_free(session, org_id, client_id, name, excluding=None):
         raise DeviceGroupError(409, tr("a group of that name already exists"))
 
     group = DeviceGroup(
@@ -571,7 +595,7 @@ async def create_device_group(
         rules=rules,
     )
     session.add(group)
-    await session.flush()
+    await _flush_guarded(session)
     if parent_group_id is not None:
         await _assert_parent_is_legal(
             session, org_id, group.id, parent_group_id, client_id=client_id
@@ -659,7 +683,9 @@ async def update_device_group(
         if new == old:
             continue
         if field == "name":
-            if not await _live_name_is_free(session, org_id, new, excluding=group_id):
+            if not await _live_name_is_free(
+                session, org_id, group.client_id, new, excluding=group_id
+            ):
                 raise DeviceGroupError(409, tr("a group of that name already exists"))
         if field == "parent_group_id":
             if new is not None:
@@ -833,8 +859,14 @@ async def _active_device_batch(
     *,
     after: UUID | None,
     changed_since: UUID | None = None,
+    client_id: UUID | None = None,
 ) -> list[Device]:
     """One batch of this org's active devices, for a keyset walk.
+
+    `client_id`, WHEN GIVEN, IS THE ONE CLIENT WHOSE DEVICES ARE WALKED: the
+    preview of one group's rules, which can only ever claim that client's
+    devices (MSP clients spec §1.5). The sweep walks every client and filters
+    the groups per device instead.
 
     `changed_since`, WHEN GIVEN, NARROWS THIS TO DEVICES WHOSE INVENTORY MOVED.
     It is an `inventory_snapshots.id` -- a uuid7, so it orders by creation --
@@ -869,6 +901,8 @@ async def _active_device_batch(
     the same objects and writes nothing.
     """
     query = select(Device).where(Device.org_id == org_id, Device.status == "active")
+    if client_id is not None:
+        query = query.where(Device.client_id == client_id)
     if after is not None:
         query = query.where(Device.id > after)
     if changed_since is not None:
@@ -894,6 +928,7 @@ async def preview_rules(
     org_id: UUID,
     rules: dict[str, Any],
     group_id: UUID | None = None,
+    client_id: UUID | None = None,
 ) -> RulePreview:
     """What this candidate rules document would claim, right now. Writes
     nothing.
@@ -924,9 +959,33 @@ async def preview_rules(
     `group_id`, when given, must resolve in this org -- same refusal for absent
     and for a neighbour's, indistinguishably, because a 403 would confirm the
     id exists somewhere.
+
+    ONE CLIENT'S DEVICES, AS THE SWEEP CLAIMS THEM (MSP clients spec §1.5): a
+    group's rules only ever claim devices of the group's client. The client is
+    the saved group's, or -- for a group not saved yet -- `client_id`, loaded
+    under the caller's scope: a client they cannot see is a 404.
     """
     if group_id is not None:
-        await get_device_group(session, org_id, group_id)
+        group = await get_device_group(session, org_id, group_id)
+        if client_id is not None and client_id != group.client_id:
+            raise DeviceGroupError(422, tr("that group belongs to another client"))
+        client_id = group.client_id
+    elif client_id is not None:
+        visible = (
+            await session.execute(
+                select(Client.id).where(Client.id == client_id, Client.org_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if visible is None:
+            raise DeviceGroupError(404, tr("unknown client"))
+    else:
+        raise DeviceGroupError(
+            422,
+            tr(
+                "a preview needs the group's client: send client_id for a group that is not "
+                "saved yet"
+            ),
+        )
 
     names = {
         row_id: name
@@ -944,7 +1003,7 @@ async def preview_rules(
     sample: list[RuleMatch] = []
     after: UUID | None = None
     while True:
-        batch = await _active_device_batch(session, org_id, after=after)
+        batch = await _active_device_batch(session, org_id, after=after, client_id=client_id)
         if not batch:
             break
         after = batch[-1].id
@@ -1492,7 +1551,9 @@ async def unarchive_device_group(
     group = await get_device_group(session, org_id, group_id)
     if group.archived_at is None:
         raise DeviceGroupError(409, tr("this group is not archived"))
-    if not await _live_name_is_free(session, org_id, group.name, excluding=group_id):
+    if not await _live_name_is_free(
+        session, org_id, group.client_id, group.name, excluding=group_id
+    ):
         raise DeviceGroupError(
             409,
             tr(
@@ -1530,7 +1591,7 @@ async def unarchive_device_group(
         target_id=str(group_id),
         metadata={"name": group.name, "member_count": 0},
     )
-    await session.flush()
+    await _flush_guarded(session)
     return group
 
 

@@ -10,6 +10,7 @@ from app.core.client_address import client_address
 from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.services import enrollment as svc
+from app.services.client_sites import NotAcceptingNewRows, SiteNotFound
 
 tokens_router = APIRouter(prefix="/enrollment-tokens", tags=["enrollment"])
 agents_router = APIRouter(prefix="/agents", tags=["enrollment"])
@@ -99,6 +100,9 @@ class TokenListItem(BaseModel):
     #: `TokenListResponse.unlimited_count` is how the console finds them.
     max_uses: int | None
     use_count: int
+    #: Where a machine enrolled with this token lands (MSP clients spec §1.5).
+    client_id: UUID
+    site_id: UUID
     #: Soft, and permanent. A revoked token is never deleted -- see
     #: `services/enrollment.py::list_tokens` for why the row has to outlive the
     #: credential -- so this is the flag the default listing filters on.
@@ -215,8 +219,10 @@ async def create_token(
                 expires_in_hours=body.expires_in_hours,
                 max_uses=body.max_uses,
             )
-        except svc.TokenSiteNotFound:
+        except SiteNotFound:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such site")) from None
+        except NotAcceptingNewRows as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
     return TokenCreatedResponse(
         id=issued.id,
         token=issued.token,
@@ -297,6 +303,8 @@ async def list_tokens(
                     expires_at=r.expires_at,
                     max_uses=r.max_uses,
                     use_count=r.use_count,
+                    client_id=r.client_id,
+                    site_id=r.site_id,
                     revoked=r.revoked,
                 )
                 for r in page.rows

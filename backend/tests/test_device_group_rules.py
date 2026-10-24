@@ -259,7 +259,9 @@ async def test_preview_counts_exactly_writes_nothing_and_truncates_its_sample(
     await _device_with_doc(api_env, org_id, "never-collected", doc=None)
 
     before = await _placements(api_env, org_id)
-    response = await api_env.client.post(PREVIEW, headers=headers, json={"rules": WINDOWS})
+    response = await api_env.client.post(
+        PREVIEW, headers=headers, json={"rules": WINDOWS, "client_id": str(org_id)}
+    )
     assert response.status_code == 200, response.text
     body = response.json()
 
@@ -293,7 +295,9 @@ async def test_preview_reports_the_no_inventory_count_that_explains_a_short_matc
         await _device_with_doc(api_env, org_id, f"bare-{index}", doc=None)
 
     body = (
-        await api_env.client.post(PREVIEW, headers=headers, json={"rules": WINDOWS})
+        await api_env.client.post(
+            PREVIEW, headers=headers, json={"rules": WINDOWS, "client_id": str(org_id)}
+        )
     ).json()
     assert body["matched"] == 1
     assert body["devices_without_inventory"] == 4
@@ -322,7 +326,9 @@ async def test_preview_agrees_with_the_sweeps_matcher(api_env: Any) -> None:
     )
 
     body = (
-        await api_env.client.post(PREVIEW, headers=headers, json={"rules": rules})
+        await api_env.client.post(
+            PREVIEW, headers=headers, json={"rules": rules, "client_id": str(org_id)}
+        )
     ).json()
     assert body["matched"] == 1
     assert matches_document(rules, InventoryDocument(**FULL_DOC))
@@ -340,8 +346,9 @@ async def test_preview_takes_devices_manage_and_not_devices_read(api_env: Any) -
     reader = await api_env.headers(org_id, await api_env.create_user(org_id, "read-only"))
     tech = await api_env.headers(org_id, await api_env.create_user(org_id, "technician"))
 
+    body = {"rules": WINDOWS, "client_id": str(org_id)}
     for headers in (reader, tech):
-        response = await api_env.client.post(PREVIEW, headers=headers, json={"rules": WINDOWS})
+        response = await api_env.client.post(PREVIEW, headers=headers, json=body)
         assert response.status_code == 403, response.text
 
     # Non-vacuous: `read-only` holds `devices.read` and the DETAIL route answers
@@ -350,9 +357,7 @@ async def test_preview_takes_devices_manage_and_not_devices_read(api_env: Any) -
     assert (
         await api_env.client.get(f"{GROUPS}/{group['id']}", headers=reader)
     ).status_code == 200
-    assert (
-        await api_env.client.post(PREVIEW, headers=admin, json={"rules": WINDOWS})
-    ).status_code == 200
+    assert (await api_env.client.post(PREVIEW, headers=admin, json=body)).status_code == 200
 
 
 async def test_preview_refuses_a_document_it_cannot_run(api_env: Any) -> None:
@@ -364,7 +369,11 @@ async def test_preview_refuses_a_document_it_cannot_run(api_env: Any) -> None:
     response = await api_env.client.post(
         PREVIEW,
         headers=headers,
-        json={"rules": {"all": [{"fact": "os_familly", "op": "ne", "value": "x"}]}},
+        # The client is named, so the only thing wrong is the document.
+        json={
+            "rules": {"all": [{"fact": "os_familly", "op": "ne", "value": "x"}]},
+            "client_id": str(org_id),
+        },
     )
     assert response.status_code == 422, response.text
 
@@ -379,8 +388,14 @@ async def test_preview_counts_only_this_orgs_devices_on_the_admin_engine(
     through the real route with `app.state.app_engine` repointed at the
     BYPASSRLS admin engine, so RLS is not there to mask a missing predicate.
 
-    FALSIFIED: delete `Device.org_id == org_id` from `_active_device_batch` and
-    this turns red. Verified by doing it.
+    FALSIFIED, ONCE: deleting `Device.org_id == org_id` from
+    `_active_device_batch` turned this red. SINCE THE PREVIEW RUNS OVER ONE
+    CLIENT (MSP clients spec §1.5) it no longer can: the walk also carries
+    `Device.client_id == <the client>`, and a client id names one client of one
+    organisation, so the neighbour's devices are out on that predicate alone.
+    The org predicate is the sweep's too -- it walks every client -- and
+    `test_device_group_reevaluate.py::test_the_sweep_moves_only_its_own_orgs_
+    devices_on_the_admin_engine` is the test that still turns red without it.
 
     AND `devices_without_inventory` IS WHY IT TURNS RED, which is worth stating
     because the first version of this test asserted only the match count and
@@ -411,7 +426,9 @@ async def test_preview_counts_only_this_orgs_devices_on_the_admin_engine(
     original = api_env.app.state.app_engine
     api_env.app.state.app_engine = admin_engine
     try:
-        response = await api_env.client.post(PREVIEW, headers=headers, json={"rules": WINDOWS})
+        response = await api_env.client.post(
+            PREVIEW, headers=headers, json={"rules": WINDOWS, "client_id": str(mine)}
+        )
     finally:
         api_env.app.state.app_engine = original
 

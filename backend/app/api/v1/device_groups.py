@@ -53,9 +53,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.api.deps import AuthContext, require_permission
+from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job
 from app.modules.health.sweep import run_policy_reconcile
@@ -500,7 +501,12 @@ async def create_group(
 
 
 class RulePreviewRequest(BaseModel):
-    """A candidate rules document, and optionally the group it is for."""
+    """A candidate rules document, and the group it is for or its client.
+
+    A PREVIEW RUNS OVER ONE CLIENT'S DEVICES, as the sweep claims them (MSP
+    clients spec §1.5): the saved group's client, or `client_id` for a group
+    not saved yet -- required then, as it is on `GroupCreateRequest`.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -513,6 +519,21 @@ class RulePreviewRequest(BaseModel):
     group_id: UUID | None = Field(
         default=None, description="The group being edited, when there is one"
     )
+    client_id: UUID | None = Field(
+        default=None,
+        description="The client of a group not saved yet; required when group_id is absent",
+    )
+
+    @model_validator(mode="after")
+    def _names_its_client(self) -> "RulePreviewRequest":
+        if self.group_id is None and self.client_id is None:
+            raise ValueError(
+                tr(
+                    "a preview needs the group's client: send client_id for a group that is "
+                    "not saved yet"
+                )
+            )
+        return self
 
 
 class RuleMatchOut(BaseModel):
@@ -593,6 +614,7 @@ async def preview_group_rules(
                 org_id=ctx.org_id,
                 rules=body.rules.model_dump(),
                 group_id=body.group_id,
+                client_id=body.client_id,
             )
         except DeviceGroupError as exc:
             raise _http(exc) from None

@@ -173,9 +173,13 @@ class DeviceGroup(TimestampMixin, Base):
     __tablename__ = "device_groups"
     __table_args__ = (
         client_org_fk("device_groups"),
+        # A live name is unique WITHIN ITS CLIENT (migration 0231): a group
+        # organises one client's devices, and two clients may each have
+        # "Servers". Partial, as 0072 made it: an archived group's name is free.
         Index(
-            "uq_device_groups_org_live_name",
+            "uq_device_groups_client_live_name",
             "org_id",
+            "client_id",
             "name",
             unique=True,
             postgresql_where=text("archived_at IS NULL"),

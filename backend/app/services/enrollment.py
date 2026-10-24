@@ -29,20 +29,15 @@ from app.core.events import publish as publish_event
 from app.core.i18n import tr
 from app.core.signing import SigningService
 from app.core.tenancy import org_session
-from app.models import Agent, Device, EnrollmentToken, Site, SuggestedAssetMatch
+from app.models import Agent, Device, EnrollmentToken, SuggestedAssetMatch
 from app.services import install_link as link_svc
+from app.services.client_sites import site_for_new_rows
 from app.services.matching import resolve_enrolment_target
 
 
 class EnrollmentError(Exception):
     """Invalid, expired, revoked, or exhausted token — always a 403, with no
     detail leaked about which check failed."""
-
-
-class TokenSiteNotFound(LookupError):
-    """The site a token was asked for does not exist, or the caller's session
-    cannot see it -- another organisation's, or a client outside the caller's
-    scope. A route answers 404, the same for both."""
 
 
 class LinkNotFound(Exception):
@@ -194,8 +189,9 @@ async def create_token(
     session on that client alone. The site is loaded HERE, in the caller's own
     session, and the client is taken from it -- never from the caller, so the
     pair cannot disagree. RLS hides a site of another organisation or of a
-    client outside the caller's scope: `TokenSiteNotFound`, before a secret is
-    generated.
+    client outside the caller's scope (`client_sites.SiteNotFound`), and an
+    archived site or client takes no new token (`NotAcceptingNewRows`); both
+    before a secret is generated.
 
     IT USED TO BE `int | None`, DEFAULTED TO `None` BY THE ROUTE, AND `None`
     MEANS UNLIMITED AT `enroll()`. `docs/modules/agent-distribution/spec-
@@ -222,11 +218,7 @@ async def create_token(
     their behalf and write it into their database.
     """
     _checked_max_uses(max_uses)
-    site = (
-        await session.execute(select(Site).where(Site.id == site_id, Site.org_id == org_id))
-    ).scalar_one_or_none()
-    if site is None:
-        raise TokenSiteNotFound(site_id)
+    site = await site_for_new_rows(session, org_id=org_id, site_id=site_id)
     client_id = site.client_id
     # EXACTLY ONE OF hours/minutes. A minute-granularity expiry exists for one
     # caller and one reason: agent push install mints a token DELIVERED BY A
@@ -613,6 +605,9 @@ async def enroll(
         outcome = await resolve_enrolment_target(session, org_id, facts)
         device = None
         if outcome.device_id is not None:
+            # A LINKED ASSET KEEPS ITS OWN SITE. Under this session's scope it is
+            # one of the token's client's, and a person filed it under a site;
+            # the token's site is only where a NEW row goes.
             device = await session.get(Device, outcome.device_id)
         if device is None:
             device = Device(
@@ -688,6 +683,10 @@ async def enroll(
                 "os_family": facts.os_family,
                 "token_id": str(token_id),
                 "cert_fingerprint": issued.fingerprint_sha256,
+                # Where the machine landed: the device's own, which for a
+                # linked asset is the asset's site, not necessarily the token's.
+                "client_id": str(device.client_id),
+                "site_id": str(device.site_id),
             },
         )
         if outcome.device_id is not None:

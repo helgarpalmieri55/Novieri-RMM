@@ -1,13 +1,15 @@
 """Spec §5 test 10 and §1.5: a device lands in its link's client and site."""
 
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Client, Device, Site
+from app.models import AuditEvent, Client, Device, InstallLink, Site
+from tests.client_scope_support import client_with_site
 from tests.install_link_fixtures import FACTS as LINK_FACTS
-from tests.install_link_fixtures import make_csr_pem, peer_client
+from tests.install_link_fixtures import link_path, make_csr_pem, peer_client, switch_on
 
 FACTS = {
     "hostname": "wks-cli",
@@ -179,3 +181,205 @@ async def test_a_machine_joining_through_a_sites_link_lands_in_that_site(api_env
             await s.execute(select(Device).where(Device.id == UUID(joined.json()["device_id"])))
         ).scalar_one()
     assert device.client_id == client_id and device.site_id == site_id
+
+
+# --------------------------------------------------------------------------- #
+# Review fixes (Task 7 review 1).
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_enrolment_audit_names_the_client_and_the_site(api_env) -> None:
+    """M6: `enrollment.device_enrolled` says where the machine landed."""
+    env = api_env
+    org = await env.create_org("enr")
+    sub = await env.create_user(org, "org-admin")
+    client_id, site_id = await _customer_with_site(env, org)
+    device_id = await _enroll_with_token(env, org, sub, site_id, FACTS)
+    async with AsyncSession(env.admin_engine) as s:
+        audit = (
+            await s.execute(
+                select(AuditEvent).where(
+                    AuditEvent.org_id == org,
+                    AuditEvent.action == "enrollment.device_enrolled",
+                    AuditEvent.target_id == str(device_id),
+                )
+            )
+        ).scalar_one()
+    assert audit.meta["client_id"] == str(client_id)
+    assert audit.meta["site_id"] == str(site_id)
+
+
+async def test_the_token_list_names_each_tokens_client_and_site(api_env) -> None:
+    """M1: the list says where each token's machines land, not only the mint."""
+    env = api_env
+    org = await env.create_org("enr")
+    headers = await env.headers(org, await env.create_user(org, "org-admin"))
+    client_id, site_id = await _customer_with_site(env, org)
+    for site in (site_id, org):
+        minted = await env.client.post(
+            "/api/v1/enrollment-tokens",
+            json={"name": "x", "max_uses": 1, "expires_in_hours": 1, "site_id": str(site)},
+            headers=headers,
+        )
+        assert minted.status_code == 201, minted.text
+    items = (await env.client.get("/api/v1/enrollment-tokens", headers=headers)).json()["items"]
+    assert sorted((i["client_id"], i["site_id"]) for i in items) == sorted(
+        [(str(client_id), str(site_id)), (str(org), str(org))]
+    )
+
+
+async def test_a_token_is_not_minted_for_an_archived_site(api_env) -> None:
+    """M4: nothing new lands in an archived site."""
+    env = api_env
+    org = await env.create_org("enr")
+    _, site_id = await client_with_site(env, org, site_archived=True)
+    r = await env.client.post(
+        "/api/v1/enrollment-tokens",
+        json={"name": "x", "max_uses": 1, "expires_in_hours": 1, "site_id": str(site_id)},
+        headers=await env.headers(org, await env.create_user(org, "org-admin")),
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "that site is archived"
+
+
+async def test_an_archived_sites_link_is_not_saved(api_env) -> None:
+    """M4: switching on a link would let machines join an archived site."""
+    env = api_env
+    org = await env.create_org("enr")
+    _, site_id = await client_with_site(env, org, site_archived=True)
+    r = await env.client.put(
+        link_path(site_id),
+        json={"enabled": True, "networks": ["10.50.0.0/16"]},
+        headers=await env.headers(org, await env.create_user(org, "org-admin")),
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "that site is archived"
+
+
+async def _join(env, code: str, source: str):
+    async with peer_client(env, source) as peer:
+        return await peer.post(
+            "/enroll/v1",
+            json={"link_code": code, "csr_pem": make_csr_pem(), "device_facts": LINK_FACTS},
+        )
+
+
+async def test_the_sites_networks_are_what_a_join_is_checked_against(api_env) -> None:
+    """I4 and spec §5 test 10's second half. `save` writes the networks to the
+    site AND keeps a copy on the link row (0170's CHECK wants one), so a test
+    that sets both alike cannot tell which one is read. Here they differ: the
+    site says 10.60/16, the stale copy says 10.50/16. Only the site counts."""
+    env = api_env
+    org = await env.create_org("enr")
+    code = await switch_on(env, org, ["10.50.0.0/16"])
+    async with AsyncSession(env.admin_engine) as s:
+        await s.execute(
+            update(Site).where(Site.id == org).values(egress_networks=["10.60.0.0/16"])
+        )
+        await s.commit()
+    async with AsyncSession(env.admin_engine) as s:
+        copy = (
+            await s.execute(select(InstallLink.networks).where(InstallLink.site_id == org))
+        ).scalar_one()
+    assert [str(n) for n in copy] == ["10.50.0.0/16"]
+
+    assert (await _join(env, code, "10.50.0.9")).status_code == 404
+    assert (await _join(env, code, "10.60.0.9")).status_code == 201
+
+
+async def test_switching_a_link_off_keeps_the_sites_networks(api_env) -> None:
+    """M2: `networks` is optional on the link's PUT, and absent means unchanged
+    -- the networks are the site's, and switching its link off is not an
+    instruction to forget where the office is."""
+    env = api_env
+    org = await env.create_org("enr")
+    await switch_on(env, org, ["10.50.0.0/16", "10.51.0.0/16"])
+    headers = await env.headers(org, await env.create_user(org, "org-admin"))
+    off = await env.client.put(link_path(org), json={"enabled": False}, headers=headers)
+    assert off.status_code == 200, off.text
+    assert off.json()["networks"] == ["10.50.0.0/16", "10.51.0.0/16"]
+    async with AsyncSession(env.admin_engine) as s:
+        site = (await s.execute(select(Site).where(Site.id == org))).scalar_one()
+    assert [str(n) for n in site.egress_networks] == ["10.50.0.0/16", "10.51.0.0/16"]
+
+    # And back on with no list: the site's networks are still there to use.
+    on = await env.client.put(link_path(org), json={"enabled": True}, headers=headers)
+    assert on.status_code == 200, on.text
+    assert on.json()["enabled"] is True
+
+
+async def test_the_hourly_limit_counts_each_sites_own_joins(api_env) -> None:
+    """M5: one link per site, so one limit per site. The Principal site's link
+    used up does not refuse a machine joining another site's link.
+
+    BOTH SITES ARE THE INTERNAL CLIENT'S, deliberately: a link enrollment's
+    session sees its own client only, so with two clients RLS would keep the
+    counts apart whatever the query said. Within one client only the query's
+    own site predicate does."""
+    env = api_env
+    org = await env.create_org("enr")
+    async with AsyncSession(env.admin_engine, expire_on_commit=False) as s:
+        branch_site = Site(org_id=org, client_id=org, name="Sucursal")
+        s.add(branch_site)
+        await s.commit()
+        site_id = branch_site.id
+    principal = await switch_on(env, org, ["10.50.0.0/16"], hourly_limit=1)
+    headers = await env.headers(org, await env.create_user(org, "org-admin"))
+    other = await env.client.put(
+        link_path(site_id),
+        json={"enabled": True, "networks": ["10.60.0.0/16"], "hourly_limit": 1},
+        headers=headers,
+    )
+    assert other.status_code == 200, other.text
+    branch = other.json()["url"].rsplit("/i/", 1)[1]
+
+    assert (await _join(env, principal, "10.50.0.9")).status_code == 201
+    assert (await _join(env, principal, "10.50.0.10")).status_code == 429
+    assert (await _join(env, branch, "10.60.0.9")).status_code == 201
+    assert (await _join(env, branch, "10.60.0.10")).status_code == 429
+
+
+async def test_the_switch_off_beat_records_every_due_link_of_an_organisation(
+    api_env,
+) -> None:
+    """M5: with a link per site an organisation can have several links past
+    their switch-off at once; each is switched off and audited on its own."""
+    from app.core.client_scope import ClientScope
+    from app.core.tenancy import org_session
+    from app.services import install_link as svc
+
+    env = api_env
+    org = await env.create_org("enr")
+    _, site_id = await _customer_with_site(env, org)
+    when = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    await switch_on(env, org, ["10.50.0.0/16"], disable_at=when)
+    headers = await env.headers(org, await env.create_user(org, "org-admin"))
+    saved = await env.client.put(
+        link_path(site_id),
+        json={"enabled": True, "networks": ["10.60.0.0/16"], "disable_at": when},
+        headers=headers,
+    )
+    assert saved.status_code == 200, saved.text
+    passed = datetime.now(UTC) - timedelta(minutes=1)
+    async with AsyncSession(env.admin_engine) as s:
+        await s.execute(
+            update(InstallLink).where(InstallLink.org_id == org).values(disable_at=passed)
+        )
+        await s.commit()
+
+    async with org_session(org, engine=env.app_engine, clients=ClientScope.all()) as session:
+        assert await svc.switch_off_due(session, org, datetime.now(UTC)) == 2
+
+    async with AsyncSession(env.admin_engine) as s:
+        links = (
+            await s.execute(select(InstallLink.enabled).where(InstallLink.org_id == org))
+        ).scalars().all()
+        audited = (
+            await s.execute(
+                select(AuditEvent.target_id).where(
+                    AuditEvent.org_id == org, AuditEvent.action == "enrollment.link_disabled"
+                )
+            )
+        ).scalars().all()
+    assert links == [False, False]
+    assert sorted(audited) == sorted([str(org), str(site_id)])

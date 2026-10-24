@@ -74,6 +74,7 @@ from app.modules.agent_distribution.link_page import (
 from app.modules.agent_update.semver import Version, parse_version, try_parse_version
 from app.services import install_link as link_svc
 from app.services import msi_build
+from app.services.client_sites import SiteNotFound
 
 #: The first agent that has `--msi-install` and `--msi-uninstall`. 1.6.0 was
 #: tagged before them (`agent-v1.6.0`); an MSI wrapping it would fail its own
@@ -411,7 +412,7 @@ async def _check(
     """Everything the database answers, in one short transaction."""
     try:
         state = await link_svc.code_state(session, site_id, code=code, now=now)
-    except link_svc.LinkSiteNotFound:
+    except SiteNotFound:
         raise MsiRefused(404, tr("no such site")) from None
     if state == "off":
         raise MsiRefused(

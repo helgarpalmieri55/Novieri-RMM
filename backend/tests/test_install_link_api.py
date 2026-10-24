@@ -225,6 +225,7 @@ async def test_two_first_saves_at_once_do_not_collide(admin_engine, app_engine) 
     org = await seed_org(admin_engine, "il-race")
     now = datetime.now(UTC)
     kwargs = {
+        "org_id": org.org_id,
         "site_id": org.org_id,
         "actor_id": org.user_id,
         "enabled": True,
