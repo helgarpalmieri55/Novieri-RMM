@@ -19,6 +19,7 @@ from app.gateway.dispatch import (
     handle_agent_message,
     publish_job,
     publish_revoke,
+    ui_channel,
 )
 from app.gateway.protocol import parse_agent_message
 from app.jobs.engine import JobEngine
@@ -127,7 +128,8 @@ async def test_job_result_completes_job_and_emits_ui_event(
         job_id = job.id
 
     pubsub = redis_client.pubsub()
-    await pubsub.subscribe(f"ui:{org_id}")
+    # The device is on the org's internal client, whose id is the org's.
+    await pubsub.subscribe(ui_channel(org_id, org_id))
 
     running = parse_agent_message(
         json.dumps({"v": 1, "kind": "job_status", "job_id": str(job_id), "state": "running"})

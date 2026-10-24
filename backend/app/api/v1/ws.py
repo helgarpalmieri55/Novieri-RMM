@@ -2,7 +2,19 @@
 
 Authentication uses the same OIDC bearer token as the HTTP API, carried in the
 **WebSocket subprotocol header**, not in the query string. Events come from the
-org's Redis UI channel — the same channel the gateway publishes job status into.
+Redis UI channels of the clients in the person's scope, plus the org's global
+channel -- the channels the gateway publishes job and device status into
+(MSP clients spec §2.6, `app/gateway/dispatch.py`).
+
+THE SCOPE IS THE DOOR'S, NARROWED BY `?client=`. `read_door_identity` returns
+every client the person holds any role in; the console's client selector
+travels as the `client` query parameter (a UUID, not a credential, so the
+query string is the right place for it) and is intersected with that scope --
+narrowing never widens. A scope of every client subscribes to the org's
+pattern, `ui:{org}:*`; a list subscribes to each client's channel and
+`ui:{org}:global`. A malformed parameter closes 4400; an empty scope -- no
+grant at all, or a client outside the scope -- closes 4403 and subscribes to
+nothing.
 
 WHY THE SUBPROTOCOL, AND WHAT IT REPLACED. A browser cannot set headers on a
 WebSocket handshake, so this endpoint originally took `?token=<jwt>`. That put
@@ -31,20 +43,39 @@ the token while a URL-borne one does.
 import asyncio
 import logging
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, WebSocket
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope, parse_client_header
 from app.core.identity.door import read_door_identity
 from app.core.security import TokenValidationError, require_console_token, validate_token
 from app.core.ws_auth import AUTH_SUBPROTOCOL, token_from_subprotocols
-from app.gateway.dispatch import ui_channel
+from app.gateway.dispatch import ui_channel, ui_channel_pattern, ui_global_channel
 from app.models import Organization
 
 logger = logging.getLogger("its.ui-ws")
 
 router = APIRouter(tags=["ws"])
+
+#: Close codes beyond the token door's 4401. 4400: the `client` parameter is
+#: not one UUID. 4403: the identity is not admitted, or its scope is empty.
+CLOSE_BAD_CLIENT = 4400
+CLOSE_FORBIDDEN = 4403
+
+
+def _requested_client(websocket: WebSocket) -> UUID | None:
+    """The `client` query parameter: absent is None; anything but exactly one
+    UUID raises ValueError -- `X-Client-Id`'s rule, through the same parser."""
+    values = websocket.query_params.getlist("client")
+    if not values:
+        return None
+    if len(values) > 1:
+        raise ValueError("more than one client")  # i18n-exempt: caught, the socket closes 4400
+    return parse_client_header(values[0])
+
 
 @router.websocket("/ws")
 async def ui_websocket(websocket: WebSocket) -> None:
@@ -87,11 +118,13 @@ async def ui_websocket(websocket: WebSocket) -> None:
     # unknown org closes 4401 (above) rather than 4403 -- the org has to exist
     # before its setting can be read.
     #
-    # A `sub` with NO row is admitted, as it was before the status check
+    # A `sub` with NO row passes ADMISSION, as it did before the status check
     # existed: the HTTP door self-heals such a user into an active row, so
-    # refusing here would contradict the door next to it for no gain. What
-    # this closes is the disabled user whose row exists and whose token has
-    # not yet expired.
+    # refusing it here would contradict the door next to it. What admission
+    # closes is the disabled user whose row exists and whose token has not
+    # yet expired. Such a `sub` holds no grant, though, so its scope is empty
+    # and the scope check below refuses it -- exactly as the HTTP door shows
+    # it zero rows.
     identity = await read_door_identity(
         door="console-ws",
         org_id=org_id,
@@ -100,7 +133,23 @@ async def ui_websocket(websocket: WebSocket) -> None:
         engine=state.app_engine,
     )
     if identity.refusal is not None:
-        await websocket.close(code=4403)
+        await websocket.close(code=CLOSE_FORBIDDEN)
+        return
+
+    # THE SCOPE (MSP clients spec §2.6): the door's, narrowed by the client
+    # the console chose. `intersect` never widens: a client outside the scope
+    # leaves the EMPTY scope, which is refused below rather than subscribed to
+    # nothing, so the console learns at once that its choice is not allowed.
+    try:
+        requested = _requested_client(websocket)
+    except ValueError:
+        await websocket.close(code=CLOSE_BAD_CLIENT)
+        return
+    scope = identity.clients
+    if requested is not None:
+        scope = scope.intersect(ClientScope.only([requested]))
+    if scope.is_empty:
+        await websocket.close(code=CLOSE_FORBIDDEN)
         return
 
     # Echoing the selected subprotocol is mandatory: a browser that offered
@@ -108,7 +157,15 @@ async def ui_websocket(websocket: WebSocket) -> None:
     # The NAME is echoed, never the token.
     await websocket.accept(subprotocol=AUTH_SUBPROTOCOL)
     pubsub = state.redis.pubsub()
-    await pubsub.subscribe(ui_channel(org_id))
+    if scope.is_all:
+        # Every client of THIS org and its global channel; the pattern is
+        # anchored on the org, so no other org's channel matches it.
+        await pubsub.psubscribe(ui_channel_pattern(org_id))
+    else:
+        await pubsub.subscribe(
+            *(ui_channel(org_id, client_id) for client_id in sorted(scope.ids)),
+            ui_global_channel(org_id),
+        )
     receive_task: asyncio.Task[Any] = asyncio.create_task(websocket.receive())
     poll_task: asyncio.Task[Any] | None = None
     try:
@@ -140,4 +197,5 @@ async def ui_websocket(websocket: WebSocket) -> None:
             if task is not None and not task.done():
                 task.cancel()
         await pubsub.unsubscribe()
+        await pubsub.punsubscribe()
         await pubsub.aclose()

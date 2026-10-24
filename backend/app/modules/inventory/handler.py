@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.gateway.dispatch import queue_ui_event
+from app.gateway.dispatch import queue_job_ui_event
 from app.jobs.registry import InventoryCollectParams, JobType, register
 from app.models import Device, Job
 from app.modules.inventory.hooks import run_post_ingest_hooks
@@ -43,9 +43,9 @@ def register_job_type() -> None:
         await run_post_ingest_hooks(session, device, doc)
         # Queued, not published: the kernel publishes after the transaction
         # commits, so UI consumers never refetch ahead of durable data.
-        queue_ui_event(
+        await queue_job_ui_event(
             session,
-            job.org_id,
+            job,
             {
                 "kind": "inventory_updated",
                 "device_id": str(device.id),

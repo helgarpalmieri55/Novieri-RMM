@@ -3,7 +3,12 @@
 Channels:
 - dispatch:{device_id} — signed job envelopes; every gateway replica
   psubscribes and forwards to the connections it holds.
-- ui:{org_id} — live status events consumed by the operator UI WebSocket.
+- ui:{org_id}:{client_id} — live status events about one client's rows (a
+  device, a job, anything carrying `client_id`), consumed by the operator UI
+  WebSocket of a person whose scope holds that client (MSP clients spec §2.6).
+- ui:{org_id}:global — live events about rows with no client (phase 1:
+  tickets and the rest of `PENDING_PHASE_2`, org settings). Every scope hears
+  it, so a global event never carries a client's data.
 
 handle_agent_message() is the single entry point for agent->server messages.
 Identity is never taken from message content: the device binding comes from
@@ -61,8 +66,24 @@ async def publish_revoke(redis: aioredis.Redis, device_id: UUID) -> None:
     await redis.publish(REVOKE_CHANNEL, json.dumps({"device_id": str(device_id)}))
 
 
-def ui_channel(org_id: UUID) -> str:
-    return f"ui:{org_id}"
+def ui_channel(org_id: UUID, client_id: UUID) -> str:
+    """One client's live channel (MSP clients spec §2.6). The client is a
+    required UUID, never optional: an event about a row with no client goes
+    to `ui_global_channel` by an explicit call, so a missing client can never
+    fall through to the channel every technician hears."""
+    return f"ui:{org_id}:{client_id}"
+
+
+def ui_global_channel(org_id: UUID) -> str:
+    """The org's channel for rows with no client. Every scope subscribes."""
+    return f"ui:{org_id}:global"
+
+
+def ui_channel_pattern(org_id: UUID) -> str:
+    """Every channel of one org -- each client's and the global one -- for a
+    socket whose scope is every client. The org is a UUID, so the pattern has
+    no glob metacharacter but its own `*`, and no other org matches it."""
+    return f"ui:{org_id}:*"
 
 
 async def publish_job(
@@ -71,15 +92,57 @@ async def publish_job(
     await redis.publish(dispatch_channel(device_id), json.dumps(envelope))
 
 
-async def publish_ui_event(redis: aioredis.Redis, org_id: UUID, event: dict[str, Any]) -> None:
-    await redis.publish(ui_channel(org_id), json.dumps(event))
+async def publish_ui_event(
+    redis: aioredis.Redis, org_id: UUID, client_id: UUID, event: dict[str, Any]
+) -> None:
+    await redis.publish(ui_channel(org_id, client_id), json.dumps(event))
 
 
-def queue_ui_event(session: AsyncSession, org_id: UUID, event: dict[str, Any]) -> None:
+async def publish_global_ui_event(
+    redis: aioredis.Redis, org_id: UUID, event: dict[str, Any]
+) -> None:
+    """For an event about a row with NO client. Its payload must not carry a
+    client's data: every technician of the org hears this channel."""
+    await redis.publish(ui_global_channel(org_id), json.dumps(event))
+
+
+#: What a tenant transaction queues: the channel the event goes to, and the
+#: event. The channel is fixed when the event is queued, by the publisher that
+#: knows which client the row belongs to.
+QueuedUiEvent = tuple[str, dict[str, Any]]
+
+
+def queue_ui_event(
+    session: AsyncSession, org_id: UUID, client_id: UUID, event: dict[str, Any]
+) -> None:
     """Modules queue UI events during a tenant transaction; the kernel drains
     and publishes them only after the transaction commits (see
     handle_agent_message) — never before the data is durable."""
-    session.info.setdefault("ui_events", []).append((org_id, event))
+    queued: list[QueuedUiEvent] = session.info.setdefault("ui_events", [])
+    queued.append((ui_channel(org_id, client_id), event))
+
+
+async def job_client(session: AsyncSession, job_id: UUID) -> UUID:
+    """The job's client, READ from the database.
+
+    `jobs.client_id` is `server_onupdate=FetchedValue()`: once an UPDATE of the
+    job flushes (every status change does), the attribute is EXPIRED, and
+    reading `job.client_id` in async code lazy-loads and raises MissingGreenlet.
+    A result handler always runs after `JobEngine.complete` has changed the job,
+    so it reads the client here instead.
+    """
+    return (await session.execute(select(Job.client_id).where(Job.id == job_id))).scalar_one()
+
+
+async def queue_job_ui_event(session: AsyncSession, job: Job, event: dict[str, Any]) -> None:
+    """`queue_ui_event` on the job's own client: the event a result handler
+    queues is about the job and its device, so it goes where the job is."""
+    queue_ui_event(session, job.org_id, await job_client(session, job.id), event)
+
+
+async def _publish_queued(redis: aioredis.Redis, queued: list[QueuedUiEvent]) -> None:
+    for channel, event in queued:
+        await redis.publish(channel, json.dumps(event))
 
 
 class DispatchSubscriber:
@@ -170,15 +233,19 @@ class RevokeSubscriber:
 
 async def _load_job_for_device(
     session: AsyncSession, job_id: str, device_id: UUID
-) -> Job | None:
+) -> tuple[Job, UUID] | None:
+    """The job, and its client read in the same SELECT -- before the caller
+    changes the job, after which `job.client_id` is expired (`job_client`)."""
     try:
         parsed = UUID(job_id)
     except ValueError:
         return None
-    job = (await session.execute(select(Job).where(Job.id == parsed))).scalar_one_or_none()
-    if job is None or job.target_id != device_id:
+    row = (
+        await session.execute(select(Job, Job.client_id).where(Job.id == parsed))
+    ).one_or_none()
+    if row is None or row[0].target_id != device_id:
         return None
-    return job
+    return row[0], row[1]
 
 
 async def _audit_mismatch(
@@ -208,12 +275,13 @@ async def _handle_security_events(
 
     inserted = 0
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
-        device = (
-            await session.execute(select(Device).where(Device.id == device_id))
-        ).scalar_one_or_none()
-        if device is None:
+        loaded = (
+            await session.execute(select(Device, Device.client_id).where(Device.id == device_id))
+        ).one_or_none()
+        if loaded is None:
             await _audit_mismatch(session, org_id, device_id, msg)
             return
+        device, client_id = loaded
         try:
             inserted = await ingest_events(session, device, msg.events)
         except SecurityIngestError as exc:
@@ -228,10 +296,11 @@ async def _handle_security_events(
                 metadata={"reason": str(exc), "batch_size": len(msg.events)},
             )
             return
-    # transaction committed — safe to notify UI consumers
+    # transaction committed — safe to notify UI consumers of the device's client
     await publish_ui_event(
         redis,
         org_id,
+        client_id,
         {"kind": "security_events_ingested", "device_id": str(device_id), "count": inserted},
     )
 
@@ -261,15 +330,16 @@ async def _handle_health_report(
     from app.modules.health.ingest import HealthIngestError, IngestOutcome, ingest_report
 
     outcome = IngestOutcome()
-    queued_events: list[tuple[UUID, dict[str, Any]]] = []
+    queued_events: list[QueuedUiEvent] = []
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         queued_events = session.info.setdefault("ui_events", [])
-        device = (
-            await session.execute(select(Device).where(Device.id == device_id))
-        ).scalar_one_or_none()
-        if device is None:
+        loaded = (
+            await session.execute(select(Device, Device.client_id).where(Device.id == device_id))
+        ).one_or_none()
+        if loaded is None:
             await _audit_mismatch(session, org_id, device_id, msg)
             return
+        device, client_id = loaded
         try:
             outcome = await ingest_report(session, org_id, device, msg)
         except HealthIngestError as exc:
@@ -284,10 +354,11 @@ async def _handle_health_report(
                 metadata={"reason": str(exc), "batch_size": len(msg.reports)},
             )
             return
-    # transaction committed — safe to notify UI consumers
+    # transaction committed — safe to notify UI consumers of the device's client
     await publish_ui_event(
         redis,
         org_id,
+        client_id,
         {
             "kind": "health_reports_ingested",
             "device_id": str(device_id),
@@ -295,8 +366,7 @@ async def _handle_health_report(
             "discarded": outcome.discarded,
         },
     )
-    for event_org, event in queued_events:
-        await publish_ui_event(redis, event_org, event)
+    await _publish_queued(redis, queued_events)
 
 
 # ---------------------------------------------------------------------------
@@ -424,15 +494,18 @@ async def handle_agent_message(
         )
         return
 
-    queued_events: list[tuple[UUID, dict[str, Any]]] = []
+    queued_events: list[QueuedUiEvent] = []
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         queued_events = session.info.setdefault("ui_events", [])
-        job = await _load_job_for_device(session, msg.job_id, device_id)
-        if job is None:
+        loaded = await _load_job_for_device(session, msg.job_id, device_id)
+        if loaded is None:
             # forged/cross-device reference: discard the message, never touch
             # the real job (a compromised device must not affect others' jobs)
             await _audit_mismatch(session, org_id, device_id, msg)
             return
+        # The client is read with the job, BEFORE the branches below change it:
+        # after their UPDATE, `job.client_id` is expired (`job_client`).
+        job, client_id = loaded
 
         job_engine_event: dict[str, Any]
         if isinstance(msg, JobStatusMsg):
@@ -474,10 +547,10 @@ async def handle_agent_message(
 
         job_type = job.type
 
-    # transaction committed: publish the kernel event plus anything modules queued
-    await publish_ui_event(redis, org_id, job_engine_event)
-    for event_org, event in queued_events:
-        await publish_ui_event(redis, event_org, event)
+    # transaction committed: publish the kernel event, on the job's client,
+    # plus anything modules queued
+    await publish_ui_event(redis, org_id, client_id, job_engine_event)
+    await _publish_queued(redis, queued_events)
 
     # Certificate rotation is a two-leg exchange
     # (docs/modules/agent/cert-renewal.md §3.1). Advancing it here means the
