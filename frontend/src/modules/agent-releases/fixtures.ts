@@ -167,7 +167,9 @@ let LINK: InstallLinkSettings = {
 
 const getInstallLink: FixtureMap["getInstallLink"] = () => LINK;
 
-const saveInstallLink: FixtureMap["saveInstallLink"] = (body) => {
+// One link per site (MSP clients spec §1.5); fixture mode keeps the one the
+// console manages, the internal client's "Principal" site's.
+const saveInstallLink: FixtureMap["saveInstallLink"] = (_siteId, body) => {
   if (body.enabled && body.networks.length === 0) {
     throw new ApiError(422, JSON.stringify({
       detail: "at least one network is required to switch the link on; an empty list would not mean 'anywhere'",
@@ -194,7 +196,7 @@ const regenerateInstallLink: FixtureMap["regenerateInstallLink"] = () => {
  * server refuses one that is not the current link's; the bytes are a
  * placeholder and install nothing.
  */
-const downloadInstallLinkMsi: FixtureMap["downloadInstallLinkMsi"] = (body) => {
+const downloadInstallLinkMsi: FixtureMap["downloadInstallLinkMsi"] = (_siteId, body) => {
   if (!FIXTURE_LINK.endsWith(`/i/${body.code}`)) {
     throw new ApiError(409, JSON.stringify({
       detail: "That is not this organisation's current install link. Paste the link shown when it was last generated, or generate a new one.",

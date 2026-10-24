@@ -362,37 +362,41 @@ export function groupPermissionsByModule(
 export interface RoleAssignmentOut {
   /**
    * The `user_roles` row. A revoke is addressed to THIS, never to `role_id`:
-   * the same role may be held twice at different device-group scopes, so
-   * "remove technician" is ambiguous.
+   * the same role may be held twice at different scopes, so "remove
+   * technician" is ambiguous.
    */
   assignment_id: string;
   role_id: string;
   role_name: string;
-  /** `null` for an org-wide grant; a device group id for a scoped one. */
-  device_group_id: string | null;
+  /**
+   * `null` for a grant on every client, including clients created later; a
+   * client id for one scoped to that client (MSP clients spec §2.1). It was a
+   * device group until then; device groups no longer scope grants.
+   */
+  client_id: string | null;
 }
 
 /**
  * How one grant's scope reads on screen: "everywhere", or "limited to
- * <group>" (`docs/design/settings-language.md` glossary — the operator never
+ * <client>" (`docs/design/settings-language.md` glossary — the operator never
  * sees the words "grant", "scope" or "organization-wide").
  *
- * `null` is a real answer, not a missing one — it means the grant covers the
- * whole organization — so it is spelled out rather than left blank. A blank
- * suffix beside a scoped grant's suffix reads as data that failed to load.
+ * `null` is a real answer, not a missing one — it means the grant covers
+ * every client, including clients created later — so it is spelled out rather
+ * than left blank. A blank suffix beside a scoped grant's suffix reads as data
+ * that failed to load.
  *
- * `groupNames`, WHEN GIVEN, NAMES THE GROUP RATHER THAN ITS ID. The id is
- * what every caller had before the Device groups page could be read from
- * here; the name is what an operator can recognise. Falls back to the id
- * when the map has nothing for it -- a group the caller cannot read, or one
- * this deployment predates -- never to a blank suffix.
+ * `clientNames`, WHEN GIVEN, NAMES THE CLIENT RATHER THAN ITS ID. Falls back
+ * to the id when the map has nothing for it -- a client the caller cannot
+ * list, or an archived one -- never to a blank suffix. (The scope was a
+ * device group until the MSP clients model, spec §2.1.)
  */
 export function describeGrantScope(
-  deviceGroupId: string | null,
-  groupNames?: ReadonlyMap<string, string>,
+  clientId: string | null,
+  clientNames?: ReadonlyMap<string, string>,
 ): string {
-  if (deviceGroupId === null) return translate("settings.roles.scopeEverywhere");
-  return translate("settings.roles.scopeLimited", { group: groupNames?.get(deviceGroupId) ?? deviceGroupId });
+  if (clientId === null) return translate("settings.roles.scopeEverywhere");
+  return translate("settings.roles.scopeLimited", { client: clientNames?.get(clientId) ?? clientId });
 }
 
 /**
@@ -458,7 +462,7 @@ export function roleChipName(roleName: string): string {
 export interface RoleGrantSummary {
   key: string;
   roleName: string;
-  deviceGroupId: string | null;
+  clientId: string | null;
   /**
    * How many `user_roles` rows carry this exact (role, scope) pair. One,
    * always, on a database that has run migration 0073 — see the note on
@@ -473,7 +477,8 @@ export interface RoleGrantSummary {
  * WHY THE CONSOLE COUNTS AT ALL. Until migration 0073 the database accepted
  * the same org-wide grant without limit (`UNIQUE (user_id, role_id,
  * device_group_id)` over a nullable column enforces nothing when the column is
- * NULL), and the operator's deployment held `super-admin` three times. The
+ * NULL), and the operator's deployment held `super-admin` three times. (The
+ * scope column is `client_id` now, under the same two partial indexes.) The
  * directory rendered one line per row, so the symptom on screen was three
  * identical lines — which reads as a rendering bug and tells the operator
  * nothing about what is actually stored.
@@ -484,9 +489,9 @@ export interface RoleGrantSummary {
  * console that draws one line over three rows has stopped describing the
  * database. One line, with the count, is the honest rendering of both.
  *
- * SAME ROLE, DIFFERENT SCOPE, IS NOT A DUPLICATE. `technician` org-wide and
- * `technician` on one device group are different answers to "what may this
- * person reach", so the scope is part of the key and they stay two lines.
+ * SAME ROLE, DIFFERENT SCOPE, IS NOT A DUPLICATE. `technician` on every
+ * client and `technician` on one client are different answers to "what may
+ * this person reach", so the scope is part of the key and they stay two lines.
  *
  * Server order is preserved (the API sorts by role name, then row id), so the
  * first grant of a pair decides where its line sits.
@@ -496,14 +501,14 @@ export function summariseRoleGrants(
 ): RoleGrantSummary[] {
   const byScope = new Map<string, RoleGrantSummary>();
   for (const assignment of assignments ?? []) {
-    const key = `${assignment.role_name} ${assignment.device_group_id ?? ""}`;
+    const key = `${assignment.role_name} ${assignment.client_id ?? ""}`;
     const seen = byScope.get(key);
     if (seen) seen.count += 1;
     else
       byScope.set(key, {
         key,
         roleName: assignment.role_name,
-        deviceGroupId: assignment.device_group_id,
+        clientId: assignment.client_id,
         count: 1,
       });
   }
@@ -533,7 +538,7 @@ export function annotateDuplicateGrants(
 ): RoleGrantRow[] {
   const totals = new Map<string, number>();
   const scopeKey = (a: RoleAssignmentOut): string =>
-    `${a.role_name} ${a.device_group_id ?? ""}`;
+    `${a.role_name} ${a.client_id ?? ""}`;
   for (const assignment of assignments ?? []) {
     totals.set(scopeKey(assignment), (totals.get(scopeKey(assignment)) ?? 0) + 1);
   }
@@ -588,7 +593,8 @@ export interface CreatedUserOut extends UserOut {
 export interface CodeGrantOut {
   code: string;
   via_role: string;
-  device_group_id: string | null;
+  /** `null` when the grant covers every client, else the client it is scoped to. */
+  client_id: string | null;
 }
 
 export interface EffectivePermissionsOut {
@@ -602,9 +608,14 @@ export interface UserCreate {
   role_ids: string[];
 }
 
+/**
+ * `POST /users/{id}/roles`. `client_id` scopes the grant to one client, `null`
+ * grants it on every client (MSP clients spec §2.1). The server's model is
+ * closed (`extra="forbid"`): the old `device_group_id` key is a 422.
+ */
 export interface RoleAssign {
   role_id: string;
-  device_group_id: string | null;
+  client_id: string | null;
 }
 
 /** A mail this platform asked Keycloak to send. Carries no credential. */

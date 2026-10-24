@@ -5,10 +5,10 @@
  *
  * 1. A destructive action always confirms, and the confirmation names WHO.
  *    "Are you sure?" over a table of nine people is not a confirmation.
- * 2. The device-group SCOPE on a role assignment is reachable. The model has
- *    supported it since the RBAC engine was written and no surface has ever
- *    exposed it; "technician on Warehouse only" is the second axis of what a
- *    person may reach, and without it the tab answers only half the question.
+ * 2. The SCOPE on a role assignment is reachable: "technician on Warehouse
+ *    only" is the second axis of what a person may reach, and without it the
+ *    tab answers only half the question. It was a device group until the MSP
+ *    clients model (spec §2.1); it is a CLIENT now, or every client.
  */
 
 import { screen, waitFor, within } from "@testing-library/react";
@@ -134,25 +134,33 @@ describe("Settings — Users tab", () => {
   });
 
   /**
-   * CYCLE 9. The pasted "Device group id" field, help text and all, is a
-   * picker now, fed by the same endpoint the Device groups page lists from
-   * -- it has served `GET /api/v1/device-groups` since that page shipped,
-   * and this field no longer has to paste around the gap.
+   * CYCLE 9. The pasted "Device group id" field, help text and all, became a
+   * picker fed by a list endpoint rather than a pasted id.
+   *
+   * RE-POINTED (MSP clients, phase 1): a grant is scoped to ONE CLIENT or to
+   * every client (`user_roles.client_id`, spec §2.1), and device groups no
+   * longer scope grants -- so the picker lists `GET /api/v1/clients`, and the
+   * device-group field is gone rather than kept beside it, since a group id
+   * sent as a scope is a 422.
    */
-  it("offers device groups from a picker rather than a pasted id", async () => {
+  it("offers clients from a picker rather than a pasted id", async () => {
     const user = await openUsers();
     await user.click(await screen.findByRole("button", { name: "Manage roles for operator@example.com" }));
 
     const panel = await screen.findByRole("region", { name: /Roles for operator@example\.com/ });
-    const field = within(panel).getByLabelText(/device group/i);
+    const field = within(panel).getByLabelText(/client/i);
     expect(field).toHaveAttribute("role", "combobox");
-    expect(screen.queryByText(/No endpoint serves device groups yet/i)).not.toBeInTheDocument();
+    expect(within(panel).queryByLabelText(/device group/i)).not.toBeInTheDocument();
 
     await user.click(field);
     expect(await within(panel).findByRole("option", { name: /Warehouse/ })).toBeInTheDocument();
+    expect(within(panel).getByRole("option", { name: /Toeshee Group/ })).toBeInTheDocument();
+    // The unassigned client takes no grant (the server answers 422), so it is
+    // not offered.
+    expect(within(panel).queryByRole("option", { name: /Unassigned/ })).not.toBeInTheDocument();
   });
 
-  it("assigns a role scoped to one device group", async () => {
+  it("assigns a role scoped to one client", async () => {
     const user = await openUsers();
     await user.click(await screen.findByRole("button", { name: "Manage roles for operator@example.com" }));
 
@@ -161,18 +169,19 @@ describe("Settings — Users tab", () => {
     // field "Role to grant" -> "Role" verbatim. Same control, same select.
     await user.selectOptions(within(panel).getByLabelText("Role"), AUDITOR_ROLE.id);
     // Chosen, not typed: the picker's value can only be an id it was given.
-    await user.click(within(panel).getByLabelText(/device group/i));
+    await user.click(within(panel).getByLabelText(/client/i));
     await user.click(await within(panel).findByRole("option", { name: /Warehouse/ }));
     await user.click(within(panel).getByRole("button", { name: "Assign role" }));
 
     await waitFor(() => expect(calls.assignUserRole).toHaveBeenCalledTimes(1));
+    // RE-POINTED: `client_id`, the key the server's `RoleAssign` takes now.
     expect(calls.assignUserRole).toHaveBeenCalledWith(OPERATOR_USER.id, {
       role_id: AUDITOR_ROLE.id,
-      device_group_id: "44444444-4444-4444-8444-444444444444",
+      client_id: "44444444-4444-4444-8444-444444444444",
     });
   });
 
-  it("an org-wide grant sends no device group at all", async () => {
+  it("a grant on every client sends no client at all", async () => {
     const user = await openUsers();
     await user.click(await screen.findByRole("button", { name: "Manage roles for operator@example.com" }));
     const panel = await screen.findByRole("region", { name: /Roles for operator@example\.com/ });
@@ -181,9 +190,10 @@ describe("Settings — Users tab", () => {
     await user.click(within(panel).getByRole("button", { name: "Assign role" }));
 
     await waitFor(() => expect(calls.assignUserRole).toHaveBeenCalledTimes(1));
+    // RE-POINTED: `null` is every client, including clients created later.
     expect(calls.assignUserRole).toHaveBeenCalledWith(OPERATOR_USER.id, {
       role_id: AUDITOR_ROLE.id,
-      device_group_id: null,
+      client_id: null,
     });
   });
 
@@ -249,6 +259,7 @@ describe("Settings — Users tab", () => {
     expect(within(scoped).getByText("Warehouse technician")).toBeInTheDocument();
     // CYCLE 9. The scope now names the GROUP, resolved from the same list
     // the picker offers -- the raw id was the finding, not the fix.
+    // RE-POINTED: the scope is a CLIENT now, named from `GET /clients`.
     expect(within(scoped).getByText(/limited to Warehouse/i)).toBeInTheDocument();
     expect(within(scoped).queryByText(/44444444-4444-4444-8444-444444444444/)).not.toBeInTheDocument();
   });
@@ -363,7 +374,7 @@ describe("Settings — Users tab", () => {
       within(dialog).getByRole("button", { name: "Remove role from operator@example.com" }),
     );
     // Addressed to the ASSIGNMENT, not the role: the same role may be held
-    // twice at different device-group scopes.
+    // twice at different scopes (every client, and one client).
     await waitFor(() =>
       expect(calls.removeUserRole).toHaveBeenCalledWith(
         OPERATOR_USER.id,
@@ -510,7 +521,7 @@ describe("Settings — Users tab", () => {
  * that column is NULL), and one deployment held `super-admin` three times. The
  * index stops new ones; these tests are about what the console does with the
  * rows a deployment ALREADY holds, and with the case the index deliberately
- * still allows — one role held both org-wide and on a group.
+ * still allows — one role held both on every client and on one client.
  */
 describe("Settings — Users tab, duplicate role grants", () => {
   const DUPLICATED_USER = {
@@ -523,25 +534,25 @@ describe("Settings — Users tab, duplicate role grants", () => {
         assignment_id: "d1111111-1111-4111-8111-111111111111",
         role_id: TECHNICIAN_ROLE.id,
         role_name: "technician",
-        device_group_id: null,
+        client_id: null,
       },
       {
         assignment_id: "d2222222-2222-4222-8222-222222222222",
         role_id: TECHNICIAN_ROLE.id,
         role_name: "technician",
-        device_group_id: null,
+        client_id: null,
       },
       {
         assignment_id: "d3333333-3333-4333-8333-333333333333",
         role_id: TECHNICIAN_ROLE.id,
         role_name: "technician",
-        device_group_id: null,
+        client_id: null,
       },
       {
         assignment_id: "d4444444-4444-4444-8444-444444444444",
         role_id: TECHNICIAN_ROLE.id,
         role_name: "technician",
-        device_group_id: "44444444-4444-4444-8444-444444444444",
+        client_id: "44444444-4444-4444-8444-444444444444",
       },
     ],
   };

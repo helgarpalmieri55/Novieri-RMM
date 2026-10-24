@@ -36,8 +36,9 @@ export const settings = {
   },
   loadFailure: "That did not load. {reason} Retry, or check the platform status page.",
   readOnly: "Read-only: this change requires the {code} permission. The server enforces it; this console only reflects it.",
-  groupPicker: {
-    emptyHint: "No device groups to choose from. Create one under Devices → Groups; you may also not have permission to list them.",
+  // The clients a role grant can be limited to (Users tab).
+  clientPicker: {
+    emptyHint: "No clients to choose from. You may not have permission to list them.",
     devices: { one: "{count} device", other: "{count} devices" },
   },
   queuePicker: {
@@ -194,7 +195,7 @@ export const settings = {
       confirm: "Delete {name}",
     },
     scopeEverywhere: "everywhere",
-    scopeLimited: "limited to {group}",
+    scopeLimited: "limited to {client}",
   },
   users: {
     title: "Users",
@@ -229,7 +230,7 @@ export const settings = {
     deleteAria: "Delete {email}",
     mailHanded: "The email was handed to the identity provider for delivery.",
     rolesFor: "Roles for {email}",
-    rolesSubtitle: "Access applies everywhere unless you limit it to a device group",
+    rolesSubtitle: "Access applies everywhere unless you limit it to one client",
     holdsNone: "{email} holds no roles, and so can reach nothing.",
     duplicate: "(duplicate {index} of {total})",
     remove: "Remove",
@@ -237,8 +238,8 @@ export const settings = {
     removeDuplicateAria: "Remove {role} ({scope}, duplicate {index} of {total}) from {email}",
     role: "Role",
     selectRole: "Select a role…",
-    groupLabel: "Limit to a device group (optional)",
-    groupPlaceholder: "Leave blank to apply everywhere",
+    clientLabel: "Limit to a client (optional)",
+    clientPlaceholder: "Leave blank to apply everywhere",
     assigning: "Assigning…",
     assign: "Assign role",
     catalogueFailed: "The role catalogue did not load, so there is nothing to pick from. It needs permission to view roles.",
@@ -287,7 +288,7 @@ export const settings = {
         title: "Remove a role",
         question: "Remove {role} from {email}?",
         action: "Remove role from {email}",
-        body: "This removes just this one. A role held twice — at a different device group, or everywhere — keeps the other.",
+        body: "This removes just this one. A role held twice — for a different client, or everywhere — keeps the other.",
       },
     },
   },

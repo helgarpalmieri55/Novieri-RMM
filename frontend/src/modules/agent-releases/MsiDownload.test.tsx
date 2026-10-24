@@ -28,13 +28,16 @@ const SHA = "3f".repeat(32);
 
 let lastQueryClient: QueryClient;
 
+/** The site whose link the MSI carries (MSP clients, phase 1: one link per site). */
+const SITE = "00000000-0000-4000-8000-0000000000aa";
+
 function renderBlock(api: Partial<ApiClient>, props: { linkOn: boolean; revealed: string | null }) {
   mockUseApi.mockReturnValue(api as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   lastQueryClient = queryClient;
   return render(
     <QueryClientProvider client={queryClient}>
-      <MsiDownload {...props} />
+      <MsiDownload {...props} siteId={SITE} />
     </QueryClientProvider>,
   );
 }
@@ -70,7 +73,7 @@ describe("MsiDownload", () => {
     renderBlock({ downloadInstallLinkMsi }, { linkOn: true, revealed: LINK });
     expect(screen.getByLabelText("Install link")).toHaveValue(LINK);
     await userEvent.click(screen.getByRole("button", { name: "Download MSI for Group Policy (ARM)" }));
-    expect(downloadInstallLinkMsi).toHaveBeenCalledWith({ code: CODE, arch: "arm64" });
+    expect(downloadInstallLinkMsi).toHaveBeenCalledWith(SITE, { code: CODE, arch: "arm64" });
     expect(await screen.findByText(SHA)).toBeInTheDocument();
     expect(saveBlob).toHaveBeenCalledWith(blob, "ITMS-Agent-itms.example.com-arm64.msi");
     expect(screen.getByRole("status")).toHaveTextContent("ITMS-Agent-itms.example.com-arm64.msi");
@@ -87,7 +90,7 @@ describe("MsiDownload", () => {
     await userEvent.clear(screen.getByLabelText("Install link"));
     await userEvent.type(screen.getByLabelText("Install link"), LINK);
     await userEvent.click(amd);
-    expect(downloadInstallLinkMsi).toHaveBeenCalledWith({ code: CODE, arch: "amd64" });
+    expect(downloadInstallLinkMsi).toHaveBeenCalledWith(SITE, { code: CODE, arch: "amd64" });
   });
 
   it("says no MSI was built when the server refuses", async () => {

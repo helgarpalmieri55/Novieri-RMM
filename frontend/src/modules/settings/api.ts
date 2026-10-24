@@ -24,8 +24,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type {
   ApiError,
+  ClientOut,
   CurrentOrg,
-  DeviceGroup,
   McpConnectionsOut,
   McpRevokeOut,
   McpRevokeScope,
@@ -485,7 +485,7 @@ export const PERMISSIONS_KEY = "permission-catalogue";
 export const ROLES_KEY = "roles";
 export const USERS_KEY = "users";
 export const EFFECTIVE_PERMISSIONS_KEY = "user-effective-permissions";
-export const DEVICE_GROUPS_KEY = "settings-device-groups";
+export const CLIENTS_KEY = "settings-clients";
 
 export function usePermissionCatalogue(enabled: boolean) {
   const api = useApi();
@@ -579,17 +579,19 @@ export function useUsers(enabled: boolean) {
 }
 
 /**
- * The device groups a role grant's scope can name (cycle 9).
+ * The clients a role grant's scope can name (MSP clients spec §2.1). It was
+ * the device groups until then (cycle 9); device groups no longer scope
+ * grants.
  *
  * `retry: false`, the same concession `useRoles` above makes: an operator
- * who holds `users.manage` but not `devices.read` should meet the picker's
+ * who holds `users.manage` but not `clients.read` should meet the picker's
  * `emptyHint` immediately rather than three silent retries.
  */
-export function useDeviceGroups(enabled: boolean) {
+export function useClients(enabled: boolean) {
   const api = useApi();
-  return useQuery<DeviceGroup[], ApiError>({
-    queryKey: [DEVICE_GROUPS_KEY],
-    queryFn: async () => (await api.listDeviceGroups()).items,
+  return useQuery<ClientOut[], ApiError>({
+    queryKey: [CLIENTS_KEY],
+    queryFn: () => api.listClients(),
     enabled,
     ...NO_RETRY,
   });

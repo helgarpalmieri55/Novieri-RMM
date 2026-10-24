@@ -30,8 +30,8 @@ export const settings: Shape<typeof en> = {
   },
   loadFailure: "No se pudo cargar. {reason} Vuelve a intentarlo o consulta la página de estado de la plataforma.",
   readOnly: "Solo lectura: este cambio requiere el permiso {code}. Lo aplica el servidor; esta consola solo lo refleja.",
-  groupPicker: {
-    emptyHint: "No hay grupos de dispositivos para elegir. Crea uno en Grupos de dispositivos; también puede que no tengas permiso para listarlos.",
+  clientPicker: {
+    emptyHint: "No hay clientes para elegir. Puede que no tengas permiso para listarlos.",
     devices: { one: "{count} dispositivo", other: "{count} dispositivos" },
   },
   queuePicker: {
@@ -188,7 +188,7 @@ export const settings: Shape<typeof en> = {
       confirm: "Eliminar {name}",
     },
     scopeEverywhere: "en todas partes",
-    scopeLimited: "limitado a {group}",
+    scopeLimited: "limitado a {client}",
   },
   users: {
     title: "Usuarios",
@@ -223,7 +223,7 @@ export const settings: Shape<typeof en> = {
     deleteAria: "Eliminar a {email}",
     mailHanded: "El correo se entregó al proveedor de identidad para su envío.",
     rolesFor: "Roles de {email}",
-    rolesSubtitle: "El acceso se aplica en todas partes salvo que lo limites a un grupo de dispositivos",
+    rolesSubtitle: "El acceso se aplica en todas partes salvo que lo limites a un cliente",
     holdsNone: "{email} no tiene ningún rol, así que no puede acceder a nada.",
     duplicate: "(duplicado {index} de {total})",
     remove: "Quitar",
@@ -231,8 +231,8 @@ export const settings: Shape<typeof en> = {
     removeDuplicateAria: "Quitar {role} ({scope}, duplicado {index} de {total}) de {email}",
     role: "Rol",
     selectRole: "Elige un rol…",
-    groupLabel: "Limitar a un grupo de dispositivos (opcional)",
-    groupPlaceholder: "Déjalo en blanco para aplicarlo en todas partes",
+    clientLabel: "Limitar a un cliente (opcional)",
+    clientPlaceholder: "Déjalo en blanco para aplicarlo en todas partes",
     assigning: "Asignando…",
     assign: "Asignar rol",
     catalogueFailed: "No se cargó el catálogo de roles, así que no hay nada que elegir. Hace falta permiso para ver los roles.",
@@ -281,7 +281,7 @@ export const settings: Shape<typeof en> = {
         title: "Quitar un rol",
         question: "¿Quitar {role} de {email}?",
         action: "Quitar el rol de {email}",
-        body: "Solo se quita esta asignación. Si el rol está asignado dos veces (en otro grupo de dispositivos o en todas partes), se conserva la otra.",
+        body: "Solo se quita esta asignación. Si el rol está asignado dos veces (para otro cliente o en todas partes), se conserva la otra.",
       },
     },
   },

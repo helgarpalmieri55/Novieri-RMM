@@ -92,6 +92,7 @@ import { ApiError } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
 import { useFleetPrerequisite } from "../../lib/detectors";
+import { internalClientId, requireKnown } from "../../lib/internalClient";
 import { PageHead, Panel, QueryState, StatusPill, TableWrap } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 
@@ -196,7 +197,6 @@ const BLOCKERS: readonly {
   { key: "remote_policies", to: "/remote" },
   { key: "health_assignments", to: "/health" },
   { key: "credentials", to: "/credentials" },
-  { key: "role_grants", to: "/settings" },
 ];
 
 /** One blocker as a phrase, read when drawn so it follows the language. */
@@ -476,6 +476,13 @@ export function GroupsPage() {
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canManage = me.data?.permissions.includes("devices.manage") ?? false;
+  // PHASE 3: the client/site selector. A group organises ONE client's devices
+  // (MSP clients spec §1.5): a new one, and the preview of one not saved yet,
+  // name it. Until the selector exists that is the organisation's internal
+  // client, whose id is the organisation's -- `/me`'s `org_id`
+  // (`lib/internalClient.ts`). A saved group keeps its own client, which an
+  // edit never sends.
+  const internalClient = internalClientId(me.data);
 
   const groups = useQuery({
     queryKey: ["device-groups", showArchived],
@@ -528,7 +535,8 @@ export function GroupsPage() {
       };
       return state.group
         ? api.updateDeviceGroup(state.group.id, body)
-        : api.createDeviceGroup(body);
+        : // PHASE 3: the client/site selector -- the internal client, above.
+          api.createDeviceGroup({ ...body, client_id: requireKnown(internalClient) });
     },
     onSuccess: () => {
       setEditor(null);
@@ -626,6 +634,9 @@ export function GroupsPage() {
       api.previewDeviceGroupRules(
         JSON.parse(settled ?? "null") as GroupRules,
         editor?.group?.id ?? null,
+        // PHASE 3: the client/site selector. A saved group's preview runs over
+        // its own client; one not saved yet names the internal client, above.
+        editor?.group ? null : internalClient,
       ),
     enabled: settled !== null && canManage,
     // A preview is a statement about the fleet as it is now; a cached answer
