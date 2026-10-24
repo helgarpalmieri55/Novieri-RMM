@@ -587,11 +587,17 @@ export function useUsers(enabled: boolean) {
  * who holds `users.manage` but not `clients.read` should meet the picker's
  * `emptyHint` immediately rather than three silent retries.
  */
-export function useClients(enabled: boolean) {
+/**
+ * `GET /clients`. `include_archived` reads archived clients too -- the Users
+ * tab names an archived client's grant with it, and filters the choices
+ * itself (`clientPickerOptions`): an archived client takes no new grant.
+ */
+export function useClients(enabled: boolean, params: { include_archived?: boolean } = {}) {
   const api = useApi();
+  const includeArchived = params.include_archived === true;
   return useQuery<ClientOut[], ApiError>({
-    queryKey: [CLIENTS_KEY],
-    queryFn: () => api.listClients(),
+    queryKey: [CLIENTS_KEY, { includeArchived }],
+    queryFn: () => api.listClients(includeArchived ? { include_archived: true } : {}),
     enabled,
     ...NO_RETRY,
   });

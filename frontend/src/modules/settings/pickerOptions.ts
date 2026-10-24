@@ -40,3 +40,30 @@ export function clientPickerOptions(clients: readonly GrantableClient[]): Picker
       sublabel: translate("settings.clientPicker.devices", { count: client.device_count }),
     }));
 }
+
+/**
+ * THE "EVERY CLIENT" CHOICE (final review, T11R-I1). A grant on every client
+ * (`client_id: null`) used to be what an EMPTY box meant -- so text typed and
+ * never chosen ("Ware") left the box reading "Ware" while the grant went to
+ * every client. Every client is now an option like any client, chosen or not
+ * chosen; this id is the picker's only, and is sent as `null`, never as
+ * itself (`grantClientIdFor`).
+ */
+export const EVERY_CLIENT_CHOICE = "every-client";
+
+/** The grant scope picker's options: "Every client" first, then the clients a grant may name. */
+export function grantScopeOptions(clients: readonly GrantableClient[]): PickerOption[] {
+  return [
+    {
+      id: EVERY_CLIENT_CHOICE,
+      label: translate("settings.clientPicker.everyClient"),
+      sublabel: translate("settings.clientPicker.everyClientHint"),
+    },
+    ...clientPickerOptions(clients),
+  ];
+}
+
+/** What a committed choice sends: `null` for every client, else the client's id. */
+export function grantClientIdFor(choice: string): string | null {
+  return choice === EVERY_CLIENT_CHOICE ? null : choice;
+}

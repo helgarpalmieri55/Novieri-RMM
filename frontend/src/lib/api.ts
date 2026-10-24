@@ -1582,8 +1582,10 @@ export class ApiClient {
    * The clients of the request's scope, archived ones left out
    * (`clients.read`). The Users tab's grant scope picks from these.
    */
-  listClients(): Promise<ClientOut[]> {
-    return this.request<ClientOut[]>("/clients");
+  listClients(params: { include_archived?: boolean } = {}): Promise<ClientOut[]> {
+    return this.request<ClientOut[]>(
+      params.include_archived ? "/clients?include_archived=true" : "/clients",
+    );
   }
 
   /**

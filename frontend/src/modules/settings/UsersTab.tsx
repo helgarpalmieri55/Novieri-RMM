@@ -89,7 +89,12 @@ import {
   useRoles,
   useUsers,
 } from "./api";
-import { clientPickerEmptyHint, clientPickerOptions } from "./pickerOptions";
+import {
+  EVERY_CLIENT_CHOICE,
+  clientPickerEmptyHint,
+  grantClientIdFor,
+  grantScopeOptions,
+} from "./pickerOptions";
 import { isForbidden, permissionReason } from "./settingsState";
 import {
   annotateDuplicateGrants,
@@ -166,13 +171,17 @@ export function UsersTab({
   // Clients are read with `clients.read`, another permission a
   // `users.manage` holder is not guaranteed to hold -- the same degrade: the
   // scope picker falls back to its `emptyHint` rather than blocking the tab.
-  const clients = useClients(canRead);
+  // ARCHIVED ONES TOO (final review): a grant on a client archived since
+  // reads that client's name, not its id. The CHOICES leave them out
+  // (`clientPickerOptions`): an archived client takes no new grant.
+  const clients = useClients(canRead, { include_archived: true });
   // The options carry a worded sub-label ("3 devices"), so they are built at
   // render, never remembered: a memo would keep the language they were built in.
   // The names alone are recorded data, and those can be remembered. EVERY
   // client the list served is named, the unassigned one included: a grant
   // that names it cannot be made, but a name is still better than an id.
-  const clientOptions = clientPickerOptions(clients.data ?? []);
+  // "Every client" is the first option (T11R-I1): a choice, never an empty box.
+  const clientOptions = grantScopeOptions(clients.data ?? []);
   const clientNames = useMemo(
     () => new Map((clients.data ?? []).map((client) => [client.id, client.name])),
     [clients.data],
@@ -193,7 +202,10 @@ export function UsersTab({
   const [rolesForId, setRolesForId] = useState<string | null>(null);
   const [permissionsForId, setPermissionsForId] = useState<string | null>(null);
   const [grantRoleId, setGrantRoleId] = useState("");
+  // The committed scope choice: "" (none yet), `EVERY_CLIENT_CHOICE`, or a
+  // client id. `grantScopeTyping`: the picker holds text that is not a choice.
   const [grantClientId, setGrantClientId] = useState("");
+  const [grantScopeTyping, setGrantScopeTyping] = useState(false);
   const [confirming, setConfirming] = useState<Confirmable | null>(null);
 
   const effective = useEffectivePermissions(permissionsForId);
@@ -647,25 +659,51 @@ export function UsersTab({
                 emptyHint={clientPickerEmptyHint()}
                 placeholder={t("settings.users.clientPlaceholder")}
                 disabled={!canManage}
+                onPendingChange={setGrantScopeTyping}
               />
             </div>
 
             <div className="form-actions">
               <Btn
-                label={assignRole.isPending ? t("settings.users.assigning") : t("settings.users.assign")}
+                // THE BUTTON NAMES THE SCOPE IT GRANTS (final review,
+                // T11R-I1): "Assign role on Warehouse", "... on every
+                // client". The click that sends a grant says where it
+                // applies, whatever the box above happens to show.
+                label={
+                  assignRole.isPending
+                    ? t("settings.users.assigning")
+                    : grantClientId === EVERY_CLIENT_CHOICE
+                      ? t("settings.users.assignEvery")
+                      : grantClientId !== ""
+                        ? t("settings.users.assignOn", {
+                            client: clientNames.get(grantClientId) ?? grantClientId,
+                          })
+                        : t("settings.users.assign")
+                }
                 icon="plus"
                 variant="primary"
-                disabled={!canManage || grantRoleId === "" || assignRole.isPending}
+                // Disabled until a scope is CHOSEN, and while the picker
+                // holds typed text that is not a choice: "Ware" typed and
+                // never clicked is not Warehouse -- and it used to be every
+                // client.
+                disabled={
+                  !canManage ||
+                  grantRoleId === "" ||
+                  grantClientId === "" ||
+                  grantScopeTyping ||
+                  assignRole.isPending
+                }
                 onClick={() =>
                   assignRole.mutate(
                     {
                       userId: rolesTarget.id,
                       body: {
                         role_id: grantRoleId,
-                        // `null`, not `""`: an empty string is not a client,
-                        // and the server's model takes a uuid or nothing at
-                        // all. `null` is every client.
-                        client_id: grantClientId.trim() === "" ? null : grantClientId.trim(),
+                        // `null` for the "Every client" choice -- every
+                        // client, including those created later -- else the
+                        // chosen client's id. Never `""`, never the
+                        // picker's own sentinel.
+                        client_id: grantClientIdFor(grantClientId),
                       },
                     },
                     {
