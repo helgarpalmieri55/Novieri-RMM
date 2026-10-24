@@ -248,12 +248,14 @@ _NULL_PINNED = (
 # ... and written, changed or deleted only under scope all.
 _NULL_ALL = f"(client_id IS NULL AND {_SCOPE} = 'all')"
 
-#: THE EXCEPTION, NAMED: the two O tables whose NULL rows any pinned scope may
-#: INSERT -- staff rows written by their own person (`PATCH /me`, login), and
-#: phase 1's client-less domain events. Anything else here is a finding.
+#: THE EXCEPTION, NAMED: the two O tables whose `client_isolation` WITH CHECK
+#: admits a NULL row under any pinned scope -- a staff row's presentation
+#: fields (its CREATION is held to scope all by `client_isolation_insert`,
+#: Task 6b), and phase 1's client-less domain events. Anything else here is a
+#: finding.
 NULL_WRITABLE_FROM_ANY_SCOPE = frozenset({"users", "domain_events"})
 
-Shape = tuple[str, str, str | None]  # (cmd, USING, WITH CHECK) as written
+Shape = tuple[str, str | None, str | None]  # (cmd, USING, WITH CHECK) as written
 
 
 def _expected_client_policies(table: str) -> dict[str, Shape]:
@@ -275,11 +277,16 @@ def _expected_client_policies(table: str) -> dict[str, Shape]:
         "client_isolation": ("ALL", read, insert),
         "client_isolation_delete": ("DELETE", modify, None),
     }
-    # `users` has no UPDATE policy: a staff row is updated by its own person
-    # under a narrowed scope, and `its_user_identity_guard` holds what must
-    # not change there (kind, external_subject).
+    # `users` has no UPDATE policy: a staff row's presentation fields may be
+    # written under a narrowed scope, and `its_user_identity_guard` holds what
+    # must not change there (kind, external_subject, status).
     if table != "users":
         policies["client_isolation_update"] = ("UPDATE", modify, None)
+    # ... but CREATING a staff row is scope all (Task 6b, re-review M2):
+    # first-login provisioning and `POST /users`, both every-client. An
+    # INSERT policy has no USING.
+    if table == "users":
+        policies["client_isolation_insert"] = ("INSERT", None, modify)
     return policies
 
 
@@ -301,11 +308,12 @@ async def _deparse(conn, shapes: set[Shape]) -> dict[Shape, tuple[str, str | Non
     names: dict[str, Shape] = {}
     for n, (cmd, using, check) in enumerate(sorted(shapes, key=repr)):
         names[f"p{n}"] = (cmd, using, check)
+        using_ = f" USING ({using})" if using is not None else ""
         with_check = f" WITH CHECK ({check})" if check is not None else ""
         await conn.execute(
             text(
-                f"CREATE POLICY p{n} ON policy_probe AS RESTRICTIVE FOR {cmd} "
-                f"USING ({using}){with_check}"
+                f"CREATE POLICY p{n} ON policy_probe AS RESTRICTIVE FOR {cmd}"
+                f"{using_}{with_check}"
             )
         )
     rows = (

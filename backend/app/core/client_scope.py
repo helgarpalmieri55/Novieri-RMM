@@ -106,6 +106,17 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "COMPUTES a person's scope rather than using one: an all-clients grant "
         "(user_roles.client_id NULL) is the every-client scope (spec §2.1-2.2)"
     ),
+    # -- (d) personal: the caller's own row, which belongs to no client --------
+    **_reviewed(
+        "app/core/identity/own_profile.py",
+        "/me is personal: the caller's OWN users row, by the user id the validated token "
+        "resolved (never a request field), and G tables only (grants, roles, audit). A "
+        "person with no grant has the empty scope, which 0231 hides staff rows from "
+        "(Task 6b)",
+        "read_own_profile",
+        "read_own_locale",
+        "update_own_profile",
+    ),
     # -- (a) processes with no person behind them --------------------------
     **_reviewed(
         "app/worker.py",

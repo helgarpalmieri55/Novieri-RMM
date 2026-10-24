@@ -33,6 +33,7 @@ from app.core.client_scope import ClientScope
 from app.core.events import publish
 from app.core.tenancy import org_session
 from app.models import (
+    AuditEvent,
     Client,
     Credential,
     Device,
@@ -775,7 +776,12 @@ async def test_the_credential_delete_route_cannot_delete_a_global_credential(
     """The reviewer's ⚠️, through the API: a technician holding
     `credentials.manage` on client X only. `DELETE /credentials/{id}` loads
     the row in the person's scope (a global credential is readable) and
-    deletes it -- the database refuses the global one and allows X's."""
+    deletes it -- the database refuses the global one and allows X's.
+
+    AND SAYS SO (Task 6b, re-review M5). The database refused quietly: the
+    DELETE matched nothing, the route answered 200 and wrote
+    `credential.deleted` for a credential that still exists. The refusal is
+    a 403 now, and the audit chain holds no deletion that did not happen."""
     env = api_env
     org = await env.create_org("cred")
     sub = await env.create_user(org)
@@ -796,8 +802,10 @@ async def test_the_credential_delete_route_cannot_delete_a_global_credential(
         s.add_all(rows)
         await s.commit()
     headers = await env.headers(org, sub)
-    for row in rows:
-        await env.client.delete(f"/api/v1/credentials/{row.id}", headers=headers)
+    statuses = [
+        (await env.client.delete(f"/api/v1/credentials/{row.id}", headers=headers)).status_code
+        for row in rows
+    ]
     async with AsyncSession(env.admin_engine) as s:
         left = set(
             (
@@ -806,4 +814,80 @@ async def test_the_credential_delete_route_cannot_delete_a_global_credential(
                 )
             ).scalars()
         )
+        deleted_events = set(
+            (
+                await s.execute(
+                    select(AuditEvent.target_id).where(
+                        AuditEvent.org_id == org, AuditEvent.action == "credential.deleted"
+                    )
+                )
+            ).scalars()
+        )
     assert left == {rows[0].id}
+    assert statuses == [403, 200]
+    assert deleted_events == {str(rows[1].id)}
+
+
+# --------------------------------------------------------------------------- #
+# Task 6b (re-review M2): a staff row is created, and its status changed, only
+# under scope all. Raw SQL, so the DATABASE is what refuses -- the ORM guard
+# (`app.core.global_rows`) would refuse first and hide a missing policy.
+# --------------------------------------------------------------------------- #
+
+_INSERT_USER = (
+    "INSERT INTO users (id, org_id, external_subject, email, display_name, status, kind, "
+    "client_id) VALUES (:i, :o, :s, 'n@test.local', '', 'active', :k, :c)"
+)
+
+
+def _new_user(org: UUID, kind: str = "staff", client: UUID | None = None) -> dict[str, Any]:
+    return {"i": uuid4(), "o": org, "s": uuid4().hex, "k": kind, "c": client}
+
+
+async def test_a_narrowed_scope_cannot_insert_a_staff_row(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """`client_isolation_insert`: a staff row is a global row, and creating
+    one is first-login provisioning or `POST /users` -- both under scope all."""
+    c = await _two_clients(admin_engine)
+    with pytest.raises(DBAPIError, match="row-level security"):
+        async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
+            await s.execute(text(_INSERT_USER), _new_user(c.org))
+    async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
+        await s.execute(text(_INSERT_USER), _new_user(c.org))
+
+
+async def test_a_narrowed_scope_still_inserts_its_own_clients_contact(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    c = await _two_clients(admin_engine)
+    async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
+        await s.execute(text(_INSERT_USER), _new_user(c.org, "contact", c.x))
+    with pytest.raises(DBAPIError, match="row-level security"):
+        async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
+            await s.execute(text(_INSERT_USER), _new_user(c.org, "contact", c.y))
+
+
+async def test_a_narrowed_scope_cannot_change_a_users_status(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """`users.status` is the admission gate (spec §3): re-enabling a disabled
+    account is the every-client user administration's act, never a narrowed
+    scope's -- `its_user_identity_guard` holds it with `kind` and
+    `external_subject`."""
+    c = await _two_clients(admin_engine)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        staff = User(
+            org_id=c.org, external_subject=uuid4().hex, email="s@test.local", status="disabled"
+        )
+        s.add(staff)
+        await s.commit()
+    with pytest.raises(DBAPIError, match="only under the every-client scope"):
+        async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
+            await s.execute(
+                text("UPDATE users SET status = 'active' WHERE id = :u"), {"u": staff.id}
+            )
+    async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
+        assert await _rowcount(
+            s, "UPDATE users SET status = 'active' WHERE id = :u", u=staff.id
+        ) == 1

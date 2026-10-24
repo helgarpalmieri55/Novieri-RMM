@@ -27,6 +27,8 @@
    deleted only under scope all (spec §2.2) -- hence `client_isolation_update`
    and `client_isolation_delete`, because a DELETE checks no WITH CHECK and a
    FOR ALL policy's USING has to admit the NULL rows a limited scope reads.
+   `users` also has `client_isolation_insert`: a staff row is created only
+   under scope all (`_policies`).
 
 ORG CONSISTENCY IS A FOREIGN KEY, NOT A POLICY. A foreign key check ignores
 RLS: under scope `all` the client policy passes any client id and the tenant
@@ -169,11 +171,12 @@ NULL_ALL = f"(client_id IS NULL AND {SCOPE} = 'all')"
 NULL_WRITABLE_FROM_ANY_SCOPE = {"users", "domain_events"}
 
 
-def _create_policy(table: str, name: str, cmd: str, using: str, check: str | None) -> None:
+def _create_policy(
+    table: str, name: str, cmd: str, using: str | None, check: str | None
+) -> None:
+    using_ = f" USING ({using})" if using is not None else ""  # INSERT has none
     with_check = f" WITH CHECK ({check})" if check is not None else ""
-    op.execute(
-        f"CREATE POLICY {name} ON {table} AS RESTRICTIVE FOR {cmd} USING ({using}){with_check}"
-    )
+    op.execute(f"CREATE POLICY {name} ON {table} AS RESTRICTIVE FOR {cmd}{using_}{with_check}")
 
 
 def _policies(table: str, kind: str) -> None:
@@ -183,18 +186,23 @@ def _policies(table: str, kind: str) -> None:
     read = f"{NULL_PINNED} OR {VISIBLE}"
     modify = f"{NULL_ALL} OR {VISIBLE}"
     if table in NULL_WRITABLE_FROM_ANY_SCOPE:
-        # Two O tables whose NULL rows any PINNED scope may INSERT; with no
-        # scope, still nothing. Changing or deleting one is still scope all
-        # (the two policies below), and on `users` the identity columns are
-        # held by `its_user_identity_guard`.
+        # Two O tables whose NULL rows any PINNED scope may WRITE; with no
+        # scope, still nothing. Deleting one is still scope all, and so is
+        # changing a `domain_events` row (the policies below); on `users` the
+        # identity columns and `status` are held by `its_user_identity_guard`,
+        # and creating a staff row by `client_isolation_insert`.
         #
-        # `users`: a staff row (client_id NULL) is written under NARROWED
-        # scopes -- `PATCH /me` and the login bookkeeping run with the
-        # person's own scope -- so the generic O check, which reserves NULL
-        # rows to scope `all`, would refuse a technician's own profile. Admin
-        # writes to staff rows already require a scope of every client at the
-        # API (`users.manage`, plan Task 4). A contact row (client_id set)
-        # needs its client to be visible.
+        # `users`: a staff row's presentation fields (`display_name`, `phone`,
+        # `timezone`, `locale`, `last_login_at`) may be UPDATED under a
+        # narrowed scope, so the generic O check, which reserves NULL rows to
+        # scope `all`, is not used for them. (`PATCH /me` and the login
+        # bookkeeping run under scope all since Task 6b, and the application
+        # refuses a narrowed ORM write to a staff row before any SQL --
+        # `app/core/global_rows.py` -- so this is the database's floor, not a
+        # path the API uses.) CREATING a staff row is scope all:
+        # `client_isolation_insert` below. Admin writes to staff rows already
+        # require a scope of every client at the API (`users.manage`, plan
+        # Task 4). A contact row (client_id set) needs its client visible.
         #
         # `domain_events`: `app/core/events.publish` cannot yet name the
         # client, so in phase 1 an event is written with NULL client from any
@@ -213,6 +221,12 @@ def _policies(table: str, kind: str) -> None:
     if table != "users":
         _create_policy(table, "client_isolation_update", "UPDATE", modify, None)
     _create_policy(table, "client_isolation_delete", "DELETE", modify, None)
+    if table == "users":
+        # A staff row is a global row: it is CREATED only under scope all --
+        # first-login provisioning (`app/api/deps.py::admit`) and `POST
+        # /users`, both every-client. ANDed with `client_isolation`'s WITH
+        # CHECK, which still admits a visible client's contact.
+        _create_policy(table, "client_isolation_insert", "INSERT", None, modify)
 
 
 # (parent, child, fk): every inheritance edge above. A parent's change of
@@ -378,24 +392,27 @@ def upgrade() -> None:
         """
     )
     # What a `users` row IS -- staff or contact (and with it, through
-    # `ck_users_kind_client`, its client) and the identity it logs in as --
+    # `ck_users_kind_client`, its client), the identity it logs in as, and
+    # whether it may log in at all (`status`, the admission gate, spec §3) --
     # changes only under scope all: the auth door and the every-client user
-    # administration. A narrowed scope may write the rest of a staff row
-    # (`PATCH /me`, login bookkeeping). A role that bypasses RLS (the admin
-    # session) is not held to a client scope here either.
+    # administration (`users.manage`: disable, enable, delete). A narrowed
+    # scope may write the rest of a staff row (its presentation fields). A
+    # role that bypasses RLS (the admin session) is not held to a client
+    # scope here either.
     op.execute(
         """
         CREATE FUNCTION its_user_identity_guard() RETURNS trigger
         LANGUAGE plpgsql AS $$
         BEGIN
             IF (NEW.kind IS DISTINCT FROM OLD.kind
-                OR NEW.external_subject IS DISTINCT FROM OLD.external_subject)
+                OR NEW.external_subject IS DISTINCT FROM OLD.external_subject
+                OR NEW.status IS DISTINCT FROM OLD.status)
                AND current_setting('app.client_scope', true) IS DISTINCT FROM 'all'
                AND NOT (SELECT rolbypassrls OR rolsuper FROM pg_roles
                         WHERE rolname = current_user) THEN
                 RAISE EXCEPTION
-                    'users.kind and users.external_subject change only under the '
-                    'every-client scope'
+                    'users.kind, users.external_subject and users.status change only '
+                    'under the every-client scope'
                     USING ERRCODE = 'check_violation';
             END IF;
             RETURN NEW;
@@ -490,8 +507,8 @@ def upgrade() -> None:
         )
 
     op.execute(
-        "CREATE TRIGGER its_user_identity_guard BEFORE UPDATE OF kind, external_subject "
-        "ON users FOR EACH ROW EXECUTE FUNCTION its_user_identity_guard()"
+        "CREATE TRIGGER its_user_identity_guard BEFORE UPDATE OF kind, external_subject, "
+        "status ON users FOR EACH ROW EXECUTE FUNCTION its_user_identity_guard()"
     )
 
     for table in CLIENT_ORG_FK_TABLES:
@@ -529,6 +546,7 @@ def downgrade() -> None:
         op.execute(f"DROP POLICY IF EXISTS client_isolation ON {table}")
         op.execute(f"DROP POLICY IF EXISTS client_isolation_update ON {table}")
         op.execute(f"DROP POLICY IF EXISTS client_isolation_delete ON {table}")
+        op.execute(f"DROP POLICY IF EXISTS client_isolation_insert ON {table}")
         if parent is not None:
             op.execute(f"DROP TRIGGER IF EXISTS its_client_from_parent ON {table}")
         op.execute(f"DROP INDEX IF EXISTS ix_{table}_client_id")

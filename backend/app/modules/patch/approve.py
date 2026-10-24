@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_extensions import uuid7
 
 from app.core.audit import audit_service
+from app.core.global_rows import refuse_unless_every_client
 from app.models import DevicePatchStatus, Patch, PatchApproval
 from app.modules.patch.policy import resolve_ring_populations
 
@@ -155,6 +156,11 @@ async def _approve_one(
         # did not write, so on a lost race it re-selects the winner's row
         # and returns it immediately -- the identical no-op shape as the
         # "already approved and not revoked" branch above.
+        #
+        # `patch_approvals` rows carry no client in phase 1: every approval is
+        # a global row, and a bulk INSERT never passes `app.core.global_rows`'s
+        # flush guard (the re-approval above, an ORM update, does).
+        refuse_unless_every_client(session, "patch_approvals")
         inserted_id = (
             await session.execute(
                 pg_insert(PatchApproval)

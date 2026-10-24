@@ -75,6 +75,7 @@ from sqlalchemy.sql import text
 
 from app.core.approved_actions import ApprovedAction
 from app.core.audit import audit_service
+from app.core.global_rows import refuse_if_still_readable, refuse_unless_every_client
 from app.core.i18n import tr
 from app.modules.health.alerts import clear_alert
 from app.modules.health.errors import (
@@ -1367,6 +1368,11 @@ async def create_assignment(
         raise HealthValidationError(
             tr("an assignment names a device OR a group OR neither (the org default), never both")
         )
+    if device_id is None and device_group_id is None:
+        # The org default has no parent, so no client: a global row, written by
+        # the bulk INSERT below that `app.core.global_rows`'s flush guard never
+        # sees. Refused before anything is read, as `require_all_clients` is.
+        refuse_unless_every_client(session, "health_profile_assignment")
     await get_profile(session, org_id, profile_id)
     await _reject_cross_org_target(
         session, org_id, device_id=device_id, device_group_id=device_group_id
@@ -1478,6 +1484,16 @@ async def delete_assignment(
         )
     ).one_or_none()
     if deleted is None:
+        # A bulk DELETE, which `app.core.global_rows`'s flush guard never sees:
+        # the org-default assignment (no device, no group) is a global row, and
+        # RLS let a limited scope read it but made this match nothing. That is
+        # a refusal (403), not a "not found".
+        await refuse_if_still_readable(
+            session,
+            HealthProfileAssignment,
+            HealthProfileAssignment.org_id == org_id,
+            HealthProfileAssignment.id == assignment_id,
+        )
         raise HealthNotFoundError(
             tr("health profile assignment {assignment_id} not found", assignment_id=assignment_id)
         )

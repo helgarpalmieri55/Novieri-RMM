@@ -100,6 +100,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
+from app.core.global_rows import refuse_unless_every_client
 from app.core.i18n import tr
 from app.modules.service_desk.models import TicketQueue
 from app.modules.sla.errors import SlaNotFoundError, SlaValidationError
@@ -367,6 +368,12 @@ async def create_policy(
     creating a retired policy at a level an active one already holds is legal
     history, and the collision below can only ever mean a genuinely ACTIVE
     policy is in the way -- which is what its message says."""
+    # `sla_policy` rows carry no client in phase 1, so every one is a global
+    # row, and the bulk INSERT below never passes `app.core.global_rows`'s
+    # flush guard. Refused first, as `require_all_clients` is: a limited
+    # technician learns nothing from a validation error about a body they
+    # could never have sent.
+    refuse_unless_every_client(session, "sla_policy")
     _validate_priority(priority)
     _validate_positive(response_target_minutes, "response_target_minutes")
     _validate_positive(resolution_target_minutes, "resolution_target_minutes")

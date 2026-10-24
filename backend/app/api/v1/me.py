@@ -47,15 +47,16 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, bound_auth_context
-from app.core.audit import audit_service
 from app.core.i18n import tr
-from app.core.rbac import user_permission_codes, user_role_names
-from app.core.tenancy import org_session
-from app.models import User
+from app.core.identity.own_profile import (
+    OwnProfile,
+    OwnRowMissing,
+    read_own_locale,
+    read_own_profile,
+    update_own_profile,
+)
 from app.modules.user_admin.kc_client import (
     KeycloakAdminConfig,
     KeycloakAdminError,
@@ -118,25 +119,22 @@ def _reject(detail: str) -> HTTPException:
     return HTTPException(status.HTTP_400_BAD_REQUEST, detail)
 
 
-def _response(user: User, codes: set[str], roles: list[str]) -> MeResponse:
+def _response(profile: OwnProfile) -> MeResponse:
     return MeResponse(
-        user_id=user.id,
-        org_id=user.org_id,
-        email=user.email,
-        display_name=user.display_name,
-        phone=user.phone,
-        timezone=user.timezone,
-        locale=user.locale,
-        permissions=sorted(codes),
-        roles=roles,
+        user_id=profile.user_id,
+        org_id=profile.org_id,
+        email=profile.email,
+        display_name=profile.display_name,
+        phone=profile.phone,
+        timezone=profile.timezone,
+        locale=profile.locale,
+        permissions=sorted(profile.permissions),
+        roles=profile.roles,
     )
 
 
-async def _load(session: AsyncSession, user_id: UUID) -> User:
-    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
-    if user is None:  # pragma: no cover -- admission created or found this row
-        raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such user"))
-    return user
+def _no_such_user() -> HTTPException:  # pragma: no cover -- admission created or found this row
+    return HTTPException(status.HTTP_404_NOT_FOUND, tr("no such user"))
 
 
 @router.get("/me", response_model=MeResponse)
@@ -149,13 +147,18 @@ async def me(request: Request, ctx: AuthContext = Depends(bound_auth_context)) -
     only correct because admission now refreshes it from the claim
     (`app/api/deps.py`, §7.2) -- before that fix the row was the stale source
     and this would have been the bug rather than the fix.
+
+    Under EVERY client, not `ctx.clients`: the profile is the person's, and a
+    person with no grant has the empty scope, which sees no staff row
+    (`app.core.identity.own_profile`).
     """
-    async with org_session(
-        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
-    ) as session:
-        user = await _load(session, ctx.user_id)
-        codes = await user_permission_codes(session, ctx.user_id)
-        return _response(user, codes, await user_role_names(session, ctx.user_id))
+    try:
+        profile = await read_own_profile(
+            org_id=ctx.org_id, user_id=ctx.user_id, engine=request.app.state.app_engine
+        )
+    except OwnRowMissing:  # pragma: no cover -- admission created or found this row
+        raise _no_such_user() from None
+    return _response(profile)
 
 
 @router.patch("/me", response_model=MeResponse)
@@ -171,47 +174,26 @@ async def update_me(
     if "display_name" in supplied and body.display_name is None:
         raise _reject(tr("display_name cannot be null; send \"\" to clear it"))
 
-    async with org_session(
-        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
-    ) as session:
-        user = await _load(session, ctx.user_id)
-        previous_locale = user.locale
-        # WRITTEN OUT, not `setattr(user, field, ...)` over `supplied`. The
-        # reflective form is one model edit away from assigning to any User
-        # attribute whose name a request field happens to share; these four
-        # lines are the write surface, readable as such by whoever reviews
-        # this next.
-        if "display_name" in supplied and body.display_name is not None:
-            user.display_name = body.display_name
-        if "phone" in supplied:
-            user.phone = body.phone
-        if "timezone" in supplied:
-            user.timezone = body.timezone
-        if "locale" in supplied:
-            user.locale = body.locale
-        session.add(user)
-
-        # KEYS ONLY, never values. A phone number is directory data about a
-        # person and the audit log is read far more widely than the profile
-        # form; recording which fields moved is what makes the event useful
-        # without turning the chain into a contact list.
-        await audit_service.record(
-            session,
+    # The caller's own row, under EVERY client (`app.core.identity.
+    # own_profile`, where the four written-out assignments and the audit
+    # event live): `ctx.user_id`, never the body.
+    try:
+        profile, previous_locale = await update_own_profile(
             org_id=ctx.org_id,
-            actor_type="user",
-            actor_id=ctx.user_id,
-            action="user.profile_updated",
-            target_type="user",
-            target_id=str(ctx.user_id),
-            metadata={"fields": sorted(supplied)},
+            user_id=ctx.user_id,
+            engine=request.app.state.app_engine,
+            supplied=supplied,
+            display_name=body.display_name,
+            phone=body.phone,
+            timezone=body.timezone,
+            locale=body.locale,
         )
-        codes = await user_permission_codes(session, ctx.user_id)
-        roles = await user_role_names(session, ctx.user_id)
-        await session.flush()
-        response = _response(user, codes, roles)
-        subject = user.external_subject
+    except OwnRowMissing:  # pragma: no cover -- admission created or found this row
+        raise _no_such_user() from None
+    response = _response(profile)
+    subject = profile.external_subject
 
-    # AFTER THE COMMIT (the block above has exited), so a Keycloak that is down
+    # AFTER THE COMMIT (the call above has returned), so a Keycloak that is down
     # or slow can never lose the console setting. The target is the caller's
     # own row's `external_subject`, read from the row `ctx.user_id` selected --
     # no request field reaches this call.
@@ -230,10 +212,9 @@ async def update_me(
         # has moved on, write that instead. Whichever request finishes last
         # reads the latest committed value, so Keycloak ends on it.
         if response.identity_locale_synced:
-            async with org_session(
-                ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
-            ) as session:
-                current = (await _load(session, ctx.user_id)).locale
+            current = await read_own_locale(
+                org_id=ctx.org_id, user_id=ctx.user_id, engine=request.app.state.app_engine
+            )
             if current != body.locale:
                 response.identity_locale_synced = await _mirror_locale(
                     request, subject=subject, locale=current
