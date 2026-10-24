@@ -39,7 +39,8 @@ class World:
 
 async def _release(env: ApiEnv, org: UUID) -> UUID:
     """A Linux release with bytes, so an install command and a deployment token
-    can be minted. The catalogue is global; written on the admin engine."""
+    can be minted. The catalogue is global, so it is written on the APP engine
+    under the every-client scope -- not on the admin engine."""
     async with org_session(org, engine=env.app_engine, clients=ClientScope.all()) as s:
         release = AgentRelease(
             version=f"v{uuid4().hex[:10]}",

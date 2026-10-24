@@ -232,9 +232,9 @@ def test_the_optional_parent_exception_has_not_rotted() -> None:
 # --------------------------------------------------------------------------- #
 
 # THE EXPECTED POLICIES, WRITTEN ONCE. Spec §2.2 in SQL. Postgres deparses
-# both these and the live policies (`_deparse`), so the comparison is exact
-# and canonical: casts, parentheses and spelling come from the same deparser
-# on both sides. Like `test_schema_drift.py`'s index comparison, a predicate
+# both these and the live policies (`deparse_policies`), so the comparison is
+# exact and canonical: casts, parentheses and spelling come from the same
+# deparser on both sides. Like `test_schema_drift.py`'s index comparison, a predicate
 # that says the same thing in a different SHAPE fails -- a false failure,
 # never a false pass.
 _SCOPE = "current_setting('app.client_scope', true)"
@@ -248,17 +248,20 @@ _NULL_PINNED = (
 # ... and written, changed or deleted only under scope all.
 _NULL_ALL = f"(client_id IS NULL AND {_SCOPE} = 'all')"
 
-#: THE EXCEPTION, NAMED: the two O tables whose `client_isolation` WITH CHECK
-#: admits a NULL row under any pinned scope -- a staff row's presentation
-#: fields (its CREATION is held to scope all by `client_isolation_insert`,
-#: Task 6b), and phase 1's client-less domain events. Anything else here is a
-#: finding.
-NULL_WRITABLE_FROM_ANY_SCOPE = frozenset({"users", "domain_events"})
+#: THE EXCEPTION, NAMED: the one O table whose `client_isolation` WITH CHECK
+#: admits a NULL row under any pinned scope -- phase 1's client-less domain
+#: events. `users` left it in Task 8: no narrowed path writes a staff row
+#: (`PATCH /me` and the login bookkeeping run under scope all since Task 6b),
+#: so a staff row is created, changed and deleted only under scope all, like
+#: any other global row. Anything else here is a finding.
+NULL_WRITABLE_FROM_ANY_SCOPE = frozenset({"domain_events"})
 
 Shape = tuple[str, str | None, str | None]  # (cmd, USING, WITH CHECK) as written
 
 
-def _expected_client_policies(table: str) -> dict[str, Shape]:
+def expected_client_policies(table: str) -> dict[str, Shape]:
+    """Spec §2.2's client policies for `table`, by name, as written. Shared
+    with `tests/test_client_isolation.py`'s per-table sweep."""
     if table == "clients":
         return {
             "client_isolation": (
@@ -275,16 +278,16 @@ def _expected_client_policies(table: str) -> dict[str, Shape]:
     insert = read if table in NULL_WRITABLE_FROM_ANY_SCOPE else modify
     policies: dict[str, Shape] = {
         "client_isolation": ("ALL", read, insert),
+        # `users` included since Task 8: a narrowed scope changes no column
+        # of a staff row (`its_user_identity_guard` then holds a visible
+        # contact's kind, external_subject and status).
+        "client_isolation_update": ("UPDATE", modify, None),
         "client_isolation_delete": ("DELETE", modify, None),
     }
-    # `users` has no UPDATE policy: a staff row's presentation fields may be
-    # written under a narrowed scope, and `its_user_identity_guard` holds what
-    # must not change there (kind, external_subject, status).
-    if table != "users":
-        policies["client_isolation_update"] = ("UPDATE", modify, None)
-    # ... but CREATING a staff row is scope all (Task 6b, re-review M2):
-    # first-login provisioning and `POST /users`, both every-client. An
-    # INSERT policy has no USING.
+    # CREATING a staff row is scope all (Task 6b, re-review M2): first-login
+    # provisioning and `POST /users`, both every-client. Named on `users`
+    # although `client_isolation`'s WITH CHECK now says the same. An INSERT
+    # policy has no USING.
     if table == "users":
         policies["client_isolation_insert"] = ("INSERT", None, modify)
     return policies
@@ -298,7 +301,7 @@ OTHER_POLICIES: dict[str, set[str]] = {
 }
 
 
-async def _deparse(conn, shapes: set[Shape]) -> dict[Shape, tuple[str, str | None]]:
+async def deparse_policies(conn, shapes: set[Shape]) -> dict[Shape, tuple[str, str | None]]:
     """Each shape's (qual, with_check) as `pg_policies` prints it, from a
     policy built on a temporary table with the columns the predicates name.
     The caller rolls the transaction back."""
@@ -329,7 +332,7 @@ async def _deparse(conn, shapes: set[Shape]) -> dict[Shape, tuple[str, str | Non
 
 async def test_phase_1_tables_carry_the_restrictive_policy(admin_engine) -> None:
     tables = [*PHASE_1, "clients"]
-    expected = {t: _expected_client_policies(t) for t in tables}
+    expected = {t: expected_client_policies(t) for t in tables}
     async with admin_engine.connect() as conn:
         rows = (
             await conn.execute(
@@ -340,7 +343,8 @@ async def test_phase_1_tables_carry_the_restrictive_policy(admin_engine) -> None
                 {"t": tables},
             )
         ).all()
-        deparsed = await _deparse(conn, {s for p in expected.values() for s in p.values()})
+        shapes = {s for p in expected.values() for s in p.values()}
+        deparsed = await deparse_policies(conn, shapes)
         await conn.rollback()
 
     live: dict[str, dict[str, Any]] = {}

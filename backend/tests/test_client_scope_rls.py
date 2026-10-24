@@ -399,29 +399,49 @@ async def test_an_inherited_client_cannot_be_rewritten(
             )
 
 
-async def test_a_narrowed_scope_writes_a_staff_row_but_not_another_clients_contact(
+async def test_a_narrowed_scope_writes_no_staff_row_and_not_another_clients_contact(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
-    """`users` has its own WITH CHECK (0231): `PATCH /me` and the login
-    bookkeeping write a STAFF row (client_id NULL) under the person's own,
-    possibly narrowed, scope -- which the generic O check would refuse. A
-    CONTACT row still needs its client in the scope."""
+    """Since Task 8 `users` carries the generic O `client_isolation_update`: a
+    STAFF row (client_id NULL) is a global row, readable by a narrowed scope
+    and changed -- its email, its profile, anything -- only under scope all.
+    No narrowed path writes one: `PATCH /me` and the login bookkeeping run
+    under scope all since Task 6b, and user administration needs every client.
+    A CONTACT row is its client's, and changes with that client in scope."""
     c = await _two_clients(admin_engine)
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         staff = User(org_id=c.org, external_subject=uuid4().hex, email="s@test.local")
+        contact_x = User(
+            org_id=c.org, external_subject=uuid4().hex, email="x@test.local",
+            kind="contact", client_id=c.x,
+        )
         contact_y = User(
             org_id=c.org, external_subject=uuid4().hex, email="y@test.local",
             kind="contact", client_id=c.y,
         )
-        s.add_all([staff, contact_y])
+        s.add_all([staff, contact_x, contact_y])
         await s.commit()
     async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
-        touched = await s.execute(
-            text("UPDATE users SET display_name = 'me' WHERE id IN (:s, :y)"),
-            {"s": staff.id, "y": contact_y.id},
-        )
-    # The staff row only: Y's contact is not even visible to the UPDATE.
-    assert touched.rowcount == 1  # type: ignore[attr-defined]
+        staff_read = await _ids(s, "SELECT id FROM users WHERE id = :u", u=staff.id)
+        touched = [
+            await _rowcount(
+                s, "UPDATE users SET email = 'taken@test.local' WHERE id = :u", u=staff.id
+            ),
+            await _rowcount(s, "UPDATE users SET display_name = 'me' WHERE id = :u", u=staff.id),
+            # Y's contact is not even visible to the UPDATE ...
+            await _rowcount(
+                s, "UPDATE users SET display_name = 'me' WHERE id = :u", u=contact_y.id
+            ),
+            # ... and X's own contact is X's to change: the positive control.
+            await _rowcount(
+                s, "UPDATE users SET display_name = 'me' WHERE id = :u", u=contact_x.id
+            ),
+        ]
+    assert staff_read == {staff.id}  # read, never written
+    assert touched == [0, 0, 0, 1]
+    async with AsyncSession(admin_engine) as s:
+        after = (await s.execute(select(User).where(User.id == staff.id))).scalar_one()
+    assert (after.email, after.display_name) == ("s@test.local", staff.display_name)
     with pytest.raises(DBAPIError, match="row-level security"):
         async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
             s.add(_contact(c.org, c.y))
@@ -570,10 +590,14 @@ async def test_a_narrowed_scope_cannot_change_or_delete_a_global_event(
 async def test_a_narrowed_scope_cannot_rewrite_who_a_user_is(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
-    """`users` lets a narrowed scope write a staff row -- its own person's
-    profile and login bookkeeping. It does not let it change what the row IS:
-    `kind` and `external_subject` (and with `kind`, via `ck_users_kind_client`,
-    the client) change only under scope all. Nor may it delete a staff row."""
+    """What a `users` row IS -- `kind` and `external_subject` (and with `kind`,
+    via `ck_users_kind_client`, the client) -- changes only under scope all.
+
+    A STAFF row is out of a narrowed scope's reach altogether since Task 8
+    (`client_isolation_update`): the reviewer's probe, its profile fields and
+    a DELETE all match nothing, and the row is unchanged. A CONTACT of the
+    scope's own client is the narrowed scope's to write, so there
+    `its_user_identity_guard` is what holds the identity columns."""
     c = await _two_clients(admin_engine)
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         staff = User(org_id=c.org, external_subject=uuid4().hex, email="s@test.local")
@@ -583,7 +607,7 @@ async def test_a_narrowed_scope_cannot_rewrite_who_a_user_is(
         )
         s.add_all([staff, contact])
         await s.commit()
-    probes = [
+    staff_probes: list[tuple[str, dict[str, Any]]] = [
         # The reviewer's probe: an admin's staff row turned into X's contact,
         # its login subject replaced, in one statement.
         (
@@ -591,24 +615,39 @@ async def test_a_narrowed_scope_cannot_rewrite_who_a_user_is(
             "WHERE id = :u",
             {"x": c.x, "u": staff.id},
         ),
-        ("UPDATE users SET kind = 'staff', client_id = NULL WHERE id = :u", {"u": contact.id}),
         ("UPDATE users SET external_subject = 'taken' WHERE id = :u", {"u": staff.id}),
+        (
+            "UPDATE users SET display_name = 'Me', phone = '+57', timezone = 'America/Bogota', "
+            "locale = 'es', last_login_at = now() WHERE id = :u",
+            {"u": staff.id},
+        ),
+        ("DELETE FROM users WHERE id = :u", {"u": staff.id}),
     ]
-    for sql, params in probes:
+    async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
+        staff_touched = [await _rowcount(s, sql, **params) for sql, params in staff_probes]
+    assert staff_touched == [0, 0, 0, 0]
+    async with AsyncSession(admin_engine) as s:
+        after = (await s.execute(select(User).where(User.id == staff.id))).scalar_one()
+    assert (after.kind, after.client_id, after.external_subject, after.display_name) == (
+        "staff", None, staff.external_subject, staff.display_name,
+    )
+
+    contact_probes = [
+        ("UPDATE users SET kind = 'staff', client_id = NULL WHERE id = :u", {"u": contact.id}),
+        ("UPDATE users SET external_subject = 'taken' WHERE id = :u", {"u": contact.id}),
+    ]
+    for sql, params in contact_probes:
         with pytest.raises(DBAPIError, match="only under the every-client scope"):
             async with org_session(
                 c.org, clients=ClientScope.only([c.x]), engine=app_engine
             ) as s:
                 await s.execute(text(sql), params)
     async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
-        profile = await _rowcount(
-            s,
-            "UPDATE users SET display_name = 'Me', phone = '+57', timezone = 'America/Bogota', "
-            "locale = 'es', last_login_at = now() WHERE id = :u",
-            u=staff.id,
-        )
-        deleted = await _rowcount(s, "DELETE FROM users WHERE id = :u", u=staff.id)
-    assert (profile, deleted) == (1, 0)
+        # The contact's presentation fields are X's to write: the guard is
+        # about identity, not every column.
+        assert await _rowcount(
+            s, "UPDATE users SET display_name = 'Me' WHERE id = :u", u=contact.id
+        ) == 1
     async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
         assert await _rowcount(
             s, "UPDATE users SET external_subject = :n WHERE id = :u", n=uuid4().hex, u=staff.id
@@ -873,20 +912,39 @@ async def test_a_narrowed_scope_cannot_change_a_users_status(
 ) -> None:
     """`users.status` is the admission gate (spec §3): re-enabling a disabled
     account is the every-client user administration's act, never a narrowed
-    scope's -- `its_user_identity_guard` holds it with `kind` and
+    scope's. A staff row is out of a narrowed scope's reach since Task 8
+    (`client_isolation_update`: the UPDATE matches nothing); on a contact of
+    its own client, `its_user_identity_guard` holds `status` with `kind` and
     `external_subject`."""
     c = await _two_clients(admin_engine)
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         staff = User(
             org_id=c.org, external_subject=uuid4().hex, email="s@test.local", status="disabled"
         )
-        s.add(staff)
+        contact = User(
+            org_id=c.org, external_subject=uuid4().hex, email="c@test.local",
+            kind="contact", client_id=c.x, status="disabled",
+        )
+        s.add_all([staff, contact])
         await s.commit()
+    async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
+        assert await _rowcount(
+            s, "UPDATE users SET status = 'active' WHERE id = :u", u=staff.id
+        ) == 0
     with pytest.raises(DBAPIError, match="only under the every-client scope"):
         async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
             await s.execute(
-                text("UPDATE users SET status = 'active' WHERE id = :u"), {"u": staff.id}
+                text("UPDATE users SET status = 'active' WHERE id = :u"), {"u": contact.id}
             )
+    async with AsyncSession(admin_engine) as s:
+        statuses = set(
+            (
+                await s.execute(
+                    select(User.status).where(User.id.in_([staff.id, contact.id]))
+                )
+            ).scalars()
+        )
+    assert statuses == {"disabled"}
     async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
         assert await _rowcount(
             s, "UPDATE users SET status = 'active' WHERE id = :u", u=staff.id

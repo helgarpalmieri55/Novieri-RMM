@@ -24,18 +24,23 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import ForeignKey, func, select, text
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.core.client_scope import ClientScope
 from app.core.global_rows import GlobalRowNotWritable
 from app.core.tenancy import org_session
 from app.models import (
     AuditEvent,
+    Client,
     Credential,
     DeviceGroup,
     DocArticle,
     DocLink,
+    DocRecord,
     DocVersion,
     Permission,
     Policy,
@@ -166,7 +171,9 @@ async def test_a_limited_technician_cannot_edit_a_global_credential(api_env: Any
 
 async def test_a_limited_technician_cannot_create_a_global_credential(api_env: Any) -> None:
     """No group, so no client: a new global row. Refused before the INSERT,
-    not by the database after it."""
+    not by the database after it -- and the refusal rolls the whole
+    transaction back: no credential row, and no `credential.created` in the
+    audit chain for a credential that does not exist (invariant 4)."""
     env = api_env
     org = await env.create_org("g6b")
     headers = await _actor(env, org, org)
@@ -176,6 +183,72 @@ async def test_a_limited_technician_cannot_create_a_global_credential(api_env: A
         json={"name": "new", "type": "ssh_key", "secret": "s3cret"},
     )
     assert _refused(response), (response.status_code, response.text)
+    async with AsyncSession(env.admin_engine) as session:
+        credentials = (
+            await session.execute(
+                select(func.count()).select_from(Credential).where(Credential.org_id == org)
+            )
+        ).scalar_one()
+        created = (
+            await session.execute(
+                select(func.count()).select_from(AuditEvent).where(
+                    AuditEvent.org_id == org, AuditEvent.action == "credential.created"
+                )
+            )
+        ).scalar_one()
+    assert (credentials, created) == (0, 0)
+
+
+async def test_checking_out_a_global_credential_on_one_client_is_refused_until_decided(
+    api_env: Any,
+) -> None:
+    """PINS TODAY'S FAIL-CLOSED BEHAVIOUR; THE OPERATOR HAS NOT RULED YET.
+
+    Whether a technician limited to one client may reveal a credential that
+    serves every client is an open product question. Today they may not: the
+    checkout stamps `last_used_at` on the row, a write to a global row, which
+    `app.core.global_rows` refuses with the every-client 403 -- so the
+    transaction rolls back before the response is built. This test pins that:
+    the secret is not in the body, no `credential.checked_out` is audited, and
+    the row is untouched. Whoever answers the question changes this test on
+    purpose, not by accident."""
+    env = api_env
+    org = await env.create_org("g8")
+    every = await _actor(env, org, None)
+    secret = f"s3cret-{uuid4().hex}"
+    created = await env.client.post(
+        "/api/v1/credentials",
+        headers=every,
+        json={"name": "shared", "type": "ssh_key", "secret": secret},
+    )
+    assert created.status_code == 201, created.text
+    credential = UUID(created.json()["id"])
+
+    for headers in (
+        await _actor(env, org, org),
+        {**every, "X-Client-Id": str(org)},
+    ):
+        response = await env.client.post(
+            f"/api/v1/credentials/{credential}/checkout",
+            headers=headers,
+            json={"reason": "ticket 8"},
+        )
+        assert _refused(response), (response.status_code, response.text)
+        assert secret not in response.text
+    assert await _actions(env.admin_engine, org, "credential.checked_out", credential) == 0
+    async with AsyncSession(env.admin_engine) as session:
+        used = (
+            await session.execute(
+                select(Credential.last_used_at).where(Credential.id == credential)
+            )
+        ).scalar_one()
+    assert used is None
+    # The every-client holder still checks it out: the refusal is the scope's.
+    response = await env.client.post(
+        f"/api/v1/credentials/{credential}/checkout", headers=every, json={"reason": "r"}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["secret"] == secret
 
 
 async def test_a_limited_technician_cannot_archive_a_global_article(api_env: Any) -> None:
@@ -248,6 +321,43 @@ async def test_a_limited_technician_cannot_delete_the_org_default_health_assignm
 
     every = await _actor(env, org, None)
     response = await env.client.delete(f"/api/v1/health/assignments/{assignment}", headers=every)
+    assert response.status_code == 204, response.text
+
+
+async def test_another_clients_health_assignment_is_not_found_not_refused(
+    api_env: Any,
+) -> None:
+    """The negative control for the test above. `refuse_if_still_readable`
+    answers 403 only for a row the person can READ -- a global one. Client Y's
+    assignment is not readable under scope [X], so deleting it is a 404, the
+    answer for a row that is not there: a 403 would confirm that Y has one.
+    And X's own assignment is X's to delete."""
+    env = api_env
+    org = await env.create_org("g8")
+    headers = await _actor(env, org, org)
+    profile = await seed_profile(env, org)
+    async with AsyncSession(env.admin_engine, expire_on_commit=False) as session:
+        y = Client(org_id=org, name="Cliente Y", kind="customer")
+        session.add(y)
+        await session.flush()
+        group_y = DeviceGroup(org_id=org, client_id=y.id, name="gy")
+        group_x = DeviceGroup(org_id=org, client_id=org, name="gx")
+        session.add_all([group_y, group_x])
+        await session.commit()
+    theirs = await seed_assignment(env, org, profile, device_group_id=group_y.id)
+    own = await seed_assignment(env, org, profile, device_group_id=group_x.id)
+
+    response = await env.client.delete(f"/api/v1/health/assignments/{theirs}", headers=headers)
+    assert response.status_code == 404, response.text
+    async with AsyncSession(env.admin_engine) as session:
+        left = (
+            await session.execute(
+                text("SELECT count(*) FROM health_profile_assignment WHERE id = :i"),
+                {"i": theirs},
+            )
+        ).scalar_one()
+    assert left == 1
+    response = await env.client.delete(f"/api/v1/health/assignments/{own}", headers=headers)
     assert response.status_code == 204, response.text
 
 
@@ -445,7 +555,8 @@ async def test_the_guard_holds_staff_rows_and_passes_contacts(
 ) -> None:
     """`users`: a staff row (client NULL) is changed, deleted or created only
     under scope all; X's contact is X's. Since this task the database agrees
-    on the INSERT (`client_isolation_insert`)."""
+    on the INSERT (`client_isolation_insert`), and since Task 8 on the UPDATE
+    (`client_isolation_update`)."""
     org, _ = await _org_with_group(admin_engine)
     staff = User(org_id=org, external_subject=uuid4().hex, email="s@test.local")
     await _seed(admin_engine, staff)
@@ -479,6 +590,188 @@ def test_the_guards_second_parents_are_the_migrations() -> None:
     assert {(t, p, fk) for t, (p, fk) in SECOND_PARENTS.items()} == {
         (t, p, fk) for (t, _), (p, fk) in EXTRA_PARENT_TRIGGERS.items()
     }
+
+
+async def test_the_guard_follows_a_version_to_its_global_record(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """`doc_versions`' SECOND parent, `record_id` (0231's
+    `its_client_from_record`): the version of a GLOBAL record is global, so a
+    narrowed scope creating one is refused before the INSERT -- the
+    `GlobalRowNotWritable` that `app/main.py` answers with the every-client
+    403. A version of X's record is X's, and is written."""
+    org, _ = await _org_with_group(admin_engine)
+    shared = DocRecord(org_id=org, record_type="service", name="global")
+    own = DocRecord(org_id=org, client_id=org, record_type="service", name="x")
+    await _seed(admin_engine, shared, own)
+    x = ClientScope.only([org])
+
+    def version(record: UUID) -> DocVersion:
+        return DocVersion(
+            org_id=org, record_id=record, version=2, snapshot={}, ts=datetime.now(UTC)
+        )
+
+    with pytest.raises(GlobalRowNotWritable) as caught:
+        async with org_session(org, clients=x, engine=app_engine) as s:
+            s.add(version(shared.id))
+            await s.flush()
+    assert caught.value.table == "doc_versions"
+    async with org_session(org, clients=x, engine=app_engine) as s:
+        made = version(own.id)
+        s.add(made)
+        await s.flush()
+        await s.refresh(made, ["client_id"])
+        assert made.client_id == org
+
+
+# --------------------------------------------------------------------------- #
+# Task 8 (Task 6b review): a child linked to its parent through a relationship
+# --------------------------------------------------------------------------- #
+
+
+class _ByObject(DeclarativeBase):
+    """A registry of its own. The application maps no `relationship()`, so
+    these views of two real O tables are how a child linked BY OBJECT --
+    `DocLink(article=a)`, whose `article_id` the flush copies from `a` only
+    after `before_flush` has run -- reaches `app.core.global_rows`."""
+
+    type_annotation_map = {UUID: PGUUID(as_uuid=True)}
+
+
+class _Article(_ByObject):
+    __tablename__ = "doc_articles"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    org_id: Mapped[UUID]
+    client_id: Mapped[UUID | None]
+    title: Mapped[str]
+    body: Mapped[str] = mapped_column(default="")
+    category: Mapped[str] = mapped_column(default="General")
+    archived: Mapped[bool] = mapped_column(default=False)
+    current_version: Mapped[int] = mapped_column(default=1)
+
+
+class _Link(_ByObject):
+    """No `client_id` mapped: the trigger writes it, from the article."""
+
+    __tablename__ = "doc_links"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    org_id: Mapped[UUID]
+    article_id: Mapped[UUID] = mapped_column(ForeignKey("doc_articles.id"))
+    target_type: Mapped[str]
+    target_id: Mapped[UUID]
+    article: Mapped[_Article] = relationship()
+
+
+class _ByCollection(DeclarativeBase):
+    """The other direction: the PARENT's collection holds the child, which
+    names no parent of its own until the flush."""
+
+    type_annotation_map = {UUID: PGUUID(as_uuid=True)}
+
+
+class _CollectingArticle(_ByCollection):
+    __tablename__ = "doc_articles"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    org_id: Mapped[UUID]
+    client_id: Mapped[UUID | None]
+    links: Mapped[list["_CollectedLink"]] = relationship(lazy="selectin")
+
+
+class _CollectedLink(_ByCollection):
+    __tablename__ = "doc_links"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    org_id: Mapped[UUID]
+    article_id: Mapped[UUID] = mapped_column(ForeignKey("doc_articles.id"))
+    target_type: Mapped[str]
+    target_id: Mapped[UUID]
+
+
+async def _two_articles(admin_engine: AsyncEngine) -> tuple[UUID, UUID, UUID]:
+    """An org, a global article and one of X's (the org's internal client)."""
+    org, _ = await _org_with_group(admin_engine)
+    shared = DocArticle(org_id=org, title="global")
+    own = DocArticle(org_id=org, client_id=org, title="x")
+    await _seed(admin_engine, shared, own)
+    return org, shared.id, own.id
+
+
+async def _link_client(engine: AsyncEngine, link: UUID) -> UUID | None:
+    async with AsyncSession(engine) as session:
+        client: UUID | None = (
+            await session.execute(
+                text("SELECT client_id FROM doc_links WHERE id = :i"), {"i": link}
+            )
+        ).scalar_one()
+        return client
+
+
+async def test_the_guard_follows_a_child_linked_by_object(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """`_Link(article=a)`: the row's state holds no `article_id` when the guard
+    runs. Read as NULL, a link of X's article was "global" and refused. The
+    guard follows the relationship instead: a link of X's article -- loaded,
+    or new in the same flush -- is X's and is written; a link of a global
+    article is global and refused before the INSERT."""
+    org, shared, own = await _two_articles(admin_engine)
+    x = ClientScope.only([org])
+
+    def link(article: _Article) -> _Link:
+        return _Link(org_id=org, article=article, target_type="device", target_id=uuid4())
+
+    async with org_session(org, clients=x, engine=app_engine) as s:
+        loaded = (await s.execute(select(_Article).where(_Article.id == own))).scalar_one()
+        of_loaded = link(loaded)
+        of_new = link(_Article(org_id=org, client_id=org, title="new"))
+        s.add_all([of_loaded, of_new])
+        await s.flush()
+    assert await _link_client(admin_engine, of_loaded.id) == org
+    assert await _link_client(admin_engine, of_new.id) == org
+
+    with pytest.raises(GlobalRowNotWritable) as caught:
+        async with org_session(org, clients=x, engine=app_engine) as s:
+            loaded = (await s.execute(select(_Article).where(_Article.id == shared))).scalar_one()
+            s.add(link(loaded))
+            await s.flush()
+    assert caught.value.table == "doc_links"
+
+
+async def test_the_guard_leaves_a_child_held_by_a_collection_to_the_database(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """`article.links.append(link)`: the child names no parent and holds no
+    relationship of its own until the flush, so the guard cannot tell its
+    client. It does not call it global (it was refused, a link of X's article
+    included); it lets the statement through and RLS decides -- X's article's
+    link is written as X's, a global article's is refused by the database."""
+    org, shared, own = await _two_articles(admin_engine)
+    x = ClientScope.only([org])
+
+    def held() -> _CollectedLink:
+        return _CollectedLink(org_id=org, target_type="device", target_id=uuid4())
+
+    async with org_session(org, clients=x, engine=app_engine) as s:
+        article = (
+            await s.execute(select(_CollectingArticle).where(_CollectingArticle.id == own))
+        ).scalar_one()
+        child = held()
+        article.links.append(child)
+        await s.flush()
+    assert await _link_client(admin_engine, child.id) == org
+
+    with pytest.raises(DBAPIError, match="row-level security"):
+        async with org_session(org, clients=x, engine=app_engine) as s:
+            article = (
+                await s.execute(
+                    select(_CollectingArticle).where(_CollectingArticle.id == shared)
+                )
+            ).scalar_one()
+            article.links.append(held())
+            await s.flush()
 
 
 # --------------------------------------------------------------------------- #

@@ -337,7 +337,7 @@ async def start_run_route(
         # malformed". `wake_on_lan` additionally requires `site.wake`.
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from None
     except ProvisioningValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
     # `provision.prepare` still has no v1 consumer and `provision.enroll` is
     # dispatched later by the worker. What IS published here is the `site.wake`
     # envelope, and ONLY AFTER the `org_session` block has exited -- a job

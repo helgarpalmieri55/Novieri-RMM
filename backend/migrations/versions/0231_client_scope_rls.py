@@ -27,8 +27,9 @@
    deleted only under scope all (spec §2.2) -- hence `client_isolation_update`
    and `client_isolation_delete`, because a DELETE checks no WITH CHECK and a
    FOR ALL policy's USING has to admit the NULL rows a limited scope reads.
-   `users` also has `client_isolation_insert`: a staff row is created only
-   under scope all (`_policies`).
+   `users` is held like every other O table -- a staff row is created,
+   changed and deleted only under scope all -- and names the creation in a
+   `client_isolation_insert` of its own (`_policies`).
 
 ORG CONSISTENCY IS A FOREIGN KEY, NOT A POLICY. A foreign key check ignores
 RLS: under scope `all` the client policy passes any client id and the tenant
@@ -168,7 +169,8 @@ NULL_PINNED = f"(client_id IS NULL AND {SCOPE_PINNED})"
 NULL_ALL = f"(client_id IS NULL AND {SCOPE} = 'all')"
 
 # O tables whose NULL rows any pinned scope may INSERT (see `_policies`).
-NULL_WRITABLE_FROM_ANY_SCOPE = {"users", "domain_events"}
+# `users` was here until Task 8; no narrowed path writes a staff row.
+NULL_WRITABLE_FROM_ANY_SCOPE = {"domain_events"}
 
 
 def _create_policy(
@@ -186,23 +188,9 @@ def _policies(table: str, kind: str) -> None:
     read = f"{NULL_PINNED} OR {VISIBLE}"
     modify = f"{NULL_ALL} OR {VISIBLE}"
     if table in NULL_WRITABLE_FROM_ANY_SCOPE:
-        # Two O tables whose NULL rows any PINNED scope may WRITE; with no
-        # scope, still nothing. Deleting one is still scope all, and so is
-        # changing a `domain_events` row (the policies below); on `users` the
-        # identity columns and `status` are held by `its_user_identity_guard`,
-        # and creating a staff row by `client_isolation_insert`.
-        #
-        # `users`: a staff row's presentation fields (`display_name`, `phone`,
-        # `timezone`, `locale`, `last_login_at`) may be UPDATED under a
-        # narrowed scope, so the generic O check, which reserves NULL rows to
-        # scope `all`, is not used for them. (`PATCH /me` and the login
-        # bookkeeping run under scope all since Task 6b, and the application
-        # refuses a narrowed ORM write to a staff row before any SQL --
-        # `app/core/global_rows.py` -- so this is the database's floor, not a
-        # path the API uses.) CREATING a staff row is scope all:
-        # `client_isolation_insert` below. Admin writes to staff rows already
-        # require a scope of every client at the API (`users.manage`, plan
-        # Task 4). A contact row (client_id set) needs its client visible.
+        # The one O table whose NULL rows any PINNED scope may WRITE; with no
+        # scope, still nothing. Changing or deleting one is still scope all
+        # (the policies below).
         #
         # `domain_events`: `app/core/events.publish` cannot yet name the
         # client, so in phase 1 an event is written with NULL client from any
@@ -216,16 +204,23 @@ def _policies(table: str, kind: str) -> None:
     _create_policy(table, "client_isolation", "ALL", read, write)
     # The FOR ALL policy's USING admits the global rows a limited scope may
     # READ, and a DELETE checks USING only -- so changing or deleting a global
-    # row needs these too. `users` has no UPDATE one: a staff row is updated
-    # by its own person under a narrowed scope (`PATCH /me`, login).
-    if table != "users":
-        _create_policy(table, "client_isolation_update", "UPDATE", modify, None)
+    # row needs these too.
+    #
+    # `users` included (Task 8): a staff row is a global row, and no path a
+    # narrowed scope reaches changes one -- `PATCH /me` and the login
+    # bookkeeping (`app/api/deps.py::admit`) run under scope all since Task
+    # 6b, and user administration (`users.manage`) requires every client at
+    # the API (plan Task 4). So a narrowed scope may not UPDATE any column of
+    # a staff row; a contact row (client_id set) needs its client visible.
+    _create_policy(table, "client_isolation_update", "UPDATE", modify, None)
     _create_policy(table, "client_isolation_delete", "DELETE", modify, None)
     if table == "users":
         # A staff row is a global row: it is CREATED only under scope all --
         # first-login provisioning (`app/api/deps.py::admit`) and `POST
-        # /users`, both every-client. ANDed with `client_isolation`'s WITH
-        # CHECK, which still admits a visible client's contact.
+        # /users`, both every-client. `client_isolation`'s WITH CHECK says the
+        # same since `users` left `NULL_WRITABLE_FROM_ANY_SCOPE`; this one
+        # names the rule for the table where it matters most, so it does not
+        # hang on that set's membership.
         _create_policy(table, "client_isolation_insert", "INSERT", None, modify)
 
 
@@ -396,9 +391,10 @@ def upgrade() -> None:
     # whether it may log in at all (`status`, the admission gate, spec §3) --
     # changes only under scope all: the auth door and the every-client user
     # administration (`users.manage`: disable, enable, delete). A narrowed
-    # scope may write the rest of a staff row (its presentation fields). A
-    # role that bypasses RLS (the admin session) is not held to a client
-    # scope here either.
+    # scope reaches no staff row at all (`client_isolation_update`, Task 8),
+    # so what this holds there is a CONTACT of a client in the scope, whose
+    # other columns that scope may write. A role that bypasses RLS (the
+    # admin session) is not held to a client scope here either.
     op.execute(
         """
         CREATE FUNCTION its_user_identity_guard() RETURNS trigger

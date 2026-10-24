@@ -36,8 +36,9 @@ before it, or `refuse_if_still_readable` after it matched nothing.
 
 THE DATABASE STAYS THE GUARD. When the listener cannot tell what a row's
 client is or will be (a parent this session cannot read, an attribute it never
-loaded and cannot find), it lets the statement through and RLS decides, as
-before: this module makes refusals loud, it never makes a write possible.
+loaded and cannot find, a parent fk a relationship will fill in only at flush
+time), it lets the statement through and RLS decides, as before: this module
+makes refusals loud, it never makes a write possible.
 """
 
 from collections.abc import Iterable
@@ -46,7 +47,7 @@ from uuid import UUID
 
 from sqlalchemy import MetaData, Table, event, inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import InstanceState, Session, UOWTransaction
+from sqlalchemy.orm import MANYTOONE, ONETOMANY, InstanceState, Session, UOWTransaction
 from sqlalchemy.orm.base import NO_VALUE
 
 from app.core.client_scope import ClientScope
@@ -67,7 +68,8 @@ SECOND_PARENTS: dict[str, tuple[str, str]] = {
 #: `events.publish` cannot name a client yet (phase 2 derives it), so every
 #: route that publishes would fail for a narrowed technician -- migration 0231
 #: allows it for the same reason. `users` is NOT here: since Task 6b its
-#: `client_isolation_insert` policy reserves a staff row to scope all.
+#: `client_isolation_insert` policy reserves creating a staff row to scope
+#: all, and since Task 8 its `client_isolation_update` changing one.
 NULL_INSERTABLE_FROM_ANY_SCOPE = frozenset({"domain_events"})
 
 
@@ -89,6 +91,14 @@ class _Unknown:
 UNKNOWN = _Unknown()
 
 Client = UUID | None | _Unknown
+
+
+class _Unlinked:
+    """No relationship can fill a new row's unset parent fk in at flush time:
+    the column default, NULL, is what it will hold."""
+
+
+UNLINKED = _Unlinked()
 
 
 class ClientScopedSession(Session):
@@ -175,6 +185,49 @@ def _parent_client(session: Session, parent: str, parent_id: Any, metadata: Meta
     return UNKNOWN if row is None else cast(Client, row[0])
 
 
+def _client_of(session: Session, parent: str, obj: Any) -> Client:
+    """The client a parent OBJECT has, or will have once this flush writes it."""
+    other: InstanceState[Any] = inspect(obj)
+    if _table(other).name != parent:
+        return UNKNOWN
+    if other.identity is None:  # new itself, in this flush
+        return _resulting_client(session, parent, other, pending=True)
+    if other.modified:  # changed in this flush too
+        return _resulting_client(session, parent, other, pending=False)
+    return _original_client(session, other)
+
+
+def _linked_client(
+    session: Session, state: InstanceState[Any], parent: str, fk: str
+) -> Client | _Unlinked:
+    """The parent of a NEW row whose `fk` is unset, when a relationship names it.
+
+    `DocLink(article=a)` leaves `article_id` out of `state.dict`: the flush
+    copies it from `a` only after `before_flush` has run, so reading the
+    missing fk as NULL called a link of X's article global and refused it
+    (Task 6b review). So: the related object's client when a many-to-one over
+    `fk` holds one; UNKNOWN -- the database decides -- when a relationship
+    over `fk` exists but holds no object here (a parent's collection may hold
+    this row, or the many-to-one may be set later); UNLINKED when no
+    relationship touches `fk`, and the unset fk really is NULL. The
+    application maps no `relationship()` today: this keeps the guard right
+    the day one appears."""
+    column = _table(state).c[fk]
+    reachable = False
+    for mapper in state.mapper.registry.mappers:
+        for rel in mapper.relationships:
+            if rel.direction is MANYTOONE and column in rel.local_columns:
+                if not state.mapper.isa(rel.parent):
+                    continue
+                reachable = True
+                related = state.dict.get(rel.key)
+                if related is not None:
+                    return _client_of(session, parent, related)
+            elif rel.direction is ONETOMANY and column in rel.remote_side:
+                reachable = True
+    return UNKNOWN if reachable else UNLINKED
+
+
 def _resulting_client(
     session: Session, table: str, state: InstanceState[Any], *, pending: bool
 ) -> Client:
@@ -184,10 +237,13 @@ def _resulting_client(
     for parent, fk in _parents(table) if table in CATALOG else []:
         if fk in state.dict:
             parent_id = state.dict[fk]
-        elif pending:
-            parent_id = None  # unset on a new row: the column default, NULL
-        else:
+        elif not pending:
             return UNKNOWN
+        else:
+            linked = _linked_client(session, state, parent, fk)
+            if not isinstance(linked, _Unlinked):
+                return linked
+            parent_id = None  # unset on a new row, and nothing will set it: NULL
         if parent_id is not None:
             return _parent_client(session, parent, parent_id, metadata)
     if "client_id" in state.dict:

@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.client_scope import ClientScope
@@ -442,13 +442,49 @@ async def test_starting_a_provisioning_run_needs_every_client(api_env) -> None:
     assert everyone.status_code == 422, everyone.text
 
 
+async def _until_its_insert_waits_on(app_engine: AsyncEngine, blocker: int) -> None:
+    """Return once a backend is blocked by `blocker` IN an INSERT into
+    `device_groups`: the racing create has passed the name check -- which saw
+    no uncommitted row -- and waits on the live-name index for `blocker`'s
+    transaction. Polled from the app role, which may read its own backends'
+    query text in `pg_stat_activity`. A wait anywhere else fails the test
+    rather than passing it through the name check's 409."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 30
+    async with app_engine.connect() as conn:
+        while True:
+            waiting = (
+                await conn.execute(
+                    text(
+                        "SELECT query FROM pg_stat_activity "
+                        "WHERE CAST(:b AS integer) = ANY (pg_blocking_pids(pid))"
+                    ),
+                    {"b": blocker},
+                )
+            ).scalars().all()
+            if waiting:
+                assert all(
+                    q.lstrip().upper().startswith("INSERT INTO DEVICE_GROUPS") for q in waiting
+                ), waiting
+                return
+            assert loop.time() < deadline, "the racing create never reached the index"
+            await asyncio.sleep(0.02)
+            await conn.rollback()  # a fresh snapshot of pg_stat_activity
+
+
 async def test_two_creates_racing_for_one_name_end_in_a_409_not_a_500(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     """I2's backstop. Neither create sees the other's uncommitted row, so both
     pass the name check; the second INSERT waits on the live-name index and,
     once the first commits, fails on it. That unique violation is the same 409
-    the check gives, not an IntegrityError out of the route."""
+    the check gives, not an IntegrityError out of the route.
+
+    DETERMINISTIC: the first transaction stays open until the second is SEEN
+    waiting on it in its INSERT (`pg_blocking_pids`), so the 409 always comes
+    from the 23505 mapping in `_flush_guarded` -- never from the name check,
+    which is what a slow second task used to reach after the first had
+    committed."""
     org = await _org(admin_engine)
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         actor = User(org_id=org, external_subject=f"sub-{uuid4().hex[:8]}", email="r@test.local")
@@ -466,8 +502,9 @@ async def test_two_creates_racing_for_one_name_end_in_a_409_not_a_500(
         await create_device_group(
             session, org_id=org, client_id=org, actor_id=actor_id, name="Servers"
         )
+        first = (await session.execute(text("SELECT pg_backend_pid()"))).scalar_one()
         racing = asyncio.create_task(create())
-        await asyncio.sleep(0.5)  # let it pass the check and block on the index
+        await _until_its_insert_waits_on(app_engine, first)
         assert not racing.done()
     with pytest.raises(DeviceGroupError) as refused:
         await racing
