@@ -293,7 +293,11 @@ async def test_an_install_against_a_changed_host_key_is_refused(
     """Confirmed once, but the latest observation now disagrees: refused, not
     warned about (§7.3)."""
     org, credential_id, device_id, _ss = await _world(admin_engine, "d-changed")
-    await seed_confirmed_host_key(admin_engine, org, address=TARGET, fingerprint=FINGERPRINT)
+    # The DEVICE'S key, confirmed: a probe of the device writes its client's
+    # own row and never a global one (Task 8b review 1).
+    await seed_confirmed_host_key(
+        admin_engine, org, address=TARGET, fingerprint=FINGERPRINT, device_id=device_id
+    )
     # A later probe observes a DIFFERENT key.
     async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await host_key_service.record_observation(
