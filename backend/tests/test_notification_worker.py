@@ -128,6 +128,7 @@ async def _event(
         subject_id=uuid7(),
         payload={"assignee_id": None},
         actor_user_id=None,
+        client_id=None,
     )
     await session.flush()
     return (

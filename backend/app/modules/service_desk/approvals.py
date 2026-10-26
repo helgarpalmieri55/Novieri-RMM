@@ -285,5 +285,6 @@ async def decide_approval(
             "requester_id": str(ticket.requester_id) if ticket.requester_id else None,
         },
         actor_user_id=actor_id,
+        client_id=None,  # plan 2026-10-26 Task 2 sets the ticket's client
     )
     return approval

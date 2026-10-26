@@ -693,6 +693,10 @@ async def _publish_approval_request(
         subject_id=alert.id,
         payload=payload,
         actor_user_id=None,
+        # Read from the database (trigger-filled, expired after an UPDATE).
+        client_id=(
+            await session.execute(select(HealthAlert.client_id).where(HealthAlert.id == alert.id))
+        ).scalar_one(),
     )
 
 

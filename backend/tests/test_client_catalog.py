@@ -470,6 +470,9 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
             if e.kind == "O" or (e.kind == "C" and t != "sites")
         }
         | {"fk_user_roles_client_org"}
+        # Informative client of an audit event (plan 2026-10-26 Task 1, C6):
+        # G table, no client policy, but its client is its own org's.
+        | {"fk_audit_events_client_org"}
         | {f"fk_{t}_site_client" for t in ("devices", "enrollment_tokens", "install_links")}
         | CLIENT_KEYS
     )

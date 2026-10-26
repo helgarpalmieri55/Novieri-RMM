@@ -26,6 +26,7 @@ async def test_publish_writes_an_event(api_env) -> None:
             subject_id=uuid4(),
             payload={"ticket_number": "INC-1"},
             actor_user_id=None,
+            client_id=None,
         )
         await s.commit()
         got = (
@@ -49,6 +50,7 @@ async def test_publish_rejects_an_unregistered_event_type(api_env) -> None:
                 subject_id=uuid4(),
                 payload={},
                 actor_user_id=None,
+                client_id=None,
             )
 
 
@@ -65,6 +67,7 @@ async def test_publish_accepts_a_null_actor(api_env) -> None:
             subject_id=uuid4(),
             payload={},
             actor_user_id=None,
+            client_id=None,
         )
         await s.commit()
         got = (
@@ -90,6 +93,7 @@ async def test_a_rolled_back_transaction_leaves_no_event(api_env) -> None:
             subject_id=uuid4(),
             payload={},
             actor_user_id=None,
+            client_id=None,
         )
         await s.rollback()
 

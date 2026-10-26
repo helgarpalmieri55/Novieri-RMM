@@ -365,6 +365,7 @@ async def change_status(
             "requester_id": str(ticket.requester_id) if ticket.requester_id else None,
         },
         actor_user_id=actor_id,
+        client_id=None,  # plan 2026-10-26 Task 2 sets the ticket's client
     )
 
     # A second, distinct notification for the one edge that lands a ticket
@@ -393,6 +394,7 @@ async def change_status(
                 "requester_id": str(ticket.requester_id) if ticket.requester_id else None,
             },
             actor_user_id=actor_id,
+            client_id=None,  # plan 2026-10-26 Task 2 sets the ticket's client
         )
 
     # `ticket.resolved` (whole-branch review finding C2). Registered in
@@ -426,6 +428,7 @@ async def change_status(
                 "requester_id": str(ticket.requester_id) if ticket.requester_id else None,
             },
             actor_user_id=actor_id,
+            client_id=None,  # plan 2026-10-26 Task 2 sets the ticket's client
         )
         # SLA met detection (docs/modules/sla/spec.md §0.6), on the same
         # `to_status in _RESOLVED_LIKE_STATUSES` test that stamped
@@ -596,6 +599,7 @@ async def assign_ticket(
             "requester_id": str(ticket.requester_id) if ticket.requester_id else None,
         },
         actor_user_id=actor_id,
+        client_id=None,  # plan 2026-10-26 Task 2 sets the ticket's client
     )
 
     # SLA re-triage, the QUEUE half of §3's "a priority or queue change with a

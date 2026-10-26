@@ -7,7 +7,8 @@ O  client_id nullable: NULL means "every client" (config). When `fk` is set
    and non-null on a row, the trigger derives the client from it.
 G  no client scoping. A column named client_id there means something else:
    the grant scope on `user_roles`, an OAuth client on `mcp_revocation`
-   and `email_oauth_app`.
+   and `email_oauth_app`. On `audit_events` it is the informative client of
+   the event's subject (hashed when set, read by no policy: phase 2 C6).
 
 `PENDING_PHASE_2` are C/H tables whose module code must start writing
 client_id before the column can be NOT NULL (plan "Fuera de esta fase"). The

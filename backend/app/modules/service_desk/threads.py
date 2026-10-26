@@ -236,6 +236,7 @@ async def add_comment(
             **({} if is_internal else {"body": comment.body}),
         },
         actor_user_id=author_id,
+        client_id=None,  # plan 2026-10-26 Task 2 sets the ticket's client
     )
 
     # SLA met detection (docs/modules/sla/spec.md §0.6). Gated on the SAME

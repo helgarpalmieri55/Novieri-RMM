@@ -172,4 +172,5 @@ async def _publish(
             **extra,
         },
         actor_user_id=None,
+        client_id=None,  # organisation-wide: a platform probe has no client
     )

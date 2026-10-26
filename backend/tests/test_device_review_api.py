@@ -410,7 +410,10 @@ async def test_rejecting_an_agent_too_old_to_uninstall_tells_the_notification_ru
             .scalars()
             .all()
         )
+        device = await session.get(Device, device_id)
     assert event.subject_type == "device" and event.subject_id == device_id
+    # Phase 2 Task 1: the event names its subject's client.
+    assert device is not None and event.client_id == device.client_id
     assert event.payload["device_id"] == str(device_id)
     assert event.payload["hostname"] == "DESKTOP-7Q2M4KD"
     assert event.payload["rejection_outcome"] == "agent_cannot_uninstall"

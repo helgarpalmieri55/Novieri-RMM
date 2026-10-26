@@ -237,6 +237,7 @@ async def publish(
     subject_id: UUID,
     payload: dict[str, Any],
     actor_user_id: UUID | None,
+    client_id: UUID | None,
 ) -> None:
     """Record a domain event on the caller's session and transaction.
 
@@ -247,6 +248,12 @@ async def publish(
     `payload` must carry only publishable content -- never a raw model dump.
     An internal note's text, for instance, never enters an event, so even a
     mis-routed delivery cannot disclose it (spec §6.4).
+
+    `client_id` is the client of the subject, and has NO default: every call
+    decides. None only for an organisation-wide subject (a platform probe), or
+    -- until its family's phase-2 task -- a subject whose table has no client
+    yet; Task 15 returns `domain_events` to the generic O policy, under which a
+    NULL client is written only under scope all.
     """
     if event_type not in EVENT_TYPES:
         raise UnknownEventType(event_type)
@@ -259,6 +266,7 @@ async def publish(
             subject_id=subject_id,
             payload=payload,
             actor_user_id=actor_user_id,
+            client_id=client_id,
             occurred_at=now,
             created_at=now,
         )
