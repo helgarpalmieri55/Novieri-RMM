@@ -141,6 +141,7 @@ from app.modules.service_desk.schema import TicketCreate, TicketOrigin
 from app.modules.sla.due import next_due_clause
 from app.modules.sla.models import TicketSla
 from app.modules.sla.tracking import (
+    recompute_for_move,
     recompute_for_retriage,
     sla_misconfiguration_is_not_fatal,
     start_tracking,
@@ -1141,7 +1142,9 @@ async def move_ticket(
     An assignee who cannot read tickets of the destination is taken off it --
     a ticket is never left with someone who cannot open it -- and the audit
     names them. The SLA is re-resolved among the destination's policies
-    (D2), as a human re-triage: `policy_source = 'retriage'`.
+    (D2), as a human re-triage: `policy_source = 'retriage'`; when none
+    resolves, the ticket's SLA row is deleted and the audit says
+    `"sla": "voided"` (`tracking.recompute_for_move`).
 
     The destination is loaded first, as every client a write is filed under
     is: `client_for_new_rows`'s lock is a transaction's first (its module
@@ -1199,9 +1202,12 @@ async def move_ticket(
 
     # A move changes which policies the ticket resolves among (D2): the same
     # human re-triage `update_ticket` and `assign_ticket` run, under the same
-    # guard -- a broken calendar may cost the ticket its SLA, never the move.
-    async with sla_misconfiguration_is_not_fatal("recompute_for_retriage", ticket.id):
-        await recompute_for_retriage(session, org_id, ticket)
+    # guard -- a broken calendar may cost the ticket its SLA, never the move --
+    # except that a destination with no policy at all leaves the ticket with
+    # no SLA, not the old client's (`recompute_for_move`).
+    sla: str | None = None
+    async with sla_misconfiguration_is_not_fatal("recompute_for_move", ticket.id):
+        sla = await recompute_for_move(session, org_id, ticket)
 
     await audit_service.record(
         session,
@@ -1216,6 +1222,7 @@ async def move_ticket(
             "from": str(source),
             "to": str(to_client_id),
             "unassigned": str(dropped) if dropped is not None else None,
+            "sla": sla,
         },
     )
     await session.flush()

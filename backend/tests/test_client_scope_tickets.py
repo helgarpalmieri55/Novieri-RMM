@@ -1015,6 +1015,76 @@ async def test_a_moved_ticket_takes_its_new_client_s_sla(api_env: ApiEnv) -> Non
     assert await sla() == (x_policy, x, "initial")
     assert (await _move(api_env, ticket, y, desk["admin"])).status_code == 200
     assert await sla() == (y_policy, y, "retriage")
+    assert (await _moved_audit(api_env, ticket))["sla"] is None
+
+
+async def _moved_audit(env: ApiEnv, ticket: str) -> dict[str, Any]:
+    from app.models import AuditEvent
+
+    async with AsyncSession(env.admin_engine) as s:
+        meta: dict[str, Any] = (
+            await s.execute(
+                select(AuditEvent.meta).where(
+                    AuditEvent.action == "ticket.moved", AuditEvent.target_id == ticket
+                )
+            )
+        ).scalar_one()
+    return meta
+
+
+async def _sla_rows(env: ApiEnv, ticket: str) -> list[UUID]:
+    async with AsyncSession(env.admin_engine) as s:
+        return list(
+            (
+                await s.execute(
+                    select(TicketSla.policy_id).where(TicketSla.ticket_id == UUID(ticket))
+                )
+            ).scalars()
+        )
+
+
+async def test_a_move_to_a_client_with_no_policy_voids_the_sla(api_env: ApiEnv) -> None:
+    """Review fix round 1. X has a policy of its own; Y has none and there is
+    no global one, so nothing resolves for Y (D2). The moved ticket has NO SLA
+    -- its row is deleted, never left naming X's policy -- and the move's
+    audit says so (spec §3: an absent SLA is visibly absent)."""
+    org = await api_env.create_org("t3-move-void")
+    desk = await _desk(api_env, org)
+    x, _ = await client_with_site(api_env, org)
+    y, _ = await client_with_site(api_env, org)
+    x_policy = await _policy(api_env, org, x, 8)
+    ticket = await _ticket_in(api_env, desk, x)
+    assert await _sla_rows(api_env, ticket) == [x_policy]
+    assert (await _move(api_env, ticket, y, desk["admin"])).status_code == 200
+    assert await _sla_rows(api_env, ticket) == []
+    assert (await _moved_audit(api_env, ticket))["sla"] == "voided"
+
+
+async def test_a_technician_of_the_new_client_works_a_ticket_whose_sla_was_voided(
+    api_env: ApiEnv,
+) -> None:
+    """The clock was running when the ticket moved. A technician limited to Y
+    then opens it, parks it on `pending` (pause), takes it off (resume) and
+    replies -- with X's policy left on the row, `resume` read a policy that is
+    invisible to them (`_load_policy_in_org`) and failed."""
+    org = await api_env.create_org("t3-move-void-work")
+    desk = await _desk(api_env, org)
+    x, _ = await client_with_site(api_env, org)
+    y, _ = await client_with_site(api_env, org)
+    await _policy(api_env, org, x, 8)
+    ticket = await _ticket_in(api_env, desk, x)
+    assert (await _move(api_env, ticket, y, desk["admin"])).status_code == 200
+    y_tech = await everything_on(api_env, org, y)
+    for to_status in ("open", "pending", "open"):
+        r = await api_env.client.post(
+            f"{API}/tickets/{ticket}/status", json={"to_status": to_status}, headers=y_tech
+        )
+        assert r.status_code == 200, (to_status, r.text)
+    r = await api_env.client.post(
+        f"{API}/tickets/{ticket}/comments", json={"body": "ya", "visibility": "public"},
+        headers=y_tech,
+    )
+    assert r.status_code == 201, r.text
 
 
 @pytest.mark.parametrize("child", ["comment", "attachment"])

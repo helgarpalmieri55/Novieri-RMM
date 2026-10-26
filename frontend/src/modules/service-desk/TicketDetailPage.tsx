@@ -675,8 +675,9 @@ function ReplyBox({
 // The server decides what may move (`ticket.write` in both clients; not a
 // ticket with a device, nor one an alert or a change opened) and says why in
 // a sentence, which is shown as it is. This only offers the clients a ticket
-// could go to: never its own, and never "Sin asignar", the inbox of what has
-// no owner (plan 2026-10-26, C10).
+// could go to: never its own, never "Sin asignar", the inbox of what has no
+// owner (plan 2026-10-26, C10), and never an archived one, which takes
+// nothing new (the server's 409).
 function ClientPanel({ ticket }: { ticket: TicketOut }) {
   const t = useT();
   const clients = useClients(true);
@@ -685,7 +686,8 @@ function ClientPanel({ ticket }: { ticket: TicketOut }) {
 
   const current = clients.data?.find((client) => client.id === ticket.client_id);
   const destinations = (clients.data ?? []).filter(
-    (client) => client.id !== ticket.client_id && client.kind !== "unassigned",
+    (client) =>
+      client.id !== ticket.client_id && client.kind !== "unassigned" && client.status === "active",
   );
 
   return (

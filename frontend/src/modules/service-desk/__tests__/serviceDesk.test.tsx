@@ -1123,14 +1123,17 @@ describe("TicketDetailPage wiring", () => {
   });
 
   // Moving a ticket to another client (MSP clients plan 2026-10-26 Task 3):
-  // the clients come from `GET /clients`, never "Unassigned" (C10) nor the
-  // ticket's own, and the server's refusal is shown in its own words.
+  // the clients come from `GET /clients`, never "Unassigned" (C10), an
+  // archived one, nor the ticket's own, and the server's refusal is shown in
+  // its own words.
   describe("moving a ticket to another client", () => {
     const CLIENTS = [
       { id: "o1", name: "Novieri IT", kind: "internal" },
       { id: "c-acme", name: "Acme", kind: "customer" },
       { id: "u1", name: "Unassigned", kind: "unassigned" },
       { id: "c-beta", name: "Beta", kind: "customer" },
+      // Archived: it takes nothing new, so a move there is only a 409.
+      { id: "c-gone", name: "Gone Ltd", kind: "customer", status: "archived" },
     ].map((client) => ({
       status: "active", email_domains: [], phone: "", address: "", website: "", notes: "",
       enabled_modules: [], device_count: 0, site_count: 0, ...client,
