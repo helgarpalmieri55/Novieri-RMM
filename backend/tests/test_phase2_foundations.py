@@ -15,7 +15,7 @@ from app.core.client_scope import ClientScope
 from app.core.events import publish
 from app.core.tenancy import org_session
 from app.jobs.canonical import canonical_bytes, rfc3339
-from app.models import Client, DomainEvent, Organization
+from app.models import AuditEvent, Client, DomainEvent, Organization
 from tests.conftest import PgCluster
 
 
@@ -77,7 +77,7 @@ async def test_events_with_and_without_a_client_verify_in_one_chain(
             s, org_id=org, actor_type="system", actor_id=None, action="test.named",
             client_id=customer,
         )
-        await audit.record_many(
+        batch = await audit.record_many(
             s, org_id=org,
             entries=[AuditEntry(actor_type="system", actor_id=None, action="test.batch",
                                 client_id=customer)],
@@ -85,7 +85,14 @@ async def test_events_with_and_without_a_client_verify_in_one_chain(
     assert plain.client_id is None and named.client_id == customer
     async with org_session(org, engine=app_engine, clients=ClientScope.all()) as s:
         result = await audit.verify(s, org)
+        # Read back, not the returned object: a batch that hashed the client
+        # but did not STORE it would still verify -- the row is what the log
+        # filters on (review of Task 1).
+        stored = (
+            await s.execute(select(AuditEvent.client_id).where(AuditEvent.id == batch[0].id))
+        ).scalar_one()
     assert result.ok and result.count == 3
+    assert stored == customer
 
 
 async def test_an_event_without_a_client_hashes_exactly_as_it_did_before_the_column(
