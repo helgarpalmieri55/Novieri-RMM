@@ -15,6 +15,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -280,6 +281,15 @@ class TicketSla(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # ticket (migration 0234): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     ticket_id: Mapped[UUID] = mapped_column(ForeignKey("ticket.id"), unique=True)
     policy_id: Mapped[UUID] = mapped_column(ForeignKey("sla_policy.id"))
     calendar_id: Mapped[UUID] = mapped_column(ForeignKey("sla_calendar.id"))

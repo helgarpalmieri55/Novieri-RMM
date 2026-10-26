@@ -66,7 +66,7 @@ adds no second way to move a ticket's status.
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
@@ -104,21 +104,29 @@ async def _load_approval(
 
 
 async def _actor_holds_role(
-    session: AsyncSession, org_id: UUID, actor_id: UUID, role_id: UUID
+    session: AsyncSession, org_id: UUID, actor_id: UUID, role_id: UUID, client_id: UUID
 ) -> bool:
-    """Whether `actor_id` has a `user_roles` row for `role_id` in this org --
-    org- and device-group-scoped grants both count; spec §4 asks only whether
-    the actor holds the named role at all, not whether the grant is
-    org-wide."""
+    """Whether `actor_id` holds `role_id` in this org FOR THE TICKET'S CLIENT
+    (`client_id`): an all-clients grant (`user_roles.client_id` NULL) or a
+    grant on that client counts, a grant on another client does not (MSP
+    clients spec §2.1; research-1 §I10). Spec §4 asks only whether the actor
+    holds the named role, not whether the grant is org-wide -- but a role held
+    on X was never an approver of Y's requests.
+
+    `.first()`, not `scalar_one_or_none()`: an all-clients grant and one on
+    the ticket's client may both exist, and either answers the question."""
     membership = (
         await session.execute(
-            select(UserRole.id).where(
+            select(UserRole.id)
+            .where(
                 UserRole.org_id == org_id,
                 UserRole.user_id == actor_id,
                 UserRole.role_id == role_id,
+                or_(UserRole.client_id.is_(None), UserRole.client_id == client_id),
             )
+            .limit(1)
         )
-    ).scalar_one_or_none()
+    ).first()
     return membership is not None
 
 
@@ -199,7 +207,7 @@ async def decide_approval(
         raise TicketValidationError(tr("a requester may not approve their own request"))
 
     if category.approver_role_id is not None and not await _actor_holds_role(
-        session, org_id, actor_id, category.approver_role_id
+        session, org_id, actor_id, category.approver_role_id, ticket.client_id
     ):
         raise TicketValidationError(
             tr("actor does not hold the role required to decide this ticket's approval")
@@ -248,6 +256,7 @@ async def decide_approval(
         action=_DECISION_TO_AUDIT_ACTION[approve],
         target_type="ticket",
         target_id=str(ticket.id),
+        client_id=ticket.client_id,
         # Identifiers only -- never the free-text `reason` (spec §8.3: audit
         # metadata carries identifiers and state, never comment bodies; the
         # same convention `change_mgmt.decide_change` follows for its own
@@ -285,6 +294,6 @@ async def decide_approval(
             "requester_id": str(ticket.requester_id) if ticket.requester_id else None,
         },
         actor_user_id=actor_id,
-        client_id=None,  # plan 2026-10-26 Task 2 sets the ticket's client
+        client_id=ticket.client_id,
     )
     return approval

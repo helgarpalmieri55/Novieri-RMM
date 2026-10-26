@@ -115,9 +115,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import audit_service
 from app.core.events import publish
 from app.core.i18n import tr
+from app.core.rbac import has_permission
 from app.core.ticket_words import status_quoted, type_quoted
 from app.models import Device, Ticket, TicketApproval, TicketStatusHistory, User
-from app.modules.service_desk.errors import TicketNotFoundError, TicketValidationError
+from app.models.clients import CLIENT_KIND_UNASSIGNED
+from app.modules.service_desk.errors import (
+    TicketClientError,
+    TicketConflictError,
+    TicketNotFoundError,
+    TicketValidationError,
+)
 from app.modules.service_desk.lifecycle import TERMINAL_STATUSES, initial_status
 from app.modules.service_desk.numbering import next_number
 from app.modules.service_desk.refdata import resolve_category, resolve_queue
@@ -129,6 +136,7 @@ from app.modules.sla.tracking import (
     sla_misconfiguration_is_not_fatal,
     start_tracking,
 )
+from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
 
 # update_ticket's editable-field set, decided by key PRESENCE in `fields` (the
 # `budget.expenses`/`refdata.py` convention -- callers pass
@@ -296,6 +304,84 @@ async def _resolve_device(session: AsyncSession, org_id: UUID, device_id: UUID) 
     return device
 
 
+# ---------------------------------------------------------------------------
+# The ticket's client (MSP clients spec §2.4, §3.2; plan 2026-10-26 Task 2)
+# ---------------------------------------------------------------------------
+
+
+async def _new_ticket_client(
+    session: AsyncSession,
+    org_id: UUID,
+    *,
+    device: Device | None,
+    claimed: UUID | None,
+    origin: TicketOrigin,
+) -> UUID:
+    """The client a NEW ticket is filed under -- the rule Tasks 3 and 4 reuse.
+
+    With a device, the device's: a device's client never changes
+    (`its_device_client_guard`), and `its_ticket_client_guard` holds the
+    ticket to it. Without one, the one the caller names. Neither, or both and
+    different, is a 422: a contradicting client is refused, never silently
+    corrected, because the caller believed something false about the device.
+
+    The client is then loaded as every other new row's is
+    (`client_for_new_rows`, held FOR SHARE until commit): one the session
+    cannot see -- another organisation's, or outside a narrowed technician's
+    scope -- is a 404, never a 403 (spec §3.2's existence oracle), and an
+    archived one a 409. "Sin asignar" takes a ticket only from email (C10:
+    it is the inbox of what has no owner, not a client anyone files under).
+
+    The portal skips the load: `portal_user` cannot read `clients` (0028).
+    `portal.tickets.create_my_ticket` derives the client from the requester
+    itself and checks it is inside the portal session's scope.
+    """
+    if device is not None:
+        if claimed is not None and claimed != device.client_id:
+            raise TicketClientError(tr("the ticket's client is not its device's client"))
+        ticket_client = device.client_id
+    elif claimed is None:
+        raise TicketClientError(tr("choose the client this ticket belongs to"))
+    else:
+        ticket_client = claimed
+    if origin != "portal":
+        try:
+            client = await client_for_new_rows(session, org_id=org_id, client_id=ticket_client)
+        except ClientNotFound:
+            raise TicketNotFoundError(tr("no such client")) from None
+        except NotAcceptingNewRows as exc:
+            raise TicketConflictError(exc.detail) from None
+        if client.kind == CLIENT_KIND_UNASSIGNED and origin != "email":
+            raise TicketClientError(tr("tickets reach Unassigned only by email"))
+    return ticket_client
+
+
+def _requester_belongs(requester: User, client_id: UUID) -> None:
+    """A CONTACT requester is one of the ticket's client's own people
+    (research-1 §E2). Otherwise that contact's emailed reply -- matched on
+    `ticket.requester_id` and written under scope all -- would comment on
+    another client's ticket. A staff requester belongs to no client and may
+    file for any. `its_ticket_client_guard` says the same at the database."""
+    if requester.kind == "contact" and requester.client_id != client_id:
+        raise TicketClientError(tr("the requester is a contact of another client"))
+
+
+async def ensure_assignee_sees(session: AsyncSession, assignee: User, client_id: UUID) -> None:
+    """An assignee is a technician who holds `ticket.read` in the ticket's
+    client (research-1 §E3): a ticket handed to somebody who cannot open it
+    is work nobody can do, and a contact is never a technician. Shared by
+    `create_ticket` and `transitions.assign_ticket`.
+
+    `has_permission` with the record's client (plan Global Constraints):
+    an all-clients grant counts, a grant on this client counts, one on
+    another client does not. It reads the ASSIGNEE's grants, not the
+    caller's, so it is a fact about a record, never a request scope."""
+    if assignee.kind != "staff" or not await has_permission(
+        session, assignee.id, "ticket.read", client_id=client_id
+    ):
+        raise TicketClientError(tr("the assignee cannot see this client's tickets"))
+
+
 # Origins whose CREATE-action attribution is `actor_type="system"` (module
 # docstring, finding A3): the ticket wasn't created by a human sitting at a
 # keyboard, so the `ticket_status_history` row and the `ticket.created` audit
@@ -319,8 +405,14 @@ async def create_ticket(
     *,
     origin: TicketOrigin = "technician",
     source_alert_id: UUID | None = None,
+    client_id: UUID | None = None,
 ) -> Ticket:
     """Create a ticket (spec §2, §3, §5, §7.2).
+
+    `client_id` is the client a path that is not a technician's decides on
+    (the portal, email, an alert, a change: MSP clients plan 2026-10-26
+    Task 2); when it is None, the request's `data.client_id` is the claim. A
+    device decides the client either way (`_new_ticket_client`).
 
     `origin`/`source_alert_id` are explicit keyword arguments, never read off
     `data` -- `TicketCreate` has no `origin` field at all (see `schema.py`'s
@@ -336,7 +428,9 @@ async def create_ticket(
     Resolution order, all BEFORE the `Ticket` object is constructed (ordering
     rule above): category -> queue (category default, overridden by an
     explicit `data.queue_id`) -> requester (only for non-alert origin) ->
-    assignee (if supplied) -> device (if supplied) -> the ticket number.
+    assignee (if supplied) -> device (if supplied) -> the client (the
+    device's, else the one named; the requester and the assignee are then
+    checked against it) -> the ticket number.
     `initial_status` is computed from `data.type` and the resolved category's
     `requires_approval` last, right before the object is built.
 
@@ -405,6 +499,7 @@ async def create_ticket(
     # holds even if a future caller passes them by mistake. Every other
     # origin requires both, checked here so the failure is a typed 400
     # rather than `ck_ticket_human_attribution`'s IntegrityError (a 500).
+    requester: User | None = None
     if origin == "alert":
         requester_id: UUID | None = None
         created_by: UUID | None = None
@@ -427,15 +522,25 @@ async def create_ticket(
         requester_id = requester.id
         created_by = actor_id
 
-    assigned_to: UUID | None = None
+    assignee: User | None = None
     if data.assigned_to is not None:
         assignee = await resolve_user(session, org_id, data.assigned_to)
-        assigned_to = assignee.id
 
-    device_id: UUID | None = None
+    device: Device | None = None
     if data.device_id is not None:
         device = await _resolve_device(session, org_id, data.device_id)
-        device_id = device.id
+
+    ticket_client = await _new_ticket_client(
+        session,
+        org_id,
+        device=device,
+        claimed=client_id if client_id is not None else data.client_id,
+        origin=origin,
+    )
+    if requester is not None:
+        _requester_belongs(requester, ticket_client)
+    if assignee is not None:
+        await ensure_assignee_sees(session, assignee, ticket_client)
 
     status = initial_status(data.type, requires_approval=category.requires_approval)
 
@@ -454,6 +559,7 @@ async def create_ticket(
 
     ticket = Ticket(
         org_id=org_id,
+        client_id=ticket_client,
         number=number,
         type=data.type,
         category_id=category.id,
@@ -463,8 +569,8 @@ async def create_ticket(
         subject=data.subject,
         description=data.description,
         requester_id=requester_id,
-        assigned_to=assigned_to,
-        device_id=device_id,
+        assigned_to=assignee.id if assignee is not None else None,
+        device_id=device.id if device is not None else None,
         origin=origin,
         source_alert_id=source_alert_id,
         created_by=created_by,
@@ -509,6 +615,7 @@ async def create_ticket(
         action="ticket.created",
         target_type="ticket",
         target_id=str(ticket.id),
+        client_id=ticket.client_id,
         # Identifiers only -- never subject/description (spec §8.3, context
         # note #8).
         metadata={
@@ -545,7 +652,7 @@ async def create_ticket(
                 "requester_id": str(ticket.requester_id) if ticket.requester_id else None,
             },
             actor_user_id=actor_id,
-            client_id=None,  # plan 2026-10-26 Task 2 sets the ticket's client
+            client_id=ticket.client_id,
         )
     await session.flush()
 
@@ -628,6 +735,7 @@ async def list_tickets(
     assigned_to: UUID | None = None,
     requester_id: UUID | None = None,
     device_id: UUID | None = None,
+    client_id: UUID | None = None,
     priority: str | None = None,
     q: str | None = None,
     unassigned: bool = False,
@@ -659,6 +767,7 @@ async def list_tickets(
             assigned_to=assigned_to,
             requester_id=requester_id,
             device_id=device_id,
+            client_id=client_id,
             priority=priority,
             q=q,
             unassigned=unassigned,
@@ -686,6 +795,7 @@ async def count_tickets(
     assigned_to: UUID | None = None,
     requester_id: UUID | None = None,
     device_id: UUID | None = None,
+    client_id: UUID | None = None,
     priority: str | None = None,
     q: str | None = None,
     unassigned: bool = False,
@@ -712,6 +822,7 @@ async def count_tickets(
         assigned_to=assigned_to,
         requester_id=requester_id,
         device_id=device_id,
+        client_id=client_id,
         priority=priority,
         q=q,
         unassigned=unassigned,
@@ -731,6 +842,7 @@ def _matching_tickets(
     assigned_to: UUID | None,
     requester_id: UUID | None,
     device_id: UUID | None,
+    client_id: UUID | None,
     priority: str | None,
     q: str | None,
     unassigned: bool = False,
@@ -758,6 +870,8 @@ def _matching_tickets(
         stmt = stmt.where(Ticket.requester_id == requester_id)
     if device_id is not None:
         stmt = stmt.where(Ticket.device_id == device_id)
+    if client_id is not None:
+        stmt = stmt.where(Ticket.client_id == client_id)
     if priority is not None:
         stmt = stmt.where(Ticket.priority == priority)
     if q is not None:
@@ -858,6 +972,11 @@ async def update_ticket(
             resolved["device_id"] = None
         else:
             device = await _resolve_device(session, org_id, fields["device_id"])
+            # A ticket is its device's client's (spec §2.4); a ticket of X
+            # cannot take a device of Y. Moving the ticket is its own act
+            # (Task 3), and a ticket with a device cannot move (C9).
+            if device.client_id != ticket.client_id:
+                raise TicketClientError(tr("the ticket's client is not its device's client"))
             resolved["device_id"] = device.id
 
     # Pass 4: apply everything. Every key in `fields` is guaranteed to be in
@@ -881,6 +1000,7 @@ async def update_ticket(
         action="ticket.updated",
         target_type="ticket",
         target_id=str(ticket.id),
+        client_id=ticket.client_id,
         # Names only, never subject/description values -- spec §8.3.
         metadata={"changed_fields": sorted(changed_fields)},
     )

@@ -40,7 +40,7 @@ the only thing standing between a requester and someone else's ticket.
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import tr
@@ -52,6 +52,7 @@ from app.models import (
     TicketCategory,
     TicketComment,
     TicketStatusHistory,
+    User,
 )
 from app.modules.portal.errors import PortalNotFoundError
 from app.modules.portal.schema import (
@@ -292,8 +293,32 @@ async def create_my_ticket(
     `origin="portal"` (spec §2, `TicketOrigin`) -- distinct from the
     technician-facing route's `origin="technician"`, so a ticket's origin
     column always names which surface actually created it.
+
+    THE CLIENT IS THE REQUESTER'S (MSP clients plan 2026-10-26 Task 2, C5):
+    a contact files under its own client; a staff member -- the only portal
+    user until contacts sign in (project 2) -- under the internal client,
+    whose id is the organisation's. The portal has no selector, and
+    `portal_user` cannot read `clients`, so nothing else is asked. A client
+    outside the session's scope (`its_client_visible`, the predicate the
+    INSERT's own `client_isolation` policy would apply) is a 404 like every
+    other thing the portal cannot see -- never the policy violation a 500
+    would be.
     """
     category = await resolve_category(session, org_id, data.category_id)
+    me = (
+        await session.execute(
+            # `portal_user` reads its own `users` row and no other -- and none
+            # at all under an empty client scope, which is the 404 below too.
+            select(User.kind, User.client_id).where(
+                User.org_id == org_id, User.id == requester_id
+            )
+        )
+    ).one_or_none()
+    if me is None:
+        raise PortalNotFoundError(tr("no such client"))
+    client_id = me.client_id if me.kind == "contact" and me.client_id is not None else org_id
+    if not (await session.execute(select(func.its_client_visible(client_id)))).scalar():
+        raise PortalNotFoundError(tr("no such client"))
     ticket = await sd_tickets.create_ticket(
         session,
         org_id,
@@ -307,6 +332,7 @@ async def create_my_ticket(
             requester_id=requester_id,
         ),
         origin="portal",
+        client_id=client_id,
     )
     return await get_my_ticket(
         session, org_id=org_id, requester_id=requester_id, ticket_id=ticket.id

@@ -417,12 +417,14 @@ PART_A: dict[str, str] = {
     ),
     "GET /api/v1/service-desk/tickets": (
         "Lists tickets with a total count, filtered by type, status, queue, assignee, "
-        "requester, device, priority, text or a scope (mine, unassigned, open). Each row "
-        "includes its SLA summary."
+        "requester, device, client, priority, text or a scope (mine, unassigned, open). "
+        "Each row includes its SLA summary."
     ),
     "POST /api/v1/service-desk/tickets": (
         "Creates a ticket on behalf of a requester, defaulting the queue from the "
-        "category. Incidents start new; requests start in progress or pending approval."
+        "category. Incidents start new; requests start in progress or pending approval. "
+        "With a device the ticket takes the device's client; without one, client_id is "
+        "required."
     ),
     "GET /api/v1/service-desk/tickets/{ticket_id}": (
         "Returns one ticket with status, priority, requester, assignee, device, SLA "

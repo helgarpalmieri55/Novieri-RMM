@@ -183,6 +183,7 @@ async def _seed_ticket(
             await session.flush()
             ticket = Ticket(
                 org_id=org_id,
+                client_id=org_id,
                 number=f"INC-{uuid4().hex[:8]}",
                 type=type_,
                 category_id=category.id,

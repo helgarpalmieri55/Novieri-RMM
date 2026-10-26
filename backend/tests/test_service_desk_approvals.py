@@ -139,6 +139,7 @@ async def _create_request(
             queue_id=queue.id,
             subject="Need VPN access",
             requester_id=requester_id,
+            client_id=org_id,
         ),
     )
     return ticket, category
@@ -164,6 +165,7 @@ async def _create_incident(session, org_id, actor_id):
             queue_id=queue.id,
             subject="Laptop won't boot",
             requester_id=actor_id,
+            client_id=org_id,
         ),
     )
 
@@ -622,6 +624,7 @@ async def test_flipping_category_requires_approval_off_does_not_strand_a_pending
                 queue_id=queue.id,
                 subject="Need VPN access",
                 requester_id=requester_id,
+                client_id=org_id,
             ),
         )
         ticket_to_reject = await create_ticket(
@@ -634,6 +637,7 @@ async def test_flipping_category_requires_approval_off_does_not_strand_a_pending
                 queue_id=queue.id,
                 subject="Need admin access",
                 requester_id=requester_id,
+                client_id=org_id,
             ),
         )
         assert ticket_to_approve.status == "pending_approval"

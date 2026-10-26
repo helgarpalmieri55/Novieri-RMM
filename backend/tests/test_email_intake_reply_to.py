@@ -139,6 +139,7 @@ class ReplyEnv:
                     subject="Printer trouble",
                     description="It is on fire.",
                     requester_id=self.alice_id,
+                    client_id=self.org_id,
                 ),
                 origin="portal",
             )

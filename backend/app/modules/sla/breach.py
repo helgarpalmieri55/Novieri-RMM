@@ -405,7 +405,7 @@ async def mark_breached(
             "priority": ticket.priority,
         },
         actor_user_id=None,
-        client_id=None,  # plan 2026-10-26 Task 2 sets the ticket's client
+        client_id=ticket.client_id,
     )
 
     await _escalate(session, org_id, tracking, ticket, target=target, now=now)
@@ -520,6 +520,7 @@ async def _escalate(
         action="sla.escalated",
         target_type="ticket",
         target_id=str(ticket.id),
+        client_id=ticket.client_id,
         metadata={
             "ticket_number": ticket.number,
             "target": target,

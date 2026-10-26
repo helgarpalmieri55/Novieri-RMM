@@ -119,6 +119,7 @@ async def _setup(
             "queue_id": queue.json()["id"],
             "subject": "Laptop will not boot",
             "requester_id": str(admin_id),
+            "client_id": str(org_id),
         },
         headers=admin,
     )

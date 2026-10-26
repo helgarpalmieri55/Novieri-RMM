@@ -3,6 +3,7 @@
  * page, which opens it with the device (and a subject) already filled in.
  */
 
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Form, FormActions, attemptProblems } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -10,6 +11,9 @@ import { EntityPicker } from "../../components/picker";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
+import type { Me } from "../../lib/api";
+import { useApi } from "../../lib/ApiContext";
+import { internalClientId, requireKnown } from "../../lib/internalClient";
 import {
   useCreateTicketMutation,
   useDirectoryDevices,
@@ -51,6 +55,8 @@ export function NewTicketDialog({
   onCreated?: (ticket: TicketOut) => void;
 }) {
   const t = useT();
+  const api = useApi();
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const create = useCreateTicketMutation();
   const categories = useTicketCategories();
   const queues = useTicketQueues();
@@ -117,7 +123,7 @@ export function NewTicketDialog({
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
 
-    const body: TicketCreate = {
+    const base: TicketCreate = {
       type,
       category_id: categoryId,
       queue_id: queueId || null,
@@ -133,7 +139,15 @@ export function NewTicketDialog({
       assigned_to: assignedTo || null,
       device_id: deviceId || null,
     };
-    create.mutate(body, {
+    // A ticket with a device is the device's client's: the server takes it
+    // from the device, so nothing is sent. Without one it names its client.
+    // PHASE 3: the client/site selector. Until it exists that is the
+    // organisation's internal client, whose id is the organisation's --
+    // `/me`'s `org_id` (`lib/internalClient.ts`).
+    const internalClient = internalClientId(me.data);
+    const build = (): TicketCreate =>
+      deviceId ? base : { ...base, client_id: requireKnown(internalClient) };
+    create.mutate(build, {
       onSuccess: (ticket) => {
         reset();
         onClose();

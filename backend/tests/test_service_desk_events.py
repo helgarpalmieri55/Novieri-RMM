@@ -85,6 +85,7 @@ async def _create_incident(session, org_id, actor_id, *, requester_id=None):
             queue_id=queue.id,
             subject="Laptop won't boot",
             requester_id=requester_id or actor_id,
+            client_id=org_id,
         ),
     )
 
@@ -110,6 +111,7 @@ async def _create_request(session, org_id, requester_id, actor_id):
             queue_id=queue.id,
             subject="Need VPN access",
             requester_id=requester_id,
+            client_id=org_id,
         ),
     )
 
@@ -347,6 +349,7 @@ async def test_request_reaching_fulfilled_publishes_ticket_resolved(api_env) -> 
                 queue_id=queue.id,
                 subject="Need a webcam",
                 requester_id=user_id,
+                client_id=org_id,
             ),
         )
         assert ticket.status == "in_progress"
@@ -445,6 +448,7 @@ async def test_creating_a_request_not_needing_approval_publishes_no_approval_req
                 queue_id=queue.id,
                 subject="Need a monitor",
                 requester_id=requester_id,
+                client_id=org_id,
             ),
         )
         events = await _events(session, org_id)
@@ -484,6 +488,7 @@ async def test_approval_requested_event_carries_the_full_routing_payload(api_env
                 subject="Need admin access",
                 requester_id=requester_id,
                 assigned_to=assignee_id,
+                client_id=org_id,
             ),
         )
         events = await _events(session, org_id)
@@ -551,6 +556,7 @@ async def test_change_status_entering_pending_approval_publishes_approval_reques
                 queue_id=queue.id,
                 subject="Need a keyboard",
                 requester_id=user_id,
+                client_id=org_id,
             ),
         )
         assert ticket.status == "in_progress"

@@ -11,6 +11,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     CheckConstraint,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -22,7 +23,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 
 class TicketQueue(Base):
@@ -83,6 +84,7 @@ class Ticket(Base):
     __tablename__ = "ticket"
     __table_args__ = (
         UniqueConstraint("org_id", "number", name="uq_ticket_org_number"),
+        client_org_fk("ticket"),
         Index("ix_ticket_org_status", "org_id", "status"),
         Index("ix_ticket_org_queue_status", "org_id", "queue_id", "status"),
         Index("ix_ticket_org_assigned_status", "org_id", "assigned_to", "status"),
@@ -120,6 +122,11 @@ class Ticket(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0234):
+    # the device's client when there is a device, else the one the caller
+    # names (`tickets.create_ticket`). `its_ticket_client_guard` holds it to
+    # the device's and to a contact requester's.
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
     number: Mapped[str] = mapped_column(String(24))
     type: Mapped[str] = mapped_column(String(16))
     category_id: Mapped[UUID] = mapped_column(ForeignKey("ticket_category.id"))
@@ -167,6 +174,15 @@ class TicketComment(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # ticket (migration 0234): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     ticket_id: Mapped[UUID] = mapped_column(ForeignKey("ticket.id"))
     author_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), default=None)
     author_type: Mapped[str] = mapped_column(String(16))
@@ -183,6 +199,15 @@ class TicketAttachment(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # ticket (migration 0234): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     ticket_id: Mapped[UUID] = mapped_column(ForeignKey("ticket.id"))
     object_key: Mapped[str] = mapped_column(Text)
     filename: Mapped[str] = mapped_column(String(255))
@@ -199,6 +224,15 @@ class TicketApproval(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # ticket (migration 0234): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     ticket_id: Mapped[UUID] = mapped_column(ForeignKey("ticket.id"))
     state: Mapped[str] = mapped_column(String(16))
     decided_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), default=None)
@@ -215,6 +249,15 @@ class TicketStatusHistory(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # ticket (migration 0234): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     ticket_id: Mapped[UUID] = mapped_column(ForeignKey("ticket.id"))
     from_status: Mapped[str | None] = mapped_column(String(32), default=None)
     to_status: Mapped[str] = mapped_column(String(32))

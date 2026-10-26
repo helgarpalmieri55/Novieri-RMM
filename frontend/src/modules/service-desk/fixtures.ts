@@ -16,7 +16,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
-import { devices } from "../../fixtures/core";
+import { devices, ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 // Circular with the SLA fixtures, which read tickets from here; only called at request time.
 import { ticketSlaSummary } from "../sla/fixtures";
@@ -210,6 +210,8 @@ const TICKET_SEEDS: TicketSeed[] = [
 function ticket(seed: TicketSeed): TicketOut {
   return {
     id: seed.id,
+    // Every fixture ticket is the organisation's own IT: the internal client.
+    client_id: ORG_ID,
     number: seed.number,
     type: seed.type,
     category_id: seed.category,
@@ -301,6 +303,7 @@ export function insertTicket(
     requester_id?: string | null;
     assigned_to?: string | null;
     device_id?: string | null;
+    client_id?: string | null;
   },
   origin: "technician" | "portal",
 ): TicketOut {
@@ -308,6 +311,9 @@ export function insertTicket(
   const category = categories.find((c) => c.id === body.category_id);
   const next: TicketOut = {
     id: `tkt-new-${created}`,
+    // The fixture devices are all the internal client's, so a device's client
+    // and the one named agree; the portal names none and files there too.
+    client_id: body.client_id ?? ORG_ID,
     number: `${body.type === "request" ? "REQ" : "INC"}-${4132 + created}`,
     type: body.type,
     category_id: body.category_id,

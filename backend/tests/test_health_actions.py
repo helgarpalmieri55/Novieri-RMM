@@ -1150,7 +1150,7 @@ async def test_the_alert_ticket_is_machine_attributed_by_the_ticket_core(
     copy of the rules in this module would be a second answer to who may create
     a machine-attributed ticket.
     """
-    from app.models import Ticket
+    from app.models import Device, Ticket
 
     fixture, refs = await _armed_with_ticketing(admin_engine)
     now = datetime.now(UTC)
@@ -1172,6 +1172,13 @@ async def test_the_alert_ticket_is_machine_attributed_by_the_ticket_core(
     assert ticket.created_by is None
     assert ticket.queue_id == refs.queue_id
     assert ticket.device_id == fixture.device_id
+    # MSP clients plan 2026-10-26 Task 2: an alert's ticket is its device's
+    # client's, as the alert itself is.
+    async with AsyncSession(admin_engine) as session:
+        device_client = (
+            await session.execute(select(Device.client_id).where(Device.id == fixture.device_id))
+        ).scalar_one()
+    assert ticket.client_id == device_client
     assert "Restart-Service" not in ticket.description
     assert "cpu.busy_pct" in ticket.description
 

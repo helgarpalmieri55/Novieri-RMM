@@ -9,6 +9,7 @@ import type { ApiClient, Device, DeviceInventory, Me, Page } from "../../../lib/
 import type { UserOut } from "../../settings/types";
 import type { DeviceStatus } from "../../patch/types";
 import { MyWorkPage } from "../MyWorkPage";
+import { NewTicketDialog } from "../NewTicketDialog";
 import { ServiceDeskAdminPage } from "../ServiceDeskAdminPage";
 import { TicketDetailPage } from "../TicketDetailPage";
 import { TicketListPage } from "../TicketListPage";
@@ -231,6 +232,7 @@ const CATEGORIES: CategoryOut[] = [
 
 const TICKET_OPEN: TicketOut = {
   id: "t1",
+  client_id: "o1",
   number: "INC-1",
   type: "incident",
   category_id: "cat1",
@@ -531,7 +533,47 @@ describe("TicketListPage wiring", () => {
       requester_id: "req-1",
       assigned_to: null,
       device_id: null,
+      // No device, so the ticket names its client: the internal client,
+      // whose id is `/me`'s org_id until the phase-3 selector (MSP clients
+      // plan 2026-10-26 Task 2).
+      client_id: "o1",
     });
+  });
+
+  // A device decides the client on the server, which refuses a different
+  // one; the console sends none rather than guessing the device's.
+  it("sends no client for a ticket with a device", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<TicketListPage />);
+
+    await user.click(await screen.findByRole("button", { name: "New ticket" }));
+    await user.selectOptions(screen.getByLabelText("Category"), "cat1");
+    await user.type(screen.getByLabelText("Subject"), "Laptop won't boot");
+    await pickEntity(user, "Requester", /Rachel Requester/);
+    await pickEntity(user, "Device (optional)", /BUILD-01/);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(api.createTicket).toHaveBeenCalledTimes(1));
+    const body = vi.mocked(api.createTicket as ApiClient["createTicket"]).mock.calls[0]?.[0];
+    expect(body).toMatchObject({ device_id: "dev-2" });
+    expect(body).not.toHaveProperty("client_id");
+  });
+
+  // Without `/me` the console cannot name the internal client: it sends
+  // nothing -- a body without a client is a 422 the person can do nothing
+  // about -- and says why in the form's own error surface.
+  it("sends nothing and says why when the client cannot be named yet", async () => {
+    const user = userEvent.setup();
+    api.me = vi.fn().mockRejectedValue(new ApiError(503, ""));
+    renderWithProviders(<NewTicketDialog open onClose={() => {}} myUserId="req-1" />);
+
+    await screen.findByRole("option", { name: "Hardware" });
+    await user.selectOptions(screen.getByLabelText("Category"), "cat1");
+    await user.type(screen.getByLabelText("Subject"), "Laptop won't boot");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/has not loaded yet/);
+    expect(api.createTicket).not.toHaveBeenCalled();
   });
 
   // ------------------------------------------------------------------

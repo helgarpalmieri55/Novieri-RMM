@@ -590,6 +590,7 @@ async def seed_ticket(
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         ticket = Ticket(
             org_id=org_id,
+            client_id=org_id,
             number=f"INC-{uuid4().hex[:10]}",
             type="incident",
             category_id=anchor.category_id,

@@ -130,7 +130,11 @@ export function useCreateTicketMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: TicketCreate) => api.createTicket(body),
+    // The body is BUILT HERE, inside the mutation, not before it: a body that
+    // cannot name its client yet throws `InternalScopeUnknown`
+    // (`lib/internalClient.ts`), which then fails the mutation -- so the
+    // form's error surface says why and nothing is sent.
+    mutationFn: (build: () => TicketCreate) => api.createTicket(build()),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["service-desk-tickets"] });
     },

@@ -153,6 +153,10 @@ export interface TicketCreate {
   requester_id?: string | null;
   assigned_to?: string | null;
   device_id?: string | null;
+  // The client the ticket is filed under (MSP clients spec §3.2). The server
+  // takes the device's when there is a device and refuses a different one;
+  // without a device it is required.
+  client_id?: string | null;
   // `origin` is NOT a field here -- api.py's create_ticket_route decides it
   // server-side (always "technician" for this API), never read from the
   // request body. There is nothing for this client to send.
@@ -188,6 +192,9 @@ export interface TicketSlaSummary {
 export interface TicketOut {
   // No `org_id` field here -- security invariant #5.
   id: string;
+  // The client it is filed under (MSP clients spec §2.4): its device's when
+  // it has one.
+  client_id: string;
   number: string;
   // `str`, not `TicketType`, in schema.py's TicketOut.
   type: string;
@@ -286,6 +293,8 @@ export interface TicketListFilters {
   assigned_to?: string;
   requester_id?: string;
   device_id?: string;
+  // One client's tickets, inside the caller's scope (never wider than it).
+  client_id?: string;
   priority?: string;
   q?: string;
   // Server-side narrowing: open tickets that are mine / nobody's / anyone's,

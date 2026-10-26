@@ -202,6 +202,7 @@ async def add_comment(
         action="ticket.comment_added",
         target_type="ticket",
         target_id=str(ticket.id),
+        client_id=ticket.client_id,
         # Identifiers and state only -- never the comment body (spec §8.3: a
         # user can type anything into it, and the audit log is not the place
         # to duplicate it).
@@ -236,7 +237,7 @@ async def add_comment(
             **({} if is_internal else {"body": comment.body}),
         },
         actor_user_id=author_id,
-        client_id=None,  # plan 2026-10-26 Task 2 sets the ticket's client
+        client_id=ticket.client_id,
     )
 
     # SLA met detection (docs/modules/sla/spec.md §0.6). Gated on the SAME
@@ -348,6 +349,7 @@ async def add_attachment(
         action="ticket.attachment_uploaded",
         target_type="ticket",
         target_id=str(ticket.id),
+        client_id=ticket.client_id,
         metadata={"attachment_id": str(attachment.id), "filename": sanitized_filename},
     )
     await session.flush()

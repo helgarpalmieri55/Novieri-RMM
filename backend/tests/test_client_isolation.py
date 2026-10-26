@@ -82,6 +82,10 @@ from app.models import (
     Script,
     ScriptPolicy,
     Site,
+    Ticket,
+    TicketCategory,
+    TicketComment,
+    TicketQueue,
     User,
 )
 from app.services.device_groups import DeviceGroupError, create_device_group
@@ -120,6 +124,7 @@ class Side:
     job: UUID
     alert: UUID
     record: UUID
+    ticket: UUID
 
 
 @dataclass(frozen=True)
@@ -129,6 +134,8 @@ class World:
     script: UUID  # G: scripts are the organisation's
     profile: UUID  # G: health profiles too
     check: UUID
+    queue: UUID  # G: ticket queues and categories too
+    category: UUID
     x: Side
     y: Side
 
@@ -145,7 +152,24 @@ def _job(org: UUID, device: UUID) -> Job:
     )
 
 
-async def _side(admin_engine: AsyncEngine, org: UUID, profile: UUID, check: UUID) -> Side:
+def _ticket(org: UUID, client: UUID, queue: UUID, category: UUID, actor: UUID) -> Ticket:
+    return Ticket(
+        org_id=org, client_id=client, number=f"T-{uuid4().hex[:8]}", type="incident",
+        category_id=category, queue_id=queue, status="new", subject="s",
+        requester_id=actor, origin="technician", created_by=actor,
+    )
+
+
+async def _side(
+    admin_engine: AsyncEngine,
+    org: UUID,
+    profile: UUID,
+    check: UUID,
+    *,
+    actor: UUID,
+    queue: UUID,
+    category: UUID,
+) -> Side:
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         client = Client(org_id=org, name=f"Cliente {uuid4().hex[:6]}", kind="customer")
         s.add(client)
@@ -166,9 +190,12 @@ async def _side(admin_engine: AsyncEngine, org: UUID, profile: UUID, check: UUID
             org_id=org, device_id=device.id, check_id=check, profile_id=profile,
             check_type="cpu.busy_pct", severity="warning",
         )
-        s.add_all([job, alert])
+        ticket = _ticket(org, client.id, queue, category, actor)
+        s.add_all([job, alert, ticket])
         await s.commit()
-    return Side(client.id, site.id, device.id, group.id, job.id, alert.id, record.id)
+    return Side(
+        client.id, site.id, device.id, group.id, job.id, alert.id, record.id, ticket.id
+    )
 
 
 async def _two_clients(admin_engine: AsyncEngine) -> World:
@@ -181,12 +208,22 @@ async def _two_clients(admin_engine: AsyncEngine) -> World:
             org_id=org.id, name="noop", os_family="linux", interpreter="bash", body="true"
         )
         s.add_all([actor, script])
+        await s.flush()
+        queue = TicketQueue(org_id=org.id, key="q", name="Q", created_by=actor.id)
+        s.add(queue)
+        await s.flush()
+        category = TicketCategory(
+            org_id=org.id, key="c", name="C", type="incident", default_queue_id=queue.id,
+            created_by=actor.id,
+        )
+        s.add(category)
         await s.commit()
     profile = await seed_profile(admin_engine, org.id)
     check = await seed_check(admin_engine, org.id, profile)
-    x = await _side(admin_engine, org.id, profile, check)
-    y = await _side(admin_engine, org.id, profile, check)
-    return World(org.id, actor.id, script.id, profile, check, x, y)
+    tickets = {"actor": actor.id, "queue": queue.id, "category": category.id}
+    x = await _side(admin_engine, org.id, profile, check, **tickets)
+    y = await _side(admin_engine, org.id, profile, check, **tickets)
+    return World(org.id, actor.id, script.id, profile, check, queue.id, category.id, x, y)
 
 
 async def _seed(admin_engine: AsyncEngine, *rows: Any) -> list[UUID]:
@@ -339,6 +376,11 @@ PATHS: dict[str, tuple[str, Make]] = {
         "health_alert_action",
         lambda w, s: HealthAlertAction(org_id=w.org, alert_id=s.alert, kind="notify"),
     ),
+    "C-ticket": ("ticket", lambda w, s: _ticket(w.org, s.client, w.queue, w.category, w.actor)),
+    "H-ticket_comment-via-ticket": ("ticket_comment", lambda w, s: TicketComment(
+        org_id=w.org, ticket_id=s.ticket, author_id=w.actor, author_type="user", body="b",
+        visibility="public",
+    )),
     "O-doc_articles-no-parent": ("doc_articles", lambda w, s: DocArticle(
         org_id=w.org, client_id=s.client, title="t"
     )),

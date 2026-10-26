@@ -19,7 +19,8 @@ for a missing/cross-org ticket, queue, category, or attachment) becomes a
 404; every other `TicketValidationError` -- an invalid transition, a
 category/type mismatch, a terminal-ticket edit/comment/attachment, a
 self-approval attempt, an already-decided approval, an oversized
-attachment, a bad filename -- becomes a 400.
+attachment, a bad filename -- becomes a 400, except the ticket's client's
+own two: `TicketClientError` (422) and `TicketConflictError` (409).
 
 **No double-auditing (invariant #4).** The service layer already audits
 every mutation it performs (queue/category create+update, the one-off
@@ -113,7 +114,12 @@ from app.modules.service_desk.canned import (
     list_canned_responses,
     update_canned_response,
 )
-from app.modules.service_desk.errors import TicketNotFoundError, TicketValidationError
+from app.modules.service_desk.errors import (
+    TicketClientError,
+    TicketConflictError,
+    TicketNotFoundError,
+    TicketValidationError,
+)
 from app.modules.service_desk.lifecycle import TERMINAL_STATUSES
 from app.modules.service_desk.refdata import (
     create_category,
@@ -187,9 +193,19 @@ def _http_error(exc: TicketValidationError) -> HTTPException:
     mismatch, an edit/comment/attachment on a terminal ticket, a
     self-approval attempt, an already-decided approval, an oversized
     attachment, and a rejected filename.
+
+    The ticket's CLIENT (MSP clients spec §3.2) has two of its own: a client
+    the ticket may not have (`TicketClientError`) is a 422, an archived one
+    (`TicketConflictError`) a 409 -- what every other row filed under a
+    client answers for the same two refusals. A client the caller cannot see
+    is a `TicketNotFoundError`, a 404, never a 403.
     """
     if isinstance(exc, TicketNotFoundError):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    if isinstance(exc, TicketClientError):
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
+    if isinstance(exc, TicketConflictError):
+        return HTTPException(status.HTTP_409_CONFLICT, str(exc))
     return HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
 
@@ -302,6 +318,7 @@ async def _tickets_out(
     return [
         TicketOut(
             id=t.id,
+            client_id=t.client_id,
             number=t.number,
             type=t.type,
             category_id=t.category_id,
@@ -556,6 +573,7 @@ async def download_attachment_route(
             action="ticket.attachment_downloaded",
             target_type="ticket",
             target_id=str(attachment.ticket_id),
+            client_id=attachment.client_id,
             metadata={"attachment_id": str(attachment.id)},
         )
 
@@ -584,6 +602,7 @@ async def list_tickets_route(
     assigned_to: UUID | None = Query(default=None),
     requester_id: UUID | None = Query(default=None),
     device_id: UUID | None = Query(default=None),
+    client_id: UUID | None = Query(default=None),
     priority: str | None = Query(default=None),
     q: str | None = Query(default=None, max_length=MAX_SEARCH_Q),
     scope: Literal["mine", "unassigned", "open", "all"] = Query(default="all"),
@@ -607,6 +626,10 @@ async def list_tickets_route(
     authenticated user, never a value from the request. `sort=due` orders by
     the earliest outstanding SLA deadline, tickets without one last. Every
     row carries its SLA summary (`sla`), loaded in one query for the page.
+
+    `client_id` narrows to one client's tickets. It filters inside the
+    caller's scope and never widens it: a client outside the scope lists
+    nothing, because RLS has already hidden its rows.
     """
     if scope == "mine":
         if assigned_to is not None and assigned_to != ctx.user_id:
@@ -622,6 +645,7 @@ async def list_tickets_route(
         "assigned_to": assigned_to,
         "requester_id": requester_id,
         "device_id": device_id,
+        "client_id": client_id,
         "priority": priority,
         "q": q,
         "unassigned": scope == "unassigned",

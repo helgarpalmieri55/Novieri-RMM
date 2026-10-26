@@ -133,7 +133,7 @@ from app.models import Ticket, TicketStatusHistory
 from app.modules.service_desk.errors import TicketValidationError
 from app.modules.service_desk.lifecycle import FINAL_STATUSES, assert_transition
 from app.modules.service_desk.refdata import resolve_queue
-from app.modules.service_desk.tickets import get_ticket, resolve_user
+from app.modules.service_desk.tickets import ensure_assignee_sees, get_ticket, resolve_user
 from app.modules.sla.tracking import (
     PAUSING_STATUSES,
     note_cancelled,
@@ -288,6 +288,7 @@ async def change_status(
         action="ticket.status_changed",
         target_type="ticket",
         target_id=str(ticket.id),
+        client_id=ticket.client_id,
         metadata={"from_status": from_status, "to_status": to_status},
     )
     await session.flush()
@@ -365,7 +366,7 @@ async def change_status(
             "requester_id": str(ticket.requester_id) if ticket.requester_id else None,
         },
         actor_user_id=actor_id,
-        client_id=None,  # plan 2026-10-26 Task 2 sets the ticket's client
+        client_id=ticket.client_id,
     )
 
     # A second, distinct notification for the one edge that lands a ticket
@@ -394,7 +395,7 @@ async def change_status(
                 "requester_id": str(ticket.requester_id) if ticket.requester_id else None,
             },
             actor_user_id=actor_id,
-            client_id=None,  # plan 2026-10-26 Task 2 sets the ticket's client
+            client_id=ticket.client_id,
         )
 
     # `ticket.resolved` (whole-branch review finding C2). Registered in
@@ -428,7 +429,7 @@ async def change_status(
                 "requester_id": str(ticket.requester_id) if ticket.requester_id else None,
             },
             actor_user_id=actor_id,
-            client_id=None,  # plan 2026-10-26 Task 2 sets the ticket's client
+            client_id=ticket.client_id,
         )
         # SLA met detection (docs/modules/sla/spec.md §0.6), on the same
         # `to_status in _RESOLVED_LIKE_STATUSES` test that stamped
@@ -543,6 +544,8 @@ async def assign_ticket(
         assigned_to = fields["assigned_to"]
         if assigned_to is not None:
             assignee = await resolve_user(session, org_id, assigned_to)
+            # Somebody who can open this client's tickets (research-1 §E3).
+            await ensure_assignee_sees(session, assignee, ticket.client_id)
             resolved_assigned_to = assignee.id
         else:
             resolved_assigned_to = None
@@ -570,6 +573,7 @@ async def assign_ticket(
         action="ticket.assigned",
         target_type="ticket",
         target_id=str(ticket.id),
+        client_id=ticket.client_id,
         # Identifiers only, matching `ticket.created`/`ticket.updated`'s
         # metadata convention (spec §8.3) -- never subject/description bodies
         # (there are none here to leak, but the shape stays consistent).
@@ -599,7 +603,7 @@ async def assign_ticket(
             "requester_id": str(ticket.requester_id) if ticket.requester_id else None,
         },
         actor_user_id=actor_id,
-        client_id=None,  # plan 2026-10-26 Task 2 sets the ticket's client
+        client_id=ticket.client_id,
     )
 
     # SLA re-triage, the QUEUE half of §3's "a priority or queue change with a

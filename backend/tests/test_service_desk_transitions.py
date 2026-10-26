@@ -108,6 +108,7 @@ async def _create_incident(session, org_id, user_id):
             queue_id=queue.id,
             subject="Laptop won't boot",
             requester_id=user_id,
+            client_id=org_id,
         ),
     )
 
@@ -132,6 +133,7 @@ async def _create_request(session, org_id, user_id, *, requires_approval=False):
             queue_id=queue.id,
             subject="Need VPN access",
             requester_id=user_id,
+            client_id=org_id,
         ),
     )
 
