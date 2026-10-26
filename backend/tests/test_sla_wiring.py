@@ -83,6 +83,7 @@ from app.modules.service_desk.tickets import create_ticket, update_ticket
 from app.modules.service_desk.transitions import assign_ticket, change_status
 from app.modules.sla import tracking
 from app.modules.sla.models import TicketSla
+from tests.client_scope_support import make_technician
 from tests.test_sla_migration import _seed_calendar, _seed_policy, _seed_queue, _seed_user
 
 # A 24/7 calendar: `00:00-00:00` is migration 0035's midnight-at-end-of-day
@@ -158,6 +159,7 @@ async def _create(
                 subject="wiring",
                 priority=priority,
                 requester_id=requester_id,
+                client_id=org_id,
             ),
             origin=origin,
         )
@@ -1116,6 +1118,8 @@ async def test_an_assignment_that_does_not_move_the_queue_does_not_recompute(api
     before = await _row(api_env, ticket_id)
     assert before is not None
     assignee = await _seed_user(api_env, org_id, email=f"wire-a-{uuid4().hex[:10]}@test.local")
+    # An assignee can open the ticket's client's tickets (plan 2026-10-26 Task 2).
+    await make_technician(api_env, org_id, assignee)
 
     await _assign(
         api_env,

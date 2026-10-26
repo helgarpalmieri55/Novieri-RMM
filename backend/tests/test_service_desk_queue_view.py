@@ -66,6 +66,9 @@ async def _ticket(api_env: ApiEnv, env: dict[str, Any], subject: str, **extra: A
         "queue_id": env["queue"]["id"],
         "subject": subject,
         "requester_id": str(env["admin_id"]),
+        # The internal client, whose id is the organisation's (MSP clients
+        # plan 2026-10-26 Task 2: a ticket with no device names its client).
+        "client_id": str(env["org_id"]),
         **extra,
     }
     resp = await api_env.client.post(f"{API}/tickets", json=payload, headers=env["headers"])
@@ -376,6 +379,7 @@ async def test_the_due_sort_ignores_another_orgs_clock_where_rls_is_not_the_thin
         for n in range(2):
             ticket = Ticket(
                 org_id=mine,
+                client_id=mine,
                 number=f"INC-{n}-{uuid4().hex[:6]}",
                 type="incident",
                 category_id=category.id,

@@ -67,15 +67,33 @@ written by a path that skips that check (direct SQL, a future bug, a
 BYPASSRLS admin action) -- see `test_recipients_outside_the_event_org_are_dropped`,
 which seeds exactly that row. This re-check is what catches it here, the
 last point before a `Recipient` is produced.
+
+THE CLIENT RE-CHECK (MSP clients plan 2026-10-26 Task 3, research-1 §I9). A
+recipient outside the event's client would read another client's ticket
+subject. Queues and rules are the organisation's (G), so a queue's members
+are not all of every client's: for an event that names a client
+(`DomainEvent.client_id`), every user-shaped candidate must be either a
+contact OF THAT CLIENT or a staff member holding some role there -- an
+all-clients grant or one on that client (`_sees_client`). Anyone else is
+dropped, by the same query that resolves them. An event with no client (a
+global one) is unchanged, and so is `channel_default`: a webhook or an
+address an all-clients administrator configured is not a person.
 """
 
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DomainEvent, NotificationChannel, NotificationRule, QueueMember, User
+from app.models import (
+    DomainEvent,
+    NotificationChannel,
+    NotificationRule,
+    QueueMember,
+    User,
+    UserRole,
+)
 
 # Spec §6.4: internal notes have their own event type precisely so this
 # module boundary check is possible at all -- see app/core/events.py.
@@ -114,17 +132,47 @@ def _channel_default_address(channel: NotificationChannel) -> str:
     return str(channel.config.get("from_address", ""))
 
 
+def _sees_client(org_id: UUID, client_id: UUID | None) -> list[ColumnElement[bool]]:
+    """The client re-check (module docstring), as a predicate on `User`: a
+    contact of `client_id`, or staff with some role there -- a grant on every
+    client (`user_roles.client_id` NULL) or on that one. Nothing for an event
+    with no client.
+
+    Read straight from `user_roles` (G, no client RLS), the same rows
+    `rbac.clients_holding(session, user, None)` reads: that function returns
+    a person's UN-NARROWED scope and only the identity doors may call it
+    (`tests/test_client_catalog.py::test_only_the_doors_read_an_unnarrowed_scope`).
+    Here the question is a fact about a recipient, not a request's scope."""
+    if client_id is None:
+        return []
+    holds_a_role_there = exists().where(
+        UserRole.org_id == org_id,
+        UserRole.user_id == User.id,
+        or_(UserRole.client_id.is_(None), UserRole.client_id == client_id),
+    )
+    return [
+        or_(
+            and_(User.kind == "contact", User.client_id == client_id),
+            and_(User.kind == "staff", holds_a_role_there),
+        )
+    ]
+
+
 async def _resolve_single_user(
-    session: AsyncSession, *, org_id: UUID, user_id: UUID | None
+    session: AsyncSession, *, org_id: UUID, user_id: UUID | None, client_id: UUID | None
 ) -> list[tuple[UUID, str]]:
     """Resolve one `assignee_id`/`requester_id`-shaped candidate, org-scoped
-    (spec §6.3). Returns at most one `(user_id, email)` pair; empty if the id
-    is absent or does not resolve inside THIS org."""
+    (spec §6.3) and, for an event of a client, re-checked against that
+    client (`_sees_client`). Returns at most one `(user_id, email)` pair;
+    empty if the id is absent, does not resolve inside THIS org, or is
+    somebody outside the event's client."""
     if user_id is None:
         return []
     row = (
         await session.execute(
-            select(User.id, User.email).where(User.id == user_id, User.org_id == org_id)
+            select(User.id, User.email).where(
+                User.id == user_id, User.org_id == org_id, *_sees_client(org_id, client_id)
+            )
         )
     ).one_or_none()
     if row is None:
@@ -133,13 +181,14 @@ async def _resolve_single_user(
 
 
 async def _resolve_queue_members(
-    session: AsyncSession, *, org_id: UUID, queue_id: UUID | None
+    session: AsyncSession, *, org_id: UUID, queue_id: UUID | None, client_id: UUID | None
 ) -> list[tuple[UUID, str]]:
     """Resolve every member of `queue_id`, org-re-checked (spec §6.3): the
     join filters `User.org_id == org_id` explicitly, independent of whatever
     `queue_members.org_id` already says, so a `queue_members` row whose
     `user_id` belongs to a different org (however it got there) is dropped
-    here rather than trusted."""
+    here rather than trusted. For an event of a client, a member outside it
+    is dropped the same way (`_sees_client`)."""
     if queue_id is None:
         return []
     rows = (
@@ -158,6 +207,7 @@ async def _resolve_queue_members(
                 # predicate) should not rely on RLS alone.
                 QueueMember.org_id == org_id,
                 User.org_id == org_id,
+                *_sees_client(org_id, client_id),
             )
         )
     ).all()
@@ -170,6 +220,7 @@ async def _expand_rule(
     rule: NotificationRule,
     channel: NotificationChannel,
     org_id: UUID,
+    client_id: UUID | None,
     event_queue_id: UUID | None,
     assignee_id: UUID | None,
     requester_id: UUID | None,
@@ -180,9 +231,17 @@ async def _expand_rule(
     internal-note guard in `resolve_recipients` has something uniform to
     compare against `requester_id`."""
     if rule.recipient_kind == "assignee":
-        return list(await _resolve_single_user(session, org_id=org_id, user_id=assignee_id))
+        return list(
+            await _resolve_single_user(
+                session, org_id=org_id, user_id=assignee_id, client_id=client_id
+            )
+        )
     if rule.recipient_kind == "requester":
-        return list(await _resolve_single_user(session, org_id=org_id, user_id=requester_id))
+        return list(
+            await _resolve_single_user(
+                session, org_id=org_id, user_id=requester_id, client_id=client_id
+            )
+        )
     if rule.recipient_kind == "queue_members":
         # NULL rule.queue_id means "any queue" (spec §2.3) -- the queue whose
         # membership actually gets expanded is always the EVENT's own queue;
@@ -190,7 +249,9 @@ async def _expand_rule(
         # (the query in resolve_recipients), never which queue's members.
         effective_queue_id = rule.queue_id if rule.queue_id is not None else event_queue_id
         return list(
-            await _resolve_queue_members(session, org_id=org_id, queue_id=effective_queue_id)
+            await _resolve_queue_members(
+                session, org_id=org_id, queue_id=effective_queue_id, client_id=client_id
+            )
         )
     # "channel_default"
     return [(None, _channel_default_address(channel))]
@@ -208,7 +269,9 @@ async def resolve_recipients(session: AsyncSession, *, event: DomainEvent) -> li
        state and returns `[]`, not an error).
     2. Expand each rule's `recipient_kind` into `(user_id, address)`
        candidates, every user-shaped one re-checked against `event.org_id`
-       (§6.3 -- see `_resolve_single_user`/`_resolve_queue_members`).
+       (§6.3 -- see `_resolve_single_user`/`_resolve_queue_members`) and,
+       when the event names one, against `event.client_id` (this module's
+       "THE CLIENT RE-CHECK").
     3. Drop the requester from the result UNCONDITIONALLY when
        `event.event_type == "ticket.internal_note_added"` (§6.4 -- see this
        module's "THE INTERNAL-NOTE GUARD" docstring section).
@@ -275,6 +338,7 @@ async def resolve_recipients(session: AsyncSession, *, event: DomainEvent) -> li
             rule=rule,
             channel=channel,
             org_id=event.org_id,
+            client_id=event.client_id,
             event_queue_id=event_queue_id,
             assignee_id=assignee_id,
             requester_id=requester_id,

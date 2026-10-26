@@ -84,7 +84,9 @@ function allPermissions(): string[] {
 
 /* ---------------------------------------------------------------- identity */
 
-const ORG_ID = "org-toeshee";
+/** The organisation -- and its internal client, whose id is the organisation's
+ *  (MSP clients spec §7 point 2; `lib/internalClient.ts`). */
+export const ORG_ID = "org-toeshee";
 
 const me = (): Me => ({
   user_id: "usr-helgar",

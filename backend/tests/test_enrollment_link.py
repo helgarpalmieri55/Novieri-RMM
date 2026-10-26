@@ -73,6 +73,8 @@ async def test_a_link_enrollment_creates_a_pending_device_with_a_certificate(api
     assert code not in str(audit.meta)
     assert event.payload["device_id"] == str(device_id)
     assert event.payload["source_address"] == "10.50.0.9"
+    # Phase 2 Task 1: the event names its subject's client.
+    assert event.client_id == device.client_id
 
 
 @pytest.mark.parametrize(

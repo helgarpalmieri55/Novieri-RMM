@@ -94,7 +94,7 @@ update.
 import logging
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import exists, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,9 +102,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import audit_service
 from app.core.global_rows import refuse_unless_every_client
 from app.core.i18n import tr
+from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.service_desk.models import TicketQueue
-from app.modules.sla.errors import SlaNotFoundError, SlaValidationError
+from app.modules.sla.errors import (
+    SlaClientError,
+    SlaConflictError,
+    SlaNotFoundError,
+    SlaValidationError,
+)
 from app.modules.sla.models import SlaCalendar, SlaPolicy, TicketSla
+from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
 
 __all__ = [
     "create_policy",
@@ -130,8 +137,8 @@ _DEADLINE_INPUT_FIELDS = frozenset(
 
 # The four partial unique indexes (spec §2.4, migrations 0033 and 0036; per
 # client since 0231, Task 8b: each holds `client_id` under NULLS NOT DISTINCT,
-# so a policy -- global in phase 1 -- conflicts with the global policy at its
-# level and never with a client's;
+# so a global policy conflicts only with the global policy at its level, and
+# a client's (plan 2026-10-26, D2) only with that client's;
 # `models.py::SlaPolicy.__table_args__`), keyed by (has_queue, has_priority)
 # -- what `create_policy` uses to pick the right ON CONFLICT target, and what
 # `update_policy`'s fallback narrowing matches an `IntegrityError`'s
@@ -358,6 +365,7 @@ async def create_policy(
     escalate_priority: bool = False,
     escalate_to_queue_id: UUID | None = None,
     active: bool = True,
+    client_id: UUID | None = None,
 ) -> SlaPolicy:
     """`ON CONFLICT DO NOTHING` + `RETURNING id` against the ONE partial
     unique index matching this policy's resolution level (see module
@@ -370,13 +378,30 @@ async def create_policy(
     `active=False` policy is outside every index and can always be created:
     creating a retired policy at a level an active one already holds is legal
     history, and the collision below can only ever mean a genuinely ACTIVE
-    policy is in the way -- which is what its message says."""
-    # `sla_policy` rows carry no client in phase 1, so every one is a global
-    # row, and the bulk INSERT below never passes `app.core.global_rows`'s
-    # flush guard. Refused first, as `require_all_clients` is: a limited
-    # technician learns nothing from a validation error about a body they
-    # could never have sent.
-    refuse_unless_every_client(session, "sla_policy")
+    policy is in the way -- which is what its message says.
+
+    `client_id` makes the policy that client's (MSP clients plan 2026-10-26,
+    D2): its tickets then resolve among its own policies alone. The client is
+    loaded as every new row's is (`client_for_new_rows`, held FOR SHARE until
+    commit): one the session cannot see is a 404, an archived one a 409, and
+    "Sin asignar" -- the inbox of what has no owner, not a client anyone
+    configures (C10) -- a 422. A client's policy and a global one may share a
+    level: each of the four keys holds `client_id` (0231)."""
+    if client_id is None:
+        # A global row, every client's: the bulk INSERT below never passes
+        # `app.core.global_rows`'s flush guard, so it is refused first, as
+        # `require_all_clients` is -- a limited technician learns nothing
+        # from a validation error about a body they could never have sent.
+        refuse_unless_every_client(session, "sla_policy")
+    else:
+        try:
+            client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
+        except ClientNotFound:
+            raise SlaNotFoundError(tr("no such client")) from None
+        except NotAcceptingNewRows as exc:
+            raise SlaConflictError(exc.detail) from None
+        if client.kind == CLIENT_KIND_UNASSIGNED:
+            raise SlaClientError(tr("Unassigned has no SLA policies of its own"))
     _validate_priority(priority)
     _validate_positive(response_target_minutes, "response_target_minutes")
     _validate_positive(resolution_target_minutes, "resolution_target_minutes")
@@ -393,6 +418,7 @@ async def create_policy(
         pg_insert(SlaPolicy)
         .values(
             org_id=org_id,
+            client_id=client_id,
             queue_id=queue_id,
             priority=priority,
             calendar_id=calendar_id,
@@ -427,6 +453,7 @@ async def create_policy(
         action="sla.policy_created",
         target_type="sla_policy",
         target_id=str(policy.id),
+        client_id=client_id,
         metadata={
             "queue_id": str(queue_id) if queue_id else None,
             "priority": priority,
@@ -574,6 +601,7 @@ async def update_policy(
         action="sla.policy_updated",
         target_type="sla_policy",
         target_id=str(policy.id),
+        client_id=policy.client_id,
         metadata={"changed": sorted(changed)},
     )
     await session.flush()
@@ -640,6 +668,7 @@ async def delete_policy(
         raise SlaValidationError(ticket_message)
 
     target_id = str(policy.id)
+    policy_client = policy.client_id
     metadata = {
         "queue_id": str(policy.queue_id) if policy.queue_id else None,
         "priority": policy.priority,
@@ -675,25 +704,57 @@ async def delete_policy(
         action="sla.policy_deleted",
         target_type="sla_policy",
         target_id=target_id,
+        client_id=policy_client,
         metadata=metadata,
     )
     await session.flush()
 
 
 async def resolve_policy(
-    session: AsyncSession, org_id: UUID, *, queue_id: UUID | None, priority: str | None
+    session: AsyncSession,
+    org_id: UUID,
+    *,
+    client_id: UUID,
+    queue_id: UUID | None,
+    priority: str | None,
 ) -> SlaPolicy | None:
-    """Spec §3's resolution order, exactly: most specific first.
+    """Spec §3's resolution order, exactly: most specific first --
 
     1. `(queue_id, priority)` 2. `(queue_id, NULL)` 3. `(NULL, priority)`
     4. `(NULL, NULL)`
 
-    Only `active` policies are considered. Returns `None` when nothing
-    matches -- NEVER a fabricated default, never a zero. Spec §3: an org with
-    no policy configured must visibly have no SLA, because an invented
-    target is worse than an absent one. No `ticket_sla` row is created by
-    this function or because of its `None` return -- that decision belongs
-    entirely to the caller (Task 5)."""
+    -- among ONE owner's policies (MSP clients plan 2026-10-26, D2): the
+    ticket's client's, when it has any active policy of its own; otherwise the
+    global ones (`client_id` NULL). A client's own policies replace the global
+    ones whole, as a contract does; the two are never mixed level by level.
+
+    THE CLIENT PREDICATE IS EXPLICIT. The email poller and the SLA sweep run
+    under scope all, where RLS shows every client's policies: without it a
+    global row and a client row at one level raise `MultipleResultsFound`
+    (research-1: a 500 on create and a wedged mailbox), and another client's
+    lone policy would be applied to this ticket. The per-client keys of 0231
+    leave one active row per level and owner, so `scalar_one_or_none` is safe
+    again.
+
+    Only `active` policies are considered -- for the owner too: a client whose
+    only policies are retired is back on the global ones. Returns `None` when
+    nothing matches -- NEVER a fabricated default, never a zero. Spec §3: an
+    org with no policy configured must visibly have no SLA, because an
+    invented target is worse than an absent one. No `ticket_sla` row is
+    created by this function or because of its `None` return -- that decision
+    belongs entirely to the caller (Task 5)."""
+    has_own = (
+        await session.execute(
+            select(
+                exists().where(
+                    SlaPolicy.org_id == org_id,
+                    SlaPolicy.client_id == client_id,
+                    SlaPolicy.active.is_(True),
+                )
+            )
+        )
+    ).scalar_one()
+    owner = SlaPolicy.client_id == client_id if has_own else SlaPolicy.client_id.is_(None)
     levels = [(queue_id, priority), (queue_id, None), (None, priority), (None, None)]
     seen: set[tuple[UUID | None, str | None]] = set()
     for level_queue_id, level_priority in levels:
@@ -705,7 +766,7 @@ async def resolve_policy(
             continue
         seen.add((level_queue_id, level_priority))
 
-        conditions = [SlaPolicy.org_id == org_id, SlaPolicy.active.is_(True)]
+        conditions = [SlaPolicy.org_id == org_id, SlaPolicy.active.is_(True), owner]
         conditions.append(
             SlaPolicy.queue_id == level_queue_id
             if level_queue_id is not None

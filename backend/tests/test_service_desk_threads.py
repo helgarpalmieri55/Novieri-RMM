@@ -95,6 +95,7 @@ async def _create_incident(session, org_id, actor_id, *, requester_id=None) -> T
             queue_id=queue.id,
             subject="Laptop won't boot",
             requester_id=requester_id or actor_id,
+            client_id=org_id,
         ),
     )
 

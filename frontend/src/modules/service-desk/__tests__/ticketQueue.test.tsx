@@ -46,6 +46,7 @@ function sla(overrides: Partial<TicketSlaSummary>): TicketSlaSummary {
 function ticket(id: string, overrides: Partial<TicketOut> = {}): TicketOut {
   return {
     id,
+    client_id: "o1",
     number: `INC-${id}`,
     type: "incident",
     category_id: "cat1",

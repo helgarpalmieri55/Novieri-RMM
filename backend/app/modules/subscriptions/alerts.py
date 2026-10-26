@@ -97,6 +97,7 @@ async def emit_due_alerts(
                 subject_id=sub.id,
                 payload=_payload(sub, today, notice_deadline),
                 actor_user_id=None,
+                client_id=None,  # plan 2026-10-26 Task 6 sets the subscription's client
             )
             published += 1
     await session.flush()

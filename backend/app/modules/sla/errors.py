@@ -21,6 +21,17 @@ class SlaNotFoundError(SlaValidationError):
     the API routes 404 by isinstance."""
 
 
+class SlaClientError(SlaValidationError):
+    """A client a policy may not belong to -- "Sin asignar" (maps to HTTP
+    422, as every other row filed under a client answers; MSP clients plan
+    2026-10-26, C10)."""
+
+
+class SlaConflictError(SlaValidationError):
+    """An archived client, which takes no new policy (maps to HTTP 409, as
+    `client_sites.client_for_new_rows` answers everywhere)."""
+
+
 class UnsatisfiableCalendar(SlaValidationError):
     """A working-time target cannot be reached on this calendar within
     `calendar.MAX_LOOKAHEAD_DAYS` (spec §4).

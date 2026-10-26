@@ -28,6 +28,7 @@ const FLEET_REPORT = {
 };
 const SLA_POLICY = {
   id: "s1",
+  client_id: null,
   queue_id: null,
   priority: null,
   calendar_id: "c1",

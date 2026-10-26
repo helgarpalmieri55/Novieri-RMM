@@ -223,6 +223,7 @@ class EmailEnv:
                     subject="seeded ticket",
                     description="seeded",
                     requester_id=user_id,
+                    client_id=self.org_id,
                 ),
                 origin="email",
             )
@@ -1216,6 +1217,7 @@ async def test_a_token_for_another_orgs_ticket_never_resolves(email_env, api_env
                 category_id=other_category,
                 subject="other org",
                 requester_id=other_user,
+                client_id=other_org,
             ),
             origin="email",
         )
@@ -1698,6 +1700,7 @@ async def test_the_ticket_rate_limit_org_predicate_is_load_bearing(email_env) ->
                 category_id=other_category,
                 subject="other org ticket",
                 requester_id=other_alice,
+                client_id=other.org_id,
             ),
             origin="email",
         )
@@ -1782,3 +1785,32 @@ async def test_an_unknown_sender_that_parsed_fine_is_still_quarantined(email_env
     row = await email_env.dispose(sender="stranger@elsewhere.test")
     assert row.disposition == "quarantined"
     assert "unknown" in row.reason.lower()
+
+
+async def test_a_contact_s_mail_opens_its_ticket_in_the_contact_s_client(email_env: Any) -> None:
+    """MSP clients plan 2026-10-26 Task 2, until Task 4 decides by domain and
+    "Sin asignar" (spec §3.3): a contact's new ticket is filed under its own
+    client, a staff member's under the internal client -- whose id is the
+    organisation's. Two senders that differ only in what they are."""
+    from app.models import User
+    from tests.client_scope_support import client_with_site
+
+    x, _ = await client_with_site(email_env.api_env, email_env.org_id)
+    async with AsyncSession(email_env.admin_engine) as session:
+        session.add(
+            User(
+                org_id=email_env.org_id,
+                external_subject=uuid4().hex,
+                email="carol@acme.test",
+                kind="contact",
+                client_id=x,
+            )
+        )
+        await session.commit()
+
+    contact_row = await email_env.dispose(sender="carol@acme.test")
+    staff_row = await email_env.dispose(sender="alice@acme.test")
+
+    assert (contact_row.disposition, staff_row.disposition) == ("created", "created")
+    assert (await email_env.ticket_for_row(contact_row)).client_id == x
+    assert (await email_env.ticket_for_row(staff_row)).client_id == email_env.org_id

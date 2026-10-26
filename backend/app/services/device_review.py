@@ -307,6 +307,7 @@ async def _tombstone(
                 "rejected_at": device.rejected_at.isoformat() if device.rejected_at else None,
             },
             actor_user_id=None,
+            client_id=device.client_id,
         )
     await audit_service.record(
         session,

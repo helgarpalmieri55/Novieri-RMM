@@ -529,6 +529,7 @@ async def _auto_close_pass(session: AsyncSession, org_id: UUID, now: datetime) -
     for ticket in tickets:
         # Read before the savepoint -- see `_breach_pass`'s note on expiry.
         ticket_id = ticket.id
+        ticket_client = ticket.client_id
         ticket_number = ticket.number
         from_status = ticket.status
         resolved_at = ticket.resolved_at
@@ -553,6 +554,7 @@ async def _auto_close_pass(session: AsyncSession, org_id: UUID, now: datetime) -
                     action="sla.auto_closed",
                     target_type="ticket",
                     target_id=str(ticket_id),
+                    client_id=ticket_client,
                     metadata={
                         "ticket_number": ticket_number,
                         "auto_close_after_days": days,

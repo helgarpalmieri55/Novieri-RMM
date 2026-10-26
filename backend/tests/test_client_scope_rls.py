@@ -243,16 +243,16 @@ async def test_no_scope_guc_hides_global_rows_and_staff_too(
 async def test_a_narrowed_scope_publishes_a_domain_event(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
-    """`events.publish` cannot name a client yet (phase 2 derives it from the
-    subject), so in phase 1 an event is written with NULL client from ANY
-    pinned scope -- or every route that publishes fails under a narrowed
-    one."""
+    """`events.publish` takes the subject's client (phase 2 Task 1), but until
+    each family's task passes one, and for a platform probe for good, an event
+    is written with NULL client from ANY pinned scope -- or every route that
+    publishes fails under a narrowed one."""
     c = await _two_clients(admin_engine)
     subject = uuid4()
     async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
         await publish(
             s, org_id=c.org, event_type="ticket.assigned", subject_type="ticket",
-            subject_id=subject, payload={}, actor_user_id=None,
+            subject_id=subject, payload={}, actor_user_id=None, client_id=None,
         )
         await s.flush()
     async with AsyncSession(admin_engine) as s:
@@ -570,7 +570,7 @@ async def test_a_narrowed_scope_cannot_change_or_delete_a_global_event(
     async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
         await publish(
             s, org_id=c.org, event_type="ticket.assigned", subject_type="ticket",
-            subject_id=subject, payload={}, actor_user_id=None,
+            subject_id=subject, payload={}, actor_user_id=None, client_id=None,
         )
     by_subject = "WHERE subject_id = :subj"
     async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:

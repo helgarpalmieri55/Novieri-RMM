@@ -87,6 +87,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import use_locale
 from app.core.storage import ObjectStore
+from app.models import User
 from app.modules.email_intake.identity import (
     extract_reply_token,
     resolve_sender,
@@ -798,6 +799,19 @@ async def process_message(
                 f"Continues ticket {cited_number}, which is no longer open.\n\n{body}",
                 _MAX_BODY,
             )
+        # The sender's client when the sender is a contact, else the internal
+        # client (whose id is the organisation's).
+        # plan 2026-10-26 Task 4 decides by domain and Unassigned (spec §3.3)
+        sender_kind, sender_client = (
+            await session.execute(
+                select(User.kind, User.client_id).where(
+                    User.org_id == org_id, User.id == sender_user_id
+                )
+            )
+        ).one()
+        ticket_client = (
+            sender_client if sender_kind == "contact" and sender_client is not None else org_id
+        )
         try:
             # The refusal is stored in the row's `reason`: English, whatever the locale.
             with use_locale("en"):
@@ -813,6 +827,7 @@ async def process_message(
                         requester_id=sender_user_id,
                     ),
                     origin="email",
+                    client_id=ticket_client,
                 )
         except TicketValidationError as exc:
             # A MISCONFIGURED MAILBOX, NOT A BAD MESSAGE -- the commonest

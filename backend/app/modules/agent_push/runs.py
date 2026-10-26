@@ -866,6 +866,7 @@ async def _stop_if_locked_out(
             "stopped_at": now.isoformat(),
         },
         actor_user_id=None,
+        client_id=None,  # plan 2026-10-26 Task 12 sets the run's client
     )
     return True
 
@@ -1046,6 +1047,7 @@ async def _complete_if_done(session: AsyncSession, run: PushRun, now: datetime) 
             "finished_at": now.isoformat(),
         },
         actor_user_id=None,
+        client_id=None,  # plan 2026-10-26 Task 12 sets the run's client
     )
 
 

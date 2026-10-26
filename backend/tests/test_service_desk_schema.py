@@ -379,7 +379,8 @@ def test_ticket_update_rejects_over_length_description() -> None:
 
 def _full_ticket_out_kwargs() -> dict[str, object]:
     return dict(
-        id=_UUID, number="INC-0001", type="incident", category_id=_UUID, queue_id=_UUID,
+        id=_UUID, client_id=_UUID, number="INC-0001", type="incident", category_id=_UUID,
+        queue_id=_UUID,
         status="open", priority="normal", subject="Printer on fire", description="",
         requester_id=_UUID, assigned_to=None, device_id=None, origin="technician",
         source_alert_id=None, resolved_at=None, closed_at=None, has_attachments=False,

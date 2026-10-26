@@ -96,6 +96,7 @@ from app.modules.sla import tracking
 from app.modules.sla.errors import SlaValidationError
 from app.modules.sla.models import TicketSla
 from app.modules.sla.tracking import note_public_comment, note_resolved
+from tests.client_scope_support import make_technician
 from tests.test_sla_migration import _seed_calendar, _seed_policy, _seed_user
 from tests.test_sla_pause import _pause_at, _resume_at
 from tests.test_sla_tracking import (
@@ -201,6 +202,7 @@ async def _seed_met_ticket(
             await session.flush()
             ticket = Ticket(
                 org_id=org_id,
+                client_id=org_id,
                 number=f"M-{uuid4().hex[:10]}",
                 type=ticket_type,
                 category_id=category.id,
@@ -791,6 +793,8 @@ async def test_negative_assigning_the_ticket_does_not_stop_the_response_clock(
     ticket, actors = await _seed_met_ticket(api_env, org_id)
     await _start(api_env, org_id, ticket)
     monkeypatch.setattr(tracking, "_utcnow", lambda: MONDAY_0930)
+    # An assignee can open the ticket's client's tickets (plan 2026-10-26 Task 2).
+    await make_technician(api_env, org_id, actors.bystander)
 
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         updated = await assign_ticket(

@@ -152,6 +152,15 @@ async def _create_ticket(
         "subject": "Laptop won't boot",
         "requester_id": str(requester_id),
     }
+    if "device_id" not in overrides:
+        # A ticket with no device names its client (MSP clients plan
+        # 2026-10-26 Task 2): here the internal client of the requester's
+        # organisation, whose id IS the organisation's.
+        async with AsyncSession(api_env.admin_engine) as session:
+            org_id = (
+                await session.execute(select(User.org_id).where(User.id == requester_id))
+            ).scalar_one()
+        payload["client_id"] = str(org_id)
     payload.update(overrides)
     resp = await api_env.client.post(f"{API}/tickets", json=payload, headers=headers)
     assert resp.status_code == 201, resp.text
@@ -256,7 +265,7 @@ async def test_technician_access_matches_spec_grants(api_env: ApiEnv) -> None:
                 "json": {
                     "type": "incident", "category_id": category["id"],
                     "queue_id": queue["id"], "subject": "Printer jam",
-                    "requester_id": str(admin_id),
+                    "requester_id": str(admin_id), "client_id": str(org_id),
                 }
             },
             True,
@@ -277,6 +286,10 @@ async def test_technician_access_matches_spec_grants(api_env: ApiEnv) -> None:
         (
             "POST", "/service-desk/tickets/{ticket_id}/assign",
             f"{API}/tickets/{ticket['id']}/assign", {"json": {"assigned_to": str(tech_id)}}, True,
+        ),
+        (
+            "POST", "/service-desk/tickets/{ticket_id}/move",
+            f"{API}/tickets/{ticket['id']}/move", {"json": {"client_id": str(org_id)}}, True,
         ),
         (
             "POST", "/service-desk/tickets/{ticket_id}/approve",
@@ -598,7 +611,8 @@ async def test_list_tickets_route_forwards_all_ten_filter_params(
     forwarding every one of the ten kwargs unchanged -- proven by
     monkeypatching `tickets.list_tickets` itself (as imported into `api.py`)
     to capture exactly what the route calls it with, for a request that
-    supplies all ten at once."""
+    supplies all ten at once -- eleven since `client_id` (MSP clients plan
+    2026-10-26 Task 2)."""
     import app.modules.service_desk.api as sd_api
 
     org_id, admin_headers, _admin_id = await _org_admin(api_env, "sd-list-fwd")
@@ -616,6 +630,7 @@ async def test_list_tickets_route_forwards_all_ten_filter_params(
     assigned_uuid = uuid4()
     requester_uuid = uuid4()
     device_uuid = uuid4()
+    client_uuid = uuid4()
 
     resp = await api_env.client.get(
         f"{API}/tickets",
@@ -626,6 +641,7 @@ async def test_list_tickets_route_forwards_all_ten_filter_params(
             "assigned_to": str(assigned_uuid),
             "requester_id": str(requester_uuid),
             "device_id": str(device_uuid),
+            "client_id": str(client_uuid),
             "priority": "high",
             "q": "printer",
             "scope": "unassigned",
@@ -644,6 +660,7 @@ async def test_list_tickets_route_forwards_all_ten_filter_params(
         "assigned_to": assigned_uuid,
         "requester_id": requester_uuid,
         "device_id": device_uuid,
+        "client_id": client_uuid,
         "priority": "high",
         "q": "printer",
         "unassigned": True,
@@ -1351,6 +1368,7 @@ async def test_the_ticket_count_is_tenant_scoped_where_rls_is_not_the_thing_reje
                 session.add(
                     Ticket(
                         org_id=org.id,
+                        client_id=org.id,
                         number=f"{key[:2].upper()}-{n}-{uuid4().hex[:6]}",
                         type="incident",
                         category_id=category.id,

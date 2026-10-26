@@ -753,6 +753,9 @@ class AuditEvent(Base):
             "ts",
             postgresql_where=text("action = 'mcp.tool_called'"),
         ),
+        # Migration 0233: an informative client must still be one of the
+        # event's own organisation's (a foreign key ignores RLS).
+        client_org_fk("audit_events"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
@@ -764,6 +767,10 @@ class AuditEvent(Base):
     target_type: Mapped[str] = mapped_column(String(50), default="")
     target_id: Mapped[str] = mapped_column(String(100), default="")
     meta: Mapped[dict[str, Any]] = mapped_column("metadata", default=dict)
+    # Informative (spec §2.5, plan 2026-10-26 C6): the client of the event's
+    # subject, when it has one. No client policy reads it; it is HASHED when
+    # set (`app/core/audit.py::_canonical_fields`).
+    client_id: Mapped[UUID | None] = mapped_column(nullable=True)
     prev_hash: Mapped[str] = mapped_column(String(64))
     hash: Mapped[str] = mapped_column(String(64))
 

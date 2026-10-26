@@ -61,6 +61,19 @@ async def everything_on(env: ApiEnv, org: UUID, client_id: UUID) -> dict[str, st
     return await env.headers(org, sub)
 
 
+async def make_technician(env: ApiEnv, org: UUID, user_id: UUID) -> None:
+    """Give an existing user the built-in `technician` role on every client.
+    A ticket's assignee holds `ticket.read` in the ticket's client (MSP
+    clients plan 2026-10-26 Task 2), so a bare seeded user can no longer be
+    assigned one."""
+    async with AsyncSession(env.admin_engine) as s:
+        role = (
+            await s.execute(select(Role.id).where(Role.name == "technician", Role.org_id.is_(None)))
+        ).scalar_one()
+        s.add(UserRole(org_id=org, user_id=user_id, role_id=role, client_id=None))
+        await s.commit()
+
+
 # --------------------------------------------------------------------------- #
 # Spec §2.2's client policies, for `tests/test_client_catalog.py` and
 # `tests/test_client_isolation.py`.

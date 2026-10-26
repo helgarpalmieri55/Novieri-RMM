@@ -89,6 +89,7 @@ const QUEUES: QueueOut[] = [
 function policy(overrides: Partial<PolicyOut>): PolicyOut {
   return {
     id: "p",
+    client_id: null,
     queue_id: null,
     priority: null,
     calendar_id: "cal1",
@@ -840,10 +841,10 @@ describe("the SLA label tables and sentences", () => {
 
   it("words the four resolution levels, and re-words them on a switch", () => {
     setActiveLanguage("es");
-    const labels = resolutionPreview([], "q1", "urgent").levels.map((level) => level.label);
+    const labels = resolutionPreview([], "q1", "urgent", null).levels.map((level) => level.label);
     expect(labels).toEqual(["esta cola + esta prioridad", "esta cola + cualquier prioridad", "cualquier cola + esta prioridad", "cualquier cola + cualquier prioridad"]);
     setActiveLanguage("en");
-    expect(resolutionPreview([], "q1", "urgent").levels[0]?.label).toBe("this queue + this priority");
+    expect(resolutionPreview([], "q1", "urgent", null).levels[0]?.label).toBe("this queue + this priority");
   });
 
   it("words a policy for its confirmation", () => {

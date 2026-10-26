@@ -2966,6 +2966,30 @@ CATALOG: dict[str, str] = {
         "requester_id es obligatorio con origin={origin}"
     ),
     "actor_id is required for origin={origin}": "actor_id es obligatorio con origin={origin}",
+    # The ticket's client (MSP clients plan 2026-10-26 Task 2).
+    "the ticket's client is not its device's client": (
+        "el cliente del ticket no es el cliente de su equipo"
+    ),
+    "choose the client this ticket belongs to": "elige el cliente al que pertenece este ticket",
+    "tickets reach Unassigned only by email": (
+        "los tickets solo llegan a «Sin asignar» por correo"
+    ),
+    "the requester is a contact of another client": (
+        "el solicitante es un contacto de otro cliente"
+    ),
+    "the assignee cannot see this client's tickets": (
+        "la persona asignada no puede ver los tickets de este cliente"
+    ),
+    # Moving a ticket between clients, and a client's own SLA (Task 3).
+    "remove the ticket's device before moving it to another client": (
+        "quita el equipo del ticket antes de moverlo a otro cliente"
+    ),
+    "a ticket opened by an alert or a change stays with its client": (
+        "un ticket abierto por una alerta o un cambio se queda en su cliente"
+    ),
+    "Unassigned has no SLA policies of its own": (
+        "«Sin asignar» no tiene políticas de SLA propias"
+    ),
     "unknown ticket type: {ticket_type}": "tipo de ticket desconocido: {ticket_type}",
     "illegal {ticket_type} transition: {from_status} -> {to_status}": (
         "transición no permitida en {ticket_type}: {from_status} -> {to_status}"

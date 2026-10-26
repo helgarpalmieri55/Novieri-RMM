@@ -118,6 +118,7 @@ const QUEUES: QueueOut[] = [
 function policy(overrides: Partial<PolicyOut>): PolicyOut {
   return {
     id: "p",
+    client_id: null,
     queue_id: null,
     priority: null,
     calendar_id: "cal1",

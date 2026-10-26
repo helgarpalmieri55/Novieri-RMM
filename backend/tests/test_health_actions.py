@@ -810,7 +810,7 @@ async def test_require_approval_publishes_its_request_even_for_a_silent_check(
     they cannot identify"), and never the body -- arbitrary code is why §8.4
     makes `script.run` destructive by default in the first place.
     """
-    from app.models import DomainEvent
+    from app.models import DomainEvent, HealthAlert
 
     fixture, _ = await _armed_with_ticketing(admin_engine)
     now = datetime.now(UTC)
@@ -848,6 +848,11 @@ async def test_require_approval_publishes_its_request_even_for_a_silent_check(
                 )
             )
         ).scalar_one()
+        alert_client = (
+            await session.execute(select(HealthAlert.client_id).where(HealthAlert.id == alert_id))
+        ).scalar_one()
+    # Phase 2 Task 1: the event names the alert's client.
+    assert event.client_id == alert_client
     assert event.payload["script_name"] == "Restart Print Spooler"
     assert event.payload["script_version"] == 1
     assert "Restart-Service" not in str(event.payload), "the script BODY never travels"
@@ -1145,7 +1150,7 @@ async def test_the_alert_ticket_is_machine_attributed_by_the_ticket_core(
     copy of the rules in this module would be a second answer to who may create
     a machine-attributed ticket.
     """
-    from app.models import Ticket
+    from app.models import Device, Ticket
 
     fixture, refs = await _armed_with_ticketing(admin_engine)
     now = datetime.now(UTC)
@@ -1167,6 +1172,13 @@ async def test_the_alert_ticket_is_machine_attributed_by_the_ticket_core(
     assert ticket.created_by is None
     assert ticket.queue_id == refs.queue_id
     assert ticket.device_id == fixture.device_id
+    # MSP clients plan 2026-10-26 Task 2: an alert's ticket is its device's
+    # client's, as the alert itself is.
+    async with AsyncSession(admin_engine) as session:
+        device_client = (
+            await session.execute(select(Device.client_id).where(Device.id == fixture.device_id))
+        ).scalar_one()
+    assert ticket.client_id == device_client
     assert "Restart-Service" not in ticket.description
     assert "cpu.busy_pct" in ticket.description
 

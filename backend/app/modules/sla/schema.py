@@ -162,6 +162,11 @@ class CalendarDetail(CalendarOut):
 
 
 class PolicyCreate(_StrictIn):
+    # The client whose tickets this policy is for (MSP clients plan
+    # 2026-10-26, D2: a client with active policies of its own resolves among
+    # those alone). Absent, the policy is global -- every client's -- and only
+    # a technician of every client may create one.
+    client_id: UUID | None = None
     queue_id: UUID | None = None
     priority: Priority | None = None
     calendar_id: UUID
@@ -209,6 +214,8 @@ class PolicyOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    # `None`: a global policy, every client's (D2).
+    client_id: UUID | None
     # `None` means "any" (spec §9.1) -- the frontend renders it as the word,
     # never as a blank cell, so an unset cell stays distinguishable from one
     # that deliberately matches everything.

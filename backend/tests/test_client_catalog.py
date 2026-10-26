@@ -246,6 +246,14 @@ def test_the_optional_parent_exception_has_not_rotted() -> None:
 OTHER_POLICIES: dict[str, set[str]] = {
     "users": {"portal_isolation"},
     "doc_articles": {"portal_isolation"},
+    # The portal's own policies (0028, 0038): a requester reads their own
+    # tickets. ANDed with the client policy, never replaced by it.
+    "ticket": {"portal_isolation"},
+    "ticket_comment": {"portal_isolation"},
+    "ticket_attachment": {"portal_isolation"},
+    "ticket_approval": {"portal_isolation"},
+    "ticket_status_history": {"portal_isolation"},
+    "ticket_sla": {"portal_isolation"},
 }
 
 
@@ -470,6 +478,9 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
             if e.kind == "O" or (e.kind == "C" and t != "sites")
         }
         | {"fk_user_roles_client_org"}
+        # Informative client of an audit event (plan 2026-10-26 Task 1, C6):
+        # G table, no client policy, but its client is its own org's.
+        | {"fk_audit_events_client_org"}
         | {f"fk_{t}_site_client" for t in ("devices", "enrollment_tokens", "install_links")}
         | CLIENT_KEYS
     )
@@ -515,6 +526,9 @@ SURROGATE_COLUMNS: dict[tuple[str, str], str] = {
     ),
     ("enrollment_tokens", "token_hash"): "the hash of a random single-use token",
     ("install_links", "code_hash"): "the hash of a random install code",
+    ("ticket", "email_token"): (
+        "a random 256-bit reply token (`email_intake/identity.py::mint_email_token`)"
+    ),
 }
 
 #: Unique keys on phase-1 tables that are deliberately organisation-wide.
@@ -539,6 +553,12 @@ ORG_WIDE_KEYS: dict[str, str] = {
         "spans clients: ring 1 a pilot, ring 2 one client, ring 3 another. Per client, two "
         "rings could share a position and the order would be undefined. The rings are "
         "written with the rollout, by `enumerate`, under `require_permission_on_every_client`"
+    ),
+    "ticket_org_id_number_key": (
+        "the ticket number comes from the organisation's one counter "
+        "(`ticket_number_counter`, G): nobody types it, every client's tickets share the "
+        "sequence, and a moved ticket keeps its number. Per client, INC-12 could name two "
+        "tickets"
     ),
 }
 

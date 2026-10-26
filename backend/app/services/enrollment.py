@@ -970,6 +970,7 @@ async def enroll_via_link(
                     "joined_at": stamp.isoformat(),
                 },
                 actor_user_id=None,
+                client_id=device.client_id,
             )
             created = (device.id, issued)
 

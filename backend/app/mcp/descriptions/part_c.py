@@ -486,7 +486,8 @@ PART_C: dict[str, str] = {
     "POST /api/v1/sla/policies": (
         "Creates an SLA policy with a calendar, response and resolution targets in minutes, "
         "optional queue and priority scope, and optional escalation to a priority or queue on "
-        "breach."
+        "breach. With client_id it is that client's, whose tickets then use only its own "
+        "policies; without, it is global."
     ),
     "DELETE /api/v1/sla/policies/{policy_id}": (
         "Deletes an SLA policy. Refused, naming the tickets, if any ticket's SLA record still "

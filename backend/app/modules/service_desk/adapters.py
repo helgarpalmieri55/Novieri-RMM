@@ -175,6 +175,7 @@ class ServiceDeskChangeTicketAdapter:
             # `actor_type`) becomes `"system"` -- see `tickets.py`'s
             # `_SYSTEM_ATTRIBUTED_ORIGINS`.
             origin="integration",
+            client_id=org_id,  # plan 2026-10-26 Task 7 passes the change's client
         )
 
         session.add(

@@ -76,6 +76,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
 from app.core.events import publish
+from app.gateway.dispatch import job_client
 from app.jobs.registry import JobType, register
 from app.models import Job
 from app.modules.ipam.candidates import SweepSighting, auto_create_from_sweep
@@ -185,6 +186,7 @@ async def _reject(
         subject_id=subject_id,
         payload=payload,
         actor_user_id=None,
+        client_id=await job_client(session, job.id),
     )
     await session.flush()
     return IpamSweepRejected(reason)

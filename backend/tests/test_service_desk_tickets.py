@@ -120,6 +120,7 @@ async def test_create_incident_defaults_queue_from_category(api_env) -> None:
                 category_id=category.id,
                 subject="Laptop won't boot",
                 requester_id=user_id,
+                client_id=org_id,
             ),
         )
     assert ticket.queue_id == queue.id
@@ -146,6 +147,7 @@ async def test_explicit_queue_id_overrides_category_default(api_env) -> None:
                 queue_id=override_queue.id,
                 subject="Network down",
                 requester_id=user_id,
+                client_id=org_id,
             ),
         )
     assert ticket.queue_id == override_queue.id
@@ -165,6 +167,7 @@ async def test_create_fails_when_neither_queue_resolves(api_env) -> None:
                     category_id=category.id,
                     subject="No queue anywhere",
                     requester_id=user_id,
+                    client_id=org_id,
                 ),
             )
 
@@ -186,6 +189,7 @@ async def test_create_rejects_type_mismatch_with_category(api_env) -> None:
                     category_id=category.id,
                     subject="Mismatched type",
                     requester_id=user_id,
+                    client_id=org_id,
                 ),
             )
 
@@ -207,7 +211,8 @@ async def test_incident_starts_new(api_env) -> None:
             org_id,
             user_id,
             TicketCreate(
-                type="incident", category_id=category.id, subject="Broken", requester_id=user_id
+                type="incident", category_id=category.id, subject="Broken", requester_id=user_id,
+                client_id=org_id,
             ),
         )
     assert ticket.status == "new"
@@ -235,6 +240,7 @@ async def test_request_requiring_approval_starts_pending_approval(api_env) -> No
                 category_id=category.id,
                 subject="Need VPN access",
                 requester_id=user_id,
+                client_id=org_id,
             ),
         )
     assert ticket.status == "pending_approval"
@@ -262,6 +268,7 @@ async def test_request_not_requiring_approval_starts_in_progress(api_env) -> Non
                 category_id=category.id,
                 subject="Install VS Code",
                 requester_id=user_id,
+                client_id=org_id,
             ),
         )
     assert ticket.status == "in_progress"
@@ -284,7 +291,8 @@ async def test_create_writes_status_history_row_with_null_from_status(api_env) -
             org_id,
             user_id,
             TicketCreate(
-                type="incident", category_id=category.id, subject="Broken", requester_id=user_id
+                type="incident", category_id=category.id, subject="Broken", requester_id=user_id,
+                client_id=org_id,
             ),
         )
         rows = (
@@ -322,7 +330,9 @@ async def test_alert_origin_succeeds_with_null_requester_and_created_by(api_env)
             session,
             org_id,
             None,
-            TicketCreate(type="incident", category_id=category.id, subject="Alert breach"),
+            TicketCreate(
+                type="incident", category_id=category.id, subject="Alert breach", client_id=org_id
+            ),
             origin="alert",
             source_alert_id=uuid7(),
         )
@@ -343,7 +353,9 @@ async def test_alert_origin_status_history_is_system_actor(api_env) -> None:
             session,
             org_id,
             None,
-            TicketCreate(type="incident", category_id=category.id, subject="Alert breach"),
+            TicketCreate(
+                type="incident", category_id=category.id, subject="Alert breach", client_id=org_id
+            ),
             origin="alert",
         )
         history = (
@@ -381,6 +393,7 @@ async def test_integration_origin_is_system_actor_but_keeps_human_attribution(ap
                 category_id=category.id,
                 subject="Change triggered this",
                 requester_id=user_id,
+                client_id=org_id,
             ),
             origin="integration",
         )
@@ -427,6 +440,7 @@ async def test_non_alert_origin_with_null_requester_is_rejected(api_env) -> None
                     category_id=category.id,
                     subject="No requester",
                     requester_id=None,
+                    client_id=org_id,
                 ),
                 origin="technician",
             )
@@ -449,6 +463,7 @@ async def test_non_alert_origin_with_null_actor_is_rejected(api_env) -> None:
                     category_id=category.id,
                     subject="No actor",
                     requester_id=user_id,
+                    client_id=org_id,
                 ),
                 origin="technician",
             )
@@ -474,6 +489,7 @@ async def test_alert_origin_discards_actor_and_requester_even_if_supplied(api_en
                 category_id=category.id,
                 subject="Alert with smuggled attribution",
                 requester_id=user_id,  # non-None requester_id
+                client_id=org_id,
             ),
             origin="alert",
         )
@@ -503,7 +519,8 @@ async def test_alert_origin_rejects_non_incident_type(api_env) -> None:
                 org_id,
                 None,
                 TicketCreate(
-                    type="request", category_id=category.id, subject="Alert on a request"
+                    type="request", category_id=category.id, subject="Alert on a request",
+                    client_id=org_id,
                 ),
                 origin="alert",
             )
@@ -529,6 +546,7 @@ async def test_source_alert_id_rejected_for_non_alert_origin(api_env) -> None:
                     category_id=category.id,
                     subject="Not an alert",
                     requester_id=user_id,
+                    client_id=org_id,
                 ),
                 origin="technician",
                 source_alert_id=uuid7(),
@@ -557,6 +575,7 @@ async def test_create_audits_exactly_once_with_no_subject_leak(api_env) -> None:
                 subject="Highly sensitive subject line",
                 description="Highly sensitive description body",
                 requester_id=user_id,
+                client_id=org_id,
             ),
         )
         events = (
@@ -598,7 +617,8 @@ async def test_get_ticket_returns_the_created_ticket(api_env) -> None:
             org_id,
             user_id,
             TicketCreate(
-                type="incident", category_id=category.id, subject="Broken", requester_id=user_id
+                type="incident", category_id=category.id, subject="Broken", requester_id=user_id,
+                client_id=org_id,
             ),
         )
         fetched = await get_ticket(session, org_id, created.id)
@@ -644,6 +664,7 @@ async def test_list_tickets_filters_by_type_status_queue_priority(api_env) -> No
                 subject="Incident",
                 priority="high",
                 requester_id=user_id,
+                client_id=org_id,
             ),
         )
         request = await create_ticket(
@@ -655,6 +676,7 @@ async def test_list_tickets_filters_by_type_status_queue_priority(api_env) -> No
                 category_id=request_cat.id,
                 subject="Request",
                 requester_id=user_id,
+                client_id=org_id,
             ),
         )
 
@@ -694,6 +716,7 @@ async def test_list_tickets_filters_by_q_case_insensitive_over_subject_and_descr
                 subject="Printer jam on 3rd floor",
                 description="No detail.",
                 requester_id=user_id,
+                client_id=org_id,
             ),
         )
         description_hit = await create_ticket(
@@ -706,6 +729,7 @@ async def test_list_tickets_filters_by_q_case_insensitive_over_subject_and_descr
                 subject="Escalation",
                 description="The PRINTER on the 3rd floor is jammed again.",
                 requester_id=user_id,
+                client_id=org_id,
             ),
         )
         no_hit = await create_ticket(
@@ -718,6 +742,7 @@ async def test_list_tickets_filters_by_q_case_insensitive_over_subject_and_descr
                 subject="Laptop won't boot",
                 description="Black screen.",
                 requester_id=user_id,
+                client_id=org_id,
             ),
         )
 
@@ -771,6 +796,7 @@ async def test_list_tickets_filters_by_assigned_to_requester_and_device(api_env)
                 category_id=category.id,
                 subject="Unassigned",
                 requester_id=other_user_id,
+                client_id=org_id,
             ),
         )
 
@@ -796,7 +822,8 @@ async def test_list_tickets_is_ordered_newest_first(api_env) -> None:
             org_id,
             user_id,
             TicketCreate(
-                type="incident", category_id=category.id, subject="First", requester_id=user_id
+                type="incident", category_id=category.id, subject="First", requester_id=user_id,
+                client_id=org_id,
             ),
         )
         second = await create_ticket(
@@ -804,7 +831,8 @@ async def test_list_tickets_is_ordered_newest_first(api_env) -> None:
             org_id,
             user_id,
             TicketCreate(
-                type="incident", category_id=category.id, subject="Second", requester_id=user_id
+                type="incident", category_id=category.id, subject="Second", requester_id=user_id,
+                client_id=org_id,
             ),
         )
         third = await create_ticket(
@@ -812,7 +840,8 @@ async def test_list_tickets_is_ordered_newest_first(api_env) -> None:
             org_id,
             user_id,
             TicketCreate(
-                type="incident", category_id=category.id, subject="Third", requester_id=user_id
+                type="incident", category_id=category.id, subject="Third", requester_id=user_id,
+                client_id=org_id,
             ),
         )
         rows = await list_tickets(session, org_id)
@@ -837,6 +866,7 @@ async def test_list_tickets_respects_limit_and_offset(api_env) -> None:
                     category_id=category.id,
                     subject=f"Ticket {i}",
                     requester_id=user_id,
+                    client_id=org_id,
                 ),
             )
         page_1 = await list_tickets(session, org_id, limit=2, offset=0)
@@ -864,6 +894,7 @@ async def _create_basic_ticket(session, org_id, user_id):
             subject="Original subject",
             description="Original description",
             requester_id=user_id,
+            client_id=org_id,
         ),
     )
     return ticket, category, queue
@@ -1093,6 +1124,7 @@ async def test_create_cross_org_category_id_raises_not_found(
                     queue_id=queue_a.id,
                     subject="Cross-org category",
                     requester_id=user_a,
+                    client_id=org_a,
                 ),
             )
 
@@ -1120,6 +1152,7 @@ async def test_create_cross_org_queue_id_raises_not_found(
                     queue_id=queue_b.id,
                     subject="Cross-org queue",
                     requester_id=user_a,
+                    client_id=org_a,
                 ),
             )
 
@@ -1180,6 +1213,7 @@ async def test_create_cross_org_requester_id_raises_not_found(
                     category_id=category_a.id,
                     subject="Cross-org requester",
                     requester_id=user_b,
+                    client_id=org_a,
                 ),
             )
 
@@ -1206,6 +1240,7 @@ async def test_create_cross_org_assigned_to_raises_not_found(
                     subject="Cross-org assignee",
                     requester_id=user_a,
                     assigned_to=user_b,
+                    client_id=org_a,
                 ),
             )
 
@@ -1506,6 +1541,7 @@ async def test_tenancy_list_tickets_never_returns_another_orgs_ticket(
                 category_id=category_a.id,
                 subject="Org A's ticket",
                 requester_id=user_a,
+                client_id=org_a,
             ),
         )
 
@@ -1522,6 +1558,7 @@ async def test_tenancy_list_tickets_never_returns_another_orgs_ticket(
                 category_id=category_b.id,
                 subject="Org B's ticket",
                 requester_id=user_b,
+                client_id=org_b,
             ),
         )
         await session.commit()
@@ -1568,6 +1605,7 @@ async def test_list_status_history_oldest_first_one_row_per_transition(
                 category_id=category.id,
                 subject="History test",
                 requester_id=user_id,
+                client_id=org_id,
             ),
         )
         await session.commit()
@@ -1619,6 +1657,7 @@ async def test_tenancy_list_status_history_cross_org_ticket_id_not_found(
             TicketCreate(
                 type="incident", category_id=category_a.id, subject="Org A's ticket",
                 requester_id=user_a,
+                client_id=org_a,
             ),
         )
 
@@ -1633,6 +1672,7 @@ async def test_tenancy_list_status_history_cross_org_ticket_id_not_found(
             TicketCreate(
                 type="incident", category_id=category_b.id, subject="Org B's ticket",
                 requester_id=user_b,
+                client_id=org_b,
             ),
         )
         await session.commit()
@@ -1689,6 +1729,7 @@ async def test_list_status_history_org_id_predicate_is_exercised(
             TicketCreate(
                 type="incident", category_id=category_a.id, subject="Org A's ticket",
                 requester_id=user_a,
+                client_id=org_a,
             ),
         )
 

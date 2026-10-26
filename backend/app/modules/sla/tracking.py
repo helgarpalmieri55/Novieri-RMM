@@ -129,6 +129,7 @@ __all__ = [
     "note_public_comment",
     "note_resolved",
     "pause",
+    "recompute_for_move",
     "recompute_for_retriage",
     "resume",
     "sla_misconfiguration_is_not_fatal",
@@ -572,7 +573,11 @@ async def start_tracking(session: AsyncSession, org_id: UUID, ticket: Ticket) ->
         return existing
 
     policy = await resolve_policy(
-        session, org_id, queue_id=ticket.queue_id, priority=ticket.priority
+        session,
+        org_id,
+        client_id=ticket.client_id,
+        queue_id=ticket.queue_id,
+        priority=ticket.priority,
     )
     if policy is None:
         return None
@@ -675,17 +680,31 @@ async def recompute_for_retriage(
     # clobbering the winner's write on commit.
     tracking = await _load_tracking(session, org_id, ticket.id, for_update=True)
     policy = await resolve_policy(
-        session, org_id, queue_id=ticket.queue_id, priority=ticket.priority
+        session,
+        org_id,
+        client_id=ticket.client_id,
+        queue_id=ticket.queue_id,
+        priority=ticket.priority,
     )
-
-    if tracking is None:
-        if policy is None:
-            return None
-        spec = await load_calendar_spec(session, org_id, policy.calendar_id)
-        return await _materialise(session, org_id, ticket, policy, spec, "retriage")
-
     if policy is None:
         return tracking
+    return await _retriage_against(session, org_id, ticket, tracking, policy)
+
+
+async def _retriage_against(
+    session: AsyncSession,
+    org_id: UUID,
+    ticket: Ticket,
+    tracking: TicketSla | None,
+    policy: SlaPolicy,
+) -> TicketSla:
+    """`recompute_for_retriage` once a policy has resolved: materialise a row
+    the ticket did not have, or recompute the still-running deadlines of the
+    one it has. Shared with `recompute_for_move`, which decides differently
+    only when NO policy resolves."""
+    if tracking is None:
+        spec = await load_calendar_spec(session, org_id, policy.calendar_id)
+        return await _materialise(session, org_id, ticket, policy, spec, "retriage")
 
     response_running = tracking.response_met_at is None and tracking.response_breached_at is None
     resolution_running = (
@@ -714,6 +733,46 @@ async def recompute_for_retriage(
     tracking.last_recomputed_at = _utcnow()
     await session.flush()
     return tracking
+
+
+async def recompute_for_move(
+    session: AsyncSession, org_id: UUID, ticket: Ticket
+) -> Literal["voided"] | None:
+    """The SLA of a ticket that has just moved to another client (MSP clients
+    spec §2.4; plan 2026-10-26, D2), called by `tickets.move_ticket` after the
+    ticket's `client_id` changed.
+
+    When a policy resolves for the new client -- its own, or a global one when
+    it has none -- this is `recompute_for_retriage`, unchanged: a move is a
+    human re-triage of whose promise applies.
+
+    When NONE resolves, the ticket has NO SLA, and its row is DELETED, which is
+    where a move parts from a re-triage. `recompute_for_retriage` keeps a
+    promise already made when a ticket is re-triaged somewhere unpoliced -- the
+    same client's contract still stands behind it. A move ends that contract:
+    the row would go on naming the old client's policy, which a technician of
+    the new client cannot read (`resume` -> `_load_policy_in_org` fails for
+    them), and spec §3 wants an absent SLA to be visibly absent, never a
+    reference to someone else's. Returns `"voided"` when a row was deleted, so
+    the caller can say so in the move's audit; `None` otherwise.
+    """
+    _require_same_org(org_id, ticket)
+    tracking = await _load_tracking(session, org_id, ticket.id, for_update=True)
+    policy = await resolve_policy(
+        session,
+        org_id,
+        client_id=ticket.client_id,
+        queue_id=ticket.queue_id,
+        priority=ticket.priority,
+    )
+    if policy is not None:
+        await _retriage_against(session, org_id, ticket, tracking, policy)
+        return None
+    if tracking is None:
+        return None
+    await session.delete(tracking)
+    await session.flush()
+    return "voided"
 
 
 # ---------------------------------------------------------------------------

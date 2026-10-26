@@ -441,6 +441,12 @@ async def publish_alert_event(
         subject_id=alert.id,
         payload=payload,
         actor_user_id=actor_user_id,
+        # Read from the database, not off `alert`: `health_alert.client_id` is
+        # filled by a trigger, so the attribute is expired after any UPDATE and
+        # reading it here would lazy-load in async code.
+        client_id=(
+            await session.execute(select(HealthAlert.client_id).where(HealthAlert.id == alert.id))
+        ).scalar_one(),
     )
     return True
 

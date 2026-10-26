@@ -1,5 +1,6 @@
-"""Ticket core: create, get, list, update
-(docs/modules/service-desk/spec.md §2, §3, §5, §7.2, §8).
+"""Ticket core: create, get, list, update, and move to another client
+(docs/modules/service-desk/spec.md §2, §3, §5, §7.2, §8; MSP clients spec
+§2.4 for the move).
 
 Mirrors `app.modules.budget.expenses`'s style closely -- it solved every
 problem here already: org-scoped load + audit + flush for every mutation
@@ -109,15 +110,30 @@ when that rejection raises.
 from typing import Any, Literal
 from uuid import UUID
 
-from sqlalchemy import Select, and_, func, or_, select
+from sqlalchemy import Select, and_, exists, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
 from app.core.events import publish
 from app.core.i18n import tr
+from app.core.rbac import has_permission
 from app.core.ticket_words import status_quoted, type_quoted
-from app.models import Device, Ticket, TicketApproval, TicketStatusHistory, User
-from app.modules.service_desk.errors import TicketNotFoundError, TicketValidationError
+from app.models import (
+    Device,
+    HealthAlert,
+    HealthAlertAction,
+    Ticket,
+    TicketApproval,
+    TicketStatusHistory,
+    User,
+)
+from app.models.clients import CLIENT_KIND_UNASSIGNED
+from app.modules.service_desk.errors import (
+    TicketClientError,
+    TicketConflictError,
+    TicketNotFoundError,
+    TicketValidationError,
+)
 from app.modules.service_desk.lifecycle import TERMINAL_STATUSES, initial_status
 from app.modules.service_desk.numbering import next_number
 from app.modules.service_desk.refdata import resolve_category, resolve_queue
@@ -125,10 +141,12 @@ from app.modules.service_desk.schema import TicketCreate, TicketOrigin
 from app.modules.sla.due import next_due_clause
 from app.modules.sla.models import TicketSla
 from app.modules.sla.tracking import (
+    recompute_for_move,
     recompute_for_retriage,
     sla_misconfiguration_is_not_fatal,
     start_tracking,
 )
+from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
 
 # update_ticket's editable-field set, decided by key PRESENCE in `fields` (the
 # `budget.expenses`/`refdata.py` convention -- callers pass
@@ -296,6 +314,112 @@ async def _resolve_device(session: AsyncSession, org_id: UUID, device_id: UUID) 
     return device
 
 
+# ---------------------------------------------------------------------------
+# The ticket's client (MSP clients spec §2.4, §3.2; plan 2026-10-26 Task 2)
+# ---------------------------------------------------------------------------
+
+
+async def _new_ticket_client(
+    session: AsyncSession,
+    org_id: UUID,
+    *,
+    device: Device | None,
+    claimed: UUID | None,
+    origin: TicketOrigin,
+) -> UUID:
+    """The client a NEW ticket is filed under -- the rule Tasks 3 and 4 reuse.
+
+    With a device, the device's: a device's client never changes
+    (`its_device_client_guard`), and `its_ticket_client_guard` holds the
+    ticket to it. Without one, the one the caller names. Neither, or both and
+    different, is a 422: a contradicting client is refused, never silently
+    corrected, because the caller believed something false about the device.
+
+    The client is then loaded as every other new row's is
+    (`client_for_new_rows`, held FOR SHARE until commit): one the session
+    cannot see -- another organisation's, or outside a narrowed technician's
+    scope -- is a 404, never a 403 (spec §3.2's existence oracle), and an
+    archived one a 409. "Sin asignar" takes a ticket only from email (C10:
+    it is the inbox of what has no owner, not a client anyone files under).
+
+    The portal skips the load: `portal_user` cannot read `clients` (0028).
+    `portal.tickets.create_my_ticket` derives the client from the requester
+    itself and checks it is inside the portal session's scope.
+    """
+    if device is not None:
+        if claimed is not None and claimed != device.client_id:
+            raise TicketClientError(tr("the ticket's client is not its device's client"))
+        ticket_client = device.client_id
+    elif claimed is None:
+        raise TicketClientError(tr("choose the client this ticket belongs to"))
+    else:
+        ticket_client = claimed
+    if origin != "portal":
+        try:
+            client = await client_for_new_rows(session, org_id=org_id, client_id=ticket_client)
+        except ClientNotFound:
+            raise TicketNotFoundError(tr("no such client")) from None
+        except NotAcceptingNewRows as exc:
+            raise TicketConflictError(exc.detail) from None
+        if client.kind == CLIENT_KIND_UNASSIGNED and origin != "email":
+            raise TicketClientError(tr("tickets reach Unassigned only by email"))
+    return ticket_client
+
+
+def _requester_belongs(requester: User, client_id: UUID) -> None:
+    """A CONTACT requester is one of the ticket's client's own people
+    (research-1 §E2). Otherwise that contact's emailed reply -- matched on
+    `ticket.requester_id` and written under scope all -- would comment on
+    another client's ticket. A staff requester belongs to no client and may
+    file for any. `its_ticket_client_guard` says the same at the database."""
+    if requester.kind == "contact" and requester.client_id != client_id:
+        raise TicketClientError(tr("the requester is a contact of another client"))
+
+
+async def ensure_assignee_sees(session: AsyncSession, assignee: User, client_id: UUID) -> None:
+    """An assignee is a technician who holds `ticket.read` in the ticket's
+    client (research-1 §E3): a ticket handed to somebody who cannot open it
+    is work nobody can do, and a contact is never a technician. Shared by
+    `create_ticket` and `transitions.assign_ticket`.
+
+    `has_permission` with the record's client (plan Global Constraints):
+    an all-clients grant counts, a grant on this client counts, one on
+    another client does not. It reads the ASSIGNEE's grants, not the
+    caller's, so it is a fact about a record, never a request scope."""
+    if assignee.kind != "staff" or not await has_permission(
+        session, assignee.id, "ticket.read", client_id=client_id
+    ):
+        raise TicketClientError(tr("the assignee cannot see this client's tickets"))
+
+
+async def hold_ticket_client(
+    session: AsyncSession, ticket_id: UUID, *, moving: bool = False
+) -> None:
+    """Hold the ticket's client still until commit (research-1 §I5).
+
+    A row inserted under a ticket -- a comment, an attachment -- takes the
+    ticket's client from `its_client_from_parent`, which reads the ticket
+    with NO lock; and a move's `its_client_to_children` updates only the
+    children it can see. A comment written while a move is in flight
+    therefore reads the old client, and the move cannot see it to carry it
+    over: it would stay in the old client for good. `add_comment` and
+    `add_attachment` call this (shared) before they read the ticket, and
+    `move_ticket` (`moving=True`, exclusive) before it reads it to change it:
+    a child waits for a move in flight and is then born in the new client; a
+    move waits for the children in flight and then carries them over.
+
+    A transaction-scoped ADVISORY lock, not `SELECT ... FOR SHARE` on the
+    ticket: a row lock needs the UPDATE privilege, and `portal_user` -- whose
+    replies and uploads reach `add_comment`/`add_attachment` -- holds only
+    SELECT and INSERT on `ticket` (0028), deliberately. The same
+    `hashtext` key shape as the IPAM, remote-screen and push-run locks."""
+    lock = "pg_advisory_xact_lock" if moving else "pg_advisory_xact_lock_shared"
+    await session.execute(
+        text(f"SELECT {lock}(hashtext('ticket-client:' || :ticket))"),
+        {"ticket": str(ticket_id)},
+    )
+
+
 # Origins whose CREATE-action attribution is `actor_type="system"` (module
 # docstring, finding A3): the ticket wasn't created by a human sitting at a
 # keyboard, so the `ticket_status_history` row and the `ticket.created` audit
@@ -319,8 +443,14 @@ async def create_ticket(
     *,
     origin: TicketOrigin = "technician",
     source_alert_id: UUID | None = None,
+    client_id: UUID | None = None,
 ) -> Ticket:
     """Create a ticket (spec §2, §3, §5, §7.2).
+
+    `client_id` is the client a path that is not a technician's decides on
+    (the portal, email, an alert, a change: MSP clients plan 2026-10-26
+    Task 2); when it is None, the request's `data.client_id` is the claim. A
+    device decides the client either way (`_new_ticket_client`).
 
     `origin`/`source_alert_id` are explicit keyword arguments, never read off
     `data` -- `TicketCreate` has no `origin` field at all (see `schema.py`'s
@@ -336,7 +466,9 @@ async def create_ticket(
     Resolution order, all BEFORE the `Ticket` object is constructed (ordering
     rule above): category -> queue (category default, overridden by an
     explicit `data.queue_id`) -> requester (only for non-alert origin) ->
-    assignee (if supplied) -> device (if supplied) -> the ticket number.
+    assignee (if supplied) -> device (if supplied) -> the client (the
+    device's, else the one named; the requester and the assignee are then
+    checked against it) -> the ticket number.
     `initial_status` is computed from `data.type` and the resolved category's
     `requires_approval` last, right before the object is built.
 
@@ -405,6 +537,7 @@ async def create_ticket(
     # holds even if a future caller passes them by mistake. Every other
     # origin requires both, checked here so the failure is a typed 400
     # rather than `ck_ticket_human_attribution`'s IntegrityError (a 500).
+    requester: User | None = None
     if origin == "alert":
         requester_id: UUID | None = None
         created_by: UUID | None = None
@@ -427,15 +560,25 @@ async def create_ticket(
         requester_id = requester.id
         created_by = actor_id
 
-    assigned_to: UUID | None = None
+    assignee: User | None = None
     if data.assigned_to is not None:
         assignee = await resolve_user(session, org_id, data.assigned_to)
-        assigned_to = assignee.id
 
-    device_id: UUID | None = None
+    device: Device | None = None
     if data.device_id is not None:
         device = await _resolve_device(session, org_id, data.device_id)
-        device_id = device.id
+
+    ticket_client = await _new_ticket_client(
+        session,
+        org_id,
+        device=device,
+        claimed=client_id if client_id is not None else data.client_id,
+        origin=origin,
+    )
+    if requester is not None:
+        _requester_belongs(requester, ticket_client)
+    if assignee is not None:
+        await ensure_assignee_sees(session, assignee, ticket_client)
 
     status = initial_status(data.type, requires_approval=category.requires_approval)
 
@@ -454,6 +597,7 @@ async def create_ticket(
 
     ticket = Ticket(
         org_id=org_id,
+        client_id=ticket_client,
         number=number,
         type=data.type,
         category_id=category.id,
@@ -463,8 +607,8 @@ async def create_ticket(
         subject=data.subject,
         description=data.description,
         requester_id=requester_id,
-        assigned_to=assigned_to,
-        device_id=device_id,
+        assigned_to=assignee.id if assignee is not None else None,
+        device_id=device.id if device is not None else None,
         origin=origin,
         source_alert_id=source_alert_id,
         created_by=created_by,
@@ -509,6 +653,7 @@ async def create_ticket(
         action="ticket.created",
         target_type="ticket",
         target_id=str(ticket.id),
+        client_id=ticket.client_id,
         # Identifiers only -- never subject/description (spec §8.3, context
         # note #8).
         metadata={
@@ -545,6 +690,7 @@ async def create_ticket(
                 "requester_id": str(ticket.requester_id) if ticket.requester_id else None,
             },
             actor_user_id=actor_id,
+            client_id=ticket.client_id,
         )
     await session.flush()
 
@@ -581,15 +727,20 @@ async def create_ticket(
 # ---------------------------------------------------------------------------
 
 
-async def get_ticket(session: AsyncSession, org_id: UUID, ticket_id: UUID) -> Ticket:
+async def get_ticket(
+    session: AsyncSession, org_id: UUID, ticket_id: UUID, *, fresh: bool = False
+) -> Ticket:
     """Org-scoped load. A ticket id from another org is indistinguishable
     from a nonexistent one -- both raise `TicketNotFoundError` (spec §8,
-    invariant #5)."""
-    ticket = (
-        await session.execute(
-            select(Ticket).where(Ticket.org_id == org_id, Ticket.id == ticket_id)
-        )
-    ).scalar_one_or_none()
+    invariant #5).
+
+    `fresh` re-reads the row's columns into a ticket this session already
+    holds, as `hold_ticket_client`'s callers need: the client they file under
+    is the one a move that just committed wrote, not the one loaded before."""
+    stmt = select(Ticket).where(Ticket.org_id == org_id, Ticket.id == ticket_id)
+    if fresh:
+        stmt = stmt.execution_options(populate_existing=True)
+    ticket = (await session.execute(stmt)).scalar_one_or_none()
     if ticket is None:
         raise TicketNotFoundError(tr("ticket {ticket_id} not found", ticket_id=ticket_id))
     return ticket
@@ -627,6 +778,7 @@ async def list_tickets(
     assigned_to: UUID | None = None,
     requester_id: UUID | None = None,
     device_id: UUID | None = None,
+    client_id: UUID | None = None,
     priority: str | None = None,
     q: str | None = None,
     unassigned: bool = False,
@@ -658,6 +810,7 @@ async def list_tickets(
             assigned_to=assigned_to,
             requester_id=requester_id,
             device_id=device_id,
+            client_id=client_id,
             priority=priority,
             q=q,
             unassigned=unassigned,
@@ -685,6 +838,7 @@ async def count_tickets(
     assigned_to: UUID | None = None,
     requester_id: UUID | None = None,
     device_id: UUID | None = None,
+    client_id: UUID | None = None,
     priority: str | None = None,
     q: str | None = None,
     unassigned: bool = False,
@@ -711,6 +865,7 @@ async def count_tickets(
         assigned_to=assigned_to,
         requester_id=requester_id,
         device_id=device_id,
+        client_id=client_id,
         priority=priority,
         q=q,
         unassigned=unassigned,
@@ -730,6 +885,7 @@ def _matching_tickets(
     assigned_to: UUID | None,
     requester_id: UUID | None,
     device_id: UUID | None,
+    client_id: UUID | None,
     priority: str | None,
     q: str | None,
     unassigned: bool = False,
@@ -757,6 +913,8 @@ def _matching_tickets(
         stmt = stmt.where(Ticket.requester_id == requester_id)
     if device_id is not None:
         stmt = stmt.where(Ticket.device_id == device_id)
+    if client_id is not None:
+        stmt = stmt.where(Ticket.client_id == client_id)
     if priority is not None:
         stmt = stmt.where(Ticket.priority == priority)
     if q is not None:
@@ -857,6 +1015,11 @@ async def update_ticket(
             resolved["device_id"] = None
         else:
             device = await _resolve_device(session, org_id, fields["device_id"])
+            # A ticket is its device's client's (spec §2.4); a ticket of X
+            # cannot take a device of Y. Moving the ticket is its own act
+            # (Task 3), and a ticket with a device cannot move (C9).
+            if device.client_id != ticket.client_id:
+                raise TicketClientError(tr("the ticket's client is not its device's client"))
             resolved["device_id"] = device.id
 
     # Pass 4: apply everything. Every key in `fields` is guaranteed to be in
@@ -880,6 +1043,7 @@ async def update_ticket(
         action="ticket.updated",
         target_type="ticket",
         target_id=str(ticket.id),
+        client_id=ticket.client_id,
         # Names only, never subject/description values -- spec §8.3.
         metadata={"changed_fields": sorted(changed_fields)},
     )
@@ -916,4 +1080,150 @@ async def update_ticket(
     if actor_type == "user" and "priority" in changed_fields:
         async with sla_misconfiguration_is_not_fatal("recompute_for_retriage", ticket.id):
             await recompute_for_retriage(session, org_id, ticket)
+    return ticket
+
+
+# ---------------------------------------------------------------------------
+# move_ticket (MSP clients spec §2.4, §3.2; plan 2026-10-26 Task 3)
+# ---------------------------------------------------------------------------
+
+# The origins whose ticket belongs to something else's client, and so stays
+# there: an alert's ticket is its device's alert's, and `integration` is the
+# change adapter's (`adapters.push_change`, the only path that files one) --
+# a change's ticket is the change's client's (C9's reasoning, research-1 §E6).
+_ORIGINS_THAT_STAY: frozenset[str] = frozenset({"alert", "integration"})
+
+
+async def _linked_to_an_alert(session: AsyncSession, org_id: UUID, ticket_id: UUID) -> bool:
+    """Whether a health alert, or one of its actions, still names this ticket
+    (research-1 §E6): its client is the alert's device's."""
+    return bool(
+        (
+            await session.execute(
+                select(
+                    exists().where(HealthAlert.org_id == org_id, HealthAlert.ticket_id == ticket_id)
+                    | exists().where(
+                        HealthAlertAction.org_id == org_id,
+                        HealthAlertAction.ticket_id == ticket_id,
+                    )
+                )
+            )
+        ).scalar_one()
+    )
+
+
+async def move_ticket(
+    session: AsyncSession,
+    org_id: UUID,
+    actor_id: UUID,
+    ticket_id: UUID,
+    *,
+    to_client_id: UUID,
+) -> Ticket:
+    """Move a ticket to another client (spec §2.4) -- the normal way out of
+    "Sin asignar".
+
+    The session must see BOTH clients (the route opens it so):
+    `its_client_to_children` is SECURITY INVOKER and moves the five child
+    tables in the same statement, and RLS must let it read the old client's
+    rows and write them in the new one.
+
+    Refused, before anything changes:
+    * a destination the session cannot see (404), an archived one (409), or
+      "Sin asignar" (422: tickets reach it only by email, C10);
+    * a ticket with a device (409, C9): a device's client never changes and
+      the ticket must agree with it -- take the device off, then move;
+    * a ticket an alert or a change opened, or one an alert still links to
+      (409, research-1 §E6): it belongs to that alert's or change's client;
+    * a ticket whose requester is a contact of another client (422,
+      research-1 §E2): its emailed replies would otherwise comment on a ticket
+      of a client the contact is not one of.
+
+    An assignee who cannot read tickets of the destination is taken off it --
+    a ticket is never left with someone who cannot open it -- and the audit
+    names them. The SLA is re-resolved among the destination's policies
+    (D2), as a human re-triage: `policy_source = 'retriage'`; when none
+    resolves, the ticket's SLA row is deleted and the audit says
+    `"sla": "voided"` (`tracking.recompute_for_move`).
+
+    The destination is loaded first, as every client a write is filed under
+    is: `client_for_new_rows`'s lock is a transaction's first (its module
+    docstring). Then the ticket is held (`hold_ticket_client`, then FOR
+    UPDATE) so no comment or attachment in flight is left behind.
+    """
+    try:
+        destination = await client_for_new_rows(session, org_id=org_id, client_id=to_client_id)
+    except ClientNotFound:
+        raise TicketNotFoundError(tr("no such client")) from None
+    except NotAcceptingNewRows as exc:
+        raise TicketConflictError(exc.detail) from None
+    if destination.kind == CLIENT_KIND_UNASSIGNED:
+        raise TicketClientError(tr("tickets reach Unassigned only by email"))
+
+    await hold_ticket_client(session, ticket_id, moving=True)
+    ticket = (
+        await session.execute(
+            select(Ticket)
+            .where(Ticket.org_id == org_id, Ticket.id == ticket_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if ticket is None:
+        raise TicketNotFoundError(tr("ticket {ticket_id} not found", ticket_id=ticket_id))
+    if ticket.client_id == to_client_id:
+        return ticket
+    if ticket.device_id is not None:
+        raise TicketConflictError(
+            tr("remove the ticket's device before moving it to another client")
+        )
+    if (
+        ticket.source_alert_id is not None
+        or ticket.origin in _ORIGINS_THAT_STAY
+        or await _linked_to_an_alert(session, org_id, ticket.id)
+    ):
+        raise TicketConflictError(
+            tr("a ticket opened by an alert or a change stays with its client")
+        )
+    if ticket.requester_id is not None:
+        _requester_belongs(await resolve_user(session, org_id, ticket.requester_id), to_client_id)
+
+    # Taken off the ticket: an assignee who cannot read the destination's.
+    dropped = ticket.assigned_to
+    if dropped is not None and await has_permission(
+        session, dropped, "ticket.read", client_id=to_client_id
+    ):
+        dropped = None
+    source = ticket.client_id
+    ticket.client_id = to_client_id
+    if dropped is not None:
+        ticket.assigned_to = None
+    await session.flush()
+
+    # A move changes which policies the ticket resolves among (D2): the same
+    # human re-triage `update_ticket` and `assign_ticket` run, under the same
+    # guard -- a broken calendar may cost the ticket its SLA, never the move --
+    # except that a destination with no policy at all leaves the ticket with
+    # no SLA, not the old client's (`recompute_for_move`).
+    sla: str | None = None
+    async with sla_misconfiguration_is_not_fatal("recompute_for_move", ticket.id):
+        sla = await recompute_for_move(session, org_id, ticket)
+
+    await audit_service.record(
+        session,
+        org_id=org_id,
+        actor_type="user",
+        actor_id=actor_id,
+        action="ticket.moved",
+        target_type="ticket",
+        target_id=str(ticket.id),
+        client_id=to_client_id,
+        metadata={
+            "from": str(source),
+            "to": str(to_client_id),
+            "unassigned": str(dropped) if dropped is not None else None,
+            "sla": sla,
+        },
+    )
+    await session.flush()
     return ticket

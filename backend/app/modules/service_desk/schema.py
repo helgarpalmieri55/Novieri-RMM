@@ -242,6 +242,10 @@ class TicketCreate(BaseModel):
     requester_id: UUID | None = None
     assigned_to: UUID | None = None
     device_id: UUID | None = None
+    # The client the ticket is filed under (MSP clients spec §3.2). Taken from
+    # the device when there is one; required when there is none. Naming one
+    # that contradicts the device is refused, never silently corrected.
+    client_id: UUID | None = None
     # `origin` is deliberately NOT a field here. It is a `create_ticket`
     # keyword argument decided by the CALLER (the route passes "technician";
     # Phase 15 passes "alert"), never by the request body.
@@ -320,6 +324,9 @@ class TicketOut(BaseModel):
 
     # No `org_id` field here -- security invariant #5.
     id: UUID
+    # The client it is filed under (MSP clients spec §2.4): its device's when
+    # it has one.
+    client_id: UUID
     number: str
     type: str
     category_id: UUID
@@ -382,6 +389,13 @@ class TicketAssign(BaseModel):
 
     assigned_to: UUID | None = None
     queue_id: UUID | None = None
+
+
+class TicketMove(BaseModel):
+    """Backs `POST .../move` (MSP clients spec §2.4): the client the ticket
+    goes to. Needs `ticket.write` in the ticket's client and in this one."""
+
+    client_id: UUID
 
 
 class ApprovalDecision(BaseModel):

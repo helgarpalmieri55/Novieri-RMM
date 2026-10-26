@@ -78,8 +78,9 @@ def _canonical_fields(
     target_type: str,
     target_id: str,
     metadata: dict[str, Any],
+    client_id: UUID | None = None,
 ) -> dict[str, Any]:
-    return {
+    fields: dict[str, Any] = {
         "org_id": str(org_id),
         "ts": rfc3339(ts),
         "actor_type": actor_type,
@@ -89,6 +90,12 @@ def _canonical_fields(
         "target_id": target_id,
         "metadata": metadata,
     }
+    # ONLY WHEN SET (plan 2026-10-26 C6). Every event written before the
+    # column existed has NULL here and must hash exactly as it did; a key
+    # present with a null value would change every stored link.
+    if client_id is not None:
+        fields["client_id"] = str(client_id)
+    return fields
 
 
 ActorType = Literal["user", "agent", "system"]
@@ -110,6 +117,7 @@ class AuditEntry:
     target_type: str = ""
     target_id: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    client_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -157,6 +165,7 @@ class AuditService:
         target_type: str = "",
         target_id: str = "",
         metadata: dict[str, Any] | None = None,
+        client_id: UUID | None = None,
     ) -> AuditEvent:
         metadata = _with_channel(metadata or {})
         # serialize appends per org so the chain stays linear
@@ -183,6 +192,7 @@ class AuditService:
             target_type=target_type,
             target_id=target_id,
             metadata=metadata,
+            client_id=client_id,
         )
         event = AuditEvent(
             org_id=org_id,
@@ -193,6 +203,7 @@ class AuditService:
             target_type=target_type,
             target_id=target_id,
             meta=metadata,
+            client_id=client_id,
             prev_hash=prev_hash,
             hash=self._link(prev_hash, fields),
         )
@@ -268,6 +279,7 @@ class AuditService:
                 target_type=entry.target_type,
                 target_id=entry.target_id,
                 metadata=metadata,
+                client_id=entry.client_id,
             )
             link = self._link(prev_hash, fields)
             events.append(
@@ -281,6 +293,7 @@ class AuditService:
                     target_type=entry.target_type,
                     target_id=entry.target_id,
                     meta=metadata,
+                    client_id=entry.client_id,
                     prev_hash=prev_hash,
                     hash=link,
                 )
@@ -311,6 +324,7 @@ class AuditService:
                 target_type=event.target_type,
                 target_id=event.target_id,
                 metadata=event.meta,
+                client_id=event.client_id,
             )
             if event.prev_hash != prev_hash or not hmac.compare_digest(
                 event.hash, self._link(prev_hash, fields)

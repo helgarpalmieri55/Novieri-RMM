@@ -65,6 +65,7 @@ const QUEUES: QueueOut[] = [
 
 const TICKET_OPEN: TicketOut = {
   id: "t1",
+  client_id: "o1",
   number: "INC-1",
   type: "incident",
   category_id: "cat1",

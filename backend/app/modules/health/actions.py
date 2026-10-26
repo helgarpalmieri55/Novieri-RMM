@@ -693,6 +693,10 @@ async def _publish_approval_request(
         subject_id=alert.id,
         payload=payload,
         actor_user_id=None,
+        # Read from the database (trigger-filled, expired after an UPDATE).
+        client_id=(
+            await session.execute(select(HealthAlert.client_id).where(HealthAlert.id == alert.id))
+        ).scalar_one(),
     )
 
 
@@ -801,6 +805,14 @@ async def _execute_open_ticket(
         subject += f" {alert.selector}"
     subject += f" on {hostname}"
 
+    # The alert's client -- its device's, copied by trigger (H) -- read from
+    # the database: the attribute is server-set and expires after an UPDATE.
+    # `create_ticket` takes the device's client anyway and refuses a
+    # different one; naming it says which client this path files under.
+    alert_client = (
+        await session.execute(select(HealthAlert.client_id).where(HealthAlert.id == alert.id))
+    ).scalar_one()
+
     try:
         # `last_error` below is stored, so a refusal is worded in English whatever the
         # language of the request that approved the action.
@@ -825,6 +837,7 @@ async def _execute_open_ticket(
                 ),
                 origin="alert",
                 source_alert_id=alert.id,
+                client_id=alert_client,
             )
     except TicketValidationError as exc:
         row.state = "dead"

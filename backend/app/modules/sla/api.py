@@ -79,7 +79,12 @@ from app.modules.sla.calendars import (
     replace_windows,
     update_calendar,
 )
-from app.modules.sla.errors import SlaNotFoundError, SlaValidationError
+from app.modules.sla.errors import (
+    SlaClientError,
+    SlaConflictError,
+    SlaNotFoundError,
+    SlaValidationError,
+)
 from app.modules.sla.models import SlaCalendar, SlaCalendarHoliday, SlaCalendarWindow, TicketSla
 from app.modules.sla.policies import (
     create_policy,
@@ -126,9 +131,15 @@ router = APIRouter(tags=["sla"])
 def _http_error(exc: SlaValidationError) -> HTTPException:
     """By TYPE, never by message text. `SlaNotFoundError` (a subclass) is 404
     -- and it is the SAME error for "absent" and "another org's", so this adds
-    no oracle; every other `SlaValidationError` is 400."""
+    no oracle; every other `SlaValidationError` is 400, except a policy's
+    client's own two: "Sin asignar" (`SlaClientError`) is a 422 and an
+    archived client (`SlaConflictError`) a 409."""
     if isinstance(exc, SlaNotFoundError):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    if isinstance(exc, SlaClientError):
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
+    if isinstance(exc, SlaConflictError):
+        return HTTPException(status.HTTP_409_CONFLICT, str(exc))
     return HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
 
@@ -521,6 +532,7 @@ async def create_policy_route(
                 escalate_priority=body.escalate_priority,
                 escalate_to_queue_id=body.escalate_to_queue_id,
                 active=body.active,
+                client_id=body.client_id,
             )
             out = PolicyOut.model_validate(policy)
     except SlaValidationError as exc:

@@ -853,6 +853,7 @@ async def evaluate_org(
                     "device_id": str(finding.device_id) if finding.device_id else None,
                 },
                 actor_user_id=None,
+                client_id=None,  # plan 2026-10-26 Task 11 sets the subnet's client
             )
             published += 1
 

@@ -433,6 +433,7 @@ def a_ticket_for(admin_engine: AsyncEngine):
 
                 ticket = Ticket(
                     org_id=org_id,
+                    client_id=org_id,
                     number=f"T-{uuid4().hex[:10]}",
                     type="incident",
                     category_id=category.id,

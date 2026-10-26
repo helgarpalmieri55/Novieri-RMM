@@ -235,7 +235,7 @@ async def test_a_check_without_notify_publishes_no_event_and_reaches_no_recipien
     `declared_action_kinds`, the silent half observes a stored
     `health.alert_raised` row and 1 delivered recipient where it expects 0.
     """
-    from app.models import HealthAlert, HealthAlertAction
+    from app.models import DomainEvent, HealthAlert, HealthAlertAction
 
     pair = await _loud_and_silent(admin_engine, silent_type=silent_type, loud_type=loud_type)
     await _seed_notification_rule(admin_engine, pair.org_id, pair.org.user_id)
@@ -245,6 +245,17 @@ async def test_a_check_without_notify_publishes_no_event_and_reaches_no_recipien
     silent_alert = await _open(admin_engine, pair, pair.silent, now=now)
 
     assert await _events_for(admin_engine, pair.org_id, loud_alert) == ["health.alert_raised"]
+    # Phase 2 Task 1: the event names the alert's client.
+    async with AsyncSession(admin_engine) as session:
+        event_client = (
+            await session.execute(
+                select(DomainEvent.client_id).where(DomainEvent.subject_id == loud_alert)
+            )
+        ).scalar_one()
+        alert_client = (
+            await session.execute(select(HealthAlert.client_id).where(HealthAlert.id == loud_alert))
+        ).scalar_one()
+    assert event_client == alert_client
     assert await _recipients_for(admin_engine, pair.org_id, loud_alert) >= 1
 
     # The RECIPIENT COUNT first, deliberately: §7.3 names it as the observable,

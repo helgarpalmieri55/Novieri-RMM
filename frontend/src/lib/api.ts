@@ -4030,6 +4030,18 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Move a ticket to another client (`POST .../move`, MSP clients spec §2.4).
+   * The server needs `ticket.write` in both clients and refuses -- a 409 with
+   * a sentence -- a ticket with a device, or one an alert or a change opened.
+   */
+  moveTicket(id: string, clientId: string): Promise<TicketOut> {
+    return this.request<TicketOut>(`/service-desk/tickets/${id}/move`, {
+      method: "POST",
+      body: JSON.stringify({ client_id: clientId }),
+    });
+  }
+
   approveTicket(id: string, body: ApprovalDecision): Promise<TicketOut> {
     return this.request<TicketOut>(`/service-desk/tickets/${id}/approve`, {
       method: "POST",

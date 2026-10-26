@@ -130,7 +130,11 @@ export function useCreateTicketMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: TicketCreate) => api.createTicket(body),
+    // The body is BUILT HERE, inside the mutation, not before it: a body that
+    // cannot name its client yet throws `InternalScopeUnknown`
+    // (`lib/internalClient.ts`), which then fails the mutation -- so the
+    // form's error surface says why and nothing is sent.
+    mutationFn: (build: () => TicketCreate) => api.createTicket(build()),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["service-desk-tickets"] });
     },
@@ -175,6 +179,22 @@ export function useAssignTicketMutation() {
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: ["service-desk-tickets"] });
       void queryClient.invalidateQueries({ queryKey: ["service-desk-ticket", variables.id] });
+    },
+  });
+}
+
+// A move re-resolves the ticket's SLA among the new client's policies
+// (plan 2026-10-26 D2), so the ticket's SLA panel refetches too.
+export function useMoveTicketMutation() {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, clientId }: { id: string; clientId: string }) =>
+      api.moveTicket(id, clientId),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ["service-desk-tickets"] });
+      void queryClient.invalidateQueries({ queryKey: ["service-desk-ticket", variables.id] });
+      void queryClient.invalidateQueries({ queryKey: ["sla-ticket", variables.id] });
     },
   });
 }

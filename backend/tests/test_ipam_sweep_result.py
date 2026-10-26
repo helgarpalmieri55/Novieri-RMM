@@ -443,6 +443,8 @@ async def test_one_out_of_scope_address_rejects_the_whole_result(
     assert [e.event_type for e in events] == ["ipam.sweep_rejected"]
     assert events[0].subject_type == "ipam_sweep_run"
     assert events[0].subject_id == fx.run_id
+    # Phase 2 Task 1: the event names the client of the job that was rejected.
+    assert events[0].client_id == job.client_id
     assert events[0].payload["device_id"] == str(fx.device_id)
     assert events[0].payload["offending_count"] == 1
 

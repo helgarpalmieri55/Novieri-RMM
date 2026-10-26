@@ -9,6 +9,7 @@ import type { ApiClient, Device, DeviceInventory, Me, Page } from "../../../lib/
 import type { UserOut } from "../../settings/types";
 import type { DeviceStatus } from "../../patch/types";
 import { MyWorkPage } from "../MyWorkPage";
+import { NewTicketDialog } from "../NewTicketDialog";
 import { ServiceDeskAdminPage } from "../ServiceDeskAdminPage";
 import { TicketDetailPage } from "../TicketDetailPage";
 import { TicketListPage } from "../TicketListPage";
@@ -231,6 +232,7 @@ const CATEGORIES: CategoryOut[] = [
 
 const TICKET_OPEN: TicketOut = {
   id: "t1",
+  client_id: "o1",
   number: "INC-1",
   type: "incident",
   category_id: "cat1",
@@ -531,7 +533,47 @@ describe("TicketListPage wiring", () => {
       requester_id: "req-1",
       assigned_to: null,
       device_id: null,
+      // No device, so the ticket names its client: the internal client,
+      // whose id is `/me`'s org_id until the phase-3 selector (MSP clients
+      // plan 2026-10-26 Task 2).
+      client_id: "o1",
     });
+  });
+
+  // A device decides the client on the server, which refuses a different
+  // one; the console sends none rather than guessing the device's.
+  it("sends no client for a ticket with a device", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<TicketListPage />);
+
+    await user.click(await screen.findByRole("button", { name: "New ticket" }));
+    await user.selectOptions(screen.getByLabelText("Category"), "cat1");
+    await user.type(screen.getByLabelText("Subject"), "Laptop won't boot");
+    await pickEntity(user, "Requester", /Rachel Requester/);
+    await pickEntity(user, "Device (optional)", /BUILD-01/);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(api.createTicket).toHaveBeenCalledTimes(1));
+    const body = vi.mocked(api.createTicket as ApiClient["createTicket"]).mock.calls[0]?.[0];
+    expect(body).toMatchObject({ device_id: "dev-2" });
+    expect(body).not.toHaveProperty("client_id");
+  });
+
+  // Without `/me` the console cannot name the internal client: it sends
+  // nothing -- a body without a client is a 422 the person can do nothing
+  // about -- and says why in the form's own error surface.
+  it("sends nothing and says why when the client cannot be named yet", async () => {
+    const user = userEvent.setup();
+    api.me = vi.fn().mockRejectedValue(new ApiError(503, ""));
+    renderWithProviders(<NewTicketDialog open onClose={() => {}} myUserId="req-1" />);
+
+    await screen.findByRole("option", { name: "Hardware" });
+    await user.selectOptions(screen.getByLabelText("Category"), "cat1");
+    await user.type(screen.getByLabelText("Subject"), "Laptop won't boot");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/has not loaded yet/);
+    expect(api.createTicket).not.toHaveBeenCalled();
   });
 
   // ------------------------------------------------------------------
@@ -1077,6 +1119,73 @@ describe("TicketDetailPage wiring", () => {
     expect(api.changeTicketStatus).toHaveBeenCalledWith("t1", {
       to_status: "resolved",
       reason: "Fixed.",
+    });
+  });
+
+  // Moving a ticket to another client (MSP clients plan 2026-10-26 Task 3):
+  // the clients come from `GET /clients`, never "Unassigned" (C10), an
+  // archived one, nor the ticket's own, and the server's refusal is shown in
+  // its own words.
+  describe("moving a ticket to another client", () => {
+    const CLIENTS = [
+      { id: "o1", name: "Novieri IT", kind: "internal" },
+      { id: "c-acme", name: "Acme", kind: "customer" },
+      { id: "u1", name: "Unassigned", kind: "unassigned" },
+      { id: "c-beta", name: "Beta", kind: "customer" },
+      // Archived: it takes nothing new, so a move there is only a 409.
+      { id: "c-gone", name: "Gone Ltd", kind: "customer", status: "archived" },
+    ].map((client) => ({
+      status: "active", email_domains: [], phone: "", address: "", website: "", notes: "",
+      enabled_modules: [], device_count: 0, site_count: 0, ...client,
+    })) as Awaited<ReturnType<ApiClient["listClients"]>>;
+
+    beforeEach(() => {
+      api.me = vi.fn().mockResolvedValue({
+        ...ME_FULL, permissions: [...ME_FULL.permissions, "clients.read"],
+      });
+      api.listClients = vi.fn().mockResolvedValue(CLIENTS);
+      api.moveTicket = vi.fn().mockResolvedValue({ ...TICKET_OPEN, client_id: "c-acme" });
+    });
+
+    it("moves the ticket to a client chosen from the list", async () => {
+      const user = userEvent.setup();
+      renderDetail("t1");
+
+      await screen.findByText("INC-1: Laptop won't boot");
+      expect(await screen.findByText(/This ticket belongs to Novieri IT/)).toBeInTheDocument();
+      const select = await screen.findByLabelText("Move to another client");
+      const offered = within(select).getAllByRole("option").map((option) => option.textContent);
+      expect(offered).toEqual(["Choose a client…", "Acme", "Beta"]);
+      await user.selectOptions(select, "c-acme");
+      await user.click(screen.getByRole("button", { name: "Move ticket" }));
+
+      expect(api.moveTicket).toHaveBeenCalledWith("t1", "c-acme");
+    });
+
+    it("shows the server's refusal in its own words", async () => {
+      api.moveTicket = vi.fn().mockRejectedValue(
+        new ApiError(409, JSON.stringify({
+          detail: "remove the ticket's device before moving it to another client",
+        })),
+      );
+      const user = userEvent.setup();
+      renderDetail("t1");
+
+      await user.selectOptions(await screen.findByLabelText("Move to another client"), "c-beta");
+      await user.click(screen.getByRole("button", { name: "Move ticket" }));
+
+      expect(
+        await screen.findByText(/remove the ticket's device before moving it to another client/),
+      ).toBeInTheDocument();
+    });
+
+    it("is not offered without clients.read, the list it needs", async () => {
+      api.me = vi.fn().mockResolvedValue(ME_FULL);
+      renderDetail("t1");
+
+      await screen.findByText("INC-1: Laptop won't boot");
+      expect(screen.queryByLabelText("Move to another client")).not.toBeInTheDocument();
+      expect(api.listClients).not.toHaveBeenCalled();
     });
   });
 
