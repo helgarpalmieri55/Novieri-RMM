@@ -512,12 +512,14 @@ loopback away and turn the agent into a privilege-escalation primitive. The test
 in §13 include one that pins this: a tool invoked directly on the executor while
 the caller lacks its permission must still 403.
 
-**The cost:** the prefilter reads `route_permission`-recorded codes org-wide, and
-`require_permission` itself only counts org-wide grants
-(`has_permission(..., device_group_id=None)`), so a user holding only a
-*group-scoped* grant sees the tool offered and then gets a 403. That is the
-existing behaviour of every route in the platform, not a new inconsistency, and
-it is left alone rather than modelled twice.
+**The cost:** the prefilter reads the codes the person holds on EVERY client
+(`user_permission_codes(session, user_id)`, no `client_id`), while
+`require_permission` admits a code held on any one client and runs the request
+in the clients where it is held (MSP clients spec §2.1, §7 point 1). So a
+technician whose grants are per client is offered fewer tools than the routes
+would admit -- the prefilter fails closed -- and never more. It is left alone
+rather than modelled twice; a per-client tool list belongs with the client
+selector (MSP clients phase 3).
 
 ---
 

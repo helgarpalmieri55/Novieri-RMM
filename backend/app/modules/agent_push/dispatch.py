@@ -57,7 +57,7 @@ from app.core.i18n import N_, tr, tr_marked
 from app.core.storage import ObjectStore
 from app.core.vault import VaultService
 from app.jobs.engine import DeviceAwaitingReview, JobEngine
-from app.models import Device, Job
+from app.models import Client, Device, Job, Site
 from app.models.core import AgentRelease
 from app.modules.agent_push import credential_realm
 from app.modules.agent_push import host_key as host_key_service
@@ -67,7 +67,7 @@ from app.modules.agent_push.credential_scope import (
     WINDOWS_DOMAIN_CREDENTIAL_TYPE,
     resolve_push_credential,
 )
-from app.modules.agent_push.errors import PushValidationError
+from app.modules.agent_push.errors import PushTargetClosedError, PushValidationError
 from app.modules.agent_push.jobtypes import (
     INSTALL_JOB_TYPE,
     INSTALL_TTL_S,
@@ -84,6 +84,7 @@ from app.modules.agent_push.preflight import (
     transport_for_os_family,
 )
 from app.modules.agent_push.run_contract import RunTargetDispatch, RunTargetDispatchError
+from app.services.client_sites import CLIENT_ARCHIVED, NotAcceptingNewRows, SiteNotFound
 from app.services.dns_name import InvalidDnsName, normalise_dns_name
 from app.services.enrollment import create_token
 
@@ -176,6 +177,15 @@ DISPATCH_REFUSAL_REASONS: dict[str, str] = {
         N_(
             "the chosen Windows account now names a different domain from the one recorded "
             "for it. Open it under Credentials and save it again"
+        )
+    ),
+    # MSP clients Task 9: an archived site or client enrols nothing, so a
+    # pushed agent would install and never appear.
+    "site_archived": (
+        N_(
+            "the machine is filed under an archived site, or under a client that has been "
+            "archived, and nothing is enrolled into either. Push only machines of active sites "
+            "and clients"
         )
     ),
 }
@@ -521,6 +531,15 @@ async def pre_dispatch_checks(
                 elif not credential_realm.fqdn_in_realm(name, realm):
                     refuse(address, "outside_realm", dns_name=name, realm=realm)
 
+        # AN ARCHIVED SITE OR CLIENT ENROLS NOTHING (MSP clients Task 9): the
+        # token minted for the target's site would be refused by `create_token`
+        # and every enrollment refused by `enroll`. Named here, before the
+        # decrypt, rather than discovered at the mint.
+        for decision in decisions:
+            assert decision.device_id is not None
+            if await _site_closed(session, org_id, decision.device_id):
+                refuse(decision.address, "site_archived")
+
         # THE ONE INSTALL-ONLY BOUND THE FOUR DO NOT COVER: a confirmed host key
         # (§7.3), for every SSH target. A push to a host with no confirmed key,
         # or one whose key has changed, is refused -- not prompted, not warned
@@ -825,16 +844,29 @@ async def _dispatch_install(
             )
         )
     ).scalar_one()
-    issued = await create_token(
-        session,
-        org_id=org_id,
-        site_id=target_site,
-        created_by=actor_id,
-        name=f"push:{batch_id}:{decision.address}",
-        expires_in_hours=None,
-        expires_in_minutes=PUSH_ENROLL_TOKEN_MINUTES,
-        max_uses=1,
-    )
+    try:
+        issued = await create_token(
+            session,
+            org_id=org_id,
+            site_id=target_site,
+            created_by=actor_id,
+            name=f"push:{batch_id}:{decision.address}",
+            expires_in_hours=None,
+            expires_in_minutes=PUSH_ENROLL_TOKEN_MINUTES,
+            max_uses=1,
+        )
+    except (SiteNotFound, NotAcceptingNewRows):
+        # `pre_dispatch_checks` refused an archived site by name; reaching this
+        # means it was archived since (or is not this session's to see). A
+        # refusal, never a 500: the ticked push's route rolls the batch back
+        # and answers 409, the pacer records `site_archived` for this target.
+        raise PushTargetClosedError(
+            tr(
+                "the machine at {address} is filed under a site or client that is archived "
+                "or not visible to you; nothing was dispatched",
+                address=decision.address,
+            )
+        ) from None
 
     url = object_store.presign_agent_release_get(
         release.version, os_name, arch, expires_in=INSTALL_TTL_S
@@ -954,6 +986,22 @@ async def _device_transport(
     os_family, _arch, fqdn = await _device_row(session, org_id, device_id)
     transport = transport_for_os_family(os_family)
     return transport, (fqdn if transport == "winrm" else None)
+
+
+async def _site_closed(session: AsyncSession, org_id: UUID, device_id: UUID) -> bool:
+    """Whether the target device's site is archived, or its client is."""
+    found = (
+        await session.execute(
+            select(Site.archived_at, Client.status)
+            .join(Device, Device.site_id == Site.id)
+            .join(Client, Client.id == Site.client_id)
+            .where(Device.id == device_id, Device.org_id == org_id)
+        )
+    ).one_or_none()
+    if found is None:
+        return False  # the ladder's own bounds answer a device it cannot see
+    archived_at, client_status = found
+    return archived_at is not None or client_status == CLIENT_ARCHIVED
 
 
 async def _device_target(
@@ -1269,6 +1317,10 @@ class RunDispatcher:
                 )
         except DeviceAwaitingReview:
             return RunTargetDispatch(refusals=("site_server_awaiting_review",))
+        except PushTargetClosedError:
+            # Archived since `pre_dispatch_checks` ran: the savepoint above has
+            # rolled the token back.
+            return RunTargetDispatch(refusals=("site_archived",))
         return RunTargetDispatch(
             job_id=job.id, envelope=envelope, credential_fingerprint=presented
         )

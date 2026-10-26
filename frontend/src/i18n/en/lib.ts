@@ -40,6 +40,11 @@ export const lib = {
     sentenceOne: "permission to {phrase}",
     sentenceMany: "permission to {first} {and} {last}",
   },
+  // The internal client the console works on until the client selector
+  // exists (lib/internalClient.ts).
+  internalClient: {
+    unknown: "Your account has not loaded yet, so this console cannot tell which client this is for. Nothing was sent. Reload the page and try again.",
+  },
   // Prerequisite detectors (lib/detectors.ts).
   detectors: {
     addComputer: "Add a computer",

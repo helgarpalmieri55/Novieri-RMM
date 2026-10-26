@@ -243,20 +243,23 @@ the moment to propose it — with the migration of every caller in the same PR.
 §16 records it as the one kernel change this module deliberately did **not**
 make.
 
-### 0.6 A report is org-wide, and a group-scoped grant does not run it
+### 0.6 A report is org-wide, and a per-client grant does not run it
 
 `app/core/rbac.py::user_permission_codes` counts a `user_roles` row with a
-`device_group_id` **only** when the question is asked about that same group;
-`require_permission` asks with `device_group_id=None`. So a technician whose
-`devices.read` is scoped to one device group already fails every report gate
-today, without this spec doing anything.
+`client_id` **only** when the question is asked about that same client; the
+report gate (`require_report_sources`) asks with `client_id=None`. So a
+technician whose `devices.read` is scoped to one client fails every report
+gate, without this spec doing anything. (Until the MSP clients model, the
+scope was a device group, `user_roles.device_group_id`, and the rule was the
+same; `docs/superpowers/specs/2026-10-23-msp-clientes-design.md` §2.1.)
 
 That is the correct behaviour and it is made explicit rather than left as an
 accident: a fleet aggregate computed for someone entitled to part of the fleet
 is either wrong (the denominator includes devices they may not see) or a leak
-(it tells them how many there are). Group-scoped reporting needs RBAC to express
-"aggregate, limited to group G", which it cannot; §15 records it as **blocked**,
-not deferred.
+(it tells them how many there are). Per-client reporting is a report run under
+one client's scope, which the client-scope RLS of `CLAUDE.md` invariant 5a can
+now express; building it belongs to the MSP clients project (its spec §1.4
+lists reports as per-client), and §15 records it.
 
 ### 0.7 Running a report is not audited; exporting one is
 
@@ -1074,7 +1077,7 @@ Test-first, per `CLAUDE.md`. The security-relevant ones are 2–5.
 4. **The conjunction denies.** For each report: a user holding `reporting.read`
    and every source code gets `200`; the same user missing exactly one source
    code gets `403` naming it — one parametrised case per code, so no report can
-   accidentally under-require. Plus a group-scoped-grant case (§0.6) that must
+   accidentally under-require. Plus a client-scoped-grant case (§0.6) that must
    also be `403`.
 5. **Tenancy.** A report run as org A never returns an org B row, asserted on
    seeded two-org data for every report; and no report route's params model
@@ -1171,9 +1174,11 @@ today, and here is what would unblock it".
   attachment path. Unblocked by the link-only design in §0.11 *plus* a signed,
   expiring, single-use link credential — which is a kernel concern, not this
   module's to invent.
-- **Group-scoped reports.** §0.6: RBAC cannot express "aggregate limited to
-  group G", and RLS keys on org alone. Unblocked by a scoping mechanism the
-  kernel does not have.
+- **Per-client reports.** §0.6: a grant scoped to one client does not run a
+  report. The scoping mechanism now exists (per-client grants, and RLS keyed on
+  the session's clients as well as the org, `CLAUDE.md` invariant 5a), so this
+  is no longer blocked by the kernel; it waits on the MSP clients project
+  (`docs/superpowers/specs/2026-10-23-msp-clientes-design.md` §1.4).
 - **Cross-org / MSP roll-up.** Requires `admin_session`, which bypasses RLS by
   design. Unblocked only by a specified, audited cross-org read path — a kernel
   decision with an invariant-#5 review attached, not a reporting feature.

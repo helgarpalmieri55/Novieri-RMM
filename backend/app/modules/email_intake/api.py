@@ -555,11 +555,17 @@ async def list_messages_route(
     until: datetime | None = Query(default=None),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
-    ctx: AuthContext = Depends(require_permission("email_intake.read")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("email_intake.read")),
 ) -> MessageLogOut:
     """The disposition log, filtered on `disposition`, `mailbox_id` and a
     time range (spec §10), with `total` for paging and the quarantined count
     over the whole scope.
+
+    EVERY CLIENT'S MAIL (MSP clients spec, invariant 5a): the log holds the
+    sender and the parsed body of every message any client's people sent,
+    including the quarantined ones that belong to no client yet. Reading it
+    needs `email_intake.read` on every client, not on one
+    (`tests/test_global_writes.py::GLOBAL_READS`).
 
     `body_text` is in the response and that is deliberate (spec §10): it is
     the PARSED text, never the raw RFC822 message, and it is how an operator

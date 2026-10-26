@@ -252,7 +252,12 @@ async def retry_job(
         if stated:
             refusal += ". " + tr_marked(stated)
         raise RetryForbidden(refusal)
-    if not await has_permission(session, user_id, required):
+    # ASKED ABOUT THE JOB'S OWN CLIENT (MSP clients spec §2.1): a grant on X
+    # authorizes re-running X's jobs and says nothing about Y's. Without the
+    # client only every-client grants would count, and a technician granted
+    # the dispatch code on X alone could not retry X's own jobs. `original`
+    # was just read by the SELECT above, so `client_id` is loaded, not expired.
+    if not await has_permission(session, user_id, required, client_id=original.client_id):
         raise RetryForbidden(
             tr(
                 "re-running a {job_type} job requires {required}, the permission its own dispatch "

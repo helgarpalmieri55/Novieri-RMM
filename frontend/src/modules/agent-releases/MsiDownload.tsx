@@ -1,10 +1,11 @@
 /**
  * The MSI for Group Policy (GPO MSI spec 2026-09-30 §2.1, §2.4, §2.6).
  *
- * ONE MSI PER ORGANISATION AND LINK, BUILT ON REQUEST. It carries the
- * published agent and this organisation's install link; a computer that
- * installs it joins through the link and waits in Devices → Waiting for
- * review, like any other computer that used the link.
+ * ONE MSI PER SITE AND LINK, BUILT ON REQUEST. It carries the published agent
+ * and one site's install link (one link per site, MSP clients spec §1.5); a
+ * computer that installs it joins through the link, lands in that site, and
+ * waits in Devices → Waiting for review, like any other computer that used
+ * the link.
  *
  * THE LINK IS PASTED, BECAUSE THE SERVER DOES NOT HAVE IT. The server keeps
  * only the code's hash, so the MSI can only be built from a link the
@@ -61,7 +62,16 @@ const DOWNLOADS: { arch: MsiArch; label: MessageKey }[] = [
 /** What is kept of a download: its name and digest, never the bytes. */
 type SavedMsi = Pick<InstallLinkMsi, "filename" | "sha256">;
 
-export function MsiDownload({ linkOn, revealed }: { linkOn: boolean; revealed: string | null }) {
+export function MsiDownload({
+  linkOn,
+  revealed,
+  siteId,
+}: {
+  linkOn: boolean;
+  revealed: string | null;
+  /** The site whose link this is: one link per site (MSP clients spec §1.5). */
+  siteId: string;
+}) {
   const t = useT();
   const api = useApi();
   const [link, setLink] = useState(revealed ?? "");
@@ -72,7 +82,7 @@ export function MsiDownload({ linkOn, revealed }: { linkOn: boolean; revealed: s
   const code = codeFromLink(link);
   const download = useMutation({
     mutationFn: async (arch: MsiArch): Promise<SavedMsi> => {
-      const msi = await api.downloadInstallLinkMsi({ code: code ?? "", arch });
+      const msi = await api.downloadInstallLinkMsi(siteId, { code: code ?? "", arch });
       saveBlob(msi.blob, msi.filename);
       return { filename: msi.filename, sha256: msi.sha256 };
     },

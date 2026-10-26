@@ -48,7 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
 from app.core.i18n import tr
-from app.core.identity import domain_refusal
+from app.core.identity import STAFF_KIND, domain_refusal
 from app.core.wire_words import say
 from app.models import Client, Permission, Role, RolePermission, User, UserRole
 from app.models.clients import CLIENT_KIND_UNASSIGNED
@@ -257,7 +257,7 @@ def _translating(what: str) -> Iterator[None]:
 
 
 async def _target(session: AsyncSession, org_id: UUID, user_id: UUID) -> User:
-    """This organization's user, or a 404.
+    """This organization's TECHNICIAN, or a 404.
 
     `User.org_id == org_id` mirrors the RLS policy rather than relying on it.
     RLS is the backstop; a route with no predicate of its own passes every test
@@ -266,10 +266,20 @@ async def _target(session: AsyncSession, org_id: UUID, user_id: UUID) -> User:
 
     A 404 rather than a 403: whether a user id exists in another tenant is
     itself information this organization has no business learning.
+
+    STAFF ONLY (MSP clients Task 9 review 1). A contact (`users.kind =
+    'contact'`, spec §1.3) is one client's person, managed from that client's
+    page (`/api/v1/contacts/{id}`, `clients.manage` on the client); here it is
+    a 404 on every read and write. Its `external_subject` is a placeholder no
+    identity provider issued, so a disable, reset or delete reaching Keycloak
+    with it would act on nobody -- or, were a subject ever reused, on someone
+    else.
     """
     user = (
         await session.execute(
-            select(User).where(User.id == user_id, User.org_id == org_id)
+            select(User).where(
+                User.id == user_id, User.org_id == org_id, User.kind == STAFF_KIND
+            )
         )
     ).scalar_one_or_none()
     if user is None:
@@ -356,6 +366,7 @@ async def _active_org_admins(session: AsyncSession, org_id: UUID) -> set[UUID]:
         .join(Role, Role.id == UserRole.role_id)
         .where(
             User.org_id == org_id,
+            User.kind == STAFF_KIND,
             User.status == ACTIVE,
             Role.name == ORG_ADMIN,
             UserRole.client_id.is_(None),
@@ -480,11 +491,15 @@ async def list_users(session: AsyncSession, *, org_id: UUID) -> list[UserView]:
     Deleted users are included, carrying `status: "deleted"`. Hiding them would
     make the row's retention (rule 2) invisible to the operator, who would then
     reasonably conclude the delete failed and try again.
+
+    Technicians only: a contact is listed on its client's page (`_target`).
     """
     users = list(
         (
             await session.execute(
-                select(User).where(User.org_id == org_id).order_by(User.email)
+                select(User)
+                .where(User.org_id == org_id, User.kind == STAFF_KIND)
+                .order_by(User.email)
             )
         ).scalars()
     )
@@ -612,9 +627,16 @@ async def create_user(
 
     roles = [await _visible_role(session, org_id, role_id) for role_id in role_ids]
 
+    # ANY user, contacts included and deliberately not `STAFF_KIND` alone: one
+    # address is one person (MSP clients Task 9 review 1, I1), and a technician
+    # created with a contact's address would make that address's inbound mail
+    # ambiguous. First-login provisioning cannot be refused this way and is
+    # not (`app/api/deps.py::admit`); this console form can, and is. LIMIT 1:
+    # a sign-in may already have made two rows share an address, and that is
+    # a 409 here, not a MultipleResultsFound.
     existing = (
         await session.execute(
-            select(User.id).where(User.org_id == org_id, User.email == address)
+            select(User.id).where(User.org_id == org_id, User.email == address).limit(1)
         )
     ).scalar_one_or_none()
     if existing is not None:

@@ -271,6 +271,7 @@ describe("refusalReasonLabel", () => {
         "host_key_changed",
         "host_key_unconfirmed",
         "no_asset",
+        "ambiguous_asset",
         "no_authorization",
         "no_site_server",
         "no_winrm_site_server",

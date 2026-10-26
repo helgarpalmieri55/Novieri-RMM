@@ -80,11 +80,18 @@ CREATE UNIQUE INDEX uq_health_assignment_device ON health_profile_assignment
   (org_id, device_id)       WHERE device_id IS NOT NULL;
 CREATE UNIQUE INDEX uq_health_assignment_group  ON health_profile_assignment
   (org_id, device_group_id) WHERE device_group_id IS NOT NULL;
-CREATE UNIQUE INDEX uq_health_assignment_org    ON health_profile_assignment
-  (org_id)                  WHERE device_id IS NULL AND device_group_id IS NULL;
+CREATE UNIQUE INDEX uq_health_assignment_client_org ON health_profile_assignment
+  (org_id, client_id) NULLS NOT DISTINCT
+                            WHERE device_id IS NULL AND device_group_id IS NULL;
 ```
 
 plus `CHECK (NOT (device_id IS NOT NULL AND device_group_id IS NOT NULL))`.
+
+The org-default index was `uq_health_assignment_org (org_id)` until MSP
+clients migration 0231 (Task 8b) made it per client: the org's default is the
+row with no client, unique among those rows, and a client may hold a default of
+its own beside it. A device's and a group's assignment already belong to their
+parent's client.
 
 Rejected: **union of every matching profile** (the Atera-ish "all applicable
 profiles apply"). Union has no way to express *removal*: a check an operator

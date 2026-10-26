@@ -116,7 +116,8 @@ def expected_client_policies(table: str) -> dict[str, Shape]:
         "client_isolation": ("ALL", read, insert),
         # `users` included since Task 8: a narrowed scope changes no column
         # of a staff row (`its_user_identity_guard` then holds a visible
-        # contact's kind, external_subject and status).
+        # contact's kind and external_subject; its status is its client's
+        # since Task 9).
         "client_isolation_update": ("UPDATE", modify, None),
         "client_isolation_delete": ("DELETE", modify, None),
     }

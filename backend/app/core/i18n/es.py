@@ -1034,6 +1034,46 @@ CATALOG: dict[str, str] = {
         "no se puede asignar un rol sobre el cliente «Sin asignar»"
     ),
     "that client is archived": "ese cliente está archivado",
+    # --- clients, sites and contacts (MSP clients Task 9) ---
+    "no such client": "no existe ese cliente",
+    "no such contact": "no existe ese contacto",
+    "{domain} is not an email domain": "{domain} no es un dominio de correo",
+    "{modules} is not an optional module; the optional modules are {allowed}": (
+        "{modules} no es un módulo opcional; los módulos opcionales son {allowed}"
+    ),
+    "a client needs a name": "un cliente necesita un nombre",
+    "a site needs a name": "una sede necesita un nombre",
+    "{email} is not an email address": "{email} no es una dirección de correo",
+    "an email domain already belongs to another client": (
+        "un dominio de correo ya pertenece a otro cliente"
+    ),
+    "a client with that name already exists": "ya existe un cliente con ese nombre",
+    "the internal and unassigned clients cannot be archived": (
+        "los clientes interno y «Sin asignar» no se pueden archivar"
+    ),
+    "this client has {count} active devices; retire them before archiving it": (
+        "este cliente tiene {count} equipos activos; retíralos antes de archivarlo"
+    ),
+    "that client already has a site with that name": "ese cliente ya tiene una sede con ese nombre",
+    "the unassigned client cannot have sites": "el cliente «Sin asignar» no puede tener sedes",
+    "the Principal site of the organization's own client cannot be archived": (
+        "la sede Principal del cliente propio de la organización no se puede archivar"
+    ),
+    "this site has {count} devices; a site with devices cannot be archived": (
+        "esta sede tiene {count} equipos; una sede con equipos no se puede archivar"
+    ),
+    "that email address already belongs to another user of the organization": (
+        "esa dirección de correo ya pertenece a otro usuario de la organización"
+    ),
+    "the unassigned client takes no email domains": (
+        "el cliente «Sin asignar» no admite dominios de correo"
+    ),
+    "the unassigned client has no optional modules": (
+        "el cliente «Sin asignar» no tiene módulos opcionales"
+    ),
+    "the unassigned client cannot have contacts": (
+        "el cliente «Sin asignar» no puede tener contactos"
+    ),
     "no such credential": "no existe esa credencial",
     "This credential is used only by the backup service and cannot be revealed.": (
         "Esta credencial solo la usa el servicio de copias de seguridad y no se puede revelar."
@@ -2600,6 +2640,20 @@ CATALOG: dict[str, str] = {
         "la cuenta de Windows elegida nombra ahora un dominio distinto del que se registró "
         "para ella. Ábrela en Credenciales y vuelve a guardarla"
     ),
+    "the machine is filed under an archived site, or under a client that has been archived, "
+    "and nothing is enrolled into either. Push only machines of active sites and clients": (
+        "el equipo pertenece a una sede archivada, o a un cliente que se archivó, y en "
+        "ninguno de los dos se inscribe nada. Instala de forma remota solo equipos de sedes y "
+        "clientes activos"
+    ),
+    "the machine at {address} is filed under a site or client that is archived or not "
+    "visible to you; nothing was dispatched": (
+        "el equipo en {address} pertenece a una sede o a un cliente archivado o que no puedes "
+        "ver; no se envió nada"
+    ),
+    "the internal client's Principal site is not visible to this request": (
+        "la sede Principal del cliente interno no es visible para esta solicitud"
+    ),
     "a subnet push requires the `credentials.checkout` permission as well as "
     "`agent.push.run`: it presents a stored secret to every machine it lists": (
         "una instalación remota por subred requiere el permiso `credentials.checkout` además "
@@ -2657,6 +2711,17 @@ CATALOG: dict[str, str] = {
         "respuesta a un eco ICMP y puede ser una impresora, un teléfono o la cafetera. Abre el "
         "registro del dispositivo y promuévelo (assets.manage), que es como una persona lo "
         "avala"
+    ),
+    "device records of more than one client, each vouched for by a person, hold this "
+    "address, so it does not name one machine and nothing is chosen for you. Choose the "
+    "client in the client selector and push again: inside one client the address names "
+    "that client's machine, and only that client's site server may carry the credential "
+    "to it": (
+        "registros de dispositivo de más de un cliente, cada uno avalado por una persona, "
+        "tienen esta dirección, así que no nombra un solo equipo y no se elige ninguno por ti. "
+        "Elige el cliente en el selector de clientes e instala de nuevo: dentro de un cliente "
+        "la dirección nombra el equipo de ese cliente, y solo un servidor de sitio de ese "
+        "cliente puede llevarle la credencial"
     ),
     "no active push authorization covers this address. Deny by default: authorizing an "
     "IPAM scan of the same prefix authorizes nothing here, because authorizing an ICMP "

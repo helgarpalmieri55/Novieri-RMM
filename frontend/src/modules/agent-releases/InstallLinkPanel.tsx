@@ -1,6 +1,10 @@
 /**
  * The install link (install-link spec 2026-09-28 §1.1, §1.6).
  *
+ * ONE LINK PER SITE (MSP clients spec §1.5, §3.2): `siteId` says whose, and a
+ * machine that joins through it lands in that site and its client. The
+ * networks it answers are the site's egress networks.
+ *
  * ONE LINK FOR EVERY COMPUTER A TECHNICIAN SETS UP, off by default. What
  * bounds it is on this panel: the networks it answers, an hourly limit, an
  * optional automatic switch-off, and regeneration. Machines that join wait
@@ -109,11 +113,13 @@ function statusLine(settings: InstallLinkSettings, zone?: string | null): string
   return `${parts.join(" · ")}.`;
 }
 
-export function InstallLinkPanel({ zone }: { zone?: string | null }) {
+export function InstallLinkPanel({ zone, siteId }: { zone?: string | null; siteId: string }) {
   const t = useT();
   const api = useApi();
   const client = useQueryClient();
-  const link = useQuery({ queryKey: INSTALL_LINK_KEY, queryFn: () => api.getInstallLink() });
+  // The SITE is in the key: two sites' links are two answers.
+  const linkKey = [...INSTALL_LINK_KEY, siteId] as const;
+  const link = useQuery({ queryKey: linkKey, queryFn: () => api.getInstallLink(siteId) });
   const [draft, setDraft] = useState<Draft | null>(null);
   const [revealed, setRevealed] = useState<string | null>(null);
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
@@ -124,7 +130,7 @@ export function InstallLinkPanel({ zone }: { zone?: string | null }) {
   }, [link.data, draft]);
 
   const onSaved = (saved: InstallLinkSaved) => {
-    client.setQueryData(INSTALL_LINK_KEY, settingsOf(saved));
+    client.setQueryData(linkKey, settingsOf(saved));
     setDraft(draftFrom(saved));
     if (saved.url) {
       setRevealed(saved.url);
@@ -132,11 +138,11 @@ export function InstallLinkPanel({ zone }: { zone?: string | null }) {
     }
   };
   const save = useMutation({
-    mutationFn: (body: InstallLinkUpdate) => api.saveInstallLink(body),
+    mutationFn: (body: InstallLinkUpdate) => api.saveInstallLink(siteId, body),
     onSuccess: onSaved,
   });
   const regenerate = useMutation({
-    mutationFn: () => api.regenerateInstallLink(),
+    mutationFn: () => api.regenerateInstallLink(siteId),
     onSuccess: onSaved,
   });
 
@@ -258,7 +264,9 @@ export function InstallLinkPanel({ zone }: { zone?: string | null }) {
         </section>
       ) : null}
 
-      {link.data ? <MsiDownload linkOn={link.data.enabled} revealed={revealed} /> : null}
+      {link.data ? (
+        <MsiDownload linkOn={link.data.enabled} revealed={revealed} siteId={siteId} />
+      ) : null}
 
       <ConfirmDialog
         open={confirmRegenerate}

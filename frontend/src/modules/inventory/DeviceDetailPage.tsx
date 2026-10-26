@@ -11,6 +11,7 @@ import { useApi } from "../../lib/ApiContext";
 import { formatDate, formatDateTime } from "../../lib/datetime";
 import { formatBytes } from "../../lib/format";
 import { humaniseEnum } from "../../lib/labels";
+import { RESYNC_KIND } from "../../lib/resync";
 import { useLiveEvents } from "../../lib/ws";
 import { RelTime } from "../../components/reltime";
 import { Icon } from "../../shell/icons";
@@ -205,12 +206,15 @@ export function DeviceDetailPage() {
     enabled: deviceId != null && tab === "docs",
   });
 
+  // A RESYNC re-reads everything below (final review W1): the socket had a
+  // gap, and an event lost in it is otherwise lost until the page reloads.
   useLiveEvents((event) => {
-    if (event.kind === "inventory_updated" && event.device_id === deviceId) {
+    const resync = event.kind === RESYNC_KIND;
+    if (resync || (event.kind === "inventory_updated" && event.device_id === deviceId)) {
       void queryClient.invalidateQueries({ queryKey: ["inventory", deviceId] });
       void queryClient.invalidateQueries({ queryKey: ["inventory-changes", deviceId] });
     }
-    if (event.kind === "job_status") {
+    if (resync || event.kind === "job_status") {
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     }
   });

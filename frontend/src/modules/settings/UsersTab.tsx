@@ -5,17 +5,20 @@
 //          `POST /users/{id}/disable|enable|reset-password|resend-enrolment`,
 //          `DELETE /users/{id}`                                                  `users.manage`
 //
-// THE SECOND AXIS OF "WHAT LEVEL" IS THE DEVICE-GROUP SCOPE, and this is the
-// first surface in the platform's history to expose it. `user_roles` has
-// carried `device_group_id` since the RBAC engine was written — NULL grants
-// org-wide, a group grants only within that group — and no API and no UI has
-// ever reached it (spec §0.1). "Technician everywhere" and "technician on
-// Warehouse only" are different answers to the question this tab exists to
-// answer, so the assign control takes the scope.
+// THE SECOND AXIS OF "WHAT LEVEL" IS THE SCOPE, and the assign control takes
+// it. It was a device group (`user_roles.device_group_id`, NULL org-wide) until
+// the MSP clients model; it is a CLIENT now (`user_roles.client_id`, NULL for
+// every client including clients created later -- MSP clients spec §2.1), and
+// device groups no longer scope grants. "Technician everywhere" and
+// "technician on Warehouse only" are different answers to the question this
+// tab exists to answer.
+//
+// PHASE 3: the client/site selector. The phase-3 console restyles this editor
+// (spec §3.4, "editor de asignaciones"); the wire shape it sends is final.
 //
 // THE DIRECTORY COLLAPSES IDENTICAL GRANTS; THE ROLES PANEL DOES NOT.
 // `user_roles` accepted the same org-wide grant without limit until migration
-// 0073 — a unique constraint over a nullable `device_group_id` enforces
+// 0073 — a unique constraint over a nullable scope column enforces
 // nothing when the column is NULL — and one deployment held `super-admin`
 // three times. The directory drew three identical lines, which reads as a
 // rendering fault and says nothing about what is stored, so it now draws one
@@ -75,7 +78,7 @@ import { initialsOf, personIndex } from "../../lib/people";
 import {
   useAssignRoleMutation,
   useCreateUserMutation,
-  useDeviceGroups,
+  useClients,
   useEmailSettings,
   useDeleteUserMutation,
   useEffectivePermissions,
@@ -86,7 +89,12 @@ import {
   useRoles,
   useUsers,
 } from "./api";
-import { groupPickerEmptyHint, groupPickerOptions } from "./pickerOptions";
+import {
+  EVERY_CLIENT_CHOICE,
+  clientPickerEmptyHint,
+  grantClientIdFor,
+  grantScopeOptions,
+} from "./pickerOptions";
 import { isForbidden, permissionReason } from "./settingsState";
 import {
   annotateDuplicateGrants,
@@ -160,20 +168,23 @@ export function UsersTab({
   // holder is not guaranteed to hold. A failure here must not block the rest
   // of the tab, so the role controls degrade rather than the page failing.
   const roles = useRoles(canRead);
-  // Device groups are read with `devices.read`, another permission a
+  // Clients are read with `clients.read`, another permission a
   // `users.manage` holder is not guaranteed to hold -- the same degrade: the
   // scope picker falls back to its `emptyHint` rather than blocking the tab.
-  const groups = useDeviceGroups(canRead);
+  // ARCHIVED ONES TOO (final review): a grant on a client archived since
+  // reads that client's name, not its id. The CHOICES leave them out
+  // (`clientPickerOptions`): an archived client takes no new grant.
+  const clients = useClients(canRead, { include_archived: true });
   // The options carry a worded sub-label ("3 devices"), so they are built at
   // render, never remembered: a memo would keep the language they were built in.
-  // The names alone are recorded data, and those can be remembered.
-  const groupOptions = groupPickerOptions(groups.data ?? []);
-  const groupNames = useMemo(
-    () =>
-      new Map(
-        (groups.data ?? []).filter((group) => group.archived_at === null).map((group) => [group.id, group.name]),
-      ),
-    [groups.data],
+  // The names alone are recorded data, and those can be remembered. EVERY
+  // client the list served is named, the unassigned one included: a grant
+  // that names it cannot be made, but a name is still better than an id.
+  // "Every client" is the first option (T11R-I1): a choice, never an empty box.
+  const clientOptions = grantScopeOptions(clients.data ?? []);
+  const clientNames = useMemo(
+    () => new Map((clients.data ?? []).map((client) => [client.id, client.name])),
+    [clients.data],
   );
 
   const createUser = useCreateUserMutation();
@@ -191,7 +202,10 @@ export function UsersTab({
   const [rolesForId, setRolesForId] = useState<string | null>(null);
   const [permissionsForId, setPermissionsForId] = useState<string | null>(null);
   const [grantRoleId, setGrantRoleId] = useState("");
-  const [grantGroupId, setGrantGroupId] = useState("");
+  // The committed scope choice: "" (none yet), `EVERY_CLIENT_CHOICE`, or a
+  // client id. `grantScopeTyping`: the picker holds text that is not a choice.
+  const [grantClientId, setGrantClientId] = useState("");
+  const [grantScopeTyping, setGrantScopeTyping] = useState(false);
   const [confirming, setConfirming] = useState<Confirmable | null>(null);
 
   const effective = useEffectivePermissions(permissionsForId);
@@ -303,9 +317,9 @@ export function UsersTab({
       question: (email, role) => t("settings.users.confirm.revoke.question", { email, role }),
       action: (email) => t("settings.users.confirm.revoke.action", { email }),
       // Meaning unchanged (docs/design/settings-language.md glossary applied
-      // to the words only): a role held twice, once at a different device
-      // group and once everywhere, is two separate rows, and removing this
-      // one leaves the other in place.
+      // to the words only): a role held twice, once for a different client
+      // and once everywhere, is two separate rows, and removing this one
+      // leaves the other in place.
       body: t("settings.users.confirm.revoke.body"),
       destructive: true,
     },
@@ -389,7 +403,7 @@ export function UsersTab({
                         {summariseRoleGrants(user.roles).map((grant) => (
                           <li key={grant.key} className="chip">
                             {roleDisplayName(grant.roleName)}
-                            <span className="note">{` · ${describeGrantScope(grant.deviceGroupId, groupNames)}`}</span>
+                            <span className="note">{` · ${describeGrantScope(grant.clientId, clientNames)}`}</span>
                             {grant.count > 1 ? (
                               <span className="note">{` ×${grant.count}`}</span>
                             ) : null}
@@ -570,7 +584,7 @@ export function UsersTab({
                         transforms, same join, same tab. */}
                     <span>
                       {roleDisplayName(assignment.role_name)}
-                      <span className="note">{` · ${describeGrantScope(assignment.device_group_id, groupNames)}`}</span>
+                      <span className="note">{` · ${describeGrantScope(assignment.client_id, clientNames)}`}</span>
                       {assignment.duplicate ? (
                         <span className="note">
                           {` ${t("settings.users.duplicate", { index: assignment.duplicate.index, total: assignment.duplicate.total })}`}
@@ -593,14 +607,14 @@ export function UsersTab({
                         assignment.duplicate
                           ? t("settings.users.removeDuplicateAria", {
                               role: roleDisplayName(assignment.role_name),
-                              scope: describeGrantScope(assignment.device_group_id, groupNames),
+                              scope: describeGrantScope(assignment.client_id, clientNames),
                               index: assignment.duplicate.index,
                               total: assignment.duplicate.total,
                               email: rolesTarget.email,
                             })
                           : t("settings.users.removeAria", {
                               role: roleDisplayName(assignment.role_name),
-                              scope: describeGrantScope(assignment.device_group_id, groupNames),
+                              scope: describeGrantScope(assignment.client_id, clientNames),
                               email: rolesTarget.email,
                             })
                       }
@@ -637,38 +651,65 @@ export function UsersTab({
                 </select>
               </Field>
               <EntityPicker
-                label={t("settings.users.groupLabel")}
-                options={groupOptions}
-                value={grantGroupId}
-                onChange={setGrantGroupId}
-                loading={groups.isLoading}
-                emptyHint={groupPickerEmptyHint()}
-                placeholder={t("settings.users.groupPlaceholder")}
+                label={t("settings.users.clientLabel")}
+                options={clientOptions}
+                value={grantClientId}
+                onChange={setGrantClientId}
+                loading={clients.isLoading}
+                emptyHint={clientPickerEmptyHint()}
+                placeholder={t("settings.users.clientPlaceholder")}
                 disabled={!canManage}
+                onPendingChange={setGrantScopeTyping}
               />
             </div>
 
             <div className="form-actions">
               <Btn
-                label={assignRole.isPending ? t("settings.users.assigning") : t("settings.users.assign")}
+                // THE BUTTON NAMES THE SCOPE IT GRANTS (final review,
+                // T11R-I1): "Assign role on Warehouse", "... on every
+                // client". The click that sends a grant says where it
+                // applies, whatever the box above happens to show.
+                label={
+                  assignRole.isPending
+                    ? t("settings.users.assigning")
+                    : grantClientId === EVERY_CLIENT_CHOICE
+                      ? t("settings.users.assignEvery")
+                      : grantClientId !== ""
+                        ? t("settings.users.assignOn", {
+                            client: clientNames.get(grantClientId) ?? grantClientId,
+                          })
+                        : t("settings.users.assign")
+                }
                 icon="plus"
                 variant="primary"
-                disabled={!canManage || grantRoleId === "" || assignRole.isPending}
+                // Disabled until a scope is CHOSEN, and while the picker
+                // holds typed text that is not a choice: "Ware" typed and
+                // never clicked is not Warehouse -- and it used to be every
+                // client.
+                disabled={
+                  !canManage ||
+                  grantRoleId === "" ||
+                  grantClientId === "" ||
+                  grantScopeTyping ||
+                  assignRole.isPending
+                }
                 onClick={() =>
                   assignRole.mutate(
                     {
                       userId: rolesTarget.id,
                       body: {
                         role_id: grantRoleId,
-                        // `null`, not `""`: an empty string is not a group, and
-                        // the server's model takes a uuid or nothing at all.
-                        device_group_id: grantGroupId.trim() === "" ? null : grantGroupId.trim(),
+                        // `null` for the "Every client" choice -- every
+                        // client, including those created later -- else the
+                        // chosen client's id. Never `""`, never the
+                        // picker's own sentinel.
+                        client_id: grantClientIdFor(grantClientId),
                       },
                     },
                     {
                       onSuccess: () => {
                         setGrantRoleId("");
-                        setGrantGroupId("");
+                        setGrantClientId("");
                       },
                     },
                   )
@@ -721,12 +762,12 @@ export function UsersTab({
                 </thead>
                 <tbody>
                   {(effective.data?.codes ?? []).map((grant) => (
-                    <tr key={`${grant.code}:${grant.via_role}:${grant.device_group_id ?? ""}`}>
+                    <tr key={`${grant.code}:${grant.via_role}:${grant.client_id ?? ""}`}>
                       <Td>
                         <span className="mono">{grant.code}</span>
                       </Td>
                       <Td>{roleDisplayName(grant.via_role)}</Td>
-                      <Td>{describeGrantScope(grant.device_group_id, groupNames)}</Td>
+                      <Td>{describeGrantScope(grant.client_id, clientNames)}</Td>
                     </tr>
                   ))}
                 </tbody>

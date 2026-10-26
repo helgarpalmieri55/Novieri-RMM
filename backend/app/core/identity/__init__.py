@@ -86,6 +86,8 @@ _STATUS_REFUSED = N_("user account is not active")
 
 # `users.kind`: a person of one client, who uses the portal (MSP clients spec §1.3).
 CONTACT_KIND = "contact"
+# `users.kind`: a Novieri technician, who uses the console.
+STAFF_KIND = "staff"
 
 _CONTACT_REFUSED = N_("this account can only use the portal")
 
@@ -206,6 +208,7 @@ __all__ = [
     "ACTIVE_STATUS",
     "ADMISSION_REFUSED_ACTION",
     "CONTACT_KIND",
+    "STAFF_KIND",
     "audit_admission_refusal",
     "contact_refusal",
     "domain_refusal",

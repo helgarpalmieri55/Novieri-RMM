@@ -17,6 +17,15 @@ its gate. A NEW write route under a code that already gates a global write
 fails too until it is classified: listed in `GLOBAL_WRITES`, or in
 `NOT_GLOBAL` with the reason it is one client's data.
 
+THE SAME RULE FOR A FEW READS (`GLOBAL_READS`): a G table that RLS cannot
+scope by client, whose rows nonetheless DESCRIBE clients -- the audit log
+(every client's events, addresses and fingerprints), the incoming-mail log
+(senders and parsed bodies of every client's mail), the notification
+delivery log (recipient addresses). Reading one of those with a per-client
+grant would be reading every client's data, so these reads need every client
+too until phase 2 gives those rows a client. Checked against the router the
+same way, in both directions.
+
 NOT HERE, deliberately: the O-class rows that may be global OR one client's
 (patch/backup/remote policies, health profile assignments, SLA policies,
 credentials, the documentation family, backup offsite targets and recovery
@@ -44,6 +53,10 @@ GATE = "require_permission_on_every_client.<locals>.on_every_client"
 GLOBAL_WRITES: dict[tuple[str, str], str] = {
     # organization settings (`organizations`, the realm's mail settings)
     ("PATCH", "/api/v1/orgs/current"): "orgs.manage",
+    # the list of clients itself (MSP clients spec §2.1): creating and
+    # archiving one need `clients.manage` AND a scope of every client
+    ("POST", "/api/v1/clients"): "clients.manage",
+    ("POST", "/api/v1/clients/{client_id}/archive"): "clients.manage",
     ("PUT", "/api/v1/settings/email"): "orgs.manage",
     ("POST", "/api/v1/settings/email/test"): "orgs.manage",
     # the platform error monitor (`platform_error_group`)
@@ -162,6 +175,18 @@ GLOBAL_WRITES: dict[tuple[str, str], str] = {
     ("PUT", "/api/v1/email-intake/oauth-app"): "email_intake.admin",
 }
 
+#: (method, path) -> code: READS of a table that holds every client's data
+#: and that RLS does not scope by client (see the module docstring).
+GLOBAL_READS: dict[tuple[str, str], str] = {
+    # the audit log (`audit_events`, G): every client's events
+    ("GET", "/api/v1/audit"): "audit.read",
+    ("GET", "/api/v1/audit/verify"): "audit.read",
+    # the incoming-mail log (senders, parsed bodies, the quarantine count)
+    ("GET", "/api/v1/email-intake/messages"): "email_intake.read",
+    # the notification delivery log (`notification_deliveries`, G): recipients
+    ("GET", "/api/v1/notifications/deliveries"): "notification.read",
+}
+
 #: Write routes under a code that ALSO gates a global write, which are not
 #: global themselves -- and why. A new route under such a code fails the
 #: router check until it is listed here or in `GLOBAL_WRITES`.
@@ -187,6 +212,11 @@ NOT_GLOBAL: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/budget/cost-centers"): "C: cost_center",
     ("PATCH", "/api/v1/budget/cost-centers/{cost_center_id}"): "C: cost_center",
     ("PUT", "/api/v1/budget/settings"): "C: budget_settings",
+    # Spec §2.1: editing a client and its contacts needs `clients.manage` ON
+    # THAT CLIENT -- one client's own row, which RLS confines to the scope.
+    ("PATCH", "/api/v1/clients/{client_id}"): "clients: that client's own row",
+    ("POST", "/api/v1/clients/{client_id}/contacts"): "O: users, a contact of that client",
+    ("PATCH", "/api/v1/contacts/{contact_id}"): "O: users, a contact of that client",
     # `mcp.use` gates a person's own revocation; revoking an app for EVERYONE
     # is global and is refused inside the handler (tested below).
     ("POST", "/api/v1/mcp/connections/{client_id}/revoke"): "personal, or global by body",
@@ -198,6 +228,14 @@ def _write_routes(app: Any) -> dict[tuple[str, str], Any]:
         (method, path): route
         for path, route in flatten(app.router)
         for method in (getattr(route, "methods", None) or set()) & WRITE_METHODS
+    }
+
+
+def _read_routes(app: Any) -> dict[tuple[str, str], Any]:
+    return {
+        ("GET", path): route
+        for path, route in flatten(app.router)
+        if "GET" in (getattr(route, "methods", None) or set())
     }
 
 
@@ -224,6 +262,23 @@ def test_the_declared_list_and_the_router_agree(api_env: Any) -> None:
                 wrong.append(f"{key}: listed as global but not gated on every client")
         elif gated:
             wrong.append(f"{key}: gated on every client but not in GLOBAL_WRITES")
+    assert not wrong, "\n".join(wrong)
+
+
+def test_the_declared_reads_and_the_router_agree(api_env: Any) -> None:
+    """`GLOBAL_READS` against the router, both directions: a listed read that
+    lost its gate fails, and so does a read gated without being listed."""
+    routes = _read_routes(api_env.app)
+    missing = sorted(set(GLOBAL_READS) - set(routes))
+    assert not missing, f"listed global reads that no route serves: {missing}"
+    wrong = []
+    for key, route in sorted(routes.items()):
+        gated = _gated_on_every_client(route)
+        if key in GLOBAL_READS:
+            if not gated or route_permission(route) != GLOBAL_READS[key]:
+                wrong.append(f"{key}: listed as a global read but not gated on every client")
+        elif gated:
+            wrong.append(f"{key}: gated on every client but not in GLOBAL_READS")
     assert not wrong, "\n".join(wrong)
 
 
@@ -339,3 +394,67 @@ async def test_revoking_an_ai_app_for_everyone_needs_every_client(
         assert _refused_for_scope(response), response.text
     else:
         assert not _refused_for_scope(response), response.text
+
+
+async def test_every_global_read_needs_a_scope_of_every_client(api_env: Any) -> None:
+    """The reads of every client's data: refused for a per-client holder of
+    the code and for an every-client holder who narrowed with X-Client-Id;
+    answered (200) for the same every-client holder un-narrowed."""
+    env = api_env
+    org_id = await env.create_org("global-reads")
+    async with AsyncSession(env.admin_engine, expire_on_commit=False) as session:
+        client = Client(org_id=org_id, name="X", kind="customer")
+        session.add(client)
+        await session.commit()
+    per_client = await _actor(env, org_id, client.id)
+    every = await _actor(env, org_id, None)
+    narrowed = {**every, "X-Client-Id": str(client.id)}
+
+    failures = []
+    for _method, path in sorted(GLOBAL_READS):
+        for who, headers in (("per-client", per_client), ("narrowed", narrowed)):
+            response = await env.client.get(path, headers=headers)
+            if not _refused_for_scope(response):
+                failures.append(f"GET {path}: {who} got {response.status_code}")
+        response = await env.client.get(path, headers=every)
+        if response.status_code != 200:
+            failures.append(f"GET {path}: every-client holder got {response.status_code}")
+    assert not failures, "\n".join(failures)
+
+
+async def test_the_built_in_auditor_on_one_client_cannot_read_the_audit_log(
+    api_env: Any,
+) -> None:
+    """The built-in `auditor` role holds `audit.read`. Granted on client X
+    only, it would otherwise read every client's audit events through
+    `GET /audit` (a G table RLS does not scope). Granted on every client, it
+    reads them as before."""
+    env = api_env
+    org_id = await env.create_org("auditor-x")
+    async with AsyncSession(env.admin_engine, expire_on_commit=False) as session:
+        client = Client(org_id=org_id, name="X", kind="customer")
+        session.add(client)
+        auditor = (
+            await session.execute(select(Role).where(Role.name == "auditor", Role.org_id.is_(None)))
+        ).scalar_one()
+        await session.commit()
+
+    async def _auditor(client_id: UUID | None) -> dict[str, str]:
+        sub = await env.create_user(org_id)
+        async with AsyncSession(env.admin_engine) as session:
+            user_id = (
+                await session.execute(select(User.id).where(User.external_subject == sub))
+            ).scalar_one()
+            session.add(
+                UserRole(org_id=org_id, user_id=user_id, role_id=auditor.id, client_id=client_id)
+            )
+            await session.commit()
+        return await env.headers(org_id, sub)
+
+    on_x = await _auditor(client.id)
+    everywhere = await _auditor(None)
+    for path in ("/api/v1/audit", "/api/v1/audit/verify"):
+        refused = await env.client.get(path, headers=on_x)
+        assert _refused_for_scope(refused), (path, refused.status_code, refused.text)
+        answered = await env.client.get(path, headers=everywhere)
+        assert answered.status_code == 200, (path, answered.text)

@@ -26,12 +26,19 @@ const createAsset = vi.fn();
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
-function renderDialog(onClose: () => void = () => {}) {
+/**
+ * The site a hand-made asset is filed under (MSP clients, phase 1: `POST
+ * /devices` requires `site_id`). The Devices page passes the internal client's
+ * "Principal" site, whose id is the organisation's; any id stands in for it.
+ */
+const SITE = "00000000-0000-4000-8000-0000000000aa";
+
+function renderDialog(onClose: () => void = () => {}, siteId: string | null = SITE) {
   mockUseApi.mockReturnValue({ createAsset } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui = (open: boolean) => (
     <QueryClientProvider client={queryClient}>
-      <AddAssetDialog open={open} onClose={onClose} />
+      <AddAssetDialog open={open} onClose={onClose} siteId={siteId} />
     </QueryClientProvider>
   );
   const result = render(ui(true));
@@ -79,11 +86,36 @@ describe("AddAssetDialog", () => {
     await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
 
     expect(createAsset).toHaveBeenCalledWith({
+      // RE-POINTED: the site is part of the body now (see `SITE`).
+      site_id: SITE,
       hostname: "core-sw-01",
       primary_ip: "172.22.104.1",
       asset_type: "network",
       lifecycle: "unmanageable",
     });
+  });
+
+  it("files the asset under the site it was given", async () => {
+    renderDialog();
+    await userEvent.type(screen.getByLabelText(/description/i), "boxed laptop, PO 4471");
+    await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
+
+    const body = createAsset.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.site_id).toBe(SITE);
+  });
+
+  it("sends nothing, and says why, while it does not know the site", async () => {
+    // The site comes from `/me` (the internal client's "Principal" site has
+    // the organisation's id). Before `/me` has answered, or if it failed,
+    // there is no site to name -- and a body without one is a 422 the
+    // operator could do nothing about.
+    renderDialog(() => {}, null);
+    await userEvent.type(screen.getByLabelText(/description/i), "boxed laptop, PO 4471");
+    await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/account has not loaded/i);
+    expect(createAsset).not.toHaveBeenCalled();
   });
 
   it("records the DNS name, OS and processor a push needs, and says why", async () => {

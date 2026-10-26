@@ -572,14 +572,26 @@ from tests.tool_surface import (
 # organization, and who revoked them, is the organization's own decision about
 # AI access -- the MCP server already keeps both routes off its own tools
 # (`app/mcp/exclusions.py::NOT_FOR_MCP`).
-EXPECTED_GET_ROUTES = 250
-EXPECTED_PASSING_FIVE = 50
+# 250 -> 254 (2026-10-24): the MSP clients API (spec §3.2, Task 9) adds
+# `GET /clients`, `GET /clients/{client_id}`, `GET /clients/{client_id}/sites`
+# and `GET /clients/{client_id}/contacts`, all gated (`clients.read`), typed,
+# described and closed. The three lists answer bare lists of a handful of rows
+# (spec P6: up to 10 clients in the first year), so they fail P4 alone: 90 ->
+# 93. `GET /clients/{client_id}` passes all six -- passing five 50 -> 51 -- and
+# waits in PENDING_TOOL_REVIEW: which clients exist and the email domains that
+# route their mail are the map of who Novieri serves, and whether an AI persona
+# should read it is the AI module's decision, not a byproduct of this one.
+EXPECTED_GET_ROUTES = 254
+EXPECTED_PASSING_FIVE = 51
 
 # The registrable set, pinned by PATH rather than count: this is the number the
 # whole exercise is about, it is small, and "which routes" is the actionable
 # half of "how many".
 EXPECTED_PASSING_SIX = frozenset(
     {
+        # Added 2026-10-24 (MSP clients API). Eligible, not registered -- see
+        # the note above EXPECTED_GET_ROUTES.
+        "/api/v1/clients/{client_id}",
         # Added 2026-10-14 (MCP console admin API). Eligible, not registered --
         # see the note above EXPECTED_GET_ROUTES.
         "/api/v1/mcp/connections",
@@ -718,7 +730,9 @@ EXPECTED_FAILING_BY_PROPERTY = {
     # above `EXPECTED_GET_ROUTES`.
     # +2 P4, +4 P5 (2026-09-23): the self-update GET routes.
     # +2 (2026-09-30): `/agent-push/runs` and `/agent-push/runs/prefixes`.
-    "P4 bounded": 90,
+    # +3 (2026-10-24): `/clients`, `/clients/{client_id}/sites` and
+    # `/clients/{client_id}/contacts`.
+    "P4 bounded": 93,
     # +2 (2026-09-23): the two portal help routes.
     # +3 (2026-09-30): `/agent-push/runs`, `/runs/{run_id}`, `/runs/{run_id}/targets`.
     "P5 self-describing": 177,
@@ -924,6 +938,9 @@ def test_the_two_registered_tools_are_closed() -> None:
 # expects and asks a human to resolve.
 PENDING_TOOL_REVIEW = frozenset(
     {
+        # Added 2026-10-24 (MSP clients API); reasoning above
+        # EXPECTED_GET_ROUTES.
+        "/api/v1/clients/{client_id}",
         # Added 2026-10-14 (MCP console admin API); reasoning above
         # EXPECTED_GET_ROUTES.
         "/api/v1/mcp/connections",

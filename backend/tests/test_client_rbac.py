@@ -243,6 +243,28 @@ async def test_a_malformed_x_client_id_is_400(probe_env: Any, value: str) -> Non
     assert r.json()["detail"] == "X-Client-Id must be one client id"
 
 
+@pytest.mark.parametrize("same", [True, False], ids=["same-client-twice", "two-clients"])
+async def test_x_client_id_sent_twice_is_400(probe_env: Any, same: bool) -> None:
+    """The header narrows a scope, so a request naming it twice is refused
+    rather than answered with whichever copy a parser happens to keep -- the
+    WebSocket's `?client=` rule (4400 for two values), now on HTTP too. The
+    same value twice is refused as well: the rule is about the request, not
+    about whether the copies agree."""
+    env = probe_env
+    org, _, c = await _seed(env.admin_engine, env, [("technician", None)])
+    h = await _headers(env, org)
+    second = c["X"] if same else c["Z"]
+    headers = [*h.items(), ("X-Client-Id", str(c["X"])), ("X-Client-Id", str(second))]
+    r = await env.client.get("/api/v1/scope-probe/any", headers=headers)
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "X-Client-Id must be one client id"
+    # The control: once is answered, narrowed.
+    once = await env.client.get(
+        "/api/v1/scope-probe/any", headers={**h, "X-Client-Id": str(c["X"])}
+    )
+    assert once.status_code == 200 and once.json() == _ids(c["X"])
+
+
 async def test_a_contact_is_refused_at_the_console(api_env: Any) -> None:
     env = api_env
     org = await env.create_org("contact")

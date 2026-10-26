@@ -57,6 +57,12 @@ async def test_permission_registry_complete() -> None:
         # the fleet list, and a second read gate would blind every existing
         # read-only role to part of it.
         "assets.manage",
+        # MSP clients spec §2.1 (migration 0232): the clients, sites and
+        # contacts API. Creating and archiving a client also need a scope of
+        # every client; the codes alone do not reach another client's data.
+        "clients.read",
+        "clients.manage",
+        "sites.manage",
         "jobs.read",
         "jobs.dispatch",
         "enrollment.manage",

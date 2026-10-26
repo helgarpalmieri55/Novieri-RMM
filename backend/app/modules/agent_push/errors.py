@@ -23,6 +23,7 @@ __all__ = [
     "PushListChangedError",
     "PushNotFoundError",
     "PushPermissionError",
+    "PushTargetClosedError",
     "PushValidationError",
 ]
 
@@ -57,6 +58,14 @@ class PushListChangedError(PushConflictError):
     (design §1.3). Refused before any row is written or any secret touched;
     the console shows the list again. A 409 whose body names `list_changed`,
     so the console can tell it from "a run is already active"."""
+
+
+class PushTargetClosedError(PushConflictError):
+    """The target's site, or its client, was archived between the checks and
+    the minting of its enrollment token (MSP clients Task 9).
+    `pre_dispatch_checks` refuses such a target by name before any secret is
+    decrypted; this is the same refusal arriving late, and it rolls the
+    dispatch back rather than escaping as a 500."""
 
 
 class PushPermissionError(PushError):

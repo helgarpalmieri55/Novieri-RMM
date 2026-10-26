@@ -41,6 +41,7 @@ export function EntityPicker({
   placeholder,
   disabled = false,
   describedBy,
+  onPendingChange,
 }: {
   label: string;
   options: readonly PickerOption[];
@@ -64,6 +65,16 @@ export function EntityPicker({
    * did for every call site before this prop existed (review finding 3).
    */
   describedBy?: string;
+  /**
+   * Told whether the box holds TYPED TEXT that is not a choice -- something
+   * searched for and not (yet) picked. What the box shows is then not the
+   * value, and a form that acts on the value while the box says something
+   * else acts on what the person was not looking at (final review, T11R-I1:
+   * "Ware" typed, the grant sent to every client). A caller that submits
+   * disables its submit while this is true. Additive: omitted, nothing is
+   * told, as for every call site before it existed.
+   */
+  onPendingChange?: (pending: boolean) => void;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -84,6 +95,11 @@ export function EntityPicker({
     },
     [],
   );
+
+  const pending = query !== null;
+  useEffect(() => {
+    onPendingChange?.(pending);
+  }, [pending, onPendingChange]);
 
   const chosen = options.find((option) => option.id === value);
 
@@ -124,7 +140,17 @@ export function EntityPicker({
         disabled={disabled}
         placeholder={placeholder ?? t("components.picker.search")}
         value={shown}
-        onFocus={() => setOpen(true)}
+        onFocus={() => {
+          // Back before the deferred blur close (below) ran: that close is
+          // for a picker that was LEFT, and this one was not -- cancelled,
+          // or it would shut the list (and drop the typed text) under the
+          // person who just came back to it.
+          if (blurTimeout.current != null) {
+            window.clearTimeout(blurTimeout.current);
+            blurTimeout.current = null;
+          }
+          setOpen(true);
+        }}
         onClick={() => setOpen(true)}
         onChange={(event) => {
           setQuery(event.target.value);

@@ -25,7 +25,7 @@
 
 import type { FixtureMap } from "../../fixtures/client";
 import { ApiError } from "../../lib/api";
-import type { McpAppOut } from "../../lib/api";
+import type { ClientOut, McpAppOut } from "../../lib/api";
 import type { SettingsOut as HealthSettingsOut } from "../health/types";
 import { USERS } from "../service-desk/fixtures";
 import type {
@@ -192,21 +192,36 @@ const ROLE_SEEDS: RoleSeed[] = [
   },
 ];
 
+/**
+ * The organisation's clients (`GET /clients`, MSP clients spec §1.1): its own
+ * IT -- the internal client, whose id is the organisation's (`fixtures/core.ts`
+ * signs in to "org-toeshee") -- one customer, and the unassigned client. The
+ * Users tab's grant scope picks from these.
+ */
+const CLIENT_LOGISTICS = "cli-logistics";
+const CLIENTS: ClientOut[] = [
+  { id: "org-toeshee", name: "Toeshee", kind: "internal", status: "active", email_domains: ["toeshee.example"], phone: "", address: "", website: "", notes: "", enabled_modules: ["budget", "bcp", "change"], device_count: 42, site_count: 1 },
+  { id: CLIENT_LOGISTICS, name: "Andes Logistics", kind: "customer", status: "active", email_domains: ["andeslogistics.example"], phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 12, site_count: 2 },
+  { id: "cli-unassigned", name: "Unassigned", kind: "unassigned", status: "active", email_domains: [], phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 0, site_count: 0 },
+];
+
+const listClients: FixtureMap["listClients"] = () => CLIENTS;
+
 /** Who holds what: `user_roles`, keyed by the service desk's user ids. */
 const GRANTS: Map<string, RoleAssignmentOut[]> = new Map([
-  ["usr-helgar", [{ assignment_id: "ur-1", role_id: "role-org-admin", role_name: "org-admin", device_group_id: null }]],
-  ["usr-ao", [{ assignment_id: "ur-2", role_id: "role-technician", role_name: "technician", device_group_id: null }]],
+  ["usr-helgar", [{ assignment_id: "ur-1", role_id: "role-org-admin", role_name: "org-admin", client_id: null }]],
+  ["usr-ao", [{ assignment_id: "ur-2", role_id: "role-technician", role_name: "technician", client_id: null }]],
   [
     "usr-mr",
     [
-      { assignment_id: "ur-3", role_id: "role-technician", role_name: "technician", device_group_id: null },
-      { assignment_id: "ur-4", role_id: "role-service-desk", role_name: "service-desk", device_group_id: null },
+      { assignment_id: "ur-3", role_id: "role-technician", role_name: "technician", client_id: null },
+      { assignment_id: "ur-4", role_id: "role-service-desk", role_name: "service-desk", client_id: null },
     ],
   ],
-  ["usr-tk", [{ assignment_id: "ur-5", role_id: "role-technician", role_name: "technician", device_group_id: "grp-servers" }]],
-  ["usr-lf", [{ assignment_id: "ur-6", role_id: "role-service-desk", role_name: "service-desk", device_group_id: null }]],
-  ["usr-ic", [{ assignment_id: "ur-7", role_id: "role-finance", role_name: "finance", device_group_id: null }]],
-  ["usr-rs", [{ assignment_id: "ur-8", role_id: "role-auditor", role_name: "auditor", device_group_id: null }]],
+  ["usr-tk", [{ assignment_id: "ur-5", role_id: "role-technician", role_name: "technician", client_id: CLIENT_LOGISTICS }]],
+  ["usr-lf", [{ assignment_id: "ur-6", role_id: "role-service-desk", role_name: "service-desk", client_id: null }]],
+  ["usr-ic", [{ assignment_id: "ur-7", role_id: "role-finance", role_name: "finance", client_id: null }]],
+  ["usr-rs", [{ assignment_id: "ur-8", role_id: "role-auditor", role_name: "auditor", client_id: null }]],
 ]);
 
 const roles = new Map<string, RoleSeed>(ROLE_SEEDS.map((seed) => [seed.id, seed]));
@@ -288,7 +303,7 @@ const getUserEffectivePermissions: FixtureMap["getUserEffectivePermissions"] = (
   for (const grant of GRANTS.get(userId) ?? []) {
     const role = roles.get(grant.role_id);
     for (const code of role?.codes ?? []) {
-      codes.push({ code, via_role: grant.role_name, device_group_id: grant.device_group_id });
+      codes.push({ code, via_role: grant.role_name, client_id: grant.client_id });
     }
   }
   return { user_id: userId, codes: codes.sort((a, b) => a.code.localeCompare(b.code)) };
@@ -301,7 +316,7 @@ const createUser: FixtureMap["createUser"] = (body) => {
   const id = `usr-new-${createdUsers}`;
   const grants: RoleAssignmentOut[] = body.role_ids.flatMap((roleId, at) => {
     const role = roles.get(roleId);
-    return role ? [{ assignment_id: `ur-new-${createdUsers}-${at}`, role_id: role.id, role_name: role.name, device_group_id: null }] : [];
+    return role ? [{ assignment_id: `ur-new-${createdUsers}-${at}`, role_id: role.id, role_name: role.name, client_id: null }] : [];
   });
   GRANTS.set(id, grants);
   return {
@@ -321,7 +336,7 @@ const assignUserRole: FixtureMap["assignUserRole"] = (userId, body) => {
   const role = roles.get(body.role_id);
   if (!role) throw notFound("role");
   assigned += 1;
-  const grant: RoleAssignmentOut = { assignment_id: `ur-assigned-${assigned}`, role_id: role.id, role_name: role.name, device_group_id: body.device_group_id };
+  const grant: RoleAssignmentOut = { assignment_id: `ur-assigned-${assigned}`, role_id: role.id, role_name: role.name, client_id: body.client_id };
   GRANTS.set(userId, [...(GRANTS.get(userId) ?? []), grant]);
   return grant;
 };
@@ -424,6 +439,7 @@ const fixtures: FixtureMap = {
   setRolePermissions,
   deleteRole,
   getUserEffectivePermissions,
+  listClients,
   createUser,
   assignUserRole,
   removeUserRole,

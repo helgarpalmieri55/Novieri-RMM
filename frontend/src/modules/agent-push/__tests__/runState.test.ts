@@ -52,6 +52,7 @@ describe("run presentation", () => {
 
   it("gives every blocking reason the server can name a short chip", () => {
     for (const code of [
+      "ambiguous_asset",
       "credential_not_scoped",
       "no_site_server",
       "site_server_too_old",

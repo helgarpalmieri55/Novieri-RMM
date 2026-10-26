@@ -70,6 +70,12 @@ export interface EnrollmentTokenCreateRequest {
    * unlimited enrollment token: omitting this, or sending `null`, is a 422.
    */
   max_uses: number;
+  /**
+   * REQUIRED (MSP clients spec §1.5, §3.2): the site a machine enrolled with
+   * this token lands in. Its client is the site's, derived server-side and
+   * never sent.
+   */
+  site_id: string;
 }
 
 /**

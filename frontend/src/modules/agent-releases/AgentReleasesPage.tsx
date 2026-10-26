@@ -11,6 +11,7 @@ import { Button, Dialog, Table, Td, Th } from "../../components/ui";
 import type { AgentInstallCommand, AgentRelease, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDateTime, intlLocale } from "../../lib/datetime";
+import { internalSiteId, requireKnown } from "../../lib/internalClient";
 import { PageHead, Panel, QueryState, StatCard, StatsGrid, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { OsIcon } from "../../shell/viz";
@@ -192,6 +193,13 @@ export function AgentReleasesPage() {
   // NOT A PERMISSION GATE (invariant 6): every install-link route checks
   // `enrollment.link.manage` itself. This decides whether the panel renders.
   const canManageLink = me.data?.permissions?.includes(LINK_MANAGE) ?? false;
+  // PHASE 3: the client/site selector. The install command's token, the
+  // managed deployment's token and the install link each belong to ONE SITE
+  // now (MSP clients spec §1.5, §3.2). Until the selector exists this page
+  // works on the organisation's internal client, whose "Principal" site has
+  // the organisation's id -- `/me`'s `org_id`, from the query above
+  // (`lib/internalClient.ts`). `null` until `/me` has answered.
+  const internalSite = internalSiteId(me.data);
 
   const releases = useQuery({
     queryKey: ["agent-releases"],
@@ -200,7 +208,8 @@ export function AgentReleasesPage() {
 
   const generate = useMutation({
     mutationFn: (release: AgentRelease) =>
-      api.generateAgentInstallCommand(release.id, TOKEN_TTL_HOURS),
+      // PHASE 3: the client/site selector -- the internal site, above.
+      api.generateAgentInstallCommand(release.id, TOKEN_TTL_HOURS, requireKnown(internalSite)),
     onSuccess: (result) => {
       setCopied("idle");
       setCommand(result);
@@ -301,7 +310,12 @@ export function AgentReleasesPage() {
 
       {/* The install link (spec 2026-09-28 §1.1): one shared link, off by
           default, for technicians setting up machines by hand. */}
-      {canManageLink && <InstallLinkPanel zone={zone} />}
+      {/* PHASE 3: the client/site selector. One link per site; this is the
+          internal client's "Principal" site's, and it renders once `/me` has
+          said which that is -- the same answer `canManageLink` waits on. */}
+      {canManageLink && internalSite !== null && (
+        <InstallLinkPanel zone={zone} siteId={internalSite} />
+      )}
 
       {/* THE FRAGMENT TARGET IS A REAL ELEMENT. `Panel` takes no id, so the
           anchor is the wrapper; `#releases` pointing at nothing scrolls
@@ -599,6 +613,8 @@ export function AgentReleasesPage() {
         release={managedRelease}
         onClose={() => setManagedRelease(null)}
         timezone={zone}
+        // PHASE 3: the client/site selector -- the internal site, above.
+        siteId={internalSite}
       />
 
       <ConfirmDialog

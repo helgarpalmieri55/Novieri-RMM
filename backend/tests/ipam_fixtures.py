@@ -95,8 +95,12 @@ async def seed_device(env_or_engine: Any, org_id: UUID, **kw: Any) -> UUID:
         "os_family": "linux",
     }
     values.update(kw)
+    # The internal client and its Principal site (id = org id) unless a test
+    # names another client's site.
+    values.setdefault("client_id", org_id)
+    values.setdefault("site_id", org_id)
     async with AsyncSession(engine, expire_on_commit=False) as session:
-        device = Device(org_id=org_id, **values, client_id=org_id, site_id=org_id)
+        device = Device(org_id=org_id, **values)
         session.add(device)
         await session.commit()
         return device.id

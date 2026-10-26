@@ -63,6 +63,7 @@ export const TARGET_STATE_KIND: Readonly<Record<PushRunTargetState, Kind>> = {
 /** Short chip text for a readiness reason; the long remedy goes in a title. */
 export const READINESS_CHIPS: Readonly<Record<string, string>> = lazyLabels({
   no_asset: "agentPush.chip.no_asset",
+  ambiguous_asset: "agentPush.chip.ambiguous_asset",
   no_authorization: "agentPush.chip.no_authorization",
   credential_not_scoped: "agentPush.chip.credential_not_scoped",
   no_site_server: "agentPush.chip.no_site_server",

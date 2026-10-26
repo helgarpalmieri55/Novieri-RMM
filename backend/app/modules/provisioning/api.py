@@ -191,7 +191,7 @@ async def create_image_route(
                 actor_type="user",
             )
         except ProvisioningValidationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         return _image_out(image)
 
 
@@ -249,7 +249,7 @@ async def create_profile_route(
                 actor_type="user",
             )
         except ProvisioningValidationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         return _profile_out(profile)
 
 

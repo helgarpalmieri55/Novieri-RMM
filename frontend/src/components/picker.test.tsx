@@ -12,7 +12,7 @@
  * validation message; it is the right action against the wrong machine.
  */
 
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -143,5 +143,40 @@ describe("EntityPicker", () => {
     await user.click(await screen.findByRole("option", { name: /workstation-04/ }));
 
     expect(onChange).toHaveBeenCalledWith("22222222-2222-4222-8222-222222222222");
+  });
+  /**
+   * Final review, T11R-I1. A form that submits the VALUE must know when the
+   * box shows something else: text typed and not chosen. The Users tab
+   * disables Assign on it -- "Ware" typed is not Warehouse.
+   */
+  it("tells the caller while it holds typed text that is not a choice", async () => {
+    const onPendingChange = vi.fn();
+    picker({ onPendingChange });
+    expect(onPendingChange).toHaveBeenLastCalledWith(false);
+
+    await user.type(screen.getByLabelText("Device"), "work");
+    expect(onPendingChange).toHaveBeenLastCalledWith(true);
+
+    await user.click(await screen.findByRole("option", { name: /workstation-04/ }));
+    expect(onPendingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  /**
+   * The close on blur is deferred (so a click on an option can land). Coming
+   * back to the box before it runs cancels it: the person did not leave,
+   * and the list -- and what they typed -- stay.
+   */
+  it("keeps the list open when the box is refocused before the deferred close", async () => {
+    picker();
+    const input = screen.getByLabelText("Device");
+    await user.type(input, "build");
+    expect(await screen.findByRole("option", { name: /build-runner/ })).toBeInTheDocument();
+
+    fireEvent.blur(input);
+    fireEvent.focus(input);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 250)));
+
+    expect(screen.getByRole("option", { name: /build-runner/ })).toBeInTheDocument();
+    expect(input).toHaveValue("build");
   });
 });

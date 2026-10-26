@@ -130,9 +130,14 @@ def requested_client(request: Request) -> UUID | None:
     """The client `X-Client-Id` names, or None (spec §2.2, §3.1). Anything but
     one UUID is a 400: the header narrows a scope, so a value that cannot be
     read is never quietly treated as absent -- that would be the un-narrowed
-    scope the caller asked not to use."""
+    scope the caller asked not to use. The header sent TWICE is a 400 too,
+    whatever the copies say, rather than whichever one a parser keeps: the
+    console WebSocket refuses `?client=` twice (4400) by the same rule."""
+    values = request.headers.getlist("X-Client-Id")
     try:
-        return parse_client_header(request.headers.get("X-Client-Id"))
+        if len(values) > 1:
+            raise ValueError("more than one X-Client-Id")  # i18n-exempt: caught, the 400 below
+        return parse_client_header(values[0] if values else None)
     except ValueError as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, tr("X-Client-Id must be one client id")

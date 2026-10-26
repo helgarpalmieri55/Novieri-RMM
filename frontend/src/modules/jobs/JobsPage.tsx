@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { Job, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { RESYNC_KIND } from "../../lib/resync";
 import { useLiveEvents } from "../../lib/ws";
 import { EmptyState } from "../../components/emptystate";
 import { Table, Td, Th } from "../../components/ui";
@@ -313,8 +314,10 @@ export function JobsPage() {
     onError: () => setConfirmingRetry(false),
   });
 
+  // A RESYNC TOO (final review W1): the socket had a gap, and a final
+  // `job_status` lost in it would leave a finished job shown as running.
   useLiveEvents((event) => {
-    if (event.kind === "job_status" || event.kind === "job_log") {
+    if (event.kind === "job_status" || event.kind === "job_log" || event.kind === RESYNC_KIND) {
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     }
   });

@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.gateway.dispatch import queue_ui_event
+from app.gateway.dispatch import queue_job_ui_event
 from app.jobs.registry import JobType, register
 from app.models import Device, Job
 from app.modules.patch.apply import ingest_apply_result
@@ -53,9 +53,9 @@ def register_job_types() -> None:
                 f"no such device {job.target_id}"
             )
         await ingest_scan(session, device, doc)
-        queue_ui_event(
+        await queue_job_ui_event(
             session,
-            job.org_id,
+            job,
             {
                 "kind": "patch_status_updated",
                 "device_id": str(device.id),
@@ -73,9 +73,9 @@ def register_job_types() -> None:
                 f"invalid patch apply result: {exc}"
             ) from exc
         await ingest_apply_result(session, job, res)
-        queue_ui_event(
+        await queue_job_ui_event(
             session,
-            job.org_id,
+            job,
             {
                 "kind": "patch_status_updated",
                 "device_id": str(job.target_id),
@@ -93,9 +93,9 @@ def register_job_types() -> None:
                 f"invalid patch reboot result: {exc}"
             ) from exc
         await ingest_reboot_result(session, job, res, datetime.now(UTC))
-        queue_ui_event(
+        await queue_job_ui_event(
             session,
-            job.org_id,
+            job,
             {
                 "kind": "patch_status_updated",
                 "device_id": str(job.target_id),

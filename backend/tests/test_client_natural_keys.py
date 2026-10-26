@@ -29,6 +29,7 @@ namespace is pinned here at the database and on the global path.
 """
 
 import base64
+import inspect
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -44,6 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
+    AuditEvent,
     BackupOffsiteTarget,
     BackupRecoveryKey,
     ChangeGate,
@@ -56,6 +58,7 @@ from app.models import (
     Organization,
     Patch,
     PatchApproval,
+    PatchPolicy,
     Script,
     ScriptPolicy,
     Site,
@@ -75,6 +78,8 @@ from app.modules.health.errors import HealthValidationError
 from app.modules.health.profiles import create_assignment
 from app.modules.licenses.service import ignore_software
 from app.modules.patch.approve import approve_patch
+from app.modules.patch.ingest import AUTO_APPROVE_RING, ingest_scan
+from app.modules.patch.schema import PatchScanDocument
 from app.modules.sla.errors import SlaValidationError
 from app.modules.sla.policies import create_policy
 from tests.client_scope_support import everything_on
@@ -438,49 +443,154 @@ async def test_a_narrowed_technician_confirms_their_clients_key(api_env: Any) ->
     assert rows[w.y.client].confirmed_fingerprint == "SHA256:y"
 
 
+def _global_key(w: World) -> PushHostKey:
+    """A host key with no device: a global row (O), confirmed by an admin --
+    legacy data, since every probe now records its device."""
+    return PushHostKey(
+        org_id=w.org,
+        address=ADDRESS,
+        transport="ssh",
+        observed_fingerprint="SHA256:g",
+        observed_key_type="ssh-ed25519",
+        observed_at=_now(),
+        confirmed_fingerprint="SHA256:g",
+        confirmed_at=_now(),
+        confirmed_by=w.actor,
+    )
+
+
+async def _served(app_engine: AsyncEngine, w: World, device: UUID) -> tuple[Any, Any]:
+    async with org_session(w.org, engine=app_engine, clients=ClientScope.all()) as session:
+        return await host_key_service.confirmed_key_for(
+            session, w.org, ADDRESS, device_id=device
+        )
+
+
 async def test_a_global_host_key_serves_a_client_without_its_own(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     """A row with no device is global: every client's configuration (O). It
-    answers a push to a client that has no row of its own at the address, and
-    a client's own row -- even unconfirmed -- takes precedence over it."""
+    answers a push to any client that has no row of its own at the address,
+    and a client's own row -- even unconfirmed, even observing the same key --
+    takes precedence over it for that client and no other."""
     w = await _world(admin_engine)
-    async with AsyncSession(admin_engine) as s:
-        s.add(
-            PushHostKey(
-                org_id=w.org,
-                address=ADDRESS,
-                transport="ssh",
-                observed_fingerprint="SHA256:g",
-                observed_at=_now(),
-                confirmed_fingerprint="SHA256:g",
-                confirmed_at=_now(),
-                confirmed_by=w.actor,
-            )
-        )
-        await s.commit()
-    async with org_session(w.org, engine=app_engine, clients=ClientScope.all()) as session:
-        served = await host_key_service.confirmed_key_for(
-            session, w.org, ADDRESS, device_id=w.x.device
-        )
-    assert served == ("SHA256:g", None)
+    await _add(admin_engine, _global_key(w))
+    assert await _served(app_engine, w, w.x.device) == ("SHA256:g", None)
+    assert await _served(app_engine, w, w.y.device) == ("SHA256:g", None)
 
-    # X's probe claims the global row for X's device, as before 8b: the
-    # confirmed key is now judged against X's observation.
-    await _observe(app_engine, w, w.x.device, "SHA256:other")
+    await _observe(app_engine, w, w.x.device, "SHA256:g")
+    assert await _served(app_engine, w, w.x.device) == (None, "host_key_unconfirmed")
+    assert await _served(app_engine, w, w.y.device) == ("SHA256:g", None)
+
+
+_KEY_COLUMNS = (
+    "device_id",
+    "client_id",
+    "transport",
+    "observed_fingerprint",
+    "observed_key_type",
+    "observed_at",
+    "observed_job_id",
+    "readiness",
+    "confirmed_fingerprint",
+    "confirmed_at",
+    "confirmed_by",
+)
+
+
+@pytest.mark.parametrize("transport", ["ssh", "winrm"])
+async def test_a_clients_probe_leaves_the_global_host_key_alone(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine, transport: str
+) -> None:
+    """Task 8b review I1. A probe of X's machine at an address that has a
+    global row writes X's OWN row, twice over (created, then updated), and
+    never claims, rewrites or moves the global one: claiming it took it from
+    every other client it served, told them some other client's machine at
+    that address had been probed, and handed X a confirmation nobody made for
+    X. A global row changes only under scope all, by a person."""
+    w = await _world(admin_engine)
+    shared = _global_key(w)
+    await _add(admin_engine, shared)
+    before = await _host_keys(admin_engine, w.org)
+    snapshot = tuple(getattr(before[None], c) for c in _KEY_COLUMNS)
+
+    for fingerprint in ("SHA256:x1", "SHA256:x2"):
+        async with org_session(w.org, engine=app_engine, clients=ClientScope.all()) as session:
+            if transport == "ssh":
+                await host_key_service.record_observation(
+                    session,
+                    w.org,
+                    address=ADDRESS,
+                    transport="ssh",
+                    fingerprint=fingerprint,
+                    key_type="ssh-ed25519",
+                    device_id=w.x.device,
+                    job_id=None,
+                )
+            else:
+                await host_key_service.record_readiness(
+                    session,
+                    w.org,
+                    address=ADDRESS,
+                    device_id=w.x.device,
+                    job_id=None,
+                    readiness={"winrm_https": True, "winrm_http": False, "kdc_reachable": True},
+                )
+
     rows = await _host_keys(admin_engine, w.org)
-    assert set(rows) == {w.x.client}
-    # Y's probe finds no global row left to claim, and writes Y's own.
-    await _observe(app_engine, w, w.y.device, "SHA256:y")
+    assert set(rows) == {None, w.x.client}
+    assert rows[None].id == shared.id
+    assert tuple(getattr(rows[None], c) for c in _KEY_COLUMNS) == snapshot
+    mine = rows[w.x.client]
+    assert mine.device_id == w.x.device and mine.confirmed_fingerprint is None
+    observed = "SHA256:x2" if transport == "ssh" else host_key_service.WINRM_OBSERVATION
+    assert (mine.transport, mine.observed_fingerprint) == (transport, observed)
+
+
+def test_a_push_says_whose_host_key_it_reads() -> None:
+    """Task 8b review M2: `confirmed_key_for` has no default device. None is
+    the global row only; a caller that forgets the device must not silently
+    read it."""
+    parameter = inspect.signature(host_key_service.confirmed_key_for).parameters["device_id"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is inspect.Parameter.empty
+
+
+async def test_the_host_key_audit_names_the_row_and_its_client(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Task 8b review M3. Two clients' rows share an address, and the events'
+    target is the address: each event names the row it wrote and its client."""
+    w = await _world(admin_engine)
+    await _observe(app_engine, w, w.x.device, "SHA256:x")
+    async with org_session(
+        w.org, engine=app_engine, clients=ClientScope.only([w.x.client])
+    ) as session:
+        await host_key_service.confirm_host_key(
+            session, w.org, actor_id=w.actor, address=ADDRESS, fingerprint="SHA256:x"
+        )
     async with org_session(w.org, engine=app_engine, clients=ClientScope.all()) as session:
-        x = await host_key_service.confirmed_key_for(
-            session, w.org, ADDRESS, device_id=w.x.device
+        await host_key_service.record_readiness(
+            session,
+            w.org,
+            address=ADDRESS,
+            device_id=w.y.device,
+            job_id=None,
+            readiness={"winrm_https": True, "winrm_http": True, "kdc_reachable": True},
         )
-        y = await host_key_service.confirmed_key_for(
-            session, w.org, ADDRESS, device_id=w.y.device
-        )
-    assert x == (None, "host_key_changed")
-    assert y == (None, "host_key_unconfirmed")
+    rows = await _host_keys(admin_engine, w.org)
+    async with AsyncSession(admin_engine) as s:
+        events = {
+            e.action: e.meta
+            for e in (
+                await s.execute(select(AuditEvent).where(AuditEvent.org_id == w.org))
+            ).scalars()
+        }
+    x = {"host_key_id": str(rows[w.x.client].id), "client_id": str(w.x.client)}
+    y = {"host_key_id": str(rows[w.y.client].id), "client_id": str(w.y.client)}
+    assert x.items() <= events["push.host_key_observed"].items()
+    assert x.items() <= events["push.host_key_confirmed"].items()
+    assert y.items() <= events["push.winrm_readiness_observed"].items()
 
 
 # --------------------------------------------------------------------------- #
@@ -604,6 +714,75 @@ async def test_a_clients_approval_is_not_the_global_one(
         )
     assert made.id != theirs.id and made.client_id is None
     assert again.id == made.id
+
+
+async def test_patch_ingest_reads_the_global_approval_not_a_clients(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Task 8b review I2. The scan's auto-approval (PD-02) is global, like an
+    operator's: a client's approval of the same (patch, ring) is another row.
+    Taken for the global one, it skipped the global approval while the
+    device's status was flipped to approved anyway; beside a global one it
+    was two rows for `scalar_one_or_none`, a 500."""
+    w = await _world(admin_engine)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        device = await s.get(Device, w.x.device)
+        assert device is not None
+        device.os_family = "windows"
+        device.device_group_id = w.x.group
+        patch = Patch(
+            org_id=w.org,
+            os_family="windows",
+            source="windows_update",
+            identifier="KB-auto",
+            title="a security patch",
+            severity="critical",
+        )
+        s.add_all(
+            [
+                patch,
+                PatchPolicy(
+                    org_id=w.org,
+                    device_group_id=w.x.group,
+                    ring_name=AUTO_APPROVE_RING,
+                    auto_approve_security=True,
+                ),
+            ]
+        )
+        await s.flush()
+        theirs = PatchApproval(
+            org_id=w.org, client_id=w.x.client, patch_id=patch.id, ring_name=AUTO_APPROVE_RING
+        )
+        s.add(theirs)
+        await s.commit()
+    scan = PatchScanDocument(
+        os_family="windows",
+        scanned_at=_now().isoformat(),
+        installed_identifiers=[],
+        patches=[
+            {
+                "source": "windows_update",
+                "identifier": "KB-auto",
+                "title": "a security patch",
+                "severity": "critical",
+            }
+        ],
+    )
+    async with org_session(w.org, engine=app_engine, clients=ClientScope.all()) as session:
+        scanned = await session.get(Device, w.x.device)
+        assert scanned is not None
+        stats = await ingest_scan(session, scanned, scan)
+    assert stats.auto_approved == 1
+    async with AsyncSession(admin_engine) as s:
+        approvals = {
+            a.client_id: a
+            for a in (
+                await s.execute(select(PatchApproval).where(PatchApproval.patch_id == patch.id))
+            ).scalars()
+        }
+    assert set(approvals) == {None, w.x.client}
+    assert approvals[None].approved_by is None  # the system's
+    assert approvals[w.x.client].id == theirs.id
 
 
 async def test_a_clients_sla_policy_does_not_hold_the_global_level(
