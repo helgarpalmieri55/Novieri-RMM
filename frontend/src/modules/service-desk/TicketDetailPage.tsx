@@ -24,6 +24,7 @@ import { Facts, KV, Person } from "../../shell/viz";
 import type { DeviceStatus } from "../patch/types";
 import { useCan, usePersonForUser } from "../people/api";
 import { StartSessionDialog } from "../remote/StartSessionDialog";
+import { useClients } from "../settings/api";
 import { TicketSlaPanel } from "../sla/TicketSlaPanel";
 import { TicketCopilotPanel } from "./TicketCopilotPanel";
 import {
@@ -35,6 +36,7 @@ import {
   useCreateTicketCommentMutation,
   useDirectoryDevices,
   useDirectoryUsers,
+  useMoveTicketMutation,
   useRejectTicketMutation,
   useResolveTicketMutation,
   useTicket,
@@ -92,6 +94,8 @@ export function TicketDetailPage() {
   const canAssign = permissions.includes("ticket.assign");
   const canApprove = permissions.includes("ticket.approve");
   const canReadDocs = permissions.includes("docs.read");
+  // The move panel lists `GET /clients`, which needs `clients.read`.
+  const canReadClients = permissions.includes("clients.read");
   const zone = me.data?.timezone;
 
   const ticket = useTicket(ticketId);
@@ -170,6 +174,9 @@ export function TicketDetailPage() {
                     canWrite={canWrite}
                     canAssign={canAssign}
                   />
+                )}
+                {canWrite && canReadClients && (
+                  <ClientPanel key={`${data.id}|${data.client_id}`} ticket={data} />
                 )}
                 <TicketSlaPanel ticketId={ticketId} />
                 {data.device_id && <DeviceSummaryPanel deviceId={data.device_id} />}
@@ -658,6 +665,67 @@ function ReplyBox({
         )}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The ticket's client, and moving it to another (MSP clients spec §2.4)
+// ---------------------------------------------------------------------------
+
+// The server decides what may move (`ticket.write` in both clients; not a
+// ticket with a device, nor one an alert or a change opened) and says why in
+// a sentence, which is shown as it is. This only offers the clients a ticket
+// could go to: never its own, and never "Sin asignar", the inbox of what has
+// no owner (plan 2026-10-26, C10).
+function ClientPanel({ ticket }: { ticket: TicketOut }) {
+  const t = useT();
+  const clients = useClients(true);
+  const move = useMoveTicketMutation();
+  const [destination, setDestination] = useState("");
+
+  const current = clients.data?.find((client) => client.id === ticket.client_id);
+  const destinations = (clients.data ?? []).filter(
+    (client) => client.id !== ticket.client_id && client.kind !== "unassigned",
+  );
+
+  return (
+    <Panel title={t("serviceDesk.detail.clientTitle")}>
+      <p className="note" style={{ marginBottom: 12 }}>
+        {t("serviceDesk.detail.clientBelongs", { client: current?.name ?? ticket.client_id })}
+      </p>
+      {clients.isError ? (
+        <p className="note">{describeSubmitError(clients.error)}</p>
+      ) : (
+        <>
+          <Field label={t("serviceDesk.detail.moveToClient")}>
+            <select
+              className={inputClass}
+              value={destination}
+              disabled={clients.isLoading || move.isPending}
+              onChange={(e) => setDestination(e.target.value)}
+            >
+              <option value="">{t("serviceDesk.detail.chooseClient")}</option>
+              {destinations.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {move.isError && (
+            <p role="alert" className="notice red" style={{ marginBottom: 12 }}>
+              {describeSubmitError(move.error)}
+            </p>
+          )}
+          <Button
+            onClick={() => move.mutate({ id: ticket.id, clientId: destination })}
+            disabled={destination === "" || move.isPending}
+          >
+            {move.isPending ? t("serviceDesk.detail.moving") : t("serviceDesk.detail.moveTicket")}
+          </Button>
+        </>
+      )}
+    </Panel>
   );
 }
 

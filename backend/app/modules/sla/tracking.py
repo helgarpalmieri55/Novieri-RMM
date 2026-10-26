@@ -572,7 +572,11 @@ async def start_tracking(session: AsyncSession, org_id: UUID, ticket: Ticket) ->
         return existing
 
     policy = await resolve_policy(
-        session, org_id, queue_id=ticket.queue_id, priority=ticket.priority
+        session,
+        org_id,
+        client_id=ticket.client_id,
+        queue_id=ticket.queue_id,
+        priority=ticket.priority,
     )
     if policy is None:
         return None
@@ -675,7 +679,11 @@ async def recompute_for_retriage(
     # clobbering the winner's write on commit.
     tracking = await _load_tracking(session, org_id, ticket.id, for_update=True)
     policy = await resolve_policy(
-        session, org_id, queue_id=ticket.queue_id, priority=ticket.priority
+        session,
+        org_id,
+        client_id=ticket.client_id,
+        queue_id=ticket.queue_id,
+        priority=ticket.priority,
     )
 
     if tracking is None:

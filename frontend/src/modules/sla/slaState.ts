@@ -487,11 +487,27 @@ function matchAt(
   );
 }
 
-export function resolutionPreview(
+// WHOSE POLICIES (plan 2026-10-26 D2, mirroring `resolve_policy`): a client
+// with any active policy of its own resolves among those alone; any other --
+// and `clientId === null`, the global configuration -- among the global ones
+// (`client_id === null`). The two are never mixed level by level.
+function ownersPolicies(
   policies: ReadonlyArray<PolicyOut>,
+  clientId: string | null,
+): PolicyOut[] {
+  const hasOwn =
+    clientId !== null && policies.some((policy) => policy.active && policy.client_id === clientId);
+  const owner = hasOwn ? clientId : null;
+  return policies.filter((policy) => policy.client_id === owner);
+}
+
+export function resolutionPreview(
+  allPolicies: ReadonlyArray<PolicyOut>,
   queueId: string,
   priority: SlaPriority,
+  clientId: string | null,
 ): ResolutionPreview {
+  const policies = ownersPolicies(allPolicies, clientId);
   const candidates: Array<{ level: 1 | 2 | 3 | 4; label: string; queueId: string | null; priority: SlaPriority | null }> = [
     { level: 1, label: translate("sla.resolver.level1"), queueId, priority },
     { level: 2, label: translate("sla.resolver.level2"), queueId, priority: null },

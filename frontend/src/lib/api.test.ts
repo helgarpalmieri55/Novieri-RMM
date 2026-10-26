@@ -294,4 +294,17 @@ describe("ApiClient", () => {
     expect(JSON.parse(calls[0]![1].body as string)).toEqual({ role_id: "r1", client_id: "client-1" });
     expect(JSON.parse(calls[1]![1].body as string)).toEqual({ role_id: "r1", client_id: null });
   });
+
+  it("moves a ticket on its own route, naming the destination client in the body", async () => {
+    // `TicketMove` (service_desk/schema.py) is `{client_id}`.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "t1", client_id: "c2" }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient(() => "t", vi.fn());
+    expect((await client.moveTicket("t1", "c2")).client_id).toBe("c2");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect([url, init.method]).toEqual(["/api/v1/service-desk/tickets/t1/move", "POST"]);
+    expect(JSON.parse(init.body as string)).toEqual({ client_id: "c2" });
+  });
 });

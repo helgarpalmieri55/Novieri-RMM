@@ -288,6 +288,10 @@ async def test_technician_access_matches_spec_grants(api_env: ApiEnv) -> None:
             f"{API}/tickets/{ticket['id']}/assign", {"json": {"assigned_to": str(tech_id)}}, True,
         ),
         (
+            "POST", "/service-desk/tickets/{ticket_id}/move",
+            f"{API}/tickets/{ticket['id']}/move", {"json": {"client_id": str(org_id)}}, True,
+        ),
+        (
             "POST", "/service-desk/tickets/{ticket_id}/approve",
             f"{API}/tickets/{ticket['id']}/approve", {"json": {}}, False,
         ),

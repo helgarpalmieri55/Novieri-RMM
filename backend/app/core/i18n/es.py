@@ -2980,6 +2980,16 @@ CATALOG: dict[str, str] = {
     "the assignee cannot see this client's tickets": (
         "la persona asignada no puede ver los tickets de este cliente"
     ),
+    # Moving a ticket between clients, and a client's own SLA (Task 3).
+    "remove the ticket's device before moving it to another client": (
+        "quita el equipo del ticket antes de moverlo a otro cliente"
+    ),
+    "a ticket opened by an alert or a change stays with its client": (
+        "un ticket abierto por una alerta o un cambio se queda en su cliente"
+    ),
+    "Unassigned has no SLA policies of its own": (
+        "«Sin asignar» no tiene políticas de SLA propias"
+    ),
     "unknown ticket type: {ticket_type}": "tipo de ticket desconocido: {ticket_type}",
     "illegal {ticket_type} transition: {from_status} -> {to_status}": (
         "transición no permitida en {ticket_type}: {from_status} -> {to_status}"

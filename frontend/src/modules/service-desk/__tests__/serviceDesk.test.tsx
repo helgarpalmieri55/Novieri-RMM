@@ -1122,6 +1122,70 @@ describe("TicketDetailPage wiring", () => {
     });
   });
 
+  // Moving a ticket to another client (MSP clients plan 2026-10-26 Task 3):
+  // the clients come from `GET /clients`, never "Unassigned" (C10) nor the
+  // ticket's own, and the server's refusal is shown in its own words.
+  describe("moving a ticket to another client", () => {
+    const CLIENTS = [
+      { id: "o1", name: "Novieri IT", kind: "internal" },
+      { id: "c-acme", name: "Acme", kind: "customer" },
+      { id: "u1", name: "Unassigned", kind: "unassigned" },
+      { id: "c-beta", name: "Beta", kind: "customer" },
+    ].map((client) => ({
+      status: "active", email_domains: [], phone: "", address: "", website: "", notes: "",
+      enabled_modules: [], device_count: 0, site_count: 0, ...client,
+    })) as Awaited<ReturnType<ApiClient["listClients"]>>;
+
+    beforeEach(() => {
+      api.me = vi.fn().mockResolvedValue({
+        ...ME_FULL, permissions: [...ME_FULL.permissions, "clients.read"],
+      });
+      api.listClients = vi.fn().mockResolvedValue(CLIENTS);
+      api.moveTicket = vi.fn().mockResolvedValue({ ...TICKET_OPEN, client_id: "c-acme" });
+    });
+
+    it("moves the ticket to a client chosen from the list", async () => {
+      const user = userEvent.setup();
+      renderDetail("t1");
+
+      await screen.findByText("INC-1: Laptop won't boot");
+      expect(await screen.findByText(/This ticket belongs to Novieri IT/)).toBeInTheDocument();
+      const select = await screen.findByLabelText("Move to another client");
+      const offered = within(select).getAllByRole("option").map((option) => option.textContent);
+      expect(offered).toEqual(["Choose a client…", "Acme", "Beta"]);
+      await user.selectOptions(select, "c-acme");
+      await user.click(screen.getByRole("button", { name: "Move ticket" }));
+
+      expect(api.moveTicket).toHaveBeenCalledWith("t1", "c-acme");
+    });
+
+    it("shows the server's refusal in its own words", async () => {
+      api.moveTicket = vi.fn().mockRejectedValue(
+        new ApiError(409, JSON.stringify({
+          detail: "remove the ticket's device before moving it to another client",
+        })),
+      );
+      const user = userEvent.setup();
+      renderDetail("t1");
+
+      await user.selectOptions(await screen.findByLabelText("Move to another client"), "c-beta");
+      await user.click(screen.getByRole("button", { name: "Move ticket" }));
+
+      expect(
+        await screen.findByText(/remove the ticket's device before moving it to another client/),
+      ).toBeInTheDocument();
+    });
+
+    it("is not offered without clients.read, the list it needs", async () => {
+      api.me = vi.fn().mockResolvedValue(ME_FULL);
+      renderDetail("t1");
+
+      await screen.findByText("INC-1: Laptop won't boot");
+      expect(screen.queryByLabelText("Move to another client")).not.toBeInTheDocument();
+      expect(api.listClients).not.toHaveBeenCalled();
+    });
+  });
+
   it("assigns the ticket to a person chosen from the directory", async () => {
     const user = userEvent.setup();
     renderDetail("t1");

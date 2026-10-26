@@ -64,7 +64,8 @@ defence-in-depth belt can never drift apart.
 
 RBAC (spec §8.2, §9): queue/category/ticket/comment/attachment/status-history
 reads -> `ticket.read`; ticket create/comment/attachment-upload, the generic
-ticket PATCH + status transition and reply-and-resolve -> `ticket.write`; assign/reassign/move-
+ticket PATCH + status transition, reply-and-resolve and the move to another client
+(`ticket.write` in both clients) -> `ticket.write`; assign/reassign/move-
 queue -> `ticket.assign`; approve/reject -> `ticket.approve`; queue/category
 create+update and canned-response create/update/delete -> `ticket.admin`
 (listing canned responses needs only `ticket.read`). Technician holds `read`/`write`/`assign`
@@ -92,8 +93,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.audit import audit_service
+from app.core.client_scope import ClientScope
 from app.core.http import read_bounded_body, reject_oversized_content_length
 from app.core.i18n import tr
+from app.core.rbac import has_permission
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.core.ticket_words import status_quoted
@@ -151,6 +154,7 @@ from app.modules.service_desk.schema import (
     TicketAssign,
     TicketCreate,
     TicketListResponse,
+    TicketMove,
     TicketOut,
     TicketResolve,
     TicketSlaSummary,
@@ -171,6 +175,7 @@ from app.modules.service_desk.tickets import (
     get_ticket,
     list_status_history,
     list_tickets,
+    move_ticket,
     update_ticket,
 )
 from app.modules.service_desk.transitions import assign_ticket, change_status
@@ -834,6 +839,60 @@ async def assign_ticket_route(
                 ctx.user_id,
                 ticket_id,
                 body.model_dump(exclude_unset=True),
+            )
+        except TicketValidationError as exc:
+            raise _http_error(exc) from None
+        return await _ticket_out(session, ctx.org_id, ticket)
+
+
+@router.post("/service-desk/tickets/{ticket_id}/move", response_model=TicketOut)
+async def move_ticket_route(
+    ticket_id: UUID,
+    body: TicketMove,
+    request: Request,
+    ctx: AuthContext = Depends(require_permission("ticket.write")),
+) -> TicketOut:
+    """Move a ticket to another client (MSP clients spec §2.4): `ticket.write`
+    in BOTH clients.
+
+    The source: the ticket is read under the request's own scope, which
+    `require_permission("ticket.write")` made the clients where the person
+    holds `ticket.write` -- a ticket they cannot see is a 404, as everywhere.
+
+    The destination: `X-Client-Id` narrows what the console LISTS, not where a
+    ticket may go, so the person's own grants decide (`has_permission` with
+    the destination's id, the plan's rule for a permission on a record). A
+    client they hold no `ticket.write` in is a 404 -- the same answer as one
+    that does not exist, never a 403 (spec §3.2).
+
+    Then the move runs in a session that sees both clients and no other:
+    `its_client_to_children` moves the five child tables under the session's
+    own RLS (`tickets.move_ticket`). A request already scoped to every client
+    keeps that scope, the one place "Sin asignar" is visible, so naming it is
+    the service's 422 rather than a 404."""
+    engine = request.app.state.app_engine
+    async with org_session(ctx.org_id, engine=engine, clients=ctx.clients) as session:
+        source = (
+            await session.execute(
+                select(Ticket.client_id).where(
+                    Ticket.org_id == ctx.org_id, Ticket.id == ticket_id
+                )
+            )
+        ).scalar_one_or_none()
+        may_write_there = source is not None and await has_permission(
+            session, ctx.user_id, "ticket.write", client_id=body.client_id
+        )
+    if source is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, tr("ticket {ticket_id} not found", ticket_id=ticket_id)
+        )
+    if not may_write_there:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such client"))
+    both = ctx.clients if ctx.clients.is_all else ClientScope.only([source, body.client_id])
+    async with org_session(ctx.org_id, engine=engine, clients=both) as session:
+        try:
+            ticket = await move_ticket(
+                session, ctx.org_id, ctx.user_id, ticket_id, to_client_id=body.client_id
             )
         except TicketValidationError as exc:
             raise _http_error(exc) from None

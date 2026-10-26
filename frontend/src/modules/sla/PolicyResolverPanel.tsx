@@ -37,8 +37,11 @@ export function PolicyResolverPanel() {
 
   const forbidden = policies.error instanceof ApiError && policies.error.status === 403;
   const failed = policies.error != null && !forbidden;
+  // PHASE 3: the client selector names the client to preview; until then the
+  // panel previews the global policies, the ones a client without policies
+  // of its own resolves among (D2).
   const preview =
-    queueId === "" ? null : resolutionPreview(policies.data ?? [], queueId, priority);
+    queueId === "" ? null : resolutionPreview(policies.data ?? [], queueId, priority, null);
 
   function calendarName(id: string): string {
     return calendars.data?.find((calendar) => calendar.id === id)?.name ?? id;

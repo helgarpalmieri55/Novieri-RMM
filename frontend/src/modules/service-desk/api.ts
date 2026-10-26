@@ -183,6 +183,22 @@ export function useAssignTicketMutation() {
   });
 }
 
+// A move re-resolves the ticket's SLA among the new client's policies
+// (plan 2026-10-26 D2), so the ticket's SLA panel refetches too.
+export function useMoveTicketMutation() {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, clientId }: { id: string; clientId: string }) =>
+      api.moveTicket(id, clientId),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ["service-desk-tickets"] });
+      void queryClient.invalidateQueries({ queryKey: ["service-desk-ticket", variables.id] });
+      void queryClient.invalidateQueries({ queryKey: ["sla-ticket", variables.id] });
+    },
+  });
+}
+
 export function useApproveTicketMutation() {
   const api = useApi();
   const queryClient = useQueryClient();

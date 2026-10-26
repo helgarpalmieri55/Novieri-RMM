@@ -391,6 +391,13 @@ class TicketAssign(BaseModel):
     queue_id: UUID | None = None
 
 
+class TicketMove(BaseModel):
+    """Backs `POST .../move` (MSP clients spec §2.4): the client the ticket
+    goes to. Needs `ticket.write` in the ticket's client and in this one."""
+
+    client_id: UUID
+
+
 class ApprovalDecision(BaseModel):
     """Backs both `POST .../approve` and `POST .../reject` (spec §4, §9).
     `reason` defaults to empty for an approval; the service layer rejects

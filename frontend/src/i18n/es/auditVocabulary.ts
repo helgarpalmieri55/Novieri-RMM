@@ -433,6 +433,7 @@ export const auditActions: Shape<typeof enActions> = {
   ticket_category_updated: "Categoría de ticket actualizada",
   ticket_comment_added: "Comentario añadido a un ticket",
   ticket_created: "Ticket creado",
+  ticket_moved: "Ticket movido a otro cliente",
   ticket_queue_created: "Cola de tickets creada",
   ticket_queue_updated: "Cola de tickets actualizada",
   ticket_queues_seeded: "Colas de tickets predeterminadas creadas",

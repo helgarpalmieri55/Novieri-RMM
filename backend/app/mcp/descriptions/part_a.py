@@ -459,6 +459,10 @@ PART_A: dict[str, str] = {
     "GET /api/v1/service-desk/tickets/{ticket_id}/history": (
         "Lists the ticket's status changes oldest first, with actor and reason."
     ),
+    "POST /api/v1/service-desk/tickets/{ticket_id}/move": (
+        "Move a ticket to another client. Needs ticket.write in both clients; a ticket "
+        "with a device, or opened by an alert or a change, does not move."
+    ),
     "POST /api/v1/service-desk/tickets/{ticket_id}/reject": (
         "Rejects a pending service request with a required reason. Rejection is final; "
         "the requester cannot reject their own request."

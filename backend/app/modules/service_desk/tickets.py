@@ -1,5 +1,6 @@
-"""Ticket core: create, get, list, update
-(docs/modules/service-desk/spec.md §2, §3, §5, §7.2, §8).
+"""Ticket core: create, get, list, update, and move to another client
+(docs/modules/service-desk/spec.md §2, §3, §5, §7.2, §8; MSP clients spec
+§2.4 for the move).
 
 Mirrors `app.modules.budget.expenses`'s style closely -- it solved every
 problem here already: org-scoped load + audit + flush for every mutation
@@ -109,7 +110,7 @@ when that rejection raises.
 from typing import Any, Literal
 from uuid import UUID
 
-from sqlalchemy import Select, and_, func, or_, select
+from sqlalchemy import Select, and_, exists, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
@@ -117,7 +118,15 @@ from app.core.events import publish
 from app.core.i18n import tr
 from app.core.rbac import has_permission
 from app.core.ticket_words import status_quoted, type_quoted
-from app.models import Device, Ticket, TicketApproval, TicketStatusHistory, User
+from app.models import (
+    Device,
+    HealthAlert,
+    HealthAlertAction,
+    Ticket,
+    TicketApproval,
+    TicketStatusHistory,
+    User,
+)
 from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.service_desk.errors import (
     TicketClientError,
@@ -380,6 +389,34 @@ async def ensure_assignee_sees(session: AsyncSession, assignee: User, client_id:
         session, assignee.id, "ticket.read", client_id=client_id
     ):
         raise TicketClientError(tr("the assignee cannot see this client's tickets"))
+
+
+async def hold_ticket_client(
+    session: AsyncSession, ticket_id: UUID, *, moving: bool = False
+) -> None:
+    """Hold the ticket's client still until commit (research-1 §I5).
+
+    A row inserted under a ticket -- a comment, an attachment -- takes the
+    ticket's client from `its_client_from_parent`, which reads the ticket
+    with NO lock; and a move's `its_client_to_children` updates only the
+    children it can see. A comment written while a move is in flight
+    therefore reads the old client, and the move cannot see it to carry it
+    over: it would stay in the old client for good. `add_comment` and
+    `add_attachment` call this (shared) before they read the ticket, and
+    `move_ticket` (`moving=True`, exclusive) before it reads it to change it:
+    a child waits for a move in flight and is then born in the new client; a
+    move waits for the children in flight and then carries them over.
+
+    A transaction-scoped ADVISORY lock, not `SELECT ... FOR SHARE` on the
+    ticket: a row lock needs the UPDATE privilege, and `portal_user` -- whose
+    replies and uploads reach `add_comment`/`add_attachment` -- holds only
+    SELECT and INSERT on `ticket` (0028), deliberately. The same
+    `hashtext` key shape as the IPAM, remote-screen and push-run locks."""
+    lock = "pg_advisory_xact_lock" if moving else "pg_advisory_xact_lock_shared"
+    await session.execute(
+        text(f"SELECT {lock}(hashtext('ticket-client:' || :ticket))"),
+        {"ticket": str(ticket_id)},
+    )
 
 
 # Origins whose CREATE-action attribution is `actor_type="system"` (module
@@ -689,15 +726,20 @@ async def create_ticket(
 # ---------------------------------------------------------------------------
 
 
-async def get_ticket(session: AsyncSession, org_id: UUID, ticket_id: UUID) -> Ticket:
+async def get_ticket(
+    session: AsyncSession, org_id: UUID, ticket_id: UUID, *, fresh: bool = False
+) -> Ticket:
     """Org-scoped load. A ticket id from another org is indistinguishable
     from a nonexistent one -- both raise `TicketNotFoundError` (spec §8,
-    invariant #5)."""
-    ticket = (
-        await session.execute(
-            select(Ticket).where(Ticket.org_id == org_id, Ticket.id == ticket_id)
-        )
-    ).scalar_one_or_none()
+    invariant #5).
+
+    `fresh` re-reads the row's columns into a ticket this session already
+    holds, as `hold_ticket_client`'s callers need: the client they file under
+    is the one a move that just committed wrote, not the one loaded before."""
+    stmt = select(Ticket).where(Ticket.org_id == org_id, Ticket.id == ticket_id)
+    if fresh:
+        stmt = stmt.execution_options(populate_existing=True)
+    ticket = (await session.execute(stmt)).scalar_one_or_none()
     if ticket is None:
         raise TicketNotFoundError(tr("ticket {ticket_id} not found", ticket_id=ticket_id))
     return ticket
@@ -1037,4 +1079,144 @@ async def update_ticket(
     if actor_type == "user" and "priority" in changed_fields:
         async with sla_misconfiguration_is_not_fatal("recompute_for_retriage", ticket.id):
             await recompute_for_retriage(session, org_id, ticket)
+    return ticket
+
+
+# ---------------------------------------------------------------------------
+# move_ticket (MSP clients spec §2.4, §3.2; plan 2026-10-26 Task 3)
+# ---------------------------------------------------------------------------
+
+# The origins whose ticket belongs to something else's client, and so stays
+# there: an alert's ticket is its device's alert's, and `integration` is the
+# change adapter's (`adapters.push_change`, the only path that files one) --
+# a change's ticket is the change's client's (C9's reasoning, research-1 §E6).
+_ORIGINS_THAT_STAY: frozenset[str] = frozenset({"alert", "integration"})
+
+
+async def _linked_to_an_alert(session: AsyncSession, org_id: UUID, ticket_id: UUID) -> bool:
+    """Whether a health alert, or one of its actions, still names this ticket
+    (research-1 §E6): its client is the alert's device's."""
+    return bool(
+        (
+            await session.execute(
+                select(
+                    exists().where(HealthAlert.org_id == org_id, HealthAlert.ticket_id == ticket_id)
+                    | exists().where(
+                        HealthAlertAction.org_id == org_id,
+                        HealthAlertAction.ticket_id == ticket_id,
+                    )
+                )
+            )
+        ).scalar_one()
+    )
+
+
+async def move_ticket(
+    session: AsyncSession,
+    org_id: UUID,
+    actor_id: UUID,
+    ticket_id: UUID,
+    *,
+    to_client_id: UUID,
+) -> Ticket:
+    """Move a ticket to another client (spec §2.4) -- the normal way out of
+    "Sin asignar".
+
+    The session must see BOTH clients (the route opens it so):
+    `its_client_to_children` is SECURITY INVOKER and moves the five child
+    tables in the same statement, and RLS must let it read the old client's
+    rows and write them in the new one.
+
+    Refused, before anything changes:
+    * a destination the session cannot see (404), an archived one (409), or
+      "Sin asignar" (422: tickets reach it only by email, C10);
+    * a ticket with a device (409, C9): a device's client never changes and
+      the ticket must agree with it -- take the device off, then move;
+    * a ticket an alert or a change opened, or one an alert still links to
+      (409, research-1 §E6): it belongs to that alert's or change's client;
+    * a ticket whose requester is a contact of another client (422,
+      research-1 §E2): its emailed replies would otherwise comment on a ticket
+      of a client the contact is not one of.
+
+    An assignee who cannot read tickets of the destination is taken off it --
+    a ticket is never left with someone who cannot open it -- and the audit
+    names them. The SLA is re-resolved among the destination's policies
+    (D2), as a human re-triage: `policy_source = 'retriage'`.
+
+    The destination is loaded first, as every client a write is filed under
+    is: `client_for_new_rows`'s lock is a transaction's first (its module
+    docstring). Then the ticket is held (`hold_ticket_client`, then FOR
+    UPDATE) so no comment or attachment in flight is left behind.
+    """
+    try:
+        destination = await client_for_new_rows(session, org_id=org_id, client_id=to_client_id)
+    except ClientNotFound:
+        raise TicketNotFoundError(tr("no such client")) from None
+    except NotAcceptingNewRows as exc:
+        raise TicketConflictError(exc.detail) from None
+    if destination.kind == CLIENT_KIND_UNASSIGNED:
+        raise TicketClientError(tr("tickets reach Unassigned only by email"))
+
+    await hold_ticket_client(session, ticket_id, moving=True)
+    ticket = (
+        await session.execute(
+            select(Ticket)
+            .where(Ticket.org_id == org_id, Ticket.id == ticket_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if ticket is None:
+        raise TicketNotFoundError(tr("ticket {ticket_id} not found", ticket_id=ticket_id))
+    if ticket.client_id == to_client_id:
+        return ticket
+    if ticket.device_id is not None:
+        raise TicketConflictError(
+            tr("remove the ticket's device before moving it to another client")
+        )
+    if (
+        ticket.source_alert_id is not None
+        or ticket.origin in _ORIGINS_THAT_STAY
+        or await _linked_to_an_alert(session, org_id, ticket.id)
+    ):
+        raise TicketConflictError(
+            tr("a ticket opened by an alert or a change stays with its client")
+        )
+    if ticket.requester_id is not None:
+        _requester_belongs(await resolve_user(session, org_id, ticket.requester_id), to_client_id)
+
+    # Taken off the ticket: an assignee who cannot read the destination's.
+    dropped = ticket.assigned_to
+    if dropped is not None and await has_permission(
+        session, dropped, "ticket.read", client_id=to_client_id
+    ):
+        dropped = None
+    source = ticket.client_id
+    ticket.client_id = to_client_id
+    if dropped is not None:
+        ticket.assigned_to = None
+    await session.flush()
+
+    # A move changes which policies the ticket resolves among (D2): the same
+    # human re-triage `update_ticket` and `assign_ticket` run, under the same
+    # guard -- a broken calendar may cost the ticket its SLA, never the move.
+    async with sla_misconfiguration_is_not_fatal("recompute_for_retriage", ticket.id):
+        await recompute_for_retriage(session, org_id, ticket)
+
+    await audit_service.record(
+        session,
+        org_id=org_id,
+        actor_type="user",
+        actor_id=actor_id,
+        action="ticket.moved",
+        target_type="ticket",
+        target_id=str(ticket.id),
+        client_id=to_client_id,
+        metadata={
+            "from": str(source),
+            "to": str(to_client_id),
+            "unassigned": str(dropped) if dropped is not None else None,
+        },
+    )
+    await session.flush()
     return ticket

@@ -132,7 +132,9 @@ async def test_create_policy_persists_every_non_default_field(api_env) -> None:
 
     # `active=False` must MEAN inactive: resolution must not return it.
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        assert await resolve_policy(session, org_id, queue_id=queue_id, priority="urgent") is None
+        assert await resolve_policy(
+            session, org_id, client_id=org_id, queue_id=queue_id, priority="urgent"
+        ) is None
 
 
 async def test_create_policy_allows_all_four_wildcard_shapes(api_env) -> None:
@@ -797,7 +799,9 @@ async def test_a_referenced_policy_can_be_retired_and_replaced_at_the_same_level
         )
         original_id = original.id
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        resolved = await resolve_policy(session, org_id, queue_id=queue_id, priority="high")
+        resolved = await resolve_policy(
+            session, org_id, client_id=org_id, queue_id=queue_id, priority="high"
+        )
     assert resolved is not None and resolved.id == original_id
 
     # 2. A ticket is promised that policy.
@@ -841,7 +845,9 @@ async def test_a_referenced_policy_can_be_retired_and_replaced_at_the_same_level
 
     # 6. Resolution returns the REPLACEMENT, not the retired policy.
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        resolved = await resolve_policy(session, org_id, queue_id=queue_id, priority="high")
+        resolved = await resolve_policy(
+            session, org_id, client_id=org_id, queue_id=queue_id, priority="high"
+        )
     assert resolved is not None
     assert resolved.id == replacement_id
     assert resolved.response_target_minutes == 5
@@ -888,7 +894,9 @@ async def test_resolve_policy_returns_none_when_nothing_matches(api_env) -> None
     await _seed_policy(api_env, org_id, calendar_id=calendar_id, queue_id=other_queue_id)
 
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        result = await resolve_policy(session, org_id, queue_id=queue_id, priority="high")
+        result = await resolve_policy(
+            session, org_id, client_id=org_id, queue_id=queue_id, priority="high"
+        )
 
     assert result is None
 
@@ -909,7 +917,9 @@ async def test_resolve_policy_only_considers_active_policies(api_env) -> None:
     )
 
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        result = await resolve_policy(session, org_id, queue_id=queue_id, priority="high")
+        result = await resolve_policy(
+            session, org_id, client_id=org_id, queue_id=queue_id, priority="high"
+        )
 
     assert result is None
 
@@ -924,7 +934,9 @@ async def test_resolve_policy_inactive_specific_falls_through_to_active_fallback
     fallback_id = await _seed_policy(api_env, org_id, calendar_id=calendar_id, active=True)
 
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        result = await resolve_policy(session, org_id, queue_id=queue_id, priority="high")
+        result = await resolve_policy(
+            session, org_id, client_id=org_id, queue_id=queue_id, priority="high"
+        )
 
     assert result is not None
     assert result.id == fallback_id
@@ -963,7 +975,9 @@ async def test_resolve_policy_order_the_most_specific_wins_and_the_fallback_walk
         async with org_session(
             org_id, engine=api_env.app_engine, clients=ClientScope.all()
         ) as session:
-            result = await resolve_policy(session, org_id, queue_id=queue_id, priority="high")
+            result = await resolve_policy(
+                session, org_id, client_id=org_id, queue_id=queue_id, priority="high"
+            )
         return result.id if result else None
 
     # All four present: the most specific, level 1, wins.
@@ -1006,7 +1020,9 @@ async def test_resolve_policy_queue_only_level_wins_over_priority_only(api_env) 
     await _seed_policy(api_env, org_id, calendar_id=calendar_id, queue_id=None, priority="high")
 
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        result = await resolve_policy(session, org_id, queue_id=queue_id, priority="high")
+        result = await resolve_policy(
+            session, org_id, client_id=org_id, queue_id=queue_id, priority="high"
+        )
 
     assert result is not None
     assert result.id == level2
@@ -1103,7 +1119,9 @@ async def test_tenancy_resolve_policy_org_filter_is_load_bearing(
     await _seed_policy(api_env, org_b, calendar_id=calendar_b)  # (NULL, NULL) fallback
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        result = await resolve_policy(session, org_a, queue_id=None, priority="high")
+        result = await resolve_policy(
+            session, org_a, client_id=org_a, queue_id=None, priority="high"
+        )
 
     assert result is None
 

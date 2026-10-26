@@ -248,6 +248,7 @@ describe("describeTargetTiming", () => {
 function policy(overrides: Partial<PolicyOut>): PolicyOut {
   return {
     id: "p",
+    client_id: null,
     queue_id: null,
     priority: null,
     calendar_id: "cal",
@@ -272,6 +273,7 @@ describe("resolutionPreview", () => {
       [catchAll, priorityWildcard, queueWildcard, exact],
       "q1",
       "urgent",
+      null,
     );
     expect(preview.winner?.level).toBe(1);
     expect(preview.winner?.policy?.id).toBe("exact");
@@ -283,7 +285,7 @@ describe("resolutionPreview", () => {
   // The confusing case this panel exists for: two overlapping wildcards, and
   // only the queue-scoped one is ever used.
   it("resolves queue+any-priority above any-queue+priority", () => {
-    const preview = resolutionPreview([priorityWildcard, queueWildcard], "q1", "urgent");
+    const preview = resolutionPreview([priorityWildcard, queueWildcard], "q1", "urgent", null);
     expect(preview.winner?.level).toBe(2);
     expect(preview.winner?.policy?.id).toBe("queue-any-priority");
     expect(preview.levels[2]?.policy?.id).toBe("any-queue-urgent");
@@ -291,7 +293,7 @@ describe("resolutionPreview", () => {
   });
 
   it("falls through to the catch-all when nothing more specific matches", () => {
-    const preview = resolutionPreview([catchAll], "q1", "low");
+    const preview = resolutionPreview([catchAll], "q1", "low", null);
     expect(preview.winner?.level).toBe(4);
   });
 
@@ -300,20 +302,52 @@ describe("resolutionPreview", () => {
       [policy({ id: "exact-inactive", queue_id: "q1", priority: "urgent", active: false }), catchAll],
       "q1",
       "urgent",
+      null,
     );
     expect(preview.winner?.level).toBe(4);
     expect(preview.levels[0]?.policy).toBeNull();
   });
 
   it("reports no match rather than inventing a default", () => {
-    const preview = resolutionPreview([queueWildcard], "q2", "low");
+    const preview = resolutionPreview([queueWildcard], "q2", "low", null);
     expect(preview.winner).toBeNull();
     expect(preview.levels.every((level) => level.policy === null)).toBe(true);
   });
 
   it("does not let a different queue's policy match", () => {
-    const preview = resolutionPreview([exact], "q2", "urgent");
+    const preview = resolutionPreview([exact], "q2", "urgent", null);
     expect(preview.winner).toBeNull();
+  });
+
+  // Plan 2026-10-26 D2, mirroring `resolve_policy`: a client's own active
+  // policies replace the global ones whole, never level by level.
+  describe("a client's own policies (D2)", () => {
+    const clientCatchAll = policy({ id: "x-catch-all", client_id: "x" });
+
+    it("resolves among the client's own policies alone when it has any", () => {
+      const preview = resolutionPreview([exact, catchAll, clientCatchAll], "q1", "urgent", "x");
+      expect(preview.winner?.policy?.id).toBe("x-catch-all");
+      expect(preview.winner?.level).toBe(4);
+      // The global exact match is not even a candidate: no mixing by level.
+      expect(preview.levels[0]?.policy).toBeNull();
+    });
+
+    it("falls back to the global policies for a client without its own", () => {
+      const preview = resolutionPreview([exact, clientCatchAll], "q1", "urgent", "y");
+      expect(preview.winner?.policy?.id).toBe("exact");
+      expect(preview.levels[3]?.policy).toBeNull();
+    });
+
+    it("counts only the client's ACTIVE policies", () => {
+      const retired = policy({ id: "x-retired", client_id: "x", active: false });
+      const preview = resolutionPreview([catchAll, retired], "q1", "urgent", "x");
+      expect(preview.winner?.policy?.id).toBe("catch-all");
+    });
+
+    it("previews the global configuration when no client is named", () => {
+      const preview = resolutionPreview([catchAll, clientCatchAll], "q1", "urgent", null);
+      expect(preview.winner?.policy?.id).toBe("catch-all");
+    });
   });
 });
 

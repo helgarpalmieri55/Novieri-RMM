@@ -145,6 +145,10 @@ export interface PolicyUpdate {
 
 export interface PolicyOut {
   id: string;
+  // The client whose tickets it is for; `null`, every client's (a global
+  // policy). Plan 2026-10-26 D2: a client with active policies of its own
+  // resolves among those alone.
+  client_id: string | null;
   queue_id: string | null;
   priority: SlaPriority | null;
   calendar_id: string;

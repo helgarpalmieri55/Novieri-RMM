@@ -82,7 +82,7 @@ from app.core.ticket_words import status_quoted
 from app.models import TicketAttachment, TicketComment
 from app.modules.service_desk.errors import TicketNotFoundError, TicketValidationError
 from app.modules.service_desk.lifecycle import TERMINAL_STATUSES
-from app.modules.service_desk.tickets import get_ticket
+from app.modules.service_desk.tickets import get_ticket, hold_ticket_client
 from app.modules.sla.tracking import note_public_comment
 
 # Spec §2 `ticket_comment.author_type`: NOT a free-form string. Checked here,
@@ -160,8 +160,13 @@ async def add_comment(
     carries no `author_id` and a `user` comment carries one -- the same rule
     `ck_comment_author` enforces at the database layer, checked here first so
     a caller sees a typed 400 rather than an `IntegrityError` 500.
+
+    The ticket's client is held still first (`tickets.hold_ticket_client`), so
+    a comment never lands in the client a ticket is being moved out of; the
+    ticket is then read afresh, after any move in flight has committed.
     """
-    ticket = await get_ticket(session, org_id, ticket_id)
+    await hold_ticket_client(session, ticket_id)
+    ticket = await get_ticket(session, org_id, ticket_id, fresh=True)
     _reject_if_terminal_for_thread_content(ticket.id, ticket.status, kind=tr("comments"))
 
     if author_type not in _VALID_AUTHOR_TYPES:
@@ -323,7 +328,10 @@ async def add_attachment(
             )
         )
 
-    ticket = await get_ticket(session, org_id, ticket_id)
+    # Held before the read, as `add_comment` does: an attachment is never left
+    # in the client its ticket is being moved out of.
+    await hold_ticket_client(session, ticket_id)
+    ticket = await get_ticket(session, org_id, ticket_id, fresh=True)
     _reject_if_terminal_for_thread_content(ticket.id, ticket.status, kind=tr("attachments"))
 
     attachment_id = uuid7()

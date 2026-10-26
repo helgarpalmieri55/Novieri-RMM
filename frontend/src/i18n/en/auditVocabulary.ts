@@ -438,6 +438,7 @@ export const auditActions = {
   ticket_category_updated: "Ticket category updated",
   ticket_comment_added: "Ticket comment added",
   ticket_created: "Ticket created",
+  ticket_moved: "Ticket moved",
   ticket_queue_created: "Ticket queue created",
   ticket_queue_updated: "Ticket queue updated",
   ticket_queues_seeded: "Ticket queues seeded",

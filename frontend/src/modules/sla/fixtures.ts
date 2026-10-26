@@ -159,12 +159,12 @@ const removeSlaCalendarHoliday: FixtureMap["removeSlaCalendarHoliday"] = (id, ho
 /* ---------------------------------------------------------------- policies */
 
 const policies: PolicyOut[] = [
-  { id: "pol-urgent", queue_id: null, priority: "urgent", calendar_id: "cal-24x7", response_target_minutes: 15, resolution_target_minutes: 240, escalate_priority: false, escalate_to_queue_id: null, active: true, created_at: ago(180 * DAY) },
-  { id: "pol-high", queue_id: null, priority: "high", calendar_id: "cal-standard", response_target_minutes: 60, resolution_target_minutes: 480, escalate_priority: true, escalate_to_queue_id: null, active: true, created_at: ago(180 * DAY) },
-  { id: "pol-normal", queue_id: null, priority: "normal", calendar_id: "cal-standard", response_target_minutes: 240, resolution_target_minutes: 3 * DAY, escalate_priority: false, escalate_to_queue_id: null, active: true, created_at: ago(180 * DAY) },
-  { id: "pol-low", queue_id: null, priority: "low", calendar_id: "cal-standard", response_target_minutes: 480, resolution_target_minutes: 7 * DAY, escalate_priority: false, escalate_to_queue_id: null, active: true, created_at: ago(180 * DAY) },
-  { id: "pol-network-urgent", queue_id: "q-network", priority: "urgent", calendar_id: "cal-24x7", response_target_minutes: 10, resolution_target_minutes: 160, escalate_priority: false, escalate_to_queue_id: "q-network", active: true, created_at: ago(90 * DAY) },
-  { id: "pol-facilities", queue_id: "q-facilities", priority: null, calendar_id: "cal-standard", response_target_minutes: 480, resolution_target_minutes: 5 * DAY, escalate_priority: false, escalate_to_queue_id: null, active: false, created_at: ago(200 * DAY) },
+  { id: "pol-urgent", client_id: null, queue_id: null, priority: "urgent", calendar_id: "cal-24x7", response_target_minutes: 15, resolution_target_minutes: 240, escalate_priority: false, escalate_to_queue_id: null, active: true, created_at: ago(180 * DAY) },
+  { id: "pol-high", client_id: null, queue_id: null, priority: "high", calendar_id: "cal-standard", response_target_minutes: 60, resolution_target_minutes: 480, escalate_priority: true, escalate_to_queue_id: null, active: true, created_at: ago(180 * DAY) },
+  { id: "pol-normal", client_id: null, queue_id: null, priority: "normal", calendar_id: "cal-standard", response_target_minutes: 240, resolution_target_minutes: 3 * DAY, escalate_priority: false, escalate_to_queue_id: null, active: true, created_at: ago(180 * DAY) },
+  { id: "pol-low", client_id: null, queue_id: null, priority: "low", calendar_id: "cal-standard", response_target_minutes: 480, resolution_target_minutes: 7 * DAY, escalate_priority: false, escalate_to_queue_id: null, active: true, created_at: ago(180 * DAY) },
+  { id: "pol-network-urgent", client_id: null, queue_id: "q-network", priority: "urgent", calendar_id: "cal-24x7", response_target_minutes: 10, resolution_target_minutes: 160, escalate_priority: false, escalate_to_queue_id: "q-network", active: true, created_at: ago(90 * DAY) },
+  { id: "pol-facilities", client_id: null, queue_id: "q-facilities", priority: null, calendar_id: "cal-standard", response_target_minutes: 480, resolution_target_minutes: 5 * DAY, escalate_priority: false, escalate_to_queue_id: null, active: false, created_at: ago(200 * DAY) },
 ];
 
 const listSlaPolicies: FixtureMap["listSlaPolicies"] = () => [...policies];
@@ -172,6 +172,7 @@ const listSlaPolicies: FixtureMap["listSlaPolicies"] = () => [...policies];
 const createSlaPolicy: FixtureMap["createSlaPolicy"] = (body) => {
   const next: PolicyOut = {
     id: `pol-${policies.length + 1}`,
+    client_id: null,
     queue_id: body.queue_id ?? null,
     priority: body.priority ?? null,
     calendar_id: body.calendar_id,
