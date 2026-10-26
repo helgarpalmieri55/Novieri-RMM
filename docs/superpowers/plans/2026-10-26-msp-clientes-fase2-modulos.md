@@ -85,7 +85,7 @@ existe y la nota "Alcance de la fase 1" de `CLAUDE.md` 5a se retira.
 - **Invariantes 1, 2, 2a, 1b y 1c de `CLAUDE.md`:** ninguna tarea cambia los parámetros firmados de un trabajo, ni el formato del sobre, ni lo que un agente ejecuta. Si una tarea parece necesitarlo, se detiene y se pregunta.
 - Comandos de verificación, desde `backend/` (Postgres y Redis arriba: `pg_ctlcluster 16 main start; redis-cli ping || redis-server --daemonize yes`):
   - `.venv/bin/pytest -q <archivo>` para las pruebas de la tarea;
-  - `.venv/bin/pytest -q -x -n 8` para la suite completa (la tarea no se da por terminada sin ella);
+  - `.venv/bin/pytest -q` para la suite completa (tarda más de 30 minutos; la tarea no se da por terminada sin ella);
   - `.venv/bin/mypy app`;
   - `.venv/bin/ruff check app tests`.
 - Desde `frontend/`: `npx vitest run <ruta>`, `npx tsc -b` y `npm run build`.
@@ -4723,7 +4723,7 @@ def downgrade() -> None:
 Desde `backend/`:
 
 ```bash
-.venv/bin/pytest -q -n 8
+.venv/bin/pytest -q
 .venv/bin/mypy app
 .venv/bin/ruff check app tests
 .venv/bin/alembic upgrade head && .venv/bin/alembic downgrade base && .venv/bin/alembic upgrade head
