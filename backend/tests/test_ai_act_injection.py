@@ -25,7 +25,7 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ai.providers import TextBlock, ToolCallBlock
@@ -38,6 +38,7 @@ from app.models import (
     AiSession,
     AiSettings,
     ApprovedAction,
+    Client,
     Job,
     Ticket,
 )
@@ -90,6 +91,18 @@ async def _seed_injected_ticket(
     """
     from app.core.tenancy import org_session
     from app.modules.email_intake.intake import process_message
+
+    # Since MSP clients phase 2 Task 4 (spec §3.3) a message files under the
+    # client holding its sender's domain, and Unassigned otherwise -- which owns
+    # no devices, so `its_ticket_client_guard` would refuse the link below. The
+    # fixture's devices are the internal client's (`seed_device`), so the
+    # internal client holds the sender's domain: the real ingress, a ticket in
+    # the client its device is in.
+    async with AsyncSession(admin_engine) as session:
+        await session.execute(
+            update(Client).where(Client.id == email_env.org_id).values(email_domains=["acme.test"])
+        )
+        await session.commit()
 
     parsed = email_env.parsed(
         sender="alice@acme.test", subject="Printer trouble", body=INJECTION_BODY

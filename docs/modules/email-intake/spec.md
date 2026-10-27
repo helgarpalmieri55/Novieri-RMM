@@ -69,6 +69,15 @@ Neither is sufficient alone, and the reason each is insufficient matters:
   forgeable, and every notification this platform sends publishes a
   `Message-ID` that would become a ticket-injection key.
 
+**Dated 2026-10-26 (MSP clients phase 2, Task 4) — a message also belongs to a
+client.** Cada mensaje queda en un cliente (spec de clientes §3.3): el del
+contacto que lo envía; si no, el del dominio del remitente; si no, Sin
+asignar. Un remitente desconocido sigue en cuarentena (decisión del operador
+D1, 2026-10-26); su mensaje queda marcado con el cliente de su dominio para
+revisarlo por cliente. Neither check above changes: the client is decided
+after the sender is resolved and never authorises anything. Amendment A12 in §8
+has the rules.
+
 ### 0.3 A reply reopens within a window; beyond it, a new ticket that cites the old
 
 `lifecycle.py` already permits `resolved -> open` and `closed -> open` for an
@@ -593,6 +602,39 @@ count would otherwise be dominated by malformed spam, which is not that. The
 unknown-sender row is unchanged for mail that parsed fine: a well-formed
 message from a non-user IS mail someone expected to become a ticket, and it
 stays `quarantined`.
+
+**Amendment A12 (2026-10-26, MSP clients phase 2 Task 4) — every message
+belongs to a client.** Cada mensaje queda en un cliente (spec de clientes §3.3):
+el del contacto que lo envía; si no, el del dominio del remitente; si no, Sin
+asignar. Un remitente desconocido sigue en cuarentena (decisión del operador
+D1, 2026-10-26); su mensaje queda marcado con el cliente de su dominio para
+revisarlo por cliente. The poller runs under the every-client scope, so the
+decision is code, not RLS (`services/client_routing.py`), taken once per
+message, right after the sender is resolved:
+
+1. A **contact** (`users.kind = 'contact'`) of a client: that client.
+2. Otherwise the **active** client whose `email_domains` holds the sender's
+   domain (exact, case-insensitive). A domain no client holds, one an archived
+   client holds, or one two clients hold (written around the service, which
+   keeps a domain in one client) matches nothing: mail is never routed by
+   guessing between two customers.
+3. Otherwise **Sin asignar** (the `unassigned` client). This is also where a
+   technician (`staff`) whose domain is nobody's opens their ticket, which is
+   the only ticket Sin asignar receives.
+
+What the client decides: a new ticket is filed under it (cited-old-ticket
+included, which is only text), and the `inbound_message` row carries it. A
+reply that lands on its ticket (comment, reopen, or refused for the ticket's own
+rate limit) is filed under **the ticket's** client, and the comment inherits it.
+A quarantined row carries the **sender's** client even when its `ticket_id`
+names the ticket the sender tried to reach (the wrong-sender row of §0.2):
+that row holds the sender's text, which the ticket's client has no business
+reading. A message refused before its sender is looked up (the loop refusals)
+has no sender to place and goes to Sin asignar. `inbound_message.client_id` is
+never NULL on a row this module writes: NULL in that table means every client,
+and the row keeps the message's text. A message already filed does not move
+when its client's domains change or its ticket moves between clients; the row
+records where the message was decided.
 
 `origin='email'` already exists in `ticket`'s check constraint — the ticket core
 declared it in advance (its §2) so this module needs no constraint migration.
