@@ -484,6 +484,28 @@ describe("the person page in Spanish", () => {
     expectNoEnglish(dialog, RECORDED);
   });
 
+  it("tells how a client's contact is turned back on, and not Settings", async () => {
+    const user = userEvent.setup();
+    const account = detail().account;
+    if (account === null) throw new Error("the fixture has an account");
+    mockUseApi.mockReturnValue(
+      api(
+        { getPerson: vi.fn().mockResolvedValue(detail({ account: { ...account, kind: "contact" } })) },
+        ["people.read", "clients.manage"],
+      ),
+    );
+    mount(<PersonPage />, "/people/:personId", "/people/p1");
+    await user.click(await screen.findByRole("button", { name: "Desactivar el inicio de sesión" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(
+        "La persona ya no podrá usar el portal. Para volver a activarlo, edita el contacto en la página del cliente.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Configuración/)).toBeNull();
+    expectNoEnglish(dialog, RECORDED);
+  });
+
   it("words a failed release from the held error, and re-words it on a switch", async () => {
     const user = userEvent.setup();
     const releaseSeat = vi.fn().mockRejectedValue(new ApiError(503, ""));

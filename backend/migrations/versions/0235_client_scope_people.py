@@ -9,7 +9,8 @@ checklists are H.
 must agree: `(person_id, client_id) REFERENCES person (id, client_id)`, the
 0231 technique for sites -- a foreign key ignores RLS, and a NULL person_id
 skips the check. Existing links that disagree are UNLINKED (person_id set to
-NULL) before the key is added: there is no data to keep (spec P7), and the
+NULL, and handed back to inventory: `source = 'inventory'`, `set_by` NULL)
+before the key is added: there is no data to keep (spec P7), and the
 alternative is a migration that fails on a populated database.
 
 Natural keys become per client: a person's e-mail and a login are unique
@@ -111,8 +112,12 @@ def upgrade() -> None:
     _add_h("person_checklist_step", "person_checklist", "checklist_id")
 
     op.execute("ALTER TABLE person ADD CONSTRAINT uq_person_id_client UNIQUE (id, client_id)")
+    # Unlinked AND handed back to inventory: an operator override left with
+    # no person reads as "an operator said nobody uses this", and inventory
+    # never re-resolves an override (`people.service.observe_login`).
     op.execute(
-        "UPDATE device_person dp SET person_id = NULL FROM person p "
+        "UPDATE device_person dp SET person_id = NULL, source = 'inventory', set_by = NULL, "
+        "updated_at = now() FROM person p "
         "WHERE p.id = dp.person_id AND p.client_id <> dp.client_id"
     )
     op.execute(

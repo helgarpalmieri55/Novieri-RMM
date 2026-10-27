@@ -235,6 +235,7 @@ describe("PersonPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Turn off sign-in" }));
     const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/You can turn it back on in Settings\./)).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Turn off sign-in" }));
     await vi.waitFor(() => expect(setUserEnabled).toHaveBeenCalledWith("u9", false));
     expect(updateContact).not.toHaveBeenCalled();
@@ -266,6 +267,13 @@ describe("PersonPage", () => {
     renderAt(<PersonPage />, "/people/:personId", "/people/p1");
     await user.click(await screen.findByRole("button", { name: "Turn off sign-in" }));
     const dialog = await screen.findByRole("dialog");
+    // Not Settings: `/users` is staff-only, and a contact is turned back on as a contact.
+    expect(
+      within(dialog).getByText(
+        "They can no longer use the portal. To turn it back on, edit the contact on the client's page.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Settings/)).toBeNull();
     await user.click(within(dialog).getByRole("button", { name: "Turn off sign-in" }));
     await vi.waitFor(() =>
       expect(updateContact).toHaveBeenCalledWith("u9", { status: "disabled" }),

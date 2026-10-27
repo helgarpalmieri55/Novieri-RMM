@@ -129,6 +129,8 @@ export const people = {
       releaseSeatTitle: "Release this subscription seat",
       releaseLicenceTitle: "Release this licence",
       turnOffBody: "They can no longer use the console or the portal. You can turn it back on in Settings.",
+      // A client's contact is not a Settings user: it is switched back on as a contact.
+      turnOffBodyContact: "They can no longer use the portal. To turn it back on, edit the contact on the client's page.",
       releaseBody: "It goes back to the pool for someone else. This is recorded in the audit log.",
       turnOff: "Turn off sign-in",
       release: "Release",

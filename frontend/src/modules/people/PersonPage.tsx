@@ -414,7 +414,11 @@ function Holdings({ data, zone }: { data: PersonDetailOut; zone: string | null |
         subject={pending ? `${data.person.display_name}: ${pending.name}` : ""}
         body={
           pending?.kind === "sign-in"
-            ? t("people.holdings.confirm.turnOffBody")
+            ? t(
+                pending.account === "contact"
+                  ? "people.holdings.confirm.turnOffBodyContact"
+                  : "people.holdings.confirm.turnOffBody",
+              )
             : t("people.holdings.confirm.releaseBody")
         }
         confirmLabel={

@@ -125,6 +125,8 @@ export const people: Shape<typeof en> = {
       releaseLicenceTitle: "Liberar esta licencia",
       turnOffBody:
         "La persona ya no podrá usar la consola ni el portal. Puedes volver a activarlo en Configuración.",
+      turnOffBodyContact:
+        "La persona ya no podrá usar el portal. Para volver a activarlo, edita el contacto en la página del cliente.",
       releaseBody: "Vuelve al conjunto para que lo use otra persona. Queda registrado en el registro de auditoría.",
       turnOff: "Desactivar el inicio de sesión",
       release: "Liberar",

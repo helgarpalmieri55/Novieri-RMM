@@ -82,7 +82,9 @@ Y's holder finds nothing. `holder_reader` makes that the person join's own
 condition (`_reads_people_there`), so the holder, the search and the counts
 agree by construction -- one predicate, in the one place each of them reads
 the holder through -- and a page is still one statement, not one permission
-check per client on it.
+check per client on it. There is no holder without a reader: `with_holder`
+without `holder_reader` raises rather than reading every client's holders
+(fails closed, Task 5 review).
 """
 
 from dataclasses import dataclass
@@ -358,11 +360,10 @@ def _reads_people_there(org_id: UUID, reader: UUID) -> ColumnElement[bool]:
     )
 
 
-def _joined(
-    *columns: Any, org_id: UUID | None = None, holder_reader: UUID | None = None
-) -> Select[Any]:
-    """`devices` beside its agent and, given `org_id`, its holder -- only a
-    holder `holder_reader` may read, when one is named.
+def _joined(*columns: Any, holder_for: tuple[UUID, UUID] | None = None) -> Select[Any]:
+    """`devices` beside its agent and, given `holder_for = (org_id, reader)`,
+    its holder -- only a holder `reader` may read. One argument, so the
+    person join cannot be built without a reader.
 
     Every join is outer and at most one-to-one (`agents.device_id` is unique,
     `device_person.device_id` is the primary key), so no count is inflated by
@@ -372,14 +373,19 @@ def _joined(
     not read joins as NULL: unnamed AND unsearched.
     """
     stmt = select(*columns).select_from(Device).join(Agent, isouter=True)
-    if org_id is not None:
-        holder = and_(Person.id == DevicePerson.person_id, Person.org_id == org_id)
-        if holder_reader is not None:
-            holder = and_(holder, _reads_people_there(org_id, holder_reader))
+    if holder_for is not None:
+        org_id, reader = holder_for
         stmt = stmt.outerjoin(
             DevicePerson,
             and_(DevicePerson.device_id == Device.id, DevicePerson.org_id == org_id),
-        ).outerjoin(Person, holder)
+        ).outerjoin(
+            Person,
+            and_(
+                Person.id == DevicePerson.person_id,
+                Person.org_id == org_id,
+                _reads_people_there(org_id, reader),
+            ),
+        )
     return stmt
 
 
@@ -410,11 +416,19 @@ async def device_page(
 
     `with_holder` joins, selects and searches who each device is assigned to.
     The caller decides it from `people.read`; it defaults off so a new caller
-    discloses nothing it did not ask to. `holder_reader` narrows it to the
-    holders that user may read -- `people.read` in the holder's client; the
-    route always names its caller. Without it every holder is read: a
-    caller that is not a request (none today but the tests).
+    discloses nothing it did not ask to. `holder_reader` is the user the
+    holders are read FOR -- `people.read` in each holder's client -- and it is
+    required with `with_holder`: a call that names no reader raises, rather
+    than reading every client's holders (fails closed).
     """
+    holder_for: tuple[UUID, UUID] | None = None
+    if with_holder:
+        if holder_reader is None:
+            raise ValueError(  # i18n-exempt: programmer error, unhandled 500
+                "device_page(with_holder=True) needs holder_reader: the user the "
+                "holders are read for"
+            )
+        holder_for = (org_id, holder_reader)
     stamp = now or datetime.now(UTC)
     if state not in DEVICE_STATES:
         state = "all"
@@ -426,7 +440,6 @@ async def device_page(
         q=q,
         with_holder=with_holder,
     )
-    holder_org = org_id if with_holder else None
     attention = _cert_attention(stamp)
 
     # Each count is its tab's own clause, so a count and the rows its tab
@@ -441,8 +454,7 @@ async def device_page(
                 func.count().filter(_state_clause("certs", stamp)).label("certs"),
                 func.count().filter(_state_clause("review", stamp)).label("review"),
                 # Joined when the holder is, because the search may name it.
-                org_id=holder_org,
-                holder_reader=holder_reader,
+                holder_for=holder_for,
             ).where(*filters)
         )
     ).one()
@@ -483,8 +495,7 @@ async def device_page(
         Agent.capabilities,
         # Two NULL columns when the holder is off, so every row has one shape.
         *((Person.id, Person.display_name) if with_holder else (null(), null())),
-        org_id=holder_org,
-        holder_reader=holder_reader,
+        holder_for=holder_for,
     ).where(*filters, _state_clause(state, stamp))
     rows = (
         await session.execute(

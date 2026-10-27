@@ -67,6 +67,23 @@ async def _person(admin_engine: AsyncEngine, org_id: UUID, name: str) -> UUID:
         return person.id
 
 
+async def _reader(admin_engine: AsyncEngine, org_id: UUID) -> UUID:
+    """A user holding `people.read` on every client of `org_id`: whom the
+    holders are read FOR. `device_page` reads no holder without one."""
+    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
+        user = User(org_id=org_id, external_subject=uuid4().hex, email="reader@test.local")
+        role = Role(org_id=org_id, name=f"holders-{uuid4().hex[:6]}")
+        session.add_all([user, role])
+        await session.flush()
+        permission = (
+            await session.execute(select(Permission.id).where(Permission.code == "people.read"))
+        ).scalar_one()
+        session.add(RolePermission(role_id=role.id, permission_id=permission))
+        session.add(UserRole(org_id=org_id, user_id=user.id, role_id=role.id))
+        await session.commit()
+        return user.id
+
+
 async def _device(
     admin_engine: AsyncEngine,
     org_id: UUID,
@@ -125,9 +142,12 @@ async def test_the_holder_resolves_from_either_source_and_nothing_known_is_null(
     )
     # No link row at all: a switch, or a laptop in its box.
     await _device(admin_engine, org_id, "d-no-link")
+    reader = await _reader(admin_engine, org_id)
 
     async with AsyncSession(admin_engine) as session:
-        page = await device_page(session, org_id, with_holder=True, now=NOW)
+        page = await device_page(
+            session, org_id, with_holder=True, holder_reader=reader, now=NOW
+        )
 
     assert _holders(page) == {
         "a-by-hand": (ana, "Ana Ruiz"),
@@ -165,10 +185,15 @@ async def test_the_search_finds_devices_by_who_holds_them(admin_engine: AsyncEng
     await _device(admin_engine, org_id, "fin-lt-01", person_id=ana, source="operator")
     await _device(admin_engine, org_id, "fin-lt-02", person_id=ana, source="inventory")
     await _device(admin_engine, org_id, "ops-lt-07", person_id=ben, source="operator")
+    reader = await _reader(admin_engine, org_id)
 
     async with AsyncSession(admin_engine) as session:
-        page = await device_page(session, org_id, q="RUIZ", with_holder=True, now=NOW)
-        by_host = await device_page(session, org_id, q="ops-", with_holder=True, now=NOW)
+        page = await device_page(
+            session, org_id, q="RUIZ", with_holder=True, holder_reader=reader, now=NOW
+        )
+        by_host = await device_page(
+            session, org_id, q="ops-", with_holder=True, holder_reader=reader, now=NOW
+        )
 
     assert [d.hostname for d, *_ in page.rows] == ["fin-lt-01", "fin-lt-02"]
     assert page.total == page.state_counts.all == 2
@@ -200,6 +225,7 @@ async def test_another_orgs_person_never_appears(admin_engine: AsyncEngine) -> N
     await _device(admin_engine, theirs, "theirs-1", person_id=eve, source="operator")
     with pytest.raises(IntegrityError, match="fk_device_person_person_client"):
         await _device(admin_engine, mine, "ours-1", person_id=eve, source="operator")
+    reader = await _reader(admin_engine, mine)
 
     async with admin_engine.connect() as conn:
         await conn.execute(
@@ -213,8 +239,12 @@ async def test_another_orgs_person_never_appears(admin_engine: AsyncEngine) -> N
             DevicePerson(org_id=mine, device_id=device.id, person_id=eve, source="operator")
         )
         await session.flush()
-        page = await device_page(session, mine, with_holder=True, now=NOW)
-        searched = await device_page(session, mine, q="stone", with_holder=True, now=NOW)
+        page = await device_page(
+            session, mine, with_holder=True, holder_reader=reader, now=NOW
+        )
+        searched = await device_page(
+            session, mine, q="stone", with_holder=True, holder_reader=reader, now=NOW
+        )
         await conn.rollback()
 
     assert _holders(page) == {"ours-1": None}, "another org's person leaked as a holder"
@@ -237,10 +267,28 @@ async def test_a_link_row_from_another_org_is_not_joined(admin_engine: AsyncEngi
             DevicePerson(org_id=theirs, device_id=device_id, person_id=ana, source="operator")
         )
         await session.commit()
+    reader = await _reader(admin_engine, mine)
 
     async with AsyncSession(admin_engine) as session:
-        page = await device_page(session, mine, with_holder=True, now=NOW)
+        page = await device_page(
+            session, mine, with_holder=True, holder_reader=reader, now=NOW
+        )
     assert _holders(page) == {"ours-2": None}
+
+
+async def test_no_holder_is_read_for_nobody(admin_engine: AsyncEngine) -> None:
+    """FAILS CLOSED (Task 5 review). Whether a holder may be shown depends on
+    who reads it -- `people.read` in the holder's client -- so a call that
+    asks for holders and names no reader is refused, never answered with every
+    client's holders."""
+    org_id = await _org(admin_engine, "at-noreader")
+    ana = await _person(admin_engine, org_id, "Ana Ruiz")
+    await _device(admin_engine, org_id, "a-by-hand", person_id=ana, source="operator")
+    async with AsyncSession(admin_engine) as session:
+        with pytest.raises(ValueError, match="holder_reader"):
+            await device_page(session, org_id, with_holder=True, now=NOW)
+        with pytest.raises(ValueError, match="holder_reader"):
+            await device_page(session, org_id, q="ruiz", with_holder=True, now=NOW)
 
 
 # --------------------------------------------------------------------------- #
