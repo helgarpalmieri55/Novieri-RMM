@@ -2,13 +2,15 @@ import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { Panel, PageHead, QueryState } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { useClientName } from "../settings/api";
 import { useIdleSeats, useSpend } from "./api";
 import type { IdleSeatRow, SpendRow } from "./types";
 
 // Mirrors backend/app/modules/subscriptions/reporting.py's spend_summary:
 // four roll-ups (by_currency, by_vendor, by_category, by_owner), each never
-// summed across currencies. `group_key`/`group_id` are `null` on the
-// top-level by_currency rows.
+// summed across currencies -- nor across clients: every row is one client's
+// (MSP clients phase 2), and says which. `group_key`/`group_id` are `null` on
+// the top-level by_currency rows.
 function RollupTable({
   title,
   subtitle,
@@ -27,6 +29,7 @@ function RollupTable({
   glyph: string;
 }) {
   const t = useT();
+  const clientName = useClientName();
   return (
     <Panel title={title} subtitle={subtitle} bare>
       <QueryState
@@ -40,6 +43,7 @@ function RollupTable({
           <thead>
             <tr>
               <Th>{groupLabel}</Th>
+              <Th>{t("subscriptions.spend.colClient")}</Th>
               <Th>{t("subscriptions.spend.colCurrency")}</Th>
               <Th>{t("subscriptions.spend.colMonthly")}</Th>
               <Th>{t("subscriptions.spend.colAnnual")}</Th>
@@ -47,13 +51,14 @@ function RollupTable({
           </thead>
           <tbody>
             {(rows ?? []).map((row, i) => (
-              <tr key={`${row.group_id ?? row.group_key ?? "none"}-${row.currency}-${i}`}>
+              <tr key={`${row.client_id}-${row.group_id ?? row.group_key ?? "none"}-${row.currency}-${i}`}>
                 {/* A row with no group is the by-currency top line, or a
                     vendor or owner the org could not resolve; it says so
                     rather than drawing a placeholder as if it were a name. */}
                 <Td lead={<Icon name={glyph} size={18} />}>
                   <div className="cell-title">{row.group_key ?? (row.group_type ? t("subscriptions.spend.notResolved") : t("subscriptions.spend.allSubscriptions"))}</div>
                 </Td>
+                <Td>{clientName(row.client_id)}</Td>
                 <Td>
                   <span className="mono">{row.currency}</span>
                 </Td>

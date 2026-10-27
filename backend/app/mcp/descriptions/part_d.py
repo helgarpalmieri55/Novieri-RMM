@@ -473,8 +473,9 @@ PART_D: dict[str, str] = {
         "cycle, seat count, renewal date and status."
     ),
     "POST /api/v1/subscriptions": (
-        "Creates a subscription record for a service the organization pays for. Records the cost "
-        "and renewal terms only; nothing is purchased and no job is dispatched."
+        "Creates a subscription record of the client given by client_id for a service paid for. "
+        "Records the cost and renewal terms only; nothing is purchased and no job is dispatched. "
+        "Unassigned takes no subscriptions."
     ),
     "GET /api/v1/subscriptions/export": (
         "Returns every subscription as flat rows for a spreadsheet. Unlike the other reads here, "
@@ -489,9 +490,9 @@ PART_D: dict[str, str] = {
         "within the look-ahead window (default 30 days), flagging those that need action."
     ),
     "GET /api/v1/subscriptions/spend": (
-        "Summarizes current spend across active subscriptions as monthly and annual totals, "
-        "overall and grouped by vendor, category and owner. Totals are never summed across "
-        "currencies."
+        "Summarizes current spend across active subscriptions as monthly and annual totals per "
+        "client, overall and grouped by vendor, category and owner. Totals are never summed "
+        "across clients or currencies."
     ),
     "GET /api/v1/subscriptions/{subscription_id}": (
         "Returns one subscription with its vendor, plan, cost, seats, renewal terms and status."
@@ -515,8 +516,9 @@ PART_D: dict[str, str] = {
         "Lists the seat assignments of a subscription, including released ones."
     ),
     "POST /api/v1/subscriptions/{subscription_id}/seats": (
-        "Assigns one seat of the subscription to a named person. Refused when every seat is "
-        "already assigned."
+        "Assigns one seat of the subscription to a named person of its client; without a person "
+        "id, that client's person holding the email is linked. Refused when every seat is already "
+        "assigned."
     ),
     # --- users ---
     "GET /api/v1/users": (

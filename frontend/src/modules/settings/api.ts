@@ -603,6 +603,22 @@ export function useClients(enabled: boolean, params: { include_archived?: boolea
   });
 }
 
+/**
+ * A client's name by id, for a column that names each row's client (MSP
+ * clients phase 2: licence compliance and renewals, subscription spend --
+ * reports that are one row per client, never summed across clients). Reads
+ * `GET /clients`, archived ones included because a row may be an archived
+ * client's, and only for someone holding `clients.read`. Without it, or until
+ * it answers, the id stands in, as the ticket page's client panel does.
+ */
+export function useClientName(): (clientId: string) => string {
+  const me = useMe();
+  const canRead = (me.data?.permissions ?? []).includes("clients.read");
+  const clients = useClients(canRead, { include_archived: true });
+  const names = new Map((clients.data ?? []).map((client) => [client.id, client.name]));
+  return (clientId) => names.get(clientId) ?? clientId;
+}
+
 export function useEffectivePermissions(userId: string | null) {
   const api = useApi();
   return useQuery<EffectivePermissionsOut, ApiError>({

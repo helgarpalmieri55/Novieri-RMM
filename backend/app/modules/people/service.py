@@ -863,8 +863,11 @@ async def link_seat(
     seat_id: UUID,
     person_id: UUID | None,
 ) -> SeatAssignment:
-    """Link a seat to a person; with no person, add one from the seat's name
-    and address (or reuse the one holding that address)."""
+    """Link a seat to a person of the seat's client (its subscription's,
+    plan 2026-10-26 Task 6); with no person, add one there from the seat's
+    name and address (or reuse the one of that client holding that address).
+    A person of another client is a 422: `fk_seat_assignment_person_client`
+    would refuse it anyway, as a 500."""
     seat = (
         await session.execute(
             select(SeatAssignment).where(
@@ -874,18 +877,21 @@ async def link_seat(
     ).scalar_one_or_none()
     if seat is None:
         raise PeopleNotFoundError(tr("seat not found"))
+    # Read before the UPDATE: it expires the trigger-kept column.
+    client_id = seat.client_id
     if person_id is not None:
         person = await load_person(session, org_id, person_id)
+        if person.client_id != client_id:
+            raise PeopleClientError(tr("that person belongs to another client"))
     else:
-        # plan 2026-10-26 Task 6 files it under the seat's client
         found = await _person_with_email(
-            session, org_id, seat.assignee_email, client_id=org_id
+            session, org_id, seat.assignee_email, client_id=client_id
         )
         person = found or await create_person(
             session,
             org_id=org_id,
             actor_id=actor_id,
-            client_id=org_id,
+            client_id=client_id,
             display_name=seat.assignee_name.strip() or seat.assignee_email,
             email=seat.assignee_email,
         )
@@ -898,7 +904,7 @@ async def link_seat(
         action="people.seat_linked",
         target_type="seat_assignment",
         target_id=seat.id,
-        client_id=None,  # plan 2026-10-26 Task 6: the seat's client
+        client_id=client_id,
         metadata={"person_id": str(person.id)},
     )
     return seat

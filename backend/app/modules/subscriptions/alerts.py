@@ -11,7 +11,9 @@ point. The daily sweep here publishes into the notification outbox instead:
 
 Each is published once per subscription per deadline, enforced by
 `subscription_alert_sent`'s unique key. Both event types have no ticket and no
-requester, so they are routed through `channel_default` rules.
+requester, so they are routed through `channel_default` rules. Each names its
+subscription's client (plan 2026-10-26 Task 6); the claim row is H and takes
+it from the subscription by trigger.
 """
 
 from datetime import date, timedelta
@@ -97,7 +99,7 @@ async def emit_due_alerts(
                 subject_id=sub.id,
                 payload=_payload(sub, today, notice_deadline),
                 actor_user_id=None,
-                client_id=None,  # plan 2026-10-26 Task 6 sets the subscription's client
+                client_id=sub.client_id,
             )
             published += 1
     await session.flush()

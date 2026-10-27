@@ -16,6 +16,8 @@ and, for `idle_seats`, `SeatAssignment`) per the tenancy invariant (#5) --
 RLS is the backstop, not the only line of defense.
 
 Money is `Decimal` throughout (invariant #6: never sum across currencies).
+A subscription is ONE client's (plan 2026-10-26 Task 6), and spend is never
+summed across clients either: every spend row is one client's.
 `spend_summary` and `idle_seats` reuse `costs.monthly_equivalent` /
 `costs.annualized` rather than re-deriving billing-cycle math. A
 subscription's `currency` is used as-is for grouping -- `None` groups under
@@ -87,18 +89,21 @@ async def _resolve_user_emails(
 
 
 async def spend_summary(session: AsyncSession, org_id: UUID) -> dict[str, list[dict[str, Any]]]:
-    """Spend across all *active* subscriptions, org-scoped.
+    """Spend across all *active* subscriptions, org-scoped, per client.
 
     Each active subscription's `cost_per_cycle` is normalized once via
     `monthly_equivalent`/`annualized`, then rolled up four ways -- overall by
-    `currency`, and by `(vendor_id, currency)`, `(category, currency)`, and
-    `(owner_user_id, currency)` -- so the vendor/category/owner roll-ups are
-    still never summed across currencies. `vendor_id`/`owner_user_id` group
-    under `None` rather than being dropped when unset. Cancelled/trial
+    `(client_id, currency)`, and by `(client_id, vendor_id, currency)`,
+    `(client_id, category, currency)`, and `(client_id, owner_user_id,
+    currency)` -- so no roll-up is ever summed across currencies or across
+    clients (plan 2026-10-26 Task 6): what X pays is not what Y pays.
+    `vendor_id`/`owner_user_id` group under `None` rather than being dropped
+    when unset. Cancelled/trial
     subscriptions are excluded entirely (spend for inactive services isn't
     "current spend").
 
-    Every row in all four lists conforms to `schema.SpendRow`: `currency`,
+    Every row in all four lists conforms to `schema.SpendRow`: `client_id`,
+    `currency`,
     `monthly_total`, `annual_total`, `group_key` (a human-readable label),
     `group_type`, `group_id` (the underlying id for linking). This makes the
     report self-contained -- a CSV/BI consumer reading `by_vendor` gets the
@@ -135,46 +140,54 @@ async def spend_summary(session: AsyncSession, org_id: UUID) -> dict[str, list[d
         .all()
     )
 
-    by_currency: dict[str, dict[str, Any]] = {}
-    by_vendor: dict[tuple[UUID | None, str], dict[str, Any]] = {}
-    by_category: dict[tuple[str, str], dict[str, Any]] = {}
-    by_owner: dict[tuple[UUID | None, str], dict[str, Any]] = {}
+    by_currency: dict[tuple[UUID, str], dict[str, Any]] = {}
+    by_vendor: dict[tuple[UUID, UUID | None, str], dict[str, Any]] = {}
+    by_category: dict[tuple[UUID, str, str], dict[str, Any]] = {}
+    by_owner: dict[tuple[UUID, UUID | None, str], dict[str, Any]] = {}
 
     for sub in subs:
         monthly = monthly_equivalent(sub.cost_per_cycle, sub.billing_cycle)
         annual = annualized(sub.cost_per_cycle, sub.billing_cycle)
         currency = sub.currency
+        client_id = sub.client_id
 
-        _bucket_add(by_currency, currency, {"currency": currency}, monthly, annual)
+        _bucket_add(
+            by_currency,
+            (client_id, currency),
+            {"client_id": client_id, "currency": currency},
+            monthly,
+            annual,
+        )
         _bucket_add(
             by_vendor,
-            (sub.vendor_id, currency),
-            {"vendor_id": sub.vendor_id, "currency": currency},
+            (client_id, sub.vendor_id, currency),
+            {"client_id": client_id, "vendor_id": sub.vendor_id, "currency": currency},
             monthly,
             annual,
         )
         _bucket_add(
             by_category,
-            (sub.category, currency),
-            {"category": sub.category, "currency": currency},
+            (client_id, sub.category, currency),
+            {"client_id": client_id, "category": sub.category, "currency": currency},
             monthly,
             annual,
         )
         _bucket_add(
             by_owner,
-            (sub.owner_user_id, currency),
-            {"owner_user_id": sub.owner_user_id, "currency": currency},
+            (client_id, sub.owner_user_id, currency),
+            {"client_id": client_id, "owner_user_id": sub.owner_user_id, "currency": currency},
             monthly,
             annual,
         )
 
-    vendor_ids = {vendor_id for vendor_id, _ in by_vendor if vendor_id is not None}
-    owner_ids = {owner_id for owner_id, _ in by_owner if owner_id is not None}
+    vendor_ids = {vendor_id for _, vendor_id, _ in by_vendor if vendor_id is not None}
+    owner_ids = {owner_id for _, owner_id, _ in by_owner if owner_id is not None}
     vendor_names = await _resolve_vendor_names(session, org_id, vendor_ids)
     owner_emails = await _resolve_user_emails(session, org_id, owner_ids)
 
     by_currency_rows = [
         {
+            "client_id": row["client_id"],
             "currency": row["currency"],
             "monthly_total": row["monthly_total"],
             "annual_total": row["annual_total"],
@@ -190,6 +203,7 @@ async def spend_summary(session: AsyncSession, org_id: UUID) -> dict[str, list[d
     # tenant's identifier into this org's report.
     by_vendor_rows = [
         {
+            "client_id": row["client_id"],
             "currency": row["currency"],
             "monthly_total": row["monthly_total"],
             "annual_total": row["annual_total"],
@@ -201,6 +215,7 @@ async def spend_summary(session: AsyncSession, org_id: UUID) -> dict[str, list[d
     ]
     by_category_rows = [
         {
+            "client_id": row["client_id"],
             "currency": row["currency"],
             "monthly_total": row["monthly_total"],
             "annual_total": row["annual_total"],
@@ -212,6 +227,7 @@ async def spend_summary(session: AsyncSession, org_id: UUID) -> dict[str, list[d
     ]
     by_owner_rows = [
         {
+            "client_id": row["client_id"],
             "currency": row["currency"],
             "monthly_total": row["monthly_total"],
             "annual_total": row["annual_total"],

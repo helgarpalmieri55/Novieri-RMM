@@ -119,7 +119,7 @@ async def _make_subscription(
 ) -> UUID:
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
-            s, org_id=org_id, actor_id=actor_id, **_create_kwargs(**overrides)
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs(**overrides)
         )
         await s.commit()
         return sub.id

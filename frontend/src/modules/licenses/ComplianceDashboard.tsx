@@ -3,6 +3,7 @@ import { Table, Td, Th } from "../../components/ui";
 import type { Me } from "../../lib/api";
 import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
+import { useClientName } from "../settings/api";
 import { useCompliance } from "./api";
 import { LicenseReadiness } from "./LicenseReadiness";
 import { LicensePageNav } from "./licenseNav";
@@ -17,6 +18,7 @@ export function ComplianceDashboard() {
   const canRead = (me.data?.permissions ?? []).includes("licenses.read");
 
   const compliance = useCompliance();
+  const clientName = useClientName();
   const items = compliance.data ?? [];
 
   return (
@@ -42,6 +44,7 @@ export function ComplianceDashboard() {
             <thead>
               <tr>
                 <Th>{t("licenses.compliance.colProduct")}</Th>
+                <Th>{t("licenses.compliance.colClient")}</Th>
                 <Th>{t("licenses.compliance.colUsedOwned")}</Th>
                 <Th>{t("licenses.compliance.colEntitled")}</Th>
                 <Th>{t("licenses.compliance.colInstalled")}</Th>
@@ -58,11 +61,14 @@ export function ComplianceDashboard() {
                 // fraction, so the bar is absent rather than at zero.
                 const pct = row.entitled > 0 ? Math.min(100, (row.installed / row.entitled) * 100) : null;
                 const over = row.installed - row.entitled;
+                // One row per (client, product): a client's licenses against
+                // its own computers, never summed with another client's.
                 return (
-                  <tr key={row.product_id}>
+                  <tr key={`${row.client_id}-${row.product_id}`}>
                     <Td lead={<Icon name="license" size={18} />} gutter={kind}>
                       <div className="cell-title">{row.name}</div>
                     </Td>
+                    <Td>{clientName(row.client_id)}</Td>
                     <Td>
                       <div style={{ display: "grid", gap: 4, minWidth: 140 }}>
                         <span className="mono">{`${row.installed} / ${row.entitled}`}</span>

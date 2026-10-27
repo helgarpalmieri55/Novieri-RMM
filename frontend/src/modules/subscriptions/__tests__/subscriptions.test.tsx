@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
-import type { ApiClient, Me } from "../../../lib/api";
+import type { ApiClient, ClientOut, Me } from "../../../lib/api";
 import { RenewalCalendar } from "../RenewalCalendar";
 import { SpendDashboard } from "../SpendDashboard";
 import { SubscriptionDetail } from "../SubscriptionDetail";
@@ -134,6 +134,7 @@ async function confirmWith(
 const SUBSCRIPTIONS: SubscriptionOut[] = [
   {
     id: "s1",
+    client_id: "o1",
     vendor_id: "v1",
     service_name: "Acme SaaS",
     plan: "Business",
@@ -476,7 +477,9 @@ describe("SubscriptionsPage", () => {
     await user.type(screen.getByLabelText("Seats"), "25");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
+    // The internal client (`/me`'s `org_id`) until phase 3's selector.
     expect(api.createSubscription).toHaveBeenCalledWith({
+      client_id: "o1",
       service_name: "Globex CRM",
       billing_cycle: "annual",
       // Money is a Decimal server-side and travels as a string -- asserted
@@ -1002,6 +1005,32 @@ describe("SpendDashboard", () => {
       idleSeats: vi.fn().mockResolvedValue(IDLE_SEATS),
     };
     mockUseApi.mockReturnValue(api as ApiClient);
+  });
+
+  // MSP clients phase 2: a subscription is one client's, so every roll-up
+  // row is one client's -- never summed across clients -- and says whose.
+  it("names each spend row's client, never adding two clients together", async () => {
+    const client = (id: string, name: string): ClientOut => ({
+      id, name, kind: "customer", status: "active", email_domains: [], phone: "", address: "",
+      website: "", notes: "", enabled_modules: [], device_count: 0, site_count: 0,
+    });
+    api.me = vi.fn().mockResolvedValue({ ...ME, permissions: [...ME.permissions, "clients.read"] });
+    api.listClients = vi.fn().mockResolvedValue([client("o1", "Novieri"), client("c2", "Globex")]);
+    const total = { group_key: null, group_type: null, group_id: null, currency: "USD" };
+    api.spend = vi.fn().mockResolvedValue({
+      ...EMPTY_SPEND,
+      by_currency: [
+        { ...total, client_id: "o1", monthly_total: "100.00", annual_total: "1200.00" },
+        { ...total, client_id: "c2", monthly_total: "40.00", annual_total: "480.00" },
+      ],
+    });
+    renderWithProviders(<SpendDashboard />);
+
+    const novieri = (await screen.findByText("Novieri")).closest("tr") as HTMLElement;
+    expect(within(novieri).getByText("100.00")).toBeInTheDocument();
+    const globex = screen.getByText("Globex").closest("tr") as HTMLElement;
+    expect(within(globex).getByText("40.00")).toBeInTheDocument();
+    expect(screen.queryByText("140.00")).not.toBeInTheDocument();
   });
 
   it("renders the idle-seat rows from the mocked api", async () => {

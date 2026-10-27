@@ -16,11 +16,14 @@ Every ``SubscriptionValidationError`` raised by the service layer is
 translated to an HTTP 4xx here -- it must never surface as a 500, and the
 translation is by TYPE, not by matching exception-message text.
 ``SubscriptionNotFoundError`` (a ``SubscriptionValidationError`` subclass,
-raised for a missing subscription/seat-assignment) becomes a 404; every other
-``SubscriptionValidationError`` (an invalid billing_cycle/status, a
-cross-org/nonexistent ``vendor_id``/``owner_user_id``/``license_ref``, an
-exhausted seat pool, an already-cancelled subscription, an already-released
-seat, a renewal with no ``renews_at``) becomes a 400.
+raised for a missing subscription/seat-assignment, or a client the caller
+cannot see) becomes a 404; ``SubscriptionConflictError`` (an archived client)
+a 409; ``SubscriptionClientError`` (another client's person or license, "Sin
+asignar" as a client) a 422; every other ``SubscriptionValidationError`` (an
+invalid billing_cycle/status, a cross-org/nonexistent ``vendor_id``/
+``owner_user_id``/``license_ref``, an exhausted seat pool, an
+already-cancelled subscription, an already-released seat, a renewal with no
+``renews_at``) becomes a 400.
 
 ``GET /subscriptions/export`` is this module's one audited read: it writes
 ``subscription.export`` before returning, mirroring ``licenses``'s
@@ -49,6 +52,8 @@ from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.models import SeatAssignment, Subscription, SubscriptionEvent
 from app.modules.subscriptions.errors import (
+    SubscriptionClientError,
+    SubscriptionConflictError,
     SubscriptionNotFoundError,
     SubscriptionValidationError,
 )
@@ -92,8 +97,11 @@ def _http_error(exc: SubscriptionValidationError) -> HTTPException:
     Routing is by TYPE, never by matching exception-message prose (a wording
     tweak in the service layer must never silently mis-route a status code).
     `SubscriptionNotFoundError` -- raised for "the resource named in the URL
-    path doesn't exist under this org" (a subscription, a seat assignment) --
-    becomes a 404. Every other `SubscriptionValidationError` is a 400 --
+    path doesn't exist under this org" (a subscription, a seat assignment),
+    and for a client this caller cannot see -- becomes a 404.
+    `SubscriptionConflictError` (an archived client) is a 409, and
+    `SubscriptionClientError` (one client's row naming another's) a 422.
+    Every other `SubscriptionValidationError` is a 400 --
     including an invalid billing_cycle/status, a cross-org/nonexistent
     `vendor_id`/`owner_user_id`/`license_ref`, an exhausted seat pool, an
     already-cancelled subscription, an already-released seat, and a renewal
@@ -101,6 +109,10 @@ def _http_error(exc: SubscriptionValidationError) -> HTTPException:
     """
     if isinstance(exc, SubscriptionNotFoundError):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    if isinstance(exc, SubscriptionConflictError):
+        return HTTPException(status.HTTP_409_CONFLICT, str(exc))
+    if isinstance(exc, SubscriptionClientError):
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
     return HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
 
@@ -109,6 +121,7 @@ def _subscription_out(row: Subscription) -> SubscriptionOut:
     # leak the tenant id.
     return SubscriptionOut(
         id=row.id,
+        client_id=row.client_id,
         vendor_id=row.vendor_id,
         service_name=row.service_name,
         plan=row.plan,
@@ -259,6 +272,7 @@ async def create_subscription_route(
                 session,
                 org_id=ctx.org_id,
                 actor_id=ctx.user_id,
+                client_id=body.client_id,
                 vendor_id=body.vendor_id,
                 service_name=body.service_name,
                 plan=body.plan,

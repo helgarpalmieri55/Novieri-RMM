@@ -89,7 +89,7 @@ from app.modules.ipam.errors import IpamError
 # literal 3600.0, so the schedule and the staleness threshold the
 # `keycloak_events` probe measures against cannot drift apart.
 from app.modules.keycloak_events import sweep as keycloak_sweep_module
-from app.modules.licenses.reporting import compliance_summary
+from app.modules.licenses.reporting import compliance_summary, reported_clients
 from app.modules.notification.delivery import attempt_delivery
 from app.modules.notification.routing import resolve_recipients
 from app.modules.patch.apply import dispatch_apply
@@ -1964,10 +1964,12 @@ async def provision_timeout_sweep_all_orgs(now: datetime) -> int:
 
 async def licenses_compliance_sweep_all_orgs(now: datetime) -> int:
     """Daily Licenses/SAM compliance sweep (docs/modules/licenses/spec.md
-    §7): per org, per `SoftwareProduct`, persist a `LicenseComplianceSnapshot`
-    row capturing that product's `entitled`/`installed`/`delta` position as of
-    `now`. Returns the total number of snapshot rows inserted across every
-    org.
+    §7): per org, per active client (`reported_clients`), per
+    `SoftwareProduct`, persist a `LicenseComplianceSnapshot` row capturing
+    that client's `entitled`/`installed`/`delta` position on that product as
+    of `now`. A license is one client's (plan 2026-10-26 Task 6), so an
+    org-wide sum would let Y's spare seats hide X's breach. Returns the total
+    number of snapshot rows inserted across every org.
 
     Reuses `app.modules.licenses.reporting.compliance_summary` for the actual
     entitled/installed/delta computation rather than duplicating it -- that
@@ -2001,11 +2003,16 @@ async def licenses_compliance_sweep_all_orgs(now: datetime) -> int:
                 async with org_session(
                     org_id, engine=app_engine, clients=ClientScope.all()
                 ) as session:
-                    summary = await compliance_summary(session, org_id)
+                    summary: list[dict[str, Any]] = []
+                    for client_id in await reported_clients(session, org_id):
+                        summary.extend(
+                            await compliance_summary(session, org_id, client_id=client_id)
+                        )
                     for row in summary:
                         session.add(
                             LicenseComplianceSnapshot(
                                 org_id=org_id,
+                                client_id=row["client_id"],
                                 product_id=row["product_id"],
                                 entitled=row["entitled"],
                                 installed=row["installed"],

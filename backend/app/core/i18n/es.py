@@ -3601,6 +3601,20 @@ CATALOG: dict[str, str] = {
     ),
     "that account belongs to another client": "esa cuenta es de otro cliente",
     "that person belongs to another client": "esa persona es de otro cliente",
+    # Licenses and subscriptions belong to one client (plan 2026-10-26 Task 6).
+    "a license cannot be filed under Unassigned": (
+        "una licencia no puede pertenecer a «Sin asignar»"
+    ),
+    "a subscription cannot be filed under Unassigned": (
+        "una suscripción no puede pertenecer a «Sin asignar»"
+    ),
+    "nothing is ignored for Unassigned: it has no computers": (
+        "no se ignora nada para «Sin asignar»: no tiene equipos"
+    ),
+    "the allocation target belongs to another client": (
+        "el destino de la asignación es de otro cliente"
+    ),
+    "that license belongs to another client": "esa licencia es de otro cliente",
     "Their sign-in is turned off": "Su inicio de sesión está desactivado",
     "Every computer is in a group": "Todos los equipos están en un grupo",
     "Nothing installed through ITMS yet": "Todavía no se ha instalado nada con ITMS",

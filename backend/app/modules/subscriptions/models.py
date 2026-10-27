@@ -11,7 +11,9 @@ from uuid import UUID
 from sqlalchemy import (
     CheckConstraint,
     Date,
+    FetchedValue,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -22,7 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 
 class Subscription(Base):
@@ -31,10 +33,15 @@ class Subscription(Base):
         Index("ix_subscription_org_vendor", "org_id", "vendor_id"),
         Index("ix_subscription_org_renews_at", "org_id", "renews_at"),
         Index("ix_subscription_org_owner_user", "org_id", "owner_user_id"),
+        client_org_fk("subscription"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0236):
+    # the client the caller names (`service.create_subscription`). Never
+    # changes: no update schema carries it, and its seats hold its people.
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
     vendor_id: Mapped[UUID | None] = mapped_column(ForeignKey("vendor.id"), default=None)
     service_name: Mapped[str] = mapped_column(String(255))
     plan: Mapped[str] = mapped_column(String(255), default="")
@@ -60,10 +67,28 @@ class SeatAssignment(Base):
     __table_args__ = (
         Index("ix_seat_assignment_org_subscription", "org_id", "subscription_id"),
         Index("ix_seat_assignment_org_person", "org_id", "person_id"),
+        # The person holding a seat is one of the subscription's client's
+        # people (migration 0236). A foreign key ignores RLS, so under scope
+        # all this is the only thing between X's subscription and Y's person;
+        # a NULL person_id skips it.
+        ForeignKeyConstraint(
+            ["person_id", "client_id"],
+            ["person.id", "person.client_id"],
+            name="fk_seat_assignment_person_client",
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # subscription (migration 0236): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     subscription_id: Mapped[UUID] = mapped_column(ForeignKey("subscription.id"))
     assignee_name: Mapped[str] = mapped_column(String(255))
     assignee_email: Mapped[str] = mapped_column(String(255))
@@ -88,6 +113,15 @@ class SubscriptionEvent(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # subscription (migration 0236): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     subscription_id: Mapped[UUID] = mapped_column(ForeignKey("subscription.id"))
     type: Mapped[str] = mapped_column(String(16))
     details: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
@@ -112,6 +146,15 @@ class SubscriptionAlertSent(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # subscription (migration 0236): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     subscription_id: Mapped[UUID] = mapped_column(
         ForeignKey("subscription.id", ondelete="CASCADE")
     )

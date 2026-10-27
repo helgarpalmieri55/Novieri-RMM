@@ -236,18 +236,18 @@ PART_C: dict[str, str] = {
         "and maintenance dates, and whether a key is stored. The key itself is never returned."
     ),
     "POST /api/v1/licenses": (
-        "Creates a license for a software product with its entitlement count, cost, dates, vendor "
-        "and optional key. The key is sealed in the vault and never returned. Unknown product or "
-        "vendor is refused."
+        "Creates a license of the client given by client_id for a software product, with its "
+        "entitlement count, cost, dates, vendor and optional key. The key is sealed in the vault "
+        "and never returned. Unknown product or vendor is refused; Unassigned takes no licenses."
     ),
     "GET /api/v1/licenses/compliance": (
-        "Returns per-product compliance: licensed entitlements, devices found running the "
-        "product, the difference, and a breach flag when installs exceed entitlements. Computed "
-        "live."
+        "Returns compliance per client and product: that client's licensed entitlements, its "
+        "devices found running the product, the difference, and a breach flag when installs "
+        "exceed entitlements. Computed live; clients are never added together."
     ),
     "GET /api/v1/licenses/costs": (
-        "Returns total license cost grouped by product and currency. Licenses lacking a cost or "
-        "currency are skipped and currencies are never added together."
+        "Returns total license cost grouped by client, product and currency. Licenses lacking a "
+        "cost or currency are skipped; clients and currencies are never added together."
     ),
     "GET /api/v1/licenses/export": (
         "Returns flat license rows (product, entitlements, cost, dates) for true-up or reporting, "
@@ -278,8 +278,9 @@ PART_C: dict[str, str] = {
         "tools."
     ),
     "POST /api/v1/licenses/review-queue/ignore": (
-        "Marks a review-queue software name as ignored so it stops appearing there. Safe to "
-        "repeat for the same name."
+        "Marks a review-queue software name as ignored so it stops appearing there: on the "
+        "devices of the client given by client_id, or, without one, on every client's (which "
+        "needs access to every client). Safe to repeat for the same name."
     ),
     "POST /api/v1/licenses/review-queue/map": (
         "Resolves a review-queue software name by adding an exact-match rule for it to a chosen "
@@ -302,8 +303,9 @@ PART_C: dict[str, str] = {
         "with their release time."
     ),
     "POST /api/v1/licenses/{license_id}/allocations": (
-        "Allocates a seat of a license to a device, user or person in this organization. Refused "
-        "when all entitlements are in use; returns the allocation."
+        "Allocates a seat of a license to a device, user or person of the license's client (staff "
+        "hold only the internal client's licenses). Refused when all entitlements are in use; "
+        "returns the allocation."
     ),
     # --- notifications ---
     "GET /api/v1/notifications/allowlist": (
@@ -394,8 +396,9 @@ PART_C: dict[str, str] = {
         "they can be matched up."
     ),
     "POST /api/v1/people/unmatched/seats/{seat_id}/link": (
-        "Links a subscription seat to a person. With no person given it reuses the person holding "
-        "the seat's email address or creates one from the seat's name and email."
+        "Links a subscription seat to a person of the subscription's client. With no person given "
+        "it reuses that client's person holding the seat's email address or creates one there "
+        "from the seat's name and email."
     ),
     "GET /api/v1/people/{person_id}": (
         "Returns everything one person holds: devices, licenses, subscriptions, open tickets, "

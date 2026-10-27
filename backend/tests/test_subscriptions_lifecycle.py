@@ -102,7 +102,9 @@ async def test_cancel_subscription_sets_status_records_event_and_audits(
     org_id, actor_id = await _org_with_user(admin_engine)
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        sub = await create_subscription(s, org_id=org_id, actor_id=actor_id, **_create_kwargs())
+        sub = await create_subscription(
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs()
+        )
         await s.commit()
         sub_id = sub.id
 
@@ -129,7 +131,9 @@ async def test_cancel_subscription_already_cancelled_raises_validation_error(
     org_id, actor_id = await _org_with_user(admin_engine)
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        sub = await create_subscription(s, org_id=org_id, actor_id=actor_id, **_create_kwargs())
+        sub = await create_subscription(
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs()
+        )
         await s.commit()
         sub_id = sub.id
 
@@ -159,7 +163,9 @@ async def test_cancel_subscription_cross_org_raises_not_found(
     org_b, actor_b = await _org_with_user(admin_engine)
 
     async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
-        sub = await create_subscription(s, org_id=org_a, actor_id=actor_a, **_create_kwargs())
+        sub = await create_subscription(
+            s, org_id=org_a, client_id=org_a, actor_id=actor_a, **_create_kwargs()
+        )
         await s.commit()
         sub_id = sub.id
 
@@ -182,6 +188,7 @@ async def test_record_renewal_advances_renews_at_records_event_and_audits(
         sub = await create_subscription(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             **_create_kwargs(billing_cycle="monthly", renews_at=date(2026, 1, 31)),
         )
@@ -210,7 +217,7 @@ async def test_record_renewal_no_renewal_date_raises_validation_error(
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
-            s, org_id=org_id, actor_id=actor_id, **_create_kwargs(renews_at=None)
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs(renews_at=None)
         )
         await s.commit()
         sub_id = sub.id
@@ -240,6 +247,7 @@ async def test_record_renewal_cross_org_raises_not_found(
         sub = await create_subscription(
             s,
             org_id=org_a,
+            client_id=org_a,
             actor_id=actor_a,
             **_create_kwargs(renews_at=date(2026, 1, 31)),
         )
@@ -289,6 +297,7 @@ async def test_the_lifecycle_org_predicates_hold_where_rls_is_not_doing_the_reje
         sub = await create_subscription(
             bypassrls_session,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             **_create_kwargs(service_name=f"service-{key}", renews_at=date(2026, 6, 1)),
         )

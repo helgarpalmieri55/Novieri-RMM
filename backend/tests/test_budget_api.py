@@ -657,7 +657,7 @@ async def test_forecast_months_out_of_range_is_422(api_env: ApiEnv) -> None:
 
 
 async def test_materialize_is_idempotent_through_the_api(api_env: ApiEnv) -> None:
-    _, headers = await _org_admin(api_env, "budget-mat")
+    org_id, headers = await _org_admin(api_env, "budget-mat")
 
     # No manual `seed_default_categories` call: `materialize` lazily seeds
     # the org's default categories itself (C1 fix) -- see
@@ -667,6 +667,7 @@ async def test_materialize_is_idempotent_through_the_api(api_env: ApiEnv) -> Non
     sub = await api_env.client.post(
         "/api/v1/subscriptions",
         json={
+            "client_id": str(org_id),
             "service_name": "Materialized Co",
             "billing_cycle": "monthly",
             "cost_per_cycle": 42,
@@ -707,6 +708,7 @@ async def test_brand_new_org_materializes_variance_and_forecast_without_manual_s
     sub = await api_env.client.post(
         "/api/v1/subscriptions",
         json={
+            "client_id": str(org_id),
             "service_name": "Lazy Seed Co",
             "billing_cycle": "monthly",
             "cost_per_cycle": 42,

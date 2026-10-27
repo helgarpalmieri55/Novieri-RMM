@@ -94,6 +94,7 @@ async def _seed_subscription(
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             vendor_id=vendor_id,
             service_name=service_name,
             plan="",

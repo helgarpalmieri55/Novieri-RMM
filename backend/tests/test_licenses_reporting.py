@@ -115,6 +115,7 @@ async def _seed_license(
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         lic = License(
             org_id=org_id,
+            client_id=org_id,
             product_id=product_id,
             vendor_id=None,
             type=type_,
@@ -157,7 +158,7 @@ async def test_compliance_summary_hand_computed(
     await _seed_installed(admin_engine, org_id, device3, "Acme App")
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        rows = await compliance_summary(s, org_id)
+        rows = await compliance_summary(s, org_id, client_id=org_id)
 
     assert len(rows) == 1
     row = rows[0]
@@ -186,7 +187,7 @@ async def test_compliance_summary_breach_when_installed_exceeds_entitled(
     await _seed_installed(admin_engine, org_id, device2, "Solo App")
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        rows = await compliance_summary(s, org_id)
+        rows = await compliance_summary(s, org_id, client_id=org_id)
 
     row = next(r for r in rows if r["product_id"] == product.id)
     assert row["entitled"] == 1
@@ -202,7 +203,7 @@ async def test_compliance_summary_product_with_no_licenses_is_zero_entitled(
     product = await _seed_product(app_engine, org_id, actor_id, name="No License Product")
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        rows = await compliance_summary(s, org_id)
+        rows = await compliance_summary(s, org_id, client_id=org_id)
 
     row = next(r for r in rows if r["product_id"] == product.id)
     assert row["entitled"] == 0
@@ -481,7 +482,7 @@ async def test_a_second_orgs_rows_are_excluded_from_all_four_reports_by_rls(
     )
 
     async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
-        compliance = await compliance_summary(s, org_a)
+        compliance = await compliance_summary(s, org_a, client_id=org_a)
         renewals = await renewal_calendar(s, org_a, now=now)
         costs = await cost_view(s, org_a)
         export = await export_rows(s, org_a)
@@ -530,7 +531,7 @@ async def test_tenancy_report_org_filters_are_load_bearing(
     # connection, so only compliance_summary's own org_id predicates (and
     # product_installed_device_ids') can exclude them.
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
-        rows = await compliance_summary(s, org_a)
+        rows = await compliance_summary(s, org_a, client_id=org_a)
 
     assert {row["product_id"] for row in rows} == {product_a.id}
     row = rows[0]

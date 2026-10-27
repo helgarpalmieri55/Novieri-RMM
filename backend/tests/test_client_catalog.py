@@ -485,8 +485,14 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
         | {"fk_audit_events_client_org"}
         | {f"fk_{t}_site_client" for t in ("devices", "enrollment_tokens", "install_links")}
         # A row naming a person is of that person's client (plan 2026-10-26
-        # Task 5): who uses a device is one of the device's client's people.
-        | {"fk_device_person_person_client"}
+        # Task 5): who uses a device is one of the device's client's people;
+        # who holds a license or a seat, of the license's or subscription's
+        # (Task 6).
+        | {
+            "fk_device_person_person_client",
+            "fk_license_allocation_person_client",
+            "fk_seat_assignment_person_client",
+        }
         | CLIENT_KEYS
     )
     assert set(live) == expected, f"live vs catalog: {sorted(set(live) ^ expected)}"

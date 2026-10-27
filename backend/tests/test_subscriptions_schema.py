@@ -26,6 +26,7 @@ def test_subscription_not_found_is_a_validation_error_subclass() -> None:
 def test_subscription_create_billing_cycle_rejects_out_of_domain_value() -> None:
     with pytest.raises(ValidationError):
         SubscriptionCreate(
+            client_id="00000000-0000-0000-0000-0000000000c1",
             service_name="Acme SaaS",
             billing_cycle="weekly",  # not in the allowed Literal
             cost_per_cycle=Decimal("9.99"),
@@ -36,6 +37,7 @@ def test_subscription_create_billing_cycle_rejects_out_of_domain_value() -> None
 def test_subscription_create_status_rejects_out_of_domain_value() -> None:
     with pytest.raises(ValidationError):
         SubscriptionCreate(
+            client_id="00000000-0000-0000-0000-0000000000c1",
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("9.99"),
@@ -49,6 +51,7 @@ def test_subscription_create_currency_rejects_over_length_value() -> None:
     # 422 at the schema boundary, not a Postgres truncation 500 (spec §8).
     with pytest.raises(ValidationError):
         SubscriptionCreate(
+            client_id="00000000-0000-0000-0000-0000000000c1",
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("9.99"),
@@ -71,6 +74,7 @@ def test_subscription_update_currency_rejects_over_length_value() -> None:
 
 def _create(**overrides: object) -> SubscriptionCreate:
     payload: dict[str, object] = {
+        "client_id": "00000000-0000-0000-0000-0000000000c1",
         "service_name": "Acme SaaS",
         "billing_cycle": "monthly",
         "cost_per_cycle": Decimal("9.99"),
@@ -163,6 +167,7 @@ def test_subscription_create_accepts_zero_count(field: str) -> None:
 
 def test_subscription_create_valid_with_cost_and_currency() -> None:
     sub = SubscriptionCreate(
+        client_id="00000000-0000-0000-0000-0000000000c1",
         service_name="Acme SaaS",
         billing_cycle="monthly",
         cost_per_cycle=Decimal("9.99"),

@@ -9,6 +9,11 @@ never reachable through any function here, and every mutation is followed by
 `audit_service.record` + a flush (invariant #4). `subscription_event` rows are
 business change-history surfaced in the UI -- distinct from the audit log --
 so `_record_event` deliberately does NOT call `audit_service.record`.
+
+A subscription belongs to ONE client (plan 2026-10-26 Task 6, migration
+0236): the one its creator names, loaded like every new row's
+(`client_for_new_rows`). Its seats are held by that client's people, and the
+license it refers to is that client's too.
 """
 
 from datetime import UTC, date, datetime
@@ -30,12 +35,16 @@ from app.models import (
     User,
     Vendor,
 )
+from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.people.service import person_id_for_email
 from app.modules.subscriptions.costs import advance_renewal
 from app.modules.subscriptions.errors import (
+    SubscriptionClientError,
+    SubscriptionConflictError,
     SubscriptionNotFoundError,
     SubscriptionValidationError,
 )
+from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
 
 _VALID_STATUSES = {"active", "trial", "cancelled"}
 _VALID_CYCLES = {"monthly", "quarterly", "annual"}
@@ -101,17 +110,42 @@ async def _load_subscription(
     return sub
 
 
+async def _client_for_new_subscription(
+    session: AsyncSession, org_id: UUID, client_id: UUID
+) -> None:
+    """The client a new subscription is filed under, loaded as every new row's
+    is (`client_for_new_rows`, held FOR SHARE until commit): one this session
+    cannot see is a 404, never a 403 (spec §3.2's existence oracle), an
+    archived one a 409. "Sin asignar" is the inbox of what has no owner, and
+    nobody subscribes there (C10): 422."""
+    try:
+        client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
+    except ClientNotFound:
+        raise SubscriptionNotFoundError(tr("no such client")) from None
+    except NotAcceptingNewRows as exc:
+        raise SubscriptionConflictError(exc.detail) from None
+    if client.kind == CLIENT_KIND_UNASSIGNED:
+        raise SubscriptionClientError(tr("a subscription cannot be filed under Unassigned"))
+
+
 async def _validate_refs(
     session: AsyncSession,
     org_id: UUID,
     *,
+    client_id: UUID,
     vendor_id: UUID | None,
     owner_user_id: UUID | None,
     license_ref: UUID | None,
 ) -> None:
     """Resolve each non-None cross-ref org-scoped; a cross-org/unknown id is
     indistinguishable from nonexistent and both raise
-    `SubscriptionValidationError` (invariant #5)."""
+    `SubscriptionValidationError` (invariant #5).
+
+    `license_ref` stays advisory -- no foreign key, so deleting the license
+    leaves it dangling (spec §143-148) -- but it names a license of the
+    subscription's own client (`client_id`): another client's is a
+    `SubscriptionClientError` (422). Vendors are the organisation's catalogue
+    and owners are technicians, neither of a client."""
     if vendor_id is not None:
         found = (
             await session.execute(
@@ -135,17 +169,19 @@ async def _validate_refs(
             )
 
     if license_ref is not None:
-        found = (
+        license_client = (
             await session.execute(
-                select(License.id).where(
+                select(License.client_id).where(
                     License.org_id == org_id, License.id == license_ref
                 )
             )
         ).scalar_one_or_none()
-        if found is None:
+        if license_client is None:
             raise SubscriptionValidationError(
                 tr("license not found: {license_ref}", license_ref=license_ref)
             )
+        if license_client != client_id:
+            raise SubscriptionClientError(tr("that license belongs to another client"))
 
 
 async def _record_event(
@@ -175,6 +211,7 @@ async def create_subscription(
     *,
     org_id: UUID,
     actor_id: UUID,
+    client_id: UUID,
     vendor_id: UUID | None,
     service_name: str,
     plan: str,
@@ -192,8 +229,9 @@ async def create_subscription(
     license_ref: UUID | None,
     status: str,
 ) -> Subscription:
-    """Create a new subscription; record a `created` event and audit
-    `subscription.created`."""
+    """Create a new subscription of `client_id`; record a `created` event and
+    audit `subscription.created`."""
+    await _client_for_new_subscription(session, org_id, client_id)
     if billing_cycle not in _VALID_CYCLES:
         raise SubscriptionValidationError(
             tr("invalid billing_cycle: {billing_cycle}", billing_cycle=billing_cycle)
@@ -204,6 +242,7 @@ async def create_subscription(
     await _validate_refs(
         session,
         org_id,
+        client_id=client_id,
         vendor_id=vendor_id,
         owner_user_id=owner_user_id,
         license_ref=license_ref,
@@ -211,6 +250,7 @@ async def create_subscription(
 
     sub = Subscription(
         org_id=org_id,
+        client_id=client_id,
         vendor_id=vendor_id,
         service_name=service_name,
         plan=plan,
@@ -245,6 +285,7 @@ async def create_subscription(
         target_type="subscription",
         target_id=str(sub.id),
         metadata={"service_name": service_name},
+        client_id=sub.client_id,
     )
     await session.flush()
     return sub
@@ -299,6 +340,7 @@ async def update_subscription(
         await _validate_refs(
             session,
             org_id,
+            client_id=sub.client_id,
             vendor_id=vendor_id,
             owner_user_id=owner_user_id,
             license_ref=license_ref,
@@ -381,6 +423,7 @@ async def update_subscription(
         target_type="subscription",
         target_id=str(sub.id),
         metadata={"changed_fields": changed_fields},
+        client_id=sub.client_id,
     )
     await session.flush()
     return sub
@@ -454,6 +497,7 @@ async def cancel_subscription(
         target_type="subscription",
         target_id=str(sub_id),
         metadata={},
+        client_id=sub.client_id,
     )
     await session.flush()
     return sub
@@ -493,6 +537,7 @@ async def record_renewal(
         target_type="subscription",
         target_id=str(sub_id),
         metadata={"renewed_to": new_date.isoformat()},
+        client_id=sub.client_id,
     )
     await session.flush()
     return sub
@@ -561,19 +606,23 @@ async def assign_seat(
     if active >= sub.seats:
         raise SubscriptionValidationError(tr("no seats available"))
 
-    # The seat belongs to a person (docs/modules/people/spec.md §0.4): the one
-    # named, or else whoever holds this address.
+    # The seat belongs to a person (docs/modules/people/spec.md §0.4) of the
+    # subscription's client: the one named, or else whoever of that client
+    # holds this address -- two customers can each employ an ana@gmail.com.
     if person_id is not None:
-        found = (
+        person_client = (
             await session.execute(
-                select(Person.id).where(Person.org_id == org_id, Person.id == person_id)
+                select(Person.client_id).where(Person.org_id == org_id, Person.id == person_id)
             )
         ).scalar_one_or_none()
-        if found is None:
+        if person_client is None:
             raise SubscriptionValidationError(tr("person not found"))
+        if person_client != sub.client_id:
+            raise SubscriptionClientError(tr("that person belongs to another client"))
     else:
-        # plan 2026-10-26 Task 6 passes the subscription's client
-        person_id = await person_id_for_email(session, org_id, assignee_email, client_id=org_id)
+        person_id = await person_id_for_email(
+            session, org_id, assignee_email, client_id=sub.client_id
+        )
 
     seat = SeatAssignment(
         org_id=org_id,
@@ -604,6 +653,7 @@ async def assign_seat(
         target_type="seat_assignment",
         target_id=str(seat.id),
         metadata={"subscription_id": str(sub_id), "email": assignee_email},
+        client_id=sub.client_id,
     )
     await session.flush()
     return seat
@@ -637,6 +687,8 @@ async def release_seat(
     seat = await _load_seat(session, org_id, assignment_id)
     if seat.released_at is not None:
         raise SubscriptionValidationError(tr("seat already released"))
+    # Read before the UPDATE: it expires the trigger-kept column.
+    client_id = seat.client_id
 
     seat.released_at = datetime.now(UTC)
     await session.flush()
@@ -665,6 +717,7 @@ async def release_seat(
             "subscription_id": str(seat.subscription_id),
             "email": seat.assignee_email,
         },
+        client_id=client_id,
     )
     await session.flush()
     return seat

@@ -77,6 +77,7 @@ from app.models import (
     InstallLink,
     Job,
     JobLog,
+    License,
     Organization,
     Person,
     PersonLogin,
@@ -84,6 +85,9 @@ from app.models import (
     Script,
     ScriptPolicy,
     Site,
+    SoftwareProduct,
+    Subscription,
+    SubscriptionEvent,
     Ticket,
     TicketCategory,
     TicketComment,
@@ -128,6 +132,7 @@ class Side:
     record: UUID
     ticket: UUID
     person: UUID
+    subscription: UUID
 
 
 @dataclass(frozen=True)
@@ -139,6 +144,7 @@ class World:
     check: UUID
     queue: UUID  # G: ticket queues and categories too
     category: UUID
+    product: UUID  # G: the software catalogue too
     x: Side
     y: Side
 
@@ -152,6 +158,13 @@ def _job(org: UUID, device: UUID) -> Job:
     return Job(
         org_id=org, type="inventory.collect", target_type="device", target_id=device,
         params={}, nonce=uuid4().hex, issued_at=now, expires_at=now + timedelta(hours=1),
+    )
+
+
+def _subscription(org: UUID, client: UUID, actor: UUID) -> Subscription:
+    return Subscription(
+        org_id=org, client_id=client, service_name="s", billing_cycle="monthly",
+        cost_per_cycle=1, currency="USD", created_by=actor,
     )
 
 
@@ -195,11 +208,12 @@ async def _side(
         )
         ticket = _ticket(org, client.id, queue, category, actor)
         person = Person(org_id=org, client_id=client.id, display_name="Persona")
-        s.add_all([job, alert, ticket, person])
+        subscription = _subscription(org, client.id, actor)
+        s.add_all([job, alert, ticket, person, subscription])
         await s.commit()
     return Side(
         client.id, site.id, device.id, group.id, job.id, alert.id, record.id, ticket.id,
-        person.id,
+        person.id, subscription.id,
     )
 
 
@@ -221,14 +235,17 @@ async def _two_clients(admin_engine: AsyncEngine) -> World:
             org_id=org.id, key="c", name="C", type="incident", default_queue_id=queue.id,
             created_by=actor.id,
         )
-        s.add(category)
+        product = SoftwareProduct(org_id=org.id, name="Office", created_by=actor.id)
+        s.add_all([category, product])
         await s.commit()
     profile = await seed_profile(admin_engine, org.id)
     check = await seed_check(admin_engine, org.id, profile)
     tickets = {"actor": actor.id, "queue": queue.id, "category": category.id}
     x = await _side(admin_engine, org.id, profile, check, **tickets)
     y = await _side(admin_engine, org.id, profile, check, **tickets)
-    return World(org.id, actor.id, script.id, profile, check, queue.id, category.id, x, y)
+    return World(
+        org.id, actor.id, script.id, profile, check, queue.id, category.id, product.id, x, y
+    )
 
 
 async def _seed(admin_engine: AsyncEngine, *rows: Any) -> list[UUID]:
@@ -391,6 +408,16 @@ PATHS: dict[str, tuple[str, Make]] = {
     )),
     "H-person_login-via-person": ("person_login", lambda w, s: PersonLogin(
         org_id=w.org, person_id=s.person, login=f"corp\\{uuid4().hex[:8]}"
+    )),
+    "C-license": ("license", lambda w, s: License(
+        org_id=w.org, client_id=s.client, product_id=w.product, type="perpetual",
+        entitlements=1, created_by=w.actor,
+    )),
+    "C-subscription": ("subscription", lambda w, s: _subscription(w.org, s.client, w.actor)),
+    "H-subscription_event-via-subscription": ("subscription_event", lambda w, s: (
+        SubscriptionEvent(
+            org_id=w.org, subscription_id=s.subscription, type="created", created_by=w.actor
+        )
     )),
     "O-doc_articles-no-parent": ("doc_articles", lambda w, s: DocArticle(
         org_id=w.org, client_id=s.client, title="t"

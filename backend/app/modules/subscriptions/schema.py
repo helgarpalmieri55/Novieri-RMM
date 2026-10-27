@@ -60,6 +60,10 @@ _OptionalCount = Field(default=None, ge=0, le=_MAX_COUNT)
 
 
 class SubscriptionCreate(BaseModel):
+    # The client the service is paid for (plan 2026-10-26 Task 6). One
+    # client's: its seats are held by that client's people, and it never
+    # changes client -- `SubscriptionUpdate` has no such field.
+    client_id: UUID
     vendor_id: UUID | None = None
     service_name: str = Field(max_length=_MAX_TEXT)
     plan: str = Field(default="", max_length=_MAX_TEXT)
@@ -103,6 +107,7 @@ class SubscriptionOut(BaseModel):
     # No `org_id` field here — security invariant #5: response models never
     # leak the tenant id, mirroring `licenses/schema.py`'s `LicenseOut`.
     id: UUID
+    client_id: UUID
     vendor_id: UUID | None
     service_name: str
     plan: str
@@ -166,8 +171,13 @@ class SpendRow(BaseModel):
     vendor / no owner on the subscription), and a reference the org-scoped
     lookup could not resolve. A vendor or owner id is never emitted
     without its label -- suppressing the name while still returning the
-    raw id would leak a cross-tenant identifier."""
+    raw id would leak a cross-tenant identifier.
 
+    `client_id` is the client every subscription in the row belongs to (plan
+    2026-10-26 Task 6): each roll-up is per client, and nothing is summed
+    across two clients any more than across two currencies."""
+
+    client_id: UUID
     currency: str
     monthly_total: Decimal
     annual_total: Decimal

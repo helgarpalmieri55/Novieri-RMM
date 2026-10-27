@@ -195,6 +195,7 @@ async def test_projected_excludes_periods_that_already_have_a_materialized_row(a
 
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("20.00"),
@@ -238,6 +239,7 @@ async def test_materialized_then_confirmed_renewal_is_actual_not_projected(api_e
 
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("20.00"),
@@ -288,6 +290,7 @@ async def test_editing_expense_date_does_not_resurrect_its_projection(api_env) -
 
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("12000.00"),
@@ -350,6 +353,7 @@ async def test_unmaterialized_renewal_still_projects_despite_a_sibling_materiali
 
         small = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Small SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("20.00"),
@@ -360,6 +364,7 @@ async def test_unmaterialized_renewal_still_projects_despite_a_sibling_materiali
         )
         big = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Big SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("5000.00"),
@@ -406,6 +411,7 @@ async def test_manual_prerecorded_renewal_is_committed_not_projected(api_env) ->
 
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("20.00"),
@@ -453,6 +459,7 @@ async def test_manual_prerecorded_renewal_does_not_suppress_sibling_renewal(api_
 
         small = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Small SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("20.00"),
@@ -463,6 +470,7 @@ async def test_manual_prerecorded_renewal_does_not_suppress_sibling_renewal(api_
         )
         big = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Big SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("5000.00"),
@@ -512,6 +520,7 @@ async def test_manual_expense_without_link_id_does_not_suppress_projection(api_e
 
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("20.00"),
@@ -568,6 +577,7 @@ async def test_variance_voided_materialized_renewal_does_not_resurrect_as_projec
 
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("20.00"),
@@ -614,6 +624,7 @@ async def test_forecast_voided_materialized_renewal_does_not_resurrect(api_env) 
         await seed_default_categories(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("15.00"),
@@ -793,6 +804,7 @@ async def test_variance_discloses_unconvertible_projection(api_env) -> None:
         budget = await _make_budget(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("500000.00"),
@@ -825,6 +837,7 @@ async def test_forecast_discloses_unconvertible_projection(api_env) -> None:
         await seed_default_categories(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("500000.00"),
@@ -995,6 +1008,7 @@ async def test_forecast_separates_materialized_from_projected(api_env) -> None:
         await seed_default_categories(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("15.00"),
@@ -1045,6 +1059,7 @@ async def test_forecast_months_spans_exactly_n_calendar_months_including_current
         await seed_default_categories(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("10.00"),
@@ -1375,6 +1390,7 @@ async def test_tenancy_forecast_excludes_other_orgs_materialized_row_from_the_gu
         await seed_default_categories(session, org_a, user_a)
         sub_a = Subscription(
             org_id=org_a,
+            client_id=org_a,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("15.00"),

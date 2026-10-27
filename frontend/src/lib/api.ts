@@ -137,6 +137,7 @@ import type {
   ProductOut,
   ProductUpdate,
   RenewalRow,
+  ReviewIgnoreOut,
   ReviewIgnoreRequest,
   ReviewMapRequest,
   ReviewQueueRow,
@@ -3574,8 +3575,8 @@ export class ApiClient {
     });
   }
 
-  ignoreSoftware(body: ReviewIgnoreRequest): Promise<{ id: string; name: string }> {
-    return this.request<{ id: string; name: string }>("/licenses/review-queue/ignore", {
+  ignoreSoftware(body: ReviewIgnoreRequest): Promise<ReviewIgnoreOut> {
+    return this.request<ReviewIgnoreOut>("/licenses/review-queue/ignore", {
       method: "POST",
       body: JSON.stringify(body),
     });

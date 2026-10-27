@@ -10,7 +10,9 @@ from uuid import UUID
 
 from sqlalchemy import (
     Date,
+    FetchedValue,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -65,10 +67,15 @@ class License(Base):
             "org_id",
             "maintenance_expires_at",
         ),
+        client_org_fk("license"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0236):
+    # the client the caller names (`service.create_license`). Never changes:
+    # no update schema carries it, and its allocations hold its people.
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
     product_id: Mapped[UUID] = mapped_column(ForeignKey("software_product.id"))
     vendor_id: Mapped[UUID | None] = mapped_column(ForeignKey("vendor.id"), default=None)
     type: Mapped[str] = mapped_column(String(16))
@@ -91,10 +98,29 @@ class LicenseAllocation(Base):
     __table_args__ = (
         Index("ix_license_allocation_org_license", "org_id", "license_id"),
         Index("ix_license_allocation_org_person", "org_id", "person_id"),
+        # The person holding it is one of the license's client's people
+        # (migration 0236). A foreign key ignores RLS, so under scope all this
+        # is what stops X's license being held by Y's person; a NULL
+        # person_id skips it. The target itself has no foreign key (it is
+        # polymorphic): `its_license_allocation_target_guard` holds it.
+        ForeignKeyConstraint(
+            ["person_id", "client_id"],
+            ["person.id", "person.client_id"],
+            name="fk_license_allocation_person_client",
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # license (migration 0236): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     license_id: Mapped[UUID] = mapped_column(ForeignKey("license.id"))
     target_type: Mapped[str] = mapped_column(String(8))
     target_id: Mapped[UUID] = mapped_column()
@@ -115,10 +141,14 @@ class LicenseComplianceSnapshot(Base):
             "product_id",
             "computed_at",
         ),
+        client_org_fk("license_compliance_snapshot"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). One client's position on one product
+    # (migration 0236): written by the daily sweep, once per active client.
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
     product_id: Mapped[UUID] = mapped_column(ForeignKey("software_product.id"))
     entitled: Mapped[int] = mapped_column(Integer)
     installed: Mapped[int] = mapped_column(Integer)

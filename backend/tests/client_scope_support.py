@@ -170,3 +170,13 @@ async def deparse_policies(conn, shapes: set[Shape]) -> dict[Shape, tuple[str, s
         )
     ).all()
     return {names[r.policyname]: (r.qual, r.with_check) for r in rows}
+
+
+async def internal_client(env: ApiEnv, headers: dict[str, str]) -> str:
+    """The internal client of whoever `headers` sign in as: `/me`'s `org_id`,
+    the id convention -- what the console sends until phase 3's selector
+    (`frontend/src/lib/internalClient.ts`). For helpers that build a create
+    body from headers alone."""
+    me = await env.client.get("/api/v1/me", headers=headers)
+    assert me.status_code == 200, me.text
+    return str(me.json()["org_id"])

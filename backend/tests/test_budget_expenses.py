@@ -699,6 +699,7 @@ async def test_update_link_id_on_a_non_manual_expense_is_rejected(api_env) -> No
         cat = await _seed_category(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("10.00"),
@@ -751,6 +752,7 @@ async def test_bare_link_type_patch_on_a_manual_expense_re_resolves_link_id(api_
         cat = await _seed_category(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("10.00"),
@@ -803,6 +805,7 @@ async def test_bare_link_type_patch_re_resolves_successfully_against_the_new_typ
 
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("10.00"),
@@ -855,6 +858,7 @@ async def test_bare_null_link_type_patch_stranding_an_existing_link_id_is_reject
         cat = await _seed_category(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("10.00"),
@@ -1152,6 +1156,7 @@ async def test_tenancy_create_expense_link_resolution_is_load_bearing(
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         sub_b = Subscription(
             org_id=org_b,
+            client_id=org_b,
             service_name="Org B SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("10.00"),

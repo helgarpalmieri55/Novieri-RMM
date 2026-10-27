@@ -10,6 +10,10 @@
  * notice periods, so the "notice deadlines due" tile on `/subscriptions` and
  * the "action required" pill on `/subscriptions/renewals` are one fact.
  *
+ * Every subscription is the internal client's (`ORG_ID`, the id convention):
+ * the console files each one there until phase 3's client selector, so every
+ * spend row here is that one client's.
+ *
  * Owners are people from the shell's worked directory (the service desk's
  * `listUsers` fixture), so the same person carries the same avatar tone on
  * every page. Vendors come from the licenses fixture, the way the real API
@@ -20,6 +24,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
+import { ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 import type {
   EventOut,
@@ -76,6 +81,7 @@ const SEEDS: SubscriptionSeed[] = [
 function subscription(seed: SubscriptionSeed): SubscriptionOut {
   return {
     id: seed.id,
+    client_id: ORG_ID,
     vendor_id: seed.vendor,
     service_name: seed.name,
     plan: seed.plan,
@@ -188,6 +194,7 @@ function rollup(
     const prior = buckets.get(bucket);
     const cents = (prior?.cents ?? 0) + monthlyCents(seed);
     buckets.set(bucket, {
+      client_id: ORG_ID,
       currency: seed.currency,
       monthly_total: money(cents),
       annual_total: money(cents * 12),
@@ -288,6 +295,7 @@ const idleSeats: FixtureMap["idleSeats"] = () =>
 
 const createSubscription: FixtureMap["createSubscription"] = (body) => ({
   id: `sub-${Date.now()}`,
+  client_id: body.client_id,
   vendor_id: body.vendor_id ?? null,
   service_name: body.service_name,
   plan: body.plan ?? "",

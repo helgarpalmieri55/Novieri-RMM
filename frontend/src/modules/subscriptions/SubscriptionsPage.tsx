@@ -32,6 +32,7 @@ import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDate } from "../../lib/datetime";
+import { internalClientId, requireKnown } from "../../lib/internalClient";
 import { humaniseEnum } from "../../lib/labels";
 import {
   useCreateSubscriptionMutation,
@@ -453,6 +454,8 @@ export function SubscriptionsPage() {
 
 function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useT();
+  const api = useApi();
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const create = useCreateSubscriptionMutation();
   const vendors = useVendorDirectory();
   const users = useOrgUsers();
@@ -520,8 +523,15 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
 
+    // A subscription is one client's (MSP clients phase 2): its seats are held
+    // by that client's people.
+    // PHASE 3: the client/site selector. Until it exists that is the
+    // organisation's internal client, whose id is the organisation's --
+    // `/me`'s `org_id` (`lib/internalClient.ts`).
+    const internalClient = internalClientId(me.data);
     create.mutate(
-      {
+      () => ({
+        client_id: requireKnown(internalClient),
         service_name: serviceName,
         billing_cycle: billingCycle,
         // Money stays a STRING to the wire (module docstring / invariant #6).
@@ -540,7 +550,7 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
         // A count, guarded by `noticeDays` above before this Number() runs.
         notice_days: Number(noticeDaysValue),
         auto_renew: autoRenew,
-      },
+      }),
       {
         onSuccess: () => {
           reset();

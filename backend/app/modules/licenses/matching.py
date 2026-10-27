@@ -106,22 +106,25 @@ def validate_match_rules(rules: list[dict[str, Any]]) -> None:
 
 
 async def product_installed_device_ids(
-    session: AsyncSession, org_id: UUID, product: SoftwareProduct
+    session: AsyncSession, org_id: UUID, product: SoftwareProduct, *, client_id: UUID
 ) -> set[UUID]:
-    """Return the set of THIS ORG's device_ids running software that matches
-    ANY of `product.match_rules`.
+    """Return the set of THIS ORG's device_ids OF `client_id` running software
+    that matches ANY of `product.match_rules`.
 
     Loads `InstalledSoftware` explicitly filtered `WHERE org_id == org_id`
-    (invariant #5) and matches in Python -- keeps regex out of SQL and the
-    tenant boundary in one predicate. A device with multiple matching rows is
-    counted once (the result is a set).
+    (invariant #5) and by the client (plan 2026-10-26 Task 6: a client's
+    installs count against that client's licenses, never another's), and
+    matches in Python -- keeps regex out of SQL and the tenant boundary in
+    one predicate. Both are explicit predicates, not RLS: under scope all
+    RLS narrows nothing. A device with multiple matching rows is counted once
+    (the result is a set).
     """
     rows = await session.execute(
         select(
             InstalledSoftware.device_id,
             InstalledSoftware.name,
             InstalledSoftware.publisher,
-        ).where(InstalledSoftware.org_id == org_id)
+        ).where(InstalledSoftware.org_id == org_id, InstalledSoftware.client_id == client_id)
     )
 
     device_ids: set[UUID] = set()

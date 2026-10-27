@@ -71,6 +71,7 @@ async def _seed_subscription(
 ) -> Subscription:
     sub = Subscription(
         org_id=org_id,
+        client_id=org_id,
         service_name=service_name,
         billing_cycle=billing_cycle,
         cost_per_cycle=cost_per_cycle,
@@ -100,6 +101,7 @@ async def _seed_license(
 
     lic = License(
         org_id=org_id,
+        client_id=org_id,
         product_id=product.id,
         type="volume",
         entitlements=10,
@@ -862,6 +864,7 @@ async def test_tenancy_project_costs_subscription_resolution_is_load_bearing(
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         sub_b = Subscription(
             org_id=org_b,
+            client_id=org_b,
             service_name="Org B SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("10.00"),
@@ -878,6 +881,7 @@ async def test_tenancy_project_costs_subscription_resolution_is_load_bearing(
 
         lic_b = License(
             org_id=org_b,
+            client_id=org_b,
             product_id=product_b.id,
             type="volume",
             entitlements=5,

@@ -11,6 +11,10 @@
  * dates, and `licenseCosts` their costs, per currency, never summed across
  * currencies (the module docstring's own rule).
  *
+ * Every license is the internal client's (`ORG_ID`, the id convention): the
+ * console files each one there until phase 3's client selector, so every
+ * per-client report here has that one client.
+ *
  * The device allocations name machines from the shell's worked fleet
  * (`fixtures/core.ts`), so the seat on `lis-ws-041` here is the same
  * workstation `/devices` lists.
@@ -20,6 +24,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
+import { ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 import type {
   AllocationOut,
@@ -150,6 +155,7 @@ const LICENSE_SEEDS: LicenseSeed[] = [
 function license(seed: LicenseSeed): LicenseOut {
   return {
     id: seed.id,
+    client_id: ORG_ID,
     product_id: seed.product,
     vendor_id: seed.vendor,
     type: seed.type,
@@ -269,6 +275,7 @@ const licenseCompliance: FixtureMap["licenseCompliance"] = () =>
     );
     const installed = INSTALLED[product.id] ?? 0;
     return {
+      client_id: ORG_ID,
       product_id: product.id,
       name: product.name,
       entitled,
@@ -284,10 +291,10 @@ const licenseRenewals: FixtureMap["licenseRenewals"] = (withinDays = 90) => {
   const rows: RenewalRow[] = [];
   for (const seed of LICENSE_SEEDS) {
     if (seed.renewsDays !== null && seed.renewsDays <= withinDays) {
-      rows.push({ license_id: seed.id, product_id: seed.product, trigger: "renewal", due_date: dateIn(seed.renewsDays), due_in_days: seed.renewsDays });
+      rows.push({ license_id: seed.id, client_id: ORG_ID, product_id: seed.product, trigger: "renewal", due_date: dateIn(seed.renewsDays), due_in_days: seed.renewsDays });
     }
     if (seed.maintenanceDays !== null && seed.maintenanceDays <= withinDays) {
-      rows.push({ license_id: seed.id, product_id: seed.product, trigger: "maintenance", due_date: dateIn(seed.maintenanceDays), due_in_days: seed.maintenanceDays });
+      rows.push({ license_id: seed.id, client_id: ORG_ID, product_id: seed.product, trigger: "maintenance", due_date: dateIn(seed.maintenanceDays), due_in_days: seed.maintenanceDays });
     }
   }
   return rows.sort((a, b) => a.due_in_days - b.due_in_days);
@@ -301,7 +308,7 @@ const licenseCosts: FixtureMap["licenseCosts"] = () => {
     const prior = rows.get(key);
     // Whole cents, so the string never grows a float tail.
     const cents = Math.round(Number(seed.cost) * 100) + (prior ? Math.round(Number(prior.total_cost) * 100) : 0);
-    rows.set(key, { product_id: seed.product, currency: seed.currency, total_cost: (cents / 100).toFixed(2) });
+    rows.set(key, { client_id: ORG_ID, product_id: seed.product, currency: seed.currency, total_cost: (cents / 100).toFixed(2) });
   }
   return [...rows.values()];
 };
@@ -342,6 +349,7 @@ const updateProduct: FixtureMap["updateProduct"] = (id, body) => {
 
 const createLicense: FixtureMap["createLicense"] = (body) => ({
   id: `lic-${Date.now()}`,
+  client_id: body.client_id,
   product_id: body.product_id,
   vendor_id: body.vendor_id ?? null,
   type: body.type,
@@ -365,7 +373,11 @@ const deleteLicense: FixtureMap["deleteLicense"] = (id) => {
 
 const mapSoftware: FixtureMap["mapSoftware"] = (body) => findProduct(body.product_id);
 
-const ignoreSoftware: FixtureMap["ignoreSoftware"] = (body) => ({ id: `ign-${Date.now()}`, name: body.name });
+const ignoreSoftware: FixtureMap["ignoreSoftware"] = (body) => ({
+  id: `ign-${Date.now()}`,
+  name: body.name,
+  client_id: body.client_id ?? null,
+});
 
 const fixtures: FixtureMap = {
   listVendors,

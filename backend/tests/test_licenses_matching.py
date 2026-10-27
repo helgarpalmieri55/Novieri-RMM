@@ -231,7 +231,7 @@ async def test_product_installed_device_ids_matches_own_org_only(
     product = await _seed_product(app_engine, org_id, actor_id, match_rules)
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        device_ids = await product_installed_device_ids(s, org_id, product)
+        device_ids = await product_installed_device_ids(s, org_id, product, client_id=org_id)
 
     assert device_ids == {device1, device2}
 
@@ -259,7 +259,7 @@ async def test_product_installed_device_ids_org_filter_is_load_bearing(
     product = await _seed_product(app_engine, org_id, actor_id, match_rules)
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
-        device_ids = await product_installed_device_ids(s, org_id, product)
+        device_ids = await product_installed_device_ids(s, org_id, product, client_id=org_id)
 
     assert device_ids == {device1}
     assert foreign_device not in device_ids

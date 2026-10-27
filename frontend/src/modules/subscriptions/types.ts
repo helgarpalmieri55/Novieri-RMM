@@ -18,6 +18,8 @@ export type BillingCycle = "monthly" | "quarterly" | "annual";
 export type SubStatus = "active" | "trial" | "cancelled";
 
 export interface SubscriptionCreate {
+  /** The client the service is paid for; it never changes (MSP clients phase 2). */
+  client_id: string;
   vendor_id?: string | null;
   service_name: string;
   plan?: string;
@@ -61,6 +63,7 @@ export interface SubscriptionOut {
   // No `org_id` field here -- security invariant #5: response models never
   // leak the tenant id, mirroring schema.py's SubscriptionOut.
   id: string;
+  client_id: string;
   vendor_id: string | null;
   service_name: string;
   plan: string;
@@ -135,7 +138,11 @@ export interface EventOut {
 // `by_owner` suppress BOTH fields together when the referenced entity is
 // not resolvable in the org (an ungrouped row, or a deleted/cross-org id --
 // emitting the raw id alone would leak it). Render neither unguarded.
+//
+// Every row is ONE client's (MSP clients phase 2): spend is never summed
+// across clients any more than across currencies.
 export interface SpendRow {
+  client_id: string;
   currency: string;
   // Decimal serializes as a string over the wire.
   monthly_total: string;

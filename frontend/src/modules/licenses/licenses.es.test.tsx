@@ -77,6 +77,7 @@ const PRODUCTS: ProductOut[] = [
 ];
 const LICENSE: LicenseOut = {
   id: "l1",
+  client_id: "o1",
   product_id: "p1",
   vendor_id: "v1",
   type: "per_device",
@@ -93,12 +94,12 @@ const LICENSE: LicenseOut = {
   created_at: "2026-01-01T00:00:00.000Z",
 };
 const COMPLIANCE: ComplianceRow[] = [
-  { product_id: "p1", name: "Acme Office Suite", entitled: 5, installed: 8, delta: -3, breach: true },
-  { product_id: "p2", name: "Visio", entitled: 5, installed: 1, delta: 4, breach: false },
+  { client_id: "o1", product_id: "p1", name: "Acme Office Suite", entitled: 5, installed: 8, delta: -3, breach: true },
+  { client_id: "o1", product_id: "p2", name: "Visio", entitled: 5, installed: 1, delta: 4, breach: false },
 ];
 const RENEWALS: RenewalRow[] = [
-  { license_id: "l1", product_id: "p1", trigger: "renewal", due_date: "2026-08-01", due_in_days: -3 },
-  { license_id: "l2", product_id: "p1", trigger: "maintenance", due_date: "2026-12-31", due_in_days: 20 },
+  { license_id: "l1", client_id: "o1", product_id: "p1", trigger: "renewal", due_date: "2026-08-01", due_in_days: -3 },
+  { license_id: "l2", client_id: "o1", product_id: "p1", trigger: "maintenance", due_date: "2026-12-31", due_in_days: 20 },
 ];
 const QUEUE_ROW: ReviewQueueRow = { name: "Visio", publisher: "Microsoft", device_count: 3 };
 
@@ -368,8 +369,8 @@ describe("compliance and renewals in Spanish", () => {
       api({
         licenseRenewals: vi.fn().mockResolvedValue([
           ...RENEWALS,
-          { license_id: "l3", product_id: "p1", trigger: "renewal", due_date: "2026-09-01", due_in_days: 1 },
-          { license_id: "l4", product_id: "p1", trigger: "renewal", due_date: "2026-07-01", due_in_days: -1 },
+          { license_id: "l3", client_id: "o1", product_id: "p1", trigger: "renewal", due_date: "2026-09-01", due_in_days: 1 },
+          { license_id: "l4", client_id: "o1", product_id: "p1", trigger: "renewal", due_date: "2026-07-01", due_in_days: -1 },
         ]),
       }),
     );

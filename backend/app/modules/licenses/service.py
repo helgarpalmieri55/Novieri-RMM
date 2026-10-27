@@ -10,6 +10,13 @@ here, and every mutation is followed by `audit_service.record` + a flush
 
 This is the first function set in this file; later tasks append
 product/license/allocation/reconciliation functions alongside these.
+
+A license belongs to ONE client (plan 2026-10-26 Task 6, migration 0236): the
+one its creator names, loaded like every new row's (`client_for_new_rows`).
+What holds it is of that client too -- a device or a person of it, a contact
+of it, or, for the internal client's licenses only, a staff member (C4) --
+and `its_license_allocation_target_guard` says the same at the database.
+Vendors and products are the organisation's catalogue (G): no client.
 """
 
 from datetime import UTC, date, datetime
@@ -18,9 +25,11 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
+from app.core.global_rows import refuse_unless_every_client
 from app.core.i18n import tr
 from app.core.vault import VaultService
 from app.core.wire_words import say
@@ -35,10 +44,17 @@ from app.models import (
     User,
     Vendor,
 )
-from app.modules.licenses.errors import LicenseNotFoundError, LicenseValidationError
+from app.models.clients import CLIENT_KIND_UNASSIGNED
+from app.modules.licenses.errors import (
+    LicenseClientError,
+    LicenseConflictError,
+    LicenseNotFoundError,
+    LicenseValidationError,
+)
 from app.modules.licenses.matching import rule_matches, validate_match_rules
 from app.modules.licenses.words import ALLOCATION_TARGET_WORDS
-from app.modules.people.service import person_id_for_user
+from app.modules.people.service import account_client, person_id_for_user
+from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
 
 # Fields `update_vendor` is allowed to apply. Only non-None values passed by
 # the caller are actually written.
@@ -302,6 +318,25 @@ async def list_products(session: AsyncSession, org_id: UUID) -> list[SoftwarePro
 # ---------------------------------------------------------------------------
 
 
+async def _client_for_new_license_row(
+    session: AsyncSession, org_id: UUID, client_id: UUID, *, unassigned: str
+) -> None:
+    """The client a new license-module row is filed under, loaded as every new
+    row's is (`client_for_new_rows`, held FOR SHARE until commit): one this
+    session cannot see is a 404, never a 403 (spec §3.2's existence oracle),
+    an archived one a 409. "Sin asignar" is the inbox of what has no owner,
+    and nothing is licensed there (C10): 422, with `unassigned` as the
+    sentence."""
+    try:
+        client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
+    except ClientNotFound:
+        raise LicenseNotFoundError(tr("no such client")) from None
+    except NotAcceptingNewRows as exc:
+        raise LicenseConflictError(exc.detail) from None
+    if client.kind == CLIENT_KIND_UNASSIGNED:
+        raise LicenseClientError(unassigned)
+
+
 async def _load_license(session: AsyncSession, org_id: UUID, license_id: UUID) -> License:
     license_ = (
         await session.execute(
@@ -344,6 +379,7 @@ async def create_license(
     *,
     org_id: UUID,
     actor_id: UUID,
+    client_id: UUID,
     product_id: UUID,
     vendor_id: UUID | None,
     type_: str,
@@ -358,17 +394,22 @@ async def create_license(
     agreement_ref: str | None,
     notes: str,
 ) -> License:
-    """Create a new license. `product_id` (and `vendor_id`, if given) are
-    resolved org-scoped first (invariant #5). If `key` is a non-empty
+    """Create a new license of `client_id`. The client is loaded first
+    (`_client_for_new_license_row`); `product_id` (and `vendor_id`, if
+    given) are resolved org-scoped (invariant #5). If `key` is a non-empty
     string, it is vault-sealed under the license's own id (invariant #3) --
     the plaintext key is never persisted, never logged, and never included
     in the audit metadata."""
+    await _client_for_new_license_row(
+        session, org_id, client_id, unassigned=tr("a license cannot be filed under Unassigned")
+    )
     await _validate_product_ref(session, org_id, product_id)
     if vendor_id is not None:
         await _validate_vendor_ref(session, org_id, vendor_id)
 
     license_ = License(
         org_id=org_id,
+        client_id=client_id,
         product_id=product_id,
         vendor_id=vendor_id,
         type=type_,
@@ -401,6 +442,7 @@ async def create_license(
         target_type="license",
         target_id=str(license_.id),
         metadata={"product_id": str(product_id), "entitlements": entitlements},
+        client_id=license_.client_id,
     )
     await session.flush()
     return license_
@@ -463,6 +505,7 @@ async def update_license(
         target_type="license",
         target_id=str(license_.id),
         metadata={},
+        client_id=license_.client_id,
     )
     await session.flush()
     return license_
@@ -472,7 +515,7 @@ async def delete_license(
     session: AsyncSession, *, org_id: UUID, actor_id: UUID, license_id: UUID
 ) -> None:
     license_ = await _load_license(session, org_id, license_id)
-    license_id = license_.id
+    license_id, client_id = license_.id, license_.client_id
     await session.delete(license_)
     await session.flush()
 
@@ -485,6 +528,7 @@ async def delete_license(
         target_type="license",
         target_id=str(license_id),
         metadata={},
+        client_id=client_id,
     )
     await session.flush()
 
@@ -538,6 +582,7 @@ async def reveal_key(
         target_type="license",
         target_id=str(license_.id),
         metadata={},
+        client_id=license_.client_id,
     )
     await session.flush()
     return plaintext
@@ -556,30 +601,55 @@ async def reveal_key(
 _TARGET_TYPE_TO_MODEL: dict[str, type] = {"device": Device, "user": User, "person": Person}
 
 
-async def _validate_allocation_target(
+async def _target_client(
     session: AsyncSession, org_id: UUID, target_type: str, target_id: UUID
+) -> UUID | None:
+    """The client a target holds licenses in, or None when this session sees
+    no such target in this org. A device's or a person's own client; an
+    account's is its person's (`account_client`): a contact's client, or the
+    internal client for staff (C4) -- the rule
+    `its_license_allocation_target_guard` holds at the database."""
+    if target_type == "user":
+        row = (
+            await session.execute(
+                select(User.kind, User.client_id).where(
+                    User.org_id == org_id, User.id == target_id
+                )
+            )
+        ).one_or_none()
+        return None if row is None else account_client(row.kind, row.client_id, org_id)
+    model = _TARGET_TYPE_TO_MODEL[target_type]
+    found: UUID | None = (
+        await session.execute(
+            select(model.client_id).where(model.org_id == org_id, model.id == target_id)  # type: ignore[attr-defined]
+        )
+    ).scalar_one_or_none()
+    return found
+
+
+async def _validate_allocation_target(
+    session: AsyncSession, org_id: UUID, license_: License, target_type: str, target_id: UUID
 ) -> None:
-    """Resolve an allocation target org-scoped, whitelisting `target_type`.
+    """Resolve an allocation target org-scoped, whitelisting `target_type`,
+    and hold it to the license's client.
 
     An unknown `target_type` (anything other than "device"/"user"/"person") raises
     rather than silently falling through to a `User` lookup -- mirrors
     `app.modules.bcp.service._validate_scope`'s kind whitelist. A cross-org or
     unknown `target_id` is indistinguishable from nonexistent and both raise
-    (invariant #5). The API layer's `Literal` already blocks a bad
-    `target_type` over HTTP; this keeps the service invariant true for any
-    caller (defense in depth).
+    (invariant #5) -- so is another client's target this session cannot see.
+    One it can see, of another client than the license's, is a
+    `LicenseClientError` (422): under scope all, RLS hides nothing, and this
+    is the check (the database's guard is the net under it). The API layer's
+    `Literal` already blocks a bad `target_type` over HTTP; this keeps the
+    service invariant true for any caller (defense in depth).
     """
-    model = _TARGET_TYPE_TO_MODEL.get(target_type)
-    if model is None:
+    if target_type not in _TARGET_TYPE_TO_MODEL:
         raise LicenseValidationError(
             tr("unknown target_type {target_type}", target_type=repr(target_type))
         )
-    found = (
-        await session.execute(
-            select(model.id).where(model.org_id == org_id, model.id == target_id)  # type: ignore[attr-defined]
-        )
-    ).scalar_one_or_none()
-    if found is None:
+    client_id = await _target_client(session, org_id, target_type, target_id)
+    if client_id is None:
         raise LicenseValidationError(
             tr(
                 "{target_type} target not found: {target_id}",
@@ -587,6 +657,8 @@ async def _validate_allocation_target(
                 target_id=target_id,
             )
         )
+    if client_id != license_.client_id:
+        raise LicenseClientError(tr("the allocation target belongs to another client"))
 
 
 async def _active_allocation_count(
@@ -633,7 +705,7 @@ async def allocate(
     and then re-runs the count against the first call's now-visible row (or
     its absence, if the first rolled back)."""
     license_ = await _load_license(session, org_id, license_id)
-    await _validate_allocation_target(session, org_id, target_type, target_id)
+    await _validate_allocation_target(session, org_id, license_, target_type, target_id)
     await session.execute(
         select(License.id)
         .where(License.org_id == org_id, License.id == license_id)
@@ -644,7 +716,9 @@ async def allocate(
     if active >= license_.entitlements:
         raise LicenseValidationError(tr("license pool exhausted"))
 
-    # The person who holds it (docs/modules/people/spec.md §0.4); none for a device.
+    # The person who holds it (docs/modules/people/spec.md §0.4); none for a
+    # device. An account's person is of the account's client, which the
+    # target check above made the license's.
     person_id: UUID | None = None
     if target_type == "person":
         person_id = target_id
@@ -671,6 +745,7 @@ async def allocate(
         target_type="license",
         target_id=str(license_id),
         metadata={"target_type": target_type, "target_id": str(target_id)},
+        client_id=license_.client_id,
     )
     await session.flush()
     return allocation
@@ -704,6 +779,8 @@ async def release_allocation(
     allocation = await _load_allocation(session, org_id, allocation_id)
     if allocation.released_at is not None:
         raise LicenseValidationError(tr("allocation already released"))
+    # Read before the UPDATE: it expires the trigger-kept column.
+    client_id = allocation.client_id
 
     allocation.released_at = datetime.now(UTC)
     await session.flush()
@@ -717,6 +794,7 @@ async def release_allocation(
         target_type="license_allocation",
         target_id=str(allocation_id),
         metadata={},
+        client_id=client_id,
     )
     await session.flush()
     return allocation
@@ -755,9 +833,14 @@ async def available_pool(session: AsyncSession, org_id: UUID, license: License) 
 
 async def review_queue(session: AsyncSession, org_id: UUID) -> list[dict[str, Any]]:
     """The org's distinct installed-software `(name, publisher)` that match NO
-    product's rules AND are not in `software_ignore`, each with `device_count`
-    (distinct devices running that name), ordered by `device_count` desc
-    (stable tiebreak by name). Read-only -- no audit.
+    product's rules AND are not ignored, each with `device_count` (distinct
+    devices running that name), ordered by `device_count` desc (stable
+    tiebreak by name). Read-only -- no audit.
+
+    An ignore is global (`client_id` NULL: every client's devices) or one
+    client's (plan 2026-10-26 Task 6): a name is hidden ON A DEVICE when a
+    global row or a row of THAT DEVICE'S client names it. Client X ignoring a
+    toolbar says nothing about client Y's computers, so Y's still count.
     """
     products = list(
         (
@@ -773,32 +856,36 @@ async def review_queue(session: AsyncSession, org_id: UUID) -> list[dict[str, An
         await session.execute(
             select(
                 InstalledSoftware.device_id,
+                InstalledSoftware.client_id,
                 InstalledSoftware.name,
                 InstalledSoftware.publisher,
             ).where(InstalledSoftware.org_id == org_id)
         )
     ).all()
 
-    ignored_names = {
-        name.casefold()
-        for name in (
+    # (client, name): None is a global ignore, which holds on every client.
+    ignored = {
+        (client_id, name.casefold())
+        for client_id, name in (
             await session.execute(
-                select(SoftwareIgnore.name).where(SoftwareIgnore.org_id == org_id)
+                select(SoftwareIgnore.client_id, SoftwareIgnore.name).where(
+                    SoftwareIgnore.org_id == org_id
+                )
             )
-        )
-        .scalars()
-        .all()
+        ).all()
     }
 
-    # distinct (name, publisher) -> set of device_ids running it
+    # distinct (name, publisher) -> set of device_ids running it where it is
+    # not ignored
     grouped: dict[tuple[str, str], set[UUID]] = {}
-    for device_id, name, publisher in installs:
+    for device_id, client_id, name, publisher in installs:
+        folded = name.casefold()
+        if (None, folded) in ignored or (client_id, folded) in ignored:
+            continue
         grouped.setdefault((name, publisher), set()).add(device_id)
 
     unmatched: list[dict[str, Any]] = []
     for (name, publisher), device_ids in grouped.items():
-        if name.casefold() in ignored_names:
-            continue
         if any(
             rule_matches(rule, name, publisher)
             for product in products
@@ -849,32 +936,56 @@ async def map_software(
 
 
 async def ignore_software(
-    session: AsyncSession, *, org_id: UUID, actor_id: UUID, name: str
+    session: AsyncSession,
+    *,
+    org_id: UUID,
+    actor_id: UUID,
+    name: str,
+    client_id: UUID | None = None,
 ) -> SoftwareIgnore:
-    """Resolve a review-queue entry by ignoring it: inserts a `software_ignore`
-    row. Idempotent on the unique key -- if a row already exists for this name
-    in the row's namespace, it is returned as-is without inserting a duplicate.
+    """Resolve a review-queue entry by ignoring it: a `software_ignore` row.
+    Idempotent on the unique key -- if a row already exists for this name in
+    the row's namespace, it is returned as-is without inserting a duplicate.
 
-    The row is GLOBAL (phase 1 writes no client), so its namespace is the
-    global rows': `uq_software_ignore_client_name` is per client (migration
-    0231, Task 8b), and a client's ignore of the same name is another row,
-    never this one."""
-    existing = (
+    `client_id` names the client whose devices stop showing it (plan
+    2026-10-26 Task 6), loaded like any new row's client: a technician of X
+    ignores for X. Without it the row is GLOBAL (every client's devices), and
+    a global row is written only under the every-client scope -- this is a
+    bulk statement the global-row listener cannot see, so it is refused here
+    (`refuse_unless_every_client`), before anything is written.
+
+    `uq_software_ignore_client_name` is per client, the global rows among
+    themselves (migration 0231, Task 8b): a client's ignore of a name and the
+    global one are two rows. The insert is `ON CONFLICT DO NOTHING` on that
+    key, so two concurrent ignores of one name end with one row and no 500
+    (research-2 §I9); the loser reads the winner's row."""
+    if client_id is None:
+        refuse_unless_every_client(session, SoftwareIgnore.__tablename__)
+    else:
+        await _client_for_new_license_row(
+            session,
+            org_id,
+            client_id,
+            unassigned=tr("nothing is ignored for Unassigned: it has no computers"),
+        )
+    await session.execute(
+        pg_insert(SoftwareIgnore)
+        .values(org_id=org_id, client_id=client_id, name=name, created_by=actor_id)
+        .on_conflict_do_nothing(constraint="uq_software_ignore_client_name")
+    )
+    # Inserted or already there, it is the one row of this namespace and name.
+    namespace = (
+        SoftwareIgnore.client_id.is_(None)
+        if client_id is None
+        else SoftwareIgnore.client_id == client_id
+    )
+    ignore = (
         await session.execute(
             select(SoftwareIgnore).where(
-                SoftwareIgnore.org_id == org_id,
-                SoftwareIgnore.client_id.is_(None),
-                SoftwareIgnore.name == name,
+                SoftwareIgnore.org_id == org_id, namespace, SoftwareIgnore.name == name
             )
         )
-    ).scalar_one_or_none()
-
-    if existing is not None:
-        ignore = existing
-    else:
-        ignore = SoftwareIgnore(org_id=org_id, name=name, created_by=actor_id)
-        session.add(ignore)
-        await session.flush()
+    ).scalar_one()
 
     await audit_service.record(
         session,
@@ -885,6 +996,7 @@ async def ignore_software(
         target_type="software_ignore",
         target_id=str(ignore.id),
         metadata={"name": name},
+        client_id=client_id,
     )
     await session.flush()
     return ignore

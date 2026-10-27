@@ -179,7 +179,8 @@ async def test_person_page_shows_what_they_hold_and_hides_what_the_viewer_cannot
 
     sub = await api_env.client.post(
         "/api/v1/subscriptions",
-        json={"service_name": "Slack", "billing_cycle": "monthly", "cost_per_cycle": 5,
+        json={"client_id": str(org_id), "service_name": "Slack", "billing_cycle": "monthly",
+              "cost_per_cycle": 5,
               "currency": "USD", "seats": 3},
         headers=admin_h,
     )
@@ -259,7 +260,8 @@ async def test_unmatched_seats_can_be_linked_or_added_as_people(api_env: ApiEnv)
     tech_h = await api_env.headers(org_id, await api_env.create_user(org_id, "technician"))
     sub = await api_env.client.post(
         "/api/v1/subscriptions",
-        json={"service_name": "Zoom", "billing_cycle": "monthly", "cost_per_cycle": 5,
+        json={"client_id": str(org_id), "service_name": "Zoom", "billing_cycle": "monthly",
+              "cost_per_cycle": 5,
               "currency": "USD", "seats": 3},
         headers=tech_h,
     )
