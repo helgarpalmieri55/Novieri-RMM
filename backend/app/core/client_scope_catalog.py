@@ -166,7 +166,6 @@ CATALOG: dict[str, Entry] = {
 
 PENDING_PHASE_2: frozenset[str] = frozenset(
     {
-        "person", "person_login", "person_checklist", "person_checklist_step",
         "license", "license_allocation", "license_compliance_snapshot",
         "subscription", "seat_assignment", "subscription_event", "subscription_alert_sent",
         "deployments",

@@ -5,7 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import type { ChecklistKind, PersonCreate, PersonUpdate, StepState } from "./types";
+import type { AccountOut, ChecklistKind, PersonCreate, PersonUpdate, StepState } from "./types";
 
 export function useMe() {
   const api = useApi();
@@ -78,7 +78,11 @@ export function useCreatePerson() {
   const api = useApi();
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: (body: PersonCreate) => api.createPerson(body),
+    // The body is BUILT HERE, inside the mutation, not before it: a body that
+    // cannot name its client yet throws `InternalScopeUnknown`
+    // (`lib/internalClient.ts`), which then fails the mutation -- so the
+    // form's error surface says why and nothing is sent.
+    mutationFn: (build: () => PersonCreate) => api.createPerson(build()),
     onSuccess: () => refresh(),
   });
 }
@@ -192,16 +196,31 @@ export function useReleaseLicence(personId: string) {
   });
 }
 
-/** Turn a sign-in off through Settings' own user endpoint. */
+/**
+ * Turn a sign-in off through the owning module's own endpoint: Settings'
+ * user endpoint for staff, which refuses a contact; a client's contact is
+ * switched off as a contact (`PATCH /contacts/{id}`, MSP clients phase 1).
+ */
 export function useTurnOffSignIn(personId: string) {
   const api = useApi();
   const queryClient = useQueryClient();
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: (userId: string) => api.setUserEnabled(userId, false),
+    mutationFn: async (account: Pick<AccountOut, "user_id" | "kind">): Promise<void> => {
+      if (account.kind === "contact") {
+        await api.updateContact(account.user_id, { status: "disabled" });
+      } else {
+        await api.setUserEnabled(account.user_id, false);
+      }
+    },
     onSuccess: () => {
       refresh(personId);
       void queryClient.invalidateQueries({ queryKey: ["users"] });
     },
   });
+}
+
+/** Who may turn this account's sign-in off: `users.manage` for staff, `clients.manage` for a contact. */
+export function turnOffPermission(account: Pick<AccountOut, "kind">): string {
+  return account.kind === "contact" ? "clients.manage" : "users.manage";
 }

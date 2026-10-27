@@ -27,7 +27,9 @@ path produce DIFFERENT observable values:
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+import pytest
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.models import (
@@ -58,7 +60,8 @@ async def _org(admin_engine: AsyncEngine, prefix: str) -> UUID:
 
 async def _person(admin_engine: AsyncEngine, org_id: UUID, name: str) -> UUID:
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        person = Person(org_id=org_id, display_name=name, source="operator")
+        # The org's internal client, whose id is the org's: every device here is too.
+        person = Person(org_id=org_id, client_id=org_id, display_name=name, source="operator")
         session.add(person)
         await session.commit()
         return person.id
@@ -178,21 +181,41 @@ async def test_another_orgs_person_never_appears(admin_engine: AsyncEngine) -> N
     """**A MISSING TENANT PREDICATE FAILS HERE** (the person half of the join).
 
     The link row is in MY org and names THEIR person. `device_person.person_id`
-    references `person.id` alone, so Postgres accepts it, and on this BYPASSRLS
+    references `person.id` alone, so Postgres accepted it, and on this BYPASSRLS
     engine nothing but the join's `Person.org_id == org_id` stands between
     their person's name and my screen. Deleting that predicate reports
     `('Eve Stone')` as my device's holder and makes `q="stone"` find it.
+
+    Since migration 0235 the database refuses that row as well: a link names a
+    person of the DEVICE'S CLIENT (`fk_device_person_person_client`), and a
+    client is one organisation's. The join's predicate is still the
+    application's own belt, so the key is lifted for the rest of the test
+    inside a transaction that is rolled back -- the way
+    `test_client_catalog.py` lifts a key to show what it guards.
     """
     mine = await _org(admin_engine, "at-mine")
     theirs = await _org(admin_engine, "at-theirs")
     eve = await _person(admin_engine, theirs, "Eve Stone")
-    await _device(admin_engine, mine, "ours-1", person_id=eve, source="operator")
     # Their own, correctly linked device: never on my page at all.
     await _device(admin_engine, theirs, "theirs-1", person_id=eve, source="operator")
+    with pytest.raises(IntegrityError, match="fk_device_person_person_client"):
+        await _device(admin_engine, mine, "ours-1", person_id=eve, source="operator")
 
-    async with AsyncSession(admin_engine) as session:
+    async with admin_engine.connect() as conn:
+        await conn.execute(
+            text("ALTER TABLE device_person DROP CONSTRAINT fk_device_person_person_client")
+        )
+        session = AsyncSession(bind=conn)
+        device = Device(org_id=mine, hostname="ours-1", client_id=mine, site_id=mine)
+        session.add(device)
+        await session.flush()
+        session.add(
+            DevicePerson(org_id=mine, device_id=device.id, person_id=eve, source="operator")
+        )
+        await session.flush()
         page = await device_page(session, mine, with_holder=True, now=NOW)
         searched = await device_page(session, mine, q="stone", with_holder=True, now=NOW)
+        await conn.rollback()
 
     assert _holders(page) == {"ours-1": None}, "another org's person leaked as a holder"
     assert searched.rows == [] and searched.total == 0, "the search reached another org"

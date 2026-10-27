@@ -13,7 +13,9 @@ from tests.conftest import ApiEnv
 
 async def _person(api_env: ApiEnv, org_id: UUID, name: str, email: str | None) -> UUID:
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
-        person = Person(org_id=org_id, display_name=name, email=email, source="operator")
+        person = Person(
+            org_id=org_id, client_id=org_id, display_name=name, email=email, source="operator"
+        )
         s.add(person)
         await s.flush()
         return person.id

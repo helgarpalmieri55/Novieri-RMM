@@ -69,6 +69,7 @@ function me(...permissions: string[]): Me {
 
 const MARIA: PersonListRow = {
   id: "p1",
+  client_id: "o1",
   display_name: "Maria Garcia",
   email: "maria@corp.example",
   user_id: "u9",
@@ -163,6 +164,7 @@ function detail(overrides: Partial<PersonDetailOut> = {}): PersonDetailOut {
     logins: [{ id: "l1", login: "corp\\maria", created_at: "2026-09-01T09:00:00Z" }],
     account: {
       user_id: "u9",
+      kind: "staff",
       email: "maria@corp.example",
       status: "active",
       last_login_at: "2026-09-22T08:00:00Z",

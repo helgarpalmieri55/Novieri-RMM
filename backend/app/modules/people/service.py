@@ -3,6 +3,14 @@ who uses which computer (docs/modules/people/spec.md §1-§3).
 
 Every query carries an explicit `org_id` predicate; RLS is the backstop.
 Every operator write is audited under `people.*`.
+
+A person belongs to ONE client (plan 2026-10-26 Task 5, migration 0235), and
+every lookup by a natural key -- an address, a sign-in name -- is a lookup
+within one client: two customers can each employ an ana@gmail.com, and a
+computer's sign-in names a person of the computer's own client. The person of
+an account is the account's client's (C4): a contact's own client, the
+internal client for staff (`account_client`); `its_person_account_guard`
+holds the same rule at the database.
 """
 
 import re
@@ -10,7 +18,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select, text
+from sqlalchemy import ColumnElement, case, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,11 +36,14 @@ from app.models import (
     Subscription,
     User,
 )
+from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.people.errors import (
+    PeopleClientError,
     PeopleConflictError,
     PeopleError,
     PeopleNotFoundError,
 )
+from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
 
 _EDITABLE = ("display_name", "email", "department", "job_title", "start_date", "end_date")
 _NOT_ALNUM = re.compile(r"[^a-z0-9]")
@@ -46,8 +57,11 @@ async def _audit(
     action: str,
     target_type: str,
     target_id: UUID | str,
+    client_id: UUID | None,
     metadata: dict[str, Any] | None = None,
 ) -> None:
+    """`client_id` is the subject's client: the person's, or the device's for
+    who uses a device. Required, so every new event decides it."""
     await audit_service.record(
         session,
         org_id=org_id,
@@ -57,7 +71,23 @@ async def _audit(
         target_type=target_type,
         target_id=str(target_id),
         metadata=metadata or {},
+        client_id=client_id,
     )
+
+
+def account_client(kind: str, client_id: UUID | None, org_id: UUID) -> UUID:
+    """The client the person of an account belongs to (plan C4): a contact's
+    own client; for staff, who belong to no client, the internal client,
+    whose id is the organisation's."""
+    if kind == "contact" and client_id is not None:
+        return client_id
+    return org_id
+
+
+#: `account_client` in SQL, over `users`.
+ACCOUNT_CLIENT: ColumnElement[Any] = case(
+    (User.kind == "contact", User.client_id), else_=User.org_id
+)
 
 
 def clean_email(email: str | None) -> str | None:
@@ -79,25 +109,31 @@ async def load_person(session: AsyncSession, org_id: UUID, person_id: UUID) -> P
 
 
 async def _person_with_email(
-    session: AsyncSession, org_id: UUID, email: str | None
+    session: AsyncSession, org_id: UUID, email: str | None, *, client_id: UUID
 ) -> Person | None:
+    """The person of `client_id` holding this address. One at most:
+    `uq_person_client_lower_email`. Without the client, two customers'
+    ana@gmail.com would be two rows here (research-2 §I2)."""
     email = clean_email(email)
     if email is None:
         return None
     return (
         await session.execute(
             select(Person).where(
-                Person.org_id == org_id, func.lower(Person.email) == email.lower()
+                Person.org_id == org_id,
+                Person.client_id == client_id,
+                func.lower(Person.email) == email.lower(),
             )
         )
     ).scalar_one_or_none()
 
 
 async def person_id_for_email(
-    session: AsyncSession, org_id: UUID, email: str | None
+    session: AsyncSession, org_id: UUID, email: str | None, *, client_id: UUID
 ) -> UUID | None:
-    """The person holding this address, case-insensitively. Used by seats."""
-    person = await _person_with_email(session, org_id, email)
+    """The person of `client_id` holding this address, case-insensitively.
+    Used by seats and by the sign-in resolver."""
+    person = await _person_with_email(session, org_id, email, client_id=client_id)
     return person.id if person is not None else None
 
 
@@ -112,12 +148,18 @@ async def person_for_user(
     ).scalar_one_or_none()
     if linked is not None:
         return linked
-    email = (
+    user = (
         await session.execute(
-            select(User.email).where(User.org_id == org_id, User.id == user_id)
+            select(User.email, User.kind, User.client_id).where(
+                User.org_id == org_id, User.id == user_id
+            )
         )
-    ).scalar_one_or_none()
-    return await _person_with_email(session, org_id, email)
+    ).one_or_none()
+    if user is None:
+        return None
+    return await _person_with_email(
+        session, org_id, user.email, client_id=account_client(user.kind, user.client_id, org_id)
+    )
 
 
 async def person_id_for_user(
@@ -131,43 +173,68 @@ async def person_id_for_user(
 # Mirroring accounts (spec §3.1)
 # --------------------------------------------------------------------------- #
 
+# Each account is read with `holder`: the client its person belongs to
+# (`account_client`, plan C4). An account links to, or gets, a person of THAT
+# client only -- `its_person_account_guard` refuses anything else -- and an
+# address is unique per client, so "the same address" means the same address
+# in the same client.
+
 _LINK_BY_EMAIL = text(
     """
     UPDATE person p SET user_id = u.id, updated_at = now()
     FROM (
-        SELECT DISTINCT ON (lower(btrim(email))) id, email
-        FROM users
-        WHERE org_id = :org AND btrim(email) <> ''
-          AND NOT EXISTS (SELECT 1 FROM person x WHERE x.user_id = users.id)
-        ORDER BY lower(btrim(email)), (status = 'active') DESC, created_at, id
+        SELECT DISTINCT ON (a.holder, lower(btrim(a.email))) a.id, a.email, a.holder
+        FROM (
+            SELECT id, email, status, created_at,
+                   CASE WHEN kind = 'contact' THEN client_id ELSE org_id END AS holder
+            FROM users
+            WHERE org_id = :org AND btrim(email) <> ''
+              AND NOT EXISTS (SELECT 1 FROM person x WHERE x.user_id = users.id)
+        ) a
+        ORDER BY a.holder, lower(btrim(a.email)), (a.status = 'active') DESC,
+                 a.created_at, a.id
     ) u
     WHERE p.org_id = :org AND p.user_id IS NULL AND p.email IS NOT NULL
+      AND p.client_id = u.holder
       AND lower(p.email) = lower(btrim(u.email))
     """
 )
 
+# `its_client_visible(holder)` (migration 0231): an account whose person
+# belongs to a client this session cannot see is skipped, not attempted. A
+# technician limited to X lists people too, and a staff account's person is
+# the internal client's: inserting it would fail the client policy's WITH
+# CHECK -- an error, not a conflict, so not one the savepoint absorbs
+# (research-2 §I1). Whoever does see that client creates it.
 _CREATE_FOR_ACCOUNTS = text(
     """
-    INSERT INTO person (id, org_id, display_name, email, user_id, status, source)
-    SELECT gen_random_uuid(), u.org_id,
+    INSERT INTO person (id, org_id, client_id, display_name, email, user_id, status, source)
+    SELECT gen_random_uuid(), u.org_id, u.holder,
            left(COALESCE(NULLIF(btrim(u.display_name), ''), NULLIF(u.email, ''),
                          u.external_subject), 200),
            NULLIF(u.email, ''), u.id,
            CASE WHEN u.status = 'deleted' THEN 'left' ELSE 'active' END,
            'account'
     FROM (
-        SELECT DISTINCT ON (CASE WHEN btrim(email) = '' THEN id::text
-                                 ELSE lower(btrim(email)) END)
-               id, org_id, btrim(email) AS email, display_name, external_subject, status
-        FROM users
-        WHERE org_id = :org
-          AND NOT EXISTS (SELECT 1 FROM person x WHERE x.user_id = users.id)
+        SELECT DISTINCT ON (a.holder, CASE WHEN btrim(a.email) = '' THEN a.id::text
+                                           ELSE lower(btrim(a.email)) END)
+               a.id, a.org_id, a.holder, btrim(a.email) AS email, a.display_name,
+               a.external_subject, a.status
+        FROM (
+            SELECT id, org_id, email, display_name, external_subject, status, created_at,
+                   CASE WHEN kind = 'contact' THEN client_id ELSE org_id END AS holder
+            FROM users
+            WHERE org_id = :org
+        ) a
+        WHERE its_client_visible(a.holder)
+          AND NOT EXISTS (SELECT 1 FROM person x WHERE x.user_id = a.id)
           AND NOT EXISTS (
               SELECT 1 FROM person x
-              WHERE x.org_id = :org AND x.email IS NOT NULL
-                AND lower(x.email) = lower(btrim(users.email)))
-        ORDER BY CASE WHEN btrim(email) = '' THEN id::text ELSE lower(btrim(email)) END,
-                 (status = 'active') DESC, created_at, id
+              WHERE x.org_id = :org AND x.client_id = a.holder AND x.email IS NOT NULL
+                AND lower(x.email) = lower(btrim(a.email)))
+        ORDER BY a.holder,
+                 CASE WHEN btrim(a.email) = '' THEN a.id::text ELSE lower(btrim(a.email)) END,
+                 (a.status = 'active') DESC, a.created_at, a.id
     ) u
     ON CONFLICT DO NOTHING
     """
@@ -198,6 +265,8 @@ async def sync_accounts(session: AsyncSession, org_id: UUID) -> tuple[int, int]:
             action="people.accounts_mirrored",
             target_type="org",
             target_id=org_id,
+            # The organisation's bookkeeping, not one client's.
+            client_id=None,
             metadata={"linked": linked, "created": created},
         )
     return (linked, created)
@@ -239,22 +308,44 @@ async def list_people(
     return [(row[0], int(row[1])) for row in rows]
 
 
+async def _client_for_new_person(session: AsyncSession, org_id: UUID, client_id: UUID) -> None:
+    """The client a new person is filed under, loaded as every new row's is
+    (`client_for_new_rows`, held FOR SHARE until commit): one this session
+    cannot see is a 404, never a 403 (spec §3.2's existence oracle), an
+    archived one a 409. "Sin asignar" is the inbox of what has no owner, and
+    nobody works there (C10): 422."""
+    try:
+        client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
+    except ClientNotFound:
+        raise PeopleNotFoundError(tr("no such client")) from None
+    except NotAcceptingNewRows as exc:
+        raise PeopleConflictError(exc.detail) from None
+    if client.kind == CLIENT_KIND_UNASSIGNED:
+        raise PeopleClientError(tr("a person cannot be filed under Unassigned"))
+
+
 async def create_person(
     session: AsyncSession,
     *,
     org_id: UUID,
     actor_id: UUID,
+    client_id: UUID,
     display_name: str,
     email: str | None,
     department: str | None = None,
     job_title: str | None = None,
     start_date: date | None = None,
 ) -> Person:
+    """A person of `client_id`. With an address, the account holding it is
+    linked -- only one whose person belongs to this client (`account_client`):
+    a contact of another client keeps its own."""
+    await _client_for_new_person(session, org_id, client_id)
     email = clean_email(email)
-    if await _person_with_email(session, org_id, email) is not None:
+    if await _person_with_email(session, org_id, email, client_id=client_id) is not None:
         raise PeopleConflictError(tr("someone here already has that email address"))
     person = Person(
         org_id=org_id,
+        client_id=client_id,
         display_name=display_name.strip(),
         email=email,
         department=department,
@@ -272,6 +363,7 @@ async def create_person(
             await session.execute(
                 select(User.id)
                 .where(User.org_id == org_id, func.lower(func.btrim(User.email)) == email.lower())
+                .where(ACCOUNT_CLIENT == client_id)
                 .where(~select(Person.id).where(Person.user_id == User.id).exists())
                 .order_by(User.created_at)
                 .limit(1)
@@ -286,6 +378,7 @@ async def create_person(
         action="people.created",
         target_type="person",
         target_id=person.id,
+        client_id=person.client_id,
         metadata={"display_name": person.display_name, "email": email},
     )
     return person
@@ -307,7 +400,7 @@ async def update_person(
         value = changes[field]
         if field == "email":
             value = clean_email(value)
-            other = await _person_with_email(session, org_id, value)
+            other = await _person_with_email(session, org_id, value, client_id=person.client_id)
             if other is not None and other.id != person.id:
                 raise PeopleConflictError(tr("someone here already has that email address"))
         if field == "display_name":
@@ -326,6 +419,7 @@ async def update_person(
             action="people.updated",
             target_type="person",
             target_id=person.id,
+            client_id=person.client_id,
             metadata={"changes": applied},
         )
     return person
@@ -341,13 +435,17 @@ async def link_account(
 ) -> Person:
     person = await load_person(session, org_id, person_id)
     if user_id is not None:
-        exists = (
+        account = (
             await session.execute(
-                select(User.id).where(User.org_id == org_id, User.id == user_id)
+                select(User.kind, User.client_id).where(User.org_id == org_id, User.id == user_id)
             )
-        ).scalar_one_or_none()
-        if exists is None:
+        ).one_or_none()
+        if account is None:
             raise PeopleError(tr("no such account"))
+        # The person of an account is the account's client's (C4); the
+        # database's `its_person_account_guard` is the net under this.
+        if account_client(account.kind, account.client_id, org_id) != person.client_id:
+            raise PeopleClientError(tr("that account belongs to another client"))
         holder = (
             await session.execute(
                 select(Person.id).where(Person.org_id == org_id, Person.user_id == user_id)
@@ -365,6 +463,7 @@ async def link_account(
         action="people.account_linked" if user_id else "people.account_unlinked",
         target_type="person",
         target_id=person.id,
+        client_id=person.client_id,
         metadata={
             "user_id": str(user_id) if user_id else None,
             "previous_user_id": str(previous) if previous else None,
@@ -388,10 +487,16 @@ def _name_key(login: str) -> str:
     return _NOT_ALNUM.sub("", name)
 
 
-async def resolve_login(session: AsyncSession, org_id: UUID, raw: str) -> UUID | None:
-    """The person a computer sign-in name belongs to, or None.
+async def resolve_login(
+    session: AsyncSession, org_id: UUID, raw: str, *, client_id: UUID
+) -> UUID | None:
+    """The person of `client_id` -- the computer's client -- a sign-in name
+    belongs to, or None.
 
-    First rule with exactly one match wins; ambiguity is never guessed.
+    First rule with exactly one match wins; ambiguity is never guessed. Every
+    rule looks inside the one client: `corp\\jperez` at two customers is two
+    people, and a computer of Y is never held by X's (research-2 §I6,
+    `fk_device_person_person_client`).
     """
     login = normalise_login(raw)
     if not login:
@@ -399,14 +504,16 @@ async def resolve_login(session: AsyncSession, org_id: UUID, raw: str) -> UUID |
     alias = (
         await session.execute(
             select(PersonLogin.person_id).where(
-                PersonLogin.org_id == org_id, PersonLogin.login == login
+                PersonLogin.org_id == org_id,
+                PersonLogin.client_id == client_id,
+                PersonLogin.login == login,
             )
         )
     ).scalar_one_or_none()
     if alias is not None:
         return alias
     if "@" in login:
-        by_email = await person_id_for_email(session, org_id, login)
+        by_email = await person_id_for_email(session, org_id, login, client_id=client_id)
         if by_email is not None:
             return by_email
     key = _name_key(login)
@@ -418,7 +525,12 @@ async def resolve_login(session: AsyncSession, org_id: UUID, raw: str) -> UUID |
     matches = (
         await session.execute(
             select(Person.id)
-            .where(Person.org_id == org_id, Person.email.is_not(None), local_part == key)
+            .where(
+                Person.org_id == org_id,
+                Person.client_id == client_id,
+                Person.email.is_not(None),
+                local_part == key,
+            )
             .limit(2)
         )
     ).scalars().all()
@@ -434,7 +546,11 @@ async def add_login(
         raise PeopleError(tr("a sign-in name cannot be blank"))
     existing = (
         await session.execute(
-            select(PersonLogin).where(PersonLogin.org_id == org_id, PersonLogin.login == value)
+            select(PersonLogin).where(
+                PersonLogin.org_id == org_id,
+                PersonLogin.client_id == person.client_id,
+                PersonLogin.login == value,
+            )
         )
     ).scalar_one_or_none()
     if existing is not None:
@@ -451,6 +567,7 @@ async def add_login(
         action="people.login_added",
         target_type="person",
         target_id=person.id,
+        client_id=person.client_id,
         metadata={"login": value},
     )
     return row
@@ -491,6 +608,7 @@ async def remove_login(
         action="people.login_removed",
         target_type="person",
         target_id=person_id,
+        client_id=row.client_id,
         metadata={"login": row.login},
     )
 
@@ -517,10 +635,11 @@ async def _link_row(session: AsyncSession, org_id: UUID, device_id: UUID) -> Dev
 
 
 async def observe_login(
-    session: AsyncSession, *, org_id: UUID, device_id: UUID, login: str
+    session: AsyncSession, *, org_id: UUID, device_id: UUID, client_id: UUID, login: str
 ) -> DevicePerson:
     """Record who is signed in at a computer and, unless an operator set it,
-    who uses it. Called from the inventory post-ingest hook."""
+    who uses it. Called from the inventory post-ingest hook, which passes the
+    device's client: the sign-in resolves among that client's people only."""
     link = await _link_row(session, org_id, device_id)
     if link is None:
         link = DevicePerson(org_id=org_id, device_id=device_id, source="inventory")
@@ -530,7 +649,7 @@ async def observe_login(
     if link.source == "operator":
         await session.flush()
         return link
-    resolved = await resolve_login(session, org_id, login)
+    resolved = await resolve_login(session, org_id, login, client_id=client_id)
     previous = link.person_id
     link.person_id = resolved
     await session.flush()
@@ -542,6 +661,7 @@ async def observe_login(
             action="people.device_person_detected",
             target_type="device",
             target_id=device_id,
+            client_id=client_id,
             metadata={
                 "person_id": str(resolved) if resolved else None,
                 "previous_person_id": str(previous) if previous else None,
@@ -559,10 +679,16 @@ async def set_device_person(
     device_id: UUID,
     person_id: UUID | None,
 ) -> DevicePerson:
-    """Operator override. Inventory never replaces it."""
-    await _load_device(session, org_id, device_id)
+    """Operator override. Inventory never replaces it.
+
+    Who uses a device is one of the device's client's people: a person of
+    another client is a 422 here, and `fk_device_person_person_client` at
+    the database."""
+    device = await _load_device(session, org_id, device_id)
     if person_id is not None:
-        await load_person(session, org_id, person_id)
+        person = await load_person(session, org_id, person_id)
+        if person.client_id != device.client_id:
+            raise PeopleClientError(tr("that person belongs to another client"))
     link = await _link_row(session, org_id, device_id)
     if link is None:
         link = DevicePerson(org_id=org_id, device_id=device_id)
@@ -578,7 +704,9 @@ async def set_device_person(
         taken = (
             await session.execute(
                 select(PersonLogin.id).where(
-                    PersonLogin.org_id == org_id, PersonLogin.login == login
+                    PersonLogin.org_id == org_id,
+                    PersonLogin.client_id == device.client_id,
+                    PersonLogin.login == login,
                 )
             )
         ).scalar_one_or_none()
@@ -594,6 +722,7 @@ async def set_device_person(
         action="people.device_person_set",
         target_type="device",
         target_id=device_id,
+        client_id=device.client_id,
         metadata={
             "person_id": str(person_id) if person_id else None,
             "previous_person_id": str(previous) if previous else None,
@@ -606,7 +735,7 @@ async def clear_device_override(
     session: AsyncSession, *, org_id: UUID, actor_id: UUID, device_id: UUID
 ) -> DevicePerson | None:
     """Back to automatic, resolved again from the last observed sign-in."""
-    await _load_device(session, org_id, device_id)
+    device = await _load_device(session, org_id, device_id)
     link = await _link_row(session, org_id, device_id)
     if link is None:
         return None
@@ -614,7 +743,7 @@ async def clear_device_override(
     link.source = "inventory"
     link.set_by = None
     link.person_id = (
-        await resolve_login(session, org_id, link.observed_login)
+        await resolve_login(session, org_id, link.observed_login, client_id=device.client_id)
         if link.observed_login
         else None
     )
@@ -626,6 +755,7 @@ async def clear_device_override(
         action="people.device_person_automatic",
         target_type="device",
         target_id=device_id,
+        client_id=device.client_id,
         metadata={
             "person_id": str(link.person_id) if link.person_id else None,
             "previous_person_id": str(previous) if previous else None,
@@ -747,11 +877,15 @@ async def link_seat(
     if person_id is not None:
         person = await load_person(session, org_id, person_id)
     else:
-        found = await _person_with_email(session, org_id, seat.assignee_email)
+        # plan 2026-10-26 Task 6 files it under the seat's client
+        found = await _person_with_email(
+            session, org_id, seat.assignee_email, client_id=org_id
+        )
         person = found or await create_person(
             session,
             org_id=org_id,
             actor_id=actor_id,
+            client_id=org_id,
             display_name=seat.assignee_name.strip() or seat.assignee_email,
             email=seat.assignee_email,
         )
@@ -764,6 +898,7 @@ async def link_seat(
         action="people.seat_linked",
         target_type="seat_assignment",
         target_id=seat.id,
+        client_id=None,  # plan 2026-10-26 Task 6: the seat's client
         metadata={"person_id": str(person.id)},
     )
     return seat

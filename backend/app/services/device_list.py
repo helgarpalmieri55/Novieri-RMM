@@ -74,6 +74,15 @@ engine the same way.
 gated `devices.read`; a person's name is `people.read`. With it off, the holder
 is not selected AND is not searched -- a search that matched on a name the row
 then declined to show would answer the same question the null withheld.
+
+**AND `people.read` IS HELD PER CLIENT** (plan 2026-10-26 Task 5). A
+technician may read the devices of X and Y and the people of X alone; then
+X's machines show their holder and Y's show null, and a search by the name of
+Y's holder finds nothing. `holder_reader` makes that the person join's own
+condition (`_reads_people_there`), so the holder, the search and the counts
+agree by construction -- one predicate, in the one place each of them reads
+the holder through -- and a page is still one statement, not one permission
+check per client on it.
 """
 
 from dataclasses import dataclass
@@ -81,10 +90,18 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Select, and_, func, null, or_, select
+from sqlalchemy import ColumnElement, Select, and_, exists, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Agent, Device, DevicePerson, Person
+from app.models import (
+    Agent,
+    Device,
+    DevicePerson,
+    Permission,
+    Person,
+    RolePermission,
+    UserRole,
+)
 from app.modules.remote.capability import can_share_screen
 from app.services.cert_renewal import EXPIRING_REMAINING_DAYS
 from app.services.device_review import LEFT_BEHIND
@@ -313,23 +330,56 @@ def _filtered(
     return clauses
 
 
-def _joined(*columns: Any, org_id: UUID | None = None) -> Select[Any]:
-    """`devices` beside its agent and, given `org_id`, its holder.
+#: Who holds a machine is a fact about a person: this code, in the person's
+#: client (the device's: `fk_device_person_person_client`).
+HOLDER_PERMISSION = "people.read"
+
+
+def _reads_people_there(org_id: UUID, reader: UUID) -> ColumnElement[bool]:
+    """`reader` holds `people.read` on every client or on the holder's own:
+    `has_permission(..., client_id=person.client_id)` as a predicate
+    correlated to the joined `Person`.
+
+    Read straight from the grants (`user_roles`, G: no client RLS), the rows
+    `rbac._grants` reads -- the question is a fact about one record's client,
+    as in `notification/routing._sees_client`, not a scope handed to a
+    request."""
+    return (
+        exists()
+        .where(
+            UserRole.org_id == org_id,
+            UserRole.user_id == reader,
+            RolePermission.role_id == UserRole.role_id,
+            Permission.id == RolePermission.permission_id,
+            Permission.code == HOLDER_PERMISSION,
+            or_(UserRole.client_id.is_(None), UserRole.client_id == Person.client_id),
+        )
+        .correlate(Person)
+    )
+
+
+def _joined(
+    *columns: Any, org_id: UUID | None = None, holder_reader: UUID | None = None
+) -> Select[Any]:
+    """`devices` beside its agent and, given `org_id`, its holder -- only a
+    holder `holder_reader` may read, when one is named.
 
     Every join is outer and at most one-to-one (`agents.device_id` is unique,
     `device_person.device_id` is the primary key), so no count is inflated by
     joining. The holder joins are scoped to `org_id` in their `ON` clause: see
-    the module docstring for the row that predicate keeps out.
+    the module docstring for the row that predicate keeps out. The reader's
+    permission is in the person join's `ON` clause too, so a holder they may
+    not read joins as NULL: unnamed AND unsearched.
     """
     stmt = select(*columns).select_from(Device).join(Agent, isouter=True)
     if org_id is not None:
+        holder = and_(Person.id == DevicePerson.person_id, Person.org_id == org_id)
+        if holder_reader is not None:
+            holder = and_(holder, _reads_people_there(org_id, holder_reader))
         stmt = stmt.outerjoin(
             DevicePerson,
             and_(DevicePerson.device_id == Device.id, DevicePerson.org_id == org_id),
-        ).outerjoin(
-            Person,
-            and_(Person.id == DevicePerson.person_id, Person.org_id == org_id),
-        )
+        ).outerjoin(Person, holder)
     return stmt
 
 
@@ -346,6 +396,7 @@ async def device_page(
     offset: int = 0,
     now: datetime | None = None,
     with_holder: bool = False,
+    holder_reader: UUID | None = None,
 ) -> DevicePage:
     """One page of the fleet list, plus every count the screen renders.
 
@@ -359,7 +410,10 @@ async def device_page(
 
     `with_holder` joins, selects and searches who each device is assigned to.
     The caller decides it from `people.read`; it defaults off so a new caller
-    discloses nothing it did not ask to.
+    discloses nothing it did not ask to. `holder_reader` narrows it to the
+    holders that user may read -- `people.read` in the holder's client; the
+    route always names its caller. Without it every holder is read: a
+    caller that is not a request (none today but the tests).
     """
     stamp = now or datetime.now(UTC)
     if state not in DEVICE_STATES:
@@ -388,6 +442,7 @@ async def device_page(
                 func.count().filter(_state_clause("review", stamp)).label("review"),
                 # Joined when the holder is, because the search may name it.
                 org_id=holder_org,
+                holder_reader=holder_reader,
             ).where(*filters)
         )
     ).one()
@@ -429,6 +484,7 @@ async def device_page(
         # Two NULL columns when the holder is off, so every row has one shape.
         *((Person.id, Person.display_name) if with_holder else (null(), null())),
         org_id=holder_org,
+        holder_reader=holder_reader,
     ).where(*filters, _state_clause(state, stamp))
     rows = (
         await session.execute(

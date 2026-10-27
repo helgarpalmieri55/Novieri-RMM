@@ -523,6 +523,7 @@ async def start_checklist(
         action="people.checklist_started",
         target_type="person",
         target_id=person.id,
+        client_id=person.client_id,
         metadata={"checklist_id": str(checklist.id), "kind": kind},
     )
     return checklist
@@ -572,6 +573,8 @@ async def update_step(
         action="people.checklist_step_updated",
         target_type="person",
         target_id=person_id,
+        # The checklist's client is its person's (H, migration 0235).
+        client_id=checklist.client_id,
         metadata={
             "checklist_id": str(checklist.id),
             "kind": checklist.kind,
@@ -623,6 +626,7 @@ async def close_checklist(
         action=f"people.checklist_{outcome}",
         target_type="person",
         target_id=person.id,
+        client_id=person.client_id,
         metadata={"checklist_id": str(checklist.id), "kind": checklist.kind},
     )
     return checklist

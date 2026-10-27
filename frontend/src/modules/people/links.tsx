@@ -20,11 +20,13 @@ import { EntityPicker } from "../../components/picker";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
+import { internalClientId, requireKnown } from "../../lib/internalClient";
 import {
   useCan,
   useClearDeviceOverride,
   useCreatePerson,
   useDevicePerson,
+  useMe,
   usePeople,
   usePersonForUser,
   useSetDevicePerson,
@@ -216,6 +218,7 @@ function sameDraft(person: PersonOut, draft: NewPerson): boolean {
  */
 export function DeviceAssignedTo({ deviceId }: { deviceId: string }) {
   const t = useT();
+  const me = useMe();
   const canRead = useCan("people.read");
   const canManage = useCan("people.manage");
   const link = useDevicePerson(deviceId, canRead);
@@ -247,9 +250,16 @@ export function DeviceAssignedTo({ deviceId }: { deviceId: string }) {
       return;
     }
     set.reset();
+    // A person belongs to one client (MSP clients phase 2), and the server
+    // holds a device's holder to the device's own.
+    // PHASE 3: the client/site selector. Until it exists that is the
+    // organisation's internal client, whose id is the organisation's --
+    // `/me`'s `org_id` (`lib/internalClient.ts`) -- where the console files
+    // every device it enrols.
+    const internalClient = internalClientId(me.data);
     // A FAILED CREATE ASSIGNS NOTHING: the assignment is only reached from
     // the create's own success.
-    create.mutate(draft, {
+    create.mutate(() => ({ ...draft, client_id: requireKnown(internalClient) }), {
       onSuccess: (added) => {
         setCreated(added);
         assign(added.id);

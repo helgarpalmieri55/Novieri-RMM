@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import ForeignKeyConstraint, UniqueConstraint, text
+from sqlalchemy import Column, ForeignKeyConstraint, Index, UniqueConstraint, text
 
 from app.core.client_scope import ALL_SCOPE_ALLOWLIST
 from app.core.client_scope_catalog import CATALOG, PENDING_PHASE_2, PHASE_1
@@ -417,8 +417,8 @@ async def test_a_parents_client_change_reaches_every_child(admin_engine) -> None
 # Migration 0231's constraints are declared on the models too.
 # --------------------------------------------------------------------------- #
 
-CLIENT_KEYS = {"uq_clients_id_org", "uq_sites_id_client"}
-CLIENT_FK = re.compile(r"fk_\w+_(client_org|site_client)")
+CLIENT_KEYS = {"uq_clients_id_org", "uq_sites_id_client", "uq_person_id_client"}
+CLIENT_FK = re.compile(r"fk_\w+_(client_org|site_client|person_client)")
 
 
 async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -> None:
@@ -444,9 +444,11 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
                     "FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid "
                     "LEFT JOIN pg_class r ON r.oid = c.confrelid "
                     "WHERE (c.contype = 'f' AND (c.conname LIKE 'fk\\_%\\_client\\_org' "
-                    "                       OR c.conname LIKE 'fk\\_%\\_site\\_client')) "
+                    "                       OR c.conname LIKE 'fk\\_%\\_site\\_client' "
+                    "                       OR c.conname LIKE 'fk\\_%\\_person\\_client')) "
                     "   OR (c.contype = 'u' AND c.conname IN ('uq_clients_id_org', "
-                    "                                         'uq_sites_id_client'))"
+                    "                                         'uq_sites_id_client', "
+                    "                                         'uq_person_id_client'))"
                 )
             )
         ).all()
@@ -482,6 +484,9 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
         # G table, no client policy, but its client is its own org's.
         | {"fk_audit_events_client_org"}
         | {f"fk_{t}_site_client" for t in ("devices", "enrollment_tokens", "install_links")}
+        # A row naming a person is of that person's client (plan 2026-10-26
+        # Task 5): who uses a device is one of the device's client's people.
+        | {"fk_device_person_person_client"}
         | CLIENT_KEYS
     )
     assert set(live) == expected, f"live vs catalog: {sorted(set(live) ^ expected)}"
@@ -559,6 +564,11 @@ ORG_WIDE_KEYS: dict[str, str] = {
         "(`ticket_number_counter`, G): nobody types it, every client's tickets share the "
         "sequence, and a moved ticket keeps its number. Per client, INC-12 could name two "
         "tickets"
+    ),
+    "person_user_id_key": (
+        "an account is one person: one user, one person row, in the client the account "
+        "belongs to (`its_person_account_guard`). It is an identity, not a name -- a "
+        "`users.id` nobody types -- so a collision tells nobody another client's names"
     ),
 }
 
@@ -774,6 +784,9 @@ PER_CLIENT_KEYS: dict[str, tuple[str, tuple[str, ...], bool]] = {
     "uq_change_gates_client_group": (
         "change_gates", ("org_id", "client_id", "device_group_id"), True,
     ),
+    # Plan 2026-10-26 Task 5 (migration 0235). An expression column reads as "".
+    "uq_person_login_client_login": ("person_login", ("org_id", "client_id", "login"), False),
+    "uq_person_client_lower_email": ("person", ("org_id", "client_id", ""), False),
 }
 
 
@@ -791,7 +804,14 @@ async def test_the_per_client_keys_are_in_the_database_and_on_the_models(admin_e
         for con in [*table.constraints, *table.indexes]:
             name = con.name if isinstance(con.name, str) else ""
             if name in PER_CLIENT_KEYS:
-                columns = tuple(c.name for c in con.columns)  # type: ignore[union-attr]
+                # An index's expression (`lower(email)`) is not one of its
+                # `columns`; `expressions` holds them all, in order, and the
+                # live side reads an expression as "" (`_unique_keys_on`).
+                columns = (
+                    tuple(e.name if isinstance(e, Column) else "" for e in con.expressions)
+                    if isinstance(con, Index)
+                    else tuple(c.name for c in con.columns)  # type: ignore[union-attr]
+                )
                 nnd = bool(con.dialect_options["postgresql"].get("nulls_not_distinct"))
                 declared[name] = (table.name, columns, nnd)
     assert declared == PER_CLIENT_KEYS, f"declared: {declared}"

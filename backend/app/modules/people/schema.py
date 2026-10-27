@@ -26,6 +26,10 @@ def _email_shape(value: str | None) -> str | None:
 class PersonCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    #: The client the person works for (plan 2026-10-26 Task 5). Required:
+    #: a person belongs to exactly one client, and nothing else in the body
+    #: says which. Never changes afterwards (`PersonUpdate` has no client).
+    client_id: UUID
     display_name: str = Field(min_length=1, max_length=200)
     email: str | None = Field(default=None, max_length=320)
     department: str | None = Field(default=None, max_length=200)
@@ -91,6 +95,7 @@ class PersonOut(BaseModel):
     """One person who works here, whether or not they can sign in."""
 
     id: UUID
+    client_id: UUID
     display_name: str
     email: str | None
     user_id: UUID | None
@@ -117,6 +122,9 @@ class LoginOut(BaseModel):
 
 class AccountOut(BaseModel):
     user_id: UUID
+    #: `staff` signs in to the console; `contact` is a client's person, whose
+    #: sign-in is switched off through `PATCH /contacts/{id}`, not `/users`.
+    kind: Literal["staff", "contact"]
     email: str
     status: str
     last_login_at: datetime | None

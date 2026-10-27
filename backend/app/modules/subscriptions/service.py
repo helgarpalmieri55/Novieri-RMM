@@ -572,7 +572,8 @@ async def assign_seat(
         if found is None:
             raise SubscriptionValidationError(tr("person not found"))
     else:
-        person_id = await person_id_for_email(session, org_id, assignee_email)
+        # plan 2026-10-26 Task 6 passes the subscription's client
+        person_id = await person_id_for_email(session, org_id, assignee_email, client_id=org_id)
 
     seat = SeatAssignment(
         org_id=org_id,

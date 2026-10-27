@@ -3595,6 +3595,12 @@ CATALOG: dict[str, str] = {
     "no such account": "no existe esa cuenta",
     "that account already belongs to someone else": "esa cuenta ya es de otra persona",
     "a person needs a name": "una persona necesita un nombre",
+    # A person belongs to one client (MSP clients plan 2026-10-26 Task 5).
+    "a person cannot be filed under Unassigned": (
+        "una persona no puede pertenecer a «Sin asignar»"
+    ),
+    "that account belongs to another client": "esa cuenta es de otro cliente",
+    "that person belongs to another client": "esa persona es de otro cliente",
     "Their sign-in is turned off": "Su inicio de sesión está desactivado",
     "Every computer is in a group": "Todos los equipos están en un grupo",
     "Nothing installed through ITMS yet": "Todavía no se ha instalado nada con ITMS",

@@ -43,8 +43,13 @@ async def _device(api_env: ApiEnv, org_id: UUID) -> UUID:
         return d.id
 
 
-async def _add(api_env: ApiEnv, headers: dict[str, str], **body: Any) -> dict[str, Any]:
-    resp = await api_env.client.post("/api/v1/people", json=body, headers=headers)
+async def _add(
+    api_env: ApiEnv, headers: dict[str, str], org_id: UUID, **body: Any
+) -> dict[str, Any]:
+    """A person of the org's internal client (whose id is the org's)."""
+    resp = await api_env.client.post(
+        "/api/v1/people", json={"client_id": str(org_id), **body}, headers=headers
+    )
     assert resp.status_code == 201, resp.text
     out: dict[str, Any] = resp.json()
     return out
@@ -90,7 +95,9 @@ async def test_read_only_can_list_but_not_write(api_env: ApiEnv) -> None:
     anyone = await api_env.create_user(org_id)
     none_h = await api_env.headers(org_id, anyone)
 
-    maria = await _add(api_env, tech_h, display_name="Maria Garcia", email="maria@corp.example")
+    maria = await _add(
+        api_env, tech_h, org_id, display_name="Maria Garcia", email="maria@corp.example"
+    )
     listing = await api_env.client.get("/api/v1/people?q=garc", headers=ro_h)
     assert listing.status_code == 200
     assert [p["display_name"] for p in listing.json()] == ["Maria Garcia"]
@@ -98,7 +105,7 @@ async def test_read_only_can_list_but_not_write(api_env: ApiEnv) -> None:
 
     assert (await api_env.client.get("/api/v1/people", headers=none_h)).status_code == 403
     denied = await api_env.client.post(
-        "/api/v1/people", json={"display_name": "X"}, headers=ro_h
+        "/api/v1/people", json={"display_name": "X", "client_id": str(org_id)}, headers=ro_h
     )
     assert denied.status_code == 403
     patch = await api_env.client.patch(
@@ -111,12 +118,15 @@ async def test_read_only_can_list_but_not_write(api_env: ApiEnv) -> None:
     assert patch.status_code == 200 and patch.json()["department"] == "Finance"
 
     dup = await api_env.client.post(
-        "/api/v1/people", json={"display_name": "M", "email": "MARIA@corp.example"},
+        "/api/v1/people",
+        json={"display_name": "M", "email": "MARIA@corp.example", "client_id": str(org_id)},
         headers=tech_h,
     )
     assert dup.status_code == 409
     bad = await api_env.client.post(
-        "/api/v1/people", json={"display_name": "M", "email": "not-an-address"}, headers=tech_h
+        "/api/v1/people",
+        json={"display_name": "M", "email": "not-an-address", "client_id": str(org_id)},
+        headers=tech_h,
     )
     assert bad.status_code == 422
 
@@ -129,7 +139,7 @@ async def test_another_orgs_person_and_device_are_not_found(api_env: ApiEnv) -> 
     org_b = await api_env.create_org("papi")
     a_h = await api_env.headers(org_a, await api_env.create_user(org_a, "org-admin"))
     b_h = await api_env.headers(org_b, await api_env.create_user(org_b, "org-admin"))
-    theirs = await _add(api_env, b_h, display_name="Eve", email="eve@b.example")
+    theirs = await _add(api_env, b_h, org_b, display_name="Eve", email="eve@b.example")
     their_device = await _device(api_env, org_b)
 
     got = await api_env.client.get(f"/api/v1/people/{theirs['id']}", headers=a_h)
@@ -158,7 +168,7 @@ async def test_person_page_shows_what_they_hold_and_hides_what_the_viewer_cannot
     org_id = await api_env.create_org("papi")
     admin_h = await api_env.headers(org_id, await api_env.create_user(org_id, "org-admin"))
     ro_h = await _only(api_env, org_id, "people.read", "subscriptions.read")
-    maria = await _add(api_env, admin_h, display_name="Maria", email="maria@corp.example")
+    maria = await _add(api_env, admin_h, org_id, display_name="Maria", email="maria@corp.example")
     device = await _device(api_env, org_id)
 
     put = await api_env.client.put(
@@ -198,7 +208,7 @@ async def test_leaver_needs_offboard_and_starter_does_not(api_env: ApiEnv) -> No
     org_id = await api_env.create_org("papi")
     tech_h = await api_env.headers(org_id, await api_env.create_user(org_id, "technician"))
     admin_h = await api_env.headers(org_id, await api_env.create_user(org_id, "org-admin"))
-    lee = await _add(api_env, admin_h, display_name="Lee", email="lee@corp.example")
+    lee = await _add(api_env, admin_h, org_id, display_name="Lee", email="lee@corp.example")
     base = f"/api/v1/people/{lee['id']}/checklists"
 
     refused = await api_env.client.post(base, json={"kind": "leaver"}, headers=tech_h)

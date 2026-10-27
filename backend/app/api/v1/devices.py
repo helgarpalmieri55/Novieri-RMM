@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import AuthContext, require_all_clients, require_permission
 from app.core.audit import audit_service
 from app.core.i18n import tr
-from app.core.rbac import has_permission
+from app.core.rbac import codes_held_anywhere
 from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job, publish_revoke
 from app.models import Agent, Device, SuggestedAssetMatch
@@ -19,7 +19,7 @@ from app.modules.remote.capability import can_share_screen
 from app.services import device_review as review_svc
 from app.services.cert_renewal import cert_state
 from app.services.client_sites import NotAcceptingNewRows, SiteNotFound, site_for_new_rows
-from app.services.device_list import DeviceHolder, device_page
+from app.services.device_list import HOLDER_PERMISSION, DeviceHolder, device_page
 from app.services.dns_name import MAX_DNS_NAME, InvalidDnsName, normalise_dns_name
 
 router = APIRouter(prefix="/devices", tags=["devices"])
@@ -394,13 +394,16 @@ async def list_devices(
     `total` is not counted separately -- it IS `state_counts[state]`.
 
     `assigned_to` -- and the search reaching a holder's name -- is served only
-    to a caller who also holds `people.read`: this route is gated
-    `devices.read`, and who holds a machine is a fact about a person.
+    to a caller who also holds `people.read` IN THE DEVICE'S CLIENT: this route
+    is gated `devices.read`, and who holds a machine is a fact about a person
+    of that client (plan 2026-10-26 Task 5). Decided per row in SQL
+    (`device_list._reads_people_there`); a caller holding `people.read`
+    nowhere skips the holder join altogether.
     """
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        with_holder = await has_permission(session, ctx.user_id, "people.read")
+        with_holder = HOLDER_PERMISSION in await codes_held_anywhere(session, ctx.user_id)
         page = await device_page(
             session,
             ctx.org_id,
@@ -412,6 +415,7 @@ async def list_devices(
             limit=limit,
             offset=offset,
             with_holder=with_holder,
+            holder_reader=ctx.user_id,
         )
         return DeviceListResponse(
             items=[

@@ -49,6 +49,7 @@ async def _account(
     roles = await user_role_names(session, user.id)
     return {
         "user_id": user.id,
+        "kind": user.kind,
         "email": user.email,
         "status": user.status,
         "last_login_at": user.last_login_at,
@@ -187,7 +188,10 @@ async def person_detail(
     session: AsyncSession, *, org_id: UUID, viewer_id: UUID, person_id: UUID
 ) -> dict[str, Any]:
     person = await load_person(session, org_id, person_id)
-    held = await user_permission_codes(session, viewer_id)
+    # What the viewer may read ABOUT THIS PERSON: the codes they hold on
+    # every client, or on the person's own (plan 2026-10-26 Task 5). Without
+    # the client, a technician of X saw X's people with every section hidden.
+    held = await user_permission_codes(session, viewer_id, client_id=person.client_id)
     devices = await _devices(session, org_id, person.id)
     facts = await gather_facts(session, org_id, person)
     current = await open_checklist(session, org_id, person.id)

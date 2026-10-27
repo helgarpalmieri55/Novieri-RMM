@@ -18,4 +18,11 @@ async def inventory_post_ingest(
     # Absent means nobody is signed in, which says nothing about who uses it.
     if not isinstance(login, str) or not login.strip():
         return
-    await observe_login(session, org_id=device.org_id, device_id=device.id, login=login)
+    await observe_login(
+        session,
+        org_id=device.org_id,
+        device_id=device.id,
+        # The sign-in names one of the device's client's people, or nobody.
+        client_id=device.client_id,
+        login=login,
+    )

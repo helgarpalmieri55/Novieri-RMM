@@ -78,6 +78,8 @@ from app.models import (
     Job,
     JobLog,
     Organization,
+    Person,
+    PersonLogin,
     Policy,
     Script,
     ScriptPolicy,
@@ -125,6 +127,7 @@ class Side:
     alert: UUID
     record: UUID
     ticket: UUID
+    person: UUID
 
 
 @dataclass(frozen=True)
@@ -191,10 +194,12 @@ async def _side(
             check_type="cpu.busy_pct", severity="warning",
         )
         ticket = _ticket(org, client.id, queue, category, actor)
-        s.add_all([job, alert, ticket])
+        person = Person(org_id=org, client_id=client.id, display_name="Persona")
+        s.add_all([job, alert, ticket, person])
         await s.commit()
     return Side(
-        client.id, site.id, device.id, group.id, job.id, alert.id, record.id, ticket.id
+        client.id, site.id, device.id, group.id, job.id, alert.id, record.id, ticket.id,
+        person.id,
     )
 
 
@@ -380,6 +385,12 @@ PATHS: dict[str, tuple[str, Make]] = {
     "H-ticket_comment-via-ticket": ("ticket_comment", lambda w, s: TicketComment(
         org_id=w.org, ticket_id=s.ticket, author_id=w.actor, author_type="user", body="b",
         visibility="public",
+    )),
+    "C-person": ("person", lambda w, s: Person(
+        org_id=w.org, client_id=s.client, display_name="p"
+    )),
+    "H-person_login-via-person": ("person_login", lambda w, s: PersonLogin(
+        org_id=w.org, person_id=s.person, login=f"corp\\{uuid4().hex[:8]}"
     )),
     "O-doc_articles-no-parent": ("doc_articles", lambda w, s: DocArticle(
         org_id=w.org, client_id=s.client, title="t"

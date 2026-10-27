@@ -157,8 +157,8 @@ PART_C: dict[str, str] = {
     # --- devices ---
     "GET /api/v1/devices": (
         "Lists the fleet one page at a time, filterable by OS, status, provenance, search text "
-        "and tab, with total, per-tab and fleet-wide counts. The assigned person appears only if "
-        "the caller also holds the people read permission."
+        "and tab, with total, per-tab and fleet-wide counts. The assigned person appears only on "
+        "devices of clients where the caller also holds the people read permission."
     ),
     "POST /api/v1/devices": (
         "Records an asset by hand, such as warehouse stock or equipment that cannot run an agent. "
@@ -368,8 +368,9 @@ PART_C: dict[str, str] = {
         "lacks one."
     ),
     "POST /api/v1/people": (
-        "Creates a person record with name and optional email, department, job title and start "
-        "date. A duplicate email is refused."
+        "Creates a person of the client given by client_id, with name and optional email, "
+        "department, job title and start date. An email already held in that client is refused; "
+        "Unassigned takes no people."
     ),
     "GET /api/v1/people/by-user/{user_id}": (
         "Returns the person behind a console or portal account. First creates a person for any "
@@ -381,8 +382,8 @@ PART_C: dict[str, str] = {
     ),
     "PUT /api/v1/people/devices/{device_id}": (
         "Sets, or with a null person clears, who uses a device as an operator override that "
-        "inventory never replaces. It also teaches the resolver the device's last observed "
-        "sign-in name."
+        "inventory never replaces. The person must belong to the device's client. It also "
+        "teaches the resolver the device's last observed sign-in name."
     ),
     "DELETE /api/v1/people/devices/{device_id}/override": (
         "Removes an operator's override of who uses a device and returns to automatic assignment, "
@@ -406,8 +407,9 @@ PART_C: dict[str, str] = {
         "cannot be blank and an email already held by someone else is refused."
     ),
     "PUT /api/v1/people/{person_id}/account": (
-        "Links a person to a console or portal account, or unlinks with a null user. An account "
-        "already belonging to another person is refused."
+        "Links a person to a console or portal account, or unlinks with a null user. A contact's "
+        "person is of its client and staff's of the internal client; an account already "
+        "belonging to another person is refused."
     ),
     "POST /api/v1/people/{person_id}/checklists": (
         "Starts a starter or leaver checklist for a person, setting their status to starting or "

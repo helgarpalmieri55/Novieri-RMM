@@ -834,6 +834,29 @@ export interface ClientOut {
 }
 
 /**
+ * One person of a client (`backend/app/api/v1/clients.py::ContactOut`): a
+ * user of kind `contact`, who will use the portal and never the console.
+ */
+export interface ContactOut {
+  id: string;
+  client_id: string;
+  kind: string;
+  email: string;
+  display_name: string;
+  phone: string | null;
+  /** `active` or `disabled`. */
+  status: string;
+}
+
+/** A partial edit of a contact; `status` switches it off and on (`ContactUpdate`). */
+export interface ContactUpdate {
+  email?: string;
+  display_name?: string;
+  phone?: string | null;
+  status?: "active" | "disabled";
+}
+
+/**
  * The closed allowlist of org settings keys, mirroring
  * `backend/app/api/v1/orgs.py::SETTINGS_ALLOWLIST`. Every key is optional and
  * every one is presentation or contact information.
@@ -1734,6 +1757,18 @@ export class ApiClient {
   setUserEnabled(userId: string, enabled: boolean): Promise<UserOut> {
     return this.request<UserOut>(`/users/${userId}/${enabled ? "enable" : "disable"}`, {
       method: "POST",
+    });
+  }
+
+  /**
+   * Edit a client's contact, or switch it off and on (`PATCH /contacts/{id}`,
+   * `clients.manage`). `/users` is staff-only: a contact's sign-in is turned
+   * off here.
+   */
+  updateContact(contactId: string, body: ContactUpdate): Promise<ContactOut> {
+    return this.request<ContactOut>(`/contacts/${contactId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
     });
   }
 
