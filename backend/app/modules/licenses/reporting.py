@@ -15,7 +15,7 @@ that audit call belongs to the API layer that wraps `export_rows`, never to
 this pure read function.)
 
 Every query below filters on `org_id` for every table involved (`License`,
-`SoftwareProduct`, and -- via `product_installed_device_ids` --
+`SoftwareProduct`, and -- via `matching.client_titles` --
 `InstalledSoftware`) per the tenancy invariant (#5) -- RLS is the backstop,
 not the only line of defense.
 
@@ -29,6 +29,7 @@ column, never left to RLS, which under scope all narrows nothing.
 exists for entitlement true-up, not credential export.
 """
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -38,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Client, License, SoftwareProduct
 from app.models.clients import CLIENT_KIND_UNASSIGNED
-from app.modules.licenses.matching import product_installed_device_ids
+from app.modules.licenses.matching import client_titles, devices_matching
 
 
 async def reported_clients(session: AsyncSession, org_id: UUID) -> list[UUID]:
@@ -60,55 +61,72 @@ async def reported_clients(session: AsyncSession, org_id: UUID) -> list[UUID]:
     )
 
 
-async def compliance_summary(
-    session: AsyncSession, org_id: UUID, *, client_id: UUID
+async def compliance_by_client(
+    session: AsyncSession, org_id: UUID, client_ids: Sequence[UUID]
 ) -> list[dict[str, Any]]:
-    """Per-product compliance position of ONE client, org-scoped, computed live.
+    """Per-product compliance position of each of `client_ids`, org-scoped,
+    computed live: the rows of the first client, then the second's, each in
+    catalogue order.
 
-    For each `SoftwareProduct` in the org (the catalogue is shared): `entitled`
-    is the sum of `entitlements` over that product's `License` rows of
-    `client_id` (`0` if it has none); `installed` is
-    `len(product_installed_device_ids(...))` -- the count of distinct devices
-    of `client_id` with software matching any of the product's match rules;
-    `delta = entitled - installed`; `breach` is `True` when `installed >
-    entitled`. Both sides carry the client as an explicit predicate.
+    For each `SoftwareProduct` in the org (the catalogue is shared) and each
+    client: `entitled` is the sum of `entitlements` over that product's
+    `License` rows of that client (`0` if it has none); `installed` is the
+    count of distinct devices of that client with software matching any of
+    the product's match rules (`devices_matching`); `delta = entitled -
+    installed`; `breach` is `True` when `installed > entitled`. Both sides
+    carry the org and the client as explicit predicates.
+
+    THE STATEMENT COUNT DOES NOT GROW WITH THE CATALOGUE (review M1 of plan
+    2026-10-26 Task 6): one read of the products, one entitlement query
+    grouped by (client, product) for every client at once, and one load of
+    each client's installed titles, matched against every product in memory.
+    It was two queries per client per product, on a read `/licenses` makes
+    on every page load.
     """
+    if not client_ids:
+        return []
     products = (
         (await session.execute(select(SoftwareProduct).where(SoftwareProduct.org_id == org_id)))
         .scalars()
         .all()
     )
+    entitled: dict[tuple[UUID, UUID], int] = {
+        (client_id, product_id): int(total)
+        for client_id, product_id, total in (
+            await session.execute(
+                select(License.client_id, License.product_id, func.sum(License.entitlements))
+                .where(License.org_id == org_id, License.client_id.in_(client_ids))
+                .group_by(License.client_id, License.product_id)
+            )
+        ).all()
+    }
 
     result: list[dict[str, Any]] = []
-    for product in products:
-        entitled = (
-            await session.execute(
-                select(func.coalesce(func.sum(License.entitlements), 0)).where(
-                    License.org_id == org_id,
-                    License.client_id == client_id,
-                    License.product_id == product.id,
-                )
+    for client_id in client_ids:
+        titles = await client_titles(session, org_id, client_id=client_id)
+        for product in products:
+            owned = entitled.get((client_id, product.id), 0)
+            installed = len(devices_matching(product, titles))
+            result.append(
+                {
+                    "client_id": client_id,
+                    "product_id": product.id,
+                    "name": product.name,
+                    "entitled": owned,
+                    "installed": installed,
+                    "delta": owned - installed,
+                    "breach": installed > owned,
+                }
             )
-        ).scalar_one()
-        entitled = int(entitled)
-
-        installed = len(
-            await product_installed_device_ids(session, org_id, product, client_id=client_id)
-        )
-
-        result.append(
-            {
-                "client_id": client_id,
-                "product_id": product.id,
-                "name": product.name,
-                "entitled": entitled,
-                "installed": installed,
-                "delta": entitled - installed,
-                "breach": installed > entitled,
-            }
-        )
-
     return result
+
+
+async def compliance_summary(
+    session: AsyncSession, org_id: UUID, *, client_id: UUID
+) -> list[dict[str, Any]]:
+    """Per-product compliance position of ONE client: `compliance_by_client`
+    for that client alone (three statements whatever the catalogue holds)."""
+    return await compliance_by_client(session, org_id, [client_id])
 
 
 async def renewal_calendar(

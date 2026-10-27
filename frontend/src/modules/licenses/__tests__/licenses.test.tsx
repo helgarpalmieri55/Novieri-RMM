@@ -287,6 +287,31 @@ describe("ProductsPage", () => {
     expect(await screen.findByText("Acme Office Suite", { selector: ".cell-title" })).toBeInTheDocument();
   });
 
+  // The compliance report is one row per (client, product) since MSP clients
+  // phase 2, and "Detected" is what inventory found across them: the sum,
+  // not whichever client's row came last.
+  it("detects a product's installs across every client's position", async () => {
+    const position: ComplianceRow = {
+      client_id: "o1",
+      product_id: "p1",
+      name: "Acme Office Suite",
+      entitled: 5,
+      installed: 3,
+      delta: 2,
+      breach: false,
+    };
+    api.licenseCompliance = vi.fn().mockResolvedValue([
+      position,
+      { ...position, client_id: "c2", installed: 4, delta: 1 },
+    ]);
+    renderWithProviders(<ProductsPage />);
+
+    const row = (await screen.findByText("Acme Office Suite", { selector: ".cell-title" })).closest(
+      "tr",
+    ) as HTMLElement;
+    expect(await within(row).findByText("7 installs")).toBeInTheDocument();
+  });
+
   it("hides the New product control when the caller lacks licenses.manage", async () => {
     api.me = vi.fn().mockResolvedValue({
       ...ME,
@@ -535,6 +560,34 @@ describe("LicensesPage", () => {
     expect(screen.getByText("nothing renews in this window")).toBeInTheDocument();
     const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
     expect(tiles.some((tile) => tile.classList.contains("urgent"))).toBe(false);
+  });
+
+  // The compliance report is one row per (client, product) since MSP clients
+  // phase 2. The Compliant tile and its foot say PRODUCTS ("of 2 products
+  // reconciled"), so both count distinct products, and a product is compliant
+  // only when every client's position on it is.
+  it("counts compliant products, not per-client positions", async () => {
+    const position: ComplianceRow = {
+      client_id: "o1",
+      product_id: "p1",
+      name: "Acme Office Suite",
+      entitled: 5,
+      installed: 3,
+      delta: 2,
+      breach: false,
+    };
+    api.licenseCompliance = vi.fn().mockResolvedValue([
+      position,
+      { ...position, client_id: "c2" },
+      { ...position, product_id: "p2", name: "Visio" },
+      { ...position, product_id: "p2", name: "Visio", client_id: "c2", installed: 9, delta: -4, breach: true },
+    ]);
+    renderWithProviders(<LicensesPage />);
+    await screen.findByText("of 2 products reconciled");
+
+    const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
+    expect(tiles[3]?.querySelector(".stat-value")).toHaveTextContent(/^1$/);
+    expect(tiles[3]?.querySelector(".stat-foot")?.textContent).toBe("of 2 products reconciled");
   });
 
   // The other half of the same rule: the failed query renders the em dash, so

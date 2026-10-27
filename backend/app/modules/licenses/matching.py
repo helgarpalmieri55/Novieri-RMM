@@ -105,19 +105,21 @@ def validate_match_rules(rules: list[dict[str, Any]]) -> None:
                 ) from exc
 
 
-async def product_installed_device_ids(
-    session: AsyncSession, org_id: UUID, product: SoftwareProduct, *, client_id: UUID
-) -> set[UUID]:
-    """Return the set of THIS ORG's device_ids OF `client_id` running software
-    that matches ANY of `product.match_rules`.
+#: A client's installed software as the matcher reads it: each distinct
+#: `(name, publisher)` title with the devices that report it. A rule matches on
+#: those two fields only, so grouping by them changes no match.
+Titles = dict[tuple[str, str], set[UUID]]
 
-    Loads `InstalledSoftware` explicitly filtered `WHERE org_id == org_id`
-    (invariant #5) and by the client (plan 2026-10-26 Task 6: a client's
-    installs count against that client's licenses, never another's), and
-    matches in Python -- keeps regex out of SQL and the tenant boundary in
-    one predicate. Both are explicit predicates, not RLS: under scope all
-    RLS narrows nothing. A device with multiple matching rows is counted once
-    (the result is a set).
+
+async def client_titles(session: AsyncSession, org_id: UUID, *, client_id: UUID) -> Titles:
+    """THIS ORG's installed software OF `client_id`, loaded once, by title.
+
+    Filtered `WHERE org_id == org_id` (invariant #5) and by the client (plan
+    2026-10-26 Task 6: a client's installs count against that client's
+    licenses, never another's). Both are explicit predicates, not RLS: under
+    scope all RLS narrows nothing. Matching happens in Python
+    (`devices_matching`) -- keeps regex out of SQL and the tenant boundary in
+    this one query.
     """
     rows = await session.execute(
         select(
@@ -126,9 +128,29 @@ async def product_installed_device_ids(
             InstalledSoftware.publisher,
         ).where(InstalledSoftware.org_id == org_id, InstalledSoftware.client_id == client_id)
     )
-
-    device_ids: set[UUID] = set()
+    titles: Titles = {}
     for device_id, name, publisher in rows:
+        titles.setdefault((name, publisher), set()).add(device_id)
+    return titles
+
+
+def devices_matching(product: SoftwareProduct, titles: Titles) -> set[UUID]:
+    """The devices among `titles` running software that matches ANY of
+    `product.match_rules` (`rule_matches`). A device with several matching
+    titles is counted once (the result is a set). In memory: the compliance
+    report matches every product against one load of a client's titles."""
+    device_ids: set[UUID] = set()
+    for (name, publisher), devices in titles.items():
         if any(rule_matches(rule, name, publisher) for rule in product.match_rules):
-            device_ids.add(device_id)
+            device_ids |= devices
     return device_ids
+
+
+async def product_installed_device_ids(
+    session: AsyncSession, org_id: UUID, product: SoftwareProduct, *, client_id: UUID
+) -> set[UUID]:
+    """Return the set of THIS ORG's device_ids OF `client_id` running software
+    that matches ANY of `product.match_rules`: `devices_matching` over
+    `client_titles` (whose two predicates are the tenant and client
+    boundary)."""
+    return devices_matching(product, await client_titles(session, org_id, client_id=client_id))

@@ -64,7 +64,7 @@ from app.modules.licenses.errors import (
     LicenseValidationError,
 )
 from app.modules.licenses.reporting import (
-    compliance_summary,
+    compliance_by_client,
     cost_view,
     export_rows,
     renewal_calendar,
@@ -331,11 +331,9 @@ async def compliance_route(
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        rows: list[ComplianceRow] = []
-        for client_id in await reported_clients(session, ctx.org_id):
-            summary = await compliance_summary(session, ctx.org_id, client_id=client_id)
-            rows.extend(ComplianceRow(**row) for row in summary)
-        return rows
+        clients = await reported_clients(session, ctx.org_id)
+        rows = await compliance_by_client(session, ctx.org_id, clients)
+        return [ComplianceRow(**row) for row in rows]
 
 
 @router.get("/licenses/review-queue", response_model=list[ReviewQueueRow])

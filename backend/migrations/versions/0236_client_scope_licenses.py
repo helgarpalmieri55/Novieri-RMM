@@ -24,6 +24,10 @@ one, like every license here) and their targets are NOT re-checked: the guard
 holds every later write that names a target or a client, and a release
 touches neither.
 
+Existing `license_compliance_snapshot` rows were org-wide positions; the
+backfill files them under the internal client, so the internal client's series
+steps down at deploy, from the whole organisation's figures to its own.
+
 `subscription.license_ref` stays advisory (subscriptions spec §143-148): the
 application checks it, no key.
 

@@ -500,10 +500,20 @@ async def test_tenancy_report_org_filters_are_load_bearing(
     """Run `compliance_summary` on an RLS-bypassing admin session (the
     `admin_engine` role bypasses RLS -- it is how the cross-org seed helpers
     insert) with a second org's product/license/install present, so the
-    explicit `org_id` predicates inside `compliance_summary` (and the
-    `product_installed_device_ids` it calls) are the SOLE guard against
-    cross-tenant leakage -- RLS is not backstopping it here. Mirrors
+    explicit `org_id` predicates inside `compliance_summary` (on the products,
+    on the licenses, and in `matching.client_titles` on the installs) are the
+    SOLE guard against cross-tenant leakage -- RLS is not backstopping it
+    here. Mirrors
     `tests/test_bcp_reporting.py::test_tenancy_report_org_filters_are_load_bearing`.
+
+    THE CLIENT ASKED FOR IS ORG B'S (its internal client, whose id is the
+    org's). Since plan 2026-10-26 Task 6 the licenses and installs are also
+    filtered on the client; asked for org A's own client, that predicate
+    alone would drop org B's rows and the org predicates would bear nothing
+    (review 2026-10-27, I2). Asked for org B's client within org A, only
+    `org_id` stands between org A and org B's license and installs: org A's
+    catalogue comes back with nothing entitled and nothing installed. The
+    own-client call first is the control: the report does count org A.
     """
     org_a, actor_a = await _org_with_user(admin_engine)
     org_b, actor_b = await _org_with_user(admin_engine)
@@ -526,15 +536,26 @@ async def test_tenancy_report_org_filters_are_load_bearing(
     await _seed_license(admin_engine, org_a, actor_a, product_a.id, entitlements=5)
     # org B: entitled 1, installed 2 -- would read as a breach if leaked into org A's rollup
     await _seed_license(admin_engine, org_b, actor_b, product_b.id, entitlements=1)
+    # ...and an org B license naming org A's PRODUCT. The application never
+    # writes one, but `license.product_id` is a plain foreign key, so nothing
+    # below `License.org_id == org_id` keeps its 7 seats out of org A's count.
+    await _seed_license(admin_engine, org_b, actor_b, product_a.id, entitlements=7)
 
     # RLS-bypassing admin session: org B's rows are visible on this
     # connection, so only compliance_summary's own org_id predicates (and
     # product_installed_device_ids') can exclude them.
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         rows = await compliance_summary(s, org_a, client_id=org_a)
+        foreign = await compliance_summary(s, org_a, client_id=org_b)
 
     assert {row["product_id"] for row in rows} == {product_a.id}
     row = rows[0]
     assert row["entitled"] == 5
     assert row["installed"] == 1
     assert row["breach"] is False
+
+    # Org B's client, asked of org A: org A's catalogue only, and none of org
+    # B's entitlements (1, and the 7 on org A's product) or installs (2).
+    assert [(r["product_id"], r["entitled"], r["installed"]) for r in foreign] == [
+        (product_a.id, 0, 0)
+    ]

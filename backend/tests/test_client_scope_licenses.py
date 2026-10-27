@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -308,17 +308,34 @@ async def test_license_and_subscription_events_carry_their_client(api_env: ApiEn
         f"/api/v1/licenses/{license_id}", json={"notes": "n"}, headers=admin
     )
     assert patched.status_code == 200, patched.text
-    sub = await _subscription(api_env, admin, x)
+    keyed = await _license(api_env, admin, product, x, 1, key="K-1")
+    revealed = await api_env.client.get(f"/api/v1/licenses/{keyed}/key", headers=admin)
+    assert revealed.status_code == 200, revealed.text
+    deleted = await api_env.client.delete(f"/api/v1/licenses/{keyed}", headers=admin)
+    assert deleted.status_code == 204, deleted.text
+    sub = await _subscription(api_env, admin, x, renews_at=date.today().isoformat())
+    sub_id = sub.json()["id"]
     seat = await api_env.client.post(
-        f"/api/v1/subscriptions/{sub.json()['id']}/seats",
+        f"/api/v1/subscriptions/{sub_id}/seats",
         json={"assignee_name": "A", "assignee_email": "a@x.test"}, headers=admin,
     )
     assert seat.status_code == 201, seat.text
-    for action in (
-        "license.created", "license.allocated", "license.allocation_released",
-        "license.updated", "subscription.created", "subscription.seat_assigned",
+    freed = await api_env.client.post(f"/api/v1/seats/{seat.json()['id']}/release", headers=admin)
+    assert freed.status_code == 200, freed.text
+    renewed = await api_env.client.post(f"/api/v1/subscriptions/{sub_id}/renew", headers=admin)
+    assert renewed.status_code == 200, renewed.text
+    cancelled = await api_env.client.post(f"/api/v1/subscriptions/{sub_id}/cancel", headers=admin)
+    assert cancelled.status_code == 200, cancelled.text
+    # Every license/subscription/allocation/seat event of this org: one row
+    # each, all of them X's. `license.created` twice: two licenses.
+    for action, rows in (
+        ("license.created", 2), ("license.allocated", 1), ("license.allocation_released", 1),
+        ("license.updated", 1), ("license.key_revealed", 1), ("license.deleted", 1),
+        ("subscription.created", 1), ("subscription.seat_assigned", 1),
+        ("subscription.seat_released", 1), ("subscription.renewed", 1),
+        ("subscription.cancelled", 1),
     ):
-        assert await _audit_clients(api_env, org, action) == [x], action
+        assert await _audit_clients(api_env, org, action) == [x] * rows, action
 
 
 # --------------------------------------------------------------------------- #
@@ -538,6 +555,51 @@ async def test_the_reports_are_per_client(api_env: ApiEnv) -> None:
         await api_env.client.get("/api/v1/licenses/compliance", headers=x_tech)
     ).json()
     assert {r["client_id"] for r in narrowed} == {str(x)}
+
+
+async def _statements_for(env: ApiEnv, headers: dict[str, str], url: str) -> int:
+    """How many SQL statements the app's own engine runs to answer `url`."""
+    count = 0
+
+    def tick(*_: Any) -> None:
+        nonlocal count
+        count += 1
+
+    engine = env.app.state.app_engine.sync_engine
+    event.listen(engine, "before_cursor_execute", tick)
+    try:
+        r = await env.client.get(url, headers=headers)
+    finally:
+        event.remove(engine, "before_cursor_execute", tick)
+    assert r.status_code == 200, r.text
+    return count
+
+
+async def test_the_compliance_report_does_not_query_per_product(api_env: ApiEnv) -> None:
+    """Review M1: the report used to run two queries per client per product
+    (`/licenses` reads it on every page load). Its statement count may grow
+    with clients -- one install load each -- but not with the catalogue: two
+    clients (the internal one and X), the same count for one product as for
+    five."""
+    org = await api_env.create_org("l-fanout")
+    x, x_site = await client_with_site(api_env, org)
+    admin = await _admin(api_env, org)
+    first = await _product(api_env, admin, "Fan 0")
+    for client in (org, x):
+        await _license(api_env, admin, first, client, 1)
+    await _installed(api_env, org, x, x_site, "Fan 0")
+    await _installed(api_env, org, org, org, "Fan 0")
+    url = "/api/v1/licenses/compliance"
+    await api_env.client.get(url, headers=admin)  # warm whatever a first request caches
+    one = await _statements_for(api_env, admin, url)
+    for n in range(1, 5):
+        product = await _product(api_env, admin, f"Fan {n}")
+        await _license(api_env, admin, product, x, 1)
+        await _installed(api_env, org, x, x_site, f"Fan {n}")
+    rows = (await api_env.client.get(url, headers=admin)).json()
+    assert len(rows) == 2 * 5  # two clients x five products: the report is all there
+    five = await _statements_for(api_env, admin, url)
+    assert five == one, f"{one} statements for one product, {five} for five"
 
 
 async def test_the_daily_sweep_snapshots_each_client(

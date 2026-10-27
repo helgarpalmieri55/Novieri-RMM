@@ -183,8 +183,19 @@ export function LicensesPage() {
   }, [items, productNameById, search, language]);
 
   const breachCount = (compliance.data ?? []).filter((row) => row.breach).length;
-  const compliantCount = (compliance.data ?? []).filter((row) => !row.breach).length;
-  const reconciledCount = (compliance.data ?? []).length;
+  // The Compliant tile and its foot ("of 3 products reconciled") count
+  // PRODUCTS. The report is one row per (client, product) since MSP clients
+  // phase 2, so both count distinct products, and a product is compliant only
+  // when no client's position on it is a breach.
+  const { compliantCount, reconciledCount } = useMemo(() => {
+    const breached = new Set<string>();
+    const reconciled = new Set<string>();
+    for (const row of compliance.data ?? []) {
+      reconciled.add(row.product_id);
+      if (row.breach) breached.add(row.product_id);
+    }
+    return { compliantCount: reconciled.size - breached.size, reconciledCount: reconciled.size };
+  }, [compliance.data]);
 
   // EVERY TILE'S FOOT LINE IS READ OFF THE SAME QUERY ITS FIGURE IS. The row
   // read uneven because one tile carried its breakdown and three carried an
