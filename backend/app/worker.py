@@ -1974,7 +1974,7 @@ async def licenses_compliance_sweep_all_orgs(now: datetime) -> int:
     Reuses `app.modules.licenses.reporting.compliance_summary` for the actual
     entitled/installed/delta computation rather than duplicating it -- that
     function already carries the explicit `org_id` predicates (invariant #5)
-    on `SoftwareProduct`, `License`, and (via `product_installed_device_ids`)
+    on `SoftwareProduct`, `License`, and (via `client_titles`)
     `InstalledSoftware`; this sweep only maps each of its rows onto a snapshot
     insert and flushes once per org.
 

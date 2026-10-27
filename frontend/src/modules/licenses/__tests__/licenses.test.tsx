@@ -526,10 +526,10 @@ describe("LicensesPage", () => {
     expect(tiles[0]?.querySelector(".stat-foot")).toHaveTextContent("Acme Office Suite");
   });
 
-  // Compliance is one row per (client, product) since MSP clients phase 2:
-  // two clients over on one product are two breaches, and the foot line
-  // names the product once, not once per client.
-  it("counts each client's breach and names an over-deployed product once", async () => {
+  // Compliance is one row per (client, product) since MSP clients phase 2.
+  // The tile says PRODUCTS ("Productos excedidos"): two clients over on one
+  // product are one product over, and the foot line names it once.
+  it("counts an over-deployed product once however many clients are over", async () => {
     const breach: ComplianceRow = {
       client_id: "o1",
       product_id: "p1",
@@ -544,7 +544,7 @@ describe("LicensesPage", () => {
     await screen.findAllByText("Acme Office Suite");
 
     const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
-    expect(tiles[0]?.querySelector(".stat-value")).toHaveTextContent("2");
+    expect(tiles[0]?.querySelector(".stat-value")).toHaveTextContent(/^1$/);
     expect(tiles[0]?.querySelector(".stat-foot")?.textContent).toBe("Acme Office Suite");
   });
 

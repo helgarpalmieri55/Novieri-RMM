@@ -7,7 +7,7 @@ Rules are operator-authored (RBAC `licenses.manage`) but matched against every
 row in the org's inventory during the compliance sweep, so two properties are
 non-negotiable:
 
-- **Tenant isolation**: `product_installed_device_ids` carries an explicit
+- **Tenant isolation**: `client_titles` carries an explicit
   `InstalledSoftware.org_id == org_id` predicate. Matching itself happens in
   Python (not a DB regex) so the tenant boundary stays in this one query
   rather than being smeared across SQL and application code.

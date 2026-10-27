@@ -182,19 +182,23 @@ export function LicensesPage() {
     );
   }, [items, productNameById, search, language]);
 
-  const breachCount = (compliance.data ?? []).filter((row) => row.breach).length;
-  // The Compliant tile and its foot ("of 3 products reconciled") count
-  // PRODUCTS. The report is one row per (client, product) since MSP clients
-  // phase 2, so both count distinct products, and a product is compliant only
-  // when no client's position on it is a breach.
-  const { compliantCount, reconciledCount } = useMemo(() => {
+  // The Over-deployed, Compliant and "of 3 products reconciled" figures all
+  // count PRODUCTS. The report is one row per (client, product) since MSP
+  // clients phase 2, so each counts distinct products: a product is over when
+  // any client's position on it is a breach, and compliant only when none is,
+  // so over + compliant = reconciled.
+  const { breachCount, compliantCount, reconciledCount } = useMemo(() => {
     const breached = new Set<string>();
     const reconciled = new Set<string>();
     for (const row of compliance.data ?? []) {
       reconciled.add(row.product_id);
       if (row.breach) breached.add(row.product_id);
     }
-    return { compliantCount: reconciled.size - breached.size, reconciledCount: reconciled.size };
+    return {
+      breachCount: breached.size,
+      compliantCount: reconciled.size - breached.size,
+      reconciledCount: reconciled.size,
+    };
   }, [compliance.data]);
 
   // EVERY TILE'S FOOT LINE IS READ OFF THE SAME QUERY ITS FIGURE IS. The row
@@ -276,7 +280,7 @@ export function LicensesPage() {
           zeroLabel={t("licenses.list.tileOverZero")}
           foot={
             // One compliance row per (client, product): two clients over on
-            // one product are two breaches but one name.
+            // one product are one product over and one name.
             !compliance.error && breachCount > 0
               ? [
                   ...new Set(
