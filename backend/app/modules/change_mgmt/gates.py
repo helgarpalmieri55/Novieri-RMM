@@ -12,6 +12,13 @@ With no gate, an approval or deployment made without a change gets an `auto`
 change record linked to it, so the evidence exists. System-initiated actions
 (the PD-02 security auto-approval, the sweeps) have no person to record as the
 requester and are not given one.
+
+PER CLIENT (MSP clients plan 2026-10-26 Task 7, decision D4). Gates are
+evaluated for one client at a time: the global ones (no client) and that
+client's own. A client that does not use change management meets NO gate --
+it could never create the change one would demand -- and gets no automatic
+change. A deployment is gated as its target's client; a ring's approval as
+every client its machines belong to, each evaluated once.
 """
 
 from collections.abc import Callable, Iterable, Sequence
@@ -19,7 +26,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
@@ -28,6 +35,7 @@ from app.core.wire_words import say
 from app.models import ChangeGate, ChangeLink, ChangeRequest, Device, DeviceGroup
 from app.modules.change_mgmt.state import ChangeNotFoundError, ChangeValidationError
 from app.modules.change_mgmt.words import CHANGE_STATE_WORDS
+from app.services.client_modules import module_enabled, require_module
 
 GateKind = Literal["patches", "deployments"]
 
@@ -58,19 +66,49 @@ class Gates:
         return self.everywhere or bool(self.group_ids)
 
 
-async def gates_for(session: AsyncSession, org_id: UUID, kind: GateKind) -> Gates:
+NO_GATES = Gates(everywhere=False, group_ids=frozenset())
+
+
+async def gates_for(
+    session: AsyncSession, org_id: UUID, kind: GateKind, *, client_id: UUID
+) -> Gates:
+    """The gates `client_id` meets: the global ones and its own. A group's
+    gate carries its group's client (migration 0231), so another client's
+    group gates are not among them; `everywhere` is a group-less gate OF
+    THESE -- a client's own group-less gate gates that client alone. None at
+    all for a client without change management (D4)."""
+    if not await module_enabled(session, org_id=org_id, client_id=client_id, module="change"):
+        return NO_GATES
     column = (
         ChangeGate.applies_to_patches if kind == "patches" else ChangeGate.applies_to_deployments
     )
     rows = (
         await session.execute(
-            select(ChangeGate.device_group_id).where(ChangeGate.org_id == org_id, column)
+            select(ChangeGate.device_group_id).where(
+                ChangeGate.org_id == org_id,
+                column,
+                or_(ChangeGate.client_id.is_(None), ChangeGate.client_id == client_id),
+            )
         )
     ).scalars().all()
     return Gates(
         everywhere=any(r is None for r in rows),
         group_ids=frozenset(r for r in rows if r is not None),
     )
+
+
+async def deployment_target_client(
+    session: AsyncSession, org_id: UUID, target_type: str, target_id: UUID
+) -> UUID | None:
+    """The client a deployment's target belongs to -- a device's, or a
+    group's (a group is one client's, 0231) -- read org-scoped. None when the
+    target is gone or this session cannot see it."""
+    model = DeviceGroup if target_type == "group" else Device
+    return (
+        await session.execute(
+            select(model.client_id).where(model.org_id == org_id, model.id == target_id)
+        )
+    ).scalar_one_or_none()
 
 
 async def _group_names(session: AsyncSession, org_id: UUID, ids: Iterable[UUID]) -> list[str]:
@@ -136,28 +174,26 @@ async def patch_approval_gate(
     session: AsyncSession, org_id: UUID, device_ids: Sequence[UUID], ring_name: str
 ) -> GateRefusal | None:
     """Why approving into `ring_name` needs a change, or None when it does not.
-    `device_ids` is the ring's population."""
-    gates = await gates_for(session, org_id, "patches")
-    if not gates.any:
-        return None
-    hit_groups: set[UUID] = set()
-    if gates.everywhere:
-        hit = True
-    else:
-        groups = set(
-            (
-                await session.execute(
-                    select(Device.device_group_id).where(
-                        Device.org_id == org_id, Device.id.in_(list(device_ids))
-                    )
-                )
-            ).scalars()
+    `device_ids` is the ring's population, which may span clients: the
+    approval is gated when ANY client it reaches meets a gate there. Gates are
+    read once per client, never per machine."""
+    groups_by_client: dict[UUID, set[UUID | None]] = {}
+    for client_id, group_id in (
+        await session.execute(
+            select(Device.client_id, Device.device_group_id).where(
+                Device.org_id == org_id, Device.id.in_(list(device_ids))
+            )
         )
-        hit_groups = {g for g in groups if g is not None and g in gates.group_ids}
-        hit = bool(hit_groups)
-    if not hit:
+    ).all():
+        groups_by_client.setdefault(client_id, set()).add(group_id)
+    everywhere = False
+    hit_groups: set[UUID] = set()
+    for client_id, groups in groups_by_client.items():
+        gates = await gates_for(session, org_id, "patches", client_id=client_id)
+        everywhere = everywhere or gates.everywhere
+        hit_groups |= {g for g in groups if g is not None and g in gates.group_ids}
+    if not (everywhere or hit_groups):
         return None
-    everywhere = gates.everywhere
     names = await _group_names(session, org_id, hit_groups)
     return GateRefusal(
         lambda: tr(
@@ -172,20 +208,26 @@ async def patch_approval_gate(
 async def deployment_gate(
     session: AsyncSession, org_id: UUID, target_type: str, target_id: UUID
 ) -> GateRefusal | None:
-    """Why deploying to this target needs a change, or None when it does not."""
-    gates = await gates_for(session, org_id, "deployments")
-    if not gates.any:
-        return None
+    """Why deploying to this target needs a change, or None when it does not.
+    The gates are the target's client's. A target that resolves to nothing
+    -- gone, or invisible to this session -- has no client to gate and
+    dispatches to nothing; the dispatch re-check (`deploy.dispatch`) asks
+    again, under the sweep's every-client scope."""
     if target_type == "group":
         group_id: UUID | None = target_id
+        client_id = await deployment_target_client(session, org_id, "group", target_id)
     else:
-        group_id = (
+        found = (
             await session.execute(
-                select(Device.device_group_id).where(
+                select(Device.client_id, Device.device_group_id).where(
                     Device.org_id == org_id, Device.id == target_id
                 )
             )
-        ).scalar_one_or_none()
+        ).one_or_none()
+        client_id, group_id = (found[0], found[1]) if found is not None else (None, None)
+    if client_id is None:
+        return None
+    gates = await gates_for(session, org_id, "deployments", client_id=client_id)
     if not gates.applies_to_group(group_id):
         return None
     names = [] if gates.everywhere or group_id is None else await _group_names(
@@ -284,6 +326,7 @@ async def link_actions(
             action="change.linked",
             target_type="change",
             target_id=str(change.id),
+            client_id=change.client_id,
             metadata={"action_type": action_type, "action_id": str(action_id)},
         )
 
@@ -292,18 +335,24 @@ async def record_auto_change(
     session: AsyncSession,
     *,
     org_id: UUID,
+    client_id: UUID,
     actor_id: UUID,
     title: str,
     description: str,
     affected: list[dict[str, Any]],
     action_type: str,
     action_ids: Sequence[UUID],
-) -> ChangeRequest:
+) -> ChangeRequest | None:
     """The evidence record for an action taken with no change and no gate:
-    a completed standard change, marked `auto`, linked to what was done. It
-    carries no approval because none was given."""
+    a completed standard change of `client_id`, marked `auto`, linked to what
+    was done. It carries no approval because none was given. A client that
+    does not use change management gets none (D4): nothing is written and
+    the answer is None."""
+    if not await module_enabled(session, org_id=org_id, client_id=client_id, module="change"):
+        return None
     change = ChangeRequest(
         org_id=org_id,
+        client_id=client_id,
         type="standard",
         title=title[:255],
         description=description,
@@ -323,6 +372,7 @@ async def record_auto_change(
         action="change.auto_recorded",
         target_type="change",
         target_id=str(change.id),
+        client_id=change.client_id,
         metadata={"action_type": action_type, "action_count": len(action_ids)},
     )
     await link_actions(
@@ -394,17 +444,22 @@ async def set_gate(
     applies_to_patches: bool,
     applies_to_deployments: bool,
 ) -> ChangeGate:
-    """Create or replace the gate for one group (or every device)."""
+    """Create or replace the gate for one group (or every device). A group's
+    gate is its group's client's, so that client must use change management
+    (`ModuleNotEnabled`, 404) -- a gate it would meet but never satisfy is
+    the D4 trap. A group-less gate here is the GLOBAL one: every client that
+    uses the module meets it."""
     if device_group_id is not None:
-        group = (
+        group_client = (
             await session.execute(
-                select(DeviceGroup.id).where(
+                select(DeviceGroup.client_id).where(
                     DeviceGroup.org_id == org_id, DeviceGroup.id == device_group_id
                 )
             )
         ).scalar_one_or_none()
-        if group is None:
+        if group_client is None:
             raise ChangeValidationError(tr("no such device group"))
+        await require_module(session, org_id=org_id, client_id=group_client, module="change")
     if not (applies_to_patches or applies_to_deployments):
         raise ChangeValidationError(tr("a gate must cover patch approvals, deployments, or both"))
     query = select(ChangeGate).where(ChangeGate.org_id == org_id)

@@ -36,6 +36,7 @@ async def _org_user_change(admin_engine: AsyncEngine):
         await s.flush()
         change = ChangeRequest(
             org_id=org.id,
+            client_id=org.id,
             type="normal",
             title="Test change",
             description="desc",

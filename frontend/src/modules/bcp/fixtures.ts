@@ -18,6 +18,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
+import { ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 import type {
   BcpEvidence,
@@ -43,6 +44,7 @@ const notFound = (what: string) => new ApiError(404, JSON.stringify({ detail: `$
 const plans = (): PlanOut[] => [
   {
     id: "plan-1",
+    client_id: ORG_ID,
     name: "Database failover",
     description:
       "Promote the standby PostgreSQL replica and repoint the application tier when the primary in rack B4 is lost.",
@@ -63,6 +65,7 @@ const plans = (): PlanOut[] => [
   },
   {
     id: "plan-2",
+    client_id: ORG_ID,
     name: "File server restore",
     description: "Rebuild por-fs-01 from the last verified backup onto spare hardware in the Porto rack.",
     scope: [{ kind: "device", id: "dev-8" }],
@@ -79,6 +82,7 @@ const plans = (): PlanOut[] => [
   },
   {
     id: "plan-3",
+    client_id: ORG_ID,
     name: "Porto office WAN failover",
     description: "Retired when the LTE path became automatic; kept for the tests recorded against it.",
     scope: [{ kind: "device", id: "dev-8" }],
@@ -106,6 +110,7 @@ const getPlan: FixtureMap["getPlan"] = (id) => findPlan(id);
 
 const createPlan: FixtureMap["createPlan"] = (body) => ({
   id: `plan-${Date.now()}`,
+  client_id: body.client_id,
   name: body.name,
   description: body.description ?? "",
   scope: body.scope ?? [],

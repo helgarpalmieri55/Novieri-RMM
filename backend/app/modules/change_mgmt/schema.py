@@ -16,6 +16,10 @@ from pydantic import BaseModel
 
 
 class ChangeCreateRequest(BaseModel):
+    # The client the change is for (MSP clients plan 2026-10-26 Task 7): it
+    # must use change management. Fixed for the change's life -- no update
+    # carries it.
+    client_id: UUID
     type: Literal["standard", "normal", "emergency"]
     title: str
     description: str
@@ -39,6 +43,7 @@ class ChangeUpdateRequest(BaseModel):
 
 class ChangeOut(BaseModel):
     id: UUID
+    client_id: UUID
     type: str
     title: str
     description: str

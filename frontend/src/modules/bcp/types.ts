@@ -14,6 +14,8 @@ export interface PlanScopeEntry {
 
 export interface PlanOut {
   id: string;
+  /** The client the plan is for (MSP clients phase 2); fixed for its life. */
+  client_id: string;
   name: string;
   description: string;
   scope: PlanScopeEntry[];
@@ -135,6 +137,10 @@ export interface PeriodReportOut {
 }
 
 export interface PlanCreateRequest {
+  /** The client the plan is for. It must use continuity, or the server
+   *  answers 404 with the sentence that says so; the scope and procedures
+   *  must be its own. */
+  client_id: string;
   name: string;
   description?: string;
   scope?: PlanScopeEntry[];

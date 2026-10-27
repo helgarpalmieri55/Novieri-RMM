@@ -1061,10 +1061,16 @@ async def _approve_with_change(
                         action_ids=approval_ids,
                     )
                 elif any(o.created for o in outcomes):
-                    new = [o.approval.id for o in outcomes if o.created]
+                    created = [o.approval for o in outcomes if o.created]
+                    new = [approval.id for approval in created]
                     await record_auto_change(
                         session,
                         org_id=ctx.org_id,
+                        # The approvals' client -- one call approves under one
+                        # client -- or, for a GLOBAL approval, the internal
+                        # client, whose id is the org's: Novieri decided it
+                        # (MSP clients plan 2026-10-26, C8).
+                        client_id=created[0].client_id or ctx.org_id,
                         actor_id=ctx.user_id,
                         title=f"Patch approval: {len(new)} update(s) for the {ring_name} ring",
                         description=(

@@ -117,6 +117,7 @@ async def _change(api_env, f: dict, state: str) -> UUID:
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
         change = ChangeRequest(
             org_id=f["org_id"],
+            client_id=f["org_id"],
             type="normal",
             title="Patch Tuesday",
             description="",

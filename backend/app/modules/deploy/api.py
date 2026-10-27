@@ -618,6 +618,7 @@ async def create_deployment(
                 await record_auto_change(
                     session,
                     org_id=ctx.org_id,
+                    client_id=ctx.org_id,  # plan 2026-10-26 Task 9 passes the deployment's client
                     actor_id=ctx.user_id,
                     title=f"Deployment: {body.action} {package.name} {package.version}",
                     description=(

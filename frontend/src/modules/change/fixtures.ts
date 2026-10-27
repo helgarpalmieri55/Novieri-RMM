@@ -21,6 +21,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
+import { ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 import type { Approval, CalendarConflict, CalendarEntry, ChangeRequest, Link } from "./types";
 
@@ -159,6 +160,8 @@ function change(seed: ChangeSeed): ChangeRequest {
   const end = seed.startsIn === null ? null : ahead(seed.startsIn + seed.lengthMinutes);
   return {
     id: seed.id,
+    // Every change is the internal client's (`ORG_ID`, the id convention).
+    client_id: ORG_ID,
     type: seed.type,
     title: seed.title,
     description: seed.description,
@@ -186,6 +189,7 @@ const getChange: FixtureMap["getChange"] = (id) => findChange(id);
 
 const createChange: FixtureMap["createChange"] = (body) => ({
   id: `chg-${Date.now()}`,
+  client_id: body.client_id,
   type: body.type,
   title: body.title,
   description: body.description,

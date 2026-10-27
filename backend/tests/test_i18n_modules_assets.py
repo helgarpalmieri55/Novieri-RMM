@@ -17,6 +17,7 @@ import pytest
 
 from app.core.client_scope import ClientScope
 from app.core.i18n import CATALOG_ES, use_locale
+from tests.client_scope_support import internal_client
 from tests.test_backup_offsite import aws, vault  # noqa: F401  (fixtures)
 from tests.test_backup_result import object_store  # noqa: F401  (a fixture)
 
@@ -400,6 +401,8 @@ async def test_bcp_a_scope_that_points_nowhere_keeps_the_wire_kind_in_its_identi
     env, headers = admin
     group_id = uuid4()
     body = {
+        # The internal client, which uses continuity (plan 2026-10-26 Task 7).
+        "client_id": await internal_client(env, headers),
         "name": "Plan",
         "rto_minutes": 60,
         "rpo_minutes": 15,

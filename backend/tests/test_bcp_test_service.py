@@ -124,6 +124,7 @@ async def _seed_plan_with_scope(
         plan = await create_plan(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             name="DR Plan",
             description="Recover the core stack",

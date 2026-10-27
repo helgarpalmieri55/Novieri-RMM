@@ -73,6 +73,7 @@ def _plan_dict(plan: BcpPlan) -> dict[str, Any]:
     """Shape matching `schema.PlanOut` exactly."""
     return {
         "id": plan.id,
+        "client_id": plan.client_id,
         "name": plan.name,
         "description": plan.description,
         "scope": plan.scope,

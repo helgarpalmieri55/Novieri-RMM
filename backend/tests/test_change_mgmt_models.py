@@ -34,6 +34,7 @@ async def test_change_mgmt_models_roundtrip(
         # Test ChangeRequest
         change_req = ChangeRequest(
             org_id=org_id,
+            client_id=org_id,
             type="normal",
             title="Test Change",
             description="A test change request",

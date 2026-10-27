@@ -46,6 +46,7 @@ async def _seed_plan(app_engine: AsyncEngine, org_id: UUID, actor_id: UUID) -> U
         plan = await create_plan(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             name="DR Plan",
             description="Recover the core stack",
@@ -79,6 +80,7 @@ async def _seed_change_request(admin_engine: AsyncEngine, org_id: UUID, actor_id
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         change = ChangeRequest(
             org_id=org_id,
+            client_id=org_id,
             type="normal",
             title="T",
             description="D",
@@ -392,6 +394,12 @@ async def test_update_finding_change_ref_org_filter_is_load_bearing(
     how the cross-org seed helpers insert), so org B's row IS visible on the
     connection and only the guard's own `org_id` predicate can reject the
     foreign id. Mutation-verified: deleting that predicate makes this fail.
+
+    THE MESSAGE IS PART OF THE ASSERTION (MSP clients plan 2026-10-26 Task 7).
+    The guard now also holds the change to the finding's client, and org B's
+    change is org B's client's, so without the org predicate it would still
+    be refused -- as "another client's", a different sentence. Matching "not
+    found" keeps the org predicate the one that answers.
     """
     org_a, actor_a = await _org_with_user(admin_engine)
     org_b, actor_b = await _org_with_user(admin_engine)
@@ -412,7 +420,7 @@ async def test_update_finding_change_ref_org_filter_is_load_bearing(
         finding_id = finding.id
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
-        with pytest.raises(BcpValidationError):
+        with pytest.raises(BcpValidationError, match="change_ref not found"):
             await update_finding(
                 s,
                 org_id=org_a,

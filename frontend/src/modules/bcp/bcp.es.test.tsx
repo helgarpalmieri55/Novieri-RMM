@@ -74,6 +74,7 @@ const ARTICLE_ID = "3c2b1a09-0000-4000-8000-000000000002";
 function plan(over: Partial<PlanOut> = {}): PlanOut {
   return {
     id: "plan1",
+    client_id: "o1",
     name: "Conmutación del centro de datos",
     description: "Pasar los servicios centrales al sitio de recuperación.",
     scope: [

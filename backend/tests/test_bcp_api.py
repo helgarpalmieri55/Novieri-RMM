@@ -16,6 +16,7 @@ from sqlalchemy import select
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent
+from tests.client_scope_support import internal_client
 from tests.conftest import ApiEnv
 
 _PLAN_BODY = {
@@ -31,7 +32,10 @@ _PLAN_BODY = {
 
 
 async def _create_plan(api_env: ApiEnv, headers: dict[str, str]) -> dict[str, Any]:
-    resp = await api_env.client.post("/api/v1/bcp/plans", json=_PLAN_BODY, headers=headers)
+    # The internal client of whoever `headers` sign in as, which uses
+    # continuity (MSP clients plan 2026-10-26 Task 7).
+    body = {**_PLAN_BODY, "client_id": await internal_client(api_env, headers)}
+    resp = await api_env.client.post("/api/v1/bcp/plans", json=body, headers=headers)
     assert resp.status_code == 201, resp.text
     body: dict[str, Any] = resp.json()
     return body
@@ -82,7 +86,9 @@ async def test_create_plan_ok_for_technician_forbidden_for_read_only(api_env: Ap
     assert created["state"] == "active"
 
     forbidden = await api_env.client.post(
-        "/api/v1/bcp/plans", json=_PLAN_BODY, headers=await api_env.headers(org_id, ro)
+        "/api/v1/bcp/plans",
+        json={**_PLAN_BODY, "client_id": str(org_id)},
+        headers=await api_env.headers(org_id, ro),
     )
     assert forbidden.status_code == 403
 
@@ -368,6 +374,7 @@ async def test_update_finding_cross_org_change_ref_is_400_not_500(api_env: ApiEn
             "description": "n/a",
             "risk": "low",
             "affected": [],
+            "client_id": str(other_org_id),
         },
         headers=other_headers,
     )

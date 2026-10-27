@@ -3615,6 +3615,22 @@ CATALOG: dict[str, str] = {
         "el destino de la asignación es de otro cliente"
     ),
     "that license belongs to another client": "esa licencia es de otro cliente",
+    # Optional modules per client; changes and BCP plans belong to one client
+    # (plan 2026-10-26 Task 7).
+    "this client does not use that module": "este cliente no usa ese módulo",
+    "a change cannot be filed under Unassigned": (
+        "un cambio no puede pertenecer a «Sin asignar»"
+    ),
+    "a BCP plan cannot be filed under Unassigned": (
+        "un plan de continuidad no puede pertenecer a «Sin asignar»"
+    ),
+    "scope ref belongs to another client: {kind}:{ref_id}": (
+        "la referencia del ámbito es de otro cliente: {kind}:{ref_id}"
+    ),
+    "procedure_ref belongs to another client: {ref_id}": (
+        "procedure_ref es de otro cliente: {ref_id}"
+    ),
+    "that change belongs to another client": "ese cambio es de otro cliente",
     "Their sign-in is turned off": "Su inicio de sesión está desactivado",
     "Every computer is in a group": "Todos los equipos están en un grupo",
     "Nothing installed through ITMS yet": "Todavía no se ha instalado nada con ITMS",
@@ -3951,7 +3967,6 @@ CATALOG: dict[str, str] = {
     "emergency change requires retrospective approval before completion": (
         "un cambio de emergencia necesita aprobación retroactiva antes de completarse"
     ),
-    "change not found": "no se encontró el cambio",
     "unknown action_type {action_type}": "action_type desconocido {action_type}",
     "linked action not found": "no se encontró la acción vinculada",
     "action already linked to this change": "la acción ya está vinculada a este cambio",

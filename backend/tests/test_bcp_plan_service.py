@@ -123,6 +123,7 @@ async def test_create_plan_with_valid_refs_succeeds_and_audits(
         plan = await create_plan(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             name="DR Plan",
             description="Recover the core stack",
@@ -175,6 +176,7 @@ async def test_create_plan_scope_device_from_another_org_raises(
             await create_plan(
                 s,
                 org_id=org_id,
+                client_id=org_id,
                 actor_id=actor_id,
                 name="DR Plan",
                 description="",
@@ -197,6 +199,7 @@ async def test_create_plan_scope_random_device_id_raises(
             await create_plan(
                 s,
                 org_id=org_id,
+                client_id=org_id,
                 actor_id=actor_id,
                 name="DR Plan",
                 description="",
@@ -219,6 +222,7 @@ async def test_create_plan_unknown_scope_kind_raises(
             await create_plan(
                 s,
                 org_id=org_id,
+                client_id=org_id,
                 actor_id=actor_id,
                 name="DR Plan",
                 description="",
@@ -241,6 +245,7 @@ async def test_create_plan_malformed_scope_uuid_raises(
             await create_plan(
                 s,
                 org_id=org_id,
+                client_id=org_id,
                 actor_id=actor_id,
                 name="DR Plan",
                 description="",
@@ -265,6 +270,7 @@ async def test_create_plan_cross_org_procedure_ref_raises(
             await create_plan(
                 s,
                 org_id=org_id,
+                client_id=org_id,
                 actor_id=actor_id,
                 name="DR Plan",
                 description="",
@@ -287,6 +293,7 @@ async def test_create_plan_random_procedure_ref_raises(
             await create_plan(
                 s,
                 org_id=org_id,
+                client_id=org_id,
                 actor_id=actor_id,
                 name="DR Plan",
                 description="",
@@ -313,6 +320,7 @@ async def test_update_plan_applies_fields_and_audits(
         plan = await create_plan(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             name="Original",
             description="Original desc",
@@ -350,6 +358,7 @@ async def test_update_plan_revalidates_new_scope(
         plan = await create_plan(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             name="Original",
             description="",
@@ -400,6 +409,7 @@ async def test_review_plan_sets_reviewed_fields_and_audits(
         plan = await create_plan(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             name="Plan",
             description="",
@@ -482,6 +492,7 @@ async def test_get_plan_and_list_plans(admin_engine: AsyncEngine, app_engine: As
         plan = await create_plan(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             name="Plan",
             description="",
@@ -523,6 +534,7 @@ async def test_another_orgs_plan_is_hidden_by_rls(
         plan = await create_plan(
             s,
             org_id=org_a,
+            client_id=org_a,
             actor_id=actor_a,
             name="Plan A",
             description="",
@@ -550,7 +562,7 @@ async def test_update_plan_rejects_invalid_state(
     org_id, actor_id = await _org_with_user(admin_engine)
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         plan = await create_plan(
-            s, org_id=org_id, actor_id=actor_id, name="p", description="",
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, name="p", description="",
             scope=[], rto_minutes=None, rpo_minutes=None, procedure_refs=[],
             dependencies=[], review_interval_days=365,
         )
@@ -588,7 +600,10 @@ async def test_the_plan_org_predicates_hold_where_rls_is_not_doing_the_rejecting
       of org A's evidence set.
 
     FALSIFIED, one predicate at a time: dropping `model.org_id == org_id` from
-    `_validate_scope` lets the cross-org scope be created; dropping
+    `_validate_scope` lets the cross-org scope be created (or, since the plan
+    is held to its client too (MSP clients plan 2026-10-26 Task 7), refuses it
+    as ANOTHER CLIENT'S -- a different sentence, which is why the refusal is
+    matched on "not found"); dropping
     `BcpPlan.org_id == org_id` from `list_plans` returns both orgs' plans;
     dropping `Device.org_id == org_id` from the group branch of
     `resolve_scope_devices` pulls org B's device into org A's set.
@@ -609,10 +624,11 @@ async def test_the_plan_org_predicates_hold_where_rls_is_not_doing_the_rejecting
         await s.commit()
 
     # 1. The refusal: org B's device may not enter org A's scope.
-    with pytest.raises(BcpValidationError):
+    with pytest.raises(BcpValidationError, match="scope ref not found"):
         await create_plan(
             bypassrls_session,
             org_id=org_a,
+            client_id=org_a,
             actor_id=actor_a,
             name="cross-org scope",
             description="",
@@ -634,6 +650,7 @@ async def test_the_plan_org_predicates_hold_where_rls_is_not_doing_the_rejecting
         plan = await create_plan(
             bypassrls_session,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             name=f"plan-{key}",
             description="",

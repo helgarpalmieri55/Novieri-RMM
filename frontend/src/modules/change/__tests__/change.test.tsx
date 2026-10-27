@@ -42,6 +42,7 @@ const ME: Me = {
 const CHANGES: ChangeRequest[] = [
   {
     id: "change1",
+    client_id: "o1",
     type: "standard",
     title: "Upgrade switch firmware",
     description: "Roll out firmware 2.1 to core switches.",
@@ -376,6 +377,58 @@ describe("ChangeRequestForm", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "That service is unavailable right now",
+    );
+  });
+
+  // MSP clients phase 2: a change is one client's. Until the selector exists
+  // (PHASE 3) that is the internal client, `/me`'s `org_id`.
+  it("files a new change under the internal client", async () => {
+    const user = userEvent.setup();
+    renderNew();
+
+    await user.type(screen.getByLabelText("Title *"), "Upgrade switch firmware");
+    await user.type(screen.getByLabelText("Description *"), "Roll out firmware 2.1.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(api.createChange).toHaveBeenCalledWith(
+        expect.objectContaining({ client_id: "o1", title: "Upgrade switch firmware" }),
+      ),
+    );
+  });
+
+  it("sends nothing while it cannot name the client", async () => {
+    const user = userEvent.setup();
+    api.me = vi.fn(() => new Promise<Me>(() => {}));
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderNew();
+
+    await user.type(screen.getByLabelText("Title *"), "Upgrade switch firmware");
+    await user.type(screen.getByLabelText("Description *"), "Roll out firmware 2.1.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Nothing was sent");
+    expect(api.createChange).not.toHaveBeenCalled();
+  });
+
+  // Change management is a module a client may not use, and the server's 404
+  // for that is a sentence, which is what the person reads.
+  it("says so when the client does not use change management", async () => {
+    const user = userEvent.setup();
+    api.createChange = vi
+      .fn()
+      .mockRejectedValue(
+        new ApiError(404, JSON.stringify({ detail: "this client does not use that module" })),
+      );
+    mockUseApi.mockReturnValue(api as ApiClient);
+    renderNew();
+
+    await user.type(screen.getByLabelText("Title *"), "Upgrade switch firmware");
+    await user.type(screen.getByLabelText("Description *"), "Roll out firmware 2.1.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "this client does not use that module",
     );
   });
 

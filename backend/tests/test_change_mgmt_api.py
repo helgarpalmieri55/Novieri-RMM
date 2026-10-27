@@ -36,9 +36,15 @@ async def _user_id(api_env, org_id: UUID, sub: str) -> UUID:
         ).scalar_one()
 
 
+def _change_body(org_id: UUID, **extra: object) -> dict:
+    """`_CHANGE_BODY` for the org's internal client (whose id is the org's),
+    which uses change management (MSP clients plan 2026-10-26 Task 7)."""
+    return {**_CHANGE_BODY, "client_id": str(org_id), **extra}
+
+
 async def _create_change(api_env, org_id: UUID, headers: dict[str, str]) -> dict:
     resp = await api_env.client.post(
-        "/api/v1/changes", json=_CHANGE_BODY, headers=headers
+        "/api/v1/changes", json=_change_body(org_id), headers=headers
     )
     assert resp.status_code == 201, resp.text
     return resp.json()
@@ -90,7 +96,9 @@ async def test_create_change_forbidden_without_request_permission(api_env) -> No
     org_id = await api_env.create_org("chg")
     nobody = await api_env.create_user(org_id)
     resp = await api_env.client.post(
-        "/api/v1/changes", json=_CHANGE_BODY, headers=await api_env.headers(org_id, nobody)
+        "/api/v1/changes",
+        json=_change_body(org_id),
+        headers=await api_env.headers(org_id, nobody),
     )
     assert resp.status_code == 403
 
@@ -423,7 +431,7 @@ async def test_list_approvals_returns_history_without_audit(api_env) -> None:
     # change, in order, without a state-machine reset in between.
     created = await api_env.client.post(
         "/api/v1/changes",
-        json={**_CHANGE_BODY, "type": "emergency"},
+        json=_change_body(org_id, type="emergency"),
         headers=tech_headers,
     )
     assert created.status_code == 201, created.text

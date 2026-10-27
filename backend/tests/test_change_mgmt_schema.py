@@ -25,10 +25,18 @@ from app.modules.change_mgmt.schema import (
     TransitionRequest,
 )
 
+#: Any client: these models do not look it up (MSP clients plan 2026-10-26 Task 7).
+CLIENT_ID = "0198c1f4-0000-7000-8000-0000000000c1"
+
+
+def _create(**fields: object) -> ChangeCreateRequest:
+    """A create request for `CLIENT_ID`: a refusal is then the field under test's."""
+    return ChangeCreateRequest(client_id=CLIENT_ID, **fields)  # type: ignore[arg-type]
+
 
 class TestChangeCreateRequest:
     def test_construct_with_defaults(self) -> None:
-        req = ChangeCreateRequest(type="normal", title="t", description="d", risk="low")
+        req = _create(type="normal", title="t", description="d", risk="low")
         assert req.affected == []
         assert req.window_start is None
         assert req.window_end is None
@@ -36,27 +44,34 @@ class TestChangeCreateRequest:
 
     def test_rejects_invalid_type(self) -> None:
         with pytest.raises(ValidationError):
-            ChangeCreateRequest(type="huge", title="t", description="d", risk="low")
+            _create(type="huge", title="t", description="d", risk="low")
 
     def test_rejects_invalid_risk(self) -> None:
         with pytest.raises(ValidationError):
-            ChangeCreateRequest(type="normal", title="t", description="d", risk="extreme")
+            _create(type="normal", title="t", description="d", risk="extreme")
 
     def test_requires_type(self) -> None:
         with pytest.raises(ValidationError):
-            ChangeCreateRequest(title="t", description="d", risk="low")  # type: ignore[call-arg]
+            _create(title="t", description="d", risk="low")
 
     def test_requires_title(self) -> None:
         with pytest.raises(ValidationError):
-            ChangeCreateRequest(type="normal", description="d", risk="low")  # type: ignore[call-arg]
+            _create(type="normal", description="d", risk="low")
 
     def test_requires_description(self) -> None:
         with pytest.raises(ValidationError):
-            ChangeCreateRequest(type="normal", title="t", risk="low")  # type: ignore[call-arg]
+            _create(type="normal", title="t", risk="low")
 
     def test_requires_risk(self) -> None:
         with pytest.raises(ValidationError):
-            ChangeCreateRequest(type="normal", title="t", description="d")  # type: ignore[call-arg]
+            _create(type="normal", title="t", description="d")
+
+    def test_requires_client_id(self) -> None:
+        # A change belongs to one client (MSP clients plan 2026-10-26 Task 7).
+        with pytest.raises(ValidationError, match="client_id"):
+            ChangeCreateRequest(  # type: ignore[call-arg]
+                type="normal", title="t", description="d", risk="low"
+            )
 
 
 class TestChangeUpdateRequest:
@@ -84,6 +99,7 @@ class TestChangeOut:
     def test_construct(self) -> None:
         out = ChangeOut(
             id="0198c1f4-0000-7000-8000-000000000000",
+            client_id=CLIENT_ID,
             type="normal",
             title="t",
             description="d",
@@ -183,6 +199,7 @@ class TestEvidenceOut:
     def test_construct(self) -> None:
         change = ChangeOut(
             id="0198c1f4-0000-7000-8000-000000000000",
+            client_id=CLIENT_ID,
             type="normal",
             title="t",
             description="d",

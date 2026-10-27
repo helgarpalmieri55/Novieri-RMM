@@ -57,7 +57,11 @@ export function useCreateChangeMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: ChangeCreateRequest) => api.createChange(body),
+    // The body is BUILT HERE, inside the mutation, not before it: a body that
+    // cannot name its client yet throws `InternalScopeUnknown`
+    // (`lib/internalClient.ts`), which then fails the mutation -- so the
+    // form's error surface says why and nothing is sent.
+    mutationFn: (build: () => ChangeCreateRequest) => api.createChange(build()),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["changes"] });
     },

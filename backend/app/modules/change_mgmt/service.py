@@ -32,13 +32,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.models import ChangeApproval, ChangeRequest
+from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.change_mgmt.state import (
     ChangeAction,
+    ChangeClientError,
+    ChangeConflictError,
     ChangeNotFoundError,
     ChangeValidationError,
     next_state,
 )
 from app.modules.change_mgmt.ticketing import ChangeTicketPort
+from app.services.client_modules import require_module
+from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
 
 _TERMINAL_STATES = {"completed", "cancelled"}
 
@@ -72,11 +77,41 @@ async def _load_change(session: AsyncSession, org_id: UUID, change_id: UUID) -> 
     return change
 
 
+async def load_change_for_write(
+    session: AsyncSession, org_id: UUID, change_id: UUID
+) -> ChangeRequest:
+    """The change a write is about, from a client that uses change management:
+    a change this session cannot see is the 404 it always was, and one whose
+    client has the module off is `ModuleNotEnabled` (404) -- before anything
+    is written, and as the write's first lock (`require_module`)."""
+    change = await _load_change(session, org_id, change_id)
+    await require_module(session, org_id=org_id, client_id=change.client_id, module="change")
+    return change
+
+
+async def _client_for_new_change(session: AsyncSession, org_id: UUID, client_id: UUID) -> None:
+    """The client a new change is filed under, loaded as every new row's is
+    (`client_for_new_rows`, held FOR SHARE until commit): one this session
+    cannot see is a 404, never a 403 (spec §3.2's existence oracle), an
+    archived one a 409, "Sin asignar" a 422 (C10). Then the module: a client
+    without change management is a 404 too."""
+    try:
+        client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
+    except ClientNotFound:
+        raise ChangeNotFoundError(tr("no such client")) from None
+    except NotAcceptingNewRows as exc:
+        raise ChangeConflictError(exc.detail) from None
+    if client.kind == CLIENT_KIND_UNASSIGNED:
+        raise ChangeClientError(tr("a change cannot be filed under Unassigned"))
+    await require_module(session, org_id=org_id, client_id=client_id, module="change")
+
+
 async def create_change(
     session: AsyncSession,
     *,
     org_id: UUID,
     actor_id: UUID,
+    client_id: UUID,
     type_: str,
     title: str,
     description: str,
@@ -86,9 +121,12 @@ async def create_change(
     window_end: datetime | None,
     rollback_plan: str | None,
 ) -> ChangeRequest:
-    """Create a new `draft` change and audit `change.created`."""
+    """Create a new `draft` change for `client_id` (`_client_for_new_change`)
+    and audit `change.created`."""
+    await _client_for_new_change(session, org_id, client_id)
     change = ChangeRequest(
         org_id=org_id,
+        client_id=client_id,
         type=type_,
         title=title,
         description=description,
@@ -111,6 +149,7 @@ async def create_change(
         action="change.created",
         target_type="change",
         target_id=str(change.id),
+        client_id=change.client_id,
         metadata={"type": type_, "risk": risk, "title": title},
     )
     await session.flush()
@@ -127,7 +166,7 @@ async def update_change(
 ) -> ChangeRequest:
     """Apply the given non-None fields to a `draft` change; any other state
     raises `ChangeValidationError` — only a draft is editable."""
-    change = await _load_change(session, org_id, change_id)
+    change = await load_change_for_write(session, org_id, change_id)
     if change.state != "draft":
         raise ChangeValidationError(tr("only a draft change can be edited"))
 
@@ -150,6 +189,7 @@ async def update_change(
         action="change.updated",
         target_type="change",
         target_id=str(change.id),
+        client_id=change.client_id,
         metadata={},
     )
     await session.flush()
@@ -182,7 +222,7 @@ async def transition_change(
     """Drive `change_id` through one lifecycle transition (`submit`/`begin`/
     `complete`/`cancel`/`revise` — `approve`/`reject` are Task 7), then call
     the pinned ticket-port site for the resulting state."""
-    change = await _load_change(session, org_id, change_id)
+    change = await load_change_for_write(session, org_id, change_id)
     old_state = change.state
 
     has_retrospective_approval = await _has_retrospective_approval(session, org_id, change_id)
@@ -207,6 +247,7 @@ async def transition_change(
             action="change.submitted",
             target_type="change",
             target_id=str(change.id),
+            client_id=change.client_id,
             metadata={"from": old_state, "to": new_state, "action": action},
         )
     else:
@@ -218,6 +259,7 @@ async def transition_change(
             action="change.transitioned",
             target_type="change",
             target_id=str(change.id),
+            client_id=change.client_id,
             metadata={"from": old_state, "to": new_state, "action": action},
         )
     await session.flush()
@@ -266,7 +308,7 @@ async def decide_change(
     later `transition_change(complete)` checks for via
     `_has_retrospective_approval`.
     """
-    change = await _load_change(session, org_id, change_id)
+    change = await load_change_for_write(session, org_id, change_id)
 
     if decision not in _DECISION_TO_ACTION:
         raise ChangeValidationError(tr("invalid decision: {decision}", decision=repr(decision)))
@@ -305,6 +347,7 @@ async def decide_change(
         action=_DECISION_TO_AUDIT_ACTION[decision],
         target_type="change",
         target_id=str(change.id),
+        client_id=change.client_id,
         metadata={"decision": decision, "is_retrospective": is_retrospective},
     )
     await session.flush()

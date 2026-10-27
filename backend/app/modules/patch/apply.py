@@ -186,12 +186,33 @@ async def dispatch_apply(
     for status, patch in rows:
         by_device.setdefault(status.device_id, []).append((status, patch))
 
-    gates = await gates_for(session, org_id, "patches")
+    # A device meets ITS CLIENT'S change gates (MSP clients plan 2026-10-26
+    # Task 7, D4): the clients are read once for the sweep, and each client's
+    # gates once, however many of its devices are due.
+    device_clients: dict[UUID, UUID] = dict(
+        (
+            await session.execute(
+                select(Device.id, Device.client_id).where(
+                    Device.org_id == org_id, Device.id.in_(list(by_device))
+                )
+            )
+        )
+        .tuples()
+        .all()
+    )
+    gates_by_client: dict[UUID, Gates] = {}
     pending: list[tuple[UUID, UUID, dict[str, Any]]] = []
     for device_id, status_patches in by_device.items():
         policy = await resolve_patch_policy(session, org_id, device_id)
         if not in_window(policy.maintenance_window, now):
             continue
+        client_id = device_clients.get(device_id)
+        if client_id is None:
+            continue  # gone, or invisible to this session: nothing to send it
+        gates = gates_by_client.get(client_id)
+        if gates is None:
+            gates = await gates_for(session, org_id, "patches", client_id=client_id)
+            gates_by_client[client_id] = gates
 
         candidate_patch_ids = {patch.id for _, patch in status_patches}
         approved_ids = await _ring_approved_patch_ids(

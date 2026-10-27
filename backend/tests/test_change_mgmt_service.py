@@ -144,6 +144,7 @@ async def test_create_change_creates_draft_and_audits(
         change = await create_change(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             type_="normal",
             title="Upgrade router firmware",
@@ -199,6 +200,7 @@ async def test_update_change_on_draft_applies_fields_and_audits(
         change = await create_change(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             type_="normal",
             title="Original title",
@@ -247,6 +249,7 @@ async def test_update_change_on_non_draft_raises(
         change = await create_change(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             type_="normal",
             title="T",
@@ -288,6 +291,7 @@ async def test_transition_submit_moves_to_submitted_and_pushes_ticket(
         change = await create_change(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             type_="normal",
             title="T",
@@ -332,6 +336,7 @@ async def test_standard_change_full_lifecycle_submit_approve_begin_complete(
         change = await create_change(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=requester_id,
             type_="normal",
             title="T",
@@ -424,6 +429,7 @@ async def test_illegal_transition_raises_and_does_not_commit_state(
         change = await create_change(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             type_="normal",
             title="T",
@@ -469,6 +475,7 @@ async def test_emergency_begin_from_submitted_and_complete_requires_retrospectiv
         change = await create_change(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=requester_id,
             type_="emergency",
             title="Emergency patch",
@@ -546,6 +553,7 @@ async def test_get_change_and_list_changes(
         change = await create_change(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             type_="normal",
             title="T",
@@ -593,6 +601,7 @@ async def test_another_orgs_change_is_hidden_by_rls(
         change = await create_change(
             s,
             org_id=org_a,
+            client_id=org_a,
             actor_id=actor_a,
             type_="normal",
             title="T",
@@ -654,6 +663,7 @@ async def test_the_change_org_predicates_hold_where_rls_is_not_doing_the_rejecti
         change = await create_change(
             bypassrls_session,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             type_="normal",
             title=f"title-{key}",

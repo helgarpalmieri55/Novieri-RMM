@@ -148,6 +148,7 @@ async def test_change_evidence_returns_change_approvals_links_and_scoped_audit_r
         change = await create_change(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=requester_id,
             type_="emergency",
             title="Emergency patch",
@@ -232,6 +233,7 @@ async def test_change_evidence_returns_change_approvals_links_and_scoped_audit_r
         other_change = await create_change(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=requester_id,
             type_="normal",
             title="Unrelated",
@@ -326,6 +328,7 @@ async def test_fleet_change_evidence_returns_one_record_per_change(
             change = await create_change(
                 s,
                 org_id=org_id,
+                client_id=org_id,
                 actor_id=requester_id,
                 type_="normal",
                 title=f"Change {i}",
@@ -364,6 +367,7 @@ async def test_change_calendar_conflicts_and_range_filtering(
             change = await create_change(
                 s,
                 org_id=org_id,
+                client_id=org_id,
                 actor_id=requester_id,
                 type_="normal",
                 title=title,
@@ -434,6 +438,7 @@ async def test_change_calendar_excludes_another_orgs_change_under_rls(
         change_a = await create_change(
             s,
             org_id=org_a,
+            client_id=org_a,
             actor_id=requester_a,
             type_="normal",
             title="A",
@@ -450,6 +455,7 @@ async def test_change_calendar_excludes_another_orgs_change_under_rls(
         change_b = await create_change(
             s,
             org_id=org_b,
+            client_id=org_b,
             actor_id=requester_b,
             type_="normal",
             title="B",
@@ -491,6 +497,7 @@ async def test_change_evidence_is_empty_for_another_orgs_change_under_rls(
         change = await create_change(
             s,
             org_id=org_a,
+            client_id=org_a,
             actor_id=requester_a,
             type_="normal",
             title="A-only",

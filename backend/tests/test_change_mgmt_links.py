@@ -53,6 +53,7 @@ async def _org_with_user_and_change(admin_engine: AsyncEngine) -> tuple[UUID, UU
 
         change = ChangeRequest(
             org_id=org.id,
+            client_id=org.id,
             type="normal",
             title="T",
             description="D",
@@ -740,25 +741,54 @@ async def test_the_link_org_predicates_hold_where_rls_is_not_doing_the_rejecting
     the entire defence, and a change record that claims to cover a neighbour's
     deployment is a false audit trail rather than a leak.
 
-    FALSIFIED: deleting `model.org_id == org_id` from `_validate_action_ref`
-    lets org A link org B's deployment; deleting `ChangeLink.org_id == org_id`
-    from `list_links` shows both orgs' links for the same change id.
+    FALSIFIED: deleting `model.org_id == org_id` from the resolvers'
+    `_client_column` lets org A link org B's global patch approval; deleting
+    `Deployment.org_id == org_id` from `_deployment` lets org A link org B's
+    deployment that names org A's device; deleting `ChangeLink.org_id ==
+    org_id` from `list_links` shows both orgs' links for the same change id.
+
+    WHY THOSE TWO TARGETS (MSP clients plan 2026-10-26 Task 7). The resolvers
+    also hold a target to the change's CLIENT, and org B's deployment of org
+    B's device is org B's client's -- refused without any org predicate. So
+    the org predicates are pinned by the two targets the client check lets
+    through: a global approval (no client, every client's) and a deployment
+    whose bare `target_id` names org A's own device (no foreign key stops
+    it), whose client is therefore org A's change's.
     """
     org_a, user_a, change_a = await _org_with_user_and_change(admin_engine)
     org_b, user_b, change_b = await _org_with_user_and_change(admin_engine)
     deployment_a = await _seed_deployment(admin_engine, org_a)
     deployment_b = await _seed_deployment(admin_engine, org_b)
-
-    with pytest.raises(ChangeValidationError, match="linked action not found"):
-        await add_link(
-            bypassrls_session,
-            org_id=org_a,
-            actor_id=user_a,
-            change_id=change_a,
-            action_type="deployment",
-            action_id=deployment_b,
+    approval_b = await _seed_patch_approval(admin_engine, org_b)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        device_a = (
+            await s.execute(select(Deployment.target_id).where(Deployment.id == deployment_a))
+        ).scalar_one()
+        package_b = (
+            await s.execute(select(Deployment.package_id).where(Deployment.id == deployment_b))
+        ).scalar_one()
+        b_names_a = Deployment(
+            org_id=org_b, package_id=package_b, action="install", target_type="device",
+            target_id=device_a, state="pending",
         )
-    await bypassrls_session.rollback()
+        s.add(b_names_a)
+        await s.commit()
+
+    for action_type, action_id in (
+        ("deployment", deployment_b),
+        ("patch_approval", approval_b),
+        ("deployment", b_names_a.id),
+    ):
+        with pytest.raises(ChangeValidationError, match="linked action not found"):
+            await add_link(
+                bypassrls_session,
+                org_id=org_a,
+                actor_id=user_a,
+                change_id=change_a,
+                action_type=action_type,
+                action_id=action_id,
+            )
+        await bypassrls_session.rollback()
 
     for org_id, actor_id, change_id, action_id in (
         (org_a, user_a, change_a, deployment_a),

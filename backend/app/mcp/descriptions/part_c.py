@@ -10,16 +10,16 @@ PART_C: dict[str, str] = {
     "PATCH /api/v1/bcp/findings/{finding_id}": (
         "Updates a DR test finding's remediation state (open, in_progress, resolved), "
         "description, or linked change request. Resolving stamps the resolution time and "
-        "reopening clears it; an unknown change reference is refused."
+        "reopening clears it; an unknown change, or one of another client, is refused."
     ),
     "GET /api/v1/bcp/plans": (
         "Lists the organization's business-continuity and disaster-recovery plans with scope, RTO "
         "and RPO targets, review interval, and state. Records no audit event."
     ),
     "POST /api/v1/bcp/plans": (
-        "Creates a BCP/DR plan with its scope, RTO and RPO targets in minutes, procedure "
-        "references, dependencies and review interval. Returns the new plan; an invalid scope or "
-        "procedure reference is refused."
+        "Creates a BCP/DR plan of the client given by client_id, with its scope, RTO and RPO "
+        "targets in minutes, procedures, dependencies and review interval. The client must use "
+        "continuity; scope and procedures of another client are refused."
     ),
     "GET /api/v1/bcp/plans/status": (
         "Returns a dashboard row per plan: whether its review is overdue, its last executed test "
@@ -33,7 +33,7 @@ PART_C: dict[str, str] = {
     "PATCH /api/v1/bcp/plans/{plan_id}": (
         "Edits a BCP/DR plan's name, scope, RTO and RPO, procedures, dependencies, review "
         "interval, or state (active or archived). Returns the updated plan; invalid scope or "
-        "procedure references are refused."
+        "procedure references, or ones of another client, are refused."
     ),
     "POST /api/v1/bcp/plans/{plan_id}/review": (
         "Records a review sign-off on a plan, stamping the review time and reviewer, which resets "
@@ -83,9 +83,9 @@ PART_C: dict[str, str] = {
         "window, and current state."
     ),
     "POST /api/v1/changes": (
-        "Creates a change request (standard, normal or emergency) in draft state, with risk, "
-        "affected scope, window and rollback plan. It is not submitted for approval until POST "
-        "/changes/{change_id}/submit."
+        "Creates a draft change request (standard, normal or emergency) of the client given by "
+        "client_id, which must use change management, with risk, affected scope, window and "
+        "rollback plan. It is not submitted until POST /changes/{change_id}/submit."
     ),
     "GET /api/v1/changes/calendar": (
         "Returns the changes whose maintenance window overlaps a from/to range, plus the pairs of "
@@ -100,9 +100,9 @@ PART_C: dict[str, str] = {
         "an approved change for one device group or for every device."
     ),
     "PUT /api/v1/changes/gates": (
-        "Creates or replaces the change gate for one device group, or for all devices when none "
-        "is given, choosing whether it covers patch approvals, deployments or both. At least one "
-        "must apply."
+        "Creates or replaces the change gate for one device group, whose client must use change "
+        "management, or for all devices when none is given, covering patch approvals, deployments "
+        "or both. Clients without change management meet no gate."
     ),
     "DELETE /api/v1/changes/gates/{gate_id}": (
         "Removes a change gate, so patch approvals and deployments on that scope no longer need "
@@ -135,7 +135,7 @@ PART_C: dict[str, str] = {
     ),
     "POST /api/v1/changes/{change_id}/links": (
         "Links a patch run, deployment, provision run or patch approval to a change. The target "
-        "must exist in this organization and a duplicate link is refused."
+        "must be of the change's client, or global; a duplicate link is refused."
     ),
     "DELETE /api/v1/changes/{change_id}/links/{link_id}": (
         "Removes a link between a change and the patch run, deployment or other action it was "

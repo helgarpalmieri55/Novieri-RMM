@@ -41,6 +41,17 @@ class ChangeNotFoundError(ChangeValidationError):
     """A change/link/target could not be found in this org (maps to HTTP 404)."""
 
 
+class ChangeConflictError(ChangeValidationError):
+    """The request conflicts with what exists (maps to HTTP 409): a change, or
+    the ticket a submitted one opens, filed under a client that is archived
+    (`client_for_new_rows`)."""
+
+
+class ChangeClientError(ChangeValidationError):
+    """A change filed under "Sin asignar" (maps to HTTP 422; plan 2026-10-26
+    Task 7, C10)."""
+
+
 def _illegal(action: str, current: str) -> ChangeValidationError:
     """`action` is not allowed from `current` (words as the console says them)."""
     return ChangeValidationError(

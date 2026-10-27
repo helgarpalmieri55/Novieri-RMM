@@ -63,6 +63,10 @@ from app.core.client_scope import ClientScope
 from app.core.client_scope_catalog import PHASE_1
 from app.core.tenancy import org_session
 from app.models import (
+    BcpPlan,
+    BcpTest,
+    BcpTestStep,
+    ChangeRequest,
     Client,
     Device,
     DeviceGroup,
@@ -133,6 +137,8 @@ class Side:
     ticket: UUID
     person: UUID
     subscription: UUID
+    plan: UUID  # a BCP plan, and a test of it
+    test: UUID
 
 
 @dataclass(frozen=True)
@@ -166,6 +172,10 @@ def _subscription(org: UUID, client: UUID, actor: UUID) -> Subscription:
         org_id=org, client_id=client, service_name="s", billing_cycle="monthly",
         cost_per_cycle=1, currency="USD", created_by=actor,
     )
+
+
+def _plan(org: UUID, client: UUID, actor: UUID) -> BcpPlan:
+    return BcpPlan(org_id=org, client_id=client, name="p", description="d", created_by=actor)
 
 
 def _ticket(org: UUID, client: UUID, queue: UUID, category: UUID, actor: UUID) -> Ticket:
@@ -209,11 +219,15 @@ async def _side(
         ticket = _ticket(org, client.id, queue, category, actor)
         person = Person(org_id=org, client_id=client.id, display_name="Persona")
         subscription = _subscription(org, client.id, actor)
-        s.add_all([job, alert, ticket, person, subscription])
+        plan = _plan(org, client.id, actor)
+        s.add_all([job, alert, ticket, person, subscription, plan])
+        await s.flush()
+        test = BcpTest(org_id=org, plan_id=plan.id, type="tabletop", created_by=actor)
+        s.add(test)
         await s.commit()
     return Side(
         client.id, site.id, device.id, group.id, job.id, alert.id, record.id, ticket.id,
-        person.id, subscription.id,
+        person.id, subscription.id, plan.id, test.id,
     )
 
 
@@ -418,6 +432,14 @@ PATHS: dict[str, tuple[str, Make]] = {
         SubscriptionEvent(
             org_id=w.org, subscription_id=s.subscription, type="created", created_by=w.actor
         )
+    )),
+    "C-change_request": ("change_request", lambda w, s: ChangeRequest(
+        org_id=w.org, client_id=s.client, type="normal", title="t", description="d",
+        risk="low", affected=[], created_by=w.actor,
+    )),
+    "C-bcp_plan": ("bcp_plan", lambda w, s: _plan(w.org, s.client, w.actor)),
+    "H-bcp_test_step-via-bcp_test": ("bcp_test_step", lambda w, s: BcpTestStep(
+        org_id=w.org, test_id=s.test, ordinal=1, description="d"
     )),
     "O-doc_articles-no-parent": ("doc_articles", lambda w, s: DocArticle(
         org_id=w.org, client_id=s.client, title="t"

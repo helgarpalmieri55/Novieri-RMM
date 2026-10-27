@@ -33,10 +33,16 @@ class ChangeRequest(Base):
         Index("ix_change_request_state", "org_id", "state"),
         Index("ix_change_request_window", "org_id", "window_start"),
         CheckConstraint("origin IN ('manual', 'auto')", name="ck_change_request_origin"),
+        client_org_fk("change_request"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0237):
+    # the client the caller names (`service.create_change`), or the one an
+    # automatic change is recorded for (`gates.record_auto_change`). Never
+    # changes: no update schema carries it, and its children inherit it.
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
     type: Mapped[str] = mapped_column(String(12))
     title: Mapped[str] = mapped_column(String(255))
     description: Mapped[str] = mapped_column(Text)
@@ -59,6 +65,15 @@ class ChangeApproval(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # change_request (migration 0237): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     change_id: Mapped[UUID] = mapped_column(ForeignKey("change_request.id"))
     approver_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     decision: Mapped[str] = mapped_column(String(10))
@@ -76,6 +91,15 @@ class ChangeLink(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # change_request (migration 0237): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     change_id: Mapped[UUID] = mapped_column(ForeignKey("change_request.id"))
     action_type: Mapped[str] = mapped_column(String(20))
     action_id: Mapped[UUID]
@@ -88,6 +112,15 @@ class ChangeExternalRef(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # change_request (migration 0237): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     change_id: Mapped[UUID] = mapped_column(ForeignKey("change_request.id"))
     system: Mapped[str] = mapped_column(String(16))
     external_id: Mapped[str] = mapped_column(Text)
