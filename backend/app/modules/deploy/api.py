@@ -42,6 +42,7 @@ from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job
 from app.jobs.review_gate import DeviceAwaitingReview, refused
 from app.models import Deployment, DeploymentResult, Device, DeviceGroup, Package, Script
+from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.change_mgmt.gates import (
     authorizing_change,
     deployment_gate,
@@ -593,17 +594,24 @@ async def create_deployment(
         target_client, review_state = target
         # A deployment is a new row of that client, and an archived client
         # takes none (a 409). Its row, read FOR SHARE and held to commit, is
-        # this create's FIRST lock (`client_sites`); the authorizing change's
-        # module guard takes the same lock again. Unassigned is not refused:
-        # a device waiting for its client may still need software.
+        # this create's FIRST lock (`client_sites`). Nor does Unassigned (a
+        # 422, plan C10): it can have no site, so no device, and its only
+        # possible target is a group that can never have members.
         try:
-            await client_for_new_rows(session, org_id=ctx.org_id, client_id=target_client)
+            client = await client_for_new_rows(
+                session, org_id=ctx.org_id, client_id=target_client
+            )
         except ClientNotFound:
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND, tr("deployment target not found")
             ) from None
         except NotAcceptingNewRows as exc:
             raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
+        if client.kind == CLIENT_KIND_UNASSIGNED:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                tr("a deployment cannot be filed under Unassigned"),
+            )
         # A single named device waiting for review is refused NOW, with the
         # review gate's own 409, rather than accepted as a deployment that
         # can never dispatch (install-link spec §1.5).
@@ -612,7 +620,8 @@ async def create_deployment(
 
         try:
             # The change must be the target's client's, which must use change
-            # management -- this write's first lock (`authorizing_change`).
+            # management (`authorizing_change`); its module guard takes again
+            # the client lock this create already holds.
             change = (
                 await authorizing_change(
                     session, ctx.org_id, body.change_id, client_id=target_client

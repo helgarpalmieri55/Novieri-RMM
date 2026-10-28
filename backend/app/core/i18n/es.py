@@ -4157,6 +4157,9 @@ CATALOG: dict[str, str] = {
     "no such package": "no existe ese paquete",
     "no such deployment": "no existe ese despliegue",
     "deployment target not found": "no existe el destino del despliegue",
+    "a deployment cannot be filed under Unassigned": (
+        "un despliegue no puede pertenecer a «Sin asignar»"
+    ),
     "the deployment target changed while it was being created; try again": (
         "el destino del despliegue cambió mientras se creaba; inténtalo de nuevo"
     ),

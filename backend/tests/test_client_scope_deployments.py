@@ -541,8 +541,9 @@ async def test_the_authorizing_change_holds_its_client_until_commit(api_env: Api
 
 async def test_an_archived_client_s_target_takes_no_new_deployment(api_env: ApiEnv) -> None:
     """A deployment is a new row of its target's client, and an archived
-    client takes none (`client_for_new_rows`): a 409 with its sentence, and
-    nothing written. The Unassigned client is not refused."""
+    client takes none (`client_for_new_rows`): a 409 with its sentence. Nor
+    does Unassigned (C10): a 422 with its sentence, as every other family's
+    create answers. Nothing is written for either."""
     org = await api_env.create_org("d-archived")
     archived, _ = await client_with_site(api_env, org, client_archived=True)
     group = await _group(api_env, org, archived)
@@ -554,8 +555,10 @@ async def test_an_archived_client_s_target_takes_no_new_deployment(api_env: ApiE
     assert (r.status_code, r.json()) == (409, {"detail": "that client is archived"}), r.text
     assert await _written(api_env, org) == before
 
-    # "Sin asignar" is not refused: what waits for its client may still need
-    # software.
+    # "Sin asignar" can hold no device -- it can have no site (0230), and a
+    # device's site must be its client's (0231) -- so its only possible
+    # target is a group that can never have members. Refused like any other
+    # family's row under it.
     async with AsyncSession(api_env.admin_engine) as s:
         unassigned = (
             await s.execute(
@@ -563,11 +566,14 @@ async def test_an_archived_client_s_target_takes_no_new_deployment(api_env: ApiE
                 {"o": org},
             )
         ).scalar_one()
-    waiting = await _group(api_env, org, unassigned)
-    r = await api_env.client.post(DEPLOYMENTS, json=_body(package, "group", waiting),
+    empty = await _group(api_env, org, unassigned)
+    before = await _written(api_env, org)
+    r = await api_env.client.post(DEPLOYMENTS, json=_body(package, "group", empty),
                                   headers=admin)
-    assert r.status_code == 201, r.text
-    assert r.json()["client_id"] == str(unassigned)
+    assert (r.status_code, r.json()) == (
+        422, {"detail": "a deployment cannot be filed under Unassigned"}
+    ), r.text
+    assert await _written(api_env, org) == before
 
 
 async def test_every_deployment_output_names_its_client(api_env: ApiEnv) -> None:
