@@ -72,9 +72,13 @@ class _JobEngineLike(Protocol):
 async def deployment_refusal(
     session: AsyncSession, org_id: UUID, deployment: Deployment, *, actor_id: UUID | None
 ) -> str | None:
-    """Why a change gate stops this deployment, or None. A refusal is
-    audited `change.gate_refused`."""
-    reason = await deployment_gate(session, org_id, deployment.target_type, deployment.target_id)
+    """Why a change gate stops this deployment, or None. The gates are the
+    deployment's own client's (`client_id`, its target's: migration 0239). A
+    refusal is audited `change.gate_refused`, with that client."""
+    client_id = deployment.client_id
+    reason = await deployment_gate(
+        session, org_id, deployment.target_type, deployment.target_id, client_id=client_id
+    )
     if reason is None or await has_authorizing_change(
         session, org_id, "deployment", deployment.id
     ):
@@ -86,6 +90,7 @@ async def deployment_refusal(
         target_type="deployment",
         target_id=str(deployment.id),
         reason=reason,
+        client_id=client_id,
     )
     return reason
 
@@ -140,6 +145,13 @@ async def dispatch_deployment(
     `org_id` and `package.id` and only checks the stored ref against it, so a
     `packages` row somehow naming another tenant's object yields no URL
     rather than a signed grant over it.
+
+    And the devices are the DEPLOYMENT'S CLIENT'S (MSP clients plan
+    2026-10-26 Task 9). The window sweep runs this under scope all, where RLS
+    hides no client, so a device of another client -- the one named, or a
+    member of the group -- never gets this deployment's job. The database
+    already keeps a deployment and its target, and a group and its members,
+    in one client; this predicate does not lean on that.
     """
     deployment = (
         await session.execute(
@@ -150,6 +162,8 @@ async def dispatch_deployment(
     ).scalar_one_or_none()
     if deployment is None:
         return []
+    # Read now: the state update below expires it (written by trigger).
+    client_id = deployment.client_id
 
     if deployment.window_cron is not None and not in_window(deployment.window_cron, now):
         return []
@@ -175,7 +189,9 @@ async def dispatch_deployment(
                 # for review is refused at creation (`api.create_deployment`)
                 # and by the review gate here, never silently skipped.
                 select(Device.id).where(
-                    Device.org_id == org_id, Device.id == deployment.target_id
+                    Device.org_id == org_id,
+                    Device.client_id == client_id,
+                    Device.id == deployment.target_id,
                 )
             )
         ).scalar_one_or_none()
@@ -186,6 +202,7 @@ async def dispatch_deployment(
                 await session.execute(
                     select(Device.id).where(
                         Device.org_id == org_id,
+                        Device.client_id == client_id,
                         Device.device_group_id == deployment.target_id,
                         # A group deployment passes over members waiting for
                         # review rather than failing on the gate.
@@ -275,6 +292,7 @@ async def dispatch_deployment(
         target_type="deployment",
         target_id=str(deployment_id),
         metadata={"dispatched_count": len(pending), "deployment_id": str(deployment_id)},
+        client_id=client_id,
     )
 
     await session.flush()
@@ -325,6 +343,9 @@ async def ingest_deploy_result(session: AsyncSession, job: Job, result: AppDeplo
     ).scalar_one_or_none()
     if deployment_result is None:
         return  # no matching row; the agent's report must never fail the job
+    # Its device's, which dispatch holds to the deployment's. Read now: the
+    # updates below expire it (written by trigger).
+    client_id = deployment_result.client_id
 
     audit_metadata: dict[str, Any] = {"device_id": str(device_id)}
 
@@ -391,6 +412,7 @@ async def ingest_deploy_result(session: AsyncSession, job: Job, result: AppDeplo
         target_type="device",
         target_id=str(device_id),
         metadata={**audit_metadata, "state": deployment_result.state},
+        client_id=client_id,
     )
 
     await session.flush()

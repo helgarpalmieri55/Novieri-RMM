@@ -164,6 +164,7 @@ async function pickEntity(
 const DEPLOYMENTS: Deployment[] = [
   {
     id: "dep1",
+    client_id: "o1",
     package_id: "pkg1",
     action: "install",
     target_type: "device",

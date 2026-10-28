@@ -235,14 +235,14 @@ PART_B: dict[str, str] = {
     ),
     # --- deploy ---
     "GET /api/v1/deploy/deployments": (
-        "Lists this organization's software deployments (package, action, target, state), "
-        "newest first."
+        "Lists the software deployments the caller's clients can see (package, action, "
+        "target, client, state), newest first."
     ),
     "POST /api/v1/deploy/deployments": (
-        "Creates a pending software deployment of a package to a device or group. Without a "
-        "window it sends nothing until executed; with a maintenance window it is dispatched "
-        "automatically when the window opens. Refused when a change gate covers the target "
-        "and no approved change is given."
+        "Creates a pending software deployment of a package to a device or group; it belongs "
+        "to the target's client. Without a window it sends nothing until executed; with one it "
+        "is dispatched when the window opens. A change gate on the target needs an approved "
+        "change of that client."
     ),
     "GET /api/v1/deploy/deployments/{deployment_id}": (
         "Returns one deployment with its state and per-device results. Read-only."

@@ -26,7 +26,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, uuid7_pk
+from app.models.base import Base, TimestampMixin, client_org_fk, uuid7_pk
 
 
 class Package(TimestampMixin, Base):
@@ -61,10 +61,23 @@ class Package(TimestampMixin, Base):
 
 class Deployment(TimestampMixin, Base):
     __tablename__ = "deployments"
-    __table_args__ = (Index("ix_deployments_state", "org_id", "state"),)
+    __table_args__ = (
+        Index("ix_deployments_state", "org_id", "state"),
+        client_org_fk("deployments"),
+    )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C), plan 2026-10-26 Task 9. Set by trigger
+    # its_deployment_client from the target (migration 0239): never sent; the
+    # INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the target lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     package_id: Mapped[UUID] = mapped_column(ForeignKey("packages.id"))
     action: Mapped[str] = mapped_column(String(12))
     target_type: Mapped[str] = mapped_column(String(8))

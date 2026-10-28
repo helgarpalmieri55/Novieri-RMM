@@ -70,6 +70,7 @@ from app.models import (
     BudgetLine,
     ChangeRequest,
     Client,
+    Deployment,
     Device,
     DeviceGroup,
     DeviceTag,
@@ -86,6 +87,7 @@ from app.models import (
     JobLog,
     License,
     Organization,
+    Package,
     Person,
     PersonLogin,
     Policy,
@@ -116,13 +118,15 @@ from tests.health_fixtures import seed_check, seed_profile
 #: NULL client from its trigger and fails here too.
 REFUSED = "new row violates row-level security policy"
 
-#: Two C tables whose BEFORE guard refuses first. Each reads the row's site or
-#: client under the session's own RLS, finds nothing -- Y is invisible -- and
-#: raises before the policy is checked. Refused all the same. (`sites`'s
-#: message, from 0230, predates clients sharing an organisation.)
+#: C tables whose BEFORE guard refuses first. Each reads the row's site,
+#: client or target under the session's own RLS, finds nothing -- Y is
+#: invisible -- and raises before the policy is checked. Refused all the same.
+#: (`sites`'s message, from 0230, predates clients sharing an organisation;
+#: a deployment's client is its target's, 0239.)
 GUARDED = {
     "C-devices": "device site belongs to another client",
     "C-sites": "names a client of another organization",
+    "C-deployments": "deployment target is not visible",
 }
 
 
@@ -156,6 +160,7 @@ class World:
     queue: UUID  # G: ticket queues and categories too
     category: UUID
     product: UUID  # G: the software catalogue too
+    package: UUID  # G: deployable packages too
     x: Side
     y: Side
 
@@ -270,7 +275,10 @@ async def _two_clients(admin_engine: AsyncEngine) -> World:
             created_by=actor.id,
         )
         product = SoftwareProduct(org_id=org.id, name="Office", created_by=actor.id)
-        s.add_all([category, product])
+        package = Package(
+            org_id=org.id, name="htop", version="3", os_family="linux", installer_type="deb"
+        )
+        s.add_all([category, product, package])
         await s.commit()
     profile = await seed_profile(admin_engine, org.id)
     check = await seed_check(admin_engine, org.id, profile)
@@ -278,7 +286,8 @@ async def _two_clients(admin_engine: AsyncEngine) -> World:
     x = await _side(admin_engine, org.id, profile, check, **tickets)
     y = await _side(admin_engine, org.id, profile, check, **tickets)
     return World(
-        org.id, actor.id, script.id, profile, check, queue.id, category.id, product.id, x, y
+        org.id, actor.id, script.id, profile, check, queue.id, category.id, product.id,
+        package.id, x, y,
     )
 
 
@@ -468,6 +477,11 @@ PATHS: dict[str, tuple[str, Make]] = {
     "H-budget_line-via-budget": ("budget_line", lambda w, s: BudgetLine(
         org_id=w.org, budget_id=s.budget, category_id=s.expense_category,
         period_index=1, planned_amount=1, created_by=w.actor,
+    )),
+    # The client is never sent: the trigger takes it from the target (0239).
+    "C-deployments": ("deployments", lambda w, s: Deployment(
+        org_id=w.org, package_id=w.package, action="install", target_type="device",
+        target_id=s.device, state="pending",
     )),
     "O-doc_articles-no-parent": ("doc_articles", lambda w, s: DocArticle(
         org_id=w.org, client_id=s.client, title="t"

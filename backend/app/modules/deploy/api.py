@@ -30,7 +30,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.exc import NoResultFound
+from sqlalchemy.exc import IntegrityError, NoResultFound
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.audit import audit_service
@@ -40,7 +41,7 @@ from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job
 from app.jobs.review_gate import DeviceAwaitingReview, refused
-from app.models import Deployment, DeploymentResult, Device, Package, Script
+from app.models import Deployment, DeploymentResult, Device, DeviceGroup, Package, Script
 from app.modules.change_mgmt.gates import (
     authorizing_change,
     deployment_gate,
@@ -71,6 +72,11 @@ from app.modules.deploy.scripts import author_script, edit_script, run_script
 
 #: The job a deployment becomes, for the review gate's refusal at creation.
 DEPLOY_JOB_TYPE = "app.deploy"
+
+#: What `its_deployment_client` (migration 0239) raises with, as every check
+#: constraint does: a target it cannot resolve, or a client that is not the
+#: target's. `deployments` has no CHECK constraint of its own.
+_CHECK_VIOLATION = "23514"
 
 router = APIRouter(prefix="/deploy", tags=["deploy"])
 
@@ -112,6 +118,8 @@ class PackageCreateRequest(BaseModel):
 
 class DeploymentOut(BaseModel):
     id: UUID
+    #: The target's client, written by the database (migration 0239).
+    client_id: UUID
     package_id: UUID
     action: str
     target_type: str
@@ -304,6 +312,7 @@ def _package_out(row: Package) -> PackageOut:
 def _deployment_out(row: Deployment) -> DeploymentOut:
     return DeploymentOut(
         id=row.id,
+        client_id=row.client_id,
         package_id=row.package_id,
         action=row.action,
         target_type=row.target_type,
@@ -520,6 +529,31 @@ async def list_deployments(
         return [_deployment_out(r) for r in rows]
 
 
+async def _deployment_target(
+    session: AsyncSession, org_id: UUID, target_type: str, target_id: UUID
+) -> tuple[UUID, str | None] | None:
+    """The target's client and, for a device, its review state -- read in the
+    request's own session, so a target of a client outside its scope is
+    absent, exactly like one that does not exist."""
+    if target_type == "device":
+        row = (
+            await session.execute(
+                select(Device.client_id, Device.review_state).where(
+                    Device.org_id == org_id, Device.id == target_id
+                )
+            )
+        ).one_or_none()
+        return None if row is None else (row[0], row[1])
+    client = (
+        await session.execute(
+            select(DeviceGroup.client_id).where(
+                DeviceGroup.org_id == org_id, DeviceGroup.id == target_id
+            )
+        )
+    ).scalar_one_or_none()
+    return None if client is None else (client, None)
+
+
 @router.post("/deployments", status_code=status.HTTP_201_CREATED, response_model=DeploymentOut)
 async def create_deployment(
     body: DeploymentCreateRequest,
@@ -541,23 +575,28 @@ async def create_deployment(
         if package is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such package"))
 
-        if body.target_type == "device":
-            # A single named device waiting for review is refused NOW, with the
-            # review gate's own 409, rather than accepted as a deployment that
-            # can never dispatch (install-link spec §1.5).
-            review_state = (
-                await session.execute(
-                    select(Device.review_state).where(
-                        Device.org_id == ctx.org_id, Device.id == body.target_id
-                    )
-                )
-            ).scalar_one_or_none()
-            if refused(review_state, DEPLOY_JOB_TYPE):
-                raise DeviceAwaitingReview(body.target_id, DEPLOY_JOB_TYPE, review_state or "")
+        # The deployment is its target's client's (MSP clients plan 2026-10-26
+        # Task 9): the database writes it from the target, and the request
+        # resolves the target first, in its own scope. Another client's
+        # device or group is the 404 a missing one is -- it was not, and the
+        # window sweep later dispatched it under scope all (research-3 §E5).
+        target = await _deployment_target(session, ctx.org_id, body.target_type, body.target_id)
+        if target is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, tr("deployment target not found"))
+        target_client, review_state = target
+        # A single named device waiting for review is refused NOW, with the
+        # review gate's own 409, rather than accepted as a deployment that
+        # can never dispatch (install-link spec §1.5).
+        if body.target_type == "device" and refused(review_state, DEPLOY_JOB_TYPE):
+            raise DeviceAwaitingReview(body.target_id, DEPLOY_JOB_TYPE, review_state or "")
 
         try:
+            # The change must be the target's client's, which must use change
+            # management -- this write's first lock (`authorizing_change`).
             change = (
-                await authorizing_change(session, ctx.org_id, body.change_id)
+                await authorizing_change(
+                    session, ctx.org_id, body.change_id, client_id=target_client
+                )
                 if body.change_id is not None
                 else None
             )
@@ -566,7 +605,9 @@ async def create_deployment(
         except ChangeValidationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
         if change is None:
-            refusal = await deployment_gate(session, ctx.org_id, body.target_type, body.target_id)
+            refusal = await deployment_gate(
+                session, ctx.org_id, body.target_type, body.target_id, client_id=target_client
+            )
         if refusal is not None:
             await record_gate_refusal(
                 session,
@@ -576,8 +617,11 @@ async def create_deployment(
                 target_id=str(body.target_id),
                 reason=refusal,
                 metadata={"package_id": str(body.package_id), "action": body.action},
+                client_id=target_client,
             )
         else:
+            # No client_id: `its_deployment_client` writes it from the target
+            # and the INSERT reads it back.
             deployment = Deployment(
                 org_id=ctx.org_id,
                 package_id=body.package_id,
@@ -589,7 +633,19 @@ async def create_deployment(
                 state="pending",
             )
             session.add(deployment)
-            await session.flush()
+            try:
+                await session.flush()
+            except IntegrityError as exc:
+                # The trigger reads the target again and could not resolve it:
+                # it went between the read above and this insert. Nothing was
+                # written; the person may simply try again.
+                if getattr(exc.orig, "sqlstate", None) != _CHECK_VIOLATION:
+                    raise
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    tr("the deployment target changed while it was being created; try again"),
+                ) from None
+            client_id = deployment.client_id
 
             await audit_service.record(
                 session,
@@ -604,6 +660,7 @@ async def create_deployment(
                     "action": body.action,
                     "target_type": body.target_type,
                 },
+                client_id=client_id,
             )
             if change is not None:
                 await link_actions(
@@ -618,7 +675,7 @@ async def create_deployment(
                 await record_auto_change(
                     session,
                     org_id=ctx.org_id,
-                    client_id=ctx.org_id,  # plan 2026-10-26 Task 9 passes the deployment's client
+                    client_id=client_id,
                     actor_id=ctx.user_id,
                     title=f"Deployment: {body.action} {package.name} {package.version}",
                     description=(

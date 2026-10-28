@@ -37,6 +37,7 @@ from app.models import (
 )
 from app.modules.change_mgmt.links import add_link, list_links, remove_link
 from app.modules.change_mgmt.state import ChangeNotFoundError, ChangeValidationError
+from tests.client_scope_support import drop_client_keys
 
 
 async def _org_with_user_and_change(admin_engine: AsyncEngine) -> tuple[UUID, UUID, UUID]:
@@ -742,18 +743,24 @@ async def test_the_link_org_predicates_hold_where_rls_is_not_doing_the_rejecting
     deployment is a false audit trail rather than a leak.
 
     FALSIFIED: deleting `model.org_id == org_id` from the resolvers'
-    `_client_column` lets org A link org B's global patch approval; deleting
-    `Deployment.org_id == org_id` from `_deployment` lets org A link org B's
-    deployment that names org A's device; deleting `ChangeLink.org_id ==
+    `_client_column` lets org A link org B's global patch approval, and org
+    B's deployment filed under org A's client; deleting `ChangeLink.org_id ==
     org_id` from `list_links` shows both orgs' links for the same change id.
 
     WHY THOSE TWO TARGETS (MSP clients plan 2026-10-26 Task 7). The resolvers
     also hold a target to the change's CLIENT, and org B's deployment of org
     B's device is org B's client's -- refused without any org predicate. So
     the org predicates are pinned by the two targets the client check lets
-    through: a global approval (no client, every client's) and a deployment
-    whose bare `target_id` names org A's own device (no foreign key stops
-    it), whose client is therefore org A's change's.
+    through: a global approval (no client, every client's) and an org-B
+    deployment whose client is org A's change's.
+
+    THAT DEPLOYMENT CAN NO LONGER EXIST (Task 9). It used to be built by
+    naming org A's device in its bare `target_id`. Since migration 0239 its
+    client is written from that target -- org A's client -- and
+    `fk_deployments_client_org` refuses a row of org B under a client of org
+    A. So it is planted with that key dropped, inside one transaction that is
+    rolled back (`drop_client_keys`, the Task 8 pattern), and the check runs
+    in that transaction: only the org predicate keeps it out, as before.
     """
     org_a, user_a, change_a = await _org_with_user_and_change(admin_engine)
     org_b, user_b, change_b = await _org_with_user_and_change(admin_engine)
@@ -767,17 +774,31 @@ async def test_the_link_org_predicates_hold_where_rls_is_not_doing_the_rejecting
         package_b = (
             await s.execute(select(Deployment.package_id).where(Deployment.id == deployment_b))
         ).scalar_one()
-        b_names_a = Deployment(
-            org_id=org_b, package_id=package_b, action="install", target_type="device",
-            target_id=device_a, state="pending",
+
+    # Org B's deployment under org A's client (docstring): planted and probed
+    # in ONE transaction, then rolled back with the key it needed gone.
+    await drop_client_keys(bypassrls_session, "deployments", "fk_deployments_client_org")
+    b_names_a = Deployment(
+        org_id=org_b, package_id=package_b, action="install", target_type="device",
+        target_id=device_a, state="pending",
+    )
+    bypassrls_session.add(b_names_a)
+    await bypassrls_session.flush()
+    assert b_names_a.client_id == org_a, "the planted deployment is not under org A's client"
+    with pytest.raises(ChangeValidationError, match="linked action not found"):
+        await add_link(
+            bypassrls_session,
+            org_id=org_a,
+            actor_id=user_a,
+            change_id=change_a,
+            action_type="deployment",
+            action_id=b_names_a.id,
         )
-        s.add(b_names_a)
-        await s.commit()
+    await bypassrls_session.rollback()
 
     for action_type, action_id in (
         ("deployment", deployment_b),
         ("patch_approval", approval_b),
-        ("deployment", b_names_a.id),
     ):
         with pytest.raises(ChangeValidationError, match="linked action not found"):
             await add_link(

@@ -4156,6 +4156,10 @@ CATALOG: dict[str, str] = {
     ),
     "no such package": "no existe ese paquete",
     "no such deployment": "no existe ese despliegue",
+    "deployment target not found": "no existe el destino del despliegue",
+    "the deployment target changed while it was being created; try again": (
+        "el destino del despliegue cambió mientras se creaba; inténtalo de nuevo"
+    ),
     "unknown rule type: {rule_type}": "tipo de regla desconocido: {rule_type}",
     # --- remote ---
     "{from_state} -> {to_state}": "{from_state} -> {to_state}",

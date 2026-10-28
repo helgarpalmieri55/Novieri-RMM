@@ -806,6 +806,11 @@ async def test_dispatch_gates_each_device_by_its_client_once_per_client(
 
 
 async def test_a_deployment_meets_its_target_s_client_s_gates(api_env: ApiEnv) -> None:
+    """The gates are the deployment's client's -- its own column since plan
+    2026-10-26 Task 9, which the trigger keeps equal to the target's, so each
+    call passes the target's client. X uses change management and meets the
+    global gate; Y does not, and the internal client (which does) must not
+    stand in for either."""
     org = await api_env.create_org("m-deploy")
     x, x_site = await client_with_site(api_env, org)
     y, y_site = await client_with_site(api_env, org)
@@ -817,10 +822,10 @@ async def test_a_deployment_meets_its_target_s_client_s_gates(api_env: ApiEnv) -
     await _seed(api_env, ChangeGate(org_id=org, device_group_id=None, applies_to_patches=False,
                                     applies_to_deployments=True))
     async with org_session(org, clients=ClientScope.all(), engine=api_env.app_engine) as s:
-        assert await deployment_gate(s, org, "device", x_device) is not None
-        assert await deployment_gate(s, org, "group", x_group) is not None
-        assert await deployment_gate(s, org, "device", y_device) is None
-        assert await deployment_gate(s, org, "group", y_group) is None
+        assert await deployment_gate(s, org, "device", x_device, client_id=x) is not None
+        assert await deployment_gate(s, org, "group", x_group, client_id=x) is not None
+        assert await deployment_gate(s, org, "device", y_device, client_id=y) is None
+        assert await deployment_gate(s, org, "group", y_group, client_id=y) is None
 
 
 async def test_no_automatic_change_for_a_client_without_the_module(api_env: ApiEnv) -> None:

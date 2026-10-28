@@ -17,8 +17,10 @@ PER CLIENT (MSP clients plan 2026-10-26 Task 7, decision D4). Gates are
 evaluated for one client at a time: the global ones (no client) and that
 client's own. A client that does not use change management meets NO gate --
 it could never create the change one would demand -- and gets no automatic
-change. A deployment is gated as its target's client; a ring's approval as
-every client its machines belong to, each evaluated once.
+change. A deployment is gated as its own client (`deployments.client_id`, its
+target's, written by trigger: Task 9); a ring's approval as every client its
+machines belong to, each evaluated once. The change that authorizes a
+deployment is the deployment's client's (`authorizing_change`).
 """
 
 from collections.abc import Callable, Iterable, Sequence
@@ -95,20 +97,6 @@ async def gates_for(
         everywhere=any(r is None for r in rows),
         group_ids=frozenset(r for r in rows if r is not None),
     )
-
-
-async def deployment_target_client(
-    session: AsyncSession, org_id: UUID, target_type: str, target_id: UUID
-) -> UUID | None:
-    """The client a deployment's target belongs to -- a device's, or a
-    group's (a group is one client's, 0231) -- read org-scoped. None when the
-    target is gone or this session cannot see it."""
-    model = DeviceGroup if target_type == "group" else Device
-    return (
-        await session.execute(
-            select(model.client_id).where(model.org_id == org_id, model.id == target_id)
-        )
-    ).scalar_one_or_none()
 
 
 async def _group_names(session: AsyncSession, org_id: UUID, ids: Iterable[UUID]) -> list[str]:
@@ -206,27 +194,24 @@ async def patch_approval_gate(
 
 
 async def deployment_gate(
-    session: AsyncSession, org_id: UUID, target_type: str, target_id: UUID
+    session: AsyncSession, org_id: UUID, target_type: str, target_id: UUID, *, client_id: UUID
 ) -> GateRefusal | None:
     """Why deploying to this target needs a change, or None when it does not.
-    The gates are the target's client's. A target that resolves to nothing
-    -- gone, or invisible to this session -- has no client to gate and
-    dispatches to nothing; the dispatch re-check (`deploy.dispatch`) asks
-    again, under the sweep's every-client scope."""
+    The gates are `client_id`'s: the deployment's own client, which its
+    trigger writes from the target (migration 0239) -- at creation, the
+    target's client the request has just read. A device's group is read for
+    the group gates; a device that is gone is in no group and meets only the
+    client's every-device gates."""
     if target_type == "group":
         group_id: UUID | None = target_id
-        client_id = await deployment_target_client(session, org_id, "group", target_id)
     else:
-        found = (
+        group_id = (
             await session.execute(
-                select(Device.client_id, Device.device_group_id).where(
+                select(Device.device_group_id).where(
                     Device.org_id == org_id, Device.id == target_id
                 )
             )
-        ).one_or_none()
-        client_id, group_id = (found[0], found[1]) if found is not None else (None, None)
-    if client_id is None:
-        return None
+        ).scalar_one_or_none()
     gates = await gates_for(session, org_id, "deployments", client_id=client_id)
     if not gates.applies_to_group(group_id):
         return None
@@ -243,8 +228,24 @@ async def deployment_gate(
     )
 
 
-async def authorizing_change(session: AsyncSession, org_id: UUID, change_id: UUID) -> ChangeRequest:
-    """The change, if it exists in this org and authorizes work now."""
+async def authorizing_change(
+    session: AsyncSession, org_id: UUID, change_id: UUID, *, client_id: UUID | None
+) -> ChangeRequest:
+    """The change, if it exists in this org and authorizes work now.
+
+    `client_id` is the client the work is for -- a deployment's -- and has
+    NO default: every caller decides. A change of another client is not
+    found, word for word: a narrowed session cannot see it, and a wider one
+    is told nothing more. And that client must use change management, since
+    linking the work is a write on its change (`require_module`, a 404).
+    That check reads the client FOR SHARE and is the write's FIRST lock,
+    before anything takes the audit chain's (`app.services.client_modules`):
+    call this before writing anything.
+
+    None asks neither: the patch approval path, until plan 2026-10-26 Task
+    14 names the client its approvals are for (C8: a global approval's is the
+    internal client's) -- passing it is all that path needs.
+    """
     change = (
         await session.execute(
             select(ChangeRequest).where(
@@ -252,8 +253,10 @@ async def authorizing_change(session: AsyncSession, org_id: UUID, change_id: UUI
             )
         )
     ).scalar_one_or_none()
-    if change is None:
+    if change is None or (client_id is not None and change.client_id != client_id):
         raise ChangeNotFoundError(tr("no such change"))
+    if client_id is not None:
+        await require_module(session, org_id=org_id, client_id=client_id, module="change")
     if change.state not in AUTHORIZING_STATES:
         raise ChangeValidationError(
             tr(
@@ -293,7 +296,10 @@ async def link_actions(
     action_type: str,
     action_ids: Sequence[UUID],
 ) -> None:
-    """Link each action to the change once, audited `change.linked`."""
+    """Link each action to the change once, audited `change.linked`. The
+    caller vouches that the actions are the change's client's and that it
+    uses change management: `authorizing_change` with their client, or
+    `record_auto_change`, which made the change for it."""
     existing = set(
         (
             await session.execute(
@@ -395,7 +401,11 @@ async def record_gate_refusal(
     target_id: str,
     reason: str,
     metadata: dict[str, Any] | None = None,
+    client_id: UUID | None = None,
 ) -> None:
+    """`client_id` is the refused action's client where it has one -- a
+    deployment's (plan 2026-10-26 Task 9); None for a ring's approval, which
+    can reach many."""
     await audit_service.record(
         session,
         org_id=org_id,
@@ -405,6 +415,7 @@ async def record_gate_refusal(
         target_type=target_type,
         target_id=target_id,
         metadata={"reason": str(reason), **(metadata or {})},
+        client_id=client_id,
     )
 
 

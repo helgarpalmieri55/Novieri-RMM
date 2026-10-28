@@ -165,6 +165,7 @@ const GROUP_PAGE = { items: [GROUP, SOLO_GROUP], total: 2, ungrouped_device_coun
 function deployment(overrides: Partial<Deployment> = {}): Deployment {
   return {
     id: "dep1",
+    client_id: "o1",
     package_id: "pkg1",
     action: "install",
     target_type: "device",

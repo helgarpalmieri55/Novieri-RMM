@@ -1025,7 +1025,9 @@ async def _approve_with_change(
     ) as session:
         try:
             change = (
-                await authorizing_change(session, ctx.org_id, change_id)
+                # No client rule yet: plan 2026-10-26 Task 14 names the client
+                # these approvals are for (C8).
+                await authorizing_change(session, ctx.org_id, change_id, client_id=None)
                 if change_id is not None
                 else None
             )

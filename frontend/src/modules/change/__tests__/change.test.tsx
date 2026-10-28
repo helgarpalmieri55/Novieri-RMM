@@ -1194,6 +1194,7 @@ describe("ChangeDetail identity and vocabulary (cycle 12)", () => {
 describe("change link picker options", () => {
   const DEPLOYMENT = {
     id: "dep1",
+    client_id: "o1",
     package_id: "pkg1",
     action: "install",
     target_type: "device",

@@ -39,7 +39,6 @@ from uuid_extensions import uuid7
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.models import ChangeLink, Deployment, PatchApproval, PatchRun, ProvisionRun
-from app.modules.change_mgmt.gates import deployment_target_client
 from app.modules.change_mgmt.service import load_change_for_write
 from app.modules.change_mgmt.state import ChangeNotFoundError, ChangeValidationError
 
@@ -67,29 +66,12 @@ def _client_column(model: type) -> Resolver:
     return resolve
 
 
-async def _deployment(session: AsyncSession, org_id: UUID, action_id: UUID) -> Found:
-    """A deployment has no client column yet (plan 2026-10-26 Task 9 adds one,
-    derived the same way): it is its target's -- one device or one group. A
-    target this session cannot see, or that is gone, leaves the deployment
-    with no client to match, and it is refused like a missing one."""
-    row = (
-        await session.execute(
-            select(Deployment.target_type, Deployment.target_id).where(
-                Deployment.org_id == org_id, Deployment.id == action_id
-            )
-        )
-    ).one_or_none()
-    if row is None:
-        return None
-    client = await deployment_target_client(session, org_id, row.target_type, row.target_id)
-    return None if client is None else (client,)
-
-
 # action_type -> how to find the target and its client. Every entry here must
 # resolve org-scoped (`org_id ==` on every table it reads).
 _LINK_RESOLVERS: dict[str, Resolver] = {
     "patch_run": _client_column(PatchRun),
-    "deployment": _deployment,
+    # Its client is its target's, written by trigger (migration 0239).
+    "deployment": _client_column(Deployment),
     "provision_run": _client_column(ProvisionRun),
     "patch_approval": _client_column(PatchApproval),
 }
