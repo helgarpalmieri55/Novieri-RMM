@@ -765,8 +765,11 @@ async def _export_client(session: AsyncSession, org_id: UUID, client_id: UUID) -
     module off keeps the expenses it recorded -- its lists, `variance()` and
     `position()` still show them -- and the export is how that history
     leaves (Task 8 review, controller's decision). No module check, so no
-    lock either: the export only reads, and the route's audit row names the
-    client without a foreign key, so it never waits on an archive."""
+    lock either: the export only reads. The route's audit row does carry a
+    foreign key to the client (`fk_audit_events_client_org`, 0233), and its
+    check takes FOR KEY SHARE on the client row -- which does not conflict
+    with the FOR NO KEY UPDATE an archive holds (`client_sites`), so the
+    export never waits on an archive."""
     await visible_client(session, org_id, client_id)
 
 
