@@ -945,6 +945,13 @@ async def set_sweep_settings(
     referential integrity runs as the referenced table's owner, so the foreign
     key alone would happily accept another tenant's machine as this segment's
     sweeper.
+
+    **AND BE A MACHINE OF THE SUBNET'S CLIENT** (MSP clients, invariant 5a):
+    another client's machine is not on this client's wire, whatever address it
+    reports. One the caller cannot see is "not found", as another org's is; one
+    they can see is a 422 that says why. `sweep.select_sweeper` ignores such a
+    designation anyway, so a row written before this check sweeps nothing of
+    another client's.
     """
     subnet = await get_subnet(session, org_id, subnet_id)
     if subnet.kind != "assignable":
@@ -967,20 +974,22 @@ async def set_sweep_settings(
                     "interval is how an address plan becomes a ping monitor)"
                 )
             )
+    client_id = subnet.client_id  # before the flush that expires it
     if sweep_device_id is not None:
-        found = (
+        machine_client = (
             await session.execute(
-                select(Device.id).where(
+                select(Device.client_id).where(
                     Device.org_id == org_id, Device.id == sweep_device_id
                 )
             )
         ).scalar_one_or_none()
-        if found is None:
+        if machine_client is None:
             raise IpamValidationError(
                 tr("device {sweep_device_id} not found", sweep_device_id=sweep_device_id)
             )
+        if machine_client != client_id:
+            raise IpamClientError(tr("that machine belongs to another client"))
 
-    client_id = subnet.client_id  # before the flush that expires it
     before = {
         "sweep_enabled": subnet.sweep_enabled,
         "sweep_device_id": str(subnet.sweep_device_id) if subnet.sweep_device_id else None,

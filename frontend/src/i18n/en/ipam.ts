@@ -627,8 +627,10 @@ export const ipam = {
     lastRun: "Last run",
     noAgentNotice:
       "The last sweep could not run: no enrolled agent is on this segment. A sweep runs from an agent inside the segment, never from this platform. Install the agent by hand on one machine here and it sweeps the rest.",
-    designatedAgentField: "Designated agent (device id)",
-    designatedAgentPlaceholder: "auto-select an online agent in this segment",
+    designatedAgentField: "Designated agent",
+    designatedAgentAuto: "Auto-select an online agent in this segment",
+    designatedAgentHelp:
+      "Only machines of this subnet's client that run the agent: another client's network is not this one, whatever its addresses.",
     intervalField: "Interval (hours)",
     scheduledEnabled: "Scheduled sweeps enabled",
     intervalTooShort: {

@@ -407,22 +407,33 @@ async def test_an_asset_is_not_created_at_a_site_of_an_archived_client(api_env) 
 # --------------------------------------------------------------------------- #
 
 
-async def test_promoting_a_discovered_machine_needs_every_client(api_env) -> None:
-    """Phase 1 files a promoted machine under the internal client (IPAM has no
-    client yet), so a technician limited to one client is refused up front with
-    the every-client sentence -- not a 500 from the row RLS would refuse."""
+async def test_promoting_a_discovered_machine_stays_in_the_named_client(api_env) -> None:
+    """Phase 1 filed a promoted machine under the internal client (IPAM had no
+    client yet), so a technician limited to one client was refused up front
+    with the every-client sentence -- not a 500 from the row RLS would refuse.
+
+    Phase 2 (plan 2026-10-26 Task 11) replaced the fallback, and the gate went
+    with it: the body names its client and each machine takes its subnet's.
+    What this test was written for still holds -- a narrowed technician gets
+    an answer, never a 500: in their own client, the per-address result; for
+    a client outside their scope -- here the internal one -- the 404 of a
+    client that does not exist, written before anything is read. An
+    every-client admin promotes in either."""
     org = await api_env.create_org("cdg")
     x, _ = await _customer(api_env.admin_engine, org)
-    body = {"addresses": ["10.77.0.5"]}
     path = "/api/v1/devices/candidates/promote"
-    narrowed = await api_env.client.post(
-        path, headers=await everything_on(api_env, org, x), json=body
-    )
-    assert narrowed.status_code == 403, narrowed.text
-    assert narrowed.json()["detail"] == EVERY_CLIENT
-
-    everyone = await api_env.client.post(path, headers=await _admin(api_env, org), json=body)
-    assert everyone.status_code == 200, everyone.text
+    narrowed = await everything_on(api_env, org, x)
+    admin = await _admin(api_env, org)
+    for client, headers, status in (
+        (x, narrowed, 200), (org, narrowed, 404), (x, admin, 200), (org, admin, 200),
+    ):
+        r = await api_env.client.post(
+            path, headers=headers, json={"client_id": str(client), "addresses": ["10.77.0.5"]}
+        )
+        assert r.status_code == status, (client, r.text)
+        assert EVERY_CLIENT not in r.text
+        if status == 200:  # nothing observed: answered per address, not refused
+            assert r.json()["results"][0]["created"] is False, r.text
 
 
 async def test_starting_a_provisioning_run_needs_every_client(api_env) -> None:

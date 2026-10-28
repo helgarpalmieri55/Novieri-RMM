@@ -1373,10 +1373,19 @@ async def _read_csv(request: Request) -> bytes:
     return await read_bounded_body(request, importer.MAX_IMPORT_BYTES)
 
 
+#: The client an import reads and writes (`client_id` query parameter): its
+#: `global` VRF holds every row of the sheet.
+IMPORT_CLIENT_DOC = (
+    "The client whose global VRF the sheet is imported into: one the caller can see, "
+    "active, and not Unassigned"
+)
+
+
 @router.post("/import/preview", response_model=ImportPreviewOut)
 async def import_preview(
     request: Request,
     mapping: str = Query(..., max_length=4000),
+    client_id: UUID = Query(..., description=IMPORT_CLIENT_DOC),
     ctx: AuthContext = Depends(require_permission("ipam.manage")),
 ) -> ImportPreviewOut:
     """§8.1 step one. **WRITES NOTHING.**
@@ -1386,17 +1395,17 @@ async def import_preview(
     preview happened, because no preview is persisted -- see
     `importer.apply_import` and this module's `importer` docstring for why that
     trade was taken deliberately rather than closed with a table.
+
+    THE REQUEST NAMES ITS CLIENT (MSP clients plan 2026-10-26 Task 11): 404 for
+    one the caller cannot see, 409 archived, 422 "Sin asignar" -- refused before
+    anything is read or written.
     """
     content = await _read_csv(request)
     parsed = _mapping(mapping)
     try:
         async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             preview = await importer.preview_import(
-                # The internal client, whose id is the organisation's: the import
-                # names no client yet (plan 2026-10-26 Task 11 takes it from the
-                # request), and every row it found until 0240 was the internal
-                # client's.
-                session, ctx.org_id, client_id=ctx.org_id, content=content, mapping=parsed
+                session, ctx.org_id, client_id=client_id, content=content, mapping=parsed
             )
             out = ImportPreviewOut(
                 **{**vars(preview), "rows": [ImportRowOut(**vars(r)) for r in preview.rows]}
@@ -1411,18 +1420,19 @@ async def import_apply(
     request: Request,
     mapping: str = Query(..., max_length=4000),
     digest: str = Query(..., min_length=64, max_length=64),
+    client_id: UUID = Query(..., description=IMPORT_CLIENT_DOC),
     ctx: AuthContext = Depends(require_permission("ipam.manage")),
 ) -> ImportResultOut:
     """§8.1 step two: ONE transaction. A failure on the last row leaves ZERO
     rows written, because the `org_session` block is the transaction and the
-    error escapes it."""
+    error escapes it. Into the client the request names, as `import_preview`
+    says."""
     content = await _read_csv(request)
     parsed = _mapping(mapping)
     try:
         async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             result = await importer.apply_import(
-                # The internal client, as `import_preview` says.
-                session, ctx.org_id, actor_id=ctx.user_id, client_id=ctx.org_id,
+                session, ctx.org_id, actor_id=ctx.user_id, client_id=client_id,
                 content=content, mapping=parsed, digest=digest,
             )
             out = ImportResultOut(

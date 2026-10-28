@@ -621,8 +621,10 @@ export const ipam: Shape<typeof en> = {
     lastRun: "Última ejecución",
     noAgentNotice:
       "El último barrido no se pudo ejecutar: no hay ningún agente inscrito en este segmento. Un barrido se ejecuta desde un agente dentro del segmento, nunca desde esta plataforma. Instala el agente a mano en un equipo de aquí y él barrerá el resto.",
-    designatedAgentField: "Agente designado (ID de dispositivo)",
-    designatedAgentPlaceholder: "elegir automáticamente un agente en línea de este segmento",
+    designatedAgentField: "Agente designado",
+    designatedAgentAuto: "Elegir automáticamente un agente en línea de este segmento",
+    designatedAgentHelp:
+      "Solo equipos con agente del cliente de esta subred: la red de otro cliente no es esta, aunque tenga las mismas direcciones.",
     intervalField: "Intervalo (horas)",
     scheduledEnabled: "Barridos programados habilitados",
     intervalTooShort: {

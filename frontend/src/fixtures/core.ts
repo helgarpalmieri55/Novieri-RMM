@@ -275,7 +275,9 @@ const listDevices: FixtureMap["listDevices"] = (params = {}) => {
       (d) =>
         matchesQuery(d, params.q ?? "") &&
         (!params.provenance || d.provenance === params.provenance) &&
-        (!params.osFamily || d.os_family === params.osFamily),
+        (!params.osFamily || d.os_family === params.osFamily) &&
+        // Every fixture machine is the internal client's (id = the org's).
+        (!params.clientId || params.clientId === ORG_ID),
     );
   const searched = filtered(all);
   // In the review tab and its count, and nowhere else -- as on the server.

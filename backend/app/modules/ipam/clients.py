@@ -24,20 +24,31 @@ as every new row's are -- but not always first, and not always site first:
   (`registry.vrf_for_new_row`) -- after which, without a VRF, the client's
   `global` VRF may already have been INSERTED (`ensure_default_vrf`) -- then,
   for a subnet, its site and the client again; then the address plan's
-  advisory lock, and the audit chain's last.
+  advisory lock, and the audit chain's last;
+* a CSV import (`importer._import_vrf`): the client, then its `global` VRF may
+  be INSERTED; then, per row, the same client again (`vrf_for_new_row`, a lock
+  this transaction already holds) and the audit chain;
+* a promotion (`candidates.promote`): the client, then every candidate's
+  site in ONE statement, all FOR SHARE; then, per machine, the audit chain;
+* a sweep recording what it found (`candidates.auto_create_from_sweep`,
+  inside the job's transaction, after its observations): the subnet's site,
+  then its client (`site_for_new_rows`'s order), then the audit chain -- and
+  `JobEngine.complete` appends its own event to that chain afterwards.
 
 None of these can deadlock against `archive_site` (the site FOR NO KEY
 UPDATE, then its client FOR SHARE) or `archive_client` (the client FOR NO KEY
 UPDATE, its first lock). Every client lock here, and `archive_site`'s, is FOR
 SHARE, which conflicts neither with another FOR SHARE nor with the KEY SHARE
-the VRF insert's foreign key takes. `archive_site` does wait on an IPAM write
-that holds its site FOR SHARE -- but it waits at its FIRST lock, holding
-nothing, and the write's remaining locks (the client FOR SHARE, the advisory
-lock, the audit chain) are none of `archive_site`'s, so it never deadlocks
-with one. `archive_client` holds nothing before the client and never locks a
-site. Neither archive touches a VRF row or the advisory lock, and an IPAM
-write waits for its site before it takes the audit chain. A write that meets
-an archive in flight waits for it, re-reads and gets the 409.
+the VRF insert's (and the device insert's) foreign key takes. The sites one
+promotion locks conflict with nothing but an archive of one of them.
+`archive_site` does wait on an IPAM write that holds its site FOR SHARE --
+but it waits at its FIRST lock, holding nothing, and the write's remaining
+locks (the client FOR SHARE, the advisory lock, the audit chain) are none of
+`archive_site`'s, so it never deadlocks with one. `archive_client` holds
+nothing before the client and never locks a site. Neither archive touches a
+VRF row or the advisory lock, and an IPAM write waits for its site before it
+takes the audit chain. A write that meets an archive in flight waits for it,
+re-reads and gets the 409.
 """
 
 from uuid import UUID

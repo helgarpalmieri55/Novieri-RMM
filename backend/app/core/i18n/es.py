@@ -1434,6 +1434,11 @@ CATALOG: dict[str, str] = {
     ),
     "site {site_id} belongs to another client": "la sede {site_id} es de otro cliente",
     "VLAN {vlan_id} belongs to another client": "la VLAN {vlan_id} es de otro cliente",
+    # Sweeps, candidates and promotion inside the client (plan 2026-10-26 Task 11).
+    "that machine belongs to another client": "ese equipo es de otro cliente",
+    "assign the subnet to a site before adding its machines": (
+        "asigna una sede a la subred antes de añadir sus equipos"
+    ),
     "{count} subnet": "{count} subred",
     "{count} subnets": "{count} subredes",
     "{count} VLAN": "{count} VLAN",

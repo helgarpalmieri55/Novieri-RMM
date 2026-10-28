@@ -156,9 +156,9 @@ PART_C: dict[str, str] = {
     ),
     # --- devices ---
     "GET /api/v1/devices": (
-        "Lists the fleet one page at a time, filterable by OS, status, provenance, search text "
-        "and tab, with total, per-tab and fleet-wide counts. The assigned person appears only on "
-        "devices of clients where the caller also holds the people read permission."
+        "Lists the fleet one page at a time, filterable by OS, status, provenance, client, search "
+        "text and tab, with total, per-tab and fleet-wide counts. The assigned person appears only "
+        "on devices of clients where the caller also holds the people read permission."
     ),
     "POST /api/v1/devices": (
         "Records an asset by hand, such as warehouse stock or equipment that cannot run an agent. "
@@ -170,10 +170,10 @@ PART_C: dict[str, str] = {
         "findings. It is a read and creates no device rows."
     ),
     "POST /api/v1/devices/candidates/promote": (
-        "Turns selected candidate addresses into asset records, with per-address results. "
-        "Already-promoted addresses are not errors, and an address that is no longer a candidate "
-        "is refused individually. A promoted record counts as vouched for and may be a push "
-        "install target."
+        "Turns one named client's selected candidate addresses into asset records, each at its "
+        "subnet's client and site, with per-address results. A subnet without a site, a "
+        "non-candidate or an existing asset is answered per address. A promoted record counts "
+        "as vouched for and may be a push install target."
     ),
     "POST /api/v1/devices/review/approve-all": (
         "Approves every listed computer still waiting for review after joining through the "

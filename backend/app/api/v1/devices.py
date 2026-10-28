@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, IPvAnyAddress, field_validato
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_all_clients, require_permission
+from app.api.deps import AuthContext, require_permission
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.rbac import codes_held_anywhere
@@ -15,6 +15,7 @@ from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job, publish_revoke
 from app.models import Agent, Device, SuggestedAssetMatch
 from app.modules.ipam import candidates as candidates_svc
+from app.modules.ipam.errors import IpamClientError, IpamConflictError, IpamNotFoundError
 from app.modules.remote.capability import can_share_screen
 from app.services import device_review as review_svc
 from app.services.cert_renewal import cert_state
@@ -365,6 +366,10 @@ async def list_devices(
     #: The console's search box, SERVER-SIDE. Hostname, FQDN, description,
     #: address, operating system and architecture -- the fields the box names.
     q: str | None = Query(default=None, max_length=128),
+    #: One client's machines -- what IPAM's sweeper picker lists for a subnet.
+    #: A filter like the others, never a widening: RLS still decides what the
+    #: caller may see, so another client's id answers an empty page.
+    client_id: UUID | None = Query(default=None),
     #: The tab strip: `all | online | offline | assets | certs | review`.
     #: `review` is the machines that joined through the install link and wait
     #: for a person. NOT the same
@@ -411,6 +416,7 @@ async def list_devices(
             device_status=device_status,
             provenance=provenance,
             q=q,
+            client_id=client_id,
             state=state,
             limit=limit,
             offset=offset,
@@ -446,6 +452,8 @@ class CandidateOut(BaseModel):
     #: nothing else.
     confidence: str
     subnet_id: UUID | None
+    #: Whose network saw it. The same address in two clients is two candidates.
+    client_id: UUID
 
 
 class CandidateListResponse(BaseModel):
@@ -473,6 +481,12 @@ class CandidateListResponse(BaseModel):
 class PromoteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    #: Whose candidates these are. Each machine is filed under its subnet's
+    #: client -- this one -- at the subnet's site.
+    client_id: UUID = Field(
+        description="The client whose candidates are promoted; each machine is filed under "
+        "it, at its subnet's site"
+    )
     #: The addresses an OPERATOR selected. Bulk promote is allowed; bulk
     #: auto-promote is not, and the difference is that this list came from a
     #: human looking at the screen.
@@ -540,25 +554,32 @@ async def promote_asset_candidates(
     selection must not silently discard the rest, and "already an asset" is not
     an error -- two operators looking at the same list is the normal case.
 
-    EVERY CLIENT, IN PHASE 1. IPAM has no client yet, so a promoted machine is
-    filed under the internal client and its Principal site (`candidates.py`).
-    A technician limited to some clients is refused here, with the
-    every-client sentence, rather than by RLS at the INSERT with a 500.
-    PHASE 2: the subnet's client, and this gate goes (plan "Fuera de esta
-    fase").
+    THE BODY NAMES ITS CLIENT, and each machine is filed under its subnet's
+    client and site (`candidates.promote`; decision C7 refuses a candidate
+    whose subnet has no site). `assets.manage` is held in the request's scope:
+    a technician limited to X promotes X's candidates, and Y -- outside their
+    scope -- is the 404 a client that does not exist gets. The phase-1
+    every-client gate is gone with the internal-client fallback it guarded.
     """
-    require_all_clients(ctx)
-    overrides = body.model_dump(exclude_unset=True, exclude={"addresses"})
+    overrides = body.model_dump(exclude_unset=True, exclude={"addresses", "client_id"})
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        results = await candidates_svc.promote(
-            session,
-            ctx.org_id,
-            actor_id=ctx.user_id,
-            addresses=body.addresses,
-            overrides=overrides,
-        )
+        try:
+            results = await candidates_svc.promote(
+                session,
+                ctx.org_id,
+                actor_id=ctx.user_id,
+                client_id=body.client_id,
+                addresses=body.addresses,
+                overrides=overrides,
+            )
+        except IpamNotFoundError as exc:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from None
+        except IpamConflictError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
+        except IpamClientError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         return PromoteResponse(results=[PromoteResultOut(**vars(result)) for result in results])
 
 

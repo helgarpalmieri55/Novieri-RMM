@@ -30,7 +30,7 @@
 // telemetry, which is precisely the boundary this module does not cross.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ApiError, ClientSiteOut, Device, Me, Page } from "../../lib/api";
+import type { ApiError, ClientSiteOut, Device, DevicePage, Me, Page } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { internalClientId, loadingUntilClient, requireKnown } from "../../lib/internalClient";
 import type {
@@ -618,6 +618,25 @@ export function useDispatchIpamSweepMutation() {
   });
 }
 
+/**
+ * The machines a subnet's designated sweeper may be: its CLIENT'S, with an
+ * agent (`GET /devices?client_id=`). The server refuses another client's
+ * machine (422) and the sweeper never borrows one; this is what keeps the
+ * picker from offering it.
+ */
+export function useSweeperChoices(clientId: string) {
+  const api = useApi();
+  return useQuery<DevicePage, ApiError, Device[]>({
+    queryKey: ["devices", { clientId, limit: SWEEPER_CHOICES }],
+    queryFn: () => api.listDevices({ clientId, limit: SWEEPER_CHOICES }),
+    select: (page) => page.items.filter((device) => device.agent_status !== null),
+    ...NO_RETRY,
+  });
+}
+
+/** The fleet list's page ceiling: a picker, not a report. */
+const SWEEPER_CHOICES = 500;
+
 export function useUpdateIpamSweepSettingsMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
@@ -638,26 +657,35 @@ export function useUpdateIpamSweepSettingsMutation() {
 // a digest, and a single hook that ran both would be the exact defeat of that
 // guard.
 
+//
+// An import NAMES ITS CLIENT: the sheet goes into that client's `global` VRF,
+// and the server refuses one that names none.
+
 export function usePreviewIpamImportMutation() {
   const api = useApi();
+  const client = useIpamClient();
   return useMutation<
     ImportPreviewOut,
     ApiError,
     { file: File; mapping: Record<string, string> }
   >({
-    mutationFn: ({ file, mapping }) => api.previewIpamImport(file, mapping),
+    // PHASE 3: the selected client; until then the internal one (`useIpamClient`).
+    mutationFn: ({ file, mapping }) => api.previewIpamImport(file, mapping, requireKnown(client)),
   });
 }
 
 export function useApplyIpamImportMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
+  const client = useIpamClient();
   return useMutation<
     ImportResultOut,
     ApiError,
     { file: File; mapping: Record<string, string>; digest: string }
   >({
-    mutationFn: ({ file, mapping, digest }) => api.applyIpamImport(file, mapping, digest),
+    // PHASE 3: the selected client -- the one previewed; until then the internal one.
+    mutationFn: ({ file, mapping, digest }) =>
+      api.applyIpamImport(file, mapping, digest, requireKnown(client)),
     onSuccess: () => {
       invalidateAddressEffects(queryClient);
     },

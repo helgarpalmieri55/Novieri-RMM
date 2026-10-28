@@ -824,6 +824,8 @@ async def evaluate_org(
                     },
                 ).returning(
                     IpamDrift.id,
+                    # Its VRF's, written by the trigger: whose drift this is.
+                    IpamDrift.client_id,
                     IpamDrift.consecutive_detections,
                     IpamDrift.acknowledged_at,
                     IpamDrift.suppressed_until,
@@ -854,7 +856,9 @@ async def evaluate_org(
                     "device_id": str(finding.device_id) if finding.device_id else None,
                 },
                 actor_user_id=None,
-                client_id=None,  # plan 2026-10-26 Task 11 sets the subnet's client
+                # The drift's own client -- its VRF's, so its subnet's -- read
+                # back from the row the upsert wrote.
+                client_id=row.client_id,
             )
             published += 1
 

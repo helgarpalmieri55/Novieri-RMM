@@ -3,11 +3,13 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import type { ApiClient, ClientSiteOut } from "../../../lib/api";
+import type { ApiClient, ClientSiteOut, Device } from "../../../lib/api";
 import { AddressDialog } from "../AddressDialog";
+import { ImportPage } from "../ImportPage";
 import { RegistryPage } from "../RegistryPage";
 import { ScanAuthorizationsPage } from "../ScanAuthorizationsPage";
 import { SubnetTreePage } from "../SubnetTreePage";
+import { SweepPanel } from "../SweepPanel";
 import type { GridEntryOut, ScopeOut, SubnetOut, VlanOut, VrfOut } from "../types";
 
 // EVERY IPAM ROW IS ONE CLIENT'S (MSP clients phase 2, migration 0240). A create
@@ -257,5 +259,97 @@ describe("a subnet, an address and a scan authorization", () => {
 
     expect(await screen.findByText(/Your account has not loaded yet/)).toBeInTheDocument();
     expect(createIpamAddress).not.toHaveBeenCalled();
+  });
+});
+
+// --------------------------------------------------------------------------
+// MSP clients phase 2, Task 11: sweeps and imports stay inside a client
+// --------------------------------------------------------------------------
+
+function machine(id: string, hostname: string | null, agent: Device["agent_status"]): Device {
+  return { id, hostname, primary_ip: null, agent_status: agent } as unknown as Device;
+}
+
+describe("the designated sweeper is one of the subnet's client's machines", () => {
+  it("lists that client's machines with an agent, and saves the one chosen", async () => {
+    const listDevices = vi.fn().mockResolvedValue({
+      items: [machine("m-1", "ws-01", "online"), machine("m-2", "printer", null)],
+      total: 2,
+    });
+    const updateIpamSweepSettings = vi.fn().mockResolvedValue(subnet({ client_id: "c-x" }));
+    stubApi({ listDevices, updateIpamSweepSettings });
+    const user = userEvent.setup();
+    renderWithProviders(<SweepPanel subnet={subnet({ client_id: "c-x" })} canRun canManage />);
+
+    const picker = await screen.findByLabelText("Designated agent");
+    // The SUBNET'S client -- not the internal one, not every client.
+    await waitFor(() => expect(listDevices).toHaveBeenCalledWith({ clientId: "c-x", limit: 500 }));
+    await within(picker).findByRole("option", { name: "ws-01" });
+    // A machine without an agent cannot sweep, so it is not offered.
+    expect(within(picker).queryByRole("option", { name: "printer" })).toBeNull();
+    expect(within(picker).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Auto-select an online agent in this segment",
+      "ws-01",
+    ]);
+
+    await user.selectOptions(picker, "m-1");
+    await user.click(screen.getByRole("button", { name: "Save sweep settings" }));
+    await waitFor(() => expect(updateIpamSweepSettings).toHaveBeenCalled());
+    expect(updateIpamSweepSettings.mock.calls[0]?.[1]).toMatchObject({ sweep_device_id: "m-1" });
+  });
+
+  it("keeps a designation it cannot list rather than clearing it on save", async () => {
+    const updateIpamSweepSettings = vi.fn().mockResolvedValue(subnet());
+    stubApi({ updateIpamSweepSettings });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <SweepPanel subnet={subnet({ sweep_device_id: "dev-unlisted" })} canRun canManage />,
+    );
+
+    const picker = (await screen.findByLabelText("Designated agent")) as HTMLSelectElement;
+    expect(picker.value).toBe("dev-unlisted");
+    await user.click(screen.getByRole("button", { name: "Save sweep settings" }));
+    await waitFor(() => expect(updateIpamSweepSettings).toHaveBeenCalled());
+    expect(updateIpamSweepSettings.mock.calls[0]?.[1]).toMatchObject({
+      sweep_device_id: "dev-unlisted",
+    });
+  });
+});
+
+describe("an import names its client", () => {
+  async function previewAndApply(): Promise<void> {
+    const user = userEvent.setup();
+    renderWithProviders(<ImportPage />);
+    const input = (await screen.findByLabelText("CSV file")) as HTMLInputElement;
+    await user.upload(
+      input,
+      new File(["address,hostname\n10.4.7.9,WS-01\n"], "plan.csv", { type: "text/csv" }),
+    );
+    await user.selectOptions(await screen.findByLabelText("address"), "address");
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Apply" })).not.toBeDisabled());
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+  }
+
+  const PREVIEW = {
+    digest: "a".repeat(64),
+    total_rows: 1,
+    creates: 1,
+    updates: 0,
+    conflicts: 0,
+    errors: 0,
+    rows: [{ line: 2, action: "create", address: "10.4.7.9", error: "", detail: {} }],
+  };
+
+  it("previews and applies into the internal client, the same one both times", async () => {
+    const previewIpamImport = vi.fn().mockResolvedValue(PREVIEW);
+    const applyIpamImport = vi.fn().mockResolvedValue({ ...PREVIEW, applied: 1 });
+    stubApi({ previewIpamImport, applyIpamImport });
+    await previewAndApply();
+
+    await waitFor(() => expect(applyIpamImport).toHaveBeenCalled());
+    // PHASE 3: the selected client; the internal one, `/me`'s `org_id`, until then.
+    expect(previewIpamImport.mock.calls[0]?.[2]).toBe("o1");
+    expect(applyIpamImport.mock.calls[0]?.slice(2)).toEqual(["a".repeat(64), "o1"]);
   });
 });

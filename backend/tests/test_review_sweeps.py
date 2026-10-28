@@ -141,6 +141,10 @@ async def test_a_pending_device_is_never_chosen_to_sweep_a_subnet(
         id = subnet_id
         prefix = "10.44.0.0/24"
         sweep_device_id: UUID | None = pending  # designated, too
+        # The pending device's own client -- the internal one -- so only the
+        # review gate can exclude it, not the client filter (plan 2026-10-26
+        # Task 11: `select_sweeper` keeps to the subnet's client).
+        client_id = org.org_id
 
     async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         chosen = await select_sweeper(session, org.org_id, _Subnet(), now=NOW)  # type: ignore[arg-type]

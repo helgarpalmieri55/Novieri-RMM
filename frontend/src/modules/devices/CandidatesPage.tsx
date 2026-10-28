@@ -47,6 +47,7 @@ import { Button, Td } from "../../components/ui";
 import type { AssetCandidate, Me, PromoteResult } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
+import { internalClientId, requireKnown } from "../../lib/internalClient";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { Trans } from "../../i18n/Trans";
@@ -152,7 +153,14 @@ export function CandidatesPage() {
   });
 
   const promote = useMutation({
-    mutationFn: () => api.promoteAssetCandidates({ addresses: [...selected] }),
+    mutationFn: () =>
+      api.promoteAssetCandidates({
+        // PHASE 3: the selected client; until then the internal one. A
+        // promotion is of ONE client's candidates (each machine takes its
+        // subnet's client and site), and `/me` names the internal client.
+        client_id: requireKnown(internalClientId(me.data)),
+        addresses: [...selected],
+      }),
     onSuccess: () => {
       setSelected(new Set());
       void queryClient.invalidateQueries({ queryKey: ["asset-candidates"] });
@@ -336,7 +344,9 @@ export function CandidatesPage() {
                 {items.map((candidate) => {
                   const seen = evidence(candidate);
                   return (
-                    <tr key={candidate.address}>
+                    // Keyed by client AND address: two clients' 10.0.0.9
+                    // are two candidates (MSP clients phase 2).
+                    <tr key={`${candidate.client_id}:${candidate.address}`}>
                       <td>
                         <input
                           type="checkbox"

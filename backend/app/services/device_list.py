@@ -308,6 +308,7 @@ def _filtered(
     device_status: str | None,
     provenance: str | None,
     q: str | None,
+    client_id: UUID | None,
     with_holder: bool,
 ) -> list[ColumnElement[bool]]:
     """Every predicate EXCEPT the tab. `state_counts` is counted over this set.
@@ -327,6 +328,8 @@ def _filtered(
         clauses.append(Device.status == device_status)
     if provenance:
         clauses.append(Device.provenance == provenance)
+    if client_id is not None:
+        clauses.append(Device.client_id == client_id)
     if q and q.strip():
         clauses.append(_search_clause(q.strip(), with_holder=with_holder))
     return clauses
@@ -397,6 +400,7 @@ async def device_page(
     device_status: str | None = None,
     provenance: str | None = None,
     q: str | None = None,
+    client_id: UUID | None = None,
     state: str = "all",
     limit: int = 100,
     offset: int = 0,
@@ -438,6 +442,7 @@ async def device_page(
         device_status=device_status,
         provenance=provenance,
         q=q,
+        client_id=client_id,
         with_holder=with_holder,
     )
     attention = _cert_attention(stamp)

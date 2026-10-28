@@ -107,8 +107,11 @@ async def _dispatched(
     register_job_types()
     org = await seed_org(engine, tag)
     vrf_id = await seed_vrf(engine, org.org_id)
+    # At the internal client's Principal site (id = org id): a sweep files
+    # what it finds at its subnet's site, and records nothing without one
+    # (MSP clients plan 2026-10-26 Task 11, C7).
     subnet_id = await seed_subnet(
-        engine, org.org_id, vrf_id=vrf_id, prefix=prefix
+        engine, org.org_id, vrf_id=vrf_id, prefix=prefix, site_id=org.org_id
     )
     device_id = org.device_id
     signed = targets if targets is not None else TARGETS

@@ -314,6 +314,7 @@ function candidate(overrides: Partial<AssetCandidate> = {}): AssetCandidate {
     sightings: 12,
     confidence: "medium",
     subnet_id: null,
+    client_id: "org-1",
     ...overrides,
   };
 }

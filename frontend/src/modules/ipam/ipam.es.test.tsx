@@ -523,7 +523,12 @@ describe("a subnet's detail in Spanish", () => {
     expect(screen.getByText("Ninguno, elegido automáticamente")).toBeInTheDocument();
     expect(screen.getByText(/\(mínimo 1 h\)/)).toBeInTheDocument();
     expect(await screen.findByText(/^Correcto, hace 2 horas\. 121 de 234 respondieron\./)).toBeInTheDocument();
-    expect(screen.getByLabelText("Agente designado (ID de dispositivo)")).toBeInTheDocument();
+    // A picker of the subnet's client's machines (MSP clients phase 2), not a typed id.
+    expect(screen.getByLabelText("Agente designado")).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "Elegir automáticamente un agente en línea de este segmento" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Solo equipos con agente del cliente de esta subred/)).toBeInTheDocument();
     expect(screen.getByLabelText("Intervalo (horas)")).toBeInTheDocument();
     expect(screen.getByLabelText("Barridos programados habilitados")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Guardar la configuración del barrido" })).toBeInTheDocument();

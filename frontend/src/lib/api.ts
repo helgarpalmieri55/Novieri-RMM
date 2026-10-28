@@ -515,6 +515,8 @@ export interface DeviceListParams {
   state?: DeviceState;
   provenance?: Device["provenance"] | "";
   osFamily?: Device["os_family"];
+  /** One client's machines (`?client_id=`): what IPAM's sweeper picker lists. */
+  clientId?: string;
   limit?: number;
   offset?: number;
 }
@@ -610,6 +612,8 @@ export interface AssetCandidate {
   /** `medium` = ARP saw it; `low` = only ICMP, i.e. something answered. */
   confidence: "high" | "medium" | "low";
   subnet_id: string | null;
+  /** Whose network saw it. The same address in two clients is two candidates. */
+  client_id: string;
 }
 
 export interface AssetCandidatePage {
@@ -1833,6 +1837,7 @@ export class ApiClient {
     if (params.state && params.state !== "all") query.set("state", params.state);
     if (params.provenance) query.set("provenance", params.provenance);
     if (params.osFamily) query.set("os_family", params.osFamily);
+    if (params.clientId) query.set("client_id", params.clientId);
     if (params.limit != null) query.set("limit", String(params.limit));
     if (params.offset) query.set("offset", String(params.offset));
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
@@ -1878,8 +1883,12 @@ export class ApiClient {
     return this.request<AssetCandidatePage>("/devices/candidates");
   }
 
+  /**
+   * `client_id` names whose candidates these are; each machine is filed under
+   * its subnet's client and site, and a subnet without a site refuses it.
+   */
   promoteAssetCandidates(
-    body: { addresses: string[] } & AssetInput,
+    body: { client_id: string; addresses: string[] } & AssetInput,
   ): Promise<{ results: PromoteResult[] }> {
     return this.request<{ results: PromoteResult[] }>("/devices/candidates/promote", {
       method: "POST",
@@ -5073,26 +5082,31 @@ export class ApiClient {
 
   // Step one of two. WRITES NOTHING; the digest it returns is what `apply` must
   // echo, which is the only thing binding the two steps to one file.
+  // `clientId` is the client whose `global` VRF the sheet goes into; the
+  // server refuses an import that names none.
   async previewIpamImport(
     file: File,
     mapping: Record<string, string>,
+    clientId: string,
   ): Promise<IpamImportPreviewOut> {
     return this.ipamImportRequest<IpamImportPreviewOut>(
-      `/ipam/import/preview?mapping=${encodeURIComponent(JSON.stringify(mapping))}`,
+      `/ipam/import/preview?mapping=${encodeURIComponent(JSON.stringify(mapping))}` +
+        `&client_id=${encodeURIComponent(clientId)}`,
       file,
     );
   }
 
   // Step two. The digest is REQUIRED and must be the one preview returned for
-  // this exact file.
+  // this exact file -- into the same client.
   async applyIpamImport(
     file: File,
     mapping: Record<string, string>,
     digest: string,
+    clientId: string,
   ): Promise<IpamImportResultOut> {
     return this.ipamImportRequest<IpamImportResultOut>(
       `/ipam/import/apply?mapping=${encodeURIComponent(JSON.stringify(mapping))}` +
-        `&digest=${encodeURIComponent(digest)}`,
+        `&digest=${encodeURIComponent(digest)}&client_id=${encodeURIComponent(clientId)}`,
       file,
     );
   }

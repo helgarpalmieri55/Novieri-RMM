@@ -15,7 +15,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -40,6 +40,7 @@ function candidate(overrides: Partial<AssetCandidate> = {}): AssetCandidate {
     sightings: 12,
     confidence: "medium",
     subnet_id: null,
+    client_id: "o1",
     ...overrides,
   };
 }
@@ -97,7 +98,8 @@ function renderPage(listAssetCandidates: () => Promise<unknown>, me: Partial<Me>
       state_counts: { all: 0, online: 0, offline: 0, assets: 0, certs: 0 },
       fleet: { total: 0, managed: 0, online: 0, cert_attention: 0 },
     }),
-    me: vi.fn().mockResolvedValue({ permissions: [], ...me } as Me),
+    // `org_id` is the internal client's id, which a promotion names (phase 2).
+    me: vi.fn().mockResolvedValue({ org_id: "o1", permissions: [], ...me } as Me),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui: ReactElement = (
@@ -189,6 +191,30 @@ describe("CandidatesPage", () => {
     expect(promote.mock.calls[0]?.[0]).toMatchObject({
       addresses: ["172.22.104.56"],
     });
+  });
+
+  it("names the client whose candidates it promotes: the internal one until phase 3", async () => {
+    // A promotion is of ONE client's candidates; each machine takes its
+    // subnet's client and site. PHASE 3: the selected client.
+    renderPage(() => Promise.resolve(page()));
+    await screen.findByText("172.22.104.55");
+    await userEvent.click(screen.getByRole("checkbox", { name: /172\.22\.104\.55/ }));
+    await userEvent.click(screen.getByRole("button", { name: /promote/i }));
+
+    await waitFor(() => expect(promote).toHaveBeenCalledTimes(1));
+    expect(promote.mock.calls[0]?.[0]).toEqual({
+      client_id: "o1",
+      addresses: ["172.22.104.55"],
+    });
+  });
+
+  it("lists the same address of two clients as two rows", async () => {
+    renderPage(() =>
+      Promise.resolve(
+        page({ items: [candidate(), candidate({ client_id: "c-y" })], total: 2 }),
+      ),
+    );
+    expect(await screen.findAllByText("172.22.104.55")).toHaveLength(2);
   });
 
   it("will not promote nothing", async () => {
