@@ -569,12 +569,19 @@ async def test_the_reads_that_need_a_client(api_env: ApiEnv) -> None:
     """Settings, the forecast and both exports are one client's: each client
     has its own base currency and fiscal year (research-5 §I2), and summing
     across clients would mix currencies. Without a client: 422. A client this
-    session cannot see: 404 "no such client". The exports of a client without
-    budget: the module's 404."""
+    session cannot see: 404 "no such client", and nothing audited as an
+    export. A client that turned budget OFF still exports what it recorded:
+    its history stays exportable (Task 8 review M6, the controller's
+    decision) -- only its writes are the module's 404."""
     org = await api_env.create_org("b-need")
     other = await api_env.create_org("b-need-other")
     x, _ = await client_with_site(api_env, org)
     admin = await _admin(api_env, org)
+    await _budget_on(api_env, admin, x)
+    category = await _category(api_env, admin, x)
+    await _expense(api_env, admin, x, category, status="confirmed",
+                   description="recorded before budget was off")
+    await _budget_off(api_env, admin, x)
     reads = (
         f"{B}/settings", f"{B}/forecast", f"{B}/expenses/export", f"{B}/expenses/export/odoo"
     )
@@ -589,11 +596,66 @@ async def test_the_reads_that_need_a_client(api_env: ApiEnv) -> None:
     r = await api_env.client.put(f"{B}/settings", params={"client_id": str(other)},
                                  json={"base_currency": "EUR"}, headers=admin)
     assert (r.status_code, r.json()["detail"]) == (404, NO_SUCH_CLIENT), r.text
+    # Nothing was exported yet, so nothing was audited as one.
+    assert "budget.export" not in {e.action for e in await _audit(api_env, org)}
     for path in reads[2:]:
         r = await api_env.client.get(path, params={"client_id": str(x)}, headers=admin)
-        assert (r.status_code, r.json()["detail"]) == (404, MODULE_OFF), (path, r.text)
-    # Nothing was exported, so nothing was audited as one.
-    assert "budget.export" not in {e.action for e in await _audit(api_env, org)}
+        assert r.status_code == 200, (path, r.text)
+        assert "recorded before budget was off" in r.text, (path, r.text)
+    exports = [e for e in await _audit(api_env, org) if e.action == "budget.export"]
+    assert [(e.client_id, e.meta["row_count"]) for e in exports] == [(x, 1), (x, 1)]
+
+
+async def test_an_archived_client_is_read_as_it_stands(api_env: ApiEnv) -> None:
+    """An archived client takes no new rows -- plan-wide, a create for one is
+    a 409 -- and a read is never refused for one: it answers what exists.
+    So the reads that would seed the default categories (the category list,
+    a budget's variance, the forecast) write nothing for an archived client
+    that still uses budget, and project nothing for it. A settings PUT,
+    whose first write creates the settings row, is the create's 409 with the
+    create's sentence, before anything is written or audited (Task 8 review
+    M4)."""
+    org = await api_env.create_org("b-archived")
+    x, _ = await client_with_site(api_env, org)
+    admin = await _admin(api_env, org)
+    actor = await _user_id(api_env, org)
+    await _budget_on(api_env, admin, x)
+    budget = await _budget(api_env, admin, x)
+    # Something to project, so a forecast that went on would need categories.
+    await _subscription(api_env, org, x, actor, renews_at=date.today())
+    r = await api_env.client.post(f"/api/v1/clients/{x}/archive", headers=admin)
+    assert r.status_code == 200, r.text
+    before = await _rows(api_env, org)
+    audit_before = [e.id for e in await _audit(api_env, org)]
+
+    r = await api_env.client.get(f"{B}/categories", params={"client_id": str(x)},
+                                 headers=admin)
+    assert (r.status_code, r.json()) == (200, []), r.text
+    r = await api_env.client.get(f"{B}/budgets/{budget}/variance", headers=admin)
+    assert r.status_code == 200, r.text
+    assert r.json()["rows"] == [], r.text
+    r = await api_env.client.get(f"{B}/forecast", params={"client_id": str(x), "months": 3},
+                                 headers=admin)
+    assert r.status_code == 200, r.text
+    assert r.json()["rows"] == [], r.text
+
+    create = await api_env.client.post(
+        f"{B}/budgets",
+        json={"client_id": str(x), "fiscal_year": 2028, "name": "n", "granularity": "month"},
+        headers=admin,
+    )
+    assert create.status_code == 409, create.text
+    for body in ({"base_currency": "EUR"}, {"fiscal_year_start_month": 4},
+                 {"base_currency": "EUR", "fiscal_year_start_month": 4}):
+        r = await api_env.client.put(f"{B}/settings", params={"client_id": str(x)},
+                                     json=body, headers=admin)
+        assert (r.status_code, r.json()) == (409, create.json()), (body, r.text)
+    r = await api_env.client.get(f"{B}/settings", params={"client_id": str(x)}, headers=admin)
+    assert r.status_code == 200, r.text
+    assert (r.json()["base_currency"], r.json()["updated_at"]) == ("USD", None), r.text
+
+    assert await _rows(api_env, org) == before
+    assert [e.id for e in await _audit(api_env, org)] == audit_before
 
 
 async def test_reports_and_exports_count_only_their_client(api_env: ApiEnv) -> None:

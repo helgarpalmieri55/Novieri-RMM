@@ -7,7 +7,8 @@ ONE client's (migration 0238), and budget is an optional module per client
 - A NEW row names its client, loaded like every new row's
   (`client_for_new_budget_rows`): one this session cannot see is a 404, never
   a 403 (spec §3.2's existence oracle); an archived one a 409; "Sin asignar"
-  a 422 (C10); and then the module.
+  a 422 (C10); and then the module. A settings write is held the same way
+  (`client_for_budget_settings`), because its first one creates the row.
 - Every other WRITE takes its client from the row it changes and calls
   `require_module` with it BEFORE anything else -- the client read FOR SHARE
   is the write's first lock, before the audit chain's, which is the order an
@@ -15,7 +16,9 @@ ONE client's (migration 0238), and budget is an optional module per client
 - A READ that is one client's by nature -- the settings, the forecast, the
   exports, each in that client's base currency -- names a client this session
   can see (`visible_client`), else the same 404 as a client that does not
-  exist.
+  exist. An archived client is readable, never a 409: a read answers what
+  exists. So the reads that would otherwise write -- the lazy seed of the
+  default categories -- write nothing for it (`budget_in_use`).
 - What a row POINTS AT is of the row's client (`same_client`): another
   client's category, cost center or linked record is a 422. A missing one is
   the 404 it always was, and a row this session cannot see is missing.
@@ -34,21 +37,43 @@ from app.modules.budget.errors import (
     BudgetConflictError,
     BudgetNotFoundError,
 )
-from app.services.client_modules import require_module
-from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
+from app.services.client_modules import module_enabled, require_module
+from app.services.client_sites import (
+    CLIENT_ARCHIVED,
+    ClientNotFound,
+    NotAcceptingNewRows,
+    client_for_new_rows,
+)
+
+
+async def _client_taking_rows(session: AsyncSession, org_id: UUID, client_id: UUID) -> Client:
+    """`client_for_new_rows`, held FOR SHARE until commit, in this module's
+    errors: one this session cannot see is the 404 of one that does not
+    exist, an archived one the 409 with that function's own sentence."""
+    try:
+        return await client_for_new_rows(session, org_id=org_id, client_id=client_id)
+    except ClientNotFound:
+        raise BudgetNotFoundError(tr("no such client")) from None
+    except NotAcceptingNewRows as exc:
+        raise BudgetConflictError(exc.detail) from None
 
 
 async def client_for_new_budget_rows(session: AsyncSession, org_id: UUID, client_id: UUID) -> None:
     """The client new budget rows are filed under (module docstring), held
     FOR SHARE until commit -- and it must use budget."""
-    try:
-        client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
-    except ClientNotFound:
-        raise BudgetNotFoundError(tr("no such client")) from None
-    except NotAcceptingNewRows as exc:
-        raise BudgetConflictError(exc.detail) from None
+    client = await _client_taking_rows(session, org_id, client_id)
     if client.kind == CLIENT_KIND_UNASSIGNED:
         raise BudgetClientError(tr("nothing is budgeted under Unassigned"))
+    await require_budget(session, org_id, client_id)
+
+
+async def client_for_budget_settings(session: AsyncSession, org_id: UUID, client_id: UUID) -> None:
+    """The client whose settings are written: held like a new row's client
+    (`_client_taking_rows`), because the first write creates the settings
+    row (`rates.settings_for_write`) -- so an archived client is the same 409
+    as a create, whether or not its row exists yet -- and it must use budget.
+    Call it before anything is written or audited."""
+    await _client_taking_rows(session, org_id, client_id)
     await require_budget(session, org_id, client_id)
 
 
@@ -69,6 +94,22 @@ async def visible_client(session: AsyncSession, org_id: UUID, client_id: UUID) -
     ).scalar_one_or_none()
     if found is None:
         raise BudgetNotFoundError(tr("no such client"))
+
+
+async def budget_in_use(session: AsyncSession, org_id: UUID, client_id: UUID) -> bool:
+    """Whether a READ may write for `client_id` -- the lazy seed of its
+    default categories -- and project its subscriptions and licenses: it uses
+    budget and is not archived. When it may not, the read is still answered,
+    never refused: with what the client already has, writing and projecting
+    nothing."""
+    status = (
+        await session.execute(
+            select(Client.status).where(Client.id == client_id, Client.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+    if status is None or status == CLIENT_ARCHIVED:
+        return False
+    return await module_enabled(session, org_id=org_id, client_id=client_id, module="budget")
 
 
 def same_client(row_client: UUID, client_id: UUID, refusal: str) -> None:

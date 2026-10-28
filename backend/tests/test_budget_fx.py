@@ -12,9 +12,10 @@ from decimal import Decimal
 from uuid import UUID
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import Connection, event, func, select
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.util import await_only
 
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
@@ -269,42 +270,69 @@ async def test_settings_for_write_concurrent_first_writes_do_not_race(
     pinned there.
 
     A DETERMINISTIC interleave rather than hoping `asyncio.gather` overlaps
-    two sessions at the right instant (G1 in the Task-5 fix directive #2):
-    session A's own `execute` is wrapped so that, right BEFORE A's first
-    statement runs, session B inserts and commits the same client's row --
-    the window a check-then-act lives in. (After A's insert, B would wait on
-    A's uncommitted key and the test would hang, so the hook is before.)
+    two sessions at the right instant (G1 in the Task-5 fix directive #2).
+    Session B inserts and commits the same client's row inside the window a
+    check-then-act lives in, keyed on session A's FIRST statement that
+    touches `budget_settings`:
+
+      - if it is a SELECT, B commits right AFTER it -- the check has just
+        missed and the act has not happened yet, so a check-then-act's
+        INSERT then hits B's key and raises `IntegrityError`;
+      - if it is an INSERT, B commits right BEFORE it -- so an insert
+        without `ON CONFLICT` raises the same, and the real
+        `ON CONFLICT DO NOTHING` finds B's row and hands it back locked.
+
+    Whichever comes first, and only once. B always commits before A has
+    written anything, so B never waits on an uncommitted key of A's and the
+    test cannot hang. The hook is on A's connection (cursor events), not on
+    `AsyncSession.execute`, so a check made with `session.get` and an
+    insert made by a `flush` are inside the window too.
 
     Money impact: the loser's transaction aborts, and with it the change of
     base currency or fiscal year it carried."""
     org_id, _ = await _org_with_user(api_env)
+    raced: list[str] = []
+
+    async def b_wins() -> None:
+        async with AsyncSession(admin_engine, expire_on_commit=False) as session_b:
+            session_b.add(
+                BudgetSettings(
+                    org_id=org_id,
+                    client_id=org_id,
+                    base_currency="EUR",
+                    fiscal_year_start_month=1,
+                    updated_by=None,
+                )
+            )
+            await session_b.commit()
+
+    def first_touch(statement: str, kind: str) -> bool:
+        return (
+            not raced
+            and "budget_settings" in statement
+            and statement.lstrip().upper().startswith(kind)
+        )
+
+    def before_a_statement(
+        conn: Connection, cursor: object, statement: str,
+        parameters: object, context: object, executemany: bool,
+    ) -> None:
+        if first_touch(statement, "INSERT"):
+            raced.append("before A's INSERT")
+            await_only(b_wins())
+
+    def after_a_statement(
+        conn: Connection, cursor: object, statement: str,
+        parameters: object, context: object, executemany: bool,
+    ) -> None:
+        if first_touch(statement, "SELECT"):
+            raced.append("after A's SELECT")
+            await_only(b_wins())
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session_a:
-        original_execute = session_a.execute
-        raced = False
-
-        async def interleaving_execute(statement, *args, **kwargs):
-            nonlocal raced
-            if not raced:
-                # Before A's first statement, session B wins the race for
-                # the same client.
-                raced = True
-                async with AsyncSession(
-                    admin_engine, expire_on_commit=False
-                ) as session_b:
-                    session_b.add(
-                        BudgetSettings(
-                            org_id=org_id,
-                            client_id=org_id,
-                            base_currency="EUR",
-                            fiscal_year_start_month=1,
-                            updated_by=None,
-                        )
-                    )
-                    await session_b.commit()
-            return await original_execute(statement, *args, **kwargs)
-
-        session_a.execute = interleaving_execute  # type: ignore[method-assign]
+        connection = (await session_a.connection()).sync_connection
+        event.listen(connection, "before_cursor_execute", before_a_statement)
+        event.listen(connection, "after_cursor_execute", after_a_statement)
         settings = await settings_for_write(session_a, org_id, org_id)
         await session_a.commit()
 

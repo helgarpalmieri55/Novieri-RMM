@@ -22,8 +22,9 @@ written with; only `budget_settings.base_currency` moves.
 
 A client's settings row is created by its first change
 (`settings_for_write`), never by a read (`fx.get_settings` is pure). Every
-settings write calls `require_budget` first: a client without the module is
-a 404, before anything is written.
+settings write calls `client_for_budget_settings` first: an archived client is
+the 409 a create gets, and a client without the module a 404, before anything
+is written or audited.
 """
 
 from datetime import UTC, date, datetime
@@ -39,7 +40,7 @@ from uuid_extensions import uuid7
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.models import BudgetSettings, Expense, FxRate
-from app.modules.budget.clients import require_budget, visible_client
+from app.modules.budget.clients import client_for_budget_settings, visible_client
 from app.modules.budget.errors import BudgetNotFoundError, BudgetValidationError
 from app.modules.budget.fx import (
     DEFAULT_BASE_CURRENCY,
@@ -258,7 +259,7 @@ async def settings_for_write(
 ) -> BudgetSettings:
     """The client's settings row, created with the documented defaults if it
     does not exist yet, and locked FOR UPDATE until commit. Call it after
-    `require_budget`.
+    `client_for_budget_settings`.
 
     `ON CONFLICT DO NOTHING` and then a locking SELECT, not a check and an
     insert: two concurrent first writes for one client would otherwise both
@@ -298,11 +299,12 @@ async def update_settings(
     acknowledge_mixed_basis: bool = False,
 ) -> BudgetSettings:
     """`PUT /budget/settings?client_id=`: a client this session can see (else
-    the 404 of one that does not exist), that uses budget (else the module's
-    404), then each supplied field through its own audited setter. A body
-    that supplies neither writes nothing."""
-    await visible_client(session, org_id, client_id)
-    await require_budget(session, org_id, client_id)
+    the 404 of one that does not exist), not archived (else the 409 a create
+    gets, before anything is written or audited), that uses budget (else the
+    module's 404) -- `client_for_budget_settings` -- then each supplied field
+    through its own audited setter. A body that supplies neither writes
+    nothing."""
+    await client_for_budget_settings(session, org_id, client_id)
     if base_currency is not None:
         await set_base_currency(
             session,
@@ -340,7 +342,7 @@ async def set_base_currency(
     rows: only `budget_settings.base_currency` (and the `updated_by`/
     `updated_at` marker) moves here; every existing `expense.fx_rate`/
     `amount_base` is left exactly as it was written."""
-    await require_budget(session, org_id, client_id)
+    await client_for_budget_settings(session, org_id, client_id)
     settings = await settings_for_write(session, org_id, client_id)
     old_currency = settings.base_currency
 
@@ -389,7 +391,7 @@ async def set_base_currency(
 async def set_fiscal_year_start(
     session: AsyncSession, org_id: UUID, actor_id: UUID, *, client_id: UUID, start_month: int
 ) -> BudgetSettings:
-    await require_budget(session, org_id, client_id)
+    await client_for_budget_settings(session, org_id, client_id)
     settings = await settings_for_write(session, org_id, client_id)
     old_month = settings.fiscal_year_start_month
 

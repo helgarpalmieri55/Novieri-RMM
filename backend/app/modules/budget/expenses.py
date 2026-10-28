@@ -64,17 +64,15 @@ from app.core.i18n import tr
 from app.core.wire_words import say
 from app.models import (
     ChangeRequest,
-    CostCenter,
     Device,
     Expense,
-    ExpenseCategory,
     License,
     Subscription,
 )
 from app.modules.budget.clients import client_for_new_budget_rows, require_budget, same_client
 from app.modules.budget.errors import BudgetNotFoundError, BudgetValidationError
 from app.modules.budget.fx import convert_for
-from app.modules.budget.refdata import resolve_category, resolve_cost_center
+from app.modules.budget.refdata import category_of_client, cost_center_of_client
 from app.modules.budget.schema import ExpenseCreate
 from app.modules.budget.words import (
     EXPENSE_SOURCE_WORDS,
@@ -209,39 +207,6 @@ async def _resolve_link(
     return resolved_id
 
 
-async def _category_of(
-    session: AsyncSession, org_id: UUID, client_id: UUID, category_id: UUID
-) -> ExpenseCategory:
-    """The expense's category: found org-scoped (404 if not), and the
-    expense's client's (422 if another client's)."""
-    category = await resolve_category(session, org_id, category_id)
-    same_client(
-        category.client_id,
-        client_id,
-        tr(
-            "expense category {category_id} belongs to another client",
-            category_id=category.id,
-        ),
-    )
-    return category
-
-
-async def _cost_center_of(
-    session: AsyncSession, org_id: UUID, client_id: UUID, cost_center_id: UUID
-) -> CostCenter:
-    """The expense's cost center, held like `_category_of`."""
-    cost_center = await resolve_cost_center(session, org_id, cost_center_id)
-    same_client(
-        cost_center.client_id,
-        client_id,
-        tr(
-            "cost center {cost_center_id} belongs to another client",
-            cost_center_id=cost_center.id,
-        ),
-    )
-    return cost_center
-
-
 # ---------------------------------------------------------------------------
 # create_expense
 # ---------------------------------------------------------------------------
@@ -271,11 +236,11 @@ async def create_expense(
     created, with `amount_base = NULL` (spec §0.1 -- never guess a rate)."""
     client_id = data.client_id
     await client_for_new_budget_rows(session, org_id, client_id)
-    category = await _category_of(session, org_id, client_id, data.category_id)
+    category = await category_of_client(session, org_id, client_id, data.category_id)
 
     cost_center_id: UUID | None = None
     if data.cost_center_id is not None:
-        cost_center = await _cost_center_of(session, org_id, client_id, data.cost_center_id)
+        cost_center = await cost_center_of_client(session, org_id, client_id, data.cost_center_id)
         cost_center_id = cost_center.id
 
     vendor_id: UUID | None = None
@@ -475,13 +440,13 @@ async def update_expense(
     # a supplied id is resolved org-scoped and held to the expense's client.
     resolved: dict[str, Any] = {}
     if "category_id" in fields:
-        category = await _category_of(session, org_id, client_id, fields["category_id"])
+        category = await category_of_client(session, org_id, client_id, fields["category_id"])
         resolved["category_id"] = category.id
     if "cost_center_id" in fields:
         if fields["cost_center_id"] is None:
             resolved["cost_center_id"] = None
         else:
-            cost_center = await _cost_center_of(
+            cost_center = await cost_center_of_client(
                 session, org_id, client_id, fields["cost_center_id"]
             )
             resolved["cost_center_id"] = cost_center.id

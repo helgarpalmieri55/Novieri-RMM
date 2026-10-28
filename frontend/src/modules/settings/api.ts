@@ -33,9 +33,8 @@ import type {
   OrgUpdateRequest,
 } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { requireKnown } from "../../lib/internalClient";
+import { loadingUntilClient, requireKnown } from "../../lib/internalClient";
 import type { AiProviderOut, AiSettingsOut, AiSettingsUpdate } from "../ai-admin/types";
-import { loadingUntilClient } from "../budget/api";
 import type { SettingsOut as BudgetSettingsOut, SettingsUpdate as BudgetSettingsUpdate } from "../budget/types";
 import type { SettingsOut as HealthSettingsOut, SettingsUpdate as HealthSettingsUpdate } from "../health/types";
 import type {

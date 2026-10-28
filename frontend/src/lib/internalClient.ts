@@ -19,6 +19,7 @@
  * instead.
  */
 
+import type { UseQueryResult } from "@tanstack/react-query";
 import { translate } from "../i18n/core";
 import type { Me } from "./api";
 
@@ -50,4 +51,18 @@ export class InternalScopeUnknown extends Error {
 export function requireKnown(id: string | null): string {
   if (id === null) throw new InternalScopeUnknown();
   return id;
+}
+
+/**
+ * A read that cannot be sent before its client is known is LOADING until
+ * then, not empty: a disabled query reports `isLoading: false` with no data,
+ * which a panel would draw as "nothing yet" (or, on the budget dashboard, as
+ * the first-run state) while `/me` is still in flight. `client` is the id the
+ * query waits for -- `internalClientId(me)` until phase 3.
+ */
+export function loadingUntilClient<R extends UseQueryResult<unknown, unknown>>(
+  query: R,
+  client: string | null,
+): R {
+  return client == null && query.isPending ? { ...query, isLoading: true } : query;
 }

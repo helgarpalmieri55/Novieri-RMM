@@ -69,7 +69,12 @@ class BudgetSettings(Base):
     base_currency: Mapped[str] = mapped_column(String(3), default="USD")
     fiscal_year_start_month: Mapped[int] = mapped_column(Integer, default=1)
     updated_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), default=None)
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    # `| None` for the unsaved defaults `fx.get_settings` answers before the
+    # first write (never operator-set); a stored row always has one, so the
+    # column stays NOT NULL.
+    updated_at: Mapped[datetime | None] = mapped_column(
+        nullable=False, server_default=func.now()
+    )
 
 
 class CostCenter(Base):

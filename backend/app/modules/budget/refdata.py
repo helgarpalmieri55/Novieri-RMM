@@ -33,9 +33,13 @@ from uuid_extensions import uuid7
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.models import CostCenter, ExpenseCategory
-from app.modules.budget.clients import client_for_new_budget_rows, require_budget
+from app.modules.budget.clients import (
+    budget_in_use,
+    client_for_new_budget_rows,
+    require_budget,
+    same_client,
+)
 from app.modules.budget.errors import BudgetNotFoundError, BudgetValidationError
-from app.services.client_modules import module_enabled
 
 DEFAULT_CATEGORIES: tuple[tuple[str, str], ...] = (
     ("hardware", "Hardware"),
@@ -87,11 +91,12 @@ async def seed_default_categories(
     inserts nothing, rather than being idempotent only because nothing
     happens to call it twice.
 
-    ONLY FOR A CLIENT THAT USES BUDGET (plan 2026-10-26 Task 8): the reads
-    that reach this (`list_categories`, `reporting.variance`,
-    `reporting.forecast`) ask `module_enabled` first, and `feeds.materialize`
-    has already required the module -- a client without it gets no rows from
-    a read.
+    ONLY FOR A CLIENT THAT USES BUDGET AND IS NOT ARCHIVED (plan 2026-10-26
+    Task 8): the reads that reach this (`list_categories`,
+    `reporting.variance`, `reporting.forecast`) ask `budget_in_use` first,
+    and `feeds.materialize` has already taken the client like a create's
+    (`client_for_new_budget_rows`) -- a client without the module, or
+    archived, gets no rows from a read.
 
     This is a LAZY seed, called from every path that needs categories to
     exist (`list_categories`, `feeds.materialize`, `reporting.variance`,
@@ -229,12 +234,11 @@ async def list_categories(
     /budget/categories` populates the category picker every other budget
     route depends on), so it seeds from `actor_id` exactly like
     `feeds.materialize`/`reporting.variance`/`reporting.forecast` do. Only
-    for a client that uses budget: a client without it simply has no rows,
-    and reading them writes nothing (plan 2026-10-26 Task 8). An unfiltered
-    read seeds nothing -- there is no one client to seed."""
-    if client_id is not None and await module_enabled(
-        session, org_id=org_id, client_id=client_id, module="budget"
-    ):
+    for a client that uses budget and is not archived (`budget_in_use`): any
+    other client is answered the rows it has, and reading them writes
+    nothing (plan 2026-10-26 Task 8; an archived client takes no new rows).
+    An unfiltered read seeds nothing -- there is no one client to seed."""
+    if client_id is not None and await budget_in_use(session, org_id, client_id):
         await seed_default_categories(session, org_id, actor_id, client_id=client_id)
     stmt = select(ExpenseCategory).where(ExpenseCategory.org_id == org_id)
     if client_id is not None:
@@ -343,6 +347,24 @@ async def resolve_category(
         raise BudgetNotFoundError(
             tr("expense category {category_id} not found", category_id=category_id)
         )
+    return cat
+
+
+async def category_of_client(
+    session: AsyncSession, org_id: UUID, client_id: UUID, category_id: UUID
+) -> ExpenseCategory:
+    """A category a row of `client_id` points at -- an expense, a budget
+    line: found org-scoped (`resolve_category`'s 404 if not), and of that
+    client (a 422 if another client's)."""
+    cat = await resolve_category(session, org_id, category_id)
+    same_client(
+        cat.client_id,
+        client_id,
+        tr(
+            "expense category {category_id} belongs to another client",
+            category_id=cat.id,
+        ),
+    )
     return cat
 
 
@@ -530,6 +552,23 @@ async def resolve_cost_center(
         raise BudgetNotFoundError(
             tr("cost center {cost_center_id} not found", cost_center_id=cost_center_id)
         )
+    return cc
+
+
+async def cost_center_of_client(
+    session: AsyncSession, org_id: UUID, client_id: UUID, cost_center_id: UUID
+) -> CostCenter:
+    """A cost center a row of `client_id` points at, held like
+    `category_of_client`."""
+    cc = await resolve_cost_center(session, org_id, cost_center_id)
+    same_client(
+        cc.client_id,
+        client_id,
+        tr(
+            "cost center {cost_center_id} belongs to another client",
+            cost_center_id=cc.id,
+        ),
+    )
     return cc
 
 

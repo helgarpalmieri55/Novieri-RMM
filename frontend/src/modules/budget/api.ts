@@ -7,10 +7,9 @@
 // no worker).
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { UseQueryResult } from "@tanstack/react-query";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { internalClientId, requireKnown } from "../../lib/internalClient";
+import { internalClientId, loadingUntilClient, requireKnown } from "../../lib/internalClient";
 import type {
   BudgetCreate,
   BudgetLineInput,
@@ -53,19 +52,6 @@ export function useBudgetClient(): string | null {
   // organisation's internal client, whose id is the organisation's --
   // `/me`'s `org_id` (`lib/internalClient.ts`).
   return internalClientId(me.data);
-}
-
-/**
- * A read that cannot be sent before its client is known is LOADING until
- * then, not empty: a disabled query reports `isLoading: false` with no data,
- * which every panel here would draw as "nothing yet" (or, on the dashboard,
- * as the first-run state) while `/me` is still in flight.
- */
-export function loadingUntilClient<R extends UseQueryResult<unknown, unknown>>(
-  query: R,
-  client: string | null,
-): R {
-  return client == null && query.isPending ? { ...query, isLoading: true } : query;
 }
 
 // --------------------------------------------------------------------------

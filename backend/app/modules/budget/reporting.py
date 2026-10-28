@@ -147,11 +147,12 @@ budget's client's expenses and projections alone, in that client's fiscal
 calendar and base currency. `forecast()` and both exports are one client's by
 the caller's choice -- each client has its own base currency, and summing
 across clients would mix currencies -- for a client this session can see
-(else the 404 of one that does not exist). A client without the budget module
-has no forecast (empty rows), and its reads seed nothing: `variance()` and
-`forecast()` seed default categories only for a client that uses budget, and
-`variance()` projects nothing for one that does not. Its exports are the
-module's 404.
+(else the 404 of one that does not exist). A client without the budget
+module, or archived, has no forecast (empty rows), and its reads seed nothing:
+`variance()` and `forecast()` seed default categories only for a client that
+uses budget and is not archived (`clients.budget_in_use`), and `variance()`
+projects nothing for any other. Its exports still answer: what it recorded
+stays exportable.
 """
 
 import calendar
@@ -166,7 +167,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.i18n import tr
 from app.models import BudgetLine, CostCenter, Expense, ExpenseCategory
 from app.modules.budget.budgets import get_budget
-from app.modules.budget.clients import require_budget, visible_client
+from app.modules.budget.clients import budget_in_use, visible_client
 from app.modules.budget.errors import BudgetValidationError
 from app.modules.budget.feeds import project_costs
 from app.modules.budget.fx import convert_for, get_settings
@@ -178,7 +179,6 @@ from app.modules.budget.periods import (
 )
 from app.modules.budget.refdata import category_by_system_key, seed_default_categories
 from app.modules.licenses.models import Vendor
-from app.services.client_modules import module_enabled
 
 _TWO_PLACES = Decimal("0.01")
 _ZERO = Decimal("0.00")
@@ -417,12 +417,14 @@ async def variance(
 
     The budget's client is the report's (module docstring): its expenses,
     its projections, its fiscal calendar and base currency. For a client
-    that does not use budget (it was turned off after the budget was made)
-    nothing is seeded and nothing is projected: that client has no forecast.
+    that does not use budget (it was turned off after the budget was made),
+    or that is archived, nothing is seeded and nothing is projected
+    (`budget_in_use`): that client has no forecast, and its report is the
+    lines and expenses it already has.
     """
     budget = await get_budget(session, org_id, budget_id)  # 404 if cross-org/missing
     client_id = budget.client_id
-    budgeted = await module_enabled(session, org_id=org_id, client_id=client_id, module="budget")
+    budgeted = await budget_in_use(session, org_id, client_id)
     if budgeted:
         await seed_default_categories(session, org_id, actor_id, client_id=client_id)
     settings = await get_settings(session, org_id, client_id)
@@ -696,8 +698,8 @@ async def forecast(
 
     `client_id`'s subscriptions and licenses, in its base currency: a client
     this session can see (else the 404 of one that does not exist). A client
-    without the budget module has no forecast -- empty rows, and nothing
-    seeded (module docstring)."""
+    without the budget module, or archived, has no forecast -- empty rows,
+    and nothing seeded (`budget_in_use`; a read is never a 409)."""
     if months < 1:
         raise BudgetValidationError(tr("months must be >= 1"))
     await visible_client(session, org_id, client_id)
@@ -705,7 +707,7 @@ async def forecast(
     out_rows: list[dict[str, Any]] = []
     unconvertible_count = 0
     unconvertible_totals: dict[str, Decimal] = {}
-    if not await module_enabled(session, org_id=org_id, client_id=client_id, module="budget"):
+    if not await budget_in_use(session, org_id, client_id):
         return {"rows": out_rows, "unconvertible_count": 0, "unconvertible_by_currency": {}}
 
     await seed_default_categories(session, org_id, actor_id, client_id=client_id)
@@ -758,12 +760,14 @@ async def forecast(
 
 async def _export_client(session: AsyncSession, org_id: UUID, client_id: UUID) -> None:
     """Both exports are one client's (module docstring): a client this
-    session can see (else the 404 of one that does not exist), that uses
-    budget (else the module's 404). `require_budget` takes the client FOR
-    SHARE: the export route audits next, and the client before the audit
-    chain is the order an archive takes them in (Task 7)."""
+    session can see (else the 404 of one that does not exist), whether or
+    not it still uses budget, and archived or not. A client that turned the
+    module off keeps the expenses it recorded -- its lists, `variance()` and
+    `position()` still show them -- and the export is how that history
+    leaves (Task 8 review, controller's decision). No module check, so no
+    lock either: the export only reads, and the route's audit row names the
+    client without a foreign key, so it never waits on an archive."""
     await visible_client(session, org_id, client_id)
-    await require_budget(session, org_id, client_id)
 
 
 async def _export_expenses(

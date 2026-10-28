@@ -5,8 +5,10 @@ every mutation (invariant #4), an explicit `org_id` predicate on every query
 (invariant #5), and a typed `BudgetValidationError`/`BudgetNotFoundError`
 pre-check in place of letting a DB constraint surface as a 500.
 
-`put_lines` resolves EVERY `category_id` and `cost_center_id`, org-scoped via
-`refdata.resolve_category`/`resolve_cost_center`, and validates every
+`put_lines` resolves EVERY `category_id` and `cost_center_id`, org-scoped and
+held to the budget's client via `refdata.category_of_client`/
+`cost_center_of_client` (the same check an expense's references get), and
+validates every
 `period_index` against the parent budget's granularity (`periods.py`'s
 `period_count`, not reimplemented here) -- all of it BEFORE any row is added
 to the session. A cross-org reference or an out-of-range `period_index`
@@ -42,10 +44,10 @@ from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.wire_words import say
 from app.models import Budget, BudgetLine
-from app.modules.budget.clients import client_for_new_budget_rows, require_budget, same_client
+from app.modules.budget.clients import client_for_new_budget_rows, require_budget
 from app.modules.budget.errors import BudgetNotFoundError, BudgetValidationError
 from app.modules.budget.periods import period_count
-from app.modules.budget.refdata import resolve_category, resolve_cost_center
+from app.modules.budget.refdata import category_of_client, cost_center_of_client
 from app.modules.budget.schema import BudgetLineInput
 from app.modules.budget.words import GRANULARITY_WORDS
 
@@ -360,25 +362,13 @@ async def put_lines(
     order: list[tuple[UUID, UUID | None, int]] = []
     amounts: dict[tuple[UUID, UUID | None, int], BudgetLineInput] = {}
     for line in lines:
-        category = await resolve_category(session, org_id, line.category_id)
-        same_client(
-            category.client_id,
-            budget.client_id,
-            tr(
-                "expense category {category_id} belongs to another client",
-                category_id=category.id,
-            ),
+        category = await category_of_client(
+            session, org_id, budget.client_id, line.category_id
         )
         cost_center_id: UUID | None = None
         if line.cost_center_id is not None:
-            cost_center = await resolve_cost_center(session, org_id, line.cost_center_id)
-            same_client(
-                cost_center.client_id,
-                budget.client_id,
-                tr(
-                    "cost center {cost_center_id} belongs to another client",
-                    cost_center_id=cost_center.id,
-                ),
+            cost_center = await cost_center_of_client(
+                session, org_id, budget.client_id, line.cost_center_id
             )
             cost_center_id = cost_center.id
         _validate_period_index(line.period_index, budget.granularity)
