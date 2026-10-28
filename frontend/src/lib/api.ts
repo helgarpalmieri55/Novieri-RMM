@@ -3762,19 +3762,26 @@ export class ApiClient {
     );
   }
 
-  getBudgetSettings(): Promise<SettingsOut> {
-    return this.request<SettingsOut>("/budget/settings");
+  // Budget settings are ONE CLIENT'S (each has its own base currency and
+  // fiscal year), named in the query; the lists take a client as a filter.
+  getBudgetSettings(clientId: string): Promise<SettingsOut> {
+    return this.request<SettingsOut>(
+      `/budget/settings?client_id=${encodeURIComponent(clientId)}`,
+    );
   }
 
-  updateBudgetSettings(body: SettingsUpdate): Promise<SettingsOut> {
-    return this.request<SettingsOut>("/budget/settings", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
+  updateBudgetSettings(clientId: string, body: SettingsUpdate): Promise<SettingsOut> {
+    return this.request<SettingsOut>(
+      `/budget/settings?client_id=${encodeURIComponent(clientId)}`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
   }
 
-  listBudgetCategories(includeInactive = false): Promise<CategoryOut[]> {
-    const suffix = includeInactive ? "?include_inactive=true" : "";
+  listBudgetCategories(includeInactive = false, clientId?: string): Promise<CategoryOut[]> {
+    const query = new URLSearchParams();
+    if (clientId) query.set("client_id", clientId);
+    if (includeInactive) query.set("include_inactive", "true");
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.request<CategoryOut[]>(`/budget/categories${suffix}`);
   }
 
@@ -3792,8 +3799,11 @@ export class ApiClient {
     });
   }
 
-  listCostCenters(includeInactive = false): Promise<CostCenterOut[]> {
-    const suffix = includeInactive ? "?include_inactive=true" : "";
+  listCostCenters(includeInactive = false, clientId?: string): Promise<CostCenterOut[]> {
+    const query = new URLSearchParams();
+    if (clientId) query.set("client_id", clientId);
+    if (includeInactive) query.set("include_inactive", "true");
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.request<CostCenterOut[]>(`/budget/cost-centers${suffix}`);
   }
 
@@ -3830,8 +3840,9 @@ export class ApiClient {
     });
   }
 
-  listBudgets(): Promise<BudgetOut[]> {
-    return this.request<BudgetOut[]>("/budget/budgets");
+  listBudgets(clientId?: string): Promise<BudgetOut[]> {
+    const suffix = clientId ? `?client_id=${encodeURIComponent(clientId)}` : "";
+    return this.request<BudgetOut[]>(`/budget/budgets${suffix}`);
   }
 
   createBudget(body: BudgetCreate): Promise<BudgetOut> {
@@ -3882,8 +3893,9 @@ export class ApiClient {
     return this.request<PositionOut>(`/budget/budgets/${budgetId}/position${suffix}`);
   }
 
-  listExpenses(filters: ExpenseListFilters = {}): Promise<ExpenseOut[]> {
+  listExpenses(filters: ExpenseListFilters = {}, clientId?: string): Promise<ExpenseOut[]> {
     const query = new URLSearchParams();
+    if (clientId) query.set("client_id", clientId);
     for (const [key, value] of Object.entries(filters)) {
       if (value != null && value !== "") query.set(key, String(value));
     }

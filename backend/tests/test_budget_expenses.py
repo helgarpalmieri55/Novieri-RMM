@@ -61,11 +61,13 @@ async def _org_with_user(api_env) -> tuple[UUID, UUID]:
 
 
 async def _seed_category(session: AsyncSession, org_id: UUID, user_id: UUID, key: str = "hardware"):
-    return await create_category(session, org_id, user_id, key=key, name=key.title())
+    return await create_category(session, org_id, user_id, client_id=org_id,
+                                 key=key, name=key.title())
 
 
 async def _seed_cost_center(session: AsyncSession, org_id: UUID, user_id: UUID, code: str = "ENG"):
-    return await create_cost_center(session, org_id, user_id, code=code, name=f"{code} team")
+    return await create_cost_center(session, org_id, user_id, client_id=org_id,
+                                    code=code, name=f"{code} team")
 
 
 async def _seed_vendor(
@@ -98,7 +100,7 @@ async def test_create_captures_the_rate_and_base_amount(api_env) -> None:
                 amount=Decimal("100.00"),
                 currency="EUR",
                 category_id=cat.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
     assert expense.org_id == org_id
@@ -131,7 +133,7 @@ async def test_create_expense_with_confirmed_status_stamps_an_asserter(api_env) 
                 amount=Decimal("100.00"),
                 currency="USD",
                 category_id=cat.id,
-                status="confirmed",
+                status="confirmed", client_id=org_id,
             ),
         )
         assert expense.status == "confirmed"
@@ -165,7 +167,7 @@ async def test_a_later_rate_correction_does_not_re_value_a_stored_expense(api_en
                 amount=Decimal("100.00"),
                 currency="EUR",
                 category_id=cat.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         before_rate = exp.fx_rate
@@ -207,7 +209,7 @@ async def test_unconvertible_expense_is_created_with_null_base(api_env) -> None:
                 amount=Decimal("5000.00"),
                 currency="JPY",
                 category_id=cat.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         assert expense.id is not None
@@ -251,7 +253,7 @@ async def test_convert_overflow_raises_and_expense_is_not_persisted(api_env) -> 
                     amount=Decimal("999999999999.99"),
                     currency="COP",
                     category_id=cat.id,
-                    status="expected",
+                    status="expected", client_id=org_id,
                 ),
             )
         remaining = (
@@ -277,7 +279,7 @@ async def test_confirm_stamps_actor_and_time_and_accepts_a_corrected_amount(api_
                 amount=Decimal("100.00"),
                 currency="USD",
                 category_id=cat.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         assert expense.confirmed_by is None
@@ -304,7 +306,7 @@ async def test_confirm_without_an_amount_keeps_the_recorded_amount(api_env) -> N
                 amount=Decimal("75.00"),
                 currency="USD",
                 category_id=cat.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         confirmed = await confirm_expense(session, org_id, user_id, expense.id)
@@ -324,7 +326,7 @@ async def test_confirm_re_runs_conversion_against_expense_date(api_env) -> None:
                 amount=Decimal("200.00"),
                 currency="EUR",
                 category_id=cat.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         assert expense.fx_rate is None
@@ -352,7 +354,7 @@ async def test_confirm_a_void_expense_is_rejected(api_env) -> None:
                 amount=Decimal("10.00"),
                 currency="USD",
                 category_id=cat.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         await void_expense(session, org_id, user_id, expense.id)
@@ -376,7 +378,7 @@ async def test_confirming_an_already_confirmed_expense_is_rejected(api_env) -> N
                 amount=Decimal("10.00"),
                 currency="USD",
                 category_id=cat.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         first_confirm = await confirm_expense(session, org_id, user_id, expense.id)
@@ -414,7 +416,7 @@ async def test_void_stamps_and_is_audited(api_env) -> None:
                 amount=Decimal("10.00"),
                 currency="USD",
                 category_id=cat.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         voided = await void_expense(session, org_id, user_id, expense.id)
@@ -445,7 +447,7 @@ async def test_voiding_an_already_void_expense_is_rejected(api_env) -> None:
                 amount=Decimal("10.00"),
                 currency="USD",
                 category_id=cat.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         await void_expense(session, org_id, user_id, expense.id)
@@ -474,7 +476,7 @@ async def test_patch_omitted_field_is_left_untouched(api_env) -> None:
                 cost_center_id=cc.id,
                 description="original description",
                 invoice_ref="INV-1",
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         updated = await update_expense(
@@ -504,7 +506,7 @@ async def test_patch_explicit_null_clears_a_nullable_field(api_env) -> None:
                 currency="USD",
                 category_id=cat.id,
                 cost_center_id=cc.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         assert expense.cost_center_id == cc.id
@@ -529,7 +531,7 @@ async def test_patch_amount_currency_or_date_re_runs_conversion(api_env) -> None
                 amount=Decimal("100.00"),
                 currency="EUR",
                 category_id=cat.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         assert expense.amount_base == Decimal("110.00")
@@ -557,7 +559,7 @@ async def test_patch_a_field_unrelated_to_conversion_does_not_touch_fx(api_env) 
                 amount=Decimal("100.00"),
                 currency="EUR",
                 category_id=cat.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         # A corrective rate change AFTER creation -- if `update_expense`
@@ -593,7 +595,7 @@ async def test_patch_explicit_null_on_a_non_nullable_field_is_rejected(api_env, 
                 category_id=cat.id,
                 description="keep me",
                 invoice_ref="INV-KEEP",
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         # Pair the null-rejected field with a legitimate, otherwise-valid
@@ -627,7 +629,7 @@ async def test_edit_audit_records_field_names_and_never_amounts(api_env) -> None
                 currency="USD",
                 category_id=cat.id,
                 description="original desc",
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         await update_expense(
@@ -671,7 +673,7 @@ async def test_update_expense_on_a_void_row_is_rejected(api_env) -> None:
                 currency="USD",
                 category_id=cat.id,
                 description="original",
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         await void_expense(session, org_id, user_id, expense.id)
@@ -710,7 +712,7 @@ async def test_update_link_id_on_a_non_manual_expense_is_rejected(api_env) -> No
         await session.flush()
 
         auto_fed = Expense(
-            org_id=org_id,
+            org_id=org_id, client_id=org_id,
             expense_date=date(2026, 3, 1),
             amount=Decimal("10.00"),
             currency="USD",
@@ -771,7 +773,7 @@ async def test_bare_link_type_patch_on_a_manual_expense_re_resolves_link_id(api_
                 category_id=cat.id,
                 link_type="subscription",
                 link_id=sub.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
 
@@ -824,7 +826,7 @@ async def test_bare_link_type_patch_re_resolves_successfully_against_the_new_typ
                 category_id=cat.id,
                 link_type="subscription",
                 link_id=sub.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
 
@@ -877,7 +879,7 @@ async def test_bare_null_link_type_patch_stranding_an_existing_link_id_is_reject
                 category_id=cat.id,
                 link_type="subscription",
                 link_id=sub.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
 
@@ -917,7 +919,7 @@ async def test_list_expenses_filters_by_status_category_cost_center_vendor_sourc
                 category_id=cat_a.id,
                 cost_center_id=cc.id,
                 vendor_id=vendor.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
         await create_expense(
@@ -927,7 +929,7 @@ async def test_list_expenses_filters_by_status_category_cost_center_vendor_sourc
                 amount=Decimal("20.00"),
                 currency="USD",
                 category_id=cat_b.id,
-                status="confirmed",
+                status="confirmed", client_id=org_id,
             ),
         )
 
@@ -947,14 +949,14 @@ async def test_list_expenses_filters_by_date_range(api_env) -> None:
             session, org_id, user_id,
             ExpenseCreate(
                 expense_date=date(2026, 1, 5), amount=Decimal("1.00"), currency="USD",
-                category_id=cat.id, status="expected",
+                category_id=cat.id, status="expected", client_id=org_id,
             ),
         )
         await create_expense(
             session, org_id, user_id,
             ExpenseCreate(
                 expense_date=date(2026, 3, 5), amount=Decimal("2.00"), currency="USD",
-                category_id=cat.id, status="expected",
+                category_id=cat.id, status="expected", client_id=org_id,
             ),
         )
         results = await list_expenses(
@@ -973,14 +975,14 @@ async def test_list_expenses_is_ordered_by_expense_date_desc(api_env) -> None:
             session, org_id, user_id,
             ExpenseCreate(
                 expense_date=date(2026, 1, 1), amount=Decimal("1.00"), currency="USD",
-                category_id=cat.id, status="expected",
+                category_id=cat.id, status="expected", client_id=org_id,
             ),
         )
         late = await create_expense(
             session, org_id, user_id,
             ExpenseCreate(
                 expense_date=date(2026, 6, 1), amount=Decimal("1.00"), currency="USD",
-                category_id=cat.id, status="expected",
+                category_id=cat.id, status="expected", client_id=org_id,
             ),
         )
         results = await list_expenses(session, org_id)
@@ -996,7 +998,7 @@ async def test_list_expenses_returns_only_this_orgs_rows(api_env) -> None:
             session, org_a, user_a,
             ExpenseCreate(
                 expense_date=date(2026, 1, 1), amount=Decimal("1.00"), currency="USD",
-                category_id=cat_a.id, status="expected",
+                category_id=cat_a.id, status="expected", client_id=org_a,
             ),
         )
     async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
@@ -1005,7 +1007,7 @@ async def test_list_expenses_returns_only_this_orgs_rows(api_env) -> None:
             session, org_b, user_b,
             ExpenseCreate(
                 expense_date=date(2026, 1, 1), amount=Decimal("1.00"), currency="USD",
-                category_id=cat_b.id, status="expected",
+                category_id=cat_b.id, status="expected", client_id=org_b,
             ),
         )
         results = await list_expenses(session, org_b)
@@ -1061,7 +1063,7 @@ async def test_tenancy_create_expense_category_resolution_is_load_bearing(
     org_b, user_b = await _org_with_user(api_env)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         cat_b = ExpenseCategory(
-            org_id=org_b, key="widgets", name="Org B Widgets", created_by=user_b
+            org_id=org_b, client_id=org_b, key="widgets", name="Org B Widgets", created_by=user_b
         )
         session.add(cat_b)
         await session.commit()
@@ -1073,7 +1075,7 @@ async def test_tenancy_create_expense_category_resolution_is_load_bearing(
                 session, org_a, user_a,
                 ExpenseCreate(
                     expense_date=date(2026, 1, 1), amount=Decimal("1.00"), currency="USD",
-                    category_id=cat_b_id, status="expected",
+                    category_id=cat_b_id, status="expected", client_id=org_a,
                 ),
             )
 
@@ -1089,13 +1091,15 @@ async def test_tenancy_create_expense_cost_center_resolution_is_load_bearing(
     org_a, user_a = await _org_with_user(api_env)
     org_b, user_b = await _org_with_user(api_env)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        cc_b = CostCenter(org_id=org_b, code="ENG", name="Org B Engineering", created_by=user_b)
+        cc_b = CostCenter(org_id=org_b, client_id=org_b,
+                          code="ENG", name="Org B Engineering", created_by=user_b)
         session.add(cc_b)
         await session.commit()
         cc_b_id = cc_b.id
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        cat_a = ExpenseCategory(org_id=org_a, key="hardware", name="Hardware", created_by=user_a)
+        cat_a = ExpenseCategory(org_id=org_a, client_id=org_a,
+                                key="hardware", name="Hardware", created_by=user_a)
         session.add(cat_a)
         await session.commit()
         cat_a_id = cat_a.id
@@ -1106,6 +1110,7 @@ async def test_tenancy_create_expense_cost_center_resolution_is_load_bearing(
                 ExpenseCreate(
                     expense_date=date(2026, 1, 1), amount=Decimal("1.00"), currency="USD",
                     category_id=cat_a_id, cost_center_id=cc_b_id, status="expected",
+                    client_id=org_a,
                 ),
             )
 
@@ -1127,7 +1132,8 @@ async def test_tenancy_create_expense_vendor_resolution_is_load_bearing(
         vendor_b_id = vendor_b.id
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        cat_a = ExpenseCategory(org_id=org_a, key="hardware", name="Hardware", created_by=user_a)
+        cat_a = ExpenseCategory(org_id=org_a, client_id=org_a,
+                                key="hardware", name="Hardware", created_by=user_a)
         session.add(cat_a)
         await session.commit()
         cat_a_id = cat_a.id
@@ -1137,7 +1143,7 @@ async def test_tenancy_create_expense_vendor_resolution_is_load_bearing(
                 session, org_a, user_a,
                 ExpenseCreate(
                     expense_date=date(2026, 1, 1), amount=Decimal("1.00"), currency="USD",
-                    category_id=cat_a_id, vendor_id=vendor_b_id, status="expected",
+                    category_id=cat_a_id, vendor_id=vendor_b_id, status="expected", client_id=org_a,
                 ),
             )
 
@@ -1168,7 +1174,8 @@ async def test_tenancy_create_expense_link_resolution_is_load_bearing(
         sub_b_id = sub_b.id
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        cat_a = ExpenseCategory(org_id=org_a, key="hardware", name="Hardware", created_by=user_a)
+        cat_a = ExpenseCategory(org_id=org_a, client_id=org_a,
+                                key="hardware", name="Hardware", created_by=user_a)
         session.add(cat_a)
         await session.commit()
         cat_a_id = cat_a.id
@@ -1179,6 +1186,6 @@ async def test_tenancy_create_expense_link_resolution_is_load_bearing(
                 ExpenseCreate(
                     expense_date=date(2026, 1, 1), amount=Decimal("1.00"), currency="USD",
                     category_id=cat_a_id, link_type="subscription", link_id=sub_b_id,
-                    status="expected",
+                    status="expected", client_id=org_a,
                 ),
             )

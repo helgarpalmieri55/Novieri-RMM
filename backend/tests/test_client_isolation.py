@@ -66,6 +66,8 @@ from app.models import (
     BcpPlan,
     BcpTest,
     BcpTestStep,
+    Budget,
+    BudgetLine,
     ChangeRequest,
     Client,
     Device,
@@ -75,6 +77,7 @@ from app.models import (
     DocRecord,
     DocVersion,
     EnrollmentToken,
+    ExpenseCategory,
     HealthAlert,
     HealthAlertAction,
     HealthProfileAssignment,
@@ -139,6 +142,8 @@ class Side:
     subscription: UUID
     plan: UUID  # a BCP plan, and a test of it
     test: UUID
+    budget: UUID  # a budget, and an expense category its lines can use
+    expense_category: UUID
 
 
 @dataclass(frozen=True)
@@ -176,6 +181,19 @@ def _subscription(org: UUID, client: UUID, actor: UUID) -> Subscription:
 
 def _plan(org: UUID, client: UUID, actor: UUID) -> BcpPlan:
     return BcpPlan(org_id=org, client_id=client, name="p", description="d", created_by=actor)
+
+
+def _budget(org: UUID, client: UUID, actor: UUID) -> Budget:
+    return Budget(
+        org_id=org, client_id=client, fiscal_year=2027, name=f"b-{uuid4().hex[:6]}",
+        granularity="month", created_by=actor,
+    )
+
+
+def _expense_category(org: UUID, client: UUID, actor: UUID) -> ExpenseCategory:
+    return ExpenseCategory(
+        org_id=org, client_id=client, key=f"k-{uuid4().hex[:6]}", name="n", created_by=actor
+    )
 
 
 def _ticket(org: UUID, client: UUID, queue: UUID, category: UUID, actor: UUID) -> Ticket:
@@ -220,14 +238,16 @@ async def _side(
         person = Person(org_id=org, client_id=client.id, display_name="Persona")
         subscription = _subscription(org, client.id, actor)
         plan = _plan(org, client.id, actor)
-        s.add_all([job, alert, ticket, person, subscription, plan])
+        budget = _budget(org, client.id, actor)
+        expense_category = _expense_category(org, client.id, actor)
+        s.add_all([job, alert, ticket, person, subscription, plan, budget, expense_category])
         await s.flush()
         test = BcpTest(org_id=org, plan_id=plan.id, type="tabletop", created_by=actor)
         s.add(test)
         await s.commit()
     return Side(
         client.id, site.id, device.id, group.id, job.id, alert.id, record.id, ticket.id,
-        person.id, subscription.id, plan.id, test.id,
+        person.id, subscription.id, plan.id, test.id, budget.id, expense_category.id,
     )
 
 
@@ -440,6 +460,14 @@ PATHS: dict[str, tuple[str, Make]] = {
     "C-bcp_plan": ("bcp_plan", lambda w, s: _plan(w.org, s.client, w.actor)),
     "H-bcp_test_step-via-bcp_test": ("bcp_test_step", lambda w, s: BcpTestStep(
         org_id=w.org, test_id=s.test, ordinal=1, description="d"
+    )),
+    "C-budget": ("budget", lambda w, s: _budget(w.org, s.client, w.actor)),
+    "C-expense_category": ("expense_category", lambda w, s: _expense_category(
+        w.org, s.client, w.actor
+    )),
+    "H-budget_line-via-budget": ("budget_line", lambda w, s: BudgetLine(
+        org_id=w.org, budget_id=s.budget, category_id=s.expense_category,
+        period_index=1, planned_amount=1, created_by=w.actor,
     )),
     "O-doc_articles-no-parent": ("doc_articles", lambda w, s: DocArticle(
         org_id=w.org, client_id=s.client, title="t"

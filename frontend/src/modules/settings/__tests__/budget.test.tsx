@@ -66,6 +66,7 @@ describe("Settings — Budget tab", () => {
   // can read resolves it to her actual name.
   it("resolves 'last changed by' to the actor's name when the directory has it", async () => {
     calls.getBudgetSettings.mockResolvedValue({
+      client_id: "org-1",
       base_currency: "USD",
       fiscal_year_start_month: 1,
       updated_by: CASEY_USER.id,
@@ -114,6 +115,34 @@ describe("Settings — Budget tab", () => {
     expect(calls.listUsers).not.toHaveBeenCalled();
   });
 
+  // MSP clients phase 2 (plan 2026-10-26 Task 8): each client has its own
+  // base currency and fiscal year. Until the selector exists (PHASE 3) this
+  // tab shows the internal client's, whose id is `/me`'s `org_id`.
+  it("reads the internal client's settings", async () => {
+    renderSettings();
+    await openTab();
+    await screen.findByLabelText("Base currency");
+    expect(calls.getBudgetSettings).toHaveBeenCalledWith("org-1");
+    for (const call of calls.getBudgetSettings.mock.calls) expect(call).toEqual(["org-1"]);
+  });
+
+  // A client's settings are the documented defaults until somebody sets
+  // them, and then no row exists: nothing was changed, by nobody, so the
+  // panel says nothing about a change.
+  it("says nothing about a change when the client's settings were never set", async () => {
+    calls.getBudgetSettings.mockResolvedValue({
+      client_id: "org-1",
+      base_currency: "USD",
+      fiscal_year_start_month: 1,
+      updated_by: null,
+      updated_at: null,
+    });
+    renderSettings();
+    await openTab();
+    expect(await screen.findByLabelText<HTMLInputElement>("Base currency")).toHaveValue("USD");
+    expect(screen.queryByText(/Last changed/)).not.toBeInTheDocument();
+  });
+
   it("puts the ISO 4217 hint in the description, not in the label", async () => {
     renderSettings();
     await openTab();
@@ -132,6 +161,7 @@ describe("Settings — Budget tab", () => {
     // The acknowledgement only exists once the currency is actually changing.
     await user.click(screen.getByRole("checkbox"));
     calls.getBudgetSettings.mockResolvedValue({
+      client_id: "org-1",
       base_currency: "COP",
       fiscal_year_start_month: 1,
       updated_by: "admin",
@@ -141,7 +171,9 @@ describe("Settings — Budget tab", () => {
     await user.click(screen.getByRole("button", { name: "Save budget settings" }));
 
     await waitFor(() => expect(calls.updateBudgetSettings).toHaveBeenCalledTimes(1));
-    expect(calls.updateBudgetSettings).toHaveBeenCalledWith({
+    // The internal client's settings: its id is `/me`'s `org_id` (PHASE 3:
+    // the selector's).
+    expect(calls.updateBudgetSettings).toHaveBeenCalledWith("org-1", {
       base_currency: "COP",
       fiscal_year_start_month: 1,
       acknowledge_mixed_basis: true,
@@ -191,7 +223,7 @@ describe("Settings — Budget tab", () => {
     await user.click(screen.getByRole("button", { name: "Save budget settings" }));
 
     await waitFor(() => expect(calls.updateBudgetSettings).toHaveBeenCalledTimes(1));
-    expect(calls.updateBudgetSettings).toHaveBeenCalledWith({
+    expect(calls.updateBudgetSettings).toHaveBeenCalledWith("org-1", {
       base_currency: "USD",
       fiscal_year_start_month: 4,
     });

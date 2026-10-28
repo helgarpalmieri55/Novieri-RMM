@@ -63,6 +63,7 @@ const RECORDED = ["Presupuesto TI 2026", "Herramientas de oficina", "herramienta
 
 const CATEGORY: CategoryOut = {
   id: "cat1",
+  client_id: "o1",
   key: "herramientas",
   name: "Herramientas de oficina",
   system_key: "herramientas",
@@ -71,13 +72,14 @@ const CATEGORY: CategoryOut = {
   created_at: "2026-01-01T00:00:00.000Z",
 };
 const RETIRED: CategoryOut = { ...CATEGORY, id: "cat2", key: "old_tools", name: "Old tools", system_key: null, active: false };
-const COST_CENTER: CostCenterOut = { id: "cc1", code: "OPS", name: "Operations", external_ref: null, active: true, created_at: "2026-01-01T00:00:00.000Z" };
-const BUDGET: BudgetOut = { id: "b1", fiscal_year: 2026, name: "Presupuesto TI 2026", granularity: "month", status: "active", created_at: "2026-01-01T00:00:00.000Z" };
-const SETTINGS: SettingsOut = { base_currency: "EUR", fiscal_year_start_month: 4, updated_by: null, updated_at: "2026-01-01T00:00:00.000Z" };
+const COST_CENTER: CostCenterOut = { id: "cc1", client_id: "o1", code: "OPS", name: "Operations", external_ref: null, active: true, created_at: "2026-01-01T00:00:00.000Z" };
+const BUDGET: BudgetOut = { id: "b1", client_id: "o1", fiscal_year: 2026, name: "Presupuesto TI 2026", granularity: "month", status: "active", created_at: "2026-01-01T00:00:00.000Z" };
+const SETTINGS: SettingsOut = { client_id: "o1", base_currency: "EUR", fiscal_year_start_month: 4, updated_by: null, updated_at: "2026-01-01T00:00:00.000Z" };
 const FX: FxRateOut = { id: "fx1", from_currency: "USD", to_currency: "EUR", rate: "0.92000000", effective_date: "2026-01-01", created_at: "2026-01-01T00:00:00.000Z" };
 const LINE: BudgetLineOut = { id: "line1", budget_id: "b1", category_id: "cat1", cost_center_id: null, period_index: 1, planned_amount: "500.00", created_at: "2026-01-01T00:00:00.000Z" };
 const EXPENSE: ExpenseOut = {
   id: "e1",
+  client_id: "o1",
   expense_date: "2026-07-01",
   amount: "1234.56",
   currency: "USD",
@@ -504,7 +506,7 @@ describe("the budget admin page in Spanish", () => {
   it("words the settings, the three tables and the month the fiscal year starts", async () => {
     const { container } = mount(<BudgetAdminPage />);
     expect(await screen.findByText("Configuración del presupuesto")).toBeInTheDocument();
-    expect(await screen.findByText("1 de abril")).toBeInTheDocument();
+    expect(await screen.findByText("1 de abril", { selector: "dd" })).toBeInTheDocument();
     expect(screen.getByText("Sin cambios (1 de abril)")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "1 de diciembre" })).toBeInTheDocument();
     expect(screen.getByText("El año fiscal empieza")).toBeInTheDocument();
@@ -538,6 +540,9 @@ describe("the budget admin page in Spanish", () => {
     const user = userEvent.setup();
     mount(<BudgetAdminPage />);
     await screen.findByText("Categorías");
+    // The categories are the internal client's, read once `/me` has named it:
+    // the first "Editar" is a category's once its row is there.
+    await screen.findByText("Herramientas de oficina");
     await user.click((await screen.findAllByRole("button", { name: "Editar" }))[0]!);
     expect(await screen.findByLabelText("Nombre de la categoría")).toBeInTheDocument();
     expect(screen.getByLabelText("Categoría activa")).toBeInTheDocument();
@@ -582,6 +587,7 @@ describe("the budget admin page in Spanish", () => {
     const user = userEvent.setup();
     mockUseApi.mockReturnValue(api({ updateBudgetCategory: vi.fn().mockRejectedValue(new ApiError(503, "")) }));
     mount(<BudgetAdminPage />);
+    await screen.findByText("Herramientas de oficina");
     await user.click((await screen.findAllByRole("button", { name: "Editar" }))[0]!);
     await user.click(await screen.findByRole("button", { name: "Guardar" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/no está disponible/i);

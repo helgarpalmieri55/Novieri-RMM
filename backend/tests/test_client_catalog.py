@@ -417,8 +417,18 @@ async def test_a_parents_client_change_reaches_every_child(admin_engine) -> None
 # Migration 0231's constraints are declared on the models too.
 # --------------------------------------------------------------------------- #
 
-CLIENT_KEYS = {"uq_clients_id_org", "uq_sites_id_client", "uq_person_id_client"}
-CLIENT_FK = re.compile(r"fk_\w+_(client_org|site_client|person_client)")
+CLIENT_KEYS = {
+    "uq_clients_id_org",
+    "uq_sites_id_client",
+    "uq_person_id_client",
+    # A budget line's and an expense's category and cost center are of the
+    # row's client (plan 2026-10-26 Task 8): the keys those rows reference.
+    "uq_expense_category_id_client",
+    "uq_cost_center_id_client",
+}
+CLIENT_FK = re.compile(
+    r"fk_\w+_(client_org|site_client|person_client|category_client|cost_center_client)"
+)
 
 
 async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -> None:
@@ -445,11 +455,12 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
                     "LEFT JOIN pg_class r ON r.oid = c.confrelid "
                     "WHERE (c.contype = 'f' AND (c.conname LIKE 'fk\\_%\\_client\\_org' "
                     "                       OR c.conname LIKE 'fk\\_%\\_site\\_client' "
-                    "                       OR c.conname LIKE 'fk\\_%\\_person\\_client')) "
-                    "   OR (c.contype = 'u' AND c.conname IN ('uq_clients_id_org', "
-                    "                                         'uq_sites_id_client', "
-                    "                                         'uq_person_id_client'))"
-                )
+                    "                       OR c.conname LIKE 'fk\\_%\\_person\\_client' "
+                    "                       OR c.conname LIKE 'fk\\_%\\_category\\_client' "
+                    "                       OR c.conname LIKE 'fk\\_%\\_cost\\_center\\_client')) "
+                    "   OR (c.contype = 'u' AND c.conname = ANY (:keys))"
+                ),
+                {"keys": sorted(CLIENT_KEYS)},
             )
         ).all()
     live = {
@@ -492,6 +503,13 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
             "fk_device_person_person_client",
             "fk_license_allocation_person_client",
             "fk_seat_assignment_person_client",
+        }
+        # A budget line's and an expense's category and cost center are of
+        # the row's client (plan 2026-10-26 Task 8).
+        | {
+            f"fk_{t}_{parent}_client"
+            for t in ("budget_line", "expense")
+            for parent in ("category", "cost_center")
         }
         | CLIENT_KEYS
     )
@@ -793,6 +811,23 @@ PER_CLIENT_KEYS: dict[str, tuple[str, tuple[str, ...], bool]] = {
     # Plan 2026-10-26 Task 5 (migration 0235). An expression column reads as "".
     "uq_person_login_client_login": ("person_login", ("org_id", "client_id", "login"), False),
     "uq_person_client_lower_email": ("person", ("org_id", "client_id", ""), False),
+    # Plan 2026-10-26 Task 8 (migration 0238): each client its own settings
+    # row, category keys and seeded defaults, cost center codes, budget names
+    # and materialized slots.
+    "budget_settings_pkey": ("budget_settings", ("client_id",), False),
+    "uq_expense_category_client_key": (
+        "expense_category", ("org_id", "client_id", "key"), False,
+    ),
+    "uq_expense_category_client_system_key": (
+        "expense_category", ("org_id", "client_id", "system_key"), False,
+    ),
+    "uq_cost_center_client_code": ("cost_center", ("org_id", "client_id", "code"), False),
+    "uq_budget_client_year_name": (
+        "budget", ("org_id", "client_id", "fiscal_year", "name"), False,
+    ),
+    "uq_expense_client_autofeed": (
+        "expense", ("org_id", "client_id", "source", "link_id", "period_key"), False,
+    ),
 }
 
 

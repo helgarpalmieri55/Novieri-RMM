@@ -22,13 +22,13 @@ async def test_expense_round_trips_with_decimal_money(api_env) -> None:
             )
         ).scalar_one()
         cat = ExpenseCategory(
-            org_id=org_id, key="hardware", name="Hardware", system_key="hardware",
+            org_id=org_id, client_id=org_id, key="hardware", name="Hardware", system_key="hardware",
             created_by=user_id,
         )
         session.add(cat)
         await session.flush()
         exp = Expense(
-            org_id=org_id,
+            org_id=org_id, client_id=org_id,
             expense_date=date(2026, 3, 1),
             amount=Decimal("1234.56"),
             currency="USD",
@@ -60,7 +60,7 @@ async def test_budget_round_trips(api_env) -> None:
             )
         ).scalar_one()
         budget = Budget(
-            org_id=org_id,
+            org_id=org_id, client_id=org_id,
             fiscal_year=2026,
             name="FY26 IT Budget",
             granularity="month",

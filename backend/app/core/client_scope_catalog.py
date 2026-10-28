@@ -172,8 +172,6 @@ PENDING_PHASE_2: frozenset[str] = frozenset(
         "push_authorization", "push_run", "push_run_target", "push_credential_scope",
         "push_credential_realm",
         "backup_repositories", "backup_chunks", "backup_chunk_copies",
-        "budget_settings", "cost_center", "expense_category", "budget", "budget_line",
-        "expense",
     }
 )
 

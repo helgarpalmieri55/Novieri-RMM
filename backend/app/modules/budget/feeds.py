@@ -6,13 +6,13 @@ registries (Subscriptions, Licenses) -- it never touches `session.add`/
 `session.execute` for anything but SELECTs, and writes nothing (spec §6.2,
 §0.6: "no rows, no drift, always current"). `materialize` is the only
 function in this module that writes: it turns a window of projected costs
-into `expected` `Expense` rows, idempotent under `uq_expense_autofeed`
+into `expected` `Expense` rows, idempotent under `uq_expense_client_autofeed`
 (models.py), and is always explicit and audited (spec §6.3) -- there is no
 worker, no sweep, no path that runs this without an operator action.
 
 **Idempotency, honestly reported.** The DB unique index
-`(org_id, source, link_id, period_key) WHERE source <> 'manual'` is the
-backstop that makes a duplicate physically impossible; the pre-check this
+`(org_id, client_id, source, link_id, period_key) WHERE source <> 'manual'`
+is the backstop that makes a duplicate physically impossible; the pre-check this
 module runs against `Expense` (querying by `(source, link_id, period_key)`
 with NO `status` filter) is what lets `materialize` report `skipped_existing`
 honestly rather than let a second call surface an `IntegrityError` as a 500.
@@ -81,26 +81,35 @@ created, with `amount_base = NULL`, and counted in `skipped_unconvertible`.
 An overflow RAISES `BudgetValidationError` and is allowed to propagate
 unchanged, same as `create_expense`.
 
-**Colliding projections are MERGED, not dropped (K1 fix).** `uq_expense_autofeed`
-is keyed `(org_id, source, link_id, period_key)`, so a license whose
-`renews_at` and `maintenance_expires_at` land in the SAME calendar month can
-only ever have one row. `project_costs` merges any projections that collide
-on that key into a single `ProjectedCost` -- amounts summed, descriptions
-combined -- so the forecast (§6.2) and `materialize` (§6.3) agree on the
-total. Merging is only valid within one currency: colliding projections that
-disagree on currency raise `BudgetValidationError` naming the record rather
-than sum across currency codes (never sum across codes -- the per-record
-currency rule).
+**Colliding projections are MERGED, not dropped (K1 fix).**
+`uq_expense_client_autofeed` is keyed `(org_id, client_id, source, link_id,
+period_key)`, so a license whose `renews_at` and `maintenance_expires_at` land
+in the SAME calendar month can only ever have one row. `project_costs`
+merges any projections that collide on that key into a single
+`ProjectedCost` -- amounts summed, descriptions combined -- so the forecast
+(§6.2) and `materialize` (§6.3) agree on the total. Merging is only valid
+within one currency: colliding projections that disagree on currency raise
+`BudgetValidationError` naming the record rather than sum across currency
+codes (never sum across codes -- the per-record currency rule).
 
 **The actual write is conflict-safe, not just pre-checked (K3 fix).** The
 in-memory `existing_keys` pre-check is a fast path, not the sole guard --
 two overlapping `materialize` calls can both miss it before either has
 written. The `Expense` insert itself goes through
-`pg_insert(...).on_conflict_do_nothing()` against `uq_expense_autofeed`
+`pg_insert(...).on_conflict_do_nothing()` against `uq_expense_client_autofeed`
 (same precedent as `fx.get_settings`, Task-5 finding F2); a row that loses
 that race is counted as `skipped_existing`, never raised as a raw
 `IntegrityError` (spec §8 forbids a raw DB error surfacing as a 500 on a
 financial path).
+
+**One client at a time (MSP clients plan 2026-10-26 Task 8).** A
+subscription and a license belong to a client (Task 6), and so does every
+expense. `project_costs` projects ONE client's subscriptions and licenses,
+and `materialize` files every expense it writes under that client, in that
+client's own categories, converted into that client's base currency: a
+subscription of Y never feeds X's budget. `materialize` is a create, so its
+client is one the caller may file under and that uses budget
+(`clients.client_for_new_budget_rows`), checked before anything else.
 """
 
 from dataclasses import dataclass
@@ -116,6 +125,7 @@ from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.wire_words import say
 from app.models import Expense, License, SoftwareProduct, Subscription
+from app.modules.budget.clients import client_for_new_budget_rows
 from app.modules.budget.errors import BudgetValidationError
 from app.modules.budget.fx import convert_for
 from app.modules.budget.periods import period_key_for_date
@@ -123,7 +133,7 @@ from app.modules.budget.refdata import category_by_system_key, seed_default_cate
 from app.modules.budget.words import LINK_TYPE_WORDS
 from app.modules.subscriptions.costs import advance_renewal
 
-# Mirrors the partial-unique-index predicate on `uq_expense_autofeed`
+# Mirrors the partial-unique-index predicate on `uq_expense_client_autofeed`
 # (models.py) -- `ON CONFLICT` target inference for a partial index must
 # repeat its WHERE clause exactly, or Postgres won't match the index.
 _AUTOFEED_CONFLICT_WHERE = text("source <> 'manual'")
@@ -202,7 +212,7 @@ def _combine_descriptions(first: str, second: str) -> str:
 
 def merge_colliding_projections(projections: list[ProjectedCost]) -> list[ProjectedCost]:
     """Aggregate projections that collide on `(source, link_id, period_key)`
-    into ONE `ProjectedCost` per key (K1 fix). `uq_expense_autofeed` can only
+    into ONE `ProjectedCost` per key (K1 fix). `uq_expense_client_autofeed` can only
     ever hold one `Expense` row per that key, so without this, a license
     whose `renews_at` and `maintenance_expires_at` land in the same calendar
     month would have one of its two costs silently dropped rather than
@@ -259,12 +269,13 @@ def merge_colliding_projections(projections: list[ProjectedCost]) -> list[Projec
 
 
 async def project_costs(
-    session: AsyncSession, org_id: UUID, *, from_date: date, to_date: date
+    session: AsyncSession, org_id: UUID, *, client_id: UUID, from_date: date, to_date: date
 ) -> list[ProjectedCost]:
-    """Project subscription renewals and license renewal/maintenance dates
-    forward, org-scoped (invariant #5), for every occurrence landing in
-    `[from_date, to_date]` inclusive. Pure: only SELECTs run here, nothing is
-    added to the session and nothing is flushed."""
+    """Project `client_id`'s subscription renewals and license renewal/
+    maintenance dates forward, org-scoped (invariant #5), for every
+    occurrence landing in `[from_date, to_date]` inclusive. Another client's
+    records are never projected here (module docstring). Pure: only SELECTs
+    run here, nothing is added to the session and nothing is flushed."""
     if from_date > to_date:
         raise BudgetValidationError(tr("from_date must not be after to_date"))
 
@@ -278,6 +289,7 @@ async def project_costs(
             await session.execute(
                 select(Subscription).where(
                     Subscription.org_id == org_id,
+                    Subscription.client_id == client_id,
                     Subscription.renews_at.is_not(None),
                     Subscription.status.not_in(_EXCLUDED_SUBSCRIPTION_STATUSES),
                 )
@@ -312,7 +324,13 @@ async def project_costs(
     # project -- it is skipped rather than materialized with a fabricated
     # amount.
     licenses = (
-        (await session.execute(select(License).where(License.org_id == org_id))).scalars().all()
+        (
+            await session.execute(
+                select(License).where(License.org_id == org_id, License.client_id == client_id)
+            )
+        )
+        .scalars()
+        .all()
     )
 
     # Bulk-resolve product names up front (one query, not one per license) --
@@ -377,18 +395,22 @@ async def materialize(
     org_id: UUID,
     actor_id: UUID,
     *,
+    client_id: UUID,
     from_date: date,
     to_date: date,
 ) -> dict[str, int]:
-    """Write `expected` `Expense` rows for every projected cost in
-    `[from_date, to_date]` that does not already have one (spec §6.3).
-    Returns `{"created", "skipped_existing", "skipped_unconvertible"}`.
+    """Write `expected` `Expense` rows of `client_id` for every projected cost
+    of that client in `[from_date, to_date]` that does not already have one
+    (spec §6.3). Returns `{"created", "skipped_existing",
+    "skipped_unconvertible"}`.
 
     Idempotent: a second call over the same window creates nothing --
     `skipped_existing` accounts for every row the first call created,
     INCLUDING any that were subsequently voided (spec §2: a voided
     materialized row must never resurrect).
     """
+    # A create: the client is checked (and locked) before anything else.
+    await client_for_new_budget_rows(session, org_id, client_id)
     if from_date > to_date:
         raise BudgetValidationError(tr("from_date must not be after to_date"))
     months = _months_span(from_date, to_date)
@@ -408,9 +430,11 @@ async def materialize(
     # first materialize would 400 on the category-resolution loop just
     # below, with no route able to create a system-keyed category to
     # recover (see refdata.seed_default_categories).
-    await seed_default_categories(session, org_id, actor_id)
+    await seed_default_categories(session, org_id, actor_id, client_id=client_id)
 
-    projections = await project_costs(session, org_id, from_date=from_date, to_date=to_date)
+    projections = await project_costs(
+        session, org_id, client_id=client_id, from_date=from_date, to_date=to_date
+    )
 
     # I4 fix: bounded by ROWS, not just months. `MAX_MATERIALIZE_MONTHS`
     # bounds the WINDOW, not the write -- an org with hundreds of monthly
@@ -437,7 +461,7 @@ async def materialize(
     needed_system_keys = {p.category_system_key for p in projections}
     category_by_key: dict[str, UUID] = {}
     for system_key in needed_system_keys:
-        category = await category_by_system_key(session, org_id, system_key)
+        category = await category_by_system_key(session, org_id, system_key, client_id=client_id)
         if category is None:
             raise BudgetValidationError(
                 tr(
@@ -448,8 +472,8 @@ async def materialize(
             )
         category_by_key[system_key] = category.id
 
-    # Pre-check existing rows for this org's relevant (source, link_id) pairs
-    # -- INCLUDING voided ones (no status filter): `uq_expense_autofeed`
+    # Pre-check existing rows for this client's relevant (source, link_id) pairs
+    # -- INCLUDING voided ones (no status filter): `uq_expense_client_autofeed`
     # stays keyed on a voided row on purpose (spec §2), and this pre-check
     # must see the same thing the constraint sees, or `skipped_existing`
     # would under-report and this function would try (and fail) to recreate
@@ -461,6 +485,7 @@ async def materialize(
             await session.execute(
                 select(Expense.source, Expense.link_id, Expense.period_key).where(
                     Expense.org_id == org_id,
+                    Expense.client_id == client_id,
                     Expense.source != "manual",
                     Expense.link_id.in_(link_ids),
                 )
@@ -483,14 +508,14 @@ async def materialize(
         # `fx.get_settings` autoflushes the session, and must never do so
         # over a half-built row.
         fx_rate, amount_base = await convert_for(
-            session, org_id, proj.amount, proj.currency, proj.on_date
+            session, org_id, proj.amount, proj.currency, proj.on_date, client_id=client_id
         )
         category_id = category_by_key[proj.category_system_key]
 
         # Conflict-safe write (K3 fix). The pre-check above is a fast path,
         # not the sole guard -- two overlapping `materialize` calls can both
         # miss it before either has written its row. `ON CONFLICT DO NOTHING`
-        # targets the SAME partial unique index as `uq_expense_autofeed`
+        # targets the SAME partial unique index as `uq_expense_client_autofeed`
         # (`index_where` repeats its predicate exactly, or Postgres won't
         # match a partial index for conflict inference); the loser here gets
         # an empty `RETURNING`, never a raw `IntegrityError` -- same
@@ -500,6 +525,7 @@ async def materialize(
                 pg_insert(Expense)
                 .values(
                     org_id=org_id,
+                    client_id=client_id,
                     expense_date=proj.on_date,
                     amount=proj.amount,
                     currency=proj.currency,
@@ -516,7 +542,7 @@ async def materialize(
                     entered_by=actor_id,
                 )
                 .on_conflict_do_nothing(
-                    index_elements=["org_id", "source", "link_id", "period_key"],
+                    index_elements=["org_id", "client_id", "source", "link_id", "period_key"],
                     index_where=_AUTOFEED_CONFLICT_WHERE,
                 )
                 .returning(Expense.id)
@@ -558,6 +584,7 @@ async def materialize(
             action="expense.created",
             target_type="expense",
             target_id=str(inserted_id),
+            client_id=client_id,
             metadata={
                 "category_id": str(category_id),
                 "vendor_id": str(proj.vendor_id) if proj.vendor_id else None,
@@ -573,6 +600,7 @@ async def materialize(
         actor_type="user",
         actor_id=actor_id,
         action="budget.expenses_materialized",
+        client_id=client_id,
         metadata={
             "from_date": from_date.isoformat(),
             "to_date": to_date.isoformat(),

@@ -55,14 +55,17 @@ def test_not_found_is_a_validation_error_subclass() -> None:
 @pytest.mark.parametrize("bad", ["USDD", "US", ""])
 def test_expense_rejects_bad_currency_length(bad: str) -> None:
     with pytest.raises(ValidationError):
-        ExpenseCreate(amount=Decimal("1"), currency=bad, category_id=_UUID, expense_date=_DATE)
+        ExpenseCreate(
+            client_id=_UUID, amount=Decimal("1"), currency=bad, category_id=_UUID,
+            expense_date=_DATE,
+        )
 
 
 def test_expense_rejects_amount_beyond_numeric_precision() -> None:
     # numeric(14,2) holds at most 12 integer digits
     with pytest.raises(ValidationError):
         ExpenseCreate(
-            amount=Decimal("1234567890123.00"), currency="USD",
+            client_id=_UUID, amount=Decimal("1234567890123.00"), currency="USD",
             category_id=_UUID, expense_date=_DATE,
         )
 
@@ -70,14 +73,14 @@ def test_expense_rejects_amount_beyond_numeric_precision() -> None:
 def test_expense_rejects_amount_with_too_many_decimal_places() -> None:
     with pytest.raises(ValidationError):
         ExpenseCreate(
-            amount=Decimal("1.234"), currency="USD",
+            client_id=_UUID, amount=Decimal("1.234"), currency="USD",
             category_id=_UUID, expense_date=_DATE,
         )
 
 
 def test_expense_accepts_amount_at_precision_limit() -> None:
     exp = ExpenseCreate(
-        amount=Decimal("999999999999.99"), currency="USD",
+        client_id=_UUID, amount=Decimal("999999999999.99"), currency="USD",
         category_id=_UUID, expense_date=_DATE,
     )
     assert exp.amount == Decimal("999999999999.99")
@@ -88,7 +91,9 @@ def test_expense_create_defaults_to_expected_and_empty_description() -> None:
     # form field, a CSV importer, or an ops-runbook curl that omits `status`
     # must land in the confirmation queue (`status=expected`), never book
     # straight into spec §7's `actual` column.
-    exp = ExpenseCreate(amount=Decimal("1"), currency="USD", category_id=_UUID, expense_date=_DATE)
+    exp = ExpenseCreate(
+        client_id=_UUID, amount=Decimal("1"), currency="USD", category_id=_UUID, expense_date=_DATE
+    )
     assert exp.status == "expected"
     assert exp.description == ""
     assert exp.cost_center_id is None
@@ -98,7 +103,8 @@ def test_expense_create_defaults_to_expected_and_empty_description() -> None:
 def test_expense_create_rejects_out_of_domain_status() -> None:
     with pytest.raises(ValidationError):
         ExpenseCreate(
-            amount=Decimal("1"), currency="USD", category_id=_UUID, expense_date=_DATE,
+            client_id=_UUID, amount=Decimal("1"), currency="USD", category_id=_UUID,
+            expense_date=_DATE,
             status="void",  # not in the Create Literal -- confirm/void have dedicated endpoints
         )
 
@@ -106,7 +112,8 @@ def test_expense_create_rejects_out_of_domain_status() -> None:
 def test_expense_create_rejects_out_of_domain_link_type() -> None:
     with pytest.raises(ValidationError):
         ExpenseCreate(
-            amount=Decimal("1"), currency="USD", category_id=_UUID, expense_date=_DATE,
+            client_id=_UUID, amount=Decimal("1"), currency="USD", category_id=_UUID,
+            expense_date=_DATE,
             link_type="invoice",
         )
 
@@ -114,14 +121,15 @@ def test_expense_create_rejects_out_of_domain_link_type() -> None:
 def test_expense_create_rejects_over_length_description() -> None:
     with pytest.raises(ValidationError):
         ExpenseCreate(
-            amount=Decimal("1"), currency="USD", category_id=_UUID, expense_date=_DATE,
+            client_id=_UUID, amount=Decimal("1"), currency="USD", category_id=_UUID,
+            expense_date=_DATE,
             description="x" * 1001,
         )
 
 
 def test_expense_create_accepts_max_length_description() -> None:
     exp = ExpenseCreate(
-        amount=Decimal("1"), currency="USD", category_id=_UUID, expense_date=_DATE,
+        client_id=_UUID, amount=Decimal("1"), currency="USD", category_id=_UUID, expense_date=_DATE,
         description="x" * 1000,
     )
     assert len(exp.description) == 1000
@@ -130,7 +138,8 @@ def test_expense_create_accepts_max_length_description() -> None:
 def test_expense_create_rejects_over_length_invoice_ref() -> None:
     with pytest.raises(ValidationError):
         ExpenseCreate(
-            amount=Decimal("1"), currency="USD", category_id=_UUID, expense_date=_DATE,
+            client_id=_UUID, amount=Decimal("1"), currency="USD", category_id=_UUID,
+            expense_date=_DATE,
             invoice_ref="x" * 129,
         )
 
@@ -138,7 +147,7 @@ def test_expense_create_rejects_over_length_invoice_ref() -> None:
 def test_expense_create_accepts_max_length_invoice_ref() -> None:
     # expense.invoice_ref is varchar(128) (migration 0020).
     exp = ExpenseCreate(
-        amount=Decimal("1"), currency="USD", category_id=_UUID, expense_date=_DATE,
+        client_id=_UUID, amount=Decimal("1"), currency="USD", category_id=_UUID, expense_date=_DATE,
         invoice_ref="x" * 128,
     )
     assert exp.invoice_ref is not None and len(exp.invoice_ref) == 128
@@ -154,7 +163,8 @@ def test_expense_out_serializes_money_as_json_strings() -> None:
     # serializes Decimal to a JSON string by default -- this is the exact
     # convention SubscriptionOut relies on (no field_serializer needed).
     out = ExpenseOut(
-        id=_UUID, expense_date=_DATE, amount=Decimal("1234.56"), currency="USD",
+        client_id=_UUID, id=_UUID, expense_date=_DATE, amount=Decimal("1234.56"),
+        currency="USD",
         fx_rate=Decimal("4100.12345678"), amount_base=Decimal("5061851.75"),
         vendor_id=None, category_id=_UUID, cost_center_id=None, description="",
         source="manual", link_type=None, link_id=None, period_key=None,
@@ -219,27 +229,29 @@ def test_fx_rate_update_defaults_to_none() -> None:
 @pytest.mark.parametrize("bad", [1999, 2101])
 def test_budget_rejects_out_of_range_fiscal_year(bad: int) -> None:
     with pytest.raises(ValidationError):
-        BudgetCreate(fiscal_year=bad, name="FY", granularity="month")
+        BudgetCreate(client_id=_UUID, fiscal_year=bad, name="FY", granularity="month")
 
 
 def test_budget_accepts_boundary_fiscal_years() -> None:
-    assert BudgetCreate(fiscal_year=2000, name="FY", granularity="month").fiscal_year == 2000
-    assert BudgetCreate(fiscal_year=2100, name="FY", granularity="month").fiscal_year == 2100
+    for year in (2000, 2100):
+        assert BudgetCreate(
+            client_id=_UUID, fiscal_year=year, name="FY", granularity="month"
+        ).fiscal_year == year
 
 
 def test_budget_rejects_out_of_domain_granularity() -> None:
     with pytest.raises(ValidationError):
-        BudgetCreate(fiscal_year=2026, name="FY", granularity="weekly")
+        BudgetCreate(client_id=_UUID, fiscal_year=2026, name="FY", granularity="weekly")
 
 
 def test_budget_rejects_over_length_name() -> None:
     with pytest.raises(ValidationError):
-        BudgetCreate(fiscal_year=2026, name="x" * 256, granularity="month")
+        BudgetCreate(client_id=_UUID, fiscal_year=2026, name="x" * 256, granularity="month")
 
 
 def test_budget_accepts_max_length_name() -> None:
     # budget.name is varchar(255) (migration 0020).
-    b = BudgetCreate(fiscal_year=2026, name="x" * 255, granularity="month")
+    b = BudgetCreate(client_id=_UUID, fiscal_year=2026, name="x" * 255, granularity="month")
     assert len(b.name) == 255
 
 
@@ -274,41 +286,41 @@ def test_budget_update_all_fields_optional() -> None:
 
 def test_category_create_rejects_over_length_key() -> None:
     with pytest.raises(ValidationError):
-        CategoryCreate(key="x" * 65, name="Hardware")
+        CategoryCreate(client_id=_UUID, key="x" * 65, name="Hardware")
 
 
 def test_category_create_accepts_max_length_key() -> None:
     # expense_category.key is varchar(64) (migration 0020) -- a bound one
     # below this would silently 422 input the database would accept.
-    cat = CategoryCreate(key="x" * 64, name="Hardware")
+    cat = CategoryCreate(client_id=_UUID, key="x" * 64, name="Hardware")
     assert len(cat.key) == 64
 
 
 def test_category_create_rejects_over_length_name() -> None:
     with pytest.raises(ValidationError):
-        CategoryCreate(key="hardware", name="x" * 256)
+        CategoryCreate(client_id=_UUID, key="hardware", name="x" * 256)
 
 
 def test_category_create_accepts_max_length_name() -> None:
     # expense_category.name is varchar(255) (migration 0020).
-    cat = CategoryCreate(key="hardware", name="x" * 255)
+    cat = CategoryCreate(client_id=_UUID, key="hardware", name="x" * 255)
     assert len(cat.name) == 255
 
 
 def test_category_create_rejects_negative_sort_order() -> None:
     with pytest.raises(ValidationError):
-        CategoryCreate(key="hardware", name="Hardware", sort_order=-1)
+        CategoryCreate(client_id=_UUID, key="hardware", name="Hardware", sort_order=-1)
 
 
 def test_category_create_rejects_sort_order_above_int32() -> None:
     # sort_order maps to Postgres Integer (int4); above int32 range asyncpg
     # raises DataError -- unhandled -- so this must be a clean 422 instead.
     with pytest.raises(ValidationError):
-        CategoryCreate(key="hardware", name="Hardware", sort_order=2_147_483_648)
+        CategoryCreate(client_id=_UUID, key="hardware", name="Hardware", sort_order=2_147_483_648)
 
 
 def test_category_create_accepts_sort_order_at_int32_max() -> None:
-    cat = CategoryCreate(key="hardware", name="Hardware", sort_order=2_147_483_647)
+    cat = CategoryCreate(client_id=_UUID, key="hardware", name="Hardware", sort_order=2_147_483_647)
     assert cat.sort_order == 2_147_483_647
 
 
@@ -321,23 +333,23 @@ def test_category_update_has_no_key_or_system_key_field() -> None:
 
 def test_cost_center_create_rejects_over_length_code() -> None:
     with pytest.raises(ValidationError):
-        CostCenterCreate(code="x" * 33, name="Ops")
+        CostCenterCreate(client_id=_UUID, code="x" * 33, name="Ops")
 
 
 def test_cost_center_create_accepts_max_length_code() -> None:
     # cost_center.code is varchar(32) (migration 0020).
-    cc = CostCenterCreate(code="x" * 32, name="Ops")
+    cc = CostCenterCreate(client_id=_UUID, code="x" * 32, name="Ops")
     assert len(cc.code) == 32
 
 
 def test_cost_center_create_rejects_over_length_external_ref() -> None:
     with pytest.raises(ValidationError):
-        CostCenterCreate(code="ops", name="Ops", external_ref="x" * 65)
+        CostCenterCreate(client_id=_UUID, code="ops", name="Ops", external_ref="x" * 65)
 
 
 def test_cost_center_create_accepts_max_length_external_ref() -> None:
     # cost_center.external_ref is varchar(64) (migration 0020).
-    cc = CostCenterCreate(code="ops", name="Ops", external_ref="x" * 64)
+    cc = CostCenterCreate(client_id=_UUID, code="ops", name="Ops", external_ref="x" * 64)
     assert cc.external_ref is not None and len(cc.external_ref) == 64
 
 
@@ -417,7 +429,7 @@ def test_settings_update_acknowledge_mixed_basis_defaults_false() -> None:
 
 
 def test_materialize_request_accepts_a_date_window() -> None:
-    req = MaterializeRequest(from_date=date(2026, 1, 1), to_date=date(2026, 6, 30))
+    req = MaterializeRequest(client_id=_UUID, from_date=date(2026, 1, 1), to_date=date(2026, 6, 30))
     assert req.from_date == date(2026, 1, 1)
 
 
@@ -461,3 +473,38 @@ def test_forecast_row_distinguishes_materialized_from_projected() -> None:
 
 def test_uuid_type_annotations_are_real_uuids() -> None:
     assert isinstance(_UUID, UUID)
+
+
+# ---------------------------------------------------------------------------
+# Client (MSP clients plan 2026-10-26 Task 8): every create names its client
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "model, fields",
+    [
+        (CategoryCreate, {"key": "hardware", "name": "Hardware"}),
+        (CostCenterCreate, {"code": "ENG", "name": "Engineering"}),
+        (BudgetCreate, {"fiscal_year": 2026, "name": "FY26", "granularity": "month"}),
+        (ExpenseCreate, {"amount": Decimal("1"), "currency": "USD", "category_id": _UUID,
+                         "expense_date": _DATE}),
+        (MaterializeRequest, {"from_date": _DATE, "to_date": _DATE}),
+    ],
+)
+def test_requires_client_id(model: type, fields: dict[str, object]) -> None:
+    with pytest.raises(ValidationError, match="client_id"):
+        model(**fields)
+    assert model(client_id=_UUID, **fields).client_id == _UUID
+
+
+def test_an_fx_rate_may_name_the_currency_it_converts_into() -> None:
+    """Each client has its own base currency (Task 8): a rate names its
+    `to_currency`, or leaves it to the internal client's."""
+    implied = FxRateCreate(from_currency="EUR", rate=Decimal("1.1"), effective_date=_DATE)
+    named = FxRateCreate(
+        from_currency="EUR", to_currency="COP", rate=Decimal("4000"), effective_date=_DATE
+    )
+    assert (implied.to_currency, named.to_currency) == (None, "COP")
+    with pytest.raises(ValidationError):
+        FxRateCreate(from_currency="EUR", to_currency="PESOS", rate=Decimal("1"),
+                     effective_date=_DATE)

@@ -3631,6 +3631,15 @@ CATALOG: dict[str, str] = {
         "procedure_ref es de otro cliente: {ref_id}"
     ),
     "that change belongs to another client": "ese cambio es de otro cliente",
+    # Budget belongs to one client (plan 2026-10-26 Task 8).
+    "nothing is budgeted under Unassigned": "en «Sin asignar» no se presupuesta nada",
+    "expense category {category_id} belongs to another client": (
+        "la categoría de gasto {category_id} es de otro cliente"
+    ),
+    "cost center {cost_center_id} belongs to another client": (
+        "el centro de costo {cost_center_id} es de otro cliente"
+    ),
+    "{link_type} {link_id} belongs to another client": "{link_type} {link_id} es de otro cliente",
     "Their sign-in is turned off": "Su inicio de sesión está desactivado",
     "Every computer is in a group": "Todos los equipos están en un grupo",
     "Nothing installed through ITMS yet": "Todavía no se ha instalado nada con ITMS",

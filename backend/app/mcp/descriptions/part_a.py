@@ -3,11 +3,13 @@
 PART_A: dict[str, str] = {
     # --- budget ---
     "GET /api/v1/budget/budgets": (
-        "Lists the organization's budgets with fiscal year, name, granularity and status."
+        "Lists budgets with fiscal year, name, granularity and status; optionally one "
+        "client's."
     ),
     "POST /api/v1/budget/budgets": (
-        "Creates a budget for a fiscal year with month or quarter granularity and returns "
-        "it. Add planned amounts afterwards with the lines call."
+        "Creates a client's budget for a fiscal year with month or quarter granularity and "
+        "returns it. The client must use budget. Add planned amounts afterwards with the "
+        "lines call."
     ),
     "GET /api/v1/budget/budgets/{budget_id}": (
         "Returns one budget: fiscal year, name, granularity and status."
@@ -25,7 +27,8 @@ PART_A: dict[str, str] = {
     ),
     "PUT /api/v1/budget/budgets/{budget_id}/lines": (
         "Bulk upserts planned amounts keyed by category, cost center and period; lines not "
-        "listed are kept. All-or-nothing, and refused on a closed budget."
+        "listed are kept. Categories and cost centers must be the budget's client's. "
+        "All-or-nothing, and refused on a closed budget."
     ),
     "DELETE /api/v1/budget/budgets/{budget_id}/lines/{line_id}": (
         "Deletes one planned-amount line from the budget. Refused on a closed budget."
@@ -40,39 +43,42 @@ PART_A: dict[str, str] = {
         "currency are reported separately."
     ),
     "GET /api/v1/budget/categories": (
-        "Lists expense categories, seeding the default set on first use. Inactive ones "
-        "are hidden unless requested."
+        "Lists expense categories, optionally one client's; naming a client that uses "
+        "budget seeds its default set on first use. Inactive ones are hidden unless "
+        "requested."
     ),
     "POST /api/v1/budget/categories": (
-        "Creates an expense category with a key and display name and returns it."
+        "Creates an expense category for a client with a key and display name and returns "
+        "it. The client must use budget."
     ),
     "PATCH /api/v1/budget/categories/{category_id}": (
         "Edits a category's name, active flag or sort order. Its key and system key are "
         "fixed."
     ),
     "GET /api/v1/budget/cost-centers": (
-        "Lists cost centers; inactive ones are hidden unless requested."
+        "Lists cost centers, optionally one client's; inactive ones are hidden unless "
+        "requested."
     ),
     "POST /api/v1/budget/cost-centers": (
-        "Creates a cost center with a code, name and optional external reference, and "
-        "returns it."
+        "Creates a cost center for a client with a code, name and optional external "
+        "reference, and returns it. The client must use budget."
     ),
     "PATCH /api/v1/budget/cost-centers/{cost_center_id}": (
         "Edits a cost center's name, external reference or active flag and returns it."
     ),
     "GET /api/v1/budget/expenses": (
-        "Lists expenses, optionally filtered by status, category, cost center, vendor, "
-        "source or date range. Returns amounts in original and base currency."
+        "Lists expenses, optionally filtered by client, status, category, cost center, "
+        "vendor, source or date range. Returns amounts in original and base currency."
     ),
     "POST /api/v1/budget/expenses": (
-        "Records a manual expense, either confirmed (a real cost) or expected (a known "
-        "upcoming one). Converts to base currency when a rate covers the date, else leaves "
-        "the base amount empty."
+        "Records a client's manual expense, confirmed (a real cost) or expected (a known "
+        "upcoming one). Category, cost center and link must be that client's. Converts to "
+        "its base currency when a rate covers the date, else leaves the base amount empty."
     ),
     "POST /api/v1/budget/expenses/materialize": (
-        "Creates expected expense rows for subscription and license costs projected in a "
-        "date window. Idempotent and never recreates voided ones; returns created and "
-        "skipped counts."
+        "Creates expected expense rows for one client's subscription and license costs "
+        "projected in a date window. Idempotent and never recreates voided ones; returns "
+        "created and skipped counts."
     ),
     "GET /api/v1/budget/expenses/{expense_id}": (
         "Returns one expense with its amounts, links, status, invoice attachment flag and "
@@ -91,28 +97,31 @@ PART_A: dict[str, str] = {
         "and audited."
     ),
     "GET /api/v1/budget/forecast": (
-        "Projects subscription and license costs for the next N calendar months including "
-        "the current one, by category. Rows say whether they are already booked as expenses."
+        "Projects one client's subscription and license costs for the next N calendar "
+        "months including the current one, by category, in its base currency. Rows say "
+        "whether they are already booked as expenses."
     ),
     "GET /api/v1/budget/fx-rates": (
         "Lists currency exchange rates into the base currency, optionally for one source "
         "currency."
     ),
     "POST /api/v1/budget/fx-rates": (
-        "Adds an exchange rate from a currency into the current base currency, effective "
-        "on a date. Refused if one already exists for that currency and date."
+        "Adds an exchange rate from one currency into another (by default the internal "
+        "client's base currency), effective on a date. Refused if one already exists for "
+        "that pair and date."
     ),
     "PATCH /api/v1/budget/fx-rates/{fx_rate_id}": (
         "Changes an existing exchange rate's value. Currency pair and effective date are "
         "fixed; confirmed expenses are not re-valued."
     ),
     "GET /api/v1/budget/settings": (
-        "Returns the budget settings: base currency and the month the fiscal year starts."
+        "Returns one client's budget settings: base currency and the month its fiscal "
+        "year starts."
     ),
     "PUT /api/v1/budget/settings": (
-        "Sets the base currency and fiscal-year start month. Changing currency after "
-        "converted expenses exist needs an explicit acknowledgement and does not "
-        "re-convert them."
+        "Sets one client's base currency and fiscal-year start month. Changing currency "
+        "after that client's converted expenses exist needs an explicit acknowledgement "
+        "and does not re-convert them."
     ),
     # --- docs ---
     "GET /api/v1/docs/articles": (

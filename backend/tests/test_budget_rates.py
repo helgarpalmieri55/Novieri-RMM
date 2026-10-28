@@ -16,7 +16,7 @@ from decimal import Decimal
 from uuid import UUID
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.client_scope import ClientScope
@@ -32,6 +32,7 @@ from app.modules.budget.rates import (
     update_rate,
 )
 from app.modules.budget.refdata import create_category
+from tests.client_scope_support import drop_client_keys
 
 
 async def _org_with_user(api_env) -> tuple[UUID, UUID]:
@@ -54,9 +55,10 @@ async def _seed_converted_expense(
     """A real expense row carrying a non-NULL `amount_base` -- the trigger
     condition for spec §3's base-currency guard. Needs a real category
     (FK, NOT NULL)."""
-    cat = await create_category(session, org_id, user_id, key="hardware", name="Hardware")
+    cat = await create_category(session, org_id, user_id, client_id=org_id,
+                                key="hardware", name="Hardware")
     exp = Expense(
-        org_id=org_id,
+        org_id=org_id, client_id=org_id,
         expense_date=date(2026, 1, 15),
         amount=Decimal("100.00"),
         currency="EUR",
@@ -83,7 +85,7 @@ async def test_create_rate_takes_to_currency_from_settings_not_caller(api_env) -
     currency, which only `get_settings` can supply."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        settings = await get_settings(session, org_id)
+        settings = await get_settings(session, org_id, client_id=org_id)
         assert settings.base_currency == "USD"
         rate = await create_rate(
             session,
@@ -105,7 +107,7 @@ async def test_create_rate_uses_the_currently_set_base_currency(api_env) -> None
     base -- never a value baked in at some earlier point."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await set_base_currency(session, org_id, user_id, base_currency="COP")
+        await set_base_currency(session, org_id, user_id, client_id=org_id, base_currency="COP")
         rate = await create_rate(
             session,
             org_id,
@@ -485,7 +487,8 @@ async def test_update_rate_reports_the_changed_field(api_env) -> None:
 async def test_base_currency_change_is_free_before_any_converted_expense(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        settings = await set_base_currency(session, org_id, user_id, base_currency="COP")
+        settings = await set_base_currency(session, org_id, user_id, client_id=org_id,
+                                           base_currency="COP")
     assert settings.base_currency == "COP"
     assert settings.updated_by == user_id
 
@@ -495,9 +498,9 @@ async def test_base_currency_change_is_blocked_once_an_expense_is_converted(api_
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await _seed_converted_expense(session, org_id, user_id)
         with pytest.raises(BudgetValidationError):
-            await set_base_currency(session, org_id, user_id, base_currency="COP")
+            await set_base_currency(session, org_id, user_id, client_id=org_id, base_currency="COP")
         # the settings row must be untouched by the rejected attempt
-        settings = await get_settings(session, org_id)
+        settings = await get_settings(session, org_id, client_id=org_id)
     assert settings.base_currency == "USD"
     assert settings.updated_by is None
 
@@ -507,7 +510,8 @@ async def test_base_currency_change_proceeds_with_explicit_acknowledgement(api_e
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await _seed_converted_expense(session, org_id, user_id)
         settings = await set_base_currency(
-            session, org_id, user_id, base_currency="COP", acknowledge_mixed_basis=True
+            session, org_id, user_id, client_id=org_id,
+            base_currency="COP", acknowledge_mixed_basis=True
         )
     assert settings.base_currency == "COP"
     assert settings.updated_by == user_id
@@ -520,7 +524,8 @@ async def test_base_currency_change_does_not_retro_convert_history(api_env) -> N
         exp = await _seed_converted_expense(session, org_id, user_id)
         before_rate, before_base = exp.fx_rate, exp.amount_base
         await set_base_currency(
-            session, org_id, user_id, base_currency="COP", acknowledge_mixed_basis=True
+            session, org_id, user_id, client_id=org_id,
+            base_currency="COP", acknowledge_mixed_basis=True
         )
         await session.refresh(exp)
     assert exp.fx_rate == before_rate
@@ -534,7 +539,8 @@ async def test_a_voided_expense_does_not_block_the_change(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await _seed_converted_expense(session, org_id, user_id, status="void")
-        settings = await set_base_currency(session, org_id, user_id, base_currency="COP")
+        settings = await set_base_currency(session, org_id, user_id, client_id=org_id,
+                                           base_currency="COP")
     assert settings.base_currency == "COP"
 
 
@@ -545,13 +551,13 @@ async def test_an_expected_expense_with_amount_base_still_blocks(api_env) -> Non
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await _seed_converted_expense(session, org_id, user_id, status="expected")
         with pytest.raises(BudgetValidationError):
-            await set_base_currency(session, org_id, user_id, base_currency="COP")
+            await set_base_currency(session, org_id, user_id, client_id=org_id, base_currency="COP")
 
 
 async def test_base_currency_change_audits_old_and_new_codes(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await set_base_currency(session, org_id, user_id, base_currency="COP")
+        await set_base_currency(session, org_id, user_id, client_id=org_id, base_currency="COP")
         event = (
             await session.execute(
                 select(AuditEvent).where(
@@ -574,7 +580,8 @@ async def test_base_currency_change_audits_old_and_new_codes(api_env) -> None:
 async def test_set_fiscal_year_start_updates_settings(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        settings = await set_fiscal_year_start(session, org_id, user_id, start_month=4)
+        settings = await set_fiscal_year_start(session, org_id, user_id, client_id=org_id,
+                                               start_month=4)
     assert settings.fiscal_year_start_month == 4
     assert settings.updated_by == user_id
 
@@ -582,7 +589,7 @@ async def test_set_fiscal_year_start_updates_settings(api_env) -> None:
 async def test_set_fiscal_year_start_audits_old_and_new_months(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await set_fiscal_year_start(session, org_id, user_id, start_month=7)
+        await set_fiscal_year_start(session, org_id, user_id, client_id=org_id, start_month=7)
         event = (
             await session.execute(
                 select(AuditEvent).where(
@@ -652,17 +659,31 @@ async def test_tenancy_base_currency_guard_is_org_scoped(
     leaking into org A's check. Under org_session(engine=app_engine) RLS
     would mask org B's row and this test would pass even with the
     predicate deleted.
+
+    The guard is per client since plan 2026-10-26 Task 8, and a foreign
+    org's client never reaches it (`require_budget` refuses it first), so
+    org B's row is planted under ORG A's own client (lesson 2): the client
+    predicate lets it through, and only the org predicate keeps it out. The
+    keys that make such a row impossible are dropped inside this test's one
+    transaction, which is rolled back (`drop_client_keys`).
     """
     org_a, user_a = await _org_with_user(api_env)
     org_b, user_b = await _org_with_user(api_env)
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        await _seed_converted_expense(session, org_b, user_b)
+        planted = await _seed_converted_expense(session, org_b, user_b)
         await session.commit()
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
+        await drop_client_keys(
+            session, "expense", "fk_expense_client_org", "fk_expense_category_client"
+        )
+        await session.execute(
+            update(Expense).where(Expense.id == planted.id).values(client_id=org_a)
+        )
         # org A has no converted expense of its own -- this must succeed
         # WITHOUT acknowledge_mixed_basis, despite org B having one.
-        settings = await set_base_currency(session, org_a, user_a, base_currency="COP")
-        await session.commit()
-    assert settings.base_currency == "COP"
+        settings = await set_base_currency(session, org_a, user_a, client_id=org_a,
+                                           base_currency="COP")
+        assert settings.base_currency == "COP"
+        await session.rollback()

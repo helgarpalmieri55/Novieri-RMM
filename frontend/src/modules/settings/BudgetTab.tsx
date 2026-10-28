@@ -19,6 +19,7 @@ import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
 import { formatDateTime } from "../../lib/datetime";
+import { internalClientId } from "../../lib/internalClient";
 import { KIND_ICON, Panel } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { ChipsField } from "../../shell/viz";
@@ -100,9 +101,14 @@ export function BudgetTab({
   canReadUsers: boolean;
 }) {
   const t = useT();
-  const settings = useBudgetSettings(canRead);
-  const update = useUpdateBudgetSettingsMutation();
   const me = useMe();
+  // Budget settings are one client's (base currency, fiscal year).
+  // PHASE 3: the client/site selector. Until it exists that is the
+  // organisation's internal client, whose id is the organisation's --
+  // `/me`'s `org_id` (`lib/internalClient.ts`).
+  const clientId = internalClientId(me.data);
+  const settings = useBudgetSettings(clientId, canRead);
+  const update = useUpdateBudgetSettingsMutation(clientId);
   // Only when there is actually somebody to name, and only when this session
   // can read the directory at all -- a stamp with no `updated_by` (a server
   // that has never had this setting written) asks for nothing.

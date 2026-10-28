@@ -180,3 +180,16 @@ async def internal_client(env: ApiEnv, headers: dict[str, str]) -> str:
     me = await env.client.get("/api/v1/me", headers=headers)
     assert me.status_code == 200, me.text
     return str(me.json()["org_id"])
+
+
+async def drop_client_keys(session: AsyncSession, table: str, *constraints: str) -> None:
+    """Drop `constraints` of `table` INSIDE `session`'s transaction, which the
+    caller rolls back. For the org-predicate tests (plan 2026-10-26 Task 8,
+    lesson 2): a row of org B under org A's client is what a query's org
+    predicate alone must keep out, and the client keys (`fk_<table>_client_org`
+    and the like) make such a row impossible -- which is also why, once a
+    query filters by client, its org predicate can only be shown to bite with
+    them gone. DDL is transactional in Postgres: nothing outlives the
+    rollback."""
+    for name in constraints:
+        await session.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT {name}"))

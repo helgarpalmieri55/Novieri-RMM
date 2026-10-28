@@ -145,12 +145,12 @@ async def test_project_costs_writes_nothing(api_env) -> None:
     """The forecast must never persist -- that is what keeps it from drifting."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         await _seed_subscription(session, org_id, user_id, renews_at=date(2026, 2, 1))
 
         before = await _expense_count(session, org_id)
         result = await project_costs(
-            session, org_id, from_date=date(2026, 1, 1), to_date=date(2026, 6, 30)
+            session, org_id, client_id=org_id, from_date=date(2026, 1, 1), to_date=date(2026, 6, 30)
         )
         after = await _expense_count(session, org_id)
 
@@ -166,7 +166,8 @@ async def test_project_costs_rejects_from_date_after_to_date(api_env) -> None:
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(BudgetValidationError):
             await project_costs(
-                session, org_id, from_date=date(2026, 6, 1), to_date=date(2026, 1, 1)
+                session, org_id, client_id=org_id,
+                from_date=date(2026, 6, 1), to_date=date(2026, 1, 1)
             )
 
 
@@ -179,14 +180,16 @@ async def test_materialize_twice_creates_nothing_the_second_time(api_env) -> Non
     """The idempotency guarantee. Not an assumption -- a test."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         await _seed_subscription(session, org_id, user_id, renews_at=date(2026, 2, 1))
 
         first = await materialize(
-            session, org_id, user_id, from_date=date(2026, 1, 1), to_date=date(2026, 6, 30)
+            session, org_id, user_id, client_id=org_id,
+            from_date=date(2026, 1, 1), to_date=date(2026, 6, 30)
         )
         second = await materialize(
-            session, org_id, user_id, from_date=date(2026, 1, 1), to_date=date(2026, 6, 30)
+            session, org_id, user_id, client_id=org_id,
+            from_date=date(2026, 1, 1), to_date=date(2026, 6, 30)
         )
 
     assert first["created"] > 0
@@ -199,11 +202,12 @@ async def test_a_voided_entry_is_not_resurrected(api_env) -> None:
     An operator voided it on purpose; re-running must not undo that."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         sub = await _seed_subscription(session, org_id, user_id, renews_at=date(2026, 2, 1))
 
         first = await materialize(
-            session, org_id, user_id, from_date=date(2026, 2, 1), to_date=date(2026, 2, 28)
+            session, org_id, user_id, client_id=org_id,
+            from_date=date(2026, 2, 1), to_date=date(2026, 2, 28)
         )
         assert first["created"] == 1
 
@@ -220,7 +224,8 @@ async def test_a_voided_entry_is_not_resurrected(api_env) -> None:
         await void_expense(session, org_id, user_id, created_expense.id)
 
         second = await materialize(
-            session, org_id, user_id, from_date=date(2026, 2, 1), to_date=date(2026, 2, 28)
+            session, org_id, user_id, client_id=org_id,
+            from_date=date(2026, 2, 1), to_date=date(2026, 2, 28)
         )
 
         rows = await _expenses_for_org(session, org_id)
@@ -237,7 +242,7 @@ async def test_a_voided_entry_is_not_resurrected(api_env) -> None:
 async def test_unconvertible_projection_is_created_and_counted(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         # No fx_rate row exists for JPY -> the org's default base (USD).
         await _seed_subscription(
             session,
@@ -249,7 +254,8 @@ async def test_unconvertible_projection_is_created_and_counted(api_env) -> None:
         )
 
         result = await materialize(
-            session, org_id, user_id, from_date=date(2026, 2, 1), to_date=date(2026, 2, 28)
+            session, org_id, user_id, client_id=org_id,
+            from_date=date(2026, 2, 1), to_date=date(2026, 2, 28)
         )
 
         expense = (
@@ -270,7 +276,7 @@ async def test_cancelled_and_trial_subscriptions_are_excluded(api_env) -> None:
     as an open product question -- if it changes, it changes in both places."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         active = await _seed_subscription(
             session, org_id, user_id, renews_at=date(2026, 2, 1), status="active",
             service_name="Active SaaS",
@@ -285,7 +291,7 @@ async def test_cancelled_and_trial_subscriptions_are_excluded(api_env) -> None:
         )
 
         result = await project_costs(
-            session, org_id, from_date=date(2026, 1, 1), to_date=date(2026, 6, 30)
+            session, org_id, client_id=org_id, from_date=date(2026, 1, 1), to_date=date(2026, 6, 30)
         )
 
     link_ids = {p.link_id for p in result}
@@ -301,13 +307,15 @@ async def test_missing_system_key_category_fails_loudly(api_env) -> None:
         # Hand-made category colliding with the seeded key, left with a NULL
         # system_key -- no seeding happened here at all.
         await create_category(
-            session, org_id, user_id, key="saas_subscriptions", name="My Own Category"
+            session, org_id, user_id, client_id=org_id,
+            key="saas_subscriptions", name="My Own Category"
         )
         await _seed_subscription(session, org_id, user_id, renews_at=date(2026, 2, 1))
 
         with pytest.raises(BudgetValidationError) as exc:
             await materialize(
-                session, org_id, user_id, from_date=date(2026, 1, 1), to_date=date(2026, 6, 30)
+                session, org_id, user_id, client_id=org_id,
+                from_date=date(2026, 1, 1), to_date=date(2026, 6, 30)
             )
         assert "saas_subscriptions" in str(exc.value)
 
@@ -326,8 +334,8 @@ async def test_retired_category_fails_materialization_loudly(api_env) -> None:
     silently book spend to the retired row."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
-        cat = await category_by_system_key(session, org_id, "saas_subscriptions")
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
+        cat = await category_by_system_key(session, org_id, "saas_subscriptions", client_id=org_id)
         assert cat is not None
         await update_category(session, org_id, user_id, cat.id, {"active": False})
 
@@ -335,12 +343,15 @@ async def test_retired_category_fails_materialization_loudly(api_env) -> None:
 
         # Confirm the category genuinely still exists (retired, not deleted)
         # and is simply no longer resolvable by system_key.
-        retired_lookup = await category_by_system_key(session, org_id, "saas_subscriptions")
+        retired_lookup = await category_by_system_key(
+            session, org_id, "saas_subscriptions", client_id=org_id
+        )
         assert retired_lookup is None
 
         with pytest.raises(BudgetValidationError) as exc:
             await materialize(
-                session, org_id, user_id, from_date=date(2026, 1, 1), to_date=date(2026, 6, 30)
+                session, org_id, user_id, client_id=org_id,
+                from_date=date(2026, 1, 1), to_date=date(2026, 6, 30)
             )
         assert "saas_subscriptions" in str(exc.value)
 
@@ -353,13 +364,13 @@ async def test_retired_category_fails_materialization_loudly(api_env) -> None:
 async def test_window_longer_than_24_months_is_rejected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
 
         with pytest.raises(BudgetValidationError):
             await materialize(
                 session,
                 org_id,
-                user_id,
+                user_id, client_id=org_id,
                 from_date=date(2026, 1, 1),
                 to_date=date(2028, 2, 28),  # 26 months, inclusive
             )
@@ -369,13 +380,13 @@ async def test_window_of_exactly_24_months_is_accepted(api_env) -> None:
     """The bound rejects LONGER than 24 months, not 24 itself."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         await _seed_subscription(session, org_id, user_id, renews_at=date(2026, 3, 1))
 
         result = await materialize(
             session,
             org_id,
-            user_id,
+            user_id, client_id=org_id,
             from_date=date(2026, 1, 1),
             to_date=date(2027, 12, 31),  # exactly 24 months, inclusive
         )
@@ -405,7 +416,7 @@ async def test_materialize_rejects_projection_count_over_row_limit(
     monkeypatch.setattr(feeds_module, "MAX_MATERIALIZE_ROWS", 2)
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         for i in range(3):
             await _seed_subscription(
                 session,
@@ -419,7 +430,7 @@ async def test_materialize_rejects_projection_count_over_row_limit(
             await materialize(
                 session,
                 org_id,
-                user_id,
+                user_id, client_id=org_id,
                 from_date=date(2026, 1, 1),
                 to_date=date(2026, 1, 31),
             )
@@ -440,7 +451,7 @@ async def test_materialize_accepts_projection_count_at_row_limit(
     monkeypatch.setattr(feeds_module, "MAX_MATERIALIZE_ROWS", 2)
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         for i in range(2):
             await _seed_subscription(
                 session,
@@ -453,7 +464,7 @@ async def test_materialize_accepts_projection_count_at_row_limit(
         result = await materialize(
             session,
             org_id,
-            user_id,
+            user_id, client_id=org_id,
             from_date=date(2026, 1, 1),
             to_date=date(2026, 1, 31),
         )
@@ -464,7 +475,7 @@ async def test_materialize_accepts_projection_count_at_row_limit(
 async def test_licenses_project_renewal_and_maintenance_dates(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         lic = await _seed_license(
             session,
             org_id,
@@ -476,11 +487,13 @@ async def test_licenses_project_renewal_and_maintenance_dates(api_env) -> None:
         )
 
         result = await project_costs(
-            session, org_id, from_date=date(2026, 1, 1), to_date=date(2026, 12, 31)
+            session, org_id, client_id=org_id,
+            from_date=date(2026, 1, 1), to_date=date(2026, 12, 31)
         )
 
         materialized = await materialize(
-            session, org_id, user_id, from_date=date(2026, 1, 1), to_date=date(2026, 12, 31)
+            session, org_id, user_id, client_id=org_id,
+            from_date=date(2026, 1, 1), to_date=date(2026, 12, 31)
         )
         rows = await _expenses_for_org(session, org_id)
 
@@ -510,7 +523,7 @@ async def test_license_with_no_cost_is_not_projected(api_env) -> None:
     materialization must never fabricate an amount."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         await _seed_license(
             session,
             org_id,
@@ -521,7 +534,8 @@ async def test_license_with_no_cost_is_not_projected(api_env) -> None:
         )
 
         result = await project_costs(
-            session, org_id, from_date=date(2026, 1, 1), to_date=date(2026, 12, 31)
+            session, org_id, client_id=org_id,
+            from_date=date(2026, 1, 1), to_date=date(2026, 12, 31)
         )
 
     assert result == []
@@ -542,7 +556,7 @@ async def test_same_month_license_renewal_and_maintenance_are_merged(api_env) ->
     agree: one row, created == 1, skipped_existing == 0."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         lic = await _seed_license(
             session,
             org_id,
@@ -554,10 +568,12 @@ async def test_same_month_license_renewal_and_maintenance_are_merged(api_env) ->
         )
 
         result = await project_costs(
-            session, org_id, from_date=date(2026, 1, 1), to_date=date(2026, 12, 31)
+            session, org_id, client_id=org_id,
+            from_date=date(2026, 1, 1), to_date=date(2026, 12, 31)
         )
         materialized = await materialize(
-            session, org_id, user_id, from_date=date(2026, 1, 1), to_date=date(2026, 12, 31)
+            session, org_id, user_id, client_id=org_id,
+            from_date=date(2026, 1, 1), to_date=date(2026, 12, 31)
         )
         rows = await _expenses_for_org(session, org_id)
 
@@ -684,8 +700,8 @@ async def test_materialize_concurrent_calls_do_not_race_the_expense_insert(
     to interleave."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
-        cat = await category_by_system_key(session, org_id, "saas_subscriptions")
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
+        cat = await category_by_system_key(session, org_id, "saas_subscriptions", client_id=org_id)
         assert cat is not None
         # COP, with no COP->USD rate on file, so this projection is BOTH
         # unconvertible and (below) a race loser. That combination is what
@@ -711,7 +727,7 @@ async def test_materialize_concurrent_calls_do_not_race_the_expense_insert(
                 precheck_seen = True
                 async with AsyncSession(admin_engine, expire_on_commit=False) as session_b:
                     winner = Expense(
-                        org_id=org_id,
+                        org_id=org_id, client_id=org_id,
                         expense_date=date(2026, 2, 1),
                         amount=Decimal("10.00"),
                         currency="USD",
@@ -734,7 +750,8 @@ async def test_materialize_concurrent_calls_do_not_race_the_expense_insert(
         # expected counts below depend on how many months are in range
         # rather than on the race itself.
         result = await materialize(
-            session_a, org_id, user_id, from_date=date(2026, 2, 1), to_date=date(2026, 2, 28)
+            session_a, org_id, user_id, client_id=org_id,
+            from_date=date(2026, 2, 1), to_date=date(2026, 2, 28)
         )
         await session_a.commit()
 
@@ -770,7 +787,7 @@ async def test_materialize_audits_one_summary_and_one_created_event_per_row(api_
     cannot pass silently the way it could before this test existed."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         # Both renew in the SAME month and the window covers exactly that
         # one month -- a monthly billing_cycle would otherwise produce one
         # projection per month in range, making "created" depend on how
@@ -783,7 +800,8 @@ async def test_materialize_audits_one_summary_and_one_created_event_per_row(api_
         )
 
         result = await materialize(
-            session, org_id, user_id, from_date=date(2026, 2, 1), to_date=date(2026, 2, 28)
+            session, org_id, user_id, client_id=org_id,
+            from_date=date(2026, 2, 1), to_date=date(2026, 2, 28)
         )
 
         summary_events = (
@@ -857,7 +875,13 @@ async def test_tenancy_project_costs_subscription_resolution_is_load_bearing(
     alone -- it only failed when the whole file ran, because OTHER tests'
     licenses (left behind in the same test DB across the file) happened to
     leak into org A's result. That made the guard's failure signal depend
-    on execution order/residue rather than this test's own setup."""
+    on execution order/residue rather than this test's own setup.
+
+    Asked for ORG B's internal client (its id is org B's; plan 2026-10-26
+    Task 8, lesson 2): `project_costs` also filters by client, and org B's
+    rows ARE that client's, so the client predicate lets them through and
+    only the org predicates keep them out. Asked for org A's own client, the
+    client predicate alone would have hidden them."""
     org_a, _user_a = await _org_with_user(api_env)
     org_b, user_b = await _org_with_user(api_env)
 
@@ -895,7 +919,7 @@ async def test_tenancy_project_costs_subscription_resolution_is_load_bearing(
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         result = await project_costs(
-            session, org_a, from_date=date(2026, 1, 1), to_date=date(2026, 6, 30)
+            session, org_a, client_id=org_b, from_date=date(2026, 1, 1), to_date=date(2026, 6, 30)
         )
 
     assert result == []
