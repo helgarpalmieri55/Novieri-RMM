@@ -37,7 +37,10 @@ revokes, a contact it switches off).
 LOCK ORDER: these are the FIRST locks of the transaction that takes them --
 site, then client -- and archives take the client (`archive_client`) or the
 site then the client (`archive_site`) first too, before any token, link,
-contact or audit lock. A path that already holds the audit chain's lock when
+contact or audit lock. IPAM is the documented exception: its creates lock the
+client, may insert the client's `global` VRF, and only then lock the site
+(`app.modules.ipam.clients` explains why that cannot deadlock with an
+archive). A path that already holds the audit chain's lock when
 it gets here would invert that order; push install minting a token per target
 after the previous target's audit is the one such path (a cycle there needs an
 archive of a client with no active device, and resolves as one 40P01).

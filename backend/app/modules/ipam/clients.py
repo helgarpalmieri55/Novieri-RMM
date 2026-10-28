@@ -30,8 +30,11 @@ None of these can deadlock against `archive_site` (the site FOR NO KEY
 UPDATE, then its client FOR SHARE) or `archive_client` (the client FOR NO KEY
 UPDATE, its first lock). Every client lock here, and `archive_site`'s, is FOR
 SHARE, which conflicts neither with another FOR SHARE nor with the KEY SHARE
-the VRF insert's foreign key takes: `archive_site` never waits on an IPAM
-write. `archive_client` holds nothing before the client and never locks a
+the VRF insert's foreign key takes. `archive_site` does wait on an IPAM write
+that holds its site FOR SHARE -- but it waits at its FIRST lock, holding
+nothing, and the write's remaining locks (the client FOR SHARE, the advisory
+lock, the audit chain) are none of `archive_site`'s, so it never deadlocks
+with one. `archive_client` holds nothing before the client and never locks a
 site. Neither archive touches a VRF row or the advisory lock, and an IPAM
 write waits for its site before it takes the audit chain. A write that meets
 an archive in flight waits for it, re-reads and gets the 409.

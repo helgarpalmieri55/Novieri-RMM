@@ -45,8 +45,10 @@ make a freshly imaged branch server unpromotable until inventory had run.
 migration 0231), and the site it is filed under -- `site_id`, grouping only,
 which replaced the IPAM site in migration 0240 -- is one of that client's
 sites (422, and `fk_site_server_site_client` underneath). The site plays no
-part in what the server serves: push install and wake choose an originator by
-segment and by client (`agent_push.preflight._site_server_for`), never by site.
+part in what the server serves: push install chooses an originator by segment
+and by client (`agent_push.preflight._site_server_for`), wake by segment
+(`provisioning.dispatch`; its client filter is plan 2026-10-26 Task 12) --
+never by site.
 """
 
 from collections.abc import Sequence
