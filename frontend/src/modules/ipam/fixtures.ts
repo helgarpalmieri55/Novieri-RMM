@@ -21,8 +21,9 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
-import { devices } from "../../fixtures/core";
+import { devices, ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
+import type { ClientSiteOut } from "../../lib/api";
 import type {
   AddressOut,
   DriftOut,
@@ -33,7 +34,6 @@ import type {
   RangeOut,
   ScopeOut,
   SearchOut,
-  SiteOut,
   SubnetOut,
   SweepRunOut,
   UtilizationOut,
@@ -54,26 +54,40 @@ const notFound = (what: string): never => {
 const VRF_GLOBAL = "vrf-global";
 
 const vrfs = (): VrfOut[] => [
-  { id: VRF_GLOBAL, name: "global", rd: null, description: "The default VRF; every subnet lands here unless one is named." },
-  { id: "vrf-lab", name: "lab", rd: "65000:20", description: "The isolated build lab. Overlaps campus space on purpose." },
+  { client_id: ORG_ID, id: VRF_GLOBAL, name: "global", rd: null, description: "The default VRF; every subnet lands here unless one is named." },
+  { client_id: ORG_ID, id: "vrf-lab", name: "lab", rd: "65000:20", description: "The isolated build lab. Overlaps campus space on purpose." },
 ];
 
-const sites = (): SiteOut[] => [
-  { id: "site-lisbon", name: "Lisbon", doc_record_id: "doc-lisbon-office", description: "Head office, floors 2 and 3, rack room B." },
-  { id: "site-porto", name: "Porto", doc_record_id: null, description: "Branch office." },
+// The internal client's sites (MSP clients phase 2): IPAM has none of its own.
+// Every row below is the internal client's, whose id is the organisation's.
+const site = (id: string, name: string, description: string): ClientSiteOut => ({
+  id,
+  client_id: ORG_ID,
+  name,
+  address: "",
+  description,
+  egress_networks: [],
+  archived_at: null,
+  device_count: 0,
+});
+
+const sites = (): ClientSiteOut[] => [
+  site("site-lisbon", "Lisbon", "Head office, floors 2 and 3, rack room B."),
+  site("site-porto", "Porto", "Branch office."),
 ];
 
 const vlans = (): VlanOut[] => [
-  { id: "vlan-10", vid: 10, site_id: null, name: "Management", description: "Org-wide management VLAN." },
-  { id: "vlan-40", vid: 40, site_id: "site-lisbon", name: "Racks", description: "" },
-  { id: "vlan-90", vid: 90, site_id: "site-lisbon", name: "Workstations", description: "" },
-  { id: "vlan-110", vid: 110, site_id: "site-lisbon", name: "Wireless", description: "" },
+  { client_id: ORG_ID, id: "vlan-10", vid: 10, site_id: null, name: "Management", description: "Org-wide management VLAN." },
+  { client_id: ORG_ID, id: "vlan-40", vid: 40, site_id: "site-lisbon", name: "Racks", description: "" },
+  { client_id: ORG_ID, id: "vlan-90", vid: 90, site_id: "site-lisbon", name: "Workstations", description: "" },
+  { client_id: ORG_ID, id: "vlan-110", vid: 110, site_id: "site-lisbon", name: "Wireless", description: "" },
 ];
 
 /* ---------------------------------------------------------------- subnets */
 
 const subnets = (): SubnetOut[] => [
   {
+    client_id: ORG_ID,
     id: "subnet-0",
     vrf_id: VRF_GLOBAL,
     prefix: "10.20.0.0/16",
@@ -91,6 +105,7 @@ const subnets = (): SubnetOut[] => [
     last_swept_at: null,
   },
   {
+    client_id: ORG_ID,
     id: "subnet-2",
     vrf_id: VRF_GLOBAL,
     prefix: "10.20.4.0/24",
@@ -108,6 +123,7 @@ const subnets = (): SubnetOut[] => [
     last_swept_at: ago(2 * 60 + 14),
   },
   {
+    client_id: ORG_ID,
     id: "subnet-1",
     vrf_id: VRF_GLOBAL,
     prefix: "10.20.9.0/24",
@@ -125,6 +141,7 @@ const subnets = (): SubnetOut[] => [
     last_swept_at: ago(2 * 60 + 14),
   },
   {
+    client_id: ORG_ID,
     id: "subnet-3",
     vrf_id: VRF_GLOBAL,
     prefix: "10.20.11.0/24",
@@ -142,6 +159,7 @@ const subnets = (): SubnetOut[] => [
     last_swept_at: null,
   },
   {
+    client_id: ORG_ID,
     id: "subnet-4",
     vrf_id: VRF_GLOBAL,
     prefix: "10.30.1.0/24",
@@ -330,6 +348,7 @@ const nextFree = (id: string, count: number): string[] =>
 const getIpamSubnetNextFree: FixtureMap["getIpamSubnetNextFree"] = (id, count = 1) => nextFree(id, count);
 
 const addressOut = (entry: GridEntryOut, subnetId: string): AddressOut => ({
+  client_id: ORG_ID,
   id: entry.address_id ?? `addr-new-${entry.address}`,
   vrf_id: VRF_GLOBAL,
   subnet_id: subnetId,
@@ -378,6 +397,7 @@ const getIpamAddress: FixtureMap["getIpamAddress"] = (id) => addressById(id);
 
 const createIpamAddress: FixtureMap["createIpamAddress"] = (body) => ({
   id: `addr-new-${body.address}`,
+  client_id: body.client_id ?? ORG_ID,
   vrf_id: body.vrf_id ?? VRF_GLOBAL,
   subnet_id: subnets().find((s) => s.kind === "assignable" && body.address.startsWith(`${base24(s.prefix)}.`))?.id ?? null,
   address: body.address,
@@ -445,9 +465,9 @@ const getIpamAddressHistory: FixtureMap["getIpamAddressHistory"] = (id) => {
 /* ----------------------------------------------------------------- ranges */
 
 const ranges = (): RangeOut[] => [
-  { id: "range-1", subnet_id: "subnet-1", kind: "dhcp_pool", start_address: "10.20.9.200", end_address: "10.20.9.219", name: "Visitor DHCP" },
-  { id: "range-2", subnet_id: "subnet-1", kind: "reserved", start_address: "10.20.9.250", end_address: "10.20.9.254", name: "Printers" },
-  { id: "range-3", subnet_id: "subnet-2", kind: "excluded", start_address: "10.20.4.250", end_address: "10.20.4.254", name: "Out-of-band management" },
+  { client_id: ORG_ID, id: "range-1", subnet_id: "subnet-1", kind: "dhcp_pool", start_address: "10.20.9.200", end_address: "10.20.9.219", name: "Visitor DHCP" },
+  { client_id: ORG_ID, id: "range-2", subnet_id: "subnet-1", kind: "reserved", start_address: "10.20.9.250", end_address: "10.20.9.254", name: "Printers" },
+  { client_id: ORG_ID, id: "range-3", subnet_id: "subnet-2", kind: "excluded", start_address: "10.20.4.250", end_address: "10.20.4.254", name: "Out-of-band management" },
 ];
 
 const listIpamRanges: FixtureMap["listIpamRanges"] = (subnetId) => {
@@ -457,6 +477,7 @@ const listIpamRanges: FixtureMap["listIpamRanges"] = (subnetId) => {
 
 const createIpamRange: FixtureMap["createIpamRange"] = (subnetId, body) => ({
   id: `range-${body.start_address}`,
+  client_id: ORG_ID,
   subnet_id: subnetId,
   kind: body.kind,
   start_address: body.start_address,
@@ -470,6 +491,7 @@ const deleteIpamRange: FixtureMap["deleteIpamRange"] = () => undefined;
 
 const driftRows = (): DriftOut[] => [
   {
+    client_id: ORG_ID,
     id: "drift-1",
     vrf_id: VRF_GLOBAL,
     subnet_id: "subnet-1",
@@ -488,6 +510,7 @@ const driftRows = (): DriftOut[] => [
     note: "",
   },
   {
+    client_id: ORG_ID,
     id: "drift-2",
     vrf_id: VRF_GLOBAL,
     subnet_id: "subnet-1",
@@ -506,6 +529,7 @@ const driftRows = (): DriftOut[] => [
     note: "",
   },
   {
+    client_id: ORG_ID,
     id: "drift-3",
     vrf_id: VRF_GLOBAL,
     subnet_id: "subnet-2",
@@ -524,6 +548,7 @@ const driftRows = (): DriftOut[] => [
     note: "Backup appliance decommissioned in July; waiting on the record.",
   },
   {
+    client_id: ORG_ID,
     id: "drift-4",
     vrf_id: VRF_GLOBAL,
     subnet_id: "subnet-1",
@@ -542,6 +567,7 @@ const driftRows = (): DriftOut[] => [
     note: "",
   },
   {
+    client_id: ORG_ID,
     id: "drift-5",
     vrf_id: VRF_GLOBAL,
     subnet_id: "subnet-2",
@@ -560,6 +586,7 @@ const driftRows = (): DriftOut[] => [
     note: "",
   },
   {
+    client_id: ORG_ID,
     id: "drift-6",
     vrf_id: VRF_GLOBAL,
     subnet_id: "subnet-4",
@@ -578,6 +605,7 @@ const driftRows = (): DriftOut[] => [
     note: "Sofia moved desks; waiting for the Porto sweep to confirm.",
   },
   {
+    client_id: ORG_ID,
     id: "drift-7",
     vrf_id: VRF_GLOBAL,
     subnet_id: "subnet-1",
@@ -600,6 +628,7 @@ const driftRows = (): DriftOut[] => [
 const dormantRows = (): DriftOut[] =>
   [23, 46, 69].map((i) => ({
     id: `dormant-${i}`,
+    client_id: ORG_ID,
     vrf_id: VRF_GLOBAL,
     subnet_id: "subnet-1",
     address: `10.20.9.${i}`,
@@ -648,11 +677,11 @@ const listIpamOrphans: FixtureMap["listIpamOrphans"] = () => {
 /* ------------------------------------------------- sweep governance */
 
 const scopes = (): ScopeOut[] => [
-  { id: "scope-1", vrf_id: VRF_GLOBAL, prefix: "10.20.4.0/24", note: "Rack room, swept nightly from rack-b4-relay.", authorized_by: "ines.caetano", authorized_at: ago(36 * 24 * 60), expires_at: null, revoked_at: null },
-  { id: "scope-2", vrf_id: VRF_GLOBAL, prefix: "10.20.9.0/24", note: "Workstation VLAN.", authorized_by: "ines.caetano", authorized_at: ago(36 * 24 * 60), expires_at: null, revoked_at: null },
-  { id: "scope-3", vrf_id: VRF_GLOBAL, prefix: "10.20.11.0/24", note: "Wi-Fi audit for the September review. No agent can reach it yet.", authorized_by: "helgar.palmieri", authorized_at: ago(12 * 24 * 60), expires_at: ahead(30 * 24 * 60), revoked_at: null },
-  { id: "scope-4", vrf_id: VRF_GLOBAL, prefix: "10.30.1.0/24", note: "Porto office.", authorized_by: "ines.caetano", authorized_at: ago(36 * 24 * 60), expires_at: null, revoked_at: null },
-  { id: "scope-5", vrf_id: VRF_GLOBAL, prefix: "10.30.0.0/16", note: "Porto migration window.", authorized_by: "helgar.palmieri", authorized_at: ago(90 * 24 * 60), expires_at: null, revoked_at: ago(60 * 24 * 60) },
+  { client_id: ORG_ID, id: "scope-1", vrf_id: VRF_GLOBAL, prefix: "10.20.4.0/24", note: "Rack room, swept nightly from rack-b4-relay.", authorized_by: "ines.caetano", authorized_at: ago(36 * 24 * 60), expires_at: null, revoked_at: null },
+  { client_id: ORG_ID, id: "scope-2", vrf_id: VRF_GLOBAL, prefix: "10.20.9.0/24", note: "Workstation VLAN.", authorized_by: "ines.caetano", authorized_at: ago(36 * 24 * 60), expires_at: null, revoked_at: null },
+  { client_id: ORG_ID, id: "scope-3", vrf_id: VRF_GLOBAL, prefix: "10.20.11.0/24", note: "Wi-Fi audit for the September review. No agent can reach it yet.", authorized_by: "helgar.palmieri", authorized_at: ago(12 * 24 * 60), expires_at: ahead(30 * 24 * 60), revoked_at: null },
+  { client_id: ORG_ID, id: "scope-4", vrf_id: VRF_GLOBAL, prefix: "10.30.1.0/24", note: "Porto office.", authorized_by: "ines.caetano", authorized_at: ago(36 * 24 * 60), expires_at: null, revoked_at: null },
+  { client_id: ORG_ID, id: "scope-5", vrf_id: VRF_GLOBAL, prefix: "10.30.0.0/16", note: "Porto migration window.", authorized_by: "helgar.palmieri", authorized_at: ago(90 * 24 * 60), expires_at: null, revoked_at: ago(60 * 24 * 60) },
 ];
 
 const listIpamScanAuthorizations: FixtureMap["listIpamScanAuthorizations"] = (includeRevoked = false) =>
@@ -660,6 +689,7 @@ const listIpamScanAuthorizations: FixtureMap["listIpamScanAuthorizations"] = (in
 
 const createIpamScanAuthorization: FixtureMap["createIpamScanAuthorization"] = (body) => ({
   id: `scope-${body.prefix}`,
+  client_id: body.client_id ?? ORG_ID,
   vrf_id: body.vrf_id ?? VRF_GLOBAL,
   prefix: body.prefix,
   note: body.note ?? "",
@@ -673,6 +703,7 @@ const revokeIpamScanAuthorization: FixtureMap["revokeIpamScanAuthorization"] = (
 
 const sweepRuns = (): SweepRunOut[] => {
   const run = (id: string, subnet: string, minutesAgo: number, state: string, found: number, targets: number, trigger = "scheduled", device: string | null = "dev-5", error = ""): SweepRunOut => ({
+    client_id: ORG_ID,
     id,
     subnet_id: subnet,
     job_id: state === "no_agent" || state === "refused" ? null : `job-${id}`,
@@ -709,6 +740,7 @@ const listIpamSweepRuns: FixtureMap["listIpamSweepRuns"] = (subnetId, limit = 50
 const dispatchIpamSweep: FixtureMap["dispatchIpamSweep"] = (subnetId) => {
   const subnet = findSubnet(subnetId);
   const run: SweepRunOut = {
+    client_id: ORG_ID,
     id: `run-${subnetId}-now`,
     subnet_id: subnetId,
     job_id: `job-sweep-${subnetId}`,
@@ -788,12 +820,12 @@ const searchIpam: FixtureMap["searchIpam"] = (q) => {
 
 /* ------------------------------------------------------ registry writes */
 
-const createIpamVrf: FixtureMap["createIpamVrf"] = (body) => ({ id: `vrf-${body.name}`, name: body.name, rd: body.rd ?? null, description: body.description ?? "" });
-const createIpamSite: FixtureMap["createIpamSite"] = (body) => ({ id: `site-${body.name.toLowerCase()}`, name: body.name, doc_record_id: body.doc_record_id ?? null, description: body.description ?? "" });
-const createIpamVlan: FixtureMap["createIpamVlan"] = (body) => ({ id: `vlan-${body.vid}`, vid: body.vid, site_id: body.site_id ?? null, name: body.name ?? "", description: body.description ?? "" });
+const createIpamVrf: FixtureMap["createIpamVrf"] = (body) => ({ id: `vrf-${body.name}`, client_id: body.client_id, name: body.name, rd: body.rd ?? null, description: body.description ?? "" });
+const createIpamVlan: FixtureMap["createIpamVlan"] = (body) => ({ id: `vlan-${body.vid}`, client_id: body.client_id ?? ORG_ID, vid: body.vid, site_id: body.site_id ?? null, name: body.name ?? "", description: body.description ?? "" });
 
 const createIpamSubnet: FixtureMap["createIpamSubnet"] = (body) => ({
   id: `subnet-${body.prefix}`,
+  client_id: body.client_id ?? ORG_ID,
   vrf_id: body.vrf_id ?? VRF_GLOBAL,
   prefix: body.prefix,
   kind: body.kind ?? "assignable",
@@ -883,8 +915,8 @@ const exportIpamDriftCsv: FixtureMap["exportIpamDriftCsv"] = () =>
 const fixtures: FixtureMap = {
   listIpamVrfs: vrfs,
   createIpamVrf,
-  listIpamSites: sites,
-  createIpamSite,
+  // One client in this fixture world: whichever the console names, these are its sites.
+  listClientSites: () => sites(),
   listIpamVlans: (siteId) => vlans().filter((v) => !siteId || v.site_id === siteId || v.site_id === null),
   createIpamVlan,
   listIpamSubnets,

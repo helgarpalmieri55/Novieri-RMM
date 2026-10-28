@@ -63,11 +63,12 @@ from tests.ipam_fixtures import (
 )
 
 # §11.1's correction, restated as a list so a builder never recounts looking for
-# a table that does not exist: there are TEN, not eleven. §0.13 rules out an
-# eleventh by putting assignment history in the audit log.
+# a table that does not exist: there were TEN, not eleven -- §0.13 rules out an
+# eleventh by putting assignment history in the audit log -- and there are NINE
+# since migration 0240 merged `ipam_site` into the platform's `sites` (MSP
+# clients spec §1.2), whose own RLS is the client-scope suite's.
 TABLES = (
     "ipam_vrf",
-    "ipam_site",
     "ipam_vlan",
     "ipam_subnet",
     "ipam_range",
@@ -120,7 +121,6 @@ def _row(table: str, fx: _Fx) -> Any:
         IpamObservation,
         IpamRange,
         IpamScanAuthorization,
-        IpamSite,
         IpamSubnet,
         IpamSweepRun,
         IpamVlan,
@@ -129,12 +129,12 @@ def _row(table: str, fx: _Fx) -> Any:
 
     now = utcnow()
     unique = uuid4().int % 200 + 2
+    # C rows name the internal client, whose id is the organisation's; H rows
+    # take theirs from the VRF or subnet (migration 0240).
     if table == "ipam_vrf":
-        return IpamVrf(org_id=fx.org_id, name=f"vrf-{uuid4().hex[:8]}")
-    if table == "ipam_site":
-        return IpamSite(org_id=fx.org_id, name=f"site-{uuid4().hex[:8]}")
+        return IpamVrf(org_id=fx.org_id, client_id=fx.org_id, name=f"vrf-{uuid4().hex[:8]}")
     if table == "ipam_vlan":
-        return IpamVlan(org_id=fx.org_id, site_id=fx.site_id, vid=unique)
+        return IpamVlan(org_id=fx.org_id, client_id=fx.org_id, site_id=fx.site_id, vid=unique)
     if table == "ipam_subnet":
         return IpamSubnet(
             org_id=fx.org_id, vrf_id=fx.vrf_id, prefix=f"10.{unique}.0.0/24", kind="assignable"
@@ -203,12 +203,16 @@ def _row(table: str, fx: _Fx) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def test_the_module_defines_exactly_ten_org_scoped_tables() -> None:
-    """§11.1 as first written said "all eleven tables"; §2 defines ten, and the
-    spec now says so. Pinned here so the RLS parametrizations below cannot
-    silently cover nine."""
-    assert len(TABLES) == 10
-    assert len(set(TABLES)) == 10
+def test_the_module_defines_exactly_nine_org_scoped_tables() -> None:
+    """§11.1 as first written said "all eleven tables"; §2 defined ten, and
+    migration 0240 took `ipam_site` out. Pinned here so the RLS
+    parametrizations below cannot silently cover eight -- and checked against
+    the database, so a tenth IPAM table cannot appear without joining them."""
+    from app.models.base import Base
+
+    assert len(TABLES) == 9
+    assert len(set(TABLES)) == 9
+    assert {t for t in Base.metadata.tables if t.startswith("ipam_")} == set(TABLES)
 
 
 @pytest.mark.parametrize("table", TABLES)
@@ -374,14 +378,14 @@ async def test_the_vlan_uniqueness_pair_is_partial_indexes_not_constraints(
                     " c.conname AS constraint_name"
                     " FROM pg_index ix JOIN pg_class i ON i.oid = ix.indexrelid"
                     " LEFT JOIN pg_constraint c ON c.conindid = ix.indexrelid"
-                    " WHERE i.relname IN ('uq_ipam_vlan_org_site_vid',"
-                    " 'uq_ipam_vlan_org_vid_global')"
+                    " WHERE i.relname IN ('uq_ipam_vlan_site_vid',"
+                    " 'uq_ipam_vlan_client_vid')"
                 )
             )
         ).all()
     assert {r.name for r in rows} == {
-        "uq_ipam_vlan_org_site_vid",
-        "uq_ipam_vlan_org_vid_global",
+        "uq_ipam_vlan_site_vid",
+        "uq_ipam_vlan_client_vid",
     }
     assert all(r.partial for r in rows), rows
     assert all(r.constraint_name is None for r in rows), rows
@@ -493,7 +497,7 @@ async def test_a_vlan_id_outside_1_4094_is_refused(admin_engine: AsyncEngine, vi
     from app.models import IpamVlan
 
     fx = await _fixture(admin_engine, f"vid{vid}")
-    row = IpamVlan(org_id=fx.org_id, site_id=fx.site_id, vid=vid)
+    row = IpamVlan(org_id=fx.org_id, client_id=fx.org_id, site_id=fx.site_id, vid=vid)
     outcome = await _add_outcome(
         admin_engine, row, readback=_VLAN_READBACK, params={"o": fx.org_id}
     )
@@ -1030,24 +1034,24 @@ async def test_writing_mac_key_directly_is_refused_by_postgres(
 # ---------------------------------------------------------------------------
 
 
-async def test_a_second_org_wide_vlan_10_is_refused(admin_engine: AsyncEngine) -> None:
-    """S2. `UNIQUE (org_id, site_id, vid)` alone permits TWO org-wide VLAN 10
-    rows, because `(org, NULL, 10)` does not collide with itself -- exactly the
-    duplicate the constraint exists to prevent. Deleting
-    `uq_ipam_vlan_org_vid_global` makes this print two rows."""
+async def test_a_second_site_less_vlan_10_is_refused(admin_engine: AsyncEngine) -> None:
+    """S2. `UNIQUE (org_id, site_id, vid)` alone permits TWO site-less VLAN 10
+    rows of one client, because `(org, NULL, 10)` does not collide with itself
+    -- exactly the duplicate the constraint exists to prevent. Deleting
+    `uq_ipam_vlan_client_vid` makes this print two rows."""
     from app.models import IpamVlan
 
     fx = await _fixture(admin_engine, "vlanglob")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        session.add(IpamVlan(org_id=fx.org_id, vid=10, name="voice"))
+        session.add(IpamVlan(org_id=fx.org_id, client_id=fx.org_id, vid=10, name="voice"))
         await session.commit()
     outcome = await _add_outcome(
         admin_engine,
-        IpamVlan(org_id=fx.org_id, vid=10, name="voice-again"),
+        IpamVlan(org_id=fx.org_id, client_id=fx.org_id, vid=10, name="voice-again"),
         readback=_VLAN_READBACK,
         params={"o": fx.org_id},
     )
-    assert outcome == "refused by uq_ipam_vlan_org_vid_global"
+    assert outcome == "refused by uq_ipam_vlan_client_vid"
 
 
 async def test_vlan_10_at_two_different_sites_is_accepted(admin_engine: AsyncEngine) -> None:
@@ -1059,11 +1063,11 @@ async def test_vlan_10_at_two_different_sites_is_accepted(admin_engine: AsyncEng
     fx = await _fixture(admin_engine, "vlansite")
     second_site = await seed_site(admin_engine, fx.org_id)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        session.add(IpamVlan(org_id=fx.org_id, site_id=fx.site_id, vid=10))
+        session.add(IpamVlan(org_id=fx.org_id, client_id=fx.org_id, site_id=fx.site_id, vid=10))
         await session.commit()
     outcome = await _add_outcome(
         admin_engine,
-        IpamVlan(org_id=fx.org_id, site_id=second_site, vid=10),
+        IpamVlan(org_id=fx.org_id, client_id=fx.org_id, site_id=second_site, vid=10),
         readback=_VLAN_READBACK,
         params={"o": fx.org_id},
     )
@@ -1078,15 +1082,15 @@ async def test_vlan_10_twice_at_one_site_is_refused(admin_engine: AsyncEngine) -
 
     fx = await _fixture(admin_engine, "vlandup")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        session.add(IpamVlan(org_id=fx.org_id, site_id=fx.site_id, vid=10))
+        session.add(IpamVlan(org_id=fx.org_id, client_id=fx.org_id, site_id=fx.site_id, vid=10))
         await session.commit()
     outcome = await _add_outcome(
         admin_engine,
-        IpamVlan(org_id=fx.org_id, site_id=fx.site_id, vid=10),
+        IpamVlan(org_id=fx.org_id, client_id=fx.org_id, site_id=fx.site_id, vid=10),
         readback=_VLAN_READBACK,
         params={"o": fx.org_id},
     )
-    assert outcome == "refused by uq_ipam_vlan_org_site_vid"
+    assert outcome == "refused by uq_ipam_vlan_site_vid"
 
 
 # ---------------------------------------------------------------------------

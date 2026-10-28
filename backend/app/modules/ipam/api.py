@@ -48,7 +48,6 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, require_permission
 from app.core.http import read_bounded_body, reject_oversized_content_length
@@ -63,8 +62,10 @@ from app.modules.ipam import observations as observation_service
 from app.modules.ipam import reconcile as reconcile_service
 from app.modules.ipam import registry as registry_service
 from app.modules.ipam import subnets as subnet_service
+from app.modules.ipam.clients import loaded_client
 from app.modules.ipam.errors import (
     IpamAuthorizationError,
+    IpamClientError,
     IpamConflictError,
     IpamError,
     IpamNotFoundError,
@@ -76,7 +77,6 @@ from app.modules.ipam.models import (
     IpamDrift,
     IpamRange,
     IpamScanAuthorization,
-    IpamSite,
     IpamSubnet,
     IpamSweepRun,
     IpamVlan,
@@ -104,6 +104,10 @@ def _http_error(exc: IpamError) -> HTTPException:
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
     if isinstance(exc, IpamTooLargeError):
         return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+    if isinstance(exc, IpamClientError):
+        # The row's client cannot be what the request makes it (MSP clients
+        # plan 2026-10-26: a contradiction, a missing client, "Sin asignar").
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
     if isinstance(exc, IpamConflictError):
         return HTTPException(status.HTTP_409_CONFLICT, str(exc))
     if isinstance(exc, IpamValidationError):
@@ -151,7 +155,17 @@ class _ProjectionOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+#: Every IPAM row is a client's (MSP clients plan 2026-10-26 Task 10). A create
+#: takes the client from its VRF, or a VLAN from its site; `client_id` is
+#: required only where there is neither, and must agree where there is one.
+CLIENT_DOC = (
+    "The client the row belongs to. Required when no VRF (or, for a VLAN, no site) is "
+    "named; otherwise it must be that VRF's or site's client"
+)
+
+
 class VrfCreate(BaseModel):
+    client_id: UUID = Field(description="The client the VRF belongs to")
     name: str = Field(min_length=1, max_length=100)
     rd: str | None = Field(default=None, max_length=64)
     description: str = ""
@@ -159,33 +173,25 @@ class VrfCreate(BaseModel):
 
 class VrfOut(BaseModel):
     id: UUID
+    client_id: UUID
     name: str
     rd: str | None
     description: str
 
 
-class SiteCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    doc_record_id: UUID | None = None
-    description: str = ""
-
-
-class SiteOut(BaseModel):
-    id: UUID
-    name: str
-    doc_record_id: UUID | None
-    description: str
-
-
 class VlanCreate(BaseModel):
     vid: int = Field(ge=1, le=4094)
-    site_id: UUID | None = None
+    site_id: UUID | None = Field(
+        default=None, description="One of the client's sites (`GET /clients/{id}/sites`)"
+    )
+    client_id: UUID | None = Field(default=None, description=CLIENT_DOC)
     name: str = Field(default="", max_length=100)
     description: str = ""
 
 
 class VlanOut(BaseModel):
     id: UUID
+    client_id: UUID
     vid: int
     site_id: UUID | None
     name: str
@@ -195,6 +201,7 @@ class VlanOut(BaseModel):
 class SubnetCreate(BaseModel):
     prefix: str = Field(min_length=7, max_length=49)
     vrf_id: UUID | None = None
+    client_id: UUID | None = Field(default=None, description=CLIENT_DOC)
     kind: str = Field(default="assignable", pattern="^(container|assignable)$")
     name: str = Field(default="", max_length=200)
     description: str = ""
@@ -220,6 +227,7 @@ class SubnetUpdate(BaseModel):
 
 class SubnetOut(BaseModel):
     id: UUID
+    client_id: UUID
     vrf_id: UUID
     prefix: str
     kind: str
@@ -246,6 +254,7 @@ class RangeCreate(BaseModel):
 
 class RangeOut(BaseModel):
     id: UUID
+    client_id: UUID
     subnet_id: UUID
     kind: str
     start_address: str
@@ -303,6 +312,7 @@ class AddressCreate(BaseModel):
 
     address: str
     vrf_id: UUID | None = None
+    client_id: UUID | None = Field(default=None, description=CLIENT_DOC)
     reserve: bool = False
     device_id: UUID | None = None
     asset_label: str = ""
@@ -321,6 +331,7 @@ class AddressUpdate(BaseModel):
 
 class AddressOut(BaseModel):
     id: UUID
+    client_id: UUID
     vrf_id: UUID
     subnet_id: UUID | None
     address: str
@@ -381,6 +392,7 @@ class SearchOut(_ProjectionOut):
 
 class DriftOut(BaseModel):
     id: UUID
+    client_id: UUID
     vrf_id: UUID
     subnet_id: UUID | None
     address: str
@@ -416,12 +428,14 @@ class OrphanOut(_ProjectionOut):
 class ScopeCreate(BaseModel):
     prefix: str = Field(min_length=7, max_length=49)
     vrf_id: UUID | None = None
+    client_id: UUID | None = Field(default=None, description=CLIENT_DOC)
     note: str = Field(default="", max_length=500)
     expires_at: datetime | None = None
 
 
 class ScopeOut(BaseModel):
     id: UUID
+    client_id: UUID
     vrf_id: UUID
     prefix: str
     note: str
@@ -443,6 +457,7 @@ class SweepSettings(BaseModel):
 
 class SweepRunOut(BaseModel):
     id: UUID
+    client_id: UUID
     subnet_id: UUID
     job_id: UUID | None
     device_id: UUID | None
@@ -463,19 +478,15 @@ class SweepRunOut(BaseModel):
 
 
 def _vrf_out(row: IpamVrf) -> VrfOut:
-    return VrfOut(id=row.id, name=row.name, rd=row.rd, description=row.description)
-
-
-def _site_out(row: IpamSite) -> SiteOut:
-    return SiteOut(
-        id=row.id, name=row.name, doc_record_id=row.doc_record_id,
+    return VrfOut(
+        id=row.id, client_id=row.client_id, name=row.name, rd=row.rd,
         description=row.description,
     )
 
 
 def _vlan_out(row: IpamVlan) -> VlanOut:
     return VlanOut(
-        id=row.id, vid=row.vid, site_id=row.site_id, name=row.name,
+        id=row.id, client_id=row.client_id, vid=row.vid, site_id=row.site_id, name=row.name,
         description=row.description,
     )
 
@@ -483,6 +494,7 @@ def _vlan_out(row: IpamVlan) -> VlanOut:
 def _subnet_out(row: IpamSubnet) -> SubnetOut:
     return SubnetOut(
         id=row.id,
+        client_id=row.client_id,
         vrf_id=row.vrf_id,
         prefix=str(row.prefix),
         kind=row.kind,
@@ -502,7 +514,7 @@ def _subnet_out(row: IpamSubnet) -> SubnetOut:
 
 def _range_out(row: IpamRange) -> RangeOut:
     return RangeOut(
-        id=row.id, subnet_id=row.subnet_id, kind=row.kind,
+        id=row.id, client_id=row.client_id, subnet_id=row.subnet_id, kind=row.kind,
         start_address=str(row.start_address), end_address=str(row.end_address),
         name=row.name,
     )
@@ -511,6 +523,7 @@ def _range_out(row: IpamRange) -> RangeOut:
 def _address_out(row: IpamAddress) -> AddressOut:
     return AddressOut(
         id=row.id,
+        client_id=row.client_id,
         vrf_id=row.vrf_id,
         subnet_id=row.subnet_id,
         address=str(row.address),
@@ -530,6 +543,7 @@ def _address_out(row: IpamAddress) -> AddressOut:
 def _drift_out(row: IpamDrift) -> DriftOut:
     return DriftOut(
         id=row.id,
+        client_id=row.client_id,
         vrf_id=row.vrf_id,
         subnet_id=row.subnet_id,
         address=str(row.address),
@@ -551,6 +565,7 @@ def _drift_out(row: IpamDrift) -> DriftOut:
 def _scope_out(row: IpamScanAuthorization) -> ScopeOut:
     return ScopeOut(
         id=row.id,
+        client_id=row.client_id,
         vrf_id=row.vrf_id,
         prefix=str(row.prefix),
         note=row.note,
@@ -564,6 +579,7 @@ def _scope_out(row: IpamScanAuthorization) -> ScopeOut:
 def _run_out(row: IpamSweepRun) -> SweepRunOut:
     return SweepRunOut(
         id=row.id,
+        client_id=row.client_id,
         subnet_id=row.subnet_id,
         job_id=row.job_id,
         device_id=row.device_id,
@@ -577,17 +593,6 @@ def _run_out(row: IpamSweepRun) -> SweepRunOut:
         finished_at=row.finished_at,
         error=row.error,
     )
-
-
-async def _resolve_vrf(
-    session: AsyncSession, org_id: UUID, vrf_id: UUID | None
-) -> UUID:
-    """§0.7's lazily created `global` row. A caller that names no VRF gets the
-    default one CREATED, not a null scoping column."""
-    if vrf_id is not None:
-        await registry_service.get_vrf(session, org_id, vrf_id)
-        return vrf_id
-    return await registry_service.ensure_default_vrf(session, org_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -613,37 +618,10 @@ async def create_vrf(
     try:
         async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await registry_service.create_vrf(
-                session, ctx.org_id, ctx.user_id,
+                session, ctx.org_id, ctx.user_id, client_id=body.client_id,
                 name=body.name, rd=body.rd, description=body.description,
             )
             out = _vrf_out(row)
-    except IpamError as exc:
-        raise _http_error(exc) from None
-    return out
-
-
-@router.get("/sites", response_model=list[SiteOut])
-async def list_sites(
-    request: Request, ctx: AuthContext = Depends(require_permission("ipam.read"))
-) -> list[SiteOut]:
-    async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
-        return [_site_out(row) for row in await registry_service.list_sites(session, ctx.org_id)]
-
-
-@router.post("/sites", response_model=SiteOut, status_code=status.HTTP_201_CREATED)
-async def create_site(
-    body: SiteCreate,
-    request: Request,
-    ctx: AuthContext = Depends(require_permission("ipam.manage")),
-) -> SiteOut:
-    try:
-        async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
-            row = await registry_service.create_site(
-                session, ctx.org_id, ctx.user_id,
-                name=body.name, doc_record_id=body.doc_record_id,
-                description=body.description,
-            )
-            out = _site_out(row)
     except IpamError as exc:
         raise _http_error(exc) from None
     return out
@@ -670,7 +648,7 @@ async def create_vlan(
         async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await registry_service.create_vlan(
                 session, ctx.org_id, ctx.user_id,
-                vid=body.vid, site_id=body.site_id, name=body.name,
+                vid=body.vid, client_id=body.client_id, site_id=body.site_id, name=body.name,
                 description=body.description,
             )
             out = _vlan_out(row)
@@ -716,7 +694,8 @@ async def create_subnet(
         async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             row = await subnet_service.create_subnet(
                 session, ctx.org_id, ctx.user_id,
-                prefix=body.prefix, vrf_id=body.vrf_id, kind=body.kind,
+                prefix=body.prefix, vrf_id=body.vrf_id, client_id=body.client_id,
+                kind=body.kind,
                 name=body.name, description=body.description, site_id=body.site_id,
                 vlan_id=body.vlan_id, gateway=body.gateway,
                 dns_servers=body.dns_servers,
@@ -953,13 +932,13 @@ async def create_address(
             if body.reserve:
                 row = await address_service.reserve(
                     session, ctx.org_id, ctx.user_id,
-                    address=body.address, vrf_id=body.vrf_id,
+                    address=body.address, vrf_id=body.vrf_id, client_id=body.client_id,
                     hostname=body.hostname, description=body.description,
                 )
             else:
                 row = await address_service.assign(
                     session, ctx.org_id, ctx.user_id,
-                    address=body.address, vrf_id=body.vrf_id,
+                    address=body.address, vrf_id=body.vrf_id, client_id=body.client_id,
                     device_id=body.device_id, asset_label=body.asset_label,
                     hostname=body.hostname, description=body.description,
                     mac=body.mac, allocation_method=body.allocation_method,
@@ -1153,10 +1132,10 @@ async def create_scan_authorization(
     """
     try:
         async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
-            vrf_id = await _resolve_vrf(session, ctx.org_id, body.vrf_id)
             row = await scope_service.create_authorization(
-                session, ctx.org_id, actor_id=ctx.user_id, vrf_id=vrf_id,
-                prefix=body.prefix, note=body.note, expires_at=body.expires_at,
+                session, ctx.org_id, actor_id=ctx.user_id, vrf_id=body.vrf_id,
+                client_id=body.client_id, prefix=body.prefix, note=body.note,
+                expires_at=body.expires_at,
             )
             out = _scope_out(row)
     except IpamError as exc:
@@ -1228,6 +1207,7 @@ async def dispatch_sweep(
                 actor_id=ctx.user_id,
                 trigger="manual",
             )
+            await loaded_client(session, run)  # the run's later UPDATEs expired it
             out = _run_out(run)
     except IpamError as exc:
         raise _http_error(exc) from None
@@ -1412,7 +1392,11 @@ async def import_preview(
     try:
         async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             preview = await importer.preview_import(
-                session, ctx.org_id, content=content, mapping=parsed
+                # The internal client, whose id is the organisation's: the import
+                # names no client yet (plan 2026-10-26 Task 11 takes it from the
+                # request), and every row it found until 0240 was the internal
+                # client's.
+                session, ctx.org_id, client_id=ctx.org_id, content=content, mapping=parsed
             )
             out = ImportPreviewOut(
                 **{**vars(preview), "rows": [ImportRowOut(**vars(r)) for r in preview.rows]}
@@ -1437,8 +1421,9 @@ async def import_apply(
     try:
         async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             result = await importer.apply_import(
-                session, ctx.org_id, actor_id=ctx.user_id, content=content,
-                mapping=parsed, digest=digest,
+                # The internal client, as `import_preview` says.
+                session, ctx.org_id, actor_id=ctx.user_id, client_id=ctx.org_id,
+                content=content, mapping=parsed, digest=digest,
             )
             out = ImportResultOut(
                 **{**vars(result), "rows": [ImportRowOut(**vars(r)) for r in result.rows]}

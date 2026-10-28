@@ -192,7 +192,7 @@ describe("the subnet tree in Spanish", () => {
     expect(screen.getByPlaceholderText("Buscar por nombre o prefijo")).toBeInTheDocument();
     expect(screen.getByLabelText("Filtrar por VRF")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Todas las VRF" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Todos los sitios" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Todas las sedes" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Todas las VLAN" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "VLAN 90 Workstations" })).toBeInTheDocument();
     expect(screen.getByLabelText("Filtrar por dirección contenida")).toBeInTheDocument();
@@ -271,7 +271,7 @@ describe("the subnet tree in Spanish", () => {
     expect(await screen.findByRole("dialog", { name: "Registrar una subred" })).toBeInTheDocument();
     expect(screen.getByText(/No hay que elegir un padre/)).toBeInTheDocument();
     const dialog = screen.getByRole("dialog");
-    for (const label of ["Prefijo", "Nombre", "Tipo", "VRF", "Sitio", "VLAN", "Puerta de enlace"]) {
+    for (const label of ["Prefijo", "Nombre", "Tipo", "VRF", "Sede", "VLAN", "Puerta de enlace"]) {
       expect(within(dialog).getByLabelText(label)).toBeInTheDocument();
     }
     expect(within(dialog).getByRole("option", { name: "Asignable" })).toBeInTheDocument();
@@ -329,6 +329,7 @@ describe("the subnet tree in Spanish", () => {
 // ---------------------------------------------------------------- the readiness panel
 
 const subnetRow = (id: string, prefix: string): SubnetOut => ({
+  client_id: "o1",
   id,
   vrf_id: "v",
   prefix,
@@ -347,6 +348,7 @@ const subnetRow = (id: string, prefix: string): SubnetOut => ({
 });
 
 const scopeRow = (id: string, prefix: string, over: Partial<ScopeOut> = {}): ScopeOut => ({
+  client_id: "o1",
   id,
   vrf_id: "v",
   prefix,
@@ -444,7 +446,8 @@ describe("a subnet's detail in Spanish", () => {
     stub();
     renderDetail("subnet-1");
     expect(await screen.findByRole("heading", { name: "10.20.9.0/24" })).toBeInTheDocument();
-    expect(screen.getByText(/Workstations · Lisbon · VLAN 90 Workstations · puerta de enlace 10\.20\.9\.1/)).toBeInTheDocument();
+    // The site's name is the client's site list's, which waits for `/me` (the client).
+    expect(await screen.findByText(/Workstations · Lisbon · VLAN 90 Workstations · puerta de enlace 10\.20\.9\.1/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Todas las subredes/ })).toBeInTheDocument();
     for (const fact of ["Utilizables", "Registradas", "Vistas por barrido", "Deriva", "Puerta de enlace", "DNS", "Agente de barrido", "Escaneo autorizado", "Último barrido"]) {
       expect(screen.getAllByText(fact).length).toBeGreaterThan(0);
@@ -694,7 +697,7 @@ describe("editing and deleting a subnet in Spanish", () => {
     await user.click(await screen.findByRole("button", { name: "Editar" }));
     const dialog = await screen.findByRole("dialog", { name: "Editar la subred 10.20.9.0/24" });
     expect(within(dialog).getByText(/El prefijo, la VRF y el tipo son lo que define a la subred/)).toBeInTheDocument();
-    for (const label of ["Nombre", "Puerta de enlace", "Sitio", "VLAN", "Servidores DNS", "Descripción"]) {
+    for (const label of ["Nombre", "Puerta de enlace", "Sede", "VLAN", "Servidores DNS", "Descripción"]) {
       expect(within(dialog).getByLabelText(label)).toBeInTheDocument();
     }
     const gateway = within(dialog).getByPlaceholderText("10.4.7.1");
@@ -1184,38 +1187,44 @@ describe("the registry page in Spanish", () => {
     const api = stub();
     renderPage(<RegistryPage />, "/ipam/registry");
     expect(await screen.findByRole("heading", { name: "Catálogo" })).toBeInTheDocument();
-    expect(screen.getByText("VRF, sitios y VLAN: aquello por lo que se delimitan las subredes y las direcciones.")).toBeInTheDocument();
-    expect(screen.getByText("Cada subred lleva una; una registrada sin VRF cae en global.")).toBeInTheDocument();
-    expect(screen.getByText("Una VLAN sin sitio es de toda la organización, no una a la que le falta el sitio.")).toBeInTheDocument();
+    expect(screen.getByText("VRF, VLAN y las sedes del cliente: aquello por lo que se delimitan las subredes y las direcciones.")).toBeInTheDocument();
+    expect(screen.getByText("Cada subred lleva una; una registrada sin VRF cae en la global del cliente.")).toBeInTheDocument();
+    expect(screen.getByText("Una VLAN sin sede es de todo el cliente, no una a la que le falta la sede.")).toBeInTheDocument();
+    // The client's sites, read-only: IPAM no longer keeps or creates sites (MSP clients phase 2).
+    expect(screen.getByText("Las oficinas del cliente. Las VLAN y las subredes las nombran; se gestionan con el cliente.")).toBeInTheDocument();
+    expect((await screen.findAllByText("Lisbon")).length).toBeGreaterThan(0);
+    expect(api.listClientSites).toHaveBeenCalledWith("o1");
     expect(await screen.findByText("65000:20")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "RD" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Ámbito" })).toBeInTheDocument();
-    expect(screen.getAllByText("Toda la organización").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Sin registro de documentación vinculado").length).toBeGreaterThan(0);
-    for (const label of ["Route distinguisher", "Distinguidor de ruta", "Nombre del sitio", "VID", "Sitio"]) {
+    expect(screen.getAllByText("Todo el cliente").length).toBeGreaterThan(0);
+    for (const label of ["Route distinguisher", "Distinguidor de ruta", "VID", "Sede"]) {
       if (label === "Route distinguisher") continue;
       expect(screen.getAllByLabelText(label).length).toBeGreaterThan(0);
     }
-    expect(screen.getByRole("option", { name: "Toda la organización (sin sitio)" })).toBeInTheDocument();
-    for (const button of ["Añadir VRF", "Añadir sitio", "Añadir VLAN"]) {
+    expect(screen.getByRole("option", { name: "Todo el cliente (sin sede)" })).toBeInTheDocument();
+    for (const button of ["Añadir VRF", "Añadir VLAN"]) {
       expect(screen.getByRole("button", { name: button })).toBeInTheDocument();
     }
+    expect(screen.queryByRole("button", { name: "Añadir sitio" })).toBeNull();
     const user = userEvent.setup();
     await user.type(screen.getAllByLabelText("Nombre")[0]!, "lab2");
     await user.click(screen.getByRole("button", { name: "Añadir VRF" }));
     await waitFor(() => expect(api.createIpamVrf).toHaveBeenCalled());
+    // PHASE 3: the internal client, `/me`'s `org_id`, until the selector exists.
+    expect(api.createIpamVrf).toHaveBeenCalledWith(expect.objectContaining({ name: "lab2", client_id: "o1" }));
     // "build" is a recorded VRF / site name in the registry fixture.
     expectNoEnglish(body(), [...REGISTRY_RECORDED, "build"]);
   });
 
   it("shows no add form to a caller who may only read, and says what is empty", async () => {
     stub(
-      { listIpamVrfs: vi.fn().mockResolvedValue([]), listIpamSites: vi.fn().mockResolvedValue([]), listIpamVlans: vi.fn().mockResolvedValue([]) },
+      { listIpamVrfs: vi.fn().mockResolvedValue([]), listClientSites: vi.fn().mockResolvedValue([]), listIpamVlans: vi.fn().mockResolvedValue([]) },
       ["ipam.read"],
     );
     renderPage(<RegistryPage />, "/ipam/registry");
     expect(await screen.findByText("Todavía no hay VRF.")).toBeInTheDocument();
-    expect(screen.getByText("Todavía no hay sitios.")).toBeInTheDocument();
+    expect(await screen.findByText("Este cliente todavía no tiene sedes.")).toBeInTheDocument();
     expect(screen.getByText("Todavía no hay VLAN.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Añadir VRF" })).toBeNull();
     expectNoEnglish(body());
@@ -1701,7 +1710,7 @@ describe("the state helpers' sentences in Spanish", () => {
   it("agrees the counts of one: a single row, a single answer, a single usable address", () => {
     setActiveLanguage("es");
     const run = {
-      id: "r", subnet_id: "s", job_id: null, device_id: null, state: "succeeded", trigger: "manual", target_count: 1,
+      client_id: "o1", id: "r", subnet_id: "s", job_id: null, device_id: null, state: "succeeded", trigger: "manual", target_count: 1,
       scope_digest: "d", hosts_found: 1, truncated: false, started_at: at(5000), finished_at: at(3 * HOUR), error: "",
     } satisfies SweepRunOut;
     expect(describeSweepRun(run, NOW)).toBe("Correcto, hace 3 horas. 1 de 1 respondió.");
@@ -1725,6 +1734,7 @@ describe("the state helpers' sentences in Spanish", () => {
 
   it("sums up the most recent sweep run in one line", () => {
     const run = (over: Partial<SweepRunOut>): SweepRunOut => ({
+      client_id: "o1",
       id: "r",
       subnet_id: "s",
       job_id: null,

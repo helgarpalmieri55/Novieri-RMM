@@ -142,7 +142,9 @@ class SiteServerCreate(BaseModel):
     segments: list[str]
     roles: list[str] = ["wake"]
     name: str | None = None
-    ipam_site_id: UUID | None = None
+    #: One of the device's client's sites (`GET /clients/{id}/sites`): grouping
+    #: only. Until migration 0240 this was `ipam_site_id`, an IPAM site.
+    site_id: UUID | None = None
     notes: str = ""
 
 
@@ -154,7 +156,7 @@ class SiteServerUpdate(BaseModel):
     roles: list[str] | None = None
     notes: str | None = None
     enabled: bool | None = None
-    ipam_site_id: UUID | None = None
+    site_id: UUID | None = None
 
 
 class SiteWakeRequest(BaseModel):
@@ -169,12 +171,14 @@ class SiteWakeRequest(BaseModel):
 
 class SiteServerOut(BaseModel):
     id: UUID
+    #: The device's client: a site server serves its own client's segments.
+    client_id: UUID
     device_id: UUID
     name: str
     segments: list[str]
     roles: list[str]
     enabled: bool
     notes: str
-    ipam_site_id: UUID | None
+    site_id: UUID | None
     agent_status: str | None
     agent_last_seen_at: datetime | None

@@ -1,5 +1,10 @@
-"""VRF / site / VLAN registry (`docs/modules/ipam/spec.md` §2.1-§2.3, §0.7,
-§0.15, §11.3).
+"""VRF / VLAN registry (`docs/modules/ipam/spec.md` §2.1-§2.3, §0.7, §0.15,
+§11.3), and what became of IPAM sites.
+
+SINCE MIGRATION 0240 every row here is a client's, and IPAM sites are gone: a
+VLAN names one of its client's `sites` rows (spec §1.2). The seeds default to
+the internal client, whose id is the organisation's; per-client behaviour is
+`tests/test_client_scope_ipam.py`'s.
 
 WHAT THESE FIXTURES DELIBERATELY VARY, because that is where this repo's
 recurring defect lives:
@@ -26,16 +31,18 @@ recurring defect lives:
 """
 
 import asyncio
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy import text as sqltext
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
-from app.models import AuditEvent, IpamVlan, IpamVrf
+from app.models import AuditEvent, IpamSubnet, IpamVlan, IpamVrf
 from app.modules.ipam.errors import (
     IpamConflictError,
     IpamNotFoundError,
@@ -43,23 +50,19 @@ from app.modules.ipam.errors import (
 )
 from app.modules.ipam.registry import (
     DEFAULT_VRF_NAME,
-    create_site,
     create_vlan,
     create_vrf,
-    delete_site,
     delete_vlan,
     delete_vrf,
     ensure_default_vrf,
-    get_site,
     get_vlan,
     get_vrf,
-    list_sites,
     list_vlans,
     list_vrfs,
-    update_site,
     update_vlan,
     update_vrf,
 )
+from app.modules.ipam.subnets import create_subnet
 from tests.ipam_fixtures import IpamOrg, seed_org, seed_site, seed_subnet, seed_vrf
 
 
@@ -113,7 +116,7 @@ async def test_ensure_default_vrf_creates_the_global_row(admin_engine: AsyncEngi
     decoy = await seed_vrf(admin_engine, org.org_id, name="customer-a")
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        vrf_id = await ensure_default_vrf(session, org.org_id)
+        vrf_id = await ensure_default_vrf(session, org.org_id, org.org_id)
         await session.commit()
 
     assert vrf_id != decoy
@@ -129,10 +132,10 @@ async def test_ensure_default_vrf_is_idempotent(admin_engine: AsyncEngine) -> No
     """Second call returns the SAME id and creates no second row."""
     org = await seed_org(admin_engine, "vrfidem")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        first = await ensure_default_vrf(session, org.org_id)
+        first = await ensure_default_vrf(session, org.org_id, org.org_id)
         await session.commit()
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        second = await ensure_default_vrf(session, org.org_id)
+        second = await ensure_default_vrf(session, org.org_id, org.org_id)
         await session.commit()
     assert first == second
     assert await _count(admin_engine, IpamVrf, org.org_id) == 1
@@ -173,7 +176,7 @@ async def test_two_concurrent_first_writes_produce_one_global_vrf(
         async with AsyncSession(admin_engine, expire_on_commit=False) as session:
             await session.execute(sqltext("SELECT 1"))
             await barrier.wait()
-            vrf_id = await ensure_default_vrf(session, org.org_id)
+            vrf_id = await ensure_default_vrf(session, org.org_id, org.org_id)
             await session.commit()
             return vrf_id
 
@@ -190,7 +193,7 @@ async def test_ensure_default_vrf_works_inside_a_tenant_session(
     argument and not from anywhere else."""
     org = await seed_org(admin_engine, "vrfrls")
     async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
-        vrf_id = await ensure_default_vrf(session, org.org_id)
+        vrf_id = await ensure_default_vrf(session, org.org_id, org.org_id)
         await session.commit()
     assert await _count(admin_engine, IpamVrf, org.org_id) == 1
     assert vrf_id is not None
@@ -207,14 +210,17 @@ async def test_create_vrf_audits_and_refuses_a_duplicate_name(
     org = await seed_org(admin_engine, "vrfcrud")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         vrf = await create_vrf(
-            session, org.org_id, org.user_id, name="customer-a", rd="65000:1"
+            session, org.org_id, org.user_id, client_id=org.org_id, name="customer-a",
+            rd="65000:1",
         )
         await session.commit()
         assert vrf.rd == "65000:1"
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         with pytest.raises(IpamConflictError, match="already exists"):
-            await create_vrf(session, org.org_id, org.user_id, name="customer-a")
+            await create_vrf(
+                session, org.org_id, org.user_id, client_id=org.org_id, name="customer-a"
+            )
 
     assert await _audit_actions(admin_engine, org.org_id) == ["ipam.vrf_created"]
     assert (await _audit_metadata(admin_engine, org.org_id, "ipam.vrf_created"))["rd"] == (
@@ -271,31 +277,43 @@ async def test_deleting_an_unused_vrf_succeeds_and_audits(admin_engine: AsyncEng
 
 
 # ---------------------------------------------------------------------------
-# Site CRUD
+# Sites: `ipam_site` became the platform's `sites` (migration 0240)
 # ---------------------------------------------------------------------------
 
 
-async def test_create_site_refuses_a_duplicate_name_and_audits(
-    admin_engine: AsyncEngine,
-) -> None:
-    org = await seed_org(admin_engine, "sitecrud")
-    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        await create_site(session, org.org_id, org.user_id, name="Manila")
-        await session.commit()
-    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        with pytest.raises(IpamConflictError, match="already exists"):
-            await create_site(session, org.org_id, org.user_id, name="Manila")
-    assert await _audit_actions(admin_engine, org.org_id) == ["ipam.site_created"]
+async def test_a_sites_name_is_unique_and_its_creation_audited(api_env: Any) -> None:
+    """What `create_site` / `update_site` held for IPAM sites -- a duplicate
+    name refused, on creation and on rename, and one audit event per site --
+    now holds where a VLAN's and a subnet's site lives: the client's sites
+    (`/clients/{id}/sites`, phase 1), case-insensitively. IPAM no longer
+    creates sites at all (`POST /ipam/sites` is gone)."""
+    org = await api_env.create_org("sitecrud")
+    h = await api_env.headers(org, await api_env.create_user(org, "org-admin"))
+    sites = f"/api/v1/clients/{org}/sites"
+    manila = await api_env.client.post(sites, json={"name": "Manila"}, headers=h)
+    assert manila.status_code == 201, manila.text
+    again = await api_env.client.post(sites, json={"name": "manila"}, headers=h)
+    assert again.status_code == 409, again.text
+    cebu = await api_env.client.post(sites, json={"name": "Cebu"}, headers=h)
+    renamed = await api_env.client.patch(
+        f"/api/v1/sites/{cebu.json()['id']}", json={"name": "Manila"}, headers=h
+    )
+    assert renamed.status_code == 409, renamed.text
+    actions = await _audit_actions(api_env.admin_engine, org)
+    assert actions.count("client.site_created") == 2
+    assert "ipam.site_created" not in actions
 
 
 async def test_a_doc_record_from_another_org_is_refused(admin_engine: AsyncEngine) -> None:
-    """§2.2's optional link, validated IN THIS ORG.
+    """The optional documentation link, validated IN THIS ORG -- on a subnet,
+    the IPAM row that keeps one now that IPAM sites are gone (a `sites` row's
+    link is not written through IPAM).
 
     The foreign key is org-blind, so without this check the database happily
-    joins one tenant's site to another tenant's document -- and RLS does not
+    joins one tenant's subnet to another tenant's document -- and RLS does not
     save it either, because referential-integrity checks run as the referenced
-    table's owner. IF THE GUARD WERE DELETED this test creates the site and the
-    stored `doc_record_id` points across the tenant boundary.
+    table's owner. IF THE GUARD WERE DELETED this test creates the subnet and
+    the stored `doc_record_id` points across the tenant boundary.
     """
     from app.models import DocRecord
 
@@ -311,42 +329,34 @@ async def test_a_doc_record_from_another_org_is_refused(admin_engine: AsyncEngin
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         with pytest.raises(IpamValidationError, match="not found"):
-            await create_site(
-                session, a.org_id, a.user_id, name="Manila", doc_record_id=foreign_record_id
+            await create_subnet(
+                session, a.org_id, a.user_id, prefix="10.44.0.0/24", client_id=a.org_id,
+                doc_record_id=foreign_record_id,
             )
-    assert await list_sites_count(admin_engine, a.org_id) == 0
+    assert await _count(admin_engine, IpamSubnet, a.org_id) == 0
 
 
-async def list_sites_count(engine: AsyncEngine, org_id: UUID) -> int:
-    async with AsyncSession(engine) as session:
-        return len(await list_sites(session, org_id))
-
-
-async def test_deleting_a_site_a_vlan_still_uses_is_refused(admin_engine: AsyncEngine) -> None:
-    """A site is referenced from TWO tables (§2.3, §2.4). A refusal that only
-    looks at `ipam_subnet` deletes a site out from under its VLANs and leaves
-    them org-wide -- which silently moves them into the OTHER partial unique
-    index, where they can then collide."""
+async def test_a_site_a_vlan_still_uses_cannot_be_deleted(admin_engine: AsyncEngine) -> None:
+    """A site is referenced from THREE tables now (VLANs, subnets, site
+    servers). `delete_site` refused while a VLAN named it; a `sites` row is
+    never deleted through any route (it is archived, and keeps its rows), and
+    a raw DELETE is refused by the foreign key -- the VLAN cannot silently
+    become site-less, which would move it into the OTHER partial unique
+    index, where it could collide."""
     org = await seed_org(admin_engine, "sitedel")
     site_id = await seed_site(admin_engine, org.org_id)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         await create_vlan(session, org.org_id, org.user_id, vid=10, site_id=site_id)
         await session.commit()
 
-    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        with pytest.raises(IpamConflictError, match="1 VLAN"):
-            await delete_site(session, org.org_id, org.user_id, site_id)
-
-
-async def test_updating_a_site_name_to_an_existing_one_is_refused(
-    admin_engine: AsyncEngine,
-) -> None:
-    org = await seed_org(admin_engine, "siteupd")
-    await seed_site(admin_engine, org.org_id, name="Manila")
-    second = await seed_site(admin_engine, org.org_id, name="Cebu")
-    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        with pytest.raises(IpamConflictError, match="already exists"):
-            await update_site(session, org.org_id, org.user_id, second, {"name": "Manila"})
+    with pytest.raises(DBAPIError, match="ipam_vlan"):
+        async with AsyncSession(admin_engine) as session:
+            await session.execute(sqltext("DELETE FROM sites WHERE id = :s"), {"s": site_id})
+            await session.commit()
+    async with AsyncSession(admin_engine) as session:
+        assert (
+            await session.execute(select(IpamVlan.site_id).where(IpamVlan.org_id == org.org_id))
+        ).scalar_one() == site_id
 
 
 # ---------------------------------------------------------------------------
@@ -354,44 +364,52 @@ async def test_updating_a_site_name_to_an_existing_one_is_refused(
 # ---------------------------------------------------------------------------
 
 
-async def test_a_second_org_wide_vlan_10_is_refused_by_the_service(
+async def test_a_second_site_less_vlan_10_is_refused_by_the_service(
     admin_engine: AsyncEngine,
 ) -> None:
-    """S2 through the SERVICE, not by raw insert.
+    """S2 through the SERVICE, not by raw insert. A site-less VLAN is unique
+    per CLIENT since migration 0240 (`uq_ipam_vlan_client_vid`).
 
     A partial unique index can be present and still be inferred wrongly. IF THE
     INFERENCE WERE WRONG here -- `index_elements=["org_id","site_id","vid"]` for
-    the org-wide case, or `ON CONFLICT ON CONSTRAINT` -- Postgres raises
+    the site-less case, or `ON CONFLICT ON CONSTRAINT` -- Postgres raises
     `InvalidObjectDefinition`/`InvalidColumnReference` at runtime instead of
     raising `IpamConflictError`, and only a test that executes the statement can
     tell the difference.
     """
     org = await seed_org(admin_engine, "vlanglob")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        await create_vlan(session, org.org_id, org.user_id, vid=10, name="voice")
+        await create_vlan(
+            session, org.org_id, org.user_id, vid=10, client_id=org.org_id, name="voice"
+        )
         await session.commit()
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        with pytest.raises(IpamConflictError, match="VLAN 10 already exists org-wide"):
-            await create_vlan(session, org.org_id, org.user_id, vid=10, name="voice-again")
+        with pytest.raises(
+            IpamConflictError, match="VLAN 10 already exists without a site in this client"
+        ):
+            await create_vlan(
+                session, org.org_id, org.user_id, vid=10, client_id=org.org_id,
+                name="voice-again",
+            )
 
     assert await _count(admin_engine, IpamVlan, org.org_id) == 1
 
 
-async def test_vlan_10_at_two_sites_and_once_org_wide_all_coexist(
+async def test_vlan_10_at_two_sites_and_once_site_less_all_coexist(
     admin_engine: AsyncEngine,
 ) -> None:
-    """THE OTHER HALF, and the one a single org-wide unique index fails. VLAN 10
-    legitimately exists at every site, once each, AND once org-wide -- the two
-    partial indexes are total between them and neither is a superset of the
-    other."""
+    """THE OTHER HALF, and the one a single client-wide unique index fails. VLAN
+    10 legitimately exists at every site, once each, AND once without a site --
+    the two partial indexes are total between them and neither is a superset of
+    the other."""
     org = await seed_org(admin_engine, "vlansites")
     manila = await seed_site(admin_engine, org.org_id, name="Manila")
     cebu = await seed_site(admin_engine, org.org_id, name="Cebu")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         await create_vlan(session, org.org_id, org.user_id, vid=10, site_id=manila)
         await create_vlan(session, org.org_id, org.user_id, vid=10, site_id=cebu)
-        await create_vlan(session, org.org_id, org.user_id, vid=10)
+        await create_vlan(session, org.org_id, org.user_id, vid=10, client_id=org.org_id)
         await session.commit()
     assert await _count(admin_engine, IpamVlan, org.org_id) == 3
 
@@ -409,7 +427,7 @@ async def test_vlan_10_twice_at_one_site_is_refused_by_the_service(
             await create_vlan(session, org.org_id, org.user_id, vid=10, site_id=site_id)
 
 
-async def test_moving_a_vlan_org_wide_onto_an_existing_one_is_refused(
+async def test_moving_a_vlan_site_less_onto_an_existing_one_is_refused(
     admin_engine: AsyncEngine,
 ) -> None:
     """The update path crosses BETWEEN the two partial indexes, which is where a
@@ -418,13 +436,13 @@ async def test_moving_a_vlan_org_wide_onto_an_existing_one_is_refused(
     org = await seed_org(admin_engine, "vlanmove")
     site_id = await seed_site(admin_engine, org.org_id)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        await create_vlan(session, org.org_id, org.user_id, vid=10)
+        await create_vlan(session, org.org_id, org.user_id, vid=10, client_id=org.org_id)
         sited = await create_vlan(session, org.org_id, org.user_id, vid=10, site_id=site_id)
         await session.commit()
         sited_id = sited.id
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        with pytest.raises(IpamConflictError, match="org-wide"):
+        with pytest.raises(IpamConflictError, match="without a site"):
             await update_vlan(session, org.org_id, org.user_id, sited_id, {"site_id": None})
 
 
@@ -459,7 +477,7 @@ async def test_deleting_a_vlan_a_subnet_still_uses_is_refused(
     org = await seed_org(admin_engine, "vlandel")
     vrf_id = await seed_vrf(admin_engine, org.org_id)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        vlan = await create_vlan(session, org.org_id, org.user_id, vid=10)
+        vlan = await create_vlan(session, org.org_id, org.user_id, vid=10, client_id=org.org_id)
         await session.commit()
         vlan_id = vlan.id
     await seed_subnet(
@@ -470,26 +488,25 @@ async def test_deleting_a_vlan_a_subnet_still_uses_is_refused(
             await delete_vlan(session, org.org_id, org.user_id, vlan_id)
 
 
-async def test_vlan_and_site_writes_audit_every_action(admin_engine: AsyncEngine) -> None:
-    """§11.3's `ipam.vlan_*` / `ipam.site_*` rows, asserted as an exact ordered
-    sequence rather than as membership -- an action that fires TWICE is as much
-    a defect as one that never fires."""
+async def test_vlan_writes_audit_every_action(admin_engine: AsyncEngine) -> None:
+    """§11.3's `ipam.vlan_*` rows, asserted as an exact ordered sequence rather
+    than as membership -- an action that fires TWICE is as much a defect as
+    one that never fires. (`ipam.site_*` is written no more: IPAM sites are
+    gone, and the console's audit vocabulary keeps their phrases for the old
+    events the chain still holds.)"""
     org = await seed_org(admin_engine, "audits")
+    site_id = await seed_site(admin_engine, org.org_id, name="Manila")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        site = await create_site(session, org.org_id, org.user_id, name="Manila")
-        vlan = await create_vlan(session, org.org_id, org.user_id, vid=10, site_id=site.id)
+        vlan = await create_vlan(session, org.org_id, org.user_id, vid=10, site_id=site_id)
         await update_vlan(session, org.org_id, org.user_id, vlan.id, {"name": "voice"})
+        await update_vlan(session, org.org_id, org.user_id, vlan.id, {"site_id": None})
         await delete_vlan(session, org.org_id, org.user_id, vlan.id)
-        await update_site(session, org.org_id, org.user_id, site.id, {"name": "Cebu"})
-        await delete_site(session, org.org_id, org.user_id, site.id)
         await session.commit()
     assert await _audit_actions(admin_engine, org.org_id) == [
-        "ipam.site_created",
         "ipam.vlan_created",
         "ipam.vlan_updated",
+        "ipam.vlan_updated",
         "ipam.vlan_deleted",
-        "ipam.site_updated",
-        "ipam.site_deleted",
     ]
 
 
@@ -521,14 +538,23 @@ async def test_get_vrf_from_another_org_is_not_found_on_the_admin_engine(
             await get_vrf(session, a.org_id, foreign)
 
 
-async def test_get_site_from_another_org_is_not_found_on_the_admin_engine(
+async def test_a_site_from_another_org_is_not_found_on_the_admin_engine(
     admin_engine: AsyncEngine,
 ) -> None:
+    """The site a subnet names is looked up within the organisation
+    (`client_sites.site_for_new_rows`: the site's `org_id`, and its client's).
+    Without both predicates org B's site is found, and the subnet is refused
+    as naming ANOTHER CLIENT's site -- a 422 that would confirm the id exists
+    -- instead of not finding it. (Either predicate alone keeps it out; the
+    pair is phase 1's, and pinned there.)"""
     a, b = await _two_orgs(admin_engine, "pin-site")
-    foreign = await seed_site(admin_engine, b.org_id)
+    foreign = await seed_site(admin_engine, b.org_id, client_id=b.org_id)
     async with AsyncSession(admin_engine) as session:
         with pytest.raises(IpamNotFoundError):
-            await get_site(session, a.org_id, foreign)
+            await create_subnet(
+                session, a.org_id, a.user_id, prefix="10.45.0.0/24", client_id=a.org_id,
+                site_id=foreign,
+            )
 
 
 async def test_get_vlan_from_another_org_is_not_found_on_the_admin_engine(
@@ -536,7 +562,7 @@ async def test_get_vlan_from_another_org_is_not_found_on_the_admin_engine(
 ) -> None:
     a, b = await _two_orgs(admin_engine, "pin-vlan")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        foreign = await create_vlan(session, b.org_id, b.user_id, vid=10)
+        foreign = await create_vlan(session, b.org_id, b.user_id, vid=10, client_id=b.org_id)
         await session.commit()
         foreign_id = foreign.id
     async with AsyncSession(admin_engine) as session:
@@ -553,15 +579,13 @@ async def test_the_list_queries_are_org_scoped_on_the_admin_engine(
     correct one."""
     a, b = await _two_orgs(admin_engine, "pin-list")
     await seed_vrf(admin_engine, b.org_id, name="theirs")
-    await seed_site(admin_engine, b.org_id, name="Their office")
     mine = await seed_vrf(admin_engine, a.org_id, name="mine")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        await create_vlan(session, b.org_id, b.user_id, vid=99)
+        await create_vlan(session, b.org_id, b.user_id, vid=99, client_id=b.org_id)
         await session.commit()
 
     async with AsyncSession(admin_engine) as session:
         assert [v.id for v in await list_vrfs(session, a.org_id)] == [mine]
-        assert await list_sites(session, a.org_id) == []
         assert await list_vlans(session, a.org_id) == []
 
 

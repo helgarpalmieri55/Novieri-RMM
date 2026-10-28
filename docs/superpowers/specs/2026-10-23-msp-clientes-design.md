@@ -759,8 +759,9 @@ en el mismo PR, con el motivo.
 | `health_profile_assignment` | O | Equipo o grupo |
 | `health_alert`, `device_health_check_state`, `health_flap_state`, `device_health_policy_ack` | H | `devices` |
 | `health_alert_action` | H | `health_alert` |
-| `ipam_site` | C (pendiente, fase 2) | Se elimina al fusionarse en `sites` (§1.2) |
-| `ipam_vrf`, `ipam_vlan`, `ipam_subnet` | C | La sede de una VLAN o subred es opcional (`ipam/models.py:173,234`); si existe, tiene que ser del mismo cliente |
+| `ipam_site` | — | Eliminada al fusionarse en `sites` (§1.2): la migración 0240 la borra sin copiar filas |
+| `ipam_vrf`, `ipam_vlan` | C | La sede de una VLAN es opcional; si existe, es del mismo cliente (`(site_id, client_id) → sites`), y el cliente de la VLAN es el de la sede |
+| `ipam_subnet` | H | `ipam_vrf`: su `vrf_id` es obligatorio, así que la subred es del cliente de su VRF (enmienda de la fase 2, Task 10). Su sede y su VLAN, opcionales, son de ese cliente |
 | `ipam_range`, `ipam_sweep_run` | H | `ipam_subnet` |
 | `ipam_scan_authorization`, `ipam_address`, `ipam_observation`, `ipam_drift` | H | `ipam_vrf`: su `vrf_id` es obligatorio; el `subnet_id`, donde existe, es opcional |
 | `vendor`, `software_product` | G | Catálogos compartidos |

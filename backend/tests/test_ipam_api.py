@@ -69,8 +69,6 @@ NOW = datetime.now(UTC)
 EXPECTED_ROUTES: dict[tuple[str, str], str] = {
     ("GET", f"{IPAM}/vrfs"): "ipam.read",
     ("POST", f"{IPAM}/vrfs"): "ipam.manage",
-    ("GET", f"{IPAM}/sites"): "ipam.read",
-    ("POST", f"{IPAM}/sites"): "ipam.manage",
     ("GET", f"{IPAM}/vlans"): "ipam.read",
     ("POST", f"{IPAM}/vlans"): "ipam.manage",
     ("GET", f"{IPAM}/subnets"): "ipam.read",
@@ -110,8 +108,10 @@ EXPECTED_ROUTES: dict[tuple[str, str], str] = {
 }
 
 #: PINNED. A `>=` assertion hides a missing route; this number changes only when
-#: §9's table does, which makes adding a route a deliberate edit here too.
-EXPECTED_ROUTE_COUNT = 40
+#: §9's table does, which makes adding a route a deliberate edit here too. 38
+#: since plan 2026-10-26 Task 10 removed `GET/POST /ipam/sites`: a VLAN's or a
+#: subnet's site is one of its client's `sites` (`/clients/{id}/sites`).
+EXPECTED_ROUTE_COUNT = 38
 
 
 # --------------------------------------------------------------------------- #
@@ -318,18 +318,24 @@ async def test_a_technician_can_sweep_an_authorized_scope_but_not_authorize_one(
     assert body["device_id"] == str(env.device_id)
     assert body["job_id"] is not None
     assert body["target_count"] == 256
+    # The run's client is its subnet's -- read back after the dispatch's own
+    # UPDATEs (job id, state) expired the trigger-written value.
+    assert body["client_id"] == str(env.org_id)
 
+    # The same complete body both times: the technician's refusal is the
+    # permission's, not a shape the admin's request would also fail.
+    body = {"prefix": "10.99.0.0/24", "client_id": str(env.org_id)}
     refused = await api_env.client.post(
         f"{IPAM}/scan-authorizations",
         headers=env.technician,
-        json={"prefix": "10.99.0.0/24", "note": "self-service"},
+        json={**body, "note": "self-service"},
     )
     assert refused.status_code == 403, refused.text
 
     allowed = await api_env.client.post(
         f"{IPAM}/scan-authorizations",
         headers=env.admin,
-        json={"prefix": "10.99.0.0/24", "note": "approved by change board"},
+        json={**body, "note": "approved by change board"},
     )
     assert allowed.status_code == 201, allowed.text
 
@@ -470,7 +476,11 @@ async def test_address_history_is_reachable_with_ipam_read_and_without_audit_rea
     created = await api_env.client.post(
         f"{IPAM}/addresses",
         headers=env.admin,
-        json={"address": "10.70.0.42", "asset_label": "core-switch"},
+        json={
+            "address": "10.70.0.42",
+            "asset_label": "core-switch",
+            "client_id": str(env.org_id),
+        },
     )
     assert created.status_code == 201, created.text
     address_id = created.json()["id"]
@@ -511,6 +521,7 @@ async def test_address_history_response_carries_the_detail_11_3_records(
             "address": "10.70.0.43",
             "device_id": str(env.device_id),
             "allocation_method": "dhcp",
+            "client_id": str(env.org_id),
         },
     )
     assert created.status_code == 201, created.text
@@ -648,7 +659,11 @@ async def test_another_orgs_address_and_scope_ids_are_404(api_env) -> None:
     created = await api_env.client.post(
         f"{IPAM}/addresses",
         headers=victim.admin,
-        json={"address": "10.70.0.42", "asset_label": "core-switch"},
+        json={
+            "address": "10.70.0.42",
+            "asset_label": "core-switch",
+            "client_id": str(victim.org_id),
+        },
     )
     assert created.status_code == 201
     address_id = created.json()["id"]
@@ -750,14 +765,14 @@ async def test_assignment_inside_a_dhcp_pool_is_409(api_env) -> None:
     inside = await api_env.client.post(
         f"{IPAM}/addresses",
         headers=env.admin,
-        json={"address": "10.70.0.150", "asset_label": "printer"},
+        json={"address": "10.70.0.150", "asset_label": "printer", "client_id": str(env.org_id)},
     )
     assert inside.status_code == 409, inside.text
 
     outside = await api_env.client.post(
         f"{IPAM}/addresses",
         headers=env.admin,
-        json={"address": "10.70.0.99", "asset_label": "printer"},
+        json={"address": "10.70.0.99", "asset_label": "printer", "client_id": str(env.org_id)},
     )
     assert outside.status_code == 201, outside.text
 
@@ -820,8 +835,10 @@ async def test_the_registry_and_grid_round_trip(api_env) -> None:
     exercised rather than merely defined -- a `response_model` that cannot build
     is a 500 on a route every other test only ever sends a 403 to."""
     env = await _seed(api_env)
+    # A VLAN's site is one of its client's `sites` (plan 2026-10-26 Task 10):
+    # here a new site of the internal client, whose id is the organisation's.
     site = await api_env.client.post(
-        f"{IPAM}/sites", headers=env.admin, json={"name": "Manila"}
+        f"/api/v1/clients/{env.org_id}/sites", headers=env.admin, json={"name": "Manila"}
     )
     assert site.status_code == 201, site.text
     vlan = await api_env.client.post(

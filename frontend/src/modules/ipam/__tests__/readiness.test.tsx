@@ -18,6 +18,7 @@ const ALL = ["ipam.read", "devices.read", "site.read", "notification.read"];
 
 function subnet(overrides: Partial<SubnetOut> = {}): SubnetOut {
   return {
+    client_id: "o1",
     id: "s1",
     vrf_id: "v1",
     prefix: "10.4.7.0/24",
@@ -39,6 +40,7 @@ function subnet(overrides: Partial<SubnetOut> = {}): SubnetOut {
 
 function scope(overrides: Partial<ScopeOut> = {}): ScopeOut {
   return {
+    client_id: "o1",
     id: "sc1",
     vrf_id: "v1",
     prefix: "10.4.7.0/24",
@@ -60,7 +62,8 @@ function server(segments: string[], enabled = true) {
     roles: [],
     enabled,
     notes: "",
-    ipam_site_id: null,
+    client_id: "o1",
+    site_id: null,
     agent_status: "online",
     agent_last_seen_at: null,
   };

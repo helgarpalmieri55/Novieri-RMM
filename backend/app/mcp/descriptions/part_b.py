@@ -479,11 +479,12 @@ PART_B: dict[str, str] = {
     # --- site-servers ---
     "GET /api/v1/site-servers": (
         "Lists site servers, devices declared to serve network segments, filterable by "
-        "enabled state, IPAM site and a segment they contain."
+        "enabled state, site and a segment they contain."
     ),
     "POST /api/v1/site-servers": (
-        "Promotes an enrolled device to site server for given network segments and roles. "
-        "It then acts as the originator for wake and push-install jobs there."
+        "Promotes an enrolled device to site server for given network segments and roles, "
+        "optionally filed under one of its client's sites. It then originates wake and "
+        "push-install jobs there."
     ),
     "DELETE /api/v1/site-servers/{site_server_id}": (
         "Demotes a site server so it is no longer used as an originator for its segments. "
@@ -493,8 +494,8 @@ PART_B: dict[str, str] = {
         "Returns one site server with its device, segments, roles and state."
     ),
     "PATCH /api/v1/site-servers/{site_server_id}": (
-        "Changes a site server's segments, roles, name, notes or enabled flag. Changing "
-        "segments changes where it originates wake and push jobs."
+        "Changes a site server's segments, roles, name, notes, site or enabled flag. "
+        "Changing segments changes where it originates wake and push jobs."
     ),
     "GET /api/v1/site-servers/{site_server_id}/segment-check": (
         "Compares a site server's declared segments with those observed by IPAM, listing "

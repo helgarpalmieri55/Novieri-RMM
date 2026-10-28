@@ -109,7 +109,7 @@ async def test_preview_writes_nothing_for_a_file_that_would_write_three_rows(
 
     async with AsyncSession(admin_engine) as session:
         preview = await preview_import(
-            session, org.org_id, content=GOOD_CSV, mapping=MAPPING
+            session, org.org_id, client_id=org.org_id, content=GOOD_CSV, mapping=MAPPING
         )
         await session.commit()
 
@@ -131,7 +131,7 @@ async def test_apply_writes_exactly_what_preview_predicted(
     org, _, _ = await _fx(admin_engine, "apply")
     async with AsyncSession(admin_engine) as session:
         result = await apply_import(
-            session, org.org_id, actor_id=org.user_id, content=GOOD_CSV,
+            session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=GOOD_CSV,
             mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING),
         )
         await session.commit()
@@ -165,7 +165,7 @@ async def test_apply_refuses_a_file_that_is_not_the_one_previewed(
     async with AsyncSession(admin_engine) as session:
         try:
             await apply_import(
-                session, org.org_id, actor_id=org.user_id, content=other,
+                session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=other,
                 mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING),
             )
         except IpamValidationError:
@@ -203,7 +203,7 @@ async def test_apply_refuses_the_previewed_file_under_a_different_mapping(
 
     async with AsyncSession(admin_engine) as session:
         preview = await preview_import(
-            session, org.org_id, content=GOOD_CSV, mapping=previewed
+            session, org.org_id, client_id=org.org_id, content=GOOD_CSV, mapping=previewed
         )
         await session.commit()
     assert [row.action for row in preview.rows] == ["create"] * 3
@@ -212,7 +212,7 @@ async def test_apply_refuses_the_previewed_file_under_a_different_mapping(
     async with AsyncSession(admin_engine) as session:
         try:
             await apply_import(
-                session, org.org_id, actor_id=org.user_id, content=GOOD_CSV,
+                session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=GOOD_CSV,
                 mapping=remapped, digest=preview.digest,
             )
         except IpamValidationError as exc:
@@ -278,7 +278,7 @@ async def test_an_apply_that_never_previewed_is_accepted_and_that_is_documented(
     org, _, _ = await _fx(admin_engine, "nopreview")
     async with AsyncSession(admin_engine) as session:
         result = await apply_import(
-            session, org.org_id, actor_id=org.user_id, content=GOOD_CSV,
+            session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=GOOD_CSV,
             mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING),
         )
         await session.commit()
@@ -314,7 +314,7 @@ async def test_every_file_row_comes_back_with_a_verdict(
 
     async with AsyncSession(admin_engine) as session:
         preview = await preview_import(
-            session, org.org_id, content=csv_bytes, mapping=MAPPING
+            session, org.org_id, client_id=org.org_id, content=csv_bytes, mapping=MAPPING
         )
         await session.commit()
 
@@ -343,7 +343,7 @@ async def test_apply_skips_the_bad_rows_but_still_reports_them(
     )
     async with AsyncSession(admin_engine) as session:
         result = await apply_import(
-            session, org.org_id, actor_id=org.user_id, content=csv_bytes,
+            session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=csv_bytes,
             mapping=MAPPING, digest=preview_digest(csv_bytes, MAPPING),
         )
         await session.commit()
@@ -375,7 +375,7 @@ async def test_apply_is_one_transaction_and_a_late_failure_writes_nothing(
     async with AsyncSession(admin_engine) as session:
         with pytest.raises(IpamValidationError):
             await apply_import(
-                session, org.org_id, actor_id=org.user_id, content=csv_bytes,
+                session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=csv_bytes,
                 mapping=MAPPING, digest=preview_digest(csv_bytes, MAPPING),
             )
         await session.rollback()
@@ -403,7 +403,7 @@ async def test_an_import_never_creates_a_scan_authorization(
     org, _, _ = await _fx(admin_engine, "noauth")
     async with AsyncSession(admin_engine) as session:
         result = await apply_import(
-            session, org.org_id, actor_id=org.user_id, content=GOOD_CSV,
+            session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=GOOD_CSV,
             mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING),
         )
         await session.commit()
@@ -435,7 +435,7 @@ async def test_an_import_never_enables_a_sweep(admin_engine: AsyncEngine) -> Non
     org, _, subnet_id = await _fx(admin_engine, "nosweep")
     async with AsyncSession(admin_engine) as session:
         await apply_import(
-            session, org.org_id, actor_id=org.user_id, content=GOOD_CSV,
+            session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=GOOD_CSV,
             mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING),
         )
         await session.commit()
@@ -457,7 +457,7 @@ async def test_apply_is_audited_with_the_counts_and_the_file_digest(
     org, _, _ = await _fx(admin_engine, "auditimp")
     async with AsyncSession(admin_engine) as session:
         await apply_import(
-            session, org.org_id, actor_id=org.user_id, content=GOOD_CSV,
+            session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=GOOD_CSV,
             mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING),
         )
         await session.commit()
@@ -491,7 +491,7 @@ async def test_a_conflicting_row_is_reported_and_not_applied(
     org, vrf_id, _ = await _fx(admin_engine, "conflict")
     async with AsyncSession(admin_engine) as session:
         await apply_import(
-            session, org.org_id, actor_id=org.user_id, content=GOOD_CSV,
+            session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=GOOD_CSV,
             mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING),
         )
         await session.commit()
@@ -503,7 +503,7 @@ async def test_a_conflicting_row_is_reported_and_not_applied(
     )
     async with AsyncSession(admin_engine) as session:
         preview = await preview_import(
-            session, org.org_id, content=second, mapping=MAPPING
+            session, org.org_id, client_id=org.org_id, content=second, mapping=MAPPING
         )
         await session.commit()
     assert [row.action for row in preview.rows] == ["update", "conflict"]
@@ -511,7 +511,7 @@ async def test_a_conflicting_row_is_reported_and_not_applied(
 
     async with AsyncSession(admin_engine) as session:
         result = await apply_import(
-            session, org.org_id, actor_id=org.user_id, content=second,
+            session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=second,
             mapping=MAPPING, digest=preview_digest(second, MAPPING),
         )
         await session.commit()
@@ -538,7 +538,7 @@ async def test_the_mapping_is_validated_before_anything_is_parsed(
         ):
             with pytest.raises(IpamValidationError):
                 await preview_import(
-                    session, org.org_id, content=GOOD_CSV, mapping=bad
+                    session, org.org_id, client_id=org.org_id, content=GOOD_CSV, mapping=bad
                 )
     assert "state" not in IMPORT_FIELDS
 

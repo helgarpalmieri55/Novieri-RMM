@@ -40,6 +40,7 @@ function stubApi(overrides: Partial<ApiClient>, permissions: string[]): ApiClien
 
 function subnet(overrides: Partial<SubnetOut> = {}): SubnetOut {
   return {
+    client_id: "o1",
     id: "s1",
     vrf_id: "v1",
     prefix: "10.4.7.0/24",
@@ -97,6 +98,7 @@ describe("authorising a registered subnet", () => {
   it("still authorizes an arbitrary prefix that is not a registered subnet", async () => {
     const user = userEvent.setup();
     const create = vi.fn<ApiClient["createIpamScanAuthorization"]>().mockResolvedValue({
+      client_id: "o1",
       id: "sc9",
       vrf_id: "v1",
       prefix: "192.168.9.0/24",

@@ -1291,8 +1291,8 @@ CATALOG: dict[str, str] = {
     "already assigned to device {device_id}": "ya está asignada al dispositivo {device_id}",
     "already assigned to {asset_label}": "ya está asignada a {asset_label}",
     "no cidr field": "no hay campo cidr",
-    "no VLAN with vid {raw_vlan} in this org; vlan_id left null": (
-        "no hay ninguna VLAN con vid {raw_vlan} en esta organización; vlan_id se deja en null"
+    "no VLAN with vid {raw_vlan} in this client; vlan_id left null": (
+        "no hay ninguna VLAN con vid {raw_vlan} en este cliente; vlan_id se deja en null"
     ),
     "gateway {raw_gateway} is not inside {prefix}; left null": (
         "la puerta de enlace {raw_gateway} no está dentro de {prefix}; se deja en null"
@@ -1398,7 +1398,6 @@ CATALOG: dict[str, str] = {
         "no es candidata: no hay ninguna observación actual de esta dirección"
     ),
     "VRF": "VRF",
-    "site": "sitio",
     "VLAN": "VLAN",
     "{field} must be a non-empty string": "{field} debe ser una cadena no vacía",
     "{field} must be at most {maximum} characters": (
@@ -1410,22 +1409,31 @@ CATALOG: dict[str, str] = {
     ),
     "VRF {vrf_id} not found": "no se encontró la VRF {vrf_id}",
     "could not create the default VRF": "no se pudo crear la VRF predeterminada",
-    "a VRF named {name} already exists in this org": (
-        "ya existe en esta organización una VRF llamada {name}"
+    "a VRF named {name} already exists in this client": (
+        "ya existe en este cliente una VRF llamada {name}"
     ),
     "site {site_id} not found": "no se encontró el sitio {site_id}",
-    "a site named {name} already exists in this org": (
-        "ya existe en esta organización un sitio llamado {name}"
-    ),
     "VLAN {vlan_id} not found": "no se encontró la VLAN {vlan_id}",
     "vid must be an integer; got {vid}": "vid debe ser un entero; se recibió {vid}",
     "vid must be between 1 and 4094; got {vid}": "vid debe estar entre 1 y 4094; se recibió {vid}",
     "at site {site_id}": "en el sitio {site_id}",
-    "org-wide": "en toda la organización",
+    "without a site in this client": "sin sede en este cliente",
     "VLAN {vid} already exists {scope}": "la VLAN {vid} ya existe {scope}",
-    "a {noun} named {name} already exists in this org": (
-        "ya existe en esta organización un registro de {noun} llamado {name}"
+    "a {noun} named {name} already exists in this client": (
+        "ya existe en este cliente un registro de {noun} llamado {name}"
     ),
+    # IPAM per client (plan 2026-10-26 Task 10).
+    "name the client: a row with no VRF or site takes the one the request names": (
+        "indica el cliente: un registro sin VRF ni sede pertenece al que nombra la petición"
+    ),
+    "client_id {claimed} contradicts the client of the VRF or site named": (
+        "client_id {claimed} contradice el cliente de la VRF o la sede indicadas"
+    ),
+    "IPAM records cannot be filed under Unassigned": (
+        "los registros de IPAM no pueden pertenecer a «Sin asignar»"
+    ),
+    "site {site_id} belongs to another client": "la sede {site_id} es de otro cliente",
+    "VLAN {vlan_id} belongs to another client": "la VLAN {vlan_id} es de otro cliente",
     "{count} subnet": "{count} subred",
     "{count} subnets": "{count} subredes",
     "{count} VLAN": "{count} VLAN",

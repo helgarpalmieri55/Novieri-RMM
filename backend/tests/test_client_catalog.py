@@ -483,7 +483,7 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
 
     # Not vacuous: the set is what the catalog says it must be. Every table
     # whose client_id the application writes -- C but `sites`, every O, and
-    # the grants -- plus the three tables that name a site.
+    # the grants -- plus the six tables that name a site.
     expected = (
         {
             f"fk_{t}_client_org"
@@ -494,7 +494,15 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
         # Informative client of an audit event (plan 2026-10-26 Task 1, C6):
         # G table, no client policy, but its client is its own org's.
         | {"fk_audit_events_client_org"}
-        | {f"fk_{t}_site_client" for t in ("devices", "enrollment_tokens", "install_links")}
+        # A VLAN's, a subnet's and a site server's site is of the row's
+        # client too (plan 2026-10-26 Task 10, migration 0240).
+        | {
+            f"fk_{t}_site_client"
+            for t in (
+                "devices", "enrollment_tokens", "install_links",
+                "ipam_vlan", "ipam_subnet", "site_server",
+            )
+        }
         # A row naming a person is of that person's client (plan 2026-10-26
         # Task 5): who uses a device is one of the device's client's people;
         # who holds a license or a seat, of the license's or subscription's
@@ -770,6 +778,16 @@ async def test_the_unique_key_guard_is_not_vacuous(admin_engine) -> None:
     assert old("change_gates", "org_id", "device_group_id", nnd=True) is not None
     # The same column with NULLs distinct pins the client wherever it is set.
     assert old("patch_policies", "org_id", "device_group_id") is None
+    # IPAM (plan 2026-10-26 Task 10): 0043's per-organisation VRF name and
+    # site-less VLAN number are LEAKY; a VLAN's site is pinned to its client
+    # by `fk_ipam_vlan_site_client`, so the per-site key needs no client; a
+    # subnet's VRF and an address's are their inheritance foreign key.
+    assert old("ipam_vrf", "org_id", "name") is not None
+    assert old("ipam_vlan", "org_id", "vid") is not None
+    assert "site_id" in pinning["ipam_vlan"] and "site_id" in pinning["ipam_subnet"]
+    for name in ("uq_ipam_vlan_site_vid", "uq_ipam_subnet_org_vrf_prefix",
+                 "uq_ipam_address_org_vrf_addr"):
+        assert leaky_because(by_name[name], pinning[by_name[name].table]) is None, name
 
 
 #: Migration 0231's per-client natural keys (Task 8b), with their columns and
@@ -828,6 +846,12 @@ PER_CLIENT_KEYS: dict[str, tuple[str, tuple[str, ...], bool]] = {
     "uq_expense_client_autofeed": (
         "expense", ("org_id", "client_id", "source", "link_id", "period_key"), False,
     ),
+    # Plan 2026-10-26 Task 10 (migration 0240): a VRF's name and a site-less
+    # VLAN's number are per client; a VLAN with a site is unique per site,
+    # which `fk_ipam_vlan_site_client` pins to the client.
+    "uq_ipam_vrf_client_name": ("ipam_vrf", ("org_id", "client_id", "name"), False),
+    "uq_ipam_vlan_client_vid": ("ipam_vlan", ("org_id", "client_id", "vid"), False),
+    "uq_ipam_vlan_site_vid": ("ipam_vlan", ("org_id", "site_id", "vid"), False),
 }
 
 

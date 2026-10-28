@@ -339,14 +339,18 @@ async def preview_import(
     session: AsyncSession,
     org_id: UUID,
     *,
+    client_id: UUID,
     content: bytes,
     mapping: dict[str, str],
 ) -> ImportPreview:
     """§8.1 step one. **WRITES NOTHING** -- asserted by row counts before and
-    after, not by reading the code."""
+    after, not by reading the code.
+
+    Against `client_id`'s `global` VRF (one per client since migration 0240;
+    the caller vouches for the client)."""
     mapping = _validate_mapping(mapping)
     raw = _decode(content)
-    vrf_id = await ensure_default_vrf(session, org_id)
+    vrf_id = await ensure_default_vrf(session, org_id, client_id)
     existing = await _existing(session, org_id, vrf_id)
 
     rows: list[ImportRow] = []
@@ -385,6 +389,7 @@ async def apply_import(
     org_id: UUID,
     *,
     actor_id: UUID | None,
+    client_id: UUID,
     content: bytes,
     mapping: dict[str, str],
     digest: str,
@@ -424,10 +429,12 @@ async def apply_import(
             )
         )
     actual = file_digest(content)
-    preview = await preview_import(session, org_id, content=content, mapping=mapping)
+    preview = await preview_import(
+        session, org_id, client_id=client_id, content=content, mapping=mapping
+    )
     raw = _decode(content)
 
-    vrf_id = await ensure_default_vrf(session, org_id)
+    vrf_id = await ensure_default_vrf(session, org_id, client_id)
     existing = await _existing(session, org_id, vrf_id)
 
     applied = 0
@@ -461,6 +468,7 @@ async def apply_import(
                 org_id,
                 actor_id,
                 address=row.address,
+                vrf_id=vrf_id,
                 asset_label=label,
                 hostname=values.get("hostname", ""),
                 description=values.get("description", ""),
@@ -473,6 +481,7 @@ async def apply_import(
                 org_id,
                 actor_id,
                 address=row.address,
+                vrf_id=vrf_id,
                 hostname=values.get("hostname", ""),
                 description=values.get("description", ""),
             )
@@ -571,8 +580,12 @@ async def convert_doc_records(
 
     Rows that do not convert come back in `skipped` **with reasons**. Nothing is
     guessed: a gateway outside its prefix is dropped with a warning rather than
-    silently rewritten, and a VLAN id that names no VLAN in this org leaves
-    `vlan_id` null and is reported.
+    silently rewritten, and a VLAN id that names no VLAN of the record's client
+    leaves `vlan_id` null and is reported.
+
+    THE SUBNET IS THE RECORD'S CLIENT'S (migration 0240), in that client's
+    `global` VRF; a record with no client -- Novieri's own documentation -- is
+    the internal client's, whose id is the organisation's.
     """
     records = (
         (
@@ -588,7 +601,7 @@ async def convert_doc_records(
         .all()
     )
     vlans = {
-        row.vid: row.id
+        (row.client_id, row.vid): row.id
         for row in (
             (await session.execute(select(IpamVlan).where(IpamVlan.org_id == org_id)))
             .scalars()
@@ -599,6 +612,7 @@ async def convert_doc_records(
     skipped: list[SkippedRecord] = []
 
     for record in records:
+        client_id = record.client_id or org_id
         fields = record.fields if isinstance(record.fields, dict) else {}
         raw_cidr = fields.get("cidr")
         if not raw_cidr:
@@ -619,13 +633,13 @@ async def convert_doc_records(
         raw_vlan = fields.get("vlan")
         if raw_vlan not in (None, ""):
             try:
-                vlan_id = vlans.get(int(raw_vlan))
+                vlan_id = vlans.get((client_id, int(raw_vlan)))
             except (TypeError, ValueError):
                 vlan_id = None
             if vlan_id is None:
                 warnings.append(
                     tr(
-                        "no VLAN with vid {raw_vlan} in this org; vlan_id left null",
+                        "no VLAN with vid {raw_vlan} in this client; vlan_id left null",
                         raw_vlan=raw_vlan,
                     )
                 )
@@ -662,6 +676,7 @@ async def convert_doc_records(
                 org_id,
                 actor_id,
                 prefix=str(prefix),
+                client_id=client_id,
                 kind="assignable",
                 name=record.name,
                 vlan_id=vlan_id,

@@ -229,7 +229,8 @@ PART_A: dict[str, str] = {
     # --- ipam ---
     "POST /api/v1/ipam/addresses": (
         "Records one IP address, assigned to a device or asset label or, with reserve set, "
-        "held as reserved. Returns the address row; refuses an address already claimed."
+        "held as reserved, in the VRF given or else in the global VRF of the client given. "
+        "Refuses an address already claimed."
     ),
     "GET /api/v1/ipam/addresses/{address_id}": (
         "Returns one IP address record: its state, origin, allocation method, claimant and "
@@ -274,8 +275,9 @@ PART_A: dict[str, str] = {
         "Revoked authorizations are omitted unless requested."
     ),
     "POST /api/v1/ipam/scan-authorizations": (
-        "Authorizes a prefix as a permitted target for network sweeps, optionally until an "
-        "expiry. High-privilege: it decides where the platform may emit probe traffic."
+        "Authorizes a prefix for network sweeps in a VRF, or the client's global VRF, "
+        "optionally until an expiry. High-privilege: it decides where the platform may "
+        "emit probe traffic."
     ),
     "DELETE /api/v1/ipam/scan-authorizations/{authorization_id}": (
         "Revokes a scan authorization so sweeps of that prefix are refused. The row is "
@@ -286,18 +288,14 @@ PART_A: dict[str, str] = {
         "Returns which kind it was read as, with matching subnet and device ids, addresses "
         "and an observation count."
     ),
-    "GET /api/v1/ipam/sites": "Lists the IPAM sites defined for the organization.",
-    "POST /api/v1/ipam/sites": (
-        "Creates an IPAM site, optionally linked to a documentation record, and returns it."
-    ),
     "GET /api/v1/ipam/subnets": (
         "Lists subnets, optionally filtered by VRF, site, VLAN, a contained address or a "
-        "text query. Returns prefix, kind, parent and sweep settings."
+        "text query. Returns client, prefix, kind, parent and sweep settings."
     ),
     "POST /api/v1/ipam/subnets": (
-        "Creates a subnet (container or assignable) in a VRF, defaulting to the global one. "
-        "Its parent is derived from the prefix; overlapping or duplicate prefixes are "
-        "refused."
+        "Creates a subnet (container or assignable) in a VRF, or in the global VRF of the "
+        "client given, at one of that client's sites if any. Its parent is derived from the "
+        "prefix; overlapping or duplicate prefixes are refused."
     ),
     "DELETE /api/v1/ipam/subnets/{subnet_id}": (
         "Deletes a subnet. Refused while it holds addresses or ranges unless cascade is "
@@ -308,8 +306,8 @@ PART_A: dict[str, str] = {
         "sweep settings."
     ),
     "PUT /api/v1/ipam/subnets/{subnet_id}": (
-        "Edits a subnet's name, description, site, VLAN, gateway or DNS servers. Prefix, "
-        "VRF and parent cannot be changed."
+        "Edits a subnet's name, description, site, VLAN, gateway or DNS servers; the site "
+        "and VLAN must be its client's. Prefix, VRF and parent cannot be changed."
     ),
     "GET /api/v1/ipam/subnets/{subnet_id}/addresses": (
         "Returns a paged grid of every address in the subnet with its status, claimant, "
@@ -351,11 +349,13 @@ PART_A: dict[str, str] = {
     ),
     "GET /api/v1/ipam/vlans": "Lists VLANs, optionally only those at one site.",
     "POST /api/v1/ipam/vlans": (
-        "Creates a VLAN with an ID from 1 to 4094, optionally tied to a site, and returns it."
+        "Creates a VLAN with an ID from 1 to 4094 at one of a client's sites (the site's "
+        "client) or, with no site, for the client given, and returns it."
     ),
-    "GET /api/v1/ipam/vrfs": "Lists the VRFs (routing domains) defined for the organization.",
+    "GET /api/v1/ipam/vrfs": "Lists the VRFs (routing domains), each with its client.",
     "POST /api/v1/ipam/vrfs": (
-        "Creates a VRF with an optional route distinguisher and returns it."
+        "Creates a VRF of the client given, with an optional route distinguisher, and "
+        "returns it. The name is unique within the client."
     ),
     # --- portal ---
     "GET /api/v1/portal/categories": (

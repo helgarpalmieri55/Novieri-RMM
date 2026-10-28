@@ -51,7 +51,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, CIDR
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, site_client_fk, uuid7_pk
 
 __all__ = ["SITE_SERVER_ROLES", "SiteServer"]
 
@@ -73,10 +73,13 @@ class SiteServer(Base):
     module rather than a kernel fork, and `tests/test_site_server_kernel_
     boundary.py` asserts it rather than trusting it.
 
-    `ipam_site_id` IS NULLABLE AND THAT IS LOAD-BEARING. IPAM is a pull-forward
-    module and site servers must work in a deployment that never installs it, so
-    the FK is a convenience for grouping and never a dependency: nothing in the
-    registry, the dispatch path or the segment check requires it to be set.
+    `site_id` IS NULLABLE AND THAT IS LOAD-BEARING. It names one of the device's
+    client's `sites` rows (`fk_site_server_site_client`; until migration 0240 it
+    was `ipam_site_id`, an IPAM site): a convenience for grouping and never a
+    dependency. Nothing in the registry, the dispatch path, the segment check or
+    push install's choice of originator reads it -- those go by segment and by
+    client -- so a site server serves exactly the segments it declares, with or
+    without a site.
     """
 
     __tablename__ = "site_server"
@@ -91,6 +94,7 @@ class SiteServer(Base):
             name="ck_site_server_roles",
         ),
         Index("ix_site_server_org_enabled", "org_id", "enabled"),
+        site_client_fk("site_server"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
@@ -109,8 +113,8 @@ class SiteServer(Base):
     name: Mapped[str] = mapped_column(String(200))
     segments: Mapped[list[str]] = mapped_column(ARRAY(CIDR()))
     roles: Mapped[list[str]] = mapped_column(ARRAY(Text()))
-    ipam_site_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("ipam_site.id"), default=None
+    site_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sites.id"), index=True, default=None
     )
     enabled: Mapped[bool] = mapped_column(Boolean, server_default=true(), default=True)
     notes: Mapped[str] = mapped_column(Text, server_default=text("''"), default="")

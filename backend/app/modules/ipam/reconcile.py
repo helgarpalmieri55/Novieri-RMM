@@ -89,6 +89,7 @@ from app.core.events import publish
 from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.models import Agent, Organization
+from app.modules.ipam.clients import loaded_client
 from app.modules.ipam.errors import IpamNotFoundError, IpamValidationError
 from app.modules.ipam.models import (
     IpamAddress,
@@ -968,6 +969,8 @@ async def acknowledge_drift(
         action="ipam.drift_acknowledged",
         target_type="ipam_drift",
         target_id=str(row.id),
+        # Read back: the UPDATE expired the trigger-written client.
+        client_id=await loaded_client(session, row),
         metadata={
             "drift_class": row.drift_class,
             "address": str(row.address),
@@ -1022,6 +1025,8 @@ async def suppress_drift(
         action="ipam.drift_suppressed",
         target_type="ipam_drift",
         target_id=str(row.id),
+        # Read back: the UPDATE expired the trigger-written client.
+        client_id=await loaded_client(session, row),
         metadata={
             "drift_class": row.drift_class,
             "address": str(row.address),

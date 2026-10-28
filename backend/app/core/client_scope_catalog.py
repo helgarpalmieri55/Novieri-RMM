@@ -119,8 +119,9 @@ CATALOG: dict[str, Entry] = {
     "health_flap_state": H("devices", "device_id"),
     "device_health_policy_ack": H("devices", "device_id"),
     "health_alert_action": H("health_alert", "alert_id"),
-    # ipam (ipam_site is merged into sites in phase 2)
-    "ipam_site": C, "ipam_vrf": C, "ipam_vlan": C, "ipam_subnet": C,
+    # ipam (ipam_site was merged into sites by migration 0240). A subnet's
+    # client is its VRF's: the VRF is NOT NULL (Annex A, amended in Task 10).
+    "ipam_vrf": C, "ipam_vlan": C, "ipam_subnet": H("ipam_vrf", "vrf_id"),
     "ipam_scan_authorization": H("ipam_vrf", "vrf_id"),
     "ipam_range": H("ipam_subnet", "subnet_id"),
     "ipam_address": H("ipam_vrf", "vrf_id"),
@@ -166,8 +167,6 @@ CATALOG: dict[str, Entry] = {
 
 PENDING_PHASE_2: frozenset[str] = frozenset(
     {
-        "ipam_site", "ipam_vrf", "ipam_vlan", "ipam_subnet", "ipam_range", "ipam_address",
-        "ipam_observation", "ipam_drift", "ipam_scan_authorization", "ipam_sweep_run",
         "push_authorization", "push_run", "push_run_target", "push_credential_scope",
         "push_credential_realm",
         "backup_repositories", "backup_chunks", "backup_chunk_copies",

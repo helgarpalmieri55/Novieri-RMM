@@ -83,6 +83,9 @@ from app.models import (
     HealthAlertAction,
     HealthProfileAssignment,
     InstallLink,
+    IpamRange,
+    IpamSubnet,
+    IpamVrf,
     Job,
     JobLog,
     License,
@@ -148,6 +151,8 @@ class Side:
     test: UUID
     budget: UUID  # a budget, and an expense category its lines can use
     expense_category: UUID
+    vrf: UUID  # an IPAM VRF, and a subnet in it
+    subnet: UUID
 
 
 @dataclass(frozen=True)
@@ -248,11 +253,17 @@ async def _side(
         s.add_all([job, alert, ticket, person, subscription, plan, budget, expense_category])
         await s.flush()
         test = BcpTest(org_id=org, plan_id=plan.id, type="tabletop", created_by=actor)
-        s.add(test)
+        # The same VRF name and prefix on both sides: per client since 0240.
+        vrf = IpamVrf(org_id=org, client_id=client.id, name="global")
+        s.add_all([test, vrf])
+        await s.flush()
+        subnet = IpamSubnet(org_id=org, vrf_id=vrf.id, prefix="10.0.0.0/24")
+        s.add(subnet)
         await s.commit()
     return Side(
         client.id, site.id, device.id, group.id, job.id, alert.id, record.id, ticket.id,
         person.id, subscription.id, plan.id, test.id, budget.id, expense_category.id,
+        vrf.id, subnet.id,
     )
 
 
@@ -477,6 +488,17 @@ PATHS: dict[str, tuple[str, Make]] = {
     "H-budget_line-via-budget": ("budget_line", lambda w, s: BudgetLine(
         org_id=w.org, budget_id=s.budget, category_id=s.expense_category,
         period_index=1, planned_amount=1, created_by=w.actor,
+    )),
+    # IPAM (0240). A subnet's client is its VRF's; a range's, its subnet's.
+    "C-ipam_vrf": ("ipam_vrf", lambda w, s: IpamVrf(
+        org_id=w.org, client_id=s.client, name=f"v-{uuid4().hex[:6]}"
+    )),
+    "H-ipam_subnet-via-ipam_vrf": ("ipam_subnet", lambda w, s: IpamSubnet(
+        org_id=w.org, vrf_id=s.vrf, prefix=f"10.{uuid4().int % 250 + 1}.{uuid4().int % 256}.0/24"
+    )),
+    "H-ipam_range-via-ipam_subnet": ("ipam_range", lambda w, s: IpamRange(
+        org_id=w.org, subnet_id=s.subnet, kind="reserved", start_address="10.0.0.10",
+        end_address="10.0.0.20",
     )),
     # The client is never sent: the trigger takes it from the target (0239).
     "C-deployments": ("deployments", lambda w, s: Deployment(

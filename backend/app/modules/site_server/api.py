@@ -45,6 +45,7 @@ from app.models import Agent
 from app.modules.site_server import registry as registry_service
 from app.modules.site_server.dispatch import wake_via_site_server
 from app.modules.site_server.errors import (
+    SiteServerClientError,
     SiteServerConflictError,
     SiteServerError,
     SiteServerNotFoundError,
@@ -64,12 +65,15 @@ router = APIRouter(prefix="/site-servers", tags=["site-servers"])
 
 
 def _http_error(exc: SiteServerError) -> HTTPException:
-    """By TYPE, never by message text. `SiteServerNotFoundError` is checked
-    first because it is a SUBCLASS of the validation error."""
+    """By TYPE, never by message text. `SiteServerNotFoundError` and
+    `SiteServerClientError` are checked first because they are SUBCLASSES of
+    the validation error."""
     if isinstance(exc, SiteServerConflictError):
         return HTTPException(status.HTTP_409_CONFLICT, str(exc))
     if isinstance(exc, SiteServerNotFoundError):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    if isinstance(exc, SiteServerClientError):
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
     if isinstance(exc, SiteServerValidationError):
         return HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
     return HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
@@ -96,6 +100,7 @@ async def _out(session: AsyncSession, org_id: UUID, row: SiteServer) -> SiteServ
     status_value, last_seen = await _agent_state(session, org_id, row.device_id)
     return SiteServerOut(
         id=row.id,
+        client_id=row.client_id,
         device_id=row.device_id,
         name=row.name,
         # `segments` comes back from asyncpg as `IPv4Network` objects, not
@@ -105,7 +110,7 @@ async def _out(session: AsyncSession, org_id: UUID, row: SiteServer) -> SiteServ
         roles=list(row.roles),
         enabled=row.enabled,
         notes=row.notes,
-        ipam_site_id=row.ipam_site_id,
+        site_id=row.site_id,
         agent_status=status_value,
         agent_last_seen_at=last_seen,
     )
@@ -115,7 +120,7 @@ async def _out(session: AsyncSession, org_id: UUID, row: SiteServer) -> SiteServ
 async def list_site_servers_route(
     request: Request,
     enabled: bool | None = Query(default=None),
-    ipam_site_id: UUID | None = Query(default=None),
+    site_id: UUID | None = Query(default=None),
     segment: str | None = Query(default=None),
     ctx: AuthContext = Depends(require_permission("site.read")),
 ) -> list[SiteServerOut]:
@@ -127,7 +132,7 @@ async def list_site_servers_route(
                 session,
                 ctx.org_id,
                 enabled=enabled,
-                ipam_site_id=ipam_site_id,
+                site_id=site_id,
                 segment=segment,
             )
             return [await _out(session, ctx.org_id, row) for row in rows]
@@ -152,7 +157,7 @@ async def promote_route(
                 segments=body.segments,
                 roles=body.roles,
                 name=body.name,
-                ipam_site_id=body.ipam_site_id,
+                site_id=body.site_id,
                 notes=body.notes,
                 actor_id=ctx.user_id,
             )

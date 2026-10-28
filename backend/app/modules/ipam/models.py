@@ -24,12 +24,14 @@ otherwise fails nothing:
 
 2. `ipam_vlan` CARRIES A PARTIAL UNIQUE INDEX PAIR, not one index (§2.3,
    §0.15). `UNIQUE (org_id, site_id, vid)` with `site_id` nullable permits two
-   org-wide VLAN 10 rows, which is the duplicate it exists to prevent. The
+   site-less VLAN 10 rows, which is the duplicate it exists to prevent. The
    sentinel-row fix §0.7 chose for `vrf_id` is rejected here: a `global` VRF
    names a real routing domain, a fake site does not, and it would land in every
    site picker and every site-scoped query. Neither index is a named
    constraint, so upserts must infer with `index_elements=` + `index_where=`;
-   `ON CONFLICT ON CONSTRAINT` fails at RUNTIME against a partial index.
+   `ON CONFLICT ON CONSTRAINT` fails at RUNTIME against a partial index. Since
+   migration 0240 the site-less half is per CLIENT, and the site half needs no
+   client column: the site pins it.
 
 3. `ipam_subnet.parent_id` IS A DERIVED CACHE (§0.2), recomputed on every write
    as "the smallest other prefix in the same VRF that contains this one".
@@ -48,6 +50,13 @@ otherwise fails nothing:
 Native `inet`/`cidr`/`macaddr` throughout (§0.1): the whole module is
 containment and ordering, which in text is wrong at every boundary
 (`10.4.7.9` sorts before `10.4.7.10`; `10.4.70.0/24` LIKE `10.4.7%`).
+
+EVERY TABLE BELONGS TO A CLIENT (MSP clients spec, Annex A; migration 0240).
+`ipam_vrf` and `ipam_vlan` are C: the application writes the client. The
+other seven are H: trigger `its_client_from_parent` copies it from the VRF
+or the subnet the row hangs from -- never sent, read back from the INSERT.
+A VLAN, a subnet and a site server name a `sites` row of their own client
+(`fk_<table>_site_client`); `ipam_site` is gone (spec §1.2).
 """
 
 from datetime import UTC, datetime
@@ -58,6 +67,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Computed,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -71,7 +81,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import CIDR, INET, JSONB, MACADDR
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, site_client_fk, uuid7_pk
 
 __all__ = [
     "IpamAddress",
@@ -79,7 +89,6 @@ __all__ = [
     "IpamObservation",
     "IpamRange",
     "IpamScanAuthorization",
-    "IpamSite",
     "IpamSubnet",
     "IpamSweepRun",
     "IpamVlan",
@@ -91,11 +100,24 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def _inherited_client() -> Mapped[UUID]:
+    """An H table's `client_id`: written by trigger its_client_from_parent
+    (migration 0240), never sent; the INSERT reads it back."""
+    return mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
+
+
 class IpamVrf(Base):
     """A routing domain (spec §2.1).
 
     `ipam_subnet.vrf_id` and `ipam_address.vrf_id` are NOT NULL and this table
-    carries a lazily created `global` row per org (§0.7). A nullable scoping
+    carries a lazily created `global` row per client (§0.7; per org until
+    migration 0240). A nullable scoping
     column would produce two uniqueness rules rather than one, because NULL is
     distinct from NULL in a unique index -- `(org, NULL, 10.0.0.0/24)` could be
     inserted twice and the duplicate-prefix bug `uq_ipam_subnet_org_vrf_prefix`
@@ -103,10 +125,17 @@ class IpamVrf(Base):
     """
 
     __tablename__ = "ipam_vrf"
-    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_ipam_vrf_org_name"),)
+    __table_args__ = (
+        # Per client (migration 0240): two networks both have a `global` VRF
+        # and a "LAN", and a technician of X never meets Y's names.
+        UniqueConstraint("org_id", "client_id", "name", name="uq_ipam_vrf_client_name"),
+        client_org_fk("ipam_vrf"),
+    )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0240).
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
     name: Mapped[str] = mapped_column(String(100))
     rd: Mapped[str | None] = mapped_column(String(64), default=None)
     description: Mapped[str] = mapped_column(Text, server_default="", default="")
@@ -115,43 +144,22 @@ class IpamVrf(Base):
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 
 
-class IpamSite(Base):
-    """A physical place (spec §2.2).
-
-    A first-class table rather than a free-text label because scoping
-    ("everything at Manila") must be a foreign key and an index, not a string
-    comparison that quietly splits into `Manila` and `manila`.
-    """
-
-    __tablename__ = "ipam_site"
-    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_ipam_site_org_name"),)
-
-    id: Mapped[UUID] = uuid7_pk()
-    org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
-    name: Mapped[str] = mapped_column(String(200))
-    doc_record_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("doc_records.id"), default=None
-    )
-    description: Mapped[str] = mapped_column(Text, server_default="", default="")
-    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
-
-
 class IpamVlan(Base):
-    """A VLAN, optionally scoped to a site (spec §2.3).
+    """A VLAN of one client, optionally at one of its sites (spec §2.3).
 
     THE UNIQUENESS IS A PARTIAL INDEX PAIR AND BOTH HALVES ARE LOAD-BEARING
     (§0.15). VLAN 10 legitimately exists at every site, once each
-    (`uq_ipam_vlan_org_site_vid`), and exactly once org-wide
-    (`uq_ipam_vlan_org_vid_global`). A single `UNIQUE (org_id, site_id, vid)`
+    (`uq_ipam_vlan_site_vid`), and exactly once per client without a site
+    (`uq_ipam_vlan_client_vid`). A single `UNIQUE (org_id, site_id, vid)`
     enforces only the first: `(org, NULL, 10)` does not collide with itself.
-    Between them the two are total.
+    Between them the two are total. The site half holds no client column
+    because the site pins it (`fk_ipam_vlan_site_client`).
     """
 
     __tablename__ = "ipam_vlan"
     __table_args__ = (
         Index(
-            "uq_ipam_vlan_org_site_vid",
+            "uq_ipam_vlan_site_vid",
             "org_id",
             "site_id",
             "vid",
@@ -159,18 +167,27 @@ class IpamVlan(Base):
             postgresql_where=text("site_id IS NOT NULL"),
         ),
         Index(
-            "uq_ipam_vlan_org_vid_global",
+            "uq_ipam_vlan_client_vid",
             "org_id",
+            "client_id",
             "vid",
             unique=True,
             postgresql_where=text("site_id IS NULL"),
         ),
         CheckConstraint("vid BETWEEN 1 AND 4094", name="ck_ipam_vlan_vid_range"),
+        client_org_fk("ipam_vlan"),
+        site_client_fk("ipam_vlan"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
-    site_id: Mapped[UUID | None] = mapped_column(ForeignKey("ipam_site.id"), default=None)
+    # MSP clients spec, Annex A (C). Set by the application (migration 0240):
+    # the site's client, or the one the request names for a site-less VLAN.
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
+    # One of the VLAN's client's sites (`fk_ipam_vlan_site_client`).
+    site_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sites.id"), index=True, default=None
+    )
     vid: Mapped[int] = mapped_column(Integer)
     name: Mapped[str] = mapped_column(String(100), server_default="", default="")
     description: Mapped[str] = mapped_column(Text, server_default="", default="")
@@ -202,7 +219,6 @@ class IpamSubnet(Base):
             postgresql_ops={"prefix": "inet_ops"},
         ),
         Index("uq_ipam_subnet_org_vrf_prefix", "org_id", "vrf_id", "prefix", unique=True),
-        Index("ix_ipam_subnet_org_site", "org_id", "site_id"),
         Index("ix_ipam_subnet_org_parent", "org_id", "parent_id"),
         Index(
             "ix_ipam_subnet_sweep_due",
@@ -222,16 +238,22 @@ class IpamSubnet(Base):
             "sweep_interval_hours IS NULL OR sweep_interval_hours >= 1",
             name="ck_ipam_subnet_sweep_interval",
         ),
+        site_client_fk("ipam_subnet"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H, amended): the VRF's, which is NOT NULL.
+    client_id: Mapped[UUID] = _inherited_client()
     vrf_id: Mapped[UUID] = mapped_column(ForeignKey("ipam_vrf.id"))
     prefix: Mapped[str] = mapped_column(CIDR)
     kind: Mapped[str] = mapped_column(String(12), server_default="assignable", default="assignable")
     name: Mapped[str] = mapped_column(String(200), server_default="", default="")
     description: Mapped[str] = mapped_column(Text, server_default="", default="")
-    site_id: Mapped[UUID | None] = mapped_column(ForeignKey("ipam_site.id"), default=None)
+    # One of the subnet's client's sites (`fk_ipam_subnet_site_client`).
+    site_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sites.id"), index=True, default=None
+    )
     vlan_id: Mapped[UUID | None] = mapped_column(ForeignKey("ipam_vlan.id"), default=None)
     gateway: Mapped[str | None] = mapped_column(INET, default=None)
     dns_servers: Mapped[list[str]] = mapped_column(
@@ -271,6 +293,8 @@ class IpamRange(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H): the subnet's.
+    client_id: Mapped[UUID] = _inherited_client()
     subnet_id: Mapped[UUID] = mapped_column(ForeignKey("ipam_subnet.id"))
     kind: Mapped[str] = mapped_column(String(12))
     start_address: Mapped[str] = mapped_column(INET)
@@ -338,6 +362,8 @@ class IpamAddress(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H): the VRF's.
+    client_id: Mapped[UUID] = _inherited_client()
     #: NULLABLE ON PURPOSE: an observation may land in no registered subnet
     #: (§4.2 orphans), and an orphan is not an error.
     subnet_id: Mapped[UUID | None] = mapped_column(ForeignKey("ipam_subnet.id"), default=None)
@@ -427,6 +453,8 @@ class IpamObservation(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H): the VRF's.
+    client_id: Mapped[UUID] = _inherited_client()
     vrf_id: Mapped[UUID] = mapped_column(ForeignKey("ipam_vrf.id"))
     subnet_id: Mapped[UUID | None] = mapped_column(ForeignKey("ipam_subnet.id"), default=None)
     address: Mapped[str] = mapped_column(INET)
@@ -503,6 +531,8 @@ class IpamDrift(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H): the VRF's.
+    client_id: Mapped[UUID] = _inherited_client()
     vrf_id: Mapped[UUID] = mapped_column(ForeignKey("ipam_vrf.id"))
     subnet_id: Mapped[UUID | None] = mapped_column(ForeignKey("ipam_subnet.id"), default=None)
     address: Mapped[str] = mapped_column(INET)
@@ -560,6 +590,8 @@ class IpamScanAuthorization(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H): the VRF's.
+    client_id: Mapped[UUID] = _inherited_client()
     vrf_id: Mapped[UUID] = mapped_column(ForeignKey("ipam_vrf.id"))
     prefix: Mapped[str] = mapped_column(CIDR)
     note: Mapped[str] = mapped_column(String(500), server_default="", default="")
@@ -590,6 +622,8 @@ class IpamSweepRun(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H): the subnet's.
+    client_id: Mapped[UUID] = _inherited_client()
     subnet_id: Mapped[UUID] = mapped_column(ForeignKey("ipam_subnet.id"))
     job_id: Mapped[UUID | None] = mapped_column(ForeignKey("jobs.id"), default=None)
     device_id: Mapped[UUID | None] = mapped_column(ForeignKey("devices.id"), default=None)

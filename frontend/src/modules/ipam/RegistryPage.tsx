@@ -3,7 +3,6 @@ import { NoValue } from "../../components/emptystate";
 import { Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import {
-  useCreateIpamSiteMutation,
   useCreateIpamVlanMutation,
   useCreateIpamVrfMutation,
   useIpamPermissions,
@@ -16,7 +15,7 @@ import { IpamNav } from "./IpamNav";
 import { Icon } from "../../shell/icons";
 import { Btn, PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
 
-// VRFs, sites and VLANs: the three tables everything else is scoped by.
+// VRFs, VLANs and the client's sites: what everything else is scoped by.
 //
 // ON THE v3 KIT: three bare panels of rows, each led by its glyph, with the
 // panel's sentence in its head and the add form flush under the list for a
@@ -24,15 +23,21 @@ import { Btn, PageHead, Panel, QueryState, StatusPill } from "../../shell/compon
 // this console's registry is the scoping tables, and the address list is the
 // subnet detail's grid.
 //
+// EVERY ROW IS ONE CLIENT'S (MSP clients phase 2): this console files them under
+// the internal client until phase 3's selector (`api.ts::useIpamClient`).
+// IPAM HAS NO SITES OF ITS OWN ANY MORE: the sites panel lists the client's
+// sites read-only -- an office is the client's, managed with the client -- and
+// the VLAN and subnet pickers name them.
+//
 // Two things here are easy to get wrong and are stated on the page rather than
 // left to be discovered:
 //
-//   * A VLAN WITH NO SITE IS ORG-WIDE, not a VLAN whose site somebody forgot to
-//     fill in. Uniqueness is on (site, vid), so VLAN 10 legitimately exists at
-//     every site AND once org-wide, and those are different rows.
+//   * A VLAN WITH NO SITE IS THE WHOLE CLIENT'S, not a VLAN whose site somebody
+//     forgot to fill in. VLAN 10 legitimately exists at every site AND once
+//     without one, and those are different rows.
 //   * EVERY SUBNET HAS A VRF. There is no "no VRF": a subnet created without
-//     one lands in the lazily created `global` VRF, because a nullable scoping
-//     column would let the same prefix be registered twice.
+//     one lands in the client's lazily created `global` VRF, because a
+//     nullable scoping column would let the same prefix be registered twice.
 export function RegistryPage() {
   const t = useT();
   const permissions = useIpamPermissions();
@@ -45,7 +50,7 @@ export function RegistryPage() {
       <IpamNav />
       <div className="grid grid-2">
         <VrfPanel canManage={permissions.manage} />
-        <SitePanel canManage={permissions.manage} />
+        <SitePanel />
       </div>
       <VlanPanel canManage={permissions.manage} />
     </div>
@@ -142,15 +147,15 @@ function VrfPanel({ canManage }: { canManage: boolean }) {
   );
 }
 
-function SitePanel({ canManage }: { canManage: boolean }) {
+/** The client's sites, read-only: IPAM names them and no longer creates them. */
+function SitePanel() {
   const t = useT();
   const sites = useIpamSites();
-  const create = useCreateIpamSiteMutation();
-  const [name, setName] = useState("");
 
   return (
     <Panel
       title={t("ipam.registry.sitesTitle")}
+      subtitle={t("ipam.registry.sitesSubtitle")}
       bare
     >
       <QueryState
@@ -168,43 +173,20 @@ function SitePanel({ canManage }: { canManage: boolean }) {
           </thead>
           <tbody>
             {/* One column: in the two-column grid a second column clipped at
-                the panel edge at 1440, so the doc record rides in the sub-line. */}
+                the panel edge at 1440, so the address rides in the sub-line. */}
             {sites.data?.map((site) => (
               <tr key={site.id}>
                 <Td lead={<Icon name="building" size={18} />}>
                   <div className="cell-title">{site.name}</div>
-                  <div className="cell-sub">
-                    {site.description ? <span>{site.description} </span> : null}
-                    {site.doc_record_id ? (
-                      <span className="mono">{site.doc_record_id}</span>
-                    ) : (
-                      <NoValue label={t("ipam.registry.noDocRecord")} />
-                    )}
-                  </div>
+                  {site.description || site.address ? (
+                    <div className="cell-sub">{site.description || site.address}</div>
+                  ) : null}
                 </Td>
               </tr>
             ))}
           </tbody>
         </Table>
       </QueryState>
-      {canManage && (
-        <AddRow>
-          <div className="form-grid">
-            <Field label={t("ipam.registry.siteName")}>
-              <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
-            </Field>
-          </div>
-          <div className="form-actions">
-            <Btn
-              label={t("ipam.registry.addSite")}
-              icon="plus"
-              disabled={create.isPending || name.trim() === ""}
-              onClick={() => create.mutate({ name }, { onSuccess: () => setName("") })}
-            />
-            {create.isError && <ErrorLine error={create.error} />}
-          </div>
-        </AddRow>
-      )}
     </Panel>
   );
 }
@@ -250,7 +232,11 @@ function VlanPanel({ canManage }: { canManage: boolean }) {
                 </Td>
                 <Td>
                   {vlan.site_id === null ? (
-                    <StatusPill value="org-wide" kind="info" label={t("ipam.registry.orgWide")} />
+                    <StatusPill
+                      value="client-wide"
+                      kind="info"
+                      label={t("ipam.registry.clientWide")}
+                    />
                   ) : (
                     <StatusPill
                       value="site"
@@ -283,7 +269,7 @@ function VlanPanel({ canManage }: { canManage: boolean }) {
                 value={siteId}
                 onChange={(e) => setSiteId(e.target.value)}
               >
-                <option value="">{t("ipam.registry.orgWideNoSite")}</option>
+                <option value="">{t("ipam.registry.clientWideNoSite")}</option>
                 {sites.data?.map((site) => (
                   <option key={site.id} value={site.id}>
                     {site.name}

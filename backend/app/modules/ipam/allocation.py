@@ -52,6 +52,7 @@ from sqlalchemy.sql import text
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.models import Device, Policy
+from app.modules.ipam.clients import loaded_client
 from app.modules.ipam.errors import (
     IpamConflictError,
     IpamTooLargeError,
@@ -760,6 +761,8 @@ async def claim_address(
         action="ipam.address_assigned",
         target_type="ipam_address",
         target_id=str(row.id),
+        # The subnet's, as the address's is: both are its VRF's.
+        client_id=subnet.client_id,
         metadata={
             "address": str(parsed),
             "subnet_id": str(subnet.id),
@@ -772,6 +775,7 @@ async def claim_address(
         },
     )
     await session.flush()
+    await loaded_client(session, row)  # an UPDATE expired it; the response names it
     return row
 
 

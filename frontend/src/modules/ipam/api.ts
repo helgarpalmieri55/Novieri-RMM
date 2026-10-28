@@ -30,8 +30,9 @@
 // telemetry, which is precisely the boundary this module does not cross.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ApiError, Device, Me, Page } from "../../lib/api";
+import type { ApiError, ClientSiteOut, Device, Me, Page } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { internalClientId, loadingUntilClient, requireKnown } from "../../lib/internalClient";
 import type {
   AddressCreate,
   AddressOut,
@@ -50,8 +51,6 @@ import type {
   ScopeCreate,
   ScopeOut,
   SearchOut,
-  SiteCreate,
-  SiteOut,
   SubnetCreate,
   SubnetFilters,
   SubnetOut,
@@ -86,7 +85,7 @@ const NO_RETRY_ENUMERATION = { retry: false } as const;
 /**
  * The caller's permission codes, for deciding what RENDERS.
  *
- * INVARIANT #6: this gates nothing. Every one of the module's 40 routes carries
+ * INVARIANT #6: this gates nothing. Every one of the module's 38 routes carries
  * its own `require_permission` dependency and the server re-checks on every
  * request; hiding a button here is a usability affordance that saves an
  * operator a 403, and it prevents exactly nothing. A caller who forges this
@@ -140,7 +139,39 @@ export const DRIFT_KEY = "ipam-drift";
 export const SCOPES_KEY = "ipam-scan-authorizations";
 
 // --------------------------------------------------------------------------
-// Registry — VRFs, sites, VLANs
+// The client — every IPAM row is one's (MSP clients phase 2)
+// --------------------------------------------------------------------------
+
+/**
+ * The client this console files new IPAM rows under, and whose sites its
+ * pickers list. `null` until `/me` has answered: a sites read waits for it, and
+ * a create that would have to name it throws `InternalScopeUnknown` inside its
+ * mutation (`requireKnown`), so NOTHING is sent.
+ */
+export function useIpamClient(): string | null {
+  const api = useApi();
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  // PHASE 3: the client/site selector. Until it exists that is the
+  // organisation's internal client, whose id is the organisation's --
+  // `/me`'s `org_id` (`lib/internalClient.ts`).
+  return internalClientId(me.data);
+}
+
+/**
+ * A create body names its client only when nothing above it does -- no VRF,
+ * or for a VLAN no site -- because the server takes the client from the parent
+ * and refuses a body that contradicts it. `parent` is that VRF or site.
+ */
+function namingClient<B extends { client_id?: string | null }>(
+  body: B,
+  parent: string | null | undefined,
+  client: string | null,
+): B {
+  return parent ? body : { ...body, client_id: requireKnown(client) };
+}
+
+// --------------------------------------------------------------------------
+// Registry — VRFs, VLANs, and the client's sites they name
 // --------------------------------------------------------------------------
 
 export function useIpamVrfs() {
@@ -155,32 +186,34 @@ export function useIpamVrfs() {
 export function useCreateIpamVrfMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<VrfOut, ApiError, VrfCreate>({
-    mutationFn: (body) => api.createIpamVrf(body),
+  const client = useIpamClient();
+  return useMutation<VrfOut, ApiError, Omit<VrfCreate, "client_id">>({
+    // PHASE 3: the selected client; until then the internal one (`useIpamClient`).
+    mutationFn: (body) => api.createIpamVrf({ ...body, client_id: requireKnown(client) }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["ipam-vrfs"] });
     },
   });
 }
 
+/**
+ * The sites a VLAN or a subnet may name: the client's own (`GET
+ * /clients/{id}/sites`, phase 1). IPAM keeps no sites of its own since
+ * migration 0240, and creates none -- a site is a client's office, managed
+ * with the client. LOADING until the client is known, not empty.
+ */
 export function useIpamSites() {
   const api = useApi();
-  return useQuery<SiteOut[], ApiError>({
-    queryKey: ["ipam-sites"],
-    queryFn: () => api.listIpamSites(),
-    ...NO_RETRY,
-  });
-}
-
-export function useCreateIpamSiteMutation() {
-  const api = useApi();
-  const queryClient = useQueryClient();
-  return useMutation<SiteOut, ApiError, SiteCreate>({
-    mutationFn: (body) => api.createIpamSite(body),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["ipam-sites"] });
-    },
-  });
+  const client = useIpamClient();
+  return loadingUntilClient(
+    useQuery<ClientSiteOut[], ApiError>({
+      queryKey: ["client-sites", client],
+      queryFn: () => api.listClientSites(requireKnown(client)),
+      enabled: client != null,
+      ...NO_RETRY,
+    }),
+    client,
+  );
 }
 
 export function useIpamVlans(siteId?: string) {
@@ -195,8 +228,11 @@ export function useIpamVlans(siteId?: string) {
 export function useCreateIpamVlanMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
+  const client = useIpamClient();
   return useMutation<VlanOut, ApiError, VlanCreate>({
-    mutationFn: (body) => api.createIpamVlan(body),
+    // PHASE 3: a VLAN with no site is the selected client's; until then the
+    // internal one's. With a site, the site's client is the VLAN's.
+    mutationFn: (body) => api.createIpamVlan(namingClient(body, body.site_id, client)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["ipam-vlans"] });
     },
@@ -255,8 +291,11 @@ export function useIpamSubnet(subnetId: string | undefined) {
 export function useCreateIpamSubnetMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
+  const client = useIpamClient();
   return useMutation<SubnetOut, ApiError, SubnetCreate>({
-    mutationFn: (body) => api.createIpamSubnet(body),
+    // PHASE 3: with no VRF, the selected client's `global` VRF; until then the
+    // internal client's. With a VRF, the VRF's client is the subnet's.
+    mutationFn: (body) => api.createIpamSubnet(namingClient(body, body.vrf_id, client)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [SUBNETS_KEY] });
     },
@@ -419,8 +458,11 @@ function invalidateAddressEffects(
 export function useCreateIpamAddressMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
+  const client = useIpamClient();
   return useMutation<AddressOut, ApiError, AddressCreate>({
-    mutationFn: (body) => api.createIpamAddress(body),
+    // PHASE 3: with no VRF (the address dialog names none), the selected
+    // client's `global` VRF; until then the internal client's.
+    mutationFn: (body) => api.createIpamAddress(namingClient(body, body.vrf_id, client)),
     onSuccess: (data) => invalidateAddressEffects(queryClient, data.id),
   });
 }
@@ -529,8 +571,12 @@ export function useIpamScanAuthorizations(includeRevoked = false) {
 export function useCreateIpamScanAuthorizationMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
+  const client = useIpamClient();
   return useMutation<ScopeOut, ApiError, ScopeCreate>({
-    mutationFn: (body) => api.createIpamScanAuthorization(body),
+    // PHASE 3: with no VRF, the selected client's `global` VRF; until then the
+    // internal client's. With a VRF, the VRF's client is the authorization's.
+    mutationFn: (body) =>
+      api.createIpamScanAuthorization(namingClient(body, body.vrf_id, client)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [SCOPES_KEY] });
     },

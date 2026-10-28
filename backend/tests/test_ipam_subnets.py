@@ -538,16 +538,17 @@ async def test_a_prefix_with_host_bits_is_normalised_and_the_audit_records_both(
 async def test_create_subnet_creates_the_default_vrf_when_none_is_given(
     admin_engine: AsyncEngine,
 ) -> None:
-    """§0.7's lazy `global` row, exercised through its real caller."""
+    """§0.7's lazy `global` row, exercised through its real caller: the named
+    client's, one per client since migration 0240."""
     org = await seed_org(admin_engine, "lazyvrf")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         subnet = await create_subnet(
-            session, org.org_id, org.user_id, prefix="10.48.0.0/24"
+            session, org.org_id, org.user_id, prefix="10.48.0.0/24", client_id=org.org_id
         )
         await session.commit()
         vrf_id = subnet.vrf_id
     async with AsyncSession(admin_engine) as session:
-        assert await ensure_default_vrf(session, org.org_id) == vrf_id
+        assert await ensure_default_vrf(session, org.org_id, org.org_id) == vrf_id
 
 
 # ---------------------------------------------------------------------------

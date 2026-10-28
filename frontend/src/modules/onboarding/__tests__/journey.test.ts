@@ -18,6 +18,7 @@ import { currentStep, journeySteps, type JourneyInput, type StepKey } from "../j
 const NOW = Date.parse("2026-08-26T12:00:00Z");
 
 const subnet = (over: Partial<SubnetOut> = {}): SubnetOut => ({
+  client_id: "o1",
   id: "s1",
   vrf_id: "v1",
   prefix: "10.0.4.0/24",
@@ -37,6 +38,7 @@ const subnet = (over: Partial<SubnetOut> = {}): SubnetOut => ({
 });
 
 const scope = (over: Partial<ScopeOut> = {}): ScopeOut => ({
+  client_id: "o1",
   id: "sc1",
   vrf_id: "v1",
   prefix: "10.0.0.0/16",
@@ -49,6 +51,7 @@ const scope = (over: Partial<ScopeOut> = {}): ScopeOut => ({
 });
 
 const run = (over: Partial<SweepRunOut> = {}): SweepRunOut => ({
+  client_id: "o1",
   id: "r1",
   subnet_id: "s1",
   job_id: null,

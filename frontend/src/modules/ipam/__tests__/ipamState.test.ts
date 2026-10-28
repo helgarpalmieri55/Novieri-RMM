@@ -40,6 +40,7 @@ import { ADDRESS_STATUSES, DRIFT_CLASSES } from "../types";
 
 function drift(overrides: Partial<DriftOut> = {}): DriftOut {
   return {
+    client_id: "o1",
     id: "d1",
     vrf_id: "v1",
     subnet_id: "s1",
@@ -62,6 +63,7 @@ function drift(overrides: Partial<DriftOut> = {}): DriftOut {
 
 function scope(overrides: Partial<ScopeOut> = {}): ScopeOut {
   return {
+    client_id: "o1",
     id: "sc1",
     vrf_id: "v1",
     prefix: "10.4.7.0/24",
@@ -76,6 +78,7 @@ function scope(overrides: Partial<ScopeOut> = {}): ScopeOut {
 
 function subnet(overrides: Partial<SubnetOut> = {}): SubnetOut {
   return {
+    client_id: "o1",
     id: "s1",
     vrf_id: "v1",
     prefix: "10.4.7.0/24",
@@ -464,6 +467,7 @@ describe("effectiveSweepScope", () => {
 describe("describeSweepRun", () => {
   function run(overrides: Partial<SweepRunOut> = {}): SweepRunOut {
     return {
+      client_id: "o1",
       id: "r1",
       subnet_id: "s1",
       job_id: "j1",

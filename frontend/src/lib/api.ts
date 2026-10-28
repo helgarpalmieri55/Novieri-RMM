@@ -321,8 +321,6 @@ import type {
   ScopeCreate as IpamScopeCreate,
   ScopeOut as IpamScopeOut,
   SearchOut as IpamSearchOut,
-  SiteCreate as IpamSiteCreate,
-  SiteOut as IpamSiteOut,
   SubnetCreate as IpamSubnetCreate,
   SubnetFilters as IpamSubnetFilters,
   SubnetOut as IpamSubnetOut,
@@ -832,6 +830,22 @@ export interface ClientOut {
   enabled_modules: string[];
   device_count: number;
   site_count: number;
+}
+
+/**
+ * One site of a client (`backend/app/api/v1/clients.py::SiteOut`): an office,
+ * one LAN. What a device, an enrollment token, an IPAM VLAN or subnet and a
+ * site server are filed under.
+ */
+export interface ClientSiteOut {
+  id: string;
+  client_id: string;
+  name: string;
+  address: string;
+  description: string;
+  egress_networks: string[];
+  archived_at: string | null;
+  device_count: number;
 }
 
 /**
@@ -1610,6 +1624,11 @@ export class ApiClient {
     return this.request<ClientOut[]>(
       params.include_archived ? "/clients?include_archived=true" : "/clients",
     );
+  }
+
+  /** A client's sites, archived ones left out (`clients.read`): IPAM's site pickers. */
+  listClientSites(clientId: string): Promise<ClientSiteOut[]> {
+    return this.request<ClientSiteOut[]>(`/clients/${encodeURIComponent(clientId)}/sites`);
   }
 
   /**
@@ -4829,9 +4848,12 @@ export class ApiClient {
 
   // --- IPAM (backend/app/modules/ipam/api.py) ---------------------------
   //
-  // All FORTY routes of that router, derived from `api.py` itself rather than
-  // from spec §9's table — the router is pinned by an exact-count test
-  // (`tests/test_ipam_api.py::EXPECTED_ROUTE_COUNT = 40`) and is the contract.
+  // All THIRTY-EIGHT routes of that router, derived from `api.py` itself rather
+  // than from spec §9's table — the router is pinned by an exact-count test
+  // (`tests/test_ipam_api.py::EXPECTED_ROUTE_COUNT = 38`) and is the contract.
+  // `/ipam/sites` is gone (MSP clients phase 2): a VLAN's or a subnet's site is
+  // one of its client's sites, `listClientSites`. Every create's body names its
+  // client where nothing above it does (`modules/ipam/api.ts`).
   //
   // Three shapes here are NOT the obvious ones, and each is the API's choice:
   //   * `/drift` takes the class filter as `?class=`, aliased server-side away
@@ -4850,17 +4872,6 @@ export class ApiClient {
 
   createIpamVrf(body: IpamVrfCreate): Promise<IpamVrfOut> {
     return this.request<IpamVrfOut>("/ipam/vrfs", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  }
-
-  listIpamSites(): Promise<IpamSiteOut[]> {
-    return this.request<IpamSiteOut[]>("/ipam/sites");
-  }
-
-  createIpamSite(body: IpamSiteCreate): Promise<IpamSiteOut> {
-    return this.request<IpamSiteOut>("/ipam/sites", {
       method: "POST",
       body: JSON.stringify(body),
     });
