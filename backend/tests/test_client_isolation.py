@@ -85,6 +85,7 @@ from app.models import (
     InstallLink,
     IpamRange,
     IpamSubnet,
+    IpamVlan,
     IpamVrf,
     Job,
     JobLog,
@@ -492,6 +493,10 @@ PATHS: dict[str, tuple[str, Make]] = {
     # IPAM (0240). A subnet's client is its VRF's; a range's, its subnet's.
     "C-ipam_vrf": ("ipam_vrf", lambda w, s: IpamVrf(
         org_id=w.org, client_id=s.client, name=f"v-{uuid4().hex[:6]}"
+    )),
+    # Site-less: unique per client, so X's and Y's may share a number.
+    "C-ipam_vlan": ("ipam_vlan", lambda w, s: IpamVlan(
+        org_id=w.org, client_id=s.client, vid=uuid4().int % 4094 + 1
     )),
     "H-ipam_subnet-via-ipam_vrf": ("ipam_subnet", lambda w, s: IpamSubnet(
         org_id=w.org, vrf_id=s.vrf, prefix=f"10.{uuid4().int % 250 + 1}.{uuid4().int % 256}.0/24"

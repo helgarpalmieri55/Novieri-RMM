@@ -16,6 +16,10 @@ nothing at all.
 """
 
 import asyncio
+import importlib.util
+from datetime import timedelta
+from pathlib import Path
+from types import ModuleType
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -885,3 +889,193 @@ async def test_a_machine_s_own_addresses_go_into_its_client_s_network(api_env: A
             )
         ).one()
     assert (vrf_client, observed) == (x, x)
+
+
+# --------------------------------------------------------------------------- #
+# Review fix round (task-10-review.md M1-M3)
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_technician_of_x_creates_ipam_in_x(api_env: ApiEnv) -> None:
+    """The positive twin of the 404 test above (M2): a technician narrowed to
+    X files every kind of IPAM row in X -- each a 201, each row X's. A
+    refusal of narrowed sessions across the board would pass every refusal
+    test and fail this one."""
+    org = await api_env.create_org("i-narrow-ok")
+    x, x_site = await client_with_site(api_env, org)
+    await client_with_site(api_env, org)
+    x_tech = await everything_on(api_env, org, x)
+    c = str(x)
+    vrf = await _created(api_env, "/vrfs", {"name": "LAN", "client_id": c}, x_tech)
+    made: list[tuple[str, Any]] = [
+        ("vrf", vrf),
+        ("vlan", await _created(api_env, "/vlans", {"vid": 30, "client_id": c}, x_tech)),
+        ("sited vlan", await _created(
+            api_env, "/vlans", {"vid": 31, "site_id": str(x_site)}, x_tech)),
+        ("subnet", await _created(
+            api_env, "/subnets", {"prefix": "10.30.0.0/24", "vrf_id": vrf["id"]}, x_tech)),
+        ("global subnet", await _created(
+            api_env, "/subnets", {"prefix": "10.31.0.0/24", "client_id": c}, x_tech)),
+        ("address", await _created(
+            api_env, "/addresses",
+            {"address": "10.30.0.5", "reserve": True, "vrf_id": vrf["id"]}, x_tech)),
+        ("scope", await _created(
+            api_env, "/scan-authorizations",
+            {"prefix": "10.30.0.0/24", "vrf_id": vrf["id"]}, x_tech)),
+    ]
+    for name, out in made:
+        assert out["client_id"] == c, (name, out)
+    models = {
+        "vrf": IpamVrf, "vlan": IpamVlan, "sited vlan": IpamVlan, "subnet": IpamSubnet,
+        "global subnet": IpamSubnet, "address": IpamAddress, "scope": IpamScanAuthorization,
+    }
+    async with AsyncSession(api_env.admin_engine) as s:
+        for name, out in made:
+            model = models[name]
+            stored = (
+                await s.execute(select(model.client_id).where(model.id == UUID(out["id"])))
+            ).scalar_one()
+            assert stored == x, name
+
+
+async def test_the_database_keeps_a_subnet_s_vlan_in_its_client(api_env: ApiEnv) -> None:
+    """`fk_ipam_subnet_vlan_client` (M3): under scope all, with no application
+    in the way, a subnet of X cannot name Y's VLAN -- on INSERT or on UPDATE
+    -- while X's own VLAN is accepted (the positive control)."""
+    org = await api_env.create_org("i-fk-vlan")
+    x, _ = await client_with_site(api_env, org)
+    y, _ = await client_with_site(api_env, org)
+    async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
+        vrf = IpamVrf(org_id=org, client_id=x, name="LAN")
+        x_vlan = IpamVlan(org_id=org, client_id=x, vid=40)
+        y_vlan = IpamVlan(org_id=org, client_id=y, vid=40)
+        s.add_all([vrf, x_vlan, y_vlan])
+        await s.flush()
+        subnet = IpamSubnet(org_id=org, vrf_id=vrf.id, prefix="10.40.0.0/24", vlan_id=x_vlan.id)
+        s.add(subnet)
+        await s.commit()
+    with pytest.raises(DBAPIError, match="fk_ipam_subnet_vlan_client"):
+        async with org_session(org, clients=ClientScope.all(), engine=api_env.app_engine) as s:
+            s.add(IpamSubnet(org_id=org, vrf_id=vrf.id, prefix="10.41.0.0/24",
+                             vlan_id=y_vlan.id))
+            await s.flush()
+    with pytest.raises(DBAPIError, match="fk_ipam_subnet_vlan_client"):
+        async with org_session(org, clients=ClientScope.all(), engine=api_env.app_engine) as s:
+            await s.execute(
+                text("UPDATE ipam_subnet SET vlan_id = :v WHERE id = :i"),
+                {"v": y_vlan.id, "i": subnet.id},
+            )
+    async with org_session(org, clients=ClientScope.all(), engine=api_env.app_engine) as s:
+        s.add(IpamSubnet(org_id=org, vrf_id=vrf.id, prefix="10.42.0.0/24", vlan_id=x_vlan.id))
+        await s.flush()
+
+
+def _migration_0240() -> ModuleType:
+    """0240 itself, so the fold under test is the migration's own text."""
+    path = Path(__file__).resolve().parent.parent / "migrations" / "versions"
+    spec = importlib.util.spec_from_file_location(
+        "migration_0240", path / "0240_client_scope_ipam.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+async def test_the_migration_folds_colliding_vlans_into_one(api_env: ApiEnv) -> None:
+    """0240's VLAN fold (M1), run as the migration runs it: its own statements
+    (`VLAN_FOLD`, imported, not copied), in a transaction that is rolled back.
+
+    The fold runs before the client columns exist, so it runs here on
+    temporary copies of `ipam_vlan` and `ipam_subnet` (`pg_temp` comes first
+    on the search path, so the unqualified names in the statements resolve to
+    them): the head schema's client keys are not what it ran against, and
+    the rest of this database's VLANs are not its business. The copies have
+    the real columns (`LIKE ... INCLUDING DEFAULTS`).
+
+    Per organisation and number, the survivor is the site-less VLAN, else the
+    oldest, else (same age) the lowest id; subnets naming another are
+    repointed to it; the others are deleted. A number that does not repeat,
+    and another organisation's VLAN of the same number, are untouched."""
+    fold = _migration_0240().VLAN_FOLD
+    a, b = uuid4(), uuid4()
+    t0 = utcnow()
+
+    def at(minutes: int) -> Any:
+        return t0 + timedelta(minutes=minutes)
+
+    manila, cebu, davao = uuid4(), uuid4(), uuid4()
+    # name: (org, vid, site, created_at, id) -- two ids fixed, to decide a tie.
+    low, high = UUID(int=1), UUID(int=2)
+    vlans = {
+        "10-manila": (a, 10, manila, at(0), uuid4()),
+        "10-cebu": (a, 10, cebu, at(1), uuid4()),
+        "10-global": (a, 10, None, at(2), uuid4()),  # newest, but site-less: survives
+        "20-cebu": (a, 20, cebu, at(5), uuid4()),  # inserted first, but newer
+        "20-manila": (a, 20, manila, at(4), uuid4()),  # oldest: survives
+        "30-cebu": (a, 30, cebu, at(0), uuid4()),  # alone: untouched
+        "40-davao-high": (a, 40, davao, at(0), high),
+        "40-cebu-low": (a, 40, cebu, at(0), low),  # same age, lower id: survives
+        "b-10-manila": (b, 10, manila, at(9), uuid4()),  # another org: untouched
+    }
+    subnets = {  # subnet -> the VLAN it names before the fold
+        "s-10-cebu": "10-cebu",
+        "s-10-manila": "10-manila",
+        "s-10-global": "10-global",
+        "s-20-cebu": "20-cebu",
+        "s-30": "30-cebu",
+        "s-40": "40-davao-high",
+        "s-b": "b-10-manila",
+        "s-none": None,
+    }
+    async with AsyncSession(api_env.admin_engine) as s:
+        for table in ("ipam_vlan", "ipam_subnet"):
+            await s.execute(text(
+                f"CREATE TEMP TABLE {table} (LIKE public.{table} INCLUDING DEFAULTS) "
+                "ON COMMIT DROP"
+            ))
+        vlan_id = {}
+        for name, (org, vid, site, created, row_id) in vlans.items():
+            vlan_id[name] = row_id
+            await s.execute(
+                text(
+                    "INSERT INTO ipam_vlan (id, org_id, client_id, site_id, vid, name, "
+                    "description, created_at, updated_at) "
+                    "VALUES (:i, :o, :o, :s, :v, :n, '', :c, :c)"
+                ),
+                {"i": row_id, "o": org, "s": site, "v": vid, "n": name, "c": created},
+            )
+        subnet_id = {}
+        for n, (name, vlan) in enumerate(subnets.items()):
+            subnet_id[name] = uuid4()
+            org = b if name == "s-b" else a
+            await s.execute(
+                text(
+                    "INSERT INTO ipam_subnet (id, org_id, client_id, vrf_id, prefix, vlan_id, "
+                    "created_at, updated_at) VALUES (:i, :o, :o, :o, :p, :v, :c, :c)"
+                ),
+                {"i": subnet_id[name], "o": org, "p": f"10.{n}.0.0/24",
+                 "v": vlan_id[vlan] if vlan else None, "c": t0},
+            )
+        assert len(fold) == 2
+        for statement in fold:
+            await s.execute(text(statement))
+        left = set((await s.execute(text("SELECT name FROM ipam_vlan"))).scalars())
+        named = {
+            r.id: r.vlan_id
+            for r in (await s.execute(text("SELECT id, vlan_id FROM ipam_subnet"))).all()
+        }
+        await s.rollback()
+
+    assert left == {"10-global", "20-manila", "30-cebu", "40-cebu-low", "b-10-manila"}
+    by_name = {name: named[sid] for name, sid in subnet_id.items()}
+    assert by_name == {
+        "s-10-cebu": vlan_id["10-global"],
+        "s-10-manila": vlan_id["10-global"],
+        "s-10-global": vlan_id["10-global"],
+        "s-20-cebu": vlan_id["20-manila"],
+        "s-30": vlan_id["30-cebu"],
+        "s-40": vlan_id["40-cebu-low"],
+        "s-b": vlan_id["b-10-manila"],
+        "s-none": None,
+    }

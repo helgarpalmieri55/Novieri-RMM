@@ -62,7 +62,6 @@ from app.modules.ipam import observations as observation_service
 from app.modules.ipam import reconcile as reconcile_service
 from app.modules.ipam import registry as registry_service
 from app.modules.ipam import subnets as subnet_service
-from app.modules.ipam.clients import loaded_client
 from app.modules.ipam.errors import (
     IpamAuthorizationError,
     IpamClientError,
@@ -84,6 +83,7 @@ from app.modules.ipam.models import (
 )
 from app.modules.ipam.sweep import MIN_SWEEP_INTERVAL_HOURS, create_sweep
 from app.modules.ipam.sweep import list_sweep_runs as _list_sweep_runs
+from app.services.client_sites import loaded_client
 
 router = APIRouter(prefix="/ipam", tags=["ipam"])
 
@@ -103,7 +103,7 @@ def _http_error(exc: IpamError) -> HTTPException:
     if isinstance(exc, IpamNotFoundError):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
     if isinstance(exc, IpamTooLargeError):
-        return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
     if isinstance(exc, IpamClientError):
         # The row's client cannot be what the request makes it (MSP clients
         # plan 2026-10-26: a contradiction, a missing client, "Sin asignar").

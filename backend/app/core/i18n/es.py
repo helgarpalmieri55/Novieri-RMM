@@ -1412,11 +1412,11 @@ CATALOG: dict[str, str] = {
     "a VRF named {name} already exists in this client": (
         "ya existe en este cliente una VRF llamada {name}"
     ),
-    "site {site_id} not found": "no se encontró el sitio {site_id}",
+    "site {site_id} not found": "no se encontró la sede {site_id}",
     "VLAN {vlan_id} not found": "no se encontró la VLAN {vlan_id}",
     "vid must be an integer; got {vid}": "vid debe ser un entero; se recibió {vid}",
     "vid must be between 1 and 4094; got {vid}": "vid debe estar entre 1 y 4094; se recibió {vid}",
-    "at site {site_id}": "en el sitio {site_id}",
+    "at site {site_id}": "en la sede {site_id}",
     "without a site in this client": "sin sede en este cliente",
     "VLAN {vid} already exists {scope}": "la VLAN {vid} ya existe {scope}",
     "a {noun} named {name} already exists in this client": (

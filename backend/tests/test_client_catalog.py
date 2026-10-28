@@ -425,9 +425,13 @@ CLIENT_KEYS = {
     # row's client (plan 2026-10-26 Task 8): the keys those rows reference.
     "uq_expense_category_id_client",
     "uq_cost_center_id_client",
+    # A subnet's VLAN is of the subnet's client (plan 2026-10-26 Task 10
+    # review, M3): the key `fk_ipam_subnet_vlan_client` references.
+    "uq_ipam_vlan_id_client",
 }
 CLIENT_FK = re.compile(
-    r"fk_\w+_(client_org|site_client|person_client|category_client|cost_center_client)"
+    r"fk_\w+_(client_org|site_client|person_client|category_client|cost_center_client"
+    r"|vlan_client)"
 )
 
 
@@ -457,7 +461,8 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
                     "                       OR c.conname LIKE 'fk\\_%\\_site\\_client' "
                     "                       OR c.conname LIKE 'fk\\_%\\_person\\_client' "
                     "                       OR c.conname LIKE 'fk\\_%\\_category\\_client' "
-                    "                       OR c.conname LIKE 'fk\\_%\\_cost\\_center\\_client')) "
+                    "                       OR c.conname LIKE 'fk\\_%\\_cost\\_center\\_client' "
+                    "                       OR c.conname LIKE 'fk\\_%\\_vlan\\_client')) "
                     "   OR (c.contype = 'u' AND c.conname = ANY (:keys))"
                 ),
                 {"keys": sorted(CLIENT_KEYS)},
@@ -519,6 +524,8 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
             for t in ("budget_line", "expense")
             for parent in ("category", "cost_center")
         }
+        # A subnet's VLAN is of the subnet's client (Task 10 review, M3).
+        | {"fk_ipam_subnet_vlan_client"}
         | CLIENT_KEYS
     )
     assert set(live) == expected, f"live vs catalog: {sorted(set(live) ^ expected)}"

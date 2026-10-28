@@ -13,7 +13,12 @@ client's `sites` row take their place, pinned to the row's client by
 Existing subnets, VLANs and site servers lose their old IPAM site.
 
 Natural keys: a VRF's name and a site-less VLAN's number are per client; a
-VLAN with a site is unique per site (the site pins the client).
+VLAN with a site is unique per site (the site pins the client). A subnet's
+VLAN is of the subnet's client, pinned like its site:
+`(vlan_id, client_id) REFERENCES ipam_vlan (id, client_id)`
+(`fk_ipam_subnet_vlan_client`, over `uq_ipam_vlan_id_client`). A subnet that
+breaks that on the way in -- only a row naming another organisation's VRF or
+VLAN can -- has its VLAN cleared, as 0235 unlinks another client's person.
 
 A VLAN THAT LOSES ITS SITE CAN COLLIDE, and is folded into one row first.
 Until now VLAN 10 could exist once per IPAM site and once org-wide. With the
@@ -137,18 +142,21 @@ _VLAN_SURVIVOR = (
     ") AS keep FROM ipam_vlan v"
 )
 
+#: The fold, in order: repoint the subnets, then delete the others. A
+#: constant so `tests/test_client_scope_ipam.py` runs these very statements.
+VLAN_FOLD = (
+    f"UPDATE ipam_subnet s SET vlan_id = m.keep FROM ({_VLAN_SURVIVOR}) m "
+    "WHERE s.vlan_id = m.dup AND m.dup <> m.keep",
+    f"DELETE FROM ipam_vlan v USING ({_VLAN_SURVIVOR}) m "
+    "WHERE v.id = m.dup AND m.dup <> m.keep",
+)
+
 
 def upgrade() -> None:
     # A VLAN that loses its site may collide with another of its number: fold
     # them while the site still says which one was site-less.
-    op.execute(
-        f"UPDATE ipam_subnet s SET vlan_id = m.keep FROM ({_VLAN_SURVIVOR}) m "
-        "WHERE s.vlan_id = m.dup AND m.dup <> m.keep"
-    )
-    op.execute(
-        f"DELETE FROM ipam_vlan v USING ({_VLAN_SURVIVOR}) m "
-        "WHERE v.id = m.dup AND m.dup <> m.keep"
-    )
+    for statement in VLAN_FOLD:
+        op.execute(statement)
 
     # The old site references go first: a VLAN's client cannot be derived
     # from an IPAM site that has none.
@@ -169,6 +177,20 @@ def upgrade() -> None:
             "FOREIGN KEY (site_id, client_id) REFERENCES sites (id, client_id)"
         )
         op.execute(f"CREATE INDEX ix_{table}_site_id ON {table} (site_id)")
+
+    # A subnet's VLAN is of the subnet's client (0235's person technique). A
+    # subnet whose VLAN another client holds -- possible only through a row
+    # naming another organisation's VRF or VLAN, which the FKs never stopped
+    # -- loses the VLAN rather than abort the upgrade.
+    op.execute(
+        "UPDATE ipam_subnet s SET vlan_id = NULL FROM ipam_vlan v "
+        "WHERE v.id = s.vlan_id AND v.client_id <> s.client_id"
+    )
+    op.execute("ALTER TABLE ipam_vlan ADD CONSTRAINT uq_ipam_vlan_id_client UNIQUE (id, client_id)")
+    op.execute(
+        "ALTER TABLE ipam_subnet ADD CONSTRAINT fk_ipam_subnet_vlan_client "
+        "FOREIGN KEY (vlan_id, client_id) REFERENCES ipam_vlan (id, client_id)"
+    )
 
     op.execute("ALTER TABLE ipam_vrf DROP CONSTRAINT uq_ipam_vrf_org_name")
     op.execute(
@@ -194,6 +216,8 @@ def downgrade() -> None:
     op.execute("DROP INDEX uq_ipam_vlan_site_vid")
     op.execute("ALTER TABLE ipam_vrf DROP CONSTRAINT uq_ipam_vrf_client_name")
     op.execute("ALTER TABLE ipam_vrf ADD CONSTRAINT uq_ipam_vrf_org_name UNIQUE (org_id, name)")
+    op.execute("ALTER TABLE ipam_subnet DROP CONSTRAINT fk_ipam_subnet_vlan_client")
+    op.execute("ALTER TABLE ipam_vlan DROP CONSTRAINT uq_ipam_vlan_id_client")
     for table in SITED:
         op.execute(f"ALTER TABLE {table} DROP COLUMN site_id")
     for table, parent, _ in reversed(H):

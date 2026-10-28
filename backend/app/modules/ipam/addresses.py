@@ -68,7 +68,6 @@ from app.modules.ipam.allocation import (
     covering_range_kinds,
     is_network_or_broadcast,
 )
-from app.modules.ipam.clients import loaded_client
 from app.modules.ipam.errors import (
     IpamConflictError,
     IpamNotFoundError,
@@ -78,6 +77,7 @@ from app.modules.ipam.models import IpamAddress, IpamObservation, IpamSubnet
 from app.modules.ipam.net import parse_address, parse_mac
 from app.modules.ipam.registry import vrf_for_new_row
 from app.modules.ipam.subnets import containing_subnet
+from app.services.client_sites import loaded_client
 
 __all__ = [
     "ADDRESS_EDITABLE_FIELDS",

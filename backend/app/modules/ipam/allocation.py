@@ -52,7 +52,6 @@ from sqlalchemy.sql import text
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.models import Device, Policy
-from app.modules.ipam.clients import loaded_client
 from app.modules.ipam.errors import (
     IpamConflictError,
     IpamTooLargeError,
@@ -75,6 +74,7 @@ from app.modules.ipam.net import (
 )
 from app.modules.ipam.observations import observation_ttl_days
 from app.modules.ipam.subnets import get_subnet, lock_address_plan
+from app.services.client_sites import loaded_client
 
 __all__ = [
     "ADDRESS_STATES",

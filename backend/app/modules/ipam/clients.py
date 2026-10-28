@@ -10,16 +10,35 @@ cannot see is a 404, as a missing one is (spec §3.2's existence oracle); an
 archived one a 409; "Sin asignar" a 422 (C10). The site or VLAN a row names is
 of the row's client, a 422 before the composite key would say so.
 
-The client and the site are loaded as every new row's are
-(`app/services/client_sites.py`): FOR SHARE, held until commit, as the
-transaction's first locks -- before `ensure_default_vrf`'s insert, the
-address plan's advisory lock and the audit chain's.
+The lookups are the shared ones (`app/services/client_sites.py`); this module
+maps their refusals to IPAM's errors. A row's trigger-written client is read
+back with `client_sites.loaded_client`.
+
+LOCK ORDER. The client and the site are read FOR SHARE and held until commit,
+as every new row's are -- but not always first, and not always site first:
+
+* a VRF, or a VLAN without a site: the client;
+* a VLAN at a site: the site, then its client (`site_for_new_rows`'s order),
+  then the client again;
+* a subnet, an address or a scan authorization: the client
+  (`registry.vrf_for_new_row`) -- after which, without a VRF, the client's
+  `global` VRF may already have been INSERTED (`ensure_default_vrf`) -- then,
+  for a subnet, its site and the client again; then the address plan's
+  advisory lock, and the audit chain's last.
+
+None of these can deadlock against `archive_site` (the site FOR NO KEY
+UPDATE, then its client FOR SHARE) or `archive_client` (the client FOR NO KEY
+UPDATE, its first lock). Every client lock here, and `archive_site`'s, is FOR
+SHARE, which conflicts neither with another FOR SHARE nor with the KEY SHARE
+the VRF insert's foreign key takes: `archive_site` never waits on an IPAM
+write. `archive_client` holds nothing before the client and never locks a
+site. Neither archive touches a VRF row or the advisory lock, and an IPAM
+write waits for its site before it takes the audit chain. A write that meets
+an archive in flight waits for it, re-reads and gets the 409.
 """
 
-from typing import Any
 from uuid import UUID
 
-from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import tr
@@ -29,11 +48,12 @@ from app.services.client_sites import (
     ClientNotFound,
     NotAcceptingNewRows,
     SiteNotFound,
+    SiteOfAnotherClient,
     client_for_new_rows,
-    site_for_new_rows,
+    site_of_client,
 )
 
-__all__ = ["agreed_client", "client_for_new_row", "loaded_client", "site_of_client"]
+__all__ = ["agreed_client", "client_for_ipam_row", "site_for_ipam_row"]
 
 
 def agreed_client(derived: UUID | None, claimed: UUID | None) -> UUID:
@@ -56,9 +76,10 @@ def agreed_client(derived: UUID | None, claimed: UUID | None) -> UUID:
     return derived
 
 
-async def client_for_new_row(session: AsyncSession, org_id: UUID, client_id: UUID) -> UUID:
+async def client_for_ipam_row(session: AsyncSession, org_id: UUID, client_id: UUID) -> UUID:
     """`client_id`, once it may take a new IPAM row: visible (404), active
-    (409) and not "Sin asignar" (422). Read FOR SHARE until commit."""
+    (409) and not "Sin asignar" (422). Read FOR SHARE until commit
+    (`client_sites.client_for_new_rows`)."""
     try:
         client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
     except ClientNotFound:
@@ -70,31 +91,21 @@ async def client_for_new_row(session: AsyncSession, org_id: UUID, client_id: UUI
     return client.id
 
 
-async def site_of_client(
+async def site_for_ipam_row(
     session: AsyncSession, org_id: UUID, site_id: UUID, client_id: UUID | None
 ) -> UUID:
-    """The client of `site_id`, a site a new or edited row may name: visible
-    (404), not archived and of an active client (409) -- read FOR SHARE until
-    commit -- and, when `client_id` is given, that client's (422)."""
+    """The client of `site_id`, a site a new or edited IPAM row may name:
+    visible (404), not archived and of an active client (409) -- read FOR
+    SHARE until commit -- and, when `client_id` is given, that client's (422).
+    `client_sites.site_of_client`, in IPAM's errors."""
     try:
-        site = await site_for_new_rows(session, org_id=org_id, site_id=site_id)
+        site = await site_of_client(
+            session, org_id=org_id, site_id=site_id, client_id=client_id
+        )
     except SiteNotFound:
         raise IpamNotFoundError(tr("site {site_id} not found", site_id=site_id)) from None
     except NotAcceptingNewRows as exc:
         raise IpamConflictError(exc.detail) from None
-    if client_id is not None and site.client_id != client_id:
-        raise IpamClientError(
-            tr("site {site_id} belongs to another client", site_id=site_id)
-        )
+    except SiteOfAnotherClient as exc:
+        raise IpamClientError(exc.detail) from None
     return site.client_id
-
-
-async def loaded_client(session: AsyncSession, row: Any) -> UUID:
-    """`row.client_id`, read back if an UPDATE flush expired it. An H table's
-    client is `server_onupdate` (the trigger may change it), so after any
-    UPDATE of the row the attribute is unloaded -- and in an async session a
-    lazy load is a `MissingGreenlet`, not a query."""
-    if "client_id" in sa_inspect(row).unloaded:
-        await session.refresh(row, ["client_id"])
-    client_id: UUID = row.client_id
-    return client_id

@@ -67,7 +67,7 @@ from sqlalchemy.sql import text
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.models import Device, DocRecord
-from app.modules.ipam.clients import loaded_client, site_of_client
+from app.modules.ipam.clients import site_for_ipam_row
 from app.modules.ipam.errors import (
     IpamClientError,
     IpamConflictError,
@@ -84,6 +84,7 @@ from app.modules.ipam.models import (
 )
 from app.modules.ipam.net import IPNetwork, parse_address
 from app.modules.ipam.registry import counted, get_vlan, vrf_for_new_row
+from app.services.client_sites import loaded_client
 
 __all__ = [
     "RANGE_KINDS",
@@ -243,9 +244,10 @@ async def _validate_references(
     subnet's client's (422; another client's the caller cannot see is a 404).
     The foreign keys are org-blind and referential-integrity checks run as the
     referenced table's owner, so RLS does not close this either; the site is
-    also pinned by `fk_ipam_subnet_site_client`, the VLAN only here."""
+    also pinned by `fk_ipam_subnet_site_client` and the VLAN by
+    `fk_ipam_subnet_vlan_client` (migration 0240), which this 422 comes before."""
     if site_id is not None:
-        await site_of_client(session, org_id, site_id, client_id)
+        await site_for_ipam_row(session, org_id, site_id, client_id)
     if vlan_id is not None:
         vlan = await get_vlan(session, org_id, vlan_id)
         if vlan.client_id != client_id:

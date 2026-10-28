@@ -16,6 +16,15 @@ the caller. Two refusals, the same everywhere:
 Reads are not refused here: an archived site's link settings and an archived
 client's devices stay readable.
 
+A row that already HAS a client and names a site -- a subnet, a VLAN, a site
+server -- loads it through `site_of_client`, which adds a third refusal,
+`SiteOfAnotherClient` (a 422: the site is visible, just not this row's). And a
+row whose client a trigger writes (an H table, MSP clients spec §2.4) reads
+it back after an UPDATE with `loaded_client`. Both serve every module that
+files rows under a client's site (IPAM and site servers, migration 0240), so
+neither is re-implemented per module; each module maps the exceptions to its
+own errors, as it does `SiteNotFound` and `NotAcceptingNewRows`.
+
 THE CHECK HOLDS UNTIL COMMIT (final review, T9R2 N1). The client is read FOR
 SHARE, and the site with it, so the "not archived" answer cannot go stale
 under a writer: an archive holds the client's row FOR NO KEY UPDATE (and
@@ -34,8 +43,10 @@ after the previous target's audit is the one such path (a cycle there needs an
 archive of a client with no active device, and resolves as one 40P01).
 """
 
+from typing import Any
 from uuid import UUID
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +66,15 @@ class ClientNotFound(LookupError):
 
 class NotAcceptingNewRows(Exception):
     """An archived site or client: a 409 whose `detail` is the sentence."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+class SiteOfAnotherClient(Exception):
+    """A site the caller can see, of another client than the row naming it:
+    a 422 whose `detail` is the sentence (`site_of_client`)."""
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
@@ -146,3 +166,29 @@ async def client_for_new_rows(
     if client.status == CLIENT_ARCHIVED:
         raise NotAcceptingNewRows(tr("that client is archived"))
     return client
+
+
+async def site_of_client(
+    session: AsyncSession, *, org_id: UUID, site_id: UUID, client_id: UUID | None
+) -> Site:
+    """`site_for_new_rows` (FOR SHARE, site then client, held until commit),
+    for a row that names a site: when the row already has a client,
+    `client_id`, a site of another client is `SiteOfAnotherClient`. With
+    `client_id` None the row takes the site's client (`site.client_id`)."""
+    site = await site_for_new_rows(session, org_id=org_id, site_id=site_id)
+    if client_id is not None and site.client_id != client_id:
+        raise SiteOfAnotherClient(
+            tr("site {site_id} belongs to another client", site_id=site_id)
+        )
+    return site
+
+
+async def loaded_client(session: AsyncSession, row: Any) -> UUID:
+    """`row.client_id`, read back if an UPDATE flush expired it. An H table's
+    client is `server_onupdate` (its trigger may change it), so after any
+    UPDATE of the row the attribute is unloaded -- and in an async session a
+    lazy load is a `MissingGreenlet`, not a query."""
+    if "client_id" in sa_inspect(row).unloaded:
+        await session.refresh(row, ["client_id"])
+    client_id: UUID = row.client_id
+    return client_id

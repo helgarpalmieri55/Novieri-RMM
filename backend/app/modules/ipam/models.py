@@ -56,7 +56,8 @@ EVERY TABLE BELONGS TO A CLIENT (MSP clients spec, Annex A; migration 0240).
 other seven are H: trigger `its_client_from_parent` copies it from the VRF
 or the subnet the row hangs from -- never sent, read back from the INSERT.
 A VLAN, a subnet and a site server name a `sites` row of their own client
-(`fk_<table>_site_client`); `ipam_site` is gone (spec §1.2).
+(`fk_<table>_site_client`), and a subnet a VLAN of its own client
+(`fk_ipam_subnet_vlan_client`); `ipam_site` is gone (spec §1.2).
 """
 
 from datetime import UTC, datetime
@@ -69,6 +70,7 @@ from sqlalchemy import (
     Computed,
     FetchedValue,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -177,6 +179,8 @@ class IpamVlan(Base):
         CheckConstraint("vid BETWEEN 1 AND 4094", name="ck_ipam_vlan_vid_range"),
         client_org_fk("ipam_vlan"),
         site_client_fk("ipam_vlan"),
+        # What `fk_ipam_subnet_vlan_client` references (migration 0240).
+        UniqueConstraint("id", "client_id", name="uq_ipam_vlan_id_client"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
@@ -239,6 +243,15 @@ class IpamSubnet(Base):
             name="ck_ipam_subnet_sweep_interval",
         ),
         site_client_fk("ipam_subnet"),
+        # A subnet's VLAN is of the subnet's client (migration 0240). A
+        # foreign key ignores RLS, so under scope all this is what keeps X's
+        # subnet off Y's VLAN when the application check is not in the way; a
+        # NULL vlan_id skips it.
+        ForeignKeyConstraint(
+            ["vlan_id", "client_id"],
+            ["ipam_vlan.id", "ipam_vlan.client_id"],
+            name="fk_ipam_subnet_vlan_client",
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()

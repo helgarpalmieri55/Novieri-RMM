@@ -89,7 +89,6 @@ from app.core.events import publish
 from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.models import Agent, Organization
-from app.modules.ipam.clients import loaded_client
 from app.modules.ipam.errors import IpamNotFoundError, IpamValidationError
 from app.modules.ipam.models import (
     IpamAddress,
@@ -100,6 +99,7 @@ from app.modules.ipam.models import (
 )
 from app.modules.ipam.net import IPNetwork, parse_address
 from app.modules.ipam.observations import observation_ttl_days
+from app.services.client_sites import loaded_client
 
 __all__ = [
     "DORMANT_CLASS",

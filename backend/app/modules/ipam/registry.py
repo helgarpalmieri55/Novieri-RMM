@@ -62,7 +62,7 @@ from sqlalchemy.sql import text
 
 from app.core.audit import audit_service
 from app.core.i18n import tr
-from app.modules.ipam.clients import agreed_client, client_for_new_row, site_of_client
+from app.modules.ipam.clients import agreed_client, client_for_ipam_row, site_for_ipam_row
 from app.modules.ipam.errors import (
     IpamConflictError,
     IpamNotFoundError,
@@ -221,7 +221,7 @@ async def ensure_default_vrf(session: AsyncSession, org_id: UUID, client_id: UUI
     `index_where` is involved -- unlike the VLAN pair below.
 
     The caller vouches for `client_id`: it was loaded with
-    `clients.client_for_new_row`, or is a device's own client.
+    `clients.client_for_ipam_row`, or is a device's own client.
 
     No audit event; see this module's docstring for why (it is a lock-ordering
     decision, not an omission).
@@ -261,16 +261,16 @@ async def vrf_for_new_row(
     Named, the VRF decides the client (404 when it is not visible) and the
     body's `client_id`, if any, must agree (422). Not named, the body's client
     is required and its `global` VRF is the one (§0.7), created on demand. The
-    client is loaded as a new row's (`clients.client_for_new_row`) either way:
+    client is loaded as a new row's (`clients.client_for_ipam_row`) either way:
     an archived one takes nothing new, in a VRF it already has or not.
     """
     if vrf_id is not None:
         vrf = await get_vrf(session, org_id, vrf_id)
-        client = await client_for_new_row(
+        client = await client_for_ipam_row(
             session, org_id, agreed_client(vrf.client_id, client_id)
         )
         return vrf.id, client
-    client = await client_for_new_row(session, org_id, agreed_client(None, client_id))
+    client = await client_for_ipam_row(session, org_id, agreed_client(None, client_id))
     return await ensure_default_vrf(session, org_id, client), client
 
 
@@ -288,7 +288,7 @@ async def create_vrf(
     client: nothing above it could. The name is unique within the client."""
     _validate_text(name, "name", _MAX_VRF_NAME)
     _validate_text(rd, "rd", _MAX_VRF_RD, required=False)
-    client_id = await client_for_new_row(session, org_id, client_id)
+    client_id = await client_for_ipam_row(session, org_id, client_id)
 
     now = _utcnow()
     inserted_id = (
@@ -463,8 +463,8 @@ async def create_vlan(
     _validate_text(name, "name", _MAX_VLAN_NAME, required=False)
     derived = None
     if site_id is not None:
-        derived = await site_of_client(session, org_id, site_id, None)
-    client_id = await client_for_new_row(session, org_id, agreed_client(derived, client_id))
+        derived = await site_for_ipam_row(session, org_id, site_id, None)
+    client_id = await client_for_ipam_row(session, org_id, agreed_client(derived, client_id))
 
     _, index_elements, index_where = _VLAN_INDEX_BY_SCOPE[site_id is not None]
     now = _utcnow()
@@ -521,7 +521,7 @@ async def update_vlan(
     new_site_id: UUID | None = merged["site_id"]
     if "site_id" in fields and new_site_id is not None:
         # One of the VLAN's own client's sites: a VLAN does not change client.
-        await site_of_client(session, org_id, new_site_id, vlan.client_id)
+        await site_for_ipam_row(session, org_id, new_site_id, vlan.client_id)
 
     # Moving a VLAN between sites, or from a site to site-less, moves it
     # between the two partial indexes -- so the duplicate check has to be made

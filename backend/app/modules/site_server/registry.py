@@ -54,7 +54,6 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,7 +70,13 @@ from app.modules.site_server.errors import (
 from app.modules.site_server.models import SiteServer
 from app.modules.site_server.net import parse_segment, segment_strings
 from app.modules.site_server.words import ROLE_WORDS
-from app.services.client_sites import NotAcceptingNewRows, SiteNotFound, site_for_new_rows
+from app.services.client_sites import (
+    NotAcceptingNewRows,
+    SiteNotFound,
+    SiteOfAnotherClient,
+    loaded_client,
+    site_of_client,
+)
 
 __all__ = [
     "MAX_SEGMENTS",
@@ -166,22 +171,21 @@ async def _device_in_org(session: AsyncSession, org_id: UUID, device_id: UUID) -
     return device
 
 
-async def _site_of_client(
+async def _site_for_site_server(
     session: AsyncSession, org_id: UUID, site_id: UUID, client_id: UUID
 ) -> None:
     """`site_id` may hold a site server of `client_id`: a site this session
     can see (404), not archived and of an active client (409, read FOR SHARE
-    until commit, as every new row's site is), and that client's (422)."""
+    until commit, as every new row's site is), and that client's (422).
+    `client_sites.site_of_client`, in this module's errors."""
     try:
-        site = await site_for_new_rows(session, org_id=org_id, site_id=site_id)
+        await site_of_client(session, org_id=org_id, site_id=site_id, client_id=client_id)
     except SiteNotFound:
         raise SiteServerNotFoundError(tr("site {site_id} not found", site_id=site_id)) from None
     except NotAcceptingNewRows as exc:
         raise SiteServerConflictError(exc.detail) from None
-    if site.client_id != client_id:
-        raise SiteServerClientError(
-            tr("site {site_id} belongs to another client", site_id=site_id)
-        )
+    except SiteOfAnotherClient as exc:
+        raise SiteServerClientError(exc.detail) from None
 
 
 async def promote(
@@ -254,7 +258,7 @@ async def promote(
     checked_segments = _validated_segments(segments)
     checked_roles = _validated_roles(roles)
     if site_id is not None:
-        await _site_of_client(session, org_id, site_id, device.client_id)
+        await _site_for_site_server(session, org_id, site_id, device.client_id)
 
     row = SiteServer(
         org_id=org_id,
@@ -394,7 +398,7 @@ async def update_site_server(
     # Read before the flush below: it expires the trigger-written client.
     client_id = row.client_id
     if changes.get("site_id") is not None:
-        await _site_of_client(session, org_id, changes["site_id"], client_id)
+        await _site_for_site_server(session, org_id, changes["site_id"], client_id)
 
     before = {
         "segments": segment_strings(row.segments),
@@ -416,8 +420,7 @@ async def update_site_server(
     row.updated_at = _utcnow()
     session.add(row)
     await session.flush()
-    if "client_id" in sa_inspect(row).unloaded:  # the response names it
-        await session.refresh(row, ["client_id"])
+    await loaded_client(session, row)  # the response names it
 
     await audit_service.record(
         session,
