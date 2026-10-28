@@ -81,6 +81,8 @@ export interface DeploymentExecuteResponse {
 
 export interface DeviceDeploymentHistory {
   deployment_id: string;
+  /** The deployment's client: the device's, written by the server. */
+  client_id: string;
   package_id: string;
   action: string;
   state: string;

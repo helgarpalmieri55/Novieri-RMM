@@ -69,6 +69,7 @@ from app.modules.deploy.script_policies import (
     update_policy,
 )
 from app.modules.deploy.scripts import author_script, edit_script, run_script
+from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
 
 #: The job a deployment becomes, for the review gate's refusal at creation.
 DEPLOY_JOB_TYPE = "app.deploy"
@@ -155,6 +156,8 @@ class DeviceResultOut(BaseModel):
 
 class DeploymentDetailOut(BaseModel):
     deployment_id: UUID
+    #: The target's client, written by the database (migration 0239).
+    client_id: UUID
     state: str
     action: str
     package_id: UUID
@@ -164,6 +167,8 @@ class DeploymentDetailOut(BaseModel):
 
 class DeviceDeploymentHistoryOut(BaseModel):
     deployment_id: UUID
+    #: The deployment's client: the device's (migration 0239).
+    client_id: UUID
     package_id: UUID
     action: str
     state: str
@@ -269,6 +274,8 @@ class ScriptPolicyRunOut(BaseModel):
 
 class ExposedDeploymentOut(BaseModel):
     deployment_id: UUID
+    #: The target's client, written by the database (migration 0239).
+    client_id: UUID
     state: str
     action: str
     package_id: UUID
@@ -584,6 +591,19 @@ async def create_deployment(
         if target is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("deployment target not found"))
         target_client, review_state = target
+        # A deployment is a new row of that client, and an archived client
+        # takes none (a 409). Its row, read FOR SHARE and held to commit, is
+        # this create's FIRST lock (`client_sites`); the authorizing change's
+        # module guard takes the same lock again. Unassigned is not refused:
+        # a device waiting for its client may still need software.
+        try:
+            await client_for_new_rows(session, org_id=ctx.org_id, client_id=target_client)
+        except ClientNotFound:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, tr("deployment target not found")
+            ) from None
+        except NotAcceptingNewRows as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
         # A single named device waiting for review is refused NOW, with the
         # review gate's own 409, rather than accepted as a deployment that
         # can never dispatch (install-link spec §1.5).
@@ -1021,6 +1041,7 @@ async def device_deployment_history(
             await session.execute(
                 select(
                     DeploymentResult.deployment_id,
+                    Deployment.client_id,
                     Deployment.package_id,
                     Deployment.action,
                     DeploymentResult.state,
@@ -1041,6 +1062,7 @@ async def device_deployment_history(
         return [
             DeviceDeploymentHistoryOut(
                 deployment_id=r.deployment_id,
+                client_id=r.client_id,
                 package_id=r.package_id,
                 action=r.action,
                 state=r.state,

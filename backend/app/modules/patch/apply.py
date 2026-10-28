@@ -123,7 +123,11 @@ async def _change_gate(
     allowed = {
         patch_id
         for patch_id, approval_id in approvals
-        if await has_authorizing_change(session, org_id, "patch_approval", approval_id)
+        # No client rule yet: plan 2026-10-26 Task 14 names the client these
+        # approvals are for (C8).
+        if await has_authorizing_change(
+            session, org_id, "patch_approval", approval_id, client_id=None
+        )
     }
     withheld = approved_ids - allowed
     if withheld:
@@ -138,6 +142,8 @@ async def _change_gate(
                 "needs an approved change linked to the approval"
             ),
             metadata={"patch_ids": sorted(str(p) for p in withheld)},
+            # Patch refusals carry no client until plan 2026-10-26 Task 14 (C8).
+            client_id=None,
         )
     return allowed
 

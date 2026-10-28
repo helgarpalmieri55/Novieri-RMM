@@ -80,7 +80,7 @@ async def deployment_refusal(
         session, org_id, deployment.target_type, deployment.target_id, client_id=client_id
     )
     if reason is None or await has_authorizing_change(
-        session, org_id, "deployment", deployment.id
+        session, org_id, "deployment", deployment.id, client_id=client_id
     ):
         return None
     await record_gate_refusal(

@@ -269,22 +269,39 @@ async def authorizing_change(
 
 
 async def has_authorizing_change(
-    session: AsyncSession, org_id: UUID, action_type: str, action_id: UUID
+    session: AsyncSession,
+    org_id: UUID,
+    action_type: str,
+    action_id: UUID,
+    *,
+    client_id: UUID | None,
 ) -> bool:
-    return (
-        await session.execute(
-            select(ChangeLink.id)
-            .join(ChangeRequest, ChangeRequest.id == ChangeLink.change_id)
-            .where(
-                ChangeLink.org_id == org_id,
-                ChangeRequest.org_id == org_id,
-                ChangeLink.action_type == action_type,
-                ChangeLink.action_id == action_id,
-                ChangeRequest.state.in_(AUTHORIZING_STATES),
-            )
-            .limit(1)
+    """Whether an approved (or implementing) change is linked to the action.
+
+    `client_id` is the action's client -- a deployment's -- and has NO
+    default: only a change OF THAT CLIENT authorizes it. Links made now are
+    always same-client (`authorizing_change`, the link resolvers, an
+    automatic change), but 0237 filed every existing change and link under
+    the internal client, so a deployment of X made before 0239 can be linked
+    to an approved change that is not X's; it must not pass X's gate.
+
+    None asks for no client: the patch sweep, until plan 2026-10-26 Task 14
+    names the client its approvals are for (C8).
+    """
+    query = (
+        select(ChangeLink.id)
+        .join(ChangeRequest, ChangeRequest.id == ChangeLink.change_id)
+        .where(
+            ChangeLink.org_id == org_id,
+            ChangeRequest.org_id == org_id,
+            ChangeLink.action_type == action_type,
+            ChangeLink.action_id == action_id,
+            ChangeRequest.state.in_(AUTHORIZING_STATES),
         )
-    ).first() is not None
+    )
+    if client_id is not None:
+        query = query.where(ChangeRequest.client_id == client_id)
+    return (await session.execute(query.limit(1))).first() is not None
 
 
 async def link_actions(
@@ -401,11 +418,11 @@ async def record_gate_refusal(
     target_id: str,
     reason: str,
     metadata: dict[str, Any] | None = None,
-    client_id: UUID | None = None,
+    client_id: UUID | None,
 ) -> None:
     """`client_id` is the refused action's client where it has one -- a
-    deployment's (plan 2026-10-26 Task 9); None for a ring's approval, which
-    can reach many."""
+    deployment's (plan 2026-10-26 Task 9) -- and has NO default: every caller
+    decides. None for a ring's approval, which can reach many clients."""
     await audit_service.record(
         session,
         org_id=org_id,

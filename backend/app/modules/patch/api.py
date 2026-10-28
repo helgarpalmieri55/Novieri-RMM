@@ -1043,6 +1043,8 @@ async def _approve_with_change(
                     target_id=ring_name,
                     reason=refusal,
                     metadata={"patch_ids": [str(p) for p in patch_ids]},
+                    # A ring's approval can reach many clients.
+                    client_id=None,
                 )
             else:
                 outcomes = await approve_patches(

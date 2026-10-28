@@ -201,6 +201,7 @@ const getDeviceDeployments: FixtureMap["getDeviceDeployments"] = (deviceId) => {
     .filter((d) => d.target_type === "device" && d.target_id === deviceId)
     .map((d) => ({
       deployment_id: d.id,
+      client_id: d.client_id,
       package_id: d.package_id,
       action: d.action,
       state: d.state === "complete" ? "installed" : d.state === "failed" ? "failed" : "pending",
@@ -212,6 +213,7 @@ const getDeviceDeployments: FixtureMap["getDeviceDeployments"] = (deviceId) => {
   if (deviceId === "dev-1") {
     rows.push({
       deployment_id: "dep-chrome-041-old",
+      client_id: ORG_ID,
       package_id: "pkg-chrome-128",
       action: "install",
       state: "installed",

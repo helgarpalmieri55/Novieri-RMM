@@ -34,7 +34,7 @@ from app.models import (
     Job,
     Package,
 )
-from app.modules.change_mgmt.gates import deployment_gate
+from app.modules.change_mgmt.gates import authorizing_change, deployment_gate
 from app.modules.deploy import api as deploy_api
 from app.modules.deploy.dispatch import dispatch_deployment, ingest_deploy_result
 from app.modules.deploy.schema import AppDeployResult
@@ -44,6 +44,33 @@ from tests.test_deploy_dispatch import _FakeArtifactSigner, _FakeJobEngine
 
 DEPLOYMENTS = "/api/v1/deploy/deployments"
 MODULE_OFF = "this client does not use that module"
+
+#: Some session other than the holder's (`:me`) is waiting for a `clients`
+#: row the holder locked. Postgres shows that wait in two rows: the waiter
+#: takes the row's TUPLE lock on `clients` (granted) and then waits for the
+#: holder's TRANSACTION (a `transactionid` lock, not granted) -- so a filter
+#: on `relation = 'clients' AND NOT granted` sees nothing. A second waiter
+#: would queue on the tuple lock itself, not granted; that counts too.
+WAITS_ON_A_CLIENT_ROW = text(
+    "SELECT count(*) FROM pg_locks t "
+    "WHERE t.locktype = 'tuple' AND t.relation = 'clients'::regclass AND t.pid <> :me "
+    "AND (NOT t.granted OR EXISTS ("
+    "  SELECT 1 FROM pg_locks w JOIN pg_locks h ON h.transactionid = w.transactionid "
+    "  WHERE w.pid = t.pid AND w.locktype = 'transactionid' AND NOT w.granted "
+    "  AND h.pid = :me AND h.locktype = 'transactionid' AND h.granted))"
+)
+
+
+async def _wait_until_blocked(observer: AsyncSession, holder_pid: int) -> bool:
+    for _ in range(400):
+        await asyncio.sleep(0.025)
+        waiting = (
+            await observer.execute(WAITS_ON_A_CLIENT_ROW, {"me": holder_pid})
+        ).scalar_one()
+        await observer.rollback()
+        if waiting:
+            return True
+    return False
 
 
 async def _device(
@@ -155,6 +182,15 @@ async def test_a_deployment_takes_its_target_s_client(api_env: ApiEnv) -> None:
         assert r.json()["client_id"] == str(x)
     listed = await api_env.client.get(DEPLOYMENTS, headers=admin)
     assert {d["client_id"] for d in listed.json()} == {str(x)}
+    # Every client in scope, and still the request's own 404 for a target
+    # that does not exist -- not the database's refusal of the row.
+    for target_type in ("device", "group"):
+        missing = await api_env.client.post(
+            DEPLOYMENTS, json=_body(package, target_type, uuid4()), headers=admin
+        )
+        assert (missing.status_code, missing.json()) == (
+            404, {"detail": "deployment target not found"}
+        ), missing.text
 
 
 async def test_a_technician_of_x_cannot_deploy_to_y(api_env: ApiEnv) -> None:
@@ -435,15 +471,16 @@ async def test_a_change_of_a_client_without_the_module_cannot_authorize(api_env:
     assert await _written(api_env, org) == before
 
 
-async def test_the_authorizing_change_takes_the_client_before_the_audit_chain(
+async def test_the_create_takes_the_client_before_the_audit_chain(
     api_env: ApiEnv,
 ) -> None:
-    """The module guard reads the client FOR SHARE and must be the create's
-    FIRST lock: an archive (or a module switch) holds the client and takes
-    the audit chain's lock next, so a create that audited first and read the
-    client after would deadlock with it (40P01). With the client held, the
-    create waits BEFORE the audit lock; the holder takes that lock and
-    commits; the create then goes through."""
+    """The create reads its target's client FOR SHARE as its FIRST lock --
+    the new row's client (`client_for_new_rows`), which the authorizing
+    change's module guard then takes again: an archive (or a module switch)
+    holds the client and takes the audit chain's lock next, so a create that
+    audited first and read the client after would deadlock with it (40P01).
+    With the client held, the create waits BEFORE the audit lock; the holder
+    takes that lock and commits; the create then goes through."""
     org = await api_env.create_org("d-lock")
     x, x_site = await client_with_site(api_env, org)
     admin = await _admin(api_env, org)
@@ -461,18 +498,7 @@ async def test_the_authorizing_change_takes_the_client_before_the_audit_chain(
         )
         me = (await holder.execute(text("SELECT pg_backend_pid()"))).scalar_one()
         create = asyncio.create_task(api_env.client.post(DEPLOYMENTS, json=body, headers=admin))
-        for _ in range(400):
-            await asyncio.sleep(0.025)
-            waiting = (
-                await observer.execute(
-                    text("SELECT count(*) FROM pg_locks WHERE NOT granted AND pid <> :me"),
-                    {"me": me},
-                )
-            ).scalar_one()
-            await observer.rollback()
-            if waiting:
-                break
-        else:
+        if not await _wait_until_blocked(observer, me):
             create.cancel()
             pytest.fail("the create never waited on the client lock")
         await holder.execute(
@@ -483,9 +509,137 @@ async def test_the_authorizing_change_takes_the_client_before_the_audit_chain(
     assert r.status_code == 201, r.text
 
 
+async def test_the_authorizing_change_holds_its_client_until_commit(api_env: ApiEnv) -> None:
+    """`authorizing_change` itself, not only the create around it: the
+    module guard it runs reads the client FOR SHARE and holds it, so the
+    "module on" it answered cannot go stale under a switch-off before the
+    link is written. Task 14's patch path will rely on exactly this."""
+    org = await api_env.create_org("d-lock-unit")
+    x, _ = await client_with_site(api_env, org)
+    admin = await _admin(api_env, org)
+    await _modules(api_env, admin, x, "change")
+    change = await _approved_change(api_env, admin, x)
+
+    async def authorize() -> UUID:
+        async with org_session(org, clients=ClientScope.all(), engine=api_env.app_engine) as s:
+            return (await authorizing_change(s, org, change, client_id=x)).id
+
+    async with AsyncSession(api_env.admin_engine) as holder, AsyncSession(
+        api_env.admin_engine
+    ) as observer:
+        await holder.execute(
+            text("SELECT id FROM clients WHERE id = :x FOR NO KEY UPDATE"), {"x": x}
+        )
+        me = (await holder.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+        task = asyncio.create_task(authorize())
+        if not await _wait_until_blocked(observer, me):
+            task.cancel()
+            pytest.fail("authorizing_change never waited on the client lock")
+        await holder.commit()
+    assert await task == change
+
+
+async def test_an_archived_client_s_target_takes_no_new_deployment(api_env: ApiEnv) -> None:
+    """A deployment is a new row of its target's client, and an archived
+    client takes none (`client_for_new_rows`): a 409 with its sentence, and
+    nothing written. The Unassigned client is not refused."""
+    org = await api_env.create_org("d-archived")
+    archived, _ = await client_with_site(api_env, org, client_archived=True)
+    group = await _group(api_env, org, archived)
+    admin = await _admin(api_env, org)
+    package = await _package(api_env, org)
+    before = await _written(api_env, org)
+    r = await api_env.client.post(DEPLOYMENTS, json=_body(package, "group", group),
+                                  headers=admin)
+    assert (r.status_code, r.json()) == (409, {"detail": "that client is archived"}), r.text
+    assert await _written(api_env, org) == before
+
+    # "Sin asignar" is not refused: what waits for its client may still need
+    # software.
+    async with AsyncSession(api_env.admin_engine) as s:
+        unassigned = (
+            await s.execute(
+                text("SELECT id FROM clients WHERE org_id = :o AND kind = 'unassigned'"),
+                {"o": org},
+            )
+        ).scalar_one()
+    waiting = await _group(api_env, org, unassigned)
+    r = await api_env.client.post(DEPLOYMENTS, json=_body(package, "group", waiting),
+                                  headers=admin)
+    assert r.status_code == 201, r.text
+    assert r.json()["client_id"] == str(unassigned)
+
+
+async def test_every_deployment_output_names_its_client(api_env: ApiEnv) -> None:
+    """Plan: every output of a client's row carries `client_id` -- the list
+    and the create (`DeploymentOut`), the detail, a device's history and the
+    fleet report."""
+    org = await api_env.create_org("d-outputs")
+    x, x_site = await client_with_site(api_env, org)
+    admin = await _admin(api_env, org)
+    device = await _device(api_env, org, x, x_site)
+    package = await _package(api_env, org)
+    created = await api_env.client.post(DEPLOYMENTS, json=_body(package, "device", device),
+                                        headers=admin)
+    assert created.status_code == 201, created.text
+    deployment = created.json()["id"]
+    run = await api_env.client.post(f"{DEPLOYMENTS}/{deployment}/execute", headers=admin)
+    assert run.status_code == 200, run.text
+
+    detail = await api_env.client.get(f"{DEPLOYMENTS}/{deployment}", headers=admin)
+    history = await api_env.client.get(f"/api/v1/deploy/devices/{device}/deployments",
+                                       headers=admin)
+    fleet = await api_env.client.get("/api/v1/deploy/report", headers=admin)
+    assert detail.json()["client_id"] == str(x), detail.text
+    assert [h["client_id"] for h in history.json()] == [str(x)], history.text
+    assert [d["client_id"] for d in fleet.json()["deployments"]] == [str(x)], fleet.text
+
+
 # --------------------------------------------------------------------------- #
 # Gates and the automatic change are the deployment's client's
 # --------------------------------------------------------------------------- #
+
+
+async def test_only_the_deployment_s_client_s_change_authorizes_its_dispatch(
+    api_env: ApiEnv,
+) -> None:
+    """0237 filed every existing change, and every link to one, under the
+    internal client, so a deployment of X made before 0239 can carry a link
+    to an approved change that is not X's. At dispatch that link must not
+    pass X's gate; X's own approved change still does. Planted under scope
+    all, which is where such a row is reachable."""
+    org = await api_env.create_org("d-authorized")
+    x, x_site = await client_with_site(api_env, org)
+    admin = await _admin(api_env, org)
+    await _modules(api_env, admin, x, "change")
+    package = await _package(api_env, org)
+    deployment = await _seed_deployment(
+        api_env, org, package, "device", await _device(api_env, org, x, x_site)
+    )
+    theirs = await _approved_change(api_env, admin, org)  # the internal client's
+    ours = await _approved_change(api_env, admin, x)
+    async with AsyncSession(api_env.admin_engine) as s:
+        s.add(ChangeGate(org_id=org, device_group_id=None, applies_to_patches=False,
+                         applies_to_deployments=True))
+        await s.commit()
+
+    async def plant(change: UUID) -> None:
+        async with org_session(org, clients=ClientScope.all(), engine=api_env.app_engine) as s:
+            linked_by = (
+                await s.execute(
+                    select(ChangeRequest.created_by).where(ChangeRequest.id == change)
+                )
+            ).scalar_one()
+            s.add(ChangeLink(org_id=org, change_id=change, action_type="deployment",
+                             action_id=deployment, linked_by=linked_by))
+
+    await plant(theirs)
+    refused = await api_env.client.post(f"{DEPLOYMENTS}/{deployment}/execute", headers=admin)
+    assert refused.status_code == 409, refused.text
+    await plant(ours)
+    ran = await api_env.client.post(f"{DEPLOYMENTS}/{deployment}/execute", headers=admin)
+    assert ran.status_code == 200, ran.text
+    assert len(ran.json()["job_ids"]) == 1
 
 
 async def test_the_gate_is_the_deployment_s_client_s(api_env: ApiEnv) -> None:

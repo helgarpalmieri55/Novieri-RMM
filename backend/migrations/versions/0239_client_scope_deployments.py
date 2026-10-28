@@ -6,10 +6,14 @@ device or one group, and a group is one client's (0231). Like `jobs` (0231's
 which has no foreign key. SECURITY INVOKER: a target the session cannot see
 reads as NULL and the write is refused by name.
 
-Existing rows take their target's client; a row whose target is gone takes
-the internal client, whose id is the organisation's. The trigger fires only
-on the columns that name the target or the client, so such a row's state
-still changes; retargeting it needs a target that exists.
+Existing rows take their target's client: a device or a group of the row's
+own organisation, of the type the row names. Until now `create_deployment`
+never resolved `target_id` (research-3 §E5), so a row may name a target that
+is gone, another organisation's, or of the other type; each of those takes
+the internal client, whose id is the organisation's, instead of a client the
+`fk_deployments_client_org` key would refuse mid-upgrade. The trigger fires
+only on the columns that name the target or the client, so such a row's
+state still changes; retargeting it needs a real target.
 
 Of the common block, `_add_c`, `_isolate` and `_drop_c` are used here; the
 block is copied whole all the same, as the plan requires.
@@ -89,10 +93,13 @@ def _drop_h(table: str, parent: str) -> None:
     op.execute(f"DROP TRIGGER IF EXISTS its_client_from_parent ON {table}")
     op.execute(f"ALTER TABLE {table} DROP COLUMN client_id")
 
+
 BACKFILL = (
     "COALESCE("
-    "(SELECT client_id FROM devices WHERE id = deployments.target_id), "
-    "(SELECT client_id FROM device_groups WHERE id = deployments.target_id), "
+    "(SELECT d.client_id FROM devices d WHERE d.id = deployments.target_id "
+    "AND d.org_id = deployments.org_id AND deployments.target_type = 'device'), "
+    "(SELECT g.client_id FROM device_groups g WHERE g.id = deployments.target_id "
+    "AND g.org_id = deployments.org_id AND deployments.target_type = 'group'), "
     "deployments.org_id)"
 )
 
