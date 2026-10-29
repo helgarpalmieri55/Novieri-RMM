@@ -32,7 +32,7 @@ import hmac
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import UUID
 
 from sqlalchemy import exists, func, select, text, update
@@ -41,15 +41,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.core.audit import audit_service
 from app.core.events import publish as publish_event
 from app.core.i18n import N_, tr
-from app.core.rbac import codes_held_anywhere, has_permission
+from app.core.rbac import has_permission
 from app.models import Agent, Device, Job, JobStatus
+from app.modules.agent_push.checkout import require_checkout_in, require_checkout_somewhere
 from app.modules.agent_push.credential_scope import resolve_push_credential
 from app.modules.agent_push.errors import (
     PushConflictError,
     PushError,
     PushListChangedError,
     PushNotFoundError,
-    PushPermissionError,
     PushValidationError,
 )
 from app.modules.agent_push.locks import lock_target_scope, sites_of
@@ -69,6 +69,7 @@ from app.modules.agent_push.run_contract import (
 from app.modules.agent_push.run_list import LIST_REASONS, expand_prefix
 
 __all__ = [
+    "LiveRun",
     "PUSH_RUN_AUTH_FAILURE_LIMIT",
     "PUSH_RUN_CONCURRENCY",
     "RUN_REFUSAL_REASONS",
@@ -83,7 +84,7 @@ __all__ = [
     "get_run",
     "list_runs",
     "list_targets",
-    "org_ids_with_live_runs",
+    "live_runs",
     "pause_run",
     "resume_run",
     "run_counts",
@@ -487,25 +488,19 @@ async def resume_run(
 
     Needs `credentials.checkout` as well as `agent.push.run` -- in the run's
     client (Task 12) -- because resuming causes stored secrets to be
-    decrypted and presented again. The waiting targets' sites and client are
-    locked before the resume's audit: the pacer the API runs next, in this
-    transaction, mints their tokens after it (`locks.lock_target_scope`)."""
-    refused = PushPermissionError(
-        tr(
-            "resuming a push run requires the `credentials.checkout` permission as "
-            "well as `agent.push.run`: it presents a stored secret to the machines "
-            "still waiting"
-        )
+    decrypted and presented again. Once the run's state allows the resume,
+    the waiting targets' sites and client are locked before the resume's
+    audit: the pacer the API runs next, in this transaction, mints their
+    tokens after it (`locks.lock_target_scope`)."""
+    refusal = tr(
+        "resuming a push run requires the `credentials.checkout` permission as "
+        "well as `agent.push.run`: it presents a stored secret to the machines "
+        "still waiting"
     )
-    if "credentials.checkout" not in await codes_held_anywhere(session, actor_id):
-        raise refused
+    await require_checkout_somewhere(session, actor_id, refusal)
     stamp = now or _utcnow()
     run = await _locked_run(session, org_id, run_id)
-    if not await has_permission(
-        session, actor_id, "credentials.checkout", client_id=run.client_id
-    ):
-        raise refused
-    await _lock_waiting_scope(session, run)
+    await require_checkout_in(session, actor_id, run.client_id, refusal)
     if run.state not in ("paused", "stopped_credential"):
         final = tr(" A cancelled run is final.") if run.state == "cancelled" else ""
         raise PushConflictError(
@@ -516,6 +511,10 @@ async def resume_run(
                 final=final,
             )
         )
+    # This run will mint (the pacer the API runs next, in this transaction):
+    # its waiting targets' sites and client before the resume's audit. A
+    # refused resume mints nothing and takes none of them.
+    await _lock_waiting_scope(session, run)
     from_state = run.state
     run.state = "running"
     run.auth_window_started_at = await _next_window_start(session, run, stamp)
@@ -1130,8 +1129,9 @@ async def advance_run(
 
     1. `SELECT ... FOR UPDATE` on the run: two concurrent callers (the beat, a
        person's Start or Resume) serialize here, so in-flight never exceeds
-       `PUSH_RUN_CONCURRENCY`. Then the waiting targets' sites and client FOR
-       SHARE, before any audit of this pass (`locks.lock_target_scope`).
+       `PUSH_RUN_CONCURRENCY`. Then, for a RUNNING run only -- the one kind
+       that mints -- the waiting targets' sites and client FOR SHARE, before
+       any audit of this pass (`locks.lock_target_scope`).
     2. Settle every in-flight target from its job row.
     3. Only while the run is `running`: stop it as `stopped_credential` if the
        lockout guard's limit is reached (§1.4a); otherwise re-run the whole
@@ -1153,7 +1153,12 @@ async def advance_run(
     ).scalar_one_or_none()
     if run is None:
         return []
-    await _lock_waiting_scope(session, run)
+    if run.state == "running":
+        # Only a running run mints tokens on this pass; it takes its waiting
+        # targets' sites and client before anything here audits. A paused,
+        # stopped or cancelled one is only settled -- its audits take the
+        # chain with no site or client held -- and locks neither.
+        await _lock_waiting_scope(session, run)
     await _reconcile(session, run, stamp)
     envelopes: list[Envelope] = []
     if run.state != "running":
@@ -1190,11 +1195,20 @@ def _live_condition() -> Any:
     return PushRun.state.in_(PUSH_RUN_ACTIVE_STATES) | in_flight
 
 
-async def org_ids_with_live_runs(admin_engine: AsyncEngine) -> list[tuple[UUID, UUID, UUID]]:
-    """`(org_id, run_id, client_id)` of every live run -- running, paused or
-    `stopped_credential` (never resumed by the beat, only settled), or
-    cancelled with installs still in flight to settle -- oldest first within
-    an org, in ONE statement.
+class LiveRun(NamedTuple):
+    """One live run as the beat finds it: whose (`org_id`), which (`run_id`),
+    and the client whose scope it is advanced in (`client_id`)."""
+
+    org_id: UUID
+    run_id: UUID
+    client_id: UUID
+
+
+async def live_runs(admin_engine: AsyncEngine) -> list[LiveRun]:
+    """Every live run -- running, paused or `stopped_credential` (never
+    resumed by the beat, only settled), or cancelled with installs still in
+    flight to settle -- with its org and client, oldest first within an org,
+    in ONE statement.
 
     Read on the ADMIN engine, exactly as `agent_update.reconcile._org_ids`
     is: the beat must find the runs before it can open a tenant session for
@@ -1206,4 +1220,4 @@ async def org_ids_with_live_runs(admin_engine: AsyncEngine) -> list[tuple[UUID, 
             .where(_live_condition())
             .order_by(PushRun.org_id, PushRun.created_at, PushRun.id)
         )
-        return [(row.org_id, row.id, row.client_id) for row in rows]
+        return [LiveRun(row.org_id, row.id, row.client_id) for row in rows]

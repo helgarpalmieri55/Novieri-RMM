@@ -39,13 +39,13 @@ from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import N_, tr, tr_marked
-from app.core.rbac import codes_held_anywhere, has_permission
+from app.modules.agent_push.checkout import require_checkout_in, require_checkout_somewhere
 from app.modules.agent_push.credential_scope import (
     credential_client,
     resolve_push_credential,
 )
 from app.modules.agent_push.dispatch import pre_dispatch_checks
-from app.modules.agent_push.errors import PushPermissionError, PushValidationError
+from app.modules.agent_push.errors import PushValidationError
 from app.modules.agent_push.models import PushAuthorization
 from app.modules.agent_push.net import IPAddress, parse_prefix, parse_target_address
 from app.modules.agent_push.preflight import VOUCHED_PROVENANCE, TargetDecision, evaluate_targets
@@ -151,21 +151,6 @@ _CHECKOUT_REQUIRED = N_(
 )
 
 
-async def _checkout_anywhere(session: AsyncSession, actor_id: UUID) -> None:
-    """The conjunction's first half: `credentials.checkout` in SOME client,
-    refused before anything is read for a caller who may decrypt nothing
-    anywhere."""
-    if "credentials.checkout" not in await codes_held_anywhere(session, actor_id):
-        raise PushPermissionError(tr_marked(_CHECKOUT_REQUIRED))
-
-
-async def _checkout_in(session: AsyncSession, actor_id: UUID, client_id: UUID) -> None:
-    """The conjunction in the run's client -- the credential's (Task 12): a
-    technician holding both codes on one client builds runs there."""
-    if not await has_permission(session, actor_id, "credentials.checkout", client_id=client_id):
-        raise PushPermissionError(tr_marked(_CHECKOUT_REQUIRED))
-
-
 async def authorized_prefixes(
     session: AsyncSession,
     org_id: UUID,
@@ -192,14 +177,14 @@ async def authorized_prefixes(
         PushAuthorization.revoked_at.is_(None),
         or_(PushAuthorization.expires_at.is_(None), PushAuthorization.expires_at > stamp),
     )
+    refusal = tr_marked(_CHECKOUT_REQUIRED)
     if credential_id is None:
-        if not await has_permission(session, actor_id, "credentials.checkout"):
-            raise PushPermissionError(tr_marked(_CHECKOUT_REQUIRED))
+        await require_checkout_in(session, actor_id, None, refusal)
     else:
-        await _checkout_anywhere(session, actor_id)
+        await require_checkout_somewhere(session, actor_id, refusal)
         credential = await resolve_push_credential(session, org_id, credential_id)
         client_id = credential_client(credential)
-        await _checkout_in(session, actor_id, client_id)
+        await require_checkout_in(session, actor_id, client_id, refusal)
         query = query.where(PushAuthorization.client_id == client_id)
     rows = await session.execute(query.order_by(PushAuthorization.prefix))
     return list(rows.scalars())
@@ -350,12 +335,13 @@ async def expand_prefix(
       active authorizations exactly as authorized, a list longer than
       `PUSH_RUN_LIST_MAX`, or more than `PUSH_RUN_MAX` ready machines.
     """
-    await _checkout_anywhere(session, actor_id)
+    refusal = tr_marked(_CHECKOUT_REQUIRED)
+    await require_checkout_somewhere(session, actor_id, refusal)
     stamp = now or _utcnow()
     canonical = str(parse_prefix(prefix))
     credential = await resolve_push_credential(session, org_id, credential_id)
     client_id = credential_client(credential)
-    await _checkout_in(session, actor_id, client_id)
+    await require_checkout_in(session, actor_id, client_id, refusal)
     if not await _is_authorized_prefix(session, org_id, client_id, canonical, stamp):
         raise PushValidationError(
             tr(

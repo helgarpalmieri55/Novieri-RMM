@@ -652,6 +652,7 @@ _GUARDED_SHELLS = {
     # Push runs (design 2026-09-30 §1.4): the pacer's backstop signs install
     # jobs per org and decrypts a credential for each, so one org's failure
     # (an OpenBao hiccup, a signer outage) must not skip every other org's run.
+    # Contained per RUN since Task 12's review (`_NARROWER_UNIT`).
     "push_run_tick_all_orgs",
     # docs/modules/ai-automation.md §9.1 names this sweep specifically: "a
     # failure in one org must not abort the others -- the pattern the worker
@@ -680,8 +681,18 @@ _GUARDED_SHELLS = {
 }
 
 
+#: Shells whose unit of containment is NARROWER than an org, by the name of
+#: the loop variable that unit is iterated under. The push-run beat contains
+#: each RUN (MSP clients plan 2026-10-26, Task 12 review): with one active run
+#: per client, one client's failing run must not starve another client's run
+#: in the same org, so the guard sits inside the per-run loop and that is the
+#: loop checked below.
+_NARROWER_UNIT = {"push_run_tick_all_orgs": "run"}
+
+
 def _org_loops() -> dict[str, ast.For]:
-    """Every worker function with a `for org_id in ...` loop, by name."""
+    """Every worker function with a `for org_id in ...` loop -- or, for a
+    shell in `_NARROWER_UNIT`, its per-unit loop -- by name."""
     from app import worker
 
     source = textwrap.dedent(inspect.getsource(worker))
@@ -689,11 +700,12 @@ def _org_loops() -> dict[str, ast.For]:
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef):
             continue
+        unit = _NARROWER_UNIT.get(node.name, "org_id")
         for loop in ast.walk(node):
             if (
                 isinstance(loop, ast.For)
                 and isinstance(loop.target, ast.Name)
-                and loop.target.id == "org_id"
+                and loop.target.id == unit
             ):
                 found[node.name] = loop
     return found

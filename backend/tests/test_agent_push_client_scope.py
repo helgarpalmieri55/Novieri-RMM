@@ -189,12 +189,17 @@ async def test_an_address_held_by_two_clients_names_the_credential_s_clients_mac
             assert (decision.device_id, decision.site_server_device_id) == (asset, ss_device)
 
     # A person narrowed to X who names Y's client sees none of Y's rows: no
-    # machine, no authorization, no originator -- refused, never X's.
+    # machine, no authorization, no scope, no originator -- refused, never
+    # X's. Exactly these four: the address IS a vouched machine this session
+    # sees -- X's, of another client than the push's -- so the ladder names it
+    # `credential_missing`, never `no_asset`.
     crossed = await _decide(
         app_engine, org, y_credential, ClientScope.only([x_client]), client_id=y_client
     )
     assert crossed.device_id is None and crossed.site_server_device_id is None
-    assert "no_asset" in crossed.refusals or "credential_missing" in crossed.refusals
+    assert crossed.refusals == (
+        "credential_missing", "no_authorization", "credential_not_scoped", "no_site_server"
+    )
 
 
 async def test_two_assets_of_one_client_at_one_address_are_not_ambiguous(

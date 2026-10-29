@@ -738,6 +738,10 @@ def _guarded_calls(function_name: str) -> list[tuple[int, str]]:
         if name in (
             "evaluate_targets",
             "has_permission",
+            # The `credentials.checkout` conjunction, shared by every push
+            # path since the Task 12 review (`agent_push/checkout.py`).
+            "require_checkout_somewhere",
+            "require_checkout_in",
             "create",
             "signed_envelope",
             "publish_job",
@@ -762,8 +766,11 @@ def test_the_authorization_ladder_runs_before_anything_that_could_be_signed() ->
     """
     calls = _guarded_calls("request_push_batch")
     names = [name for _, name in calls]
-    assert names[0] == "has_permission", names
+    # The conjunction first, somewhere and then in the credential's client,
+    # and both before the ladder (plan 2026-10-26 Task 12).
+    assert names[0] == "require_checkout_somewhere", names
     assert "evaluate_targets" in names, names
+    assert names.index("require_checkout_in") < names.index("evaluate_targets"), names
     forbidden = {"create", "signed_envelope", "publish_job", "sign"} & set(names)
     assert forbidden == set(), (
         f"request_push_batch calls {sorted(forbidden)}: cycle B1 dispatches "

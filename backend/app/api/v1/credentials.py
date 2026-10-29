@@ -33,7 +33,7 @@ def _windows_domain_realm(secret: str) -> str:
     try:
         return credential_realm.realm_of_secret(secret)
     except credential_realm.InvalidWindowsDomainAccount as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
 
 router = APIRouter(prefix="/credentials", tags=["credentials"])
 

@@ -159,7 +159,7 @@ def _http_error(exc: PushError) -> HTTPException:
         # failed for WHICH address is a refusal nobody can act on (spec §9),
         # and a flat string would make the console re-parse prose to render it.
         return HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             {
                 "message": str(exc),
                 "targets": [

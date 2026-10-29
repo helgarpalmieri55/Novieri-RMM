@@ -72,7 +72,7 @@ async def _resolve_wake(
        `wake_on_lan` today gets a run and no wake. After this they may get a
        422 -- which is the difference between "we ignored you" and "we cannot do
        that". (422, not 400: `api.py` maps every `ProvisioningValidationError`
-       out of this path to `HTTP_422_UNPROCESSABLE_ENTITY`. This paragraph said
+       out of this path to `HTTP_422_UNPROCESSABLE_CONTENT`. This paragraph said
        400 and was wrong about its own route.) Raised here, before
        `ProvisionRun` is constructed, so a refused wake leaves NO run behind
        rather than a half-provisioned one.

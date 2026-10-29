@@ -99,7 +99,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
 from app.core.i18n import N_, tr, tr_marked
-from app.core.rbac import codes_held_anywhere, has_permission
+from app.modules.agent_push.checkout import require_checkout_in, require_checkout_somewhere
 from app.modules.agent_push.credential_scope import (
     credential_client,
     resolve_push_credential,
@@ -107,7 +107,6 @@ from app.modules.agent_push.credential_scope import (
 from app.modules.agent_push.errors import (
     PushAuthorizationError,
     PushError,
-    PushPermissionError,
     PushValidationError,
 )
 from app.modules.agent_push.net import IPAddress, parse_target_address
@@ -259,7 +258,8 @@ class TargetDecision:
 
     address: str
     #: The push's client -- its credential's -- in which every bound was read.
-    client_id: UUID | None = None
+    #: Required: every audit and event of the address is filed under it.
+    client_id: UUID
     device_id: UUID | None = None
     authorization_id: UUID | None = None
     credential_scope_id: UUID | None = None
@@ -822,15 +822,12 @@ async def request_push_batch(
     permission to see its name -- a side door around the credential module's
     own gate (spec §2.5, §8).
     """
-    if "credentials.checkout" not in await codes_held_anywhere(session, actor_id):
-        raise PushPermissionError(tr_marked(_CHECKOUT_REQUIRED))
+    refusal = tr_marked(_CHECKOUT_REQUIRED)
+    await require_checkout_somewhere(session, actor_id, refusal)
     addresses = _validated_batch(targets)
     credential = await resolve_push_credential(session, org_id, credential_id)
     client_id = credential_client(credential)
-    if not await has_permission(
-        session, actor_id, "credentials.checkout", client_id=client_id
-    ):
-        raise PushPermissionError(tr_marked(_CHECKOUT_REQUIRED))
+    await require_checkout_in(session, actor_id, client_id, refusal)
     decisions = await evaluate_targets(
         session,
         org_id,

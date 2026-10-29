@@ -1312,6 +1312,100 @@ async def test_the_beat_continues_each_client_s_run_in_that_client_s_scope(
     assert mine == {base.site_server_device_id, xw.site_server_device_id}
 
 
+async def test_one_client_s_failing_run_does_not_starve_another_s(
+    api_env: ApiEnv, pg_cluster: PgCluster, tmp_path: Path, beat: list[Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Containment is per RUN (Task 12 review): two clients' live runs in one
+    org, and advancing the one the beat finds first raises. The other is
+    still advanced -- and published -- on the same beat."""
+    from app import worker
+    from app.core.config import override_settings
+
+    base, xw, x, _x_site = await _client_world(api_env, "beat-starve", octet=214, count=1)
+    await F.seed_asset(api_env, base.org.org_id, primary_ip=f"{base.prefix[:-4]}10")
+    await F.seed_confirmed_host_key(api_env, base.org, address=f"{base.prefix[:-4]}10")
+    worlds = {
+        await start_run(api_env.app_engine, base): base,
+        await start_run(api_env.app_engine, xw): xw,
+    }
+    first, second = [
+        r for r in await runs.live_runs(api_env.admin_engine) if r.org_id == base.org.org_id
+    ]
+    assert {first.client_id, second.client_id} == {base.org.org_id, x}
+    real = runs.advance_run
+
+    async def _flaky(session: Any, org_id: UUID, run_id: UUID, **kw: Any) -> Any:
+        if run_id == first.run_id:
+            raise RuntimeError("this run's pass fails")
+        return await real(session, org_id, run_id, **kw)
+
+    monkeypatch.setattr(runs, "advance_run", _flaky)
+    with override_settings(_settings(pg_cluster, tmp_path)):
+        await worker.push_run_tick_all_orgs()
+    sent = {d for d, _e in beat}
+    assert worlds[second.run_id].site_server_device_id in sent
+    assert worlds[first.run_id].site_server_device_id not in sent
+
+
+async def test_a_run_from_before_0241_with_another_client_s_machine_is_refused_no_asset(
+    api_env: ApiEnv, pg_cluster: PgCluster, tmp_path: Path, beat: list[Any],
+) -> None:
+    """Before 0241 a run was the organisation's: its credential could be X's
+    (through X's group) and a target the internal client's machine. 0241
+    filed the run, and so the target, under X without a retroactive check
+    (`its_push_run_target_device_guard` guards writes, not old rows). Under
+    the beat -- X's scope, where the internal client's machine is invisible
+    -- that target fails closed as `no_asset`: nothing signed, minted or
+    published, and nothing written but the refusal's audit (and the run's
+    completion, its only target settled), both in X."""
+    from app import worker
+    from app.core.config import override_settings
+
+    _base, xw, x, _x_site = await _client_world(api_env, "beat-pre0241", octet=216, count=0)
+    org = xw.org.org_id
+    address = f"{xw.prefix[:-4]}50"
+    internal_machine = await F.seed_asset(api_env, org, primary_ip=address)
+    async with AsyncSession(api_env.admin_engine) as s:
+        run = PushRun(org_id=org, client_id=x, credential_id=xw.credential_id,
+                      prefix=xw.prefix, list_digest="c" * 64, target_count=1,
+                      state="running", created_by=xw.org.user_id,
+                      auth_window_started_at=func.now())
+        s.add(run)
+        await s.flush()
+        # As 0241 left such a row: the guard is a write rule, so the row is
+        # written past it here, in one transaction that restores it.
+        await s.execute(text(
+            "ALTER TABLE push_run_target DISABLE TRIGGER its_push_run_target_device_guard"
+        ))
+        s.add(PushRunTarget(org_id=org, run_id=run.id, device_id=internal_machine,
+                            address=address, position=0, state="waiting"))
+        await s.flush()
+        await s.execute(text(
+            "ALTER TABLE push_run_target ENABLE TRIGGER its_push_run_target_device_guard"
+        ))
+        run.sealed_at = func.now()
+        run_id = run.id
+        await s.commit()
+    before = await _written(api_env, org)
+    with override_settings(_settings(pg_cluster, tmp_path)):
+        await worker.push_run_tick_all_orgs()
+    async with AsyncSession(api_env.admin_engine) as s:
+        (target,) = (
+            await s.execute(select(PushRunTarget).where(PushRunTarget.run_id == run_id))
+        ).scalars()
+    assert (target.state, target.job_id, list(target.reasons)) == ("refused", None, ["no_asset"])
+    assert xw.site_server_device_id not in {d for d, _e in beat}
+    after = await _written(api_env, org)
+    assert {k: after[k] - before[k] for k in after if after[k] != before[k]} == {
+        "audit_events": 2
+    }
+    assert [
+        a for a in await _audits(api_env, org)
+        if a[0] in ("push.refused", "push.dispatched", "push.run.completed")
+    ] == [("push.refused", x), ("push.run.completed", x)]
+
+
 async def test_finding_the_live_runs_is_one_statement(api_env: ApiEnv) -> None:
     """No fan-out (lesson 3): however many runs of however many clients, the
     beat finds them with one statement, and the triples name each run's own
@@ -1329,7 +1423,7 @@ async def test_finding_the_live_runs_is_one_statement(api_env: ApiEnv) -> None:
     engine = api_env.admin_engine.sync_engine
     event.listen(engine, "before_cursor_execute", tick)
     try:
-        live = await runs.org_ids_with_live_runs(api_env.admin_engine)
+        live = await runs.live_runs(api_env.admin_engine)
     finally:
         event.remove(engine, "before_cursor_execute", tick)
     assert len([q for q in seen if "push_run" in q]) == 1, seen
@@ -1657,6 +1751,82 @@ async def test_a_resume_takes_its_sites_and_client_before_push_run_resumed(
         api_env, org, world.client_id, _resume_and_pace, "the resume"
     )
     assert [d for d, _e in envelopes] == [world.site_server_device_id]
+
+
+@pytest.mark.parametrize("state", ["paused", "stopped_credential"])
+async def test_a_run_that_will_not_mint_locks_no_site_or_client(
+    api_env: ApiEnv, tmp_path: Path, state: str
+) -> None:
+    """A paused or stopped run's pass only settles: it mints nothing, so it
+    takes none of its targets' sites or client (Task 12 review). Held FOR NO
+    KEY UPDATE as an archive holds them, with a 2 s `lock_timeout` on the
+    pass: it goes straight through. Taking the scope before the state check
+    would wait on them, and time out."""
+    world = await run_world(api_env, f"lock-{state[:6]}", octet=218, count=2)
+    run_id = await start_run(api_env.app_engine, world)
+    org = world.org.org_id
+    if state == "paused":
+        async with org_session(org, engine=api_env.app_engine, clients=ClientScope.all()) as s:
+            await runs.pause_run(s, org, run_id=run_id, actor_id=world.org.user_id)
+    else:
+        async with AsyncSession(api_env.admin_engine) as s:
+            await s.execute(
+                text("UPDATE push_run SET state = 'stopped_credential', stopped_at = now()"
+                     " WHERE id = :r"), {"r": run_id},
+            )
+            await s.commit()
+    from app.models import Device
+
+    async with AsyncSession(api_env.admin_engine) as holder:
+        sites = sorted(set((await holder.execute(
+            select(Device.site_id).where(Device.id.in_(world.device_ids))
+        )).scalars()))
+        await holder.execute(
+            text("SELECT id FROM sites WHERE id = ANY(:s) FOR NO KEY UPDATE"), {"s": sites}
+        )
+        await holder.execute(
+            text("SELECT id FROM clients WHERE id = :c FOR NO KEY UPDATE"),
+            {"c": world.client_id},
+        )
+        async with org_session(org, engine=api_env.app_engine,
+                               clients=ClientScope.only([world.client_id])) as s:
+            await s.execute(text("SET LOCAL lock_timeout = '2s'"))
+            envelopes = await runs.advance_run(
+                s, org, run_id, dispatcher=make_dispatcher(tmp_path)
+            )
+        await holder.rollback()
+    assert envelopes == []
+
+
+async def test_a_refused_resume_locks_no_site_or_client(
+    api_env: ApiEnv, tmp_path: Path
+) -> None:
+    """`resume_run` takes the scope only once the run's state allows the
+    resume. A running run cannot be resumed: the 409 comes at once, past
+    sites and a client held as an archive holds them, never a lock wait."""
+    from app.models import Device
+    from app.modules.agent_push.errors import PushConflictError
+
+    world = await run_world(api_env, "lock-refresume", octet=220, count=1)
+    run_id = await start_run(api_env.app_engine, world)
+    org = world.org.org_id
+    async with AsyncSession(api_env.admin_engine) as holder:
+        sites = sorted(set((await holder.execute(
+            select(Device.site_id).where(Device.id.in_(world.device_ids))
+        )).scalars()))
+        await holder.execute(
+            text("SELECT id FROM sites WHERE id = ANY(:s) FOR NO KEY UPDATE"), {"s": sites}
+        )
+        await holder.execute(
+            text("SELECT id FROM clients WHERE id = :c FOR NO KEY UPDATE"),
+            {"c": world.client_id},
+        )
+        with pytest.raises(PushConflictError, match="only a paused push run"):
+            async with org_session(org, engine=api_env.app_engine,
+                                   clients=ClientScope.all()) as s:
+                await s.execute(text("SET LOCAL lock_timeout = '2s'"))
+                await runs.resume_run(s, org, run_id=run_id, actor_id=world.org.user_id)
+        await holder.rollback()
 
 
 async def test_the_lock_scope_takes_nothing_of_another_org(api_env: ApiEnv) -> None:
