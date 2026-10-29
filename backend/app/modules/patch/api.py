@@ -35,11 +35,10 @@ from app.api.deps import AuthContext, require_permission
 from app.core.audit import audit_service
 from app.core.csv_export import escape_formula
 from app.core.global_rows import refuse_unless_every_client
-from app.core.i18n import tr
+from app.core.i18n import N_, tr
 from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job
 from app.models import Device, DevicePatchStatus, Patch, PatchApproval, PatchPolicy
-from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.change_mgmt.gates import (
     authorizing_change,
     gate_said,
@@ -81,7 +80,7 @@ from app.modules.patch.reporting import (
     update_rollup,
 )
 from app.modules.patch.schema import PatchScanParams
-from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
+from app.services.client_sites import ClientRefusesNewRow, named_client_for_new_rows
 
 router = APIRouter(prefix="/patch", tags=["patch"])
 
@@ -301,6 +300,21 @@ class BulkApprovalResponse(BaseModel):
     already_in_force: int
 
 
+class RingClientCountOut(BaseModel):
+    """How many of one ring's machines are one client's.
+
+    A client's patch approval reaches only its own machines in the ring, a
+    global one all of them (MSP clients plan 2026-10-26 Task 14 review), so
+    the console states an approval's reach from this row. A list of rows
+    rather than a map keyed by client id: a map's keys are data, and a
+    response with an open key space can never be an AI read tool
+    (`tests/test_ai_tool_surface.py`, property 6).
+    """
+
+    client_id: UUID
+    device_count: int
+
+
 class RingOut(BaseModel):
     """One deployment ring, and how many of this org's devices land in it.
 
@@ -314,6 +328,13 @@ class RingOut(BaseModel):
     ring_name: str
     ring_order: int
     device_count: int
+    #: Of `device_count`, how many are each client's, one row per client
+    #: with a machine in the ring (a client absent has none), in client-id
+    #: order. A client's approval reaches only its own, a global one all of
+    #: them, so the console states an approval's reach by its owner (MSP
+    #: clients plan 2026-10-26 Task 14 review). Counted under the request's
+    #: RLS, like `device_count`, so the two add up.
+    client_device_counts: list[RingClientCountOut]
 
 
 class RingListResponse(BaseModel):
@@ -425,6 +446,10 @@ class DeviceRollupOut(BaseModel):
     """
 
     device_id: UUID
+    #: The machine's client: an approval made from its drill-down is filed
+    #: under it (the operator's rule of 2026-10-28; MSP clients plan
+    #: 2026-10-26 Task 14 review).
+    client_id: UUID
     hostname: str
     os_family: str
     outstanding: int
@@ -1031,19 +1056,17 @@ async def create_approvals_bulk(
 
 async def _approval_client(session: AsyncSession, org_id: UUID, client_id: UUID) -> None:
     """The client a new approval is filed under, read FOR SHARE as the
-    write's FIRST lock (`client_for_new_rows`): a client the request cannot
-    see is a 404, an archived one a 409, Unassigned a 422."""
+    write's FIRST lock (`named_client_for_new_rows`): a client the request
+    cannot see is a 404, an archived one a 409, Unassigned a 422."""
     try:
-        client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
-    except ClientNotFound:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such client")) from None
-    except NotAcceptingNewRows as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
-    if client.kind == CLIENT_KIND_UNASSIGNED:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            tr("a patch approval cannot be filed under Unassigned"),
+        await named_client_for_new_rows(
+            session,
+            org_id=org_id,
+            client_id=client_id,
+            unassigned=N_("a patch approval cannot be filed under Unassigned"),
         )
+    except ClientRefusesNewRow as exc:
+        raise HTTPException(exc.status_code, exc.detail) from None
 
 
 async def _approve_with_change(
@@ -1168,7 +1191,7 @@ async def _approve_with_change(
         except ChangeNotFoundError:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such change")) from None
         except ChangeValidationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
     if refusal is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, gate_said(refusal))
     return result
@@ -1250,6 +1273,10 @@ async def list_rings(
             ring_name=population.ring_name,
             ring_order=population.ring_order,
             device_count=len(population.device_ids),
+            client_device_counts=[
+                RingClientCountOut(client_id=client, device_count=count)
+                for client, count in sorted(population.client_counts.items())
+            ],
         )
         for population in populations
     ]

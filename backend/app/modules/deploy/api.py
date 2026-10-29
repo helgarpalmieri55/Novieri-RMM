@@ -36,13 +36,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.audit import audit_service
 from app.core.http import read_bounded_body, reject_oversized_content_length
-from app.core.i18n import tr
+from app.core.i18n import N_, tr
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job
 from app.jobs.review_gate import DeviceAwaitingReview, refused
 from app.models import Deployment, DeploymentResult, Device, DeviceGroup, Package, Script
-from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.change_mgmt.gates import (
     authorizing_change,
     deployment_gate,
@@ -70,7 +69,7 @@ from app.modules.deploy.script_policies import (
     update_policy,
 )
 from app.modules.deploy.scripts import author_script, edit_script, run_script
-from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
+from app.services.client_sites import ClientRefusesNewRow, named_client_for_new_rows
 
 #: The job a deployment becomes, for the review gate's refusal at creation.
 DEPLOY_JOB_TYPE = "app.deploy"
@@ -440,7 +439,7 @@ async def create_package_route(
                 install_args=body.install_args,
             )
         except DeployValidationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         return _package_out(package)
 
 
@@ -598,20 +597,15 @@ async def create_deployment(
         # 422, plan C10): it can have no site, so no device, and its only
         # possible target is a group that can never have members.
         try:
-            client = await client_for_new_rows(
-                session, org_id=ctx.org_id, client_id=target_client
+            await named_client_for_new_rows(
+                session,
+                org_id=ctx.org_id,
+                client_id=target_client,
+                unassigned=N_("a deployment cannot be filed under Unassigned"),
+                not_found=N_("deployment target not found"),
             )
-        except ClientNotFound:
-            raise HTTPException(
-                status.HTTP_404_NOT_FOUND, tr("deployment target not found")
-            ) from None
-        except NotAcceptingNewRows as exc:
-            raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
-        if client.kind == CLIENT_KIND_UNASSIGNED:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_CONTENT,
-                tr("a deployment cannot be filed under Unassigned"),
-            )
+        except ClientRefusesNewRow as exc:
+            raise HTTPException(exc.status_code, exc.detail) from None
         # A single named device waiting for review is refused NOW, with the
         # review gate's own 409, rather than accepted as a deployment that
         # can never dispatch (install-link spec §1.5).
@@ -632,7 +626,7 @@ async def create_deployment(
         except ChangeNotFoundError:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such change")) from None
         except ChangeValidationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         if change is None:
             refusal = await deployment_gate(
                 session, ctx.org_id, body.target_type, body.target_id, client_id=target_client
@@ -761,7 +755,7 @@ async def execute_deployment(
             # would refuse it anyway, but a 422 naming the missing upload is
             # an answer the operator can act on, where a fleet of `refused`
             # job rows is an answer they have to go looking for.
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
     if refusal is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, gate_said(refusal))
     # Transaction committed: safe to publish the signed jobs to the agents.
@@ -830,7 +824,7 @@ async def create_script(
                 body=body.body,
             )
         except DeployValidationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         return _script_out(script)
 
 

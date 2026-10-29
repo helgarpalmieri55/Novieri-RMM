@@ -53,6 +53,7 @@ MODEL_TO_INTERFACE = {
     "ApprovalOut": "PatchApproval",
     "ApprovalListResponse": "ApprovalListResponse",
     "BulkApprovalResponse": "BulkApprovalResponse",
+    "RingClientCountOut": "PatchRingClientCount",
     "RingOut": "PatchRing",
     "RingListResponse": "PatchRingListResponse",
     "UpdateRollupOut": "PatchUpdate",

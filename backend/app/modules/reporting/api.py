@@ -52,7 +52,7 @@ from fastapi.responses import PlainTextResponse
 
 from app.api.deps import AuthContext, bound_auth_context, require_permission
 from app.core.i18n import tr
-from app.core.rbac import codes_held_anywhere
+from app.core.rbac import scopes_by_code
 from app.core.tenancy import org_session
 
 # IMPORTED FOR ITS SIDE EFFECT, AND THE SIDE EFFECT IS THE CATALOGUE. Importing
@@ -87,19 +87,19 @@ async def _catalogue(
     `require_report_sources`: it is the one route in this module that reads no
     org data, and refusing to tell a caller which codes they lack would defeat
     the only thing it is for. The session it opens is the RBAC read, nothing
-    else -- `build_catalogue` takes a set of codes and returns platform data
-    compiled into the image.
+    else -- `build_catalogue` takes the caller's codes, each with the clients
+    holding it, and returns platform data compiled into the image.
     """
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        # The codes held on ANY client -- the same question
-        # `require_report_sources` asks, so the catalogue can never claim a
-        # report is runnable that the report itself would refuse. The report
-        # then runs over the clients holding all of them (plan 2026-10-26 Task
-        # 14): a technician of one client sees what they can run there.
-        granted = await codes_held_anywhere(session, ctx.user_id)
-    return build_catalogue(granted)
+        # Each code WITH the clients holding it. A report runs over the
+        # clients holding `reporting.read` and every code it needs
+        # (`require_report_sources`, plan 2026-10-26 Task 14), so the
+        # catalogue calls it runnable only where that set is not empty: never
+        # a report the run refuses, nor one it runs over no client.
+        held = await scopes_by_code(session, ctx.user_id)
+    return build_catalogue(held, within=ctx.clients)
 
 
 # DECLARED BEFORE THE GENERATION LOOP, and the order is load-bearing: the loop

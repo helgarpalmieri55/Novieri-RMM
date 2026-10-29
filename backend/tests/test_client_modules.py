@@ -191,7 +191,9 @@ async def test_turning_a_module_off_refuses_every_write_on_its_rows(api_env: Api
     admin = await _admin(api_env, org)
     await _modules(api_env, admin, x, "change", "bcp")
     change = await _new_change(api_env, admin, x)
-    [approval, other_approval] = await _global_approvals(api_env, org, 2)
+    # X's own approvals: a global one links only to the internal client's
+    # change (C8; plan 2026-10-26 Task 14 review).
+    [approval, other_approval] = await _global_approvals(api_env, org, 2, client=x)
     link = await api_env.client.post(
         f"/api/v1/changes/{change}/links",
         json={"action_type": "patch_approval", "action_id": str(approval)},
@@ -504,8 +506,11 @@ async def test_a_link_target_of_another_client_is_refused_like_a_missing_one(
 ) -> None:
     """research-5 §E6: the resolvers checked only the organisation. A target
     of another client gets the answer a missing one gets, word for word; an O
-    target with no client (a global patch approval, a provisioning run with
-    no device yet) is every client's."""
+    target with no client (a provisioning run with no device yet) is every
+    client's. A global patch approval is the exception: only the internal
+    client's change authorizes it (C8), so on X's change it is refused like a
+    missing one, and on the internal client's it links (plan 2026-10-26 Task
+    14 review)."""
     org = await api_env.create_org("m-links")
     x, x_site = await client_with_site(api_env, org)
     y, y_site = await client_with_site(api_env, org)
@@ -536,6 +541,7 @@ async def test_a_link_target_of_another_client_is_refused_like_a_missing_one(
         ("deployment", await _deployment(api_env, org, "group", y_group)),
         ("provision_run", await _provision_run(api_env, org, y_device)),
         ("patch_approval", y_approval),
+        ("patch_approval", global_approval),
     ):
         r = await link(action_type, theirs)
         assert (r.status_code, r.json()) == (400, missing.json()), (action_type, r.text)
@@ -546,10 +552,16 @@ async def test_a_link_target_of_another_client_is_refused_like_a_missing_one(
         ("provision_run", await _provision_run(api_env, org, x_device)),
         ("provision_run", await _provision_run(api_env, org, None)),
         ("patch_approval", x_approval),
-        ("patch_approval", global_approval),
     ):
         r = await link(action_type, ours)
         assert r.status_code == 201, (action_type, r.text)
+    internal = await _new_change(api_env, admin, org)
+    r = await api_env.client.post(
+        f"/api/v1/changes/{internal}/links",
+        json={"action_type": "patch_approval", "action_id": str(global_approval)},
+        headers=admin,
+    )
+    assert r.status_code == 201, r.text
 
 
 async def test_a_plan_s_scope_procedures_and_changes_are_its_client_s(api_env: ApiEnv) -> None:
@@ -650,7 +662,9 @@ async def test_every_change_and_bcp_audit_event_carries_its_client(api_env: ApiE
     rejected = await _new_change(api_env, admin, x)
     ok(await post(f"/api/v1/changes/{rejected}/submit", headers=admin))
     ok(await post(f"/api/v1/changes/{rejected}/reject", json={}, headers=approver))
-    [approval] = await _global_approvals(api_env, org, 1)
+    # X's own approval: a global one links only to the internal client's
+    # change (C8; plan 2026-10-26 Task 14 review).
+    [approval] = await _global_approvals(api_env, org, 1, client=x)
     link = ok(await post(f"/api/v1/changes/{change}/links",
                          json={"action_type": "patch_approval", "action_id": str(approval)},
                          headers=admin), 201)

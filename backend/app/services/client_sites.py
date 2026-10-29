@@ -56,8 +56,9 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.i18n import tr
+from app.core.i18n import N_, tr, tr_marked
 from app.models import Client, Site
+from app.models.clients import CLIENT_KIND_UNASSIGNED
 
 CLIENT_ARCHIVED = "archived"
 
@@ -171,6 +172,55 @@ async def client_for_new_rows(
         raise ClientNotFound(client_id)
     if client.status == CLIENT_ARCHIVED:
         raise NotAcceptingNewRows(tr("that client is archived"))
+    return client
+
+
+#: The 404 of a client a request cannot see, named in its body.
+NO_SUCH_CLIENT = N_("no such client")
+
+
+class ClientRefusesNewRow(Exception):
+    """The client a new row is to be filed under cannot take it
+    (`named_client_for_new_rows`): `status_code` 404 (not visible), 409
+    (archived) or 422 (Unassigned), and `detail` the sentence. Each caller
+    answers with both as they are -- a route as an `HTTPException`, a service
+    as its own error."""
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+async def named_client_for_new_rows(
+    session: AsyncSession,
+    *,
+    org_id: UUID,
+    client_id: UUID,
+    unassigned: str,
+    not_found: str = NO_SUCH_CLIENT,
+) -> Client:
+    """`client_for_new_rows` (FOR SHARE, held until commit: the create's FIRST
+    lock), for a row whose client is NAMED -- by the request's body, or by the
+    row's target -- with its three refusals as one `ClientRefusesNewRow`:
+
+    * 404 `not_found` (`no such client` unless the caller names its own:
+      deployments answer for their target);
+    * 409 "that client is archived";
+    * 422 `unassigned`, the module's own sentence: Unassigned is the inbox for
+      what has no owner (plan 2026-10-26 C10), not a client to file under.
+
+    Both sentences are `N_`-marked messages, translated here. One mapping,
+    shared by patch approvals, documentation and deployments (plan
+    2026-10-26 Task 14 review)."""
+    try:
+        client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
+    except ClientNotFound:
+        raise ClientRefusesNewRow(404, tr_marked(not_found)) from None
+    except NotAcceptingNewRows as exc:
+        raise ClientRefusesNewRow(409, exc.detail) from None
+    if client.kind == CLIENT_KIND_UNASSIGNED:
+        raise ClientRefusesNewRow(422, tr_marked(unassigned))
     return client
 
 

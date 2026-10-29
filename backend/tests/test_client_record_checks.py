@@ -104,6 +104,47 @@ async def test_the_report_catalogue_counts_codes_held_on_any_client(api_env: Api
     assert len(reports) > 0 and all(entry["entitled"] for entry in reports), reports
 
 
+async def test_the_catalogue_promises_a_report_only_where_one_client_holds_every_code(
+    api_env: ApiEnv,
+) -> None:
+    """A report runs over the clients holding `reporting.read` AND every code
+    it needs (`narrowed_to_every`), so codes held on DIFFERENT clients run it
+    over no client. The catalogue says so: such a report is not `entitled`,
+    and `missing_permissions` names the codes absent from a client where the
+    person can read reports -- never an empty list beside `entitled: false`
+    (plan 2026-10-26 Task 14 review). Each verdict is checked against the
+    run itself."""
+    org = await api_env.create_org("cfg-report-cat")
+    x, x_site = await client_with_site(api_env, org)
+    y, _ = await client_with_site(api_env, org)
+    await _device(api_env, org, x, x_site)
+    key = "fleet-posture"  # requires devices.read and health.read
+
+    async def verdict(headers: dict[str, str]) -> tuple[bool, list[str], int]:
+        cat = await api_env.client.get("/api/v1/reports", headers=headers)
+        assert cat.status_code == 200, cat.text
+        [entry] = [e for e in cat.json()["reports"] if e["key"] == key]
+        run = await api_env.client.get(f"/api/v1/reports/{key}", headers=headers)
+        assert run.status_code == 200, run.text
+        return entry["entitled"], entry["missing_permissions"], len(run.json()["rows"])
+
+    _, together = await _holder(
+        api_env, org,
+        {x: ("reporting.read", "devices.read", "health.read"), y: ("reporting.read",)},
+    )
+    assert await verdict(together) == (True, [], 1)
+
+    _, apart = await _holder(
+        api_env, org, {x: ("reporting.read", "devices.read"), y: ("health.read",)}
+    )
+    assert await verdict(apart) == (False, ["health.read"], 0)
+
+    _, elsewhere = await _holder(
+        api_env, org, {x: ("devices.read", "health.read"), y: ("reporting.read",)}
+    )
+    assert await verdict(elsewhere) == (False, ["devices.read", "health.read"], 0)
+
+
 async def test_a_report_runs_over_the_clients_holding_every_code_it_needs(
     api_env: ApiEnv,
 ) -> None:

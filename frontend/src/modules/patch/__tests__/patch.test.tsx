@@ -228,6 +228,8 @@ function updatePage(
 
 const DEVICE_ROLLUP: PatchDeviceRollup = {
   device_id: "dev-1",
+  // The internal client's machine: `ME.org_id`.
+  client_id: "o1",
   hostname: "sentinel",
   os_family: "windows",
   outstanding: 41,
@@ -245,12 +247,14 @@ function deviceRollupPage(
 }
 
 /** The blast radius the console shows before an approval is authorised. The
- *  rings PARTITION the fleet, so the counts add up to `device_total`. */
+ *  rings PARTITION the fleet, so the counts add up to `device_total`; each
+ *  ring's `client_device_counts` add up to its `device_count`. "o1" is the
+ *  internal client (`ME.org_id`), "c-acme" a customer. */
 const RINGS: PatchRingListResponse = {
   items: [
-    { ring_name: "test", ring_order: 0, device_count: 3 },
-    { ring_name: "pilot", ring_order: 50, device_count: 17 },
-    { ring_name: "broad", ring_order: 100, device_count: 220 },
+    { ring_name: "test", ring_order: 0, device_count: 3, client_device_counts: [{ client_id: "o1", device_count: 2 }, { client_id: "c-acme", device_count: 1 }] },
+    { ring_name: "pilot", ring_order: 50, device_count: 17, client_device_counts: [{ client_id: "o1", device_count: 17 }] },
+    { ring_name: "broad", ring_order: 100, device_count: 220, client_device_counts: [{ client_id: "o1", device_count: 200 }, { client_id: "c-acme", device_count: 20 }] },
   ],
   total: 3,
   device_total: 240,
@@ -764,8 +768,8 @@ describe("FleetPatchPage — the fleet view is one row per update, not per pair"
     api = {
       listPatchRings: vi.fn().mockResolvedValue({
         items: [
-          { ring_name: "canary", ring_order: 5, device_count: 2 },
-          { ring_name: "broad", ring_order: 100, device_count: 40 },
+          { ring_name: "canary", ring_order: 5, device_count: 2, client_device_counts: [{ client_id: "o1", device_count: 2 }] },
+          { ring_name: "broad", ring_order: 100, device_count: 40, client_device_counts: [{ client_id: "o1", device_count: 40 }] },
         ],
         total: 2,
         device_total: 42,
@@ -2273,7 +2277,7 @@ describe("FleetPatchPage — approving from the machine you opened", () => {
     // On the page, beside the control, before anything is clicked.
     expect(
       screen.getByText(
-        /You are choosing these from sentinel, but an approval covers all 3 devices in the test ring — not sentinel alone\./,
+        /You are choosing these from sentinel, but an approval covers the 2 devices of your organisation's own client in the test ring — not sentinel alone\./,
       ),
     ).toBeInTheDocument();
 
@@ -2284,7 +2288,9 @@ describe("FleetPatchPage — approving from the machine you opened", () => {
       name: "Approve updates into a deployment ring",
     });
     expect(confirm).toHaveTextContent(/not sentinel alone/);
-    expect(confirm).toHaveTextContent(/the 3 devices in the "test" ring/);
+    expect(confirm).toHaveTextContent(
+      /the 2 devices of your organisation's own client in the "test" ring/,
+    );
   });
 
   it("names the blast radius of whichever ring is chosen, not the one it opened on", async () => {
@@ -2297,7 +2303,9 @@ describe("FleetPatchPage — approving from the machine you opened", () => {
       "broad",
     );
 
-    expect(screen.getByText(/all 220 devices in the broad ring/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/the 200 devices of your organisation's own client in the broad ring/),
+    ).toBeInTheDocument();
   });
 
   it("asks for that machine's whole list, never narrowed by the fleet severity filter", async () => {
@@ -3204,5 +3212,258 @@ describe("the compliance panel speaks the page's own vocabulary", () => {
         name: "Low compliance, by severity, not held to a target",
       }),
     ).toBeInTheDocument();
+  });
+});
+
+// ===========================================================================
+// AN APPROVAL'S REACH IS ITS OWNER'S (MSP clients plan 2026-10-26 Task 14
+// review). A client's approval clears that client's machines in the ring and
+// no other client's; a global one -- "For every client" -- clears every
+// client's. The screen states the reach of the approval actually being made:
+// the internal client's by default (phase 3 brings the selector), the ROW's
+// own client on a machine's drill-down (the operator's rule of 2026-10-28),
+// and every client's only when asked. And the Approvals list tells a global
+// row from a client's row of the same update and ring.
+// ===========================================================================
+
+describe("FleetPatchPage — an approval reaches its owner's machines, and says so", () => {
+  let api: Partial<ApiClient>;
+
+  beforeEach(() => {
+    api = {};
+    mockUseApi.mockImplementation(() => api);
+  });
+
+  /** `ME` with `clients.read`: the console can name a client. */
+  const READS_CLIENTS: Me = { ...ME, permissions: [...ME.permissions, "clients.read"] };
+
+  const CLIENTS = [
+    {
+      id: "o1",
+      name: "Novieri",
+      kind: "internal" as const,
+      status: "active",
+      email_domains: [],
+      phone: "",
+      address: "",
+      website: "",
+      notes: "",
+      enabled_modules: [],
+      device_count: 219,
+      site_count: 1,
+    },
+    {
+      id: "c-acme",
+      name: "Acme",
+      kind: "customer" as const,
+      status: "active",
+      email_domains: [],
+      phone: "",
+      address: "",
+      website: "",
+      notes: "",
+      enabled_modules: [],
+      device_count: 21,
+      site_count: 1,
+    },
+  ];
+
+  async function openApproval(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: /^Approve 1 update/ }));
+    return screen.findByRole("dialog", { name: "Approve updates into a deployment ring" });
+  }
+
+  it("states the internal client's machines by default, and every client's when asked", async () => {
+    const user = userEvent.setup();
+    const bulkApprovePatches = vi.fn().mockResolvedValue(bulkResult(["p1"], "test"));
+    api = { bulkApprovePatches };
+    renderWithProviders(<FleetPatchPage />);
+
+    await screen.findByText("2023-10 Cumulative Update");
+    await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
+
+    // Unticked: the internal client's 2 of the ring's 3 machines.
+    let confirm = await openApproval(user);
+    expect(confirm).toHaveTextContent(
+      'This update becomes installable on the 2 devices of your organisation\'s own client in the "test" ring at their next maintenance window.',
+    );
+    expect(confirm).not.toHaveTextContent(/3 devices/);
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+
+    // Ticked: all 3, of every client -- and no client is sent.
+    await user.click(screen.getByRole("checkbox", { name: /For every client/ }));
+    confirm = await openApproval(user);
+    expect(confirm).toHaveTextContent(
+      'This update becomes installable on the 3 devices of every client in the "test" ring at their next maintenance window.',
+    );
+    await user.click(within(confirm).getByRole("button", { name: "Approve" }));
+    expect(bulkApprovePatches).toHaveBeenCalledWith({ patch_ids: ["p1"], ring_name: "test" });
+  });
+
+  /** A customer's machine on the device list, and its own update list. */
+  function customerMachine(overrides: Partial<ApiClient> = {}): Partial<ApiClient> {
+    return {
+      listPatchDeviceRollup: vi
+        .fn()
+        .mockResolvedValue(deviceRollupPage([{ ...DEVICE_ROLLUP, client_id: "c-acme" }])),
+      listPatchUpdates: vi.fn((params?: PatchUpdateFilters) =>
+        Promise.resolve(params?.device_id ? updatePage(MANY_UPDATES) : updatePage(UPDATES)),
+      ),
+      ...overrides,
+    };
+  }
+
+  async function chooseOnSentinel(user: ReturnType<typeof userEvent.setup>) {
+    renderWithProviders(<FleetPatchPage />);
+    await screen.findByRole("link", { name: "sentinel" });
+    await user.click(
+      screen.getByRole("button", { name: "Show sentinel's 41 outstanding updates" }),
+    );
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Select KB5031354 on sentinel" }),
+    );
+  }
+
+  it("files an approval from a customer's machine under that customer, and says its reach", async () => {
+    const user = userEvent.setup();
+    const bulkApprovePatches = vi.fn().mockResolvedValue(bulkResult(["p1"], "test"));
+    api = customerMachine({
+      me: vi.fn().mockResolvedValue(READS_CLIENTS),
+      listClients: vi.fn().mockResolvedValue(CLIENTS),
+      bulkApprovePatches,
+    });
+    await chooseOnSentinel(user);
+
+    expect(
+      await screen.findByText(
+        "You are choosing these from sentinel, but an approval covers the 1 device of Acme in the test ring — not sentinel alone.",
+      ),
+    ).toBeInTheDocument();
+    const confirm = await openApproval(user);
+    expect(confirm).toHaveTextContent(/not sentinel alone/);
+    expect(confirm).toHaveTextContent(/installable on the 1 device of Acme in the "test" ring/);
+    await user.click(within(confirm).getByRole("button", { name: "Approve" }));
+
+    // The ROW's client, not the internal one.
+    expect(bulkApprovePatches).toHaveBeenCalledExactlyOnceWith({
+      patch_ids: ["p1"],
+      ring_name: "test",
+      client_id: "c-acme",
+    });
+  });
+
+  it("names the customer by its id when the clients list cannot be read", async () => {
+    const user = userEvent.setup();
+    const listClients = vi.fn();
+    api = customerMachine({ listClients });
+    await chooseOnSentinel(user);
+
+    expect(
+      await screen.findByText(
+        "You are choosing these from sentinel, but an approval covers the 1 device of c-acme in the test ring — not sentinel alone.",
+      ),
+    ).toBeInTheDocument();
+    expect(listClients).not.toHaveBeenCalled();
+  });
+
+  it("states every client's reach from a customer's machine when asked, and sends no client", async () => {
+    const user = userEvent.setup();
+    const bulkApprovePatches = vi.fn().mockResolvedValue(bulkResult(["p1"], "test"));
+    api = customerMachine({ bulkApprovePatches });
+    await chooseOnSentinel(user);
+
+    const section = screen.getByRole("combobox", { name: "Ring to approve into — sentinel" })
+      .parentElement as HTMLElement;
+    await user.click(within(section).getByRole("checkbox", { name: /For every client/ }));
+    expect(
+      screen.getByText(
+        "You are choosing these from sentinel, but an approval covers all 3 devices of every client in the test ring — not sentinel alone.",
+      ),
+    ).toBeInTheDocument();
+    const confirm = await openApproval(user);
+    await user.click(within(confirm).getByRole("button", { name: "Approve" }));
+    expect(bulkApprovePatches).toHaveBeenCalledExactlyOnceWith({
+      patch_ids: ["p1"],
+      ring_name: "test",
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // The Approvals list: a global row and a client's row of the same update
+  // and ring, which used to read identically.
+  // -------------------------------------------------------------------------
+
+  const GLOBAL_ROW: PatchApproval = { ...APPROVAL, id: "a-global", client_id: null };
+  const ACME_ROW: PatchApproval = { ...APPROVAL, id: "a-acme", client_id: "c-acme" };
+
+  function twinApprovals(overrides: Partial<ApiClient> = {}): Partial<ApiClient> {
+    return {
+      me: vi.fn().mockResolvedValue(READS_CLIENTS),
+      listClients: vi.fn().mockResolvedValue(CLIENTS),
+      listPatchApprovals: vi.fn().mockResolvedValue({ items: [GLOBAL_ROW, ACME_ROW], total: 2 }),
+      revokePatchApproval: vi.fn().mockResolvedValue(undefined),
+      ...overrides,
+    };
+  }
+
+  const rowOf = (id: string): Promise<HTMLElement> =>
+    waitFor(() => {
+      const row = document.querySelector(`[data-approval-id="${id}"]`);
+      if (!row) throw new Error(`no approvals row for ${id}`);
+      return row as HTMLElement;
+    });
+
+  it("tells a global approval from a client's approval of the same update and ring", async () => {
+    api = twinApprovals();
+    renderWithProviders(<FleetPatchPage />);
+
+    const global = await rowOf("a-global");
+    const acme = await rowOf("a-acme");
+    expect(within(global).getByText("Every client")).toBeInTheDocument();
+    expect(await within(acme).findByText("Acme")).toBeInTheDocument();
+    expect(within(acme).queryByText("Every client")).not.toBeInTheDocument();
+    // Their row menus, too, are two different controls to a screen reader.
+    expect(
+      within(global).getByRole("button", {
+        name: "More actions for KB5031354 → pilot ring, every client",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(acme).getByRole("button", { name: "More actions for KB5031354 → pilot ring, Acme" }),
+    ).toBeInTheDocument();
+  });
+
+  it("names the client by its id in the list when the clients list cannot be read", async () => {
+    api = twinApprovals({ me: vi.fn().mockResolvedValue(ME) });
+    renderWithProviders(<FleetPatchPage />);
+
+    expect(within(await rowOf("a-acme")).getByText("c-acme")).toBeInTheDocument();
+    expect(within(await rowOf("a-global")).getByText("Every client")).toBeInTheDocument();
+  });
+
+  it("says whose machines stop when each one is revoked", async () => {
+    const user = userEvent.setup();
+    api = twinApprovals();
+    renderWithProviders(<FleetPatchPage />);
+
+    async function revokeDialog(id: string) {
+      const row = await rowOf(id);
+      await user.click(within(row).getByRole("button", { name: /more actions/i }));
+      await user.click(screen.getByRole("menuitem", { name: "Revoke" }));
+      return screen.findByRole("dialog", { name: "Revoke patch approval" });
+    }
+
+    let confirm = await revokeDialog("a-global");
+    expect(confirm).toHaveTextContent(
+      'The devices of every client in the "pilot" ring will no longer install this update, except the machines of a client whose own approval of it still stands,',
+    );
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+
+    await within(await rowOf("a-acme")).findByText("Acme");
+    confirm = await revokeDialog("a-acme");
+    expect(confirm).toHaveTextContent(
+      'The devices of Acme in the "pilot" ring will no longer install this update, unless an approval for every client still covers them,',
+    );
+    expect(confirm).toHaveTextContent("KB5031354 → pilot ring, Acme");
   });
 });

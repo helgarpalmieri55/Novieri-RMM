@@ -457,6 +457,26 @@ async def codes_held_anywhere(session: AsyncSession, user_id: UUID) -> set[str]:
     return {code for code, _ in await _grants(session, user_id)}
 
 
+async def scopes_by_code(session: AsyncSession, user_id: UUID) -> dict[str, ClientScope]:
+    """Every code the user holds, each with the clients holding it -- what
+    `clients_holding` answers code by code, from one read of the grants. For
+    a surface that must say which codes are held TOGETHER on some client (the
+    report catalogue: a report runs over the clients holding all of its
+    codes, plan 2026-10-26 Task 14 review), where `codes_held_anywhere`
+    cannot tell X's code from Y's."""
+    every: set[str] = set()
+    scoped: dict[str, set[UUID]] = {}
+    for code, client_id in await _grants(session, user_id):
+        if client_id is None:
+            every.add(code)
+        else:
+            scoped.setdefault(code, set()).add(client_id)
+    return {
+        code: ClientScope.all() if code in every else ClientScope.only(scoped.get(code, ()))
+        for code in every | set(scoped)
+    }
+
+
 async def clients_holding(session: AsyncSession, user_id: UUID, code: str | None) -> ClientScope:
     """The client scope in which the user holds `code` -- or any role at all
     when `code` is None (an ungated route). An all-clients grant makes it

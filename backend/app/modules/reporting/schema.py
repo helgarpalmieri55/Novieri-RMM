@@ -115,14 +115,17 @@ class CatalogueEntry(BaseModel):
     )
     entitled: bool = Field(
         description=(
-            "True when you hold every code in `requires` org-wide. False means this "
-            "report answers 403 for you, and `missing_permissions` says what to ask for."
+            "True when at least one client holds `reporting.read` and every code in "
+            "`requires` for you: the report runs over exactly those clients. False means "
+            "it answers 403 for you, or runs over no client, and `missing_permissions` "
+            "says what to ask for."
         )
     )
     missing_permissions: list[str] = Field(
         description=(
-            "The codes in `requires` you do not hold, sorted. Empty exactly when "
-            "`entitled` is true."
+            "The codes in `requires` you hold on no client, sorted -- or, when you hold "
+            "each of them but on no one client together, the ones missing from a client "
+            "where you hold `reporting.read`. Empty exactly when `entitled` is true."
         )
     )
 

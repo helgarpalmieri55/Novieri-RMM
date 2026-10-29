@@ -283,12 +283,16 @@ async def has_authorizing_change(
 
     `client_id` is the action's client -- a deployment's; a patch approval's,
     or the internal client's for a global approval (C8) -- and has NO
-    default: only a change OF THAT CLIENT authorizes it. Links made now are
-    always same-client (`authorizing_change`, the link resolvers, an
-    automatic change), but 0237 filed every existing change and link under
-    the internal client, so a deployment or approval of X made before then
-    can be linked to an approved change that is not X's; it must not pass
-    X's gate.
+    default: only a change OF THAT CLIENT authorizes it. Every path that
+    links now pairs the action with a change that can authorize it -- a
+    client's action with that client's change, a global patch approval with
+    the internal client's (`authorizing_change`, `links.add_link`, an
+    automatic change). Rows made before that do not hold to it: 0237 filed
+    every existing change and link under the internal client, so a
+    deployment or approval of X made before then can be linked to an
+    approved change that is not X's, and a global approval linked by hand
+    before the Task 14 review to a customer's change; neither may pass the
+    gate.
     """
     query = (
         select(ChangeLink.id)

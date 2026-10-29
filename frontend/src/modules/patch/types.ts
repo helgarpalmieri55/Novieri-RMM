@@ -228,10 +228,22 @@ export interface BulkApprovalResponse {
  * approval, since clearing a patch for a ring clears it for every device that
  * resolves into that ring now and at every future scan.
  */
+/** How many of one ring's machines are one client's. */
+export interface PatchRingClientCount {
+  client_id: string;
+  device_count: number;
+}
+
 export interface PatchRing {
   ring_name: string;
   ring_order: number;
   device_count: number;
+  /** Of `device_count`, how many are each client's, one row per client with a
+   *  machine in the ring; a client absent has none. A client's approval
+   *  reaches only its own, a global one all of them (MSP clients plan
+   *  2026-10-26 Task 14 review). Rows rather than a map: a response with an
+   *  open key space can never be an AI read tool. */
+  client_device_counts: PatchRingClientCount[];
 }
 
 /** The rings partition the fleet, so `sum(device_count) === device_total`. */
@@ -398,6 +410,9 @@ export interface PatchUpdateFilters {
  */
 export interface PatchDeviceRollup {
   device_id: string;
+  /** The machine's client: an approval made from its drill-down is filed
+   *  under it (the operator's rule of 2026-10-28). */
+  client_id: string;
   hostname: string;
   os_family: string;
   outstanding: number;

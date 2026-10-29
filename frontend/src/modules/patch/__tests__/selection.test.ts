@@ -203,6 +203,7 @@ describe("resolveMatchingHostIds", () => {
       for (let index = offset; index < Math.min(total, offset + limit); index += 1) {
         items.push({
           device_id: `d${index}`,
+          client_id: "o1",
           hostname: `host-${index}`,
           os_family: "linux",
           outstanding: total - index,

@@ -42,9 +42,7 @@ from tests.client_scope_support import (
     client_with_site,
     drop_client_keys,
     everything_on,
-)
-from tests.client_scope_support import (
-    wait_until_blocked as _wait_until_blocked,
+    wait_until_blocked,
 )
 from tests.conftest import ApiEnv
 from tests.test_deploy_dispatch import _FakeArtifactSigner, _FakeJobEngine
@@ -479,7 +477,7 @@ async def test_the_create_takes_the_client_before_the_audit_chain(
         )
         me = (await holder.execute(text("SELECT pg_backend_pid()"))).scalar_one()
         create = asyncio.create_task(api_env.client.post(DEPLOYMENTS, json=body, headers=admin))
-        if not await _wait_until_blocked(observer, me):
+        if not await wait_until_blocked(observer, me):
             create.cancel()
             pytest.fail("the create never waited on the client lock")
         await holder.execute(
@@ -513,7 +511,7 @@ async def test_the_authorizing_change_holds_its_client_until_commit(api_env: Api
         )
         me = (await holder.execute(text("SELECT pg_backend_pid()"))).scalar_one()
         task = asyncio.create_task(authorize())
-        if not await _wait_until_blocked(observer, me):
+        if not await wait_until_blocked(observer, me):
             task.cancel()
             pytest.fail("authorizing_change never waited on the client lock")
         await holder.commit()

@@ -6,18 +6,34 @@ import { describeSubmitError } from "../../components/form";
 import { useT } from "../../i18n/context";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { newRowClient } from "../../lib/internalClient";
+import { internalClientId, newRowClient } from "../../lib/internalClient";
 import { Btn } from "../../shell/components";
+import { useClientName } from "../settings/api";
 import { useAuthorizingChanges, usePatchBulkApproveMutation } from "./api";
 import {
+  type ApprovalOwner,
+  approvalTarget,
   bulkApprovedMessage,
   deviceLensWarning,
+  EVERY_CLIENT,
   ringReachMessage,
   selectAllMatchingLabel,
   selectionCeilingNotice,
   selectionSummary,
 } from "./patchCopy";
 import { BULK_APPROVAL_MAX, type MatchingSelection } from "./selection";
+
+/** A ring an approval can go into, and how many machines it holds. */
+export interface RingOption {
+  name: string;
+  /** Every client's machines in the ring. `null` until `GET /patch/rings` has
+   *  answered: a blast radius guessed at is worse than one not shown. */
+  deviceCount: number | null;
+  /** Of those, each client's, by client id (`client_device_counts`); a client
+   *  absent has none. A client's approval reaches only its own (MSP clients
+   *  plan 2026-10-26 Task 14 review). `null` until answered. */
+  clientCounts: Readonly<Record<string, number>> | null;
+}
 
 /**
  * THE ONE PLACE AN APPROVAL IS DECIDED, WHEREVER THE OPERATOR IS STANDING.
@@ -39,6 +55,15 @@ import { BULK_APPROVAL_MAX, type MatchingSelection } from "./selection";
  * click, and again in the confirmation. The blast radius is visible at the
  * moment of the decision, which is the same rule the fleet list already
  * followed.
+ *
+ * AND THE BLAST RADIUS IS THE OWNER'S (MSP clients plan 2026-10-26 Task 14
+ * and its review). An approval now belongs to one client -- the ROW's own
+ * client on a machine's drill-down (the operator's rule of 2026-10-28), the
+ * internal client otherwise until phase 3's selector -- and clears that
+ * client's machines in the ring and no other's; "For every client" makes it
+ * global, clearing every client's. The warning and the confirmation state the
+ * reach of the approval actually being made: the owner's count, from
+ * `client_device_counts`, never the ring's whole population for a client's.
  *
  * WHY IT IS ALWAYS ON SCREEN. The bulk bar used to exist only once a row was
  * ticked. Three things were wrong with that: the ring chooser and the blast
@@ -63,6 +88,7 @@ export function DecisionBar({
   fleetDeviceTotal,
   scopeHostname = null,
   scopeName,
+  rowClientId = null,
 }: {
   /** The ids ticked right now. Owned by the caller, because the row checkboxes
    *  live in the caller's table. */
@@ -74,7 +100,7 @@ export function DecisionBar({
   matchingTotal: number;
   /** Resolve that criterion to an explicit id list. See `selection.ts`. */
   resolveMatching: () => Promise<MatchingSelection>;
-  ringOptions: readonly { name: string; deviceCount: number | null }[];
+  ringOptions: readonly RingOption[];
   fleetDeviceTotal: number | null;
   /** The machine whose list this bar sits under, or `null` on the fleet list.
    *  Present means the device is a LENS and the warning is shown. */
@@ -84,6 +110,10 @@ export function DecisionBar({
    *  a "Ring to approve into" select; a screen-reader user moving by form
    *  control needs to know which is which. */
   scopeName: string;
+  /** The client of the ROW this bar decides from -- the machine's, on its
+   *  drill-down. An approval made here is filed under it (the operator's rule
+   *  of 2026-10-28); with none, under the internal client until phase 3. */
+  rowClientId?: string | null;
 }) {
   const t = useT();
   const api = useApi();
@@ -109,8 +139,30 @@ export function DecisionBar({
    *  the selection is made, not only while the button is being read. */
   const [lastResolved, setLastResolved] = useState<MatchingSelection | null>(null);
 
-  const ringDeviceCount = ringOptions.find((entry) => entry.name === ring)?.deviceCount ?? null;
+  const option = ringOptions.find((entry) => entry.name === ring);
+  const ringDeviceCount = option?.deviceCount ?? null;
   const reach = ringReachMessage(ring, ringDeviceCount, fleetDeviceTotal);
+
+  // WHOSE MACHINES THIS APPROVAL CLEARS, and how many of them are in the ring:
+  // every client's when asked; otherwise the row's client, or the internal
+  // client's (its id is the organisation's, `lib/internalClient.ts`).
+  const clientName = useClientName();
+  const internalId = internalClientId(me.data);
+  const ownerId = forEveryClient ? null : (rowClientId ?? internalId);
+  const owner: ApprovalOwner = forEveryClient
+    ? EVERY_CLIENT
+    : {
+        kind: "client",
+        name:
+          ownerId == null || ownerId === internalId
+            ? t("patch.decision.ownClient")
+            : clientName(ownerId),
+      };
+  const ownerCount = forEveryClient
+    ? ringDeviceCount
+    : ownerId == null || option?.clientCounts == null
+      ? null
+      : (option.clientCounts[ownerId] ?? 0);
   const ceilingNotice = selectionCeilingNotice(matchingTotal, BULK_APPROVAL_MAX);
   const selectedCount = selectedIds.length;
 
@@ -235,7 +287,7 @@ export function DecisionBar({
           costs a line of the drill-down for none. The lens sentence carries the
           population, so on that surface it is the only one. */}
       <span className="note w-full sm:w-auto">
-        {scopeHostname ? deviceLensWarning(scopeHostname, ring, ringDeviceCount) : (reach ?? "")}
+        {scopeHostname ? deviceLensWarning(scopeHostname, ring, ownerCount, owner) : (reach ?? "")}
       </span>
 
       {ceilingNotice ? (
@@ -292,14 +344,11 @@ export function DecisionBar({
         body={
           `${
             scopeHostname
-              ? `${deviceLensWarning(scopeHostname, ring, ringDeviceCount)} `
+              ? `${deviceLensWarning(scopeHostname, ring, ownerCount, owner)} `
               : ""
           }${t("patch.decision.bodyIntro", {
             count: selectedCount,
-            target:
-              ringDeviceCount == null
-                ? t("patch.decision.targetEvery", { ring })
-                : t("patch.decision.target", { count: ringDeviceCount, ring }),
+            target: approvalTarget(owner, ring, ownerCount),
           })}${changeId ? "" : ` ${t("patch.decision.noChangeNote")}`}`
         }
         confirmLabel={t("patch.decision.confirmLabel")}
@@ -308,12 +357,18 @@ export function DecisionBar({
         onConfirm={() => {
           setConfirming(false);
           if (selectedIds.length === 0) return;
-          let owner: { client_id?: string };
+          let filedUnder: { client_id?: string };
           try {
-            // PHASE 3: the client/site selector. Until it exists an approval
-            // is the organisation's internal client's (`lib/internalClient.ts`),
-            // or, when asked, every client's.
-            owner = newRowClient(me.data, forEveryClient);
+            // The ROW's client where there is one (a machine's drill-down);
+            // none at all when asked for every client.
+            filedUnder =
+              forEveryClient || rowClientId == null
+                ? // PHASE 3: the client/site selector. Until it exists an
+                  // approval with no row is the organisation's internal
+                  // client's (`lib/internalClient.ts`), or, when asked, every
+                  // client's.
+                  newRowClient(me.data, forEveryClient)
+                : { client_id: rowClientId };
           } catch (error) {
             // `/me` has not answered: nothing is sent without its client.
             setOwnerError(error);
@@ -325,7 +380,7 @@ export function DecisionBar({
               patch_ids: [...selectedIds],
               ring_name: ring,
               ...(changeId ? { change_id: changeId } : {}),
-              ...owner,
+              ...filedUnder,
             },
             // Cleared ONLY on a 2xx. A failed batch keeps the selection, so the
             // operator can read the error and retry the same decision rather

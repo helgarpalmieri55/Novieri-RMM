@@ -86,6 +86,16 @@ export const patch: Shape<typeof en> = {
       one: "el único dispositivo del anillo {ring}",
       other: "los {count} dispositivos del anillo {ring}",
     },
+    reachClientEvery: "todos los dispositivos del cliente {client} en el anillo {ring}",
+    reachClientCount: {
+      one: "el único dispositivo del cliente {client} en el anillo {ring}",
+      other: "los {count} dispositivos del cliente {client} en el anillo {ring}",
+    },
+    reachEveryClient: "todos los dispositivos de todos los clientes en el anillo {ring}",
+    reachEveryClientCount: {
+      one: "el único dispositivo de cualquier cliente en el anillo {ring}",
+      other: "los {count} dispositivos de todos los clientes en el anillo {ring}",
+    },
     lens:
       "Estás eligiendo estas actualizaciones desde {hostname}, pero una aprobación abarca {reach}, no solo {hostname}.",
     hostLens:
@@ -205,6 +215,8 @@ export const patch: Shape<typeof en> = {
     empty: "Todavía no hay ninguna actualización aprobada en un anillo. Aprueba una desde el panel de Actualizaciones.",
     update: "Actualización",
     ring: "Anillo",
+    client: "Cliente",
+    everyClient: "Todos los clientes",
     approved: "Aprobada",
     by: "Por",
     status: "Estado",
@@ -212,10 +224,13 @@ export const patch: Shape<typeof en> = {
     revoked: "Revocada",
     inForce: "En vigor",
     revoke: "Revocar",
-    subject: "{patch} → anillo {ring}",
+    subject: "{patch} → anillo {ring}, cliente {client}",
+    subjectEvery: "{patch} → anillo {ring}, todos los clientes",
     confirmTitle: "Revocar la aprobación del parche",
-    confirmBody:
-      "Los dispositivos del anillo «{ring}» dejarán de instalar esta actualización, y ninguna tarea de instalación enviada a partir de ahora la incluirá. Los equipos que ya la han instalado la conservan. La aprobación sigue en la lista como revocada, porque es el registro de que alguna vez se concedió.",
+    confirmBodyClient:
+      "Los dispositivos del cliente {client} en el anillo «{ring}» dejarán de instalar esta actualización, salvo que aún los cubra una aprobación para todos los clientes, y ninguna tarea de instalación enviada a partir de ahora se la llevará. Los equipos que ya la han instalado la conservan. La aprobación sigue en la lista como revocada, porque es el registro de que alguna vez se concedió.",
+    confirmBodyEvery:
+      "Los dispositivos de todos los clientes del anillo «{ring}» dejarán de instalar esta actualización, salvo los de un cliente cuya propia aprobación de ella siga en vigor, y ninguna tarea de instalación enviada a partir de ahora se la llevará. Los equipos que ya la han instalado la conservan. La aprobación sigue en la lista como revocada, porque es el registro de que alguna vez se concedió.",
     confirmLabel: "Revocar aprobación",
   },
   apps: {
@@ -275,11 +290,17 @@ export const patch: Shape<typeof en> = {
       other:
         "Estas {count} actualizaciones pasan a poder instalarse en {target} en su próxima ventana de mantenimiento. Cada una queda registrada por separado en la lista de Aprobaciones, que es donde se puede retirar de nuevo cualquiera de ellas.",
     },
-    targetEvery: "todos los dispositivos del anillo «{ring}»",
+    targetEvery: "todos los dispositivos de todos los clientes en el anillo «{ring}»",
     target: {
-      one: "el único dispositivo del anillo «{ring}»",
-      other: "los {count} dispositivos del anillo «{ring}»",
+      one: "el único dispositivo de cualquier cliente en el anillo «{ring}»",
+      other: "los {count} dispositivos de todos los clientes en el anillo «{ring}»",
     },
+    targetClientEvery: "todos los dispositivos del cliente {client} en el anillo «{ring}»",
+    targetClient: {
+      one: "el único dispositivo del cliente {client} en el anillo «{ring}»",
+      other: "los {count} dispositivos del cliente {client} en el anillo «{ring}»",
+    },
+    ownClient: "propio de tu organización",
     noChangeNote: "Si no eliges ninguna solicitud de cambio, se registra una automáticamente para esta aprobación.",
     confirmLabel: "Aprobar",
     ringAria: "Anillo en el que aprobar — {scope}",

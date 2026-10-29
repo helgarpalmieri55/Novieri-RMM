@@ -37,10 +37,9 @@ from app.models import (
     IpamAddress,
     IpamSubnet,
 )
-from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.documentation.schemas import validate_record_fields
 from app.modules.documentation.words import LINK_TARGET_WORDS
-from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
+from app.services.client_sites import ClientRefusesNewRow, named_client_for_new_rows
 
 
 class LinkTargetNotFound(Exception):
@@ -68,7 +67,7 @@ async def client_for_documentation(
 ) -> UUID | None:
     """The client a new documentation row is filed under, or None (global).
 
-    Loaded with `client_for_new_rows` in the caller's own session, so it is
+    Loaded with `named_client_for_new_rows` in the caller's own session, so it is
     read FOR SHARE as the create's FIRST lock, before its audit event
     (`app.services.client_sites`). Global needs no check here: the row is
     then written under the every-client scope or refused by
@@ -76,15 +75,14 @@ async def client_for_documentation(
     if client_id is None:
         return None
     try:
-        client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
-    except ClientNotFound:
-        raise DocumentationClientError(404, tr("no such client")) from None
-    except NotAcceptingNewRows as exc:
-        raise DocumentationClientError(409, exc.detail) from None
-    if client.kind == CLIENT_KIND_UNASSIGNED:
-        raise DocumentationClientError(
-            422, tr("documentation cannot be filed under Unassigned")
+        client = await named_client_for_new_rows(
+            session,
+            org_id=org_id,
+            client_id=client_id,
+            unassigned=N_("documentation cannot be filed under Unassigned"),
         )
+    except ClientRefusesNewRow as exc:
+        raise DocumentationClientError(exc.status_code, exc.detail) from None
     return client.id
 
 

@@ -25,7 +25,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
-import { devices } from "../../fixtures/core";
+import { devices, ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 import type {
   DeviceStatus,
@@ -383,6 +383,8 @@ function rollup(entry: ReturnType<typeof managed>[number]): PatchDeviceRollup | 
   }
   return {
     device_id: entry.device.id,
+    // The fixture fleet is the organisation's own: its internal client.
+    client_id: entry.device.client_id ?? ORG_ID,
     hostname: entry.device.hostname ?? entry.device.id,
     os_family: entry.device.os_family ?? "unknown",
     outstanding: outstanding.length,
@@ -415,11 +417,20 @@ const listPatchRings: FixtureMap["listPatchRings"] = () => {
   const fleet = managed();
   const items = [...POLICIES]
     .sort((a, b) => a.ring_order - b.ring_order)
-    .map((policy) => ({
-      ring_name: policy.ring_name,
-      ring_order: policy.ring_order,
-      device_count: fleet.filter((m) => ringOf(m.device.device_group_id).id === policy.id).length,
-    }));
+    .map((policy) => {
+      const members = fleet.filter((m) => ringOf(m.device.device_group_id).id === policy.id);
+      const byClient = new Map<string, number>();
+      for (const m of members) {
+        const client = m.device.client_id ?? ORG_ID;
+        byClient.set(client, (byClient.get(client) ?? 0) + 1);
+      }
+      return {
+        ring_name: policy.ring_name,
+        ring_order: policy.ring_order,
+        device_count: members.length,
+        client_device_counts: [...byClient].map(([client_id, device_count]) => ({ client_id, device_count })),
+      };
+    });
   return { items, total: items.length, device_total: fleet.length };
 };
 

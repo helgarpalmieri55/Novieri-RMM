@@ -617,6 +617,56 @@ async def test_a_client_s_patch_approval_reaches_only_that_client(api_env: ApiEn
     assert for_x == {patch.id} and for_y == set()
 
 
+async def test_the_rings_say_how_many_of_each_ring_s_machines_are_each_client_s(
+    api_env: ApiEnv,
+) -> None:
+    """The console states an approval's reach by its owner (plan 2026-10-26
+    Task 14 review): X's approval reaches X's machines in the ring, a global
+    one every client's. `GET /patch/rings` says both: `device_count`, and
+    `client_device_counts` -- of the machines this request can see, each
+    client's -- which add up to it. A technician of X counts X's only."""
+    w = await _patch_world(api_env, "cfg-rings")
+    x_site = await _site_of(api_env, w.x)
+    await _device(api_env, w.org, w.x, x_site, w.x_group)
+    admin = await _admin(api_env, w.org)
+    r = await api_env.client.get("/api/v1/patch/rings", headers=admin)
+    assert r.status_code == 200, r.text
+    rings = {item["ring_name"]: item for item in r.json()["items"]}
+
+    def by_client(item: dict[str, Any]) -> dict[str, int]:
+        return {row["client_id"]: row["device_count"] for row in item["client_device_counts"]}
+
+    assert rings["prod"]["device_count"] == 3
+    assert by_client(rings["prod"]) == {str(w.x): 2, str(w.y): 1}
+    for item in rings.values():
+        assert sum(by_client(item).values()) == item["device_count"]
+
+    x_tech = await everything_on(api_env, w.org, w.x)
+    r = await api_env.client.get("/api/v1/patch/rings", headers=x_tech)
+    prod = next(i for i in r.json()["items"] if i["ring_name"] == "prod")
+    assert (prod["device_count"], by_client(prod)) == (2, {str(w.x): 2})
+
+
+async def test_the_device_rollup_names_each_machine_s_client(api_env: ApiEnv) -> None:
+    """The device drill-down approves under the ROW's client (the operator's
+    rule, 2026-10-28), so each row of `GET /patch/device-rollup` carries it."""
+    w = await _patch_world(api_env, "cfg-rollup-client")
+    admin = await _admin(api_env, w.org)
+    r = await api_env.client.get("/api/v1/patch/device-rollup", headers=admin)
+    assert r.status_code == 200, r.text
+    assert {row["device_id"]: row["client_id"] for row in r.json()["items"]} == {
+        str(w.x_device): str(w.x), str(w.y_device): str(w.y),
+    }
+
+
+async def _site_of(env: ApiEnv, client: UUID) -> UUID:
+    async with AsyncSession(env.admin_engine) as s:
+        found: UUID = (
+            await s.execute(text("SELECT id FROM sites WHERE client_id = :c"), {"c": client})
+        ).scalar_one()
+    return found
+
+
 @pytest.mark.parametrize("route", ["single", "bulk"])
 async def test_a_technician_of_x_approves_for_x_and_flips_x_s_machines_only(
     api_env: ApiEnv, route: str
@@ -1000,6 +1050,30 @@ async def test_revoking_one_approval_leaves_the_machines_another_still_covers(
     r = await api_env.client.delete(f"{APPROVALS}/{theirs.json()['id']}", headers=admin)
     assert r.status_code == 204
     assert await _states(api_env, w) == {w.x_device: "approved", w.y_device: "missing"}
+
+
+async def test_revoking_the_global_approval_leaves_a_client_s_own_approval_covering_it(
+    api_env: ApiEnv,
+) -> None:
+    """The other order (plan 2026-10-26 Task 14 review): with X's approval
+    and a global one live for the same patch and ring, revoking the GLOBAL
+    one flips Y's machine back to missing and leaves X's approved -- X's own
+    approval still covers it (`approve.revoke_approval`'s
+    `DevicePatchStatus.client_id.not_in(covering)`)."""
+    w = await _patch_world(api_env, "cfg-revoke-g")
+    admin = await _admin(api_env, w.org)
+    body = {"patch_id": str(w.patch), "ring_name": "prod"}
+    mine = await api_env.client.post(
+        APPROVALS, json={**body, "client_id": str(w.x)}, headers=admin
+    )
+    shared = await api_env.client.post(APPROVALS, json=body, headers=admin)
+    assert mine.status_code == shared.status_code == 201
+    assert await _states(api_env, w) == {w.x_device: "approved", w.y_device: "approved"}
+
+    r = await api_env.client.delete(f"{APPROVALS}/{shared.json()['id']}", headers=admin)
+    assert r.status_code == 204
+    assert await _states(api_env, w) == {w.x_device: "approved", w.y_device: "missing"}
+    assert await _approval_rows(api_env, w.org) == sorted([(w.x, False), (None, True)], key=repr)
 
 
 async def test_patch_audits_carry_the_approval_s_or_the_machine_s_client(

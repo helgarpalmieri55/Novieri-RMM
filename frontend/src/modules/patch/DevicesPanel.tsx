@@ -233,6 +233,7 @@ export function DevicesPanel({
               <FragmentRows
                 key={device.device_id}
                 deviceId={device.device_id}
+                clientId={device.client_id}
                 hostname={device.hostname}
                 osFamily={device.os_family}
                 outstanding={device.outstanding}
@@ -278,6 +279,7 @@ function familyName(osFamily: string): string {
 
 function FragmentRows({
   deviceId,
+  clientId,
   hostname,
   osFamily,
   outstanding,
@@ -295,6 +297,8 @@ function FragmentRows({
   onToggle,
 }: {
   deviceId: string;
+  /** The machine's client: an approval from its drill-down is filed under it. */
+  clientId: string;
   hostname: string;
   osFamily: string;
   outstanding: number;
@@ -399,6 +403,7 @@ function FragmentRows({
       {expanded && (
         <DeviceUpdates
           deviceId={deviceId}
+          clientId={clientId}
           hostname={hostname}
           columns={columns}
           canApprove={canApprove}
@@ -432,6 +437,7 @@ function FragmentRows({
  */
 function DeviceUpdates({
   deviceId,
+  clientId,
   hostname,
   columns,
   canApprove,
@@ -439,6 +445,7 @@ function DeviceUpdates({
   fleetDeviceTotal,
 }: {
   deviceId: string;
+  clientId: string;
   hostname: string;
   columns: number;
   canApprove: boolean;
@@ -504,6 +511,9 @@ function DeviceUpdates({
               fleetDeviceTotal={fleetDeviceTotal}
               scopeHostname={hostname}
               scopeName={hostname}
+              // The operator's rule of 2026-10-28: an approval made from a
+              // machine is filed under that machine's own client.
+              rowClientId={clientId}
             />
           )}
 

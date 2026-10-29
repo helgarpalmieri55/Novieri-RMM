@@ -19,7 +19,7 @@ function renderBar() {
           onSelectionChange={() => undefined}
           matchingTotal={1}
           resolveMatching={() => Promise.resolve({ ids: ["p1"], matching: 1, truncated: false })}
-          ringOptions={[{ name: "broad", deviceCount: 12 }]}
+          ringOptions={[{ name: "broad", deviceCount: 12, clientCounts: { o1: 12 } }]}
           fleetDeviceTotal={12}
           scopeName="Windows updates"
         />

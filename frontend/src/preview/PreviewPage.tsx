@@ -315,13 +315,13 @@ const PATCH_FIXTURE_MACOS_PAGE: PatchUpdateListResponse = {
 const PATCH_FIXTURE_WINDOWS_ROLLUP: PatchDeviceRollupListResponse = {
   items: [
     {
-      device_id: "d-2", hostname: "ws-alpha", os_family: "windows", outstanding: 12, failed: 2,
+      device_id: "d-2", client_id: "o-1", hostname: "ws-alpha", os_family: "windows", outstanding: 12, failed: 2,
       worst_severity: "critical",
       counts_by_severity: { critical: 1, important: 3, moderate: 8 },
       last_scan_at: "2026-08-26T03:55:00Z",
     },
     {
-      device_id: "d-4", hostname: "ws-gamma", os_family: "windows", outstanding: 2, failed: 0,
+      device_id: "d-4", client_id: "o-1", hostname: "ws-gamma", os_family: "windows", outstanding: 2, failed: 0,
       worst_severity: "low",
       counts_by_severity: { low: 2 },
       last_scan_at: "2026-08-26T04:01:00Z",
@@ -336,13 +336,13 @@ const PATCH_FIXTURE_WINDOWS_ROLLUP: PatchDeviceRollupListResponse = {
 const PATCH_FIXTURE_LINUX_ROLLUP: PatchDeviceRollupListResponse = {
   items: [
     {
-      device_id: "d-1", hostname: "srv-dc01", os_family: "linux", outstanding: 41, failed: 0,
+      device_id: "d-1", client_id: "o-1", hostname: "srv-dc01", os_family: "linux", outstanding: 41, failed: 0,
       worst_severity: "critical",
       counts_by_severity: { critical: 1, important: 2, moderate: 21, unknown: 17 },
       last_scan_at: "2026-08-26T04:09:00Z",
     },
     {
-      device_id: "d-5", hostname: "srv-app02", os_family: "linux", outstanding: 18, failed: 0,
+      device_id: "d-5", client_id: "o-1", hostname: "srv-app02", os_family: "linux", outstanding: 18, failed: 0,
       worst_severity: "important",
       counts_by_severity: { important: 2, moderate: 9, unknown: 7 },
       // NEVER ANSWERED. A machine with no scan is a different fact from one
@@ -361,7 +361,7 @@ const PATCH_FIXTURE_LINUX_ROLLUP: PatchDeviceRollupListResponse = {
 const PATCH_FIXTURE_MACOS_ROLLUP: PatchDeviceRollupListResponse = {
   items: [
     {
-      device_id: "d-3", hostname: "ws-beta", os_family: "macos", outstanding: 6, failed: 0,
+      device_id: "d-3", client_id: "o-1", hostname: "ws-beta", os_family: "macos", outstanding: 6, failed: 0,
       worst_severity: "important",
       counts_by_severity: { important: 2, moderate: 4 },
       last_scan_at: "2026-08-25T22:31:00Z",
@@ -447,9 +447,9 @@ const PATCH_FIXTURE_REPORT: FleetReport = {
 
 const PATCH_FIXTURE_RINGS: PatchRingListResponse = {
   items: [
-    { ring_name: "test", ring_order: 0, device_count: 12 },
-    { ring_name: "pilot", ring_order: 1, device_count: 47 },
-    { ring_name: "broad", ring_order: 2, device_count: 227 },
+    { ring_name: "test", ring_order: 0, device_count: 12, client_device_counts: [{ client_id: "o-1", device_count: 12 }] },
+    { ring_name: "pilot", ring_order: 1, device_count: 47, client_device_counts: [{ client_id: "o-1", device_count: 47 }] },
+    { ring_name: "broad", ring_order: 2, device_count: 227, client_device_counts: [{ client_id: "o-1", device_count: 227 }] },
   ],
   total: 3,
   device_total: 286,
@@ -516,6 +516,9 @@ function PatchWorkingSurfaces() {
       PATCH_FIXTURE_RINGS.items.map((ring) => ({
         name: ring.ring_name,
         deviceCount: ring.device_count,
+        clientCounts: Object.fromEntries(
+          ring.client_device_counts.map((row) => [row.client_id, row.device_count]),
+        ),
       })),
     [],
   );

@@ -22,10 +22,15 @@ THE SAME HOLDS FOR CLIENTS (MSP clients plan 2026-10-26 Task 7, research-5
 resolver reads the target's client and an action of another client answers
 exactly like a missing one ("linked action not found"), word for word -- a
 narrowed session cannot see it at all, and a wider one is told nothing
-more. A target with no client is every client's: a global patch approval,
-or a provisioning run with no device yet (both O tables, NULL = every
-client). Linking and unlinking are writes on the change, so they need
-change management in the change's client (`load_change_for_write`).
+more. A target with no client is every client's: a provisioning run with no
+device yet links to any client's change. A GLOBAL PATCH APPROVAL is the
+exception (decision C8, plan 2026-10-26 Task 14 review): Novieri decides
+it, so only the INTERNAL client's change -- whose id is the organisation's
+-- authorizes it (`gates.has_authorizing_change`). Linked to a customer's
+change it would authorize nothing and the gate would withhold it in
+silence, so that link is refused like a missing one too. Linking and
+unlinking are writes on the change, so they need change management in the
+change's client (`load_change_for_write`).
 """
 
 from collections.abc import Awaitable, Callable
@@ -77,6 +82,18 @@ _LINK_RESOLVERS: dict[str, Resolver] = {
 }
 
 
+def _may_authorize(
+    action_type: str, target_client: UUID | None, *, change_client: UUID, org_id: UUID
+) -> bool:
+    """Whether a change of `change_client` may be linked to a target of
+    `target_client`: the same client, or a target with no client -- except a
+    global patch approval, which only the internal client's change (id = the
+    organisation's) authorizes (C8; module docstring)."""
+    if target_client is None:
+        return action_type != "patch_approval" or change_client == org_id
+    return target_client == change_client
+
+
 async def add_link(
     session: AsyncSession,
     *,
@@ -107,9 +124,12 @@ async def add_link(
 
     # Org-scoped resolution: an action_id from another org is invisible here,
     # so it raises exactly like a nonexistent one (invariant #5). One of
-    # another CLIENT raises exactly the same (module docstring).
+    # another CLIENT raises exactly the same, and so does a global patch
+    # approval on any change but the internal client's (module docstring).
     found = await resolve(session, org_id, action_id)
-    if found is None or found[0] not in (None, change.client_id):
+    if found is None or not _may_authorize(
+        action_type, found[0], change_client=change.client_id, org_id=org_id
+    ):
         raise ChangeValidationError(tr("linked action not found"))
 
     # Pre-check for a duplicate rather than relying on the unique constraint,

@@ -201,20 +201,64 @@ export function ringReachMessage(
 }
 
 /**
+ * WHOSE MACHINES AN APPROVAL CLEARS (MSP clients plan 2026-10-26 Task 14 and
+ * its review). One client's -- `name` is how the sentence names it, already
+ * resolved by the caller: the client's name, its id when the clients list
+ * cannot be read, or the internal client's own phrase -- or, for a global
+ * approval ("For every client"), every client's.
+ */
+export type ApprovalOwner = { readonly kind: "every" } | { readonly kind: "client"; readonly name: string };
+
+export const EVERY_CLIENT: ApprovalOwner = { kind: "every" };
+
+/**
+ * How far an approval reaches, as a phrase ("the 2 devices of Acme in the test
+ * ring"). `count` is the OWNER's machines in the ring -- that client's, or
+ * every client's for a global approval -- and `null` when `GET /patch/rings`
+ * has not answered. A client's approval reaches no other client's machine, so
+ * the ring's whole population would overstate it.
+ */
+export function approvalReach(owner: ApprovalOwner, ring: string, count: number | null): string {
+  if (owner.kind === "every") {
+    return count == null
+      ? translate("patch.copy.reachEveryClient", { ring })
+      : translate("patch.copy.reachEveryClientCount", { ring, count });
+  }
+  return count == null
+    ? translate("patch.copy.reachClientEvery", { ring, client: owner.name })
+    : translate("patch.copy.reachClientCount", { ring, count, client: owner.name });
+}
+
+/** The same reach, as the confirmation names it (`patch.decision.bodyIntro`). */
+export function approvalTarget(owner: ApprovalOwner, ring: string, count: number | null): string {
+  if (owner.kind === "every") {
+    return count == null
+      ? translate("patch.decision.targetEvery", { ring })
+      : translate("patch.decision.target", { ring, count });
+  }
+  return count == null
+    ? translate("patch.decision.targetClientEvery", { ring, client: owner.name })
+    : translate("patch.decision.targetClient", { ring, count, client: owner.name });
+}
+
+/**
  * THE SENTENCE THAT KEEPS A LENS FROM READING AS A SCOPE.
  *
  * Said on the device drill-down, where an operator has just picked updates off
  * one machine's list and is about to clear them for a whole ring. Without it
  * the most natural reading of the screen — "I am approving srv-dc01's
  * updates" — is wrong in the one direction that matters: it understates the
- * blast radius.
+ * blast radius. The reach is the approval's OWNER's (`approvalReach`): the
+ * machine's own client's machines in the ring, or every client's when the
+ * approval is for every client.
  */
 export function deviceLensWarning(
   hostname: string,
   ring: string,
-  ringDeviceCount: number | null,
+  ownerCount: number | null,
+  owner: ApprovalOwner,
 ): string {
-  return translate("patch.copy.lens", { hostname, reach: ringReach(ring, ringDeviceCount) });
+  return translate("patch.copy.lens", { hostname, reach: approvalReach(owner, ring, ownerCount) });
 }
 
 /** How many devices an approval into `ring` reaches, as a phrase ("all 12 devices in the test ring"). */

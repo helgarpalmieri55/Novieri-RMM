@@ -5,7 +5,7 @@ import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { FilterBar, Pager, Panel, QueryState, SearchField, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
-import { DecisionBar } from "./DecisionBar";
+import { DecisionBar, type RingOption } from "./DecisionBar";
 import { severityKind, severityLabel } from "./patchState";
 import type { MatchingSelection } from "./selection";
 import {
@@ -66,12 +66,7 @@ export interface UpdateFilters {
   offset: number;
 }
 
-export interface RingOption {
-  name: string;
-  /** `null` until `GET /patch/rings` has answered. A blast radius guessed at is
-   *  worse than one not shown. */
-  deviceCount: number | null;
-}
+export type { RingOption };
 
 export function UpdatesPanel({
   query,

@@ -317,10 +317,17 @@ export function FleetPatchPage() {
     const served = rings.data?.items ?? [];
     const names = new Set(served.map((ring) => ring.ring_name));
     return [
-      ...served.map((ring) => ({ name: ring.ring_name, deviceCount: ring.device_count })),
+      ...served.map((ring) => ({
+        name: ring.ring_name,
+        deviceCount: ring.device_count,
+        clientCounts: Object.fromEntries(
+          ring.client_device_counts.map((row) => [row.client_id, row.device_count]),
+        ),
+      })),
       ...CANONICAL_RINGS.filter((name) => !names.has(name)).map((name) => ({
         name,
         deviceCount: rings.data ? 0 : null,
+        clientCounts: rings.data ? {} : null,
       })),
     ];
   }, [rings.data]);

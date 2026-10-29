@@ -448,7 +448,7 @@ async def create_record(
         except svc.DocumentationClientError as exc:
             raise HTTPException(exc.status_code, exc.detail) from None
         except ValueError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         return _record_out(record)
 
 
@@ -517,7 +517,7 @@ async def update_record(
                 session, record, actor_id=ctx.user_id, name=body.name, fields=body.fields
             )
         except ValueError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         return _record_out(record)
 
 
