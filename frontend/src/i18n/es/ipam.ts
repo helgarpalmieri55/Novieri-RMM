@@ -37,6 +37,7 @@ export const ipam: Shape<typeof en> = {
     end: "Fin",
     none: "Ninguno",
     defaultGlobal: "Predeterminada (global)",
+    vrfOfClient: "{vrf} · {client}",
     loading: "Cargando…",
     drift: "Deriva",
     dormant: "En reposo",
@@ -765,7 +766,8 @@ export const ipam: Shape<typeof en> = {
     routeDistinguisher: "Distinguidor de ruta",
     addVrf: "Añadir VRF",
     sitesTitle: "Sedes",
-    sitesSubtitle: "Las oficinas del cliente. Las VLAN y las subredes las nombran; se gestionan con el cliente.",
+    sitesSubtitle:
+      "Las oficinas del cliente. Las VLAN y las subredes las nombran; hasta que la consola pueda gestionar un cliente, se crean y se editan mediante la API o una conexión de IA (MCP).",
     sitesEmpty: "Este cliente todavía no tiene sedes.",
     vlansTitle: "VLAN",
     vlansSubtitle: "Una VLAN sin sede es de todo el cliente, no una a la que le falta la sede.",

@@ -640,8 +640,14 @@ describe("FleetPatchPage — the fleet view is one row per update, not per pair"
       "pilot",
     );
 
-    // On the page, beside the control, before anything is clicked.
-    expect(await screen.findByText(/pilot ring covers 17 of 240 devices/i)).toBeInTheDocument();
+    // On the page, beside the control, before anything is clicked -- and the
+    // reach of THIS approval, the internal client's (final review E: it used
+    // to say the ring's whole population whoever the approval was for).
+    expect(
+      await screen.findByText(
+        "An approval here covers the 17 devices of your organisation's own client in the pilot ring.",
+      ),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^Approve 1 update/ }));
     const confirm = await screen.findByRole("dialog", {
@@ -3350,6 +3356,46 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
       ring_name: "test",
       client_id: "c-acme",
     });
+  });
+
+  it("says on the bar what an approval reaches, and what ticking For every client does", async () => {
+    // Final review E Important 3. The hint said what the row would be visible
+    // to ("Every client's technicians will see it ...") -- for a patch
+    // approval the effect is reach: ticking makes the update installable on
+    // every client's machines in the ring.
+    const user = userEvent.setup();
+    renderWithProviders(<FleetPatchPage />);
+    await screen.findByText("2023-10 Cumulative Update");
+    expect(
+      await screen.findByText(
+        "An approval here covers the 2 devices of your organisation's own client in the test ring.",
+      ),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
+    const toggle = screen.getByRole("checkbox", { name: /For every client/ });
+    expect(toggle.closest("label")).toHaveTextContent(
+      "Ticked, these updates become installable on every client's machines in the test ring. Unticked, only on the machines of your organisation's own client.",
+    );
+    expect(toggle.closest("label")).not.toHaveTextContent(/will see it/);
+    await user.click(toggle);
+    // A global approval does reach the ring's whole population.
+    expect(screen.getByText("The test ring covers 3 of 240 devices.")).toBeInTheDocument();
+  });
+
+  it("names the machine's own client in the hint on a customer's drill-down", async () => {
+    const user = userEvent.setup();
+    api = customerMachine({
+      me: vi.fn().mockResolvedValue(READS_CLIENTS),
+      listClients: vi.fn().mockResolvedValue(CLIENTS),
+    });
+    await chooseOnSentinel(user);
+    const section = screen.getByRole("combobox", { name: "Ring to approve into — sentinel" })
+      .parentElement as HTMLElement;
+    expect(
+      (await within(section).findByRole("checkbox", { name: /For every client/ })).closest("label"),
+    ).toHaveTextContent(
+      "Ticked, these updates become installable on every client's machines in the test ring. Unticked, only on the machines of Acme.",
+    );
   });
 
   it("names the customer by its id when the clients list cannot be read", async () => {

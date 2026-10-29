@@ -8,8 +8,10 @@ import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
 import { humaniseEnum } from "../../lib/labels";
 import { Icon } from "../../shell/icons";
+import { useClientName } from "../settings/api";
 import {
   useCreateIpamSubnetMutation,
+  useIpamClient,
   useIpamDrift,
   useIpamPermissions,
   useIpamSites,
@@ -563,7 +565,8 @@ function CreateSubnetForm() {
   const t = useT();
   const create = useCreateIpamSubnetMutation();
   const vrfs = useIpamVrfs();
-  const sites = useIpamSites();
+  const clientName = useClientName();
+  const own = useIpamClient();
   const vlans = useIpamVlans();
   const [prefix, setPrefix] = useState("");
   const [name, setName] = useState("");
@@ -571,6 +574,13 @@ function CreateSubnetForm() {
   const [vrfId, setVrfId] = useState("");
   const [siteId, setSiteId] = useState("");
   const [vlanId, setVlanId] = useState("");
+  // THE VRF DECIDES THE SUBNET'S CLIENT (with none, the console's own client's
+  // `global` VRF), so the sites and VLANs offered are that client's -- the
+  // server refuses any other's (final review E). `null` while the chosen VRF
+  // is not in the list yet.
+  const client = vrfId ? (vrfs.data?.find((vrf) => vrf.id === vrfId)?.client_id ?? null) : own;
+  const sites = useIpamSites(client);
+  const clientVlans = (vlans.data ?? []).filter((vlan) => vlan.client_id === client);
   const [gateway, setGateway] = useState("");
   // Populated ON SUBMIT, never while typing — "10.4" is not yet wrong, it is
   // unfinished, and a form that says so mid-keystroke is its own kind of noise.
@@ -645,11 +655,20 @@ function CreateSubnetForm() {
             </select>
           </Field>
           <Field label={t("ipam.fields.vrf")}>
-            <select className={inputClass} value={vrfId} onChange={(e) => setVrfId(e.target.value)}>
+            <select
+              className={inputClass}
+              value={vrfId}
+              onChange={(e) => {
+                setVrfId(e.target.value);
+                // Another VRF can be another client: its sites and VLANs differ.
+                setSiteId("");
+                setVlanId("");
+              }}
+            >
               <option value="">{t("ipam.fields.defaultGlobal")}</option>
               {vrfs.data?.map((vrf) => (
                 <option key={vrf.id} value={vrf.id}>
-                  {vrf.name}
+                  {t("ipam.fields.vrfOfClient", { vrf: vrf.name, client: clientName(vrf.client_id) })}
                 </option>
               ))}
             </select>
@@ -675,7 +694,7 @@ function CreateSubnetForm() {
               onChange={(e) => setVlanId(e.target.value)}
             >
               <option value="">{t("ipam.fields.none")}</option>
-              {vlans.data?.map((vlan) => (
+              {clientVlans.map((vlan) => (
                 <option key={vlan.id} value={vlan.id}>
                   {t("ipam.vlan.named", { vid: vlan.vid, name: vlan.name })}
                 </option>

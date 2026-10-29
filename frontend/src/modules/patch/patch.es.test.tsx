@@ -292,12 +292,17 @@ describe("the fleet patch page in Spanish", () => {
     renderPage(<FleetPatchPage />);
     await screen.findByText("Acumulativa de octubre");
     expect(screen.getByRole("button", { name: "Seleccionar las 2 actualizaciones — actualizaciones de Windows" })).toBeInTheDocument();
-    expect(screen.getByText("El anillo test abarca 3 de 240 dispositivos.")).toBeInTheDocument();
+    // The reach of THIS approval, the internal client's 2 of the ring's 3.
+    expect(screen.getByText("Una aprobación aquí abarca los 2 dispositivos del cliente propio de tu organización en el anillo test.")).toBeInTheDocument();
     const ring = screen.getByLabelText("Anillo en el que aprobar — actualizaciones de Windows");
     expect(within(ring).getByRole("option", { name: "pilot, 1 dispositivo" })).toBeInTheDocument();
     expect(within(ring).getByRole("option", { name: "broad, 220 dispositivos" })).toBeInTheDocument();
     await user.click(screen.getByLabelText("Seleccionar KB5031354"));
     expect(screen.getByText("1 actualización seleccionada de 2 coincidentes.")).toBeInTheDocument();
+    // What ticking does, and whose machines it is otherwise (final review E).
+    expect(screen.getByRole("checkbox", { name: /Para todos los clientes/ }).closest("label")).toHaveTextContent(
+      "Marcada, estas actualizaciones pasan a poder instalarse en los equipos de todos los clientes del anillo test. Sin marcar, solo en los del cliente propio de tu organización.",
+    );
     expect(screen.getByLabelText("Cambio que implementa esta aprobación — actualizaciones de Windows")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Sin solicitud de cambio" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Aprobar 1 actualización en el anillo test/ }));
@@ -711,7 +716,7 @@ describe("a live language switch on the patch pages", () => {
     expect(screen.getByRole("heading", { name: "Patch management" })).toBeInTheDocument();
     expect(screen.getByText("Showing 1–2 of 2 updates.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Select all 2 updates — Windows updates" })).toBeInTheDocument();
-    expect(screen.getByText("The test ring covers 3 of 240 devices.")).toBeInTheDocument();
+    expect(screen.getByText("An approval here covers the 2 devices of your organisation's own client in the test ring.")).toBeInTheDocument();
     expect(screen.getByText("Policy auto-approval")).toBeInTheDocument();
     expect(screen.getByText("Restart booked")).toBeInTheDocument();
     expect(screen.getByText(/Severity here is Microsoft's MSRC rating/)).toBeInTheDocument();

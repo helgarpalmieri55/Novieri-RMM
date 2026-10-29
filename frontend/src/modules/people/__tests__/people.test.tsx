@@ -270,7 +270,7 @@ describe("PersonPage", () => {
     // Not Settings: `/users` is staff-only, and a contact is turned back on as a contact.
     expect(
       within(dialog).getByText(
-        "They can no longer use the portal. To turn it back on, edit the contact on the client's page.",
+        "They can no longer use the portal. Until the console can edit a client's contacts, turning it back on is done through the API or an AI connection (MCP).",
       ),
     ).toBeInTheDocument();
     expect(within(dialog).queryByText(/Settings/)).toBeNull();
@@ -366,7 +366,7 @@ async function openPicker(overrides: Partial<Record<keyof ApiClient, unknown>>) 
     ["people.read", "people.manage"],
   );
   mockUseApi.mockReturnValue(client);
-  renderAt(<DeviceAssignedTo deviceId="d1" />, "/devices/:id", "/devices/d1");
+  renderAt(<DeviceAssignedTo deviceId="d1" clientId="c-x" />, "/devices/:id", "/devices/d1");
   await user.click(await screen.findByRole("button", { name: "Change" }));
   const dialog = await screen.findByRole("dialog");
   return { user, client, dialog };
@@ -377,7 +377,7 @@ describe("DeviceAssignedTo", () => {
     const getDevicePerson = vi.fn().mockResolvedValue(devicePerson());
     mockUseApi.mockReturnValue(api({ getDevicePerson }, ["people.read"]));
     const { unmount } = renderAt(
-      <DeviceAssignedTo deviceId="d1" />,
+      <DeviceAssignedTo deviceId="d1" clientId="c-x" />,
       "/devices/:id",
       "/devices/d1",
     );
@@ -394,7 +394,7 @@ describe("DeviceAssignedTo", () => {
     const client = api({ getDevicePerson: hidden }, ["devices.read"]);
     mockUseApi.mockReturnValue(client);
     const { container } = renderAt(
-      <DeviceAssignedTo deviceId="d1" />,
+      <DeviceAssignedTo deviceId="d1" clientId="c-x" />,
       "/devices/:id",
       "/devices/d1",
     );
@@ -408,7 +408,7 @@ describe("DeviceAssignedTo", () => {
       devicePerson({ person: null, source: "inventory", observed_login: "TOESHEE\\aruiz" }),
     );
     mockUseApi.mockReturnValue(api({ getDevicePerson }, ["people.read"]));
-    renderAt(<DeviceAssignedTo deviceId="d1" />, "/devices/:id", "/devices/d1");
+    renderAt(<DeviceAssignedTo deviceId="d1" clientId="c-x" />, "/devices/:id", "/devices/d1");
     expect(await screen.findByTestId("device-assigned-to")).toHaveTextContent(
       "Assigned to: nobody yet · last signed in as TOESHEE\\aruiz",
     );
@@ -417,7 +417,7 @@ describe("DeviceAssignedTo", () => {
   it("says where an automatic holder came from, and offers the way back only from a hand-set one", async () => {
     const getDevicePerson = vi.fn().mockResolvedValue(devicePerson({ source: "inventory" }));
     mockUseApi.mockReturnValue(api({ getDevicePerson }, ["people.read", "people.manage"]));
-    renderAt(<DeviceAssignedTo deviceId="d1" />, "/devices/:id", "/devices/d1");
+    renderAt(<DeviceAssignedTo deviceId="d1" clientId="c-x" />, "/devices/:id", "/devices/d1");
     expect(await screen.findByTestId("device-assigned-to")).toHaveTextContent(
       "Assigned to: Maria Garcia · from who signs in",
     );
@@ -448,11 +448,14 @@ describe("DeviceAssignedTo", () => {
     await user.type(within(dialog).getByLabelText("Email"), "ana@corp.example");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
-    // In the internal client, whose id is `/me`'s org_id (PHASE 3: the selector's).
+    // In the DEVICE'S client (final review E Important 2): the server holds a
+    // device's holder to the device's own client, so a person filed under the
+    // internal client -- as this test used to expect -- could never be
+    // assigned to a customer's machine, and every retry made another.
     expect(createPerson).toHaveBeenCalledWith({
       display_name: "Ana Ruiz",
       email: "ana@corp.example",
-      client_id: "o1",
+      client_id: "c-x",
     });
     await vi.waitFor(() => expect(setDevicePerson).toHaveBeenCalledWith("d1", "p7"));
     // Created first, assigned second.
@@ -474,7 +477,7 @@ describe("DeviceAssignedTo", () => {
 
     await user.type(within(dialog).getByLabelText("Name"), "Pat");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
-    expect(createPerson).toHaveBeenCalledWith({ display_name: "Pat", email: null, client_id: "o1" });
+    expect(createPerson).toHaveBeenCalledWith({ display_name: "Pat", email: null, client_id: "c-x" });
     await vi.waitFor(() => expect(setDevicePerson).toHaveBeenCalledWith("d1", "p8"));
   });
 

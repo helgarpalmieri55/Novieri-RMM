@@ -12,11 +12,11 @@ import { useClientName } from "../settings/api";
 import { useAuthorizingChanges, usePatchBulkApproveMutation } from "./api";
 import {
   type ApprovalOwner,
+  approvalReachMessage,
   approvalTarget,
   bulkApprovedMessage,
   deviceLensWarning,
   EVERY_CLIENT,
-  ringReachMessage,
   selectAllMatchingLabel,
   selectionCeilingNotice,
   selectionSummary,
@@ -141,7 +141,6 @@ export function DecisionBar({
 
   const option = ringOptions.find((entry) => entry.name === ring);
   const ringDeviceCount = option?.deviceCount ?? null;
-  const reach = ringReachMessage(ring, ringDeviceCount, fleetDeviceTotal);
 
   // WHOSE MACHINES THIS APPROVAL CLEARS, and how many of them are in the ring:
   // every client's when asked; otherwise the row's client, or the internal
@@ -163,6 +162,14 @@ export function DecisionBar({
     : ownerId == null || option?.clientCounts == null
       ? null
       : (option.clientCounts[ownerId] ?? 0);
+  // The reach of THIS approval: its owner's machines (final review E).
+  const reach = approvalReachMessage(owner, ring, ownerCount, fleetDeviceTotal);
+  // What ticking "For every client" changes, said by the client the approval
+  // is otherwise for: the row's on a drill-down, else the internal one.
+  const untickedName =
+    rowClientId == null || rowClientId === internalId
+      ? t("patch.decision.ownClient")
+      : clientName(rowClientId);
   const ceilingNotice = selectionCeilingNotice(matchingTotal, BULK_APPROVAL_MAX);
   const selectedCount = selectedIds.length;
 
@@ -231,6 +238,7 @@ export function DecisionBar({
           />
           <ForEveryClientToggle
             code="patch.approve"
+            hint={t("patch.decision.forEveryClientHint", { ring, client: untickedName })}
             checked={forEveryClient}
             onChange={(checked) => {
               setForEveryClient(checked);

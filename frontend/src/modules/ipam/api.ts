@@ -203,9 +203,16 @@ export function useCreateIpamVrfMutation() {
  * migration 0240, and creates none -- a site is a client's office, managed
  * with the client. LOADING until the client is known, not empty.
  */
-export function useIpamSites() {
+/**
+ * The sites of `of` -- a row's own client, whose sites alone it may name --
+ * or, with no argument, of the client this console files new rows under
+ * (`useIpamClient`). `null` waits: the row, or the VRF that decides it, has
+ * not loaded yet.
+ */
+export function useIpamSites(of?: string | null) {
   const api = useApi();
-  const client = useIpamClient();
+  const own = useIpamClient();
+  const client = of === undefined ? own : of;
   return loadingUntilClient(
     useQuery<ClientSiteOut[], ApiError>({
       queryKey: ["client-sites", client],
@@ -461,8 +468,10 @@ export function useCreateIpamAddressMutation() {
   const queryClient = useQueryClient();
   const client = useIpamClient();
   return useMutation<AddressOut, ApiError, AddressCreate>({
-    // PHASE 3: with no VRF (the address dialog names none), the selected
-    // client's `global` VRF; until then the internal client's.
+    // The address dialog names its subnet's VRF, whose client is the
+    // address's, so it sends no client. Only a body with no VRF names one --
+    // PHASE 3: the selected client's `global` VRF; until then the internal
+    // client's.
     mutationFn: (body) => api.createIpamAddress(namingClient(body, body.vrf_id, client)),
     onSuccess: (data) => invalidateAddressEffects(queryClient, data.id),
   });

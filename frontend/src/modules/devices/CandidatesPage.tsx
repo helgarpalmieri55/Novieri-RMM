@@ -130,6 +130,8 @@ function rowKey(candidate: AssetCandidate): string {
 interface PromoteOutcomes {
   results: PromoteResult[];
   failures: unknown[];
+  /** The clients whose request failed: their rows stay selected for a retry. */
+  failedClients: ReadonlySet<string>;
 }
 
 /** A selected row, as it was when it was ticked: whose it is, and its address. */
@@ -200,20 +202,31 @@ export function CandidatesPage() {
       for (const picked of selected.values()) {
         byClient.set(picked.client_id, [...(byClient.get(picked.client_id) ?? []), picked.address]);
       }
+      const requests = [...byClient];
       const settled = await Promise.allSettled(
-        [...byClient].map(([client_id, addresses]) =>
+        requests.map(([client_id, addresses]) =>
           api.promoteAssetCandidates({ client_id, addresses }),
         ),
       );
       const results = settled.flatMap((s) => (s.status === "fulfilled" ? s.value.results : []));
       const failures = settled.flatMap((s) => (s.status === "rejected" ? [s.reason] : []));
+      // `allSettled` keeps the order it was given: the i-th outcome is the
+      // i-th client's.
+      const failedClients = new Set(
+        requests.flatMap(([client_id], i) => (settled[i]?.status === "rejected" ? [client_id] : [])),
+      );
       // Nothing came back at all: the selection stays, and the error lines
       // say why -- every request's, not only the first.
       if (results.length === 0 && failures.length > 0) throw new PromoteFailed(failures);
-      return { results, failures };
+      return { results, failures, failedClients };
     },
-    onSuccess: () => {
-      setSelected(new Map());
+    onSuccess: ({ failedClients }) => {
+      // The rows of a client whose request FAILED stay selected, so the
+      // retry is one click; the rest were answered (final review E).
+      setSelected(
+        (current) =>
+          new Map([...current].filter(([, picked]) => failedClients.has(picked.client_id))),
+      );
       void queryClient.invalidateQueries({ queryKey: ["asset-candidates"] });
       void queryClient.invalidateQueries({ queryKey: ["devices"] });
     },

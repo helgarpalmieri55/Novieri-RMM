@@ -40,6 +40,8 @@ export const ipam = {
     end: "End",
     none: "None",
     defaultGlobal: "Default (global)",
+    // A VRF decides the client of what is filed in it, so a VRF says whose it is.
+    vrfOfClient: "{vrf} · {client}",
     loading: "Loading…",
     drift: "Drift",
     dormant: "Dormant",
@@ -771,7 +773,9 @@ export const ipam = {
     routeDistinguisher: "Route distinguisher",
     addVrf: "Add VRF",
     sitesTitle: "Sites",
-    sitesSubtitle: "The client's offices. VLANs and subnets name them; they are managed with the client.",
+    // No console page manages a client's sites yet (phase 3) -- final review E.
+    sitesSubtitle:
+      "The client's offices. VLANs and subnets name them; until the console can manage a client, they are added and edited through the API or an AI connection (MCP).",
     sitesEmpty: "This client has no sites yet.",
     vlansTitle: "VLANs",
     vlansSubtitle: "A VLAN with no site is the whole client's, not one whose site is missing.",

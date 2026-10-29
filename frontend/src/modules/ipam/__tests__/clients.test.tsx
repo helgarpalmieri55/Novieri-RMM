@@ -179,7 +179,9 @@ describe("a subnet, an address and a scan authorization", () => {
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
     if (vrf !== null) {
-      await within(dialog).findByRole("option", { name: "lab" });
+      // `lab · o1`: the VRF names its client (its id here: this `/me` cannot
+      // read the clients' names).
+      await within(dialog).findByRole("option", { name: "lab · o1" });
       await user.selectOptions(within(dialog).getByLabelText("VRF"), vrf);
     }
     await user.click(within(dialog).getByRole("button", { name: "Register" }));
@@ -228,37 +230,160 @@ describe("a subnet, an address and a scan authorization", () => {
       allocation_method_source: "unknown",
     };
 
-  it("reserves an address in the internal client's global VRF", async () => {
-    const createIpamAddress = vi.fn().mockResolvedValue({});
-    stubApi({ createIpamAddress });
-    const user = userEvent.setup();
-    renderWithProviders(
-      <AddressDialog entry={entry} subnetPrefix="10.4.7.0/24" canAssign onClose={() => {}} />,
-    );
-    // The client comes from `/me`: wait for it before acting, as a person would.
-    await waitFor(() => expect(mockUseApi().me).toHaveBeenCalled());
-    await user.click(await screen.findByRole("button", { name: "Reserve" }));
+  // CORRECTED by the final review (E Important 1). These pinned a body that
+  // named the INTERNAL client and no VRF: the server then looked the address up
+  // in the internal client's `global` VRF whatever subnet the grid showed -- a
+  // customer's address written into Novieri's own plan where an internal
+  // subnet overlapped, a misleading 422 where none did, a 404 for a technician
+  // of that customer. The dialog lives on one subnet, so it names that
+  // subnet's VRF, whose client is the address's, and no client at all.
+  it.each(["Reserve", "Assign"])(
+    "%s files the address in the subnet's own VRF and names no client",
+    async (button) => {
+      const createIpamAddress = vi.fn().mockResolvedValue({});
+      stubApi({ createIpamAddress });
+      const user = userEvent.setup();
+      renderWithProviders(
+        <AddressDialog
+          entry={entry}
+          subnetPrefix="10.4.7.0/24"
+          vrfId="vrf-x"
+          canAssign
+          onClose={() => {}}
+        />,
+      );
+      await user.click(await screen.findByRole("button", { name: button }));
 
-    await waitFor(() => expect(createIpamAddress).toHaveBeenCalled());
-    expect(bodyOf(createIpamAddress)).toMatchObject({
-      address: "10.4.7.9",
-      reserve: true,
-      client_id: "o1",
-    });
-  });
+      await waitFor(() => expect(createIpamAddress).toHaveBeenCalled());
+      const body = bodyOf(createIpamAddress);
+      expect(body).toMatchObject({ address: "10.4.7.9", vrf_id: "vrf-x" });
+      expect(body).not.toHaveProperty("client_id");
+    },
+  );
 
-  it("sends nothing before `/me` has answered, and says why", async () => {
+  it("needs no `/me` for an address: the subnet's VRF already names its client", async () => {
     const createIpamAddress = vi.fn().mockResolvedValue({});
-    // `/me` has not answered: the console cannot know the client yet.
     stubApi({ createIpamAddress, me: vi.fn(() => new Promise(() => {})) });
     const user = userEvent.setup();
     renderWithProviders(
-      <AddressDialog entry={entry} subnetPrefix="10.4.7.0/24" canAssign onClose={() => {}} />,
+      <AddressDialog entry={entry} subnetPrefix="10.4.7.0/24" vrfId="vrf-x" canAssign onClose={() => {}} />,
     );
     await user.click(await screen.findByRole("button", { name: "Reserve" }));
 
+    await waitFor(() => expect(createIpamAddress).toHaveBeenCalled());
+    expect(bodyOf(createIpamAddress)).toMatchObject({ vrf_id: "vrf-x", reserve: true });
+  });
+
+  it("sends nothing before `/me` has answered where the client must be named, and says why", async () => {
+    // Moved here from the address dialog, which names a VRF now. A subnet
+    // with no VRF names its client (`namingClient`), and the console cannot
+    // know it yet. Driven through the mutation itself: every page that offers
+    // the form reads its permission from the same `/me`.
+    const { useCreateIpamSubnetMutation } = await import("../api");
+    const { ErrorLine } = await import("../ErrorLine");
+    function Register() {
+      const create = useCreateIpamSubnetMutation();
+      return (
+        <>
+          <button onClick={() => create.mutate({ prefix: "10.4.7.0/24", kind: "assignable", vrf_id: null })}>
+            Register
+          </button>
+          {create.error && <ErrorLine error={create.error} />}
+        </>
+      );
+    }
+    const createIpamSubnet = vi.fn().mockResolvedValue(subnet());
+    stubApi({ createIpamSubnet, me: vi.fn(() => new Promise(() => {})) });
+    const user = userEvent.setup();
+    renderWithProviders(<Register />);
+    await user.click(await screen.findByRole("button", { name: "Register" }));
+
     expect(await screen.findByText(/Your account has not loaded yet/)).toBeInTheDocument();
-    expect(createIpamAddress).not.toHaveBeenCalled();
+    expect(createIpamSubnet).not.toHaveBeenCalled();
+  });
+});
+
+// --------------------------------------------------------------------------
+// Final review E Important 1: a row's pickers are its own client's, and a VRF
+// says whose it is -- the VRF decides the new row's client
+// --------------------------------------------------------------------------
+
+const ME_WITH_CLIENTS = { ...ME, permissions: [...ME.permissions, "clients.read"] };
+const CLIENT_ROWS = [
+  { id: "o1", name: "Novieri", kind: "internal", status: "active" },
+  { id: "c-x", name: "Acme", kind: "customer", status: "active" },
+];
+const X_SITE: ClientSiteOut = { ...SITE, id: "site-x", client_id: "c-x", name: "Acme HQ" };
+const X_VRF: VrfOut = { id: "vrf-x", client_id: "c-x", name: "acme-lan", rd: null, description: "" };
+
+function sitesOf(clientId: string): ClientSiteOut[] {
+  return clientId === "c-x" ? [X_SITE] : [SITE];
+}
+
+describe("pickers follow the row's client", () => {
+  it("edits a subnet with its own client's sites and VLANs", async () => {
+    const { SubnetActions } = await import("../SubnetActions");
+    const api = stubApi({
+      listClientSites: vi.fn((clientId: string) => Promise.resolve(sitesOf(clientId))),
+      listIpamVlans: vi.fn().mockResolvedValue([
+        vlan({ id: "vl-x", client_id: "c-x", vid: 20, name: "acme" }),
+        vlan({ id: "vl-o", client_id: "o1", vid: 30, name: "novieri" }),
+      ]),
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <SubnetActions subnet={subnet({ client_id: "c-x", vrf_id: "vrf-x", site_id: "site-x" })} />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog");
+
+    await waitFor(() => expect(api.listClientSites).toHaveBeenCalledWith("c-x"));
+    const site = within(dialog).getByLabelText("Site");
+    await within(site).findByRole("option", { name: "Acme HQ" });
+    expect((site as HTMLSelectElement).value).toBe("site-x");
+    expect(within(site).queryByRole("option", { name: "Medellín" })).toBeNull();
+    const vlanPicker = within(dialog).getByLabelText("VLAN");
+    await within(vlanPicker).findByRole("option", { name: /20/ });
+    expect(within(vlanPicker).queryByRole("option", { name: /30/ })).toBeNull();
+  });
+
+  it("registers a subnet with the sites of the chosen VRF's client", async () => {
+    const api = stubApi({
+      me: vi.fn().mockResolvedValue(ME_WITH_CLIENTS),
+      listClients: vi.fn().mockResolvedValue(CLIENT_ROWS),
+      listIpamVrfs: vi.fn().mockResolvedValue([VRF, X_VRF]),
+      listClientSites: vi.fn((clientId: string) => Promise.resolve(sitesOf(clientId))),
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<SubnetTreePage />);
+    await user.click(await screen.findByRole("button", { name: "New subnet" }));
+    const dialog = await screen.findByRole("dialog");
+
+    // The VRF decides the new subnet's client, so it says whose it is.
+    await within(dialog).findByRole("option", { name: "acme-lan · Acme" });
+    await user.selectOptions(within(dialog).getByLabelText("VRF"), X_VRF.id);
+    await waitFor(() => expect(api.listClientSites).toHaveBeenCalledWith("c-x"));
+    const site = within(dialog).getByLabelText("Site");
+    await within(site).findByRole("option", { name: "Acme HQ" });
+    expect(within(site).queryByRole("option", { name: "Medellín" })).toBeNull();
+  });
+
+  it("names each VRF's client in the scan authorization's picker and the registry", async () => {
+    stubApi({
+      me: vi.fn().mockResolvedValue(ME_WITH_CLIENTS),
+      listClients: vi.fn().mockResolvedValue(CLIENT_ROWS),
+      listIpamVrfs: vi.fn().mockResolvedValue([VRF, X_VRF]),
+    });
+    const user = userEvent.setup();
+    const { unmount } = renderWithProviders(<ScanAuthorizationsPage />);
+    await user.click(await screen.findByRole("button", { name: "Authorize a subnet" }));
+    const picker = await screen.findByLabelText("VRF");
+    await within(picker).findByRole("option", { name: "acme-lan · Acme" });
+    expect(within(picker).getByRole("option", { name: "lab · Novieri" })).toBeInTheDocument();
+    unmount();
+
+    renderWithProviders(<RegistryPage />, "/ipam/registry");
+    expect(await screen.findByText("acme-lan · Acme")).toBeInTheDocument();
   });
 });
 

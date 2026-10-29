@@ -47,8 +47,12 @@ export function SubnetActions({ subnet }: { subnet: SubnetOut }) {
 function EditSubnetDialog({ subnet, onClose }: { subnet: SubnetOut; onClose: () => void }) {
   const t = useT();
   const update = useUpdateIpamSubnetMutation();
-  const sites = useIpamSites();
+  // The SUBNET'S client's sites and VLANs: the server refuses any other's, and
+  // a picker of the internal client's showed a customer subnet's own site as
+  // "None" (final review E).
+  const sites = useIpamSites(subnet.client_id);
   const vlans = useIpamVlans();
+  const ownVlans = (vlans.data ?? []).filter((vlan) => vlan.client_id === subnet.client_id);
   const [name, setName] = useState(subnet.name);
   const [description, setDescription] = useState(subnet.description);
   const [siteId, setSiteId] = useState(subnet.site_id ?? "");
@@ -116,7 +120,7 @@ function EditSubnetDialog({ subnet, onClose }: { subnet: SubnetOut; onClose: () 
         <Field label={t("ipam.fields.vlan")}>
           <select className={inputClass} value={vlanId} onChange={(e) => setVlanId(e.target.value)}>
             <option value="">{t("ipam.fields.none")}</option>
-            {vlans.data?.map((vlan) => (
+            {ownVlans.map((vlan) => (
               <option key={vlan.id} value={vlan.id}>
                 {t("ipam.vlan.named", { vid: vlan.vid, name: vlan.name })}
               </option>

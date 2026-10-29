@@ -223,17 +223,18 @@ export interface BulkApprovalResponse {
   already_in_force: number;
 }
 
-/**
- * One deployment ring and the machines it reaches — the blast radius of an
- * approval, since clearing a patch for a ring clears it for every device that
- * resolves into that ring now and at every future scan.
- */
 /** How many of one ring's machines are one client's. */
 export interface PatchRingClientCount {
   client_id: string;
   device_count: number;
 }
 
+/**
+ * One deployment ring and the machines it reaches — the blast radius of an
+ * approval: a global approval clears a patch for every device that resolves
+ * into the ring now and at every future scan, a client's approval for that
+ * client's devices in it (`client_device_counts`).
+ */
 export interface PatchRing {
   ring_name: string;
   ring_order: number;

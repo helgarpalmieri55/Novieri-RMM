@@ -81,6 +81,9 @@ export const patch: Shape<typeof en> = {
       other: "El anillo {ring} abarca {count} dispositivos.",
     },
     ringCoversOf: "El anillo {ring} abarca {count} de {total} dispositivos.",
+    approvalCovers: "Una aprobación aquí abarca {reach}.",
+    ringEmptyClient:
+      "Ningún dispositivo del cliente {client} pertenece todavía al anillo {ring}, así que aprobar aquí no autoriza nada hoy.",
     reachEvery: "todos los dispositivos del anillo {ring}",
     reachCount: {
       one: "el único dispositivo del anillo {ring}",
@@ -301,6 +304,8 @@ export const patch: Shape<typeof en> = {
       other: "los {count} dispositivos del cliente {client} en el anillo «{ring}»",
     },
     ownClient: "propio de tu organización",
+    forEveryClientHint:
+      "Marcada, estas actualizaciones pasan a poder instalarse en los equipos de todos los clientes del anillo {ring}. Sin marcar, solo en los del cliente {client}.",
     noChangeNote: "Si no eliges ninguna solicitud de cambio, se registra una automáticamente para esta aprobación.",
     confirmLabel: "Aprobar",
     ringAria: "Anillo en el que aprobar — {scope}",

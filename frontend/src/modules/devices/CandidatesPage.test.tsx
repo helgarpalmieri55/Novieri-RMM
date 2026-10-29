@@ -294,6 +294,41 @@ describe("CandidatesPage", () => {
     expect(await screen.findByText("no such client")).toBeInTheDocument();
   });
 
+  it("keeps the rows of a client whose request failed selected, and only those", async () => {
+    // Final review E: a partial failure cleared the whole selection, so
+    // retrying the client that failed meant finding and ticking its rows
+    // again. The client that succeeded is done; the one that failed is not.
+    promote.mockImplementation((body: { client_id: string; addresses: string[] }) =>
+      body.client_id === "c-x"
+        ? Promise.resolve({
+            results: [{ address: "10.0.0.1", created: true, device_id: "d-1", reason: "created" }],
+          })
+        : Promise.reject(new ApiError(503, JSON.stringify({ detail: "try again" }))),
+    );
+    renderPage(() =>
+      Promise.resolve(
+        page({
+          items: [
+            candidate({ address: "10.0.0.1", client_id: "c-x" }),
+            candidate({ address: "10.0.0.2", client_id: "c-y" }),
+            candidate({ address: "10.0.0.3", client_id: "c-y" }),
+          ],
+          total: 3,
+        }),
+      ),
+    );
+    await screen.findByText("10.0.0.1");
+    for (const address of ["10.0.0.1", "10.0.0.2", "10.0.0.3"]) {
+      await userEvent.click(screen.getByRole("checkbox", { name: address }));
+    }
+    await userEvent.click(screen.getByRole("button", { name: /promote/i }));
+
+    expect(await screen.findByText("try again")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "10.0.0.1" })).not.toBeChecked());
+    expect(screen.getByRole("checkbox", { name: "10.0.0.2" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "10.0.0.3" })).toBeChecked();
+  });
+
   it("still sends a selected row a re-read dropped, and the server answers it", async () => {
     // Task 11 re-review, M-R2: the selection is a snapshot of each ticked row.
     promote.mockResolvedValue({

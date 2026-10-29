@@ -201,6 +201,24 @@ export function ringReachMessage(
 }
 
 /**
+ * `ringReachMessage` for the approval actually being made (final review E): a
+ * global one reaches the ring's whole population, so it is that sentence; a
+ * client's reaches only that client's machines in the ring, `ownerCount`, and
+ * says so by its owner. `null` when `/patch/rings` has not answered.
+ */
+export function approvalReachMessage(
+  owner: ApprovalOwner,
+  ring: string,
+  ownerCount: number | null,
+  fleetDeviceTotal: number | null,
+): string | null {
+  if (owner.kind === "every") return ringReachMessage(ring, ownerCount, fleetDeviceTotal);
+  if (ownerCount == null) return null;
+  if (ownerCount === 0) return translate("patch.copy.ringEmptyClient", { ring, client: owner.name });
+  return translate("patch.copy.approvalCovers", { reach: approvalReach(owner, ring, ownerCount) });
+}
+
+/**
  * WHOSE MACHINES AN APPROVAL CLEARS (MSP clients plan 2026-10-26 Task 14 and
  * its review). One client's -- `name` is how the sentence names it, already
  * resolved by the caller: the client's name, its id when the clients list

@@ -82,6 +82,11 @@ export const patch = {
       other: "The {ring} ring covers {count} devices.",
     },
     ringCoversOf: "The {ring} ring covers {count} of {total} devices.",
+    // A client's approval reaches only that client's machines in the ring
+    // (patchCopy.approvalReachMessage).
+    approvalCovers: "An approval here covers {reach}.",
+    ringEmptyClient:
+      "No device of {client} resolves into the {ring} ring yet, so approving here clears nothing today.",
     reachEvery: "every device in the {ring} ring",
     reachCount: {
       one: "the 1 device in the {ring} ring",
@@ -306,6 +311,10 @@ export const patch = {
     },
     /** The internal client, as an approval's owner, until phase 3's selector. */
     ownClient: "your organisation's own client",
+    // The "For every client" hint on an approval (components/forEveryClient.tsx):
+    // what ticking does is reach, not visibility (final review E).
+    forEveryClientHint:
+      "Ticked, these updates become installable on every client's machines in the {ring} ring. Unticked, only on the machines of {client}.",
     noChangeNote: "With no change request chosen, one is recorded for this approval automatically.",
     confirmLabel: "Approve",
     ringAria: "Ring to approve into — {scope}",

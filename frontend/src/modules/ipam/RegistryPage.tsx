@@ -2,6 +2,7 @@ import { useState } from "react";
 import { NoValue } from "../../components/emptystate";
 import { Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
+import { useClientName } from "../settings/api";
 import {
   useCreateIpamVlanMutation,
   useCreateIpamVrfMutation,
@@ -69,6 +70,8 @@ function AddRow({ children }: { children: React.ReactNode }) {
 function VrfPanel({ canManage }: { canManage: boolean }) {
   const t = useT();
   const vrfs = useIpamVrfs();
+  // A VRF is one client's, and decides the client of what is filed in it.
+  const clientName = useClientName();
   const create = useCreateIpamVrfMutation();
   const [name, setName] = useState("");
   const [rd, setRd] = useState("");
@@ -97,7 +100,9 @@ function VrfPanel({ canManage }: { canManage: boolean }) {
             {vrfs.data?.map((vrf) => (
               <tr key={vrf.id}>
                 <Td lead={<Icon name="topology-star-3" size={18} />}>
-                  <div className="cell-title">{vrf.name}</div>
+                  <div className="cell-title">
+                    {t("ipam.fields.vrfOfClient", { vrf: vrf.name, client: clientName(vrf.client_id) })}
+                  </div>
                   {vrf.description ? <div className="cell-sub">{vrf.description}</div> : null}
                 </Td>
                 <Td>

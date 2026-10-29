@@ -6,7 +6,8 @@ import { useMePermissions } from "../lib/mePermissions";
  *
  * MSP clients plan 2026-10-26 Task 14. An article, record, document or patch
  * approval made in this console belongs to the organisation's internal client
- * (`lib/internalClient.ts`, until phase 3's selector); one made for every
+ * (`lib/internalClient.ts`, until phase 3's selector) -- a patch approval made
+ * from a machine's drill-down to that machine's client; one made for every
  * client is global, and the server lets only someone with access to every
  * client create it. So the switch renders only for a person holding `code` on
  * EVERY client -- what `/me`'s permissions list -- and for anyone else it is
@@ -17,11 +18,17 @@ import { useMePermissions } from "../lib/mePermissions";
  */
 export function ForEveryClientToggle({
   code,
+  hint,
   checked,
   onChange,
 }: {
   /** The permission the create route is gated on (`docs.manage`, `patch.approve`). */
   code: string;
+  /**
+   * What ticking does, where the generic sentence -- who will SEE the row --
+   * is not the point: a patch approval's effect is its reach (final review E).
+   */
+  hint?: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
 }) {
@@ -37,7 +44,7 @@ export function ForEveryClientToggle({
       />
       <span>
         {t("components.forEveryClient.label")}
-        <span className="note block">{t("components.forEveryClient.hint")}</span>
+        <span className="note block">{hint ?? t("components.forEveryClient.hint")}</span>
       </span>
     </label>
   );

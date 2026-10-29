@@ -521,7 +521,11 @@ export function DeviceDetailPage() {
             lost -- same table of words, same four values, and it stays on
             screen at every width because chips wrap. */}
         {provenance ? <Badge variant="muted">{provenance}</Badge> : null}
-        {deviceId ? <DeviceAssignedTo deviceId={deviceId} /> : null}
+        {/* The holder is a person of the DEVICE'S client: "Someone new" files
+            them there (final review E), so the control waits for the row. */}
+        {deviceId && device.data?.client_id ? (
+          <DeviceAssignedTo deviceId={deviceId} clientId={device.data.client_id} />
+        ) : null}
         {Object.entries(facts).map(([key, value]) => {
           const badge = factBadge(key, value);
           return badge ? (

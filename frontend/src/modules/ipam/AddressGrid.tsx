@@ -78,11 +78,14 @@ function heatKind(status: string): Kind {
 export function AddressGrid({
   subnetId,
   subnetPrefix,
+  vrfId,
   utilization,
   canAssign,
 }: {
   subnetId: string;
   subnetPrefix: string;
+  /** The subnet's VRF: an address written from this grid is filed in it. */
+  vrfId: string;
   utilization: UtilizationOut | undefined;
   canAssign: boolean;
 }) {
@@ -321,6 +324,7 @@ export function AddressGrid({
         <AddressDialog
           entry={selected}
           subnetPrefix={subnetPrefix}
+          vrfId={vrfId}
           canAssign={canAssign}
           onClose={() => setSelected(null)}
         />

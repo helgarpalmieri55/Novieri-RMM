@@ -499,7 +499,7 @@ describe("the person page in Spanish", () => {
     const dialog = await screen.findByRole("dialog");
     expect(
       within(dialog).getByText(
-        "La persona ya no podrá usar el portal. Para volver a activarlo, edita el contacto en la página del cliente.",
+        "La persona ya no podrá usar el portal. Hasta que la consola pueda editar los contactos de un cliente, se vuelve a activar mediante la API o una conexión de IA (MCP).",
       ),
     ).toBeInTheDocument();
     expect(within(dialog).queryByText(/Configuración/)).toBeNull();
@@ -628,14 +628,14 @@ describe("the pieces other pages use, in Spanish", () => {
         ["people.read", "people.manage"],
       ),
     );
-    const view = mount(<DeviceAssignedTo deviceId="d1" />, "/devices/:id", "/devices/d1");
+    const view = mount(<DeviceAssignedTo deviceId="d1" clientId="c-x" />, "/devices/:id", "/devices/d1");
     await user.click(await screen.findByRole("button", { name: "Cambiar" }));
     return { user, dialog: await screen.findByRole("dialog"), ...view };
   }
 
   it("reads the assigned holder as a field of the device", async () => {
     mockUseApi.mockReturnValue(api({ getDevicePerson: vi.fn().mockResolvedValue(devicePerson()) }, ["people.read", "people.manage"]));
-    const { container } = mount(<DeviceAssignedTo deviceId="d1" />, "/devices/:id", "/devices/d1");
+    const { container } = mount(<DeviceAssignedTo deviceId="d1" clientId="c-x" />, "/devices/:id", "/devices/d1");
     const field = await screen.findByTestId("device-assigned-to");
     expect(field).toHaveTextContent("Asignado a: Maria Garcia · indicado a mano");
     expect(screen.getByRole("button", { name: "Cambiar" })).toBeInTheDocument();
@@ -650,7 +650,7 @@ describe("the pieces other pages use, in Spanish", () => {
         ["people.read"],
       ),
     );
-    const { container } = mount(<DeviceAssignedTo deviceId="d1" />, "/devices/:id", "/devices/d1");
+    const { container } = mount(<DeviceAssignedTo deviceId="d1" clientId="c-x" />, "/devices/:id", "/devices/d1");
     expect(await screen.findByTestId("device-assigned-to")).toHaveTextContent(
       "Asignado a: nadie todavía · último inicio de sesión como TOESHEE\\aruiz",
     );

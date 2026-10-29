@@ -307,6 +307,7 @@ describe("a failure the user must be told about is announced, and is a sentence"
       <AddressDialog
         entry={gridEntry()}
         subnetPrefix="10.4.7.0/24"
+        vrfId="v1"
         canAssign
         onClose={onClose}
       />,
