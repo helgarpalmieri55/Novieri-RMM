@@ -452,7 +452,9 @@ async def _forced_policy(
 ) -> None:
     """A policy the guard of migration 0242 refuses -- one naming another
     client's repository, or one for every client naming any -- written with
-    the guard off inside one committed transaction, as 0242 can leave one."""
+    the guard off inside one committed transaction: 0242 can leave the first
+    kind behind; the second only a hand could plant (there is no policy for
+    every client, `backup/policy.py`)."""
     from sqlalchemy import text
 
     from app.models import BackupPolicy

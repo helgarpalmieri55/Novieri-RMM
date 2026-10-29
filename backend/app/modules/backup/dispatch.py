@@ -33,7 +33,11 @@ into the hash-chained log, for every device of a customer client 0242 left on
 an organisation repository (review of 2240971, Important 1). Nothing else
 changes -- no job, no key, the health check and the coverage report still
 show the device unprotected -- and a person's Run now is recorded every time,
-because it is their act (invariant 4).
+because it is their act (invariant 4): every time the person can see the
+repository, that is. For a technician narrowed to the device's client, a
+repository of another client does not exist (RLS), so their Run now stops at
+`_dispatch_for_policy`'s repository look-up: nothing dispatched, no key
+opened, and no refusal recorded.
 """
 
 import base64
@@ -188,7 +192,7 @@ async def dispatch_due_backup(
         )
     except ValueError:
         # A window the parser cannot read -- stored before the API checked
-        # windows (`schedule.checked_window`). Raised here it would roll back
+        # windows (`app.core.schedule.checked_window`). Raised here it would roll back
         # the whole organisation's sweep, which is ONE transaction, every 15
         # minutes: so this device is skipped, the rest of the sweep goes on,
         # and the policy is recorded once per version.

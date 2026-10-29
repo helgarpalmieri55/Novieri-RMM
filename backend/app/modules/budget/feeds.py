@@ -97,7 +97,7 @@ in-memory `existing_keys` pre-check is a fast path, not the sole guard --
 two overlapping `materialize` calls can both miss it before either has
 written. The `Expense` insert itself goes through
 `pg_insert(...).on_conflict_do_nothing()` against `uq_expense_client_autofeed`
-(same precedent as `fx.get_settings`, Task-5 finding F2); a row that loses
+(same precedent as `rates.settings_for_write`, Task-5 finding F2); a row that loses
 that race is counted as `skipped_existing`, never raised as a raw
 `IntegrityError` (spec §8 forbids a raw DB error surfacing as a 500 on a
 financial path).
@@ -519,7 +519,7 @@ async def materialize(
         # (`index_where` repeats its predicate exactly, or Postgres won't
         # match a partial index for conflict inference); the loser here gets
         # an empty `RETURNING`, never a raw `IntegrityError` -- same
-        # precedent as `fx.get_settings` (Task-5 finding F2).
+        # precedent as `rates.settings_for_write` (Task-5 finding F2).
         inserted_id = (
             await session.execute(
                 pg_insert(Expense)

@@ -745,7 +745,9 @@ con cada una lo que la implementación precisó a su lado.
     clave maestra viaja en los parámetros firmados de cada equipo que lo usa,
     y la deduplicación es por repositorio: compartido, un equipo de un cliente
     tendría la clave de otro. Una política solo nombra un repositorio de su
-    cliente, y una política para todos los clientes no nombra ninguno. El
+    cliente, y no hay política para todos los clientes: el repositorio es
+    obligatorio (0014) y la migración 0242 pasó las predeterminadas sin
+    cliente al cliente interno. El
     equipo cuya política nombra un repositorio de otro cliente no se respalda,
     y queda registrado (`backup.dispatch_refused`) una vez por equipo y
     versión de la política. Los puntos de antes de la migración 0242 se quedan

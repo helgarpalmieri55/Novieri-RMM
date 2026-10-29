@@ -119,20 +119,16 @@ limitado a ciertos clientes no puede leer ni escribir filas de otro. Una sesión
 sin alcance ve cero filas. Solo los procesos internos usan el alcance "todos", y
 cada uso está en una lista revisada.
 
-   *Alcance de la fase 1 (2026-10-24):* la base de datos impone 5a en las
-   tablas de `client_scope_catalog.PHASE_1`
-   (`backend/app/core/client_scope_catalog.py`), y solo en ellas. Las familias
-   de `PENDING_PHASE_2` — tickets, personas, licencias, suscripciones,
-   despliegues, IPAM, autorizaciones y ejecuciones de instalación remota,
-   repositorios de respaldo, y los módulos opcionales de continuidad (BCP),
-   presupuesto y gestión de cambios — todavía no tienen la política de cliente
-   y **siguen visibles para toda la organización hasta la fase 2**: un técnico
-   limitado al cliente X lee y escribe las de Y. Por eso, **hasta la fase 2 los
-   técnicos solo deben tener asignaciones de "todos los clientes"**; una
-   asignación limitada a un cliente no limita esas familias. El registro de
-   auditoría, el registro de correo entrante y el de entregas de
-   notificaciones, que guardan datos de todos los clientes en tablas sin
-   cliente, solo se leen con el permiso en todos los clientes.
+   *Fase 2 (completada el 2026-10-29):* la base de datos impone 5a en toda
+   tabla C, H u O de `client_scope_catalog.SCOPED`
+   (`backend/app/core/client_scope_catalog.py`); ninguna familia queda
+   pendiente. Los registros que guardan datos de todos los clientes — el de
+   auditoría (tabla sin cliente, con un `client_id` informativo), el de correo
+   entrante (cada mensaje nuevo con su cliente) y el de entregas de
+   notificaciones (tabla sin cliente) — solo se leen con el permiso en todos
+   los clientes. La instalación remota (2a) queda además dentro de un cliente:
+   el activo avalado, la autorización, la credencial y el site server son del
+   mismo cliente.
 
 **1b. A device managed over a third-party management protocol (Apple MDM,
 Android EMM) is commanded over that protocol's trust model, never over the

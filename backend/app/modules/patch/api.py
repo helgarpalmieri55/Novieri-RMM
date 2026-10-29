@@ -318,11 +318,14 @@ class RingClientCountOut(BaseModel):
 class RingOut(BaseModel):
     """One deployment ring, and how many of this org's devices land in it.
 
-    THE BLAST RADIUS OF AN APPROVAL. Clearing a patch for a ring clears it for
-    every machine that resolves into that ring, now and at every future scan --
-    so this count is the reach of the decision itself rather than of any one
-    install. `ring_order` is the rollout position the ring's policies declare
-    (test before pilot before broad), which is why this list is not alphabetical.
+    THE BLAST RADIUS OF AN APPROVAL. A global approval (no client) clears the
+    patch for every machine that resolves into that ring, now and at every
+    future scan -- so this count is the reach of that decision rather than of
+    any one install. A client's approval clears it only for that client's
+    machines in the ring: its reach is that client's row of
+    `client_device_counts`. `ring_order` is the rollout position the ring's
+    policies declare (test before pilot before broad), which is why this list
+    is not alphabetical.
     """
 
     ring_name: str

@@ -4,11 +4,12 @@
 ONE ROW PER ORG, AND IT IS OPTIONAL. Most orgs will never have one: every value
 here has a documented default, so `get_settings` returns the EFFECTIVE value
 (configured or default) and writes nothing. A `GET` that lazily INSERTs -- the
-shape `budget.fx.get_settings` uses -- would make a `health.read` request a
-write, and would populate the table for every org that ever opened the settings
-screen while changing nothing about behaviour. This follows
-`app/modules/sla/settings.py`, which states the same reasoning for the same
-shape. Only the PUT creates the row.
+shape `budget.fx.get_settings` had until MSP clients plan 2026-10-26 Task 8
+made it pure too -- would make a `health.read` request a write, and would
+populate the table for every org that ever opened the settings screen while
+changing nothing about behaviour. This follows `app/modules/sla/settings.py`,
+which states the same reasoning for the same shape. Only the PUT creates the
+row.
 
 `SETTING_DEFAULTS` MUST AGREE WITH THE COLUMN `server_default`s, and a test
 compares them against `information_schema` rather than trusting this file: the

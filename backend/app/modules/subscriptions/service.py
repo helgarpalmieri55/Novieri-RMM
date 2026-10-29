@@ -144,8 +144,12 @@ async def _validate_refs(
     `license_ref` stays advisory -- no foreign key, so deleting the license
     leaves it dangling (spec §143-148) -- but it names a license of the
     subscription's own client (`client_id`): another client's is a
-    `SubscriptionClientError` (422). Vendors are the organisation's catalogue
-    and owners are technicians, neither of a client."""
+    `SubscriptionClientError` (422). Vendors are the organisation's catalogue,
+    of no client. An owner is any user of the organisation this session can
+    see (`users` is O: technicians, and the contacts of the clients in its
+    scope); neither its kind nor its client is checked, so under a scope of
+    several clients a contact of another client than the subscription's is
+    accepted as its owner."""
     if vendor_id is not None:
         found = (
             await session.execute(

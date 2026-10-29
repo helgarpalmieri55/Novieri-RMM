@@ -261,6 +261,22 @@ one `SUM` before the write (§4.2). Rejected for v1: a per-org override in
 this spec is not otherwise touching. The constant is named in one place so the
 override is a small later change. Overturnable: §17 D6.
 
+> **Amended 2026-10-29 (MSP clients phase 2, operator decision after the final
+> review): the cap is per client.** Each client has its own quota of
+> `CLIENT_DOCUMENT_QUOTA_BYTES` (5 GiB), and the documents for every client
+> (no `client_id`) are one bucket more with the same cap. Usage is counted
+> explicitly for the document's owner — versions joined to `doc_documents`
+> and kept to that document's `client_id` (or to the documents with none) —
+> never as "whatever the caller's scope can see", so an every-client admin and
+> a technician narrowed to X get the same number for the same upload. The 507
+> names the owner's usage: the caller's own client's, or the every-client
+> bucket's, which only an every-client person can write to. **The documents'
+> share of the shared volume is therefore bounded by the cap times the number
+> of clients plus one, and grows as clients are added**: size the volume, which
+> backups share, for that. (Before this, the `SUM` ran under the caller's
+> client policy: each narrowed scope could fill its own 5 GiB, while an
+> every-client admin was measured against the organisation's total.)
+
 ---
 
 ## 1. Scope
@@ -428,11 +444,13 @@ as "No file uploaded yet" with an Upload control, not as an error. This mirrors
   a diagram export and keeps ten simultaneous uploads inside a quarter of a
   gigabyte. Overturnable: §17 D5 — and note that raising it raises that product
   linearly, which is the thing to argue about, not the file size.
-- **Per organisation: `ORG_DOCUMENT_QUOTA_BYTES = 5 * 1024 * 1024 * 1024`
-  (5 GiB)**, §0.10. Checked with one `SELECT COALESCE(SUM(byte_size), 0) FROM
-  doc_document_versions WHERE purged_at IS NULL` inside the tenant session,
-  before the object write, in the two passes §4.4 sets out. Over quota →
-  **507**, no row, no object.
+- **Per client: `CLIENT_DOCUMENT_QUOTA_BYTES = 5 * 1024 * 1024 * 1024`
+  (5 GiB)**, §0.10 (per organisation until the amendment of 2026-10-29 there).
+  Checked with one `SELECT COALESCE(SUM(v.byte_size), 0) FROM
+  doc_document_versions v JOIN doc_documents d ON d.id = v.document_id WHERE
+  d.client_id IS NOT DISTINCT FROM <the document's client> AND v.purged_at IS
+  NULL` inside the tenant session, before the object write, in the two passes
+  §4.4 sets out. Over quota → **507**, no row, no object.
   **Two concurrent uploads can both pass this check.** The overshoot is bounded
   by `concurrency × MAX_DOCUMENT_BYTES` and is not worth an advisory lock on a
   soft, operator-visible limit. Stated rather than fixed.
@@ -507,7 +525,8 @@ earned there:
    holder buffer 25 MiB against a nonexistent id.
 4. Reject if archived (a 409; an archived document takes no new versions, the
    same freeze Service Desk applies to terminal tickets).
-5. **Quota, first pass** — `SUM(byte_size)` for the org. If it is already at
+5. **Quota, first pass** — `SUM(byte_size)` for the document's owner (its
+   client, or the documents for every client; §4.2). If it is already at
    or above the cap, 507 now, before reading anything. This pass cannot see the
    incoming size, which is why there is a second one.
 6. `read_bounded_body`.

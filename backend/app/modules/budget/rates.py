@@ -98,10 +98,10 @@ async def create_rate(
     `create_rate` calls for the exact same `(org_id, from_currency,
     to_currency, effective_date)` can both miss it before either has
     written. The insert itself is therefore `ON CONFLICT DO NOTHING`
-    against `uq_fx_rate_org_pair_date` (mirrors `fx.get_settings`, Task-5
-    finding F2) rather than a plain `session.add` -- but unlike
-    `get_settings`'s get-or-create shape, a duplicate here is a genuine
-    caller error, not a row to silently hand back. So the loser of the
+    against `uq_fx_rate_org_pair_date` (mirrors `settings_for_write`, where
+    the Task-5 finding F2 fix now lives) rather than a plain `session.add`
+    -- but unlike `settings_for_write`'s get-or-create shape, a duplicate
+    here is a genuine caller error, not a row to silently hand back. So the loser of the
     race raises the SAME typed `BudgetValidationError` the pre-check would
     have raised, rather than either 500ing on a raw `IntegrityError` or
     quietly returning someone else's rate."""

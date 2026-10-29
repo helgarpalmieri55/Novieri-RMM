@@ -239,9 +239,12 @@ def _client_policy(column: Any, org_id: UUID, *, enabled_only: bool) -> Any:
 
 
 def _every_client_policy(org_id: UUID) -> Any:
-    """Whether a policy for every client (no client, no group) exists. It
-    names no repository (`resolve_backup_policy`), so it can make a policy
-    PRESENT and never a device protected."""
+    """Whether a client-less, group-less policy exists. There is no policy for
+    every client (`backup/policy.py`: the repository is NOT NULL and the guard
+    refuses a client-less one naming it), so only a row planted around that
+    guard answers yes -- and since its repository is never used
+    (`resolve_backup_policy`), it can make a policy PRESENT and never a device
+    protected."""
     return (
         select(BackupPolicy.id)
         .where(

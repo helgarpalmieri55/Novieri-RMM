@@ -3918,11 +3918,14 @@ its own cycle.
   warning already in `docker-compose.yml` applies here with teeth.
 - **Two limits, and one of them protects your backups.** Per file: **25 MiB**,
   bounded on both the declared `Content-Length` and the bytes actually read.
-  Per organisation: **5 GiB** total across all live versions, checked twice per
-  upload — once before the body is read, once after. The org quota exists
-  because **this bucket is shared with backup repositories**: without it, a
-  technician-tier `docs.manage` holder filling the volume stops backups from
-  writing. Both are module constants (`app/modules/documentation/documents.py`)
+  Per client: **5 GiB** total across the live versions of that client's
+  documents, and 5 GiB more for the documents for every client, checked twice
+  per upload — once before the body is read, once after (per client since
+  2026-10-29). The quota exists because **this bucket is shared with backup
+  repositories**: without it, a technician-tier `docs.manage` holder filling
+  the volume stops backups from writing. Being per client, the documents'
+  share of the volume grows with the number of clients — up to 5 GiB times
+  (clients + 1) — so size the volume for that. Both are module constants (`app/modules/documentation/documents.py`)
   with no UI in this build; raising the per-file cap raises peak API-process
   memory as `concurrent_uploads x cap`, which is the thing to weigh rather than
   the file size.

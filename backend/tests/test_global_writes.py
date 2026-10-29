@@ -17,14 +17,18 @@ its gate. A NEW write route under a code that already gates a global write
 fails too until it is classified: listed in `GLOBAL_WRITES`, or in
 `NOT_GLOBAL` with the reason it is one client's data.
 
-THE SAME RULE FOR A FEW READS (`GLOBAL_READS`): a G table that RLS cannot
-scope by client, whose rows nonetheless DESCRIBE clients -- the audit log
-(every client's events, addresses and fingerprints), the incoming-mail log
-(senders and parsed bodies of every client's mail), the notification
-delivery log (recipient addresses). Reading one of those with a per-client
-grant would be reading every client's data, so these reads need every client
-too until phase 2 gives those rows a client. Checked against the router the
-same way, in both directions.
+THE SAME RULE FOR A FEW READS (`GLOBAL_READS`): the logs whose rows DESCRIBE
+every client -- the audit log (a G table: every client's events, addresses
+and fingerprints; its `client_id` is informative, and plan decision C6 keeps
+this gate until reading it per client is decided), the incoming-mail log
+(senders and parsed bodies of every client's mail; an O table since phase 2
+Task 4, each new message filed under a client -- its contact's, its
+domain's, a ticket's, or Unassigned -- the rows from before it under none),
+and the notification
+delivery log (a G table with no client: recipient addresses). Reading one of
+those with a per-client grant would be reading every client's data, so these
+reads need every client. Checked against the router the same way, in both
+directions.
 
 NOT HERE, deliberately: the O-class rows that may be global OR one client's
 (patch/backup/remote policies, health profile assignments, SLA policies,

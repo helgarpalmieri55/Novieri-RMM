@@ -1,4 +1,5 @@
-"""Migration 0231 at work (MSP clients spec §2.2-2.4), through the real RLS.
+"""Migrations 0231 and 0243 at work (MSP clients spec §2.2-2.4), through the
+real RLS.
 
 Seeding is through the ADMIN engine (no RLS); every assertion about what a
 session sees or may write is through `app_user`, where the restrictive
@@ -12,7 +13,9 @@ pins what 0231 adds beyond the catalog's literal copy:
 - a client id of ANOTHER organization is refused by a foreign key, which RLS
   cannot be relied on for: a foreign key check ignores RLS;
 - an inherited `client_id` cannot be rewritten by an UPDATE, and a job takes
-  its target's client.
+  its target's client;
+- `domain_events` is under the generic O check since 0243 (plan 2026-10-26
+  Task 15): an event with no client is written only under scope all.
 
 The fixture makes the client the ONLY discriminator: X and Y share the org,
 each has one device and one record with one version (HANDOFF.md §4).

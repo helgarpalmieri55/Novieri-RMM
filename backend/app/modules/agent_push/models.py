@@ -393,8 +393,10 @@ class PushRun(Base):
     amended 2026-09-30).
 
     **THE LIST IS THE AUTHORITY, NOT THE SUBNET.** `prefix` records what built
-    the list; `list_digest` is the SHA-256 of the ready `(device_id, address)`
-    pairs the person was shown and confirmed (`run_list.compute_list_digest`).
+    the list; `list_digest` is the SHA-256 of the run's client and credential
+    and the ready `(device_id, address)` pairs the person was shown and
+    confirmed (`run_list.compute_list_digest`), so a confirmation binds all
+    three.
     The targets are written once, in the transaction that sets `sealed_at`, and
     the `push_run_target_fixed` trigger refuses any later insert.
 

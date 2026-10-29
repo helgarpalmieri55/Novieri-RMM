@@ -165,8 +165,8 @@ reboot: "never|if_required|forced", deferral_hours: int }`.
 3. **Auto-approve rule (PD-02):** if the device's resolved policy
    `auto_approve_security` is true, for each newly-`missing` **security-severity**
    (`critical`/`important`) patch, create a `patch_approval` for the **test**
-   ring only and flip the device's status to `approved` — audited
-   `patch.auto_approved`.
+   ring only, of the device's client (§7, amended 2026-10-29), and flip the
+   device's status to `approved` — audited `patch.auto_approved`.
 4. Queue a UI event `patch_status_updated` (post-commit, via the kernel drain).
 
 ## 7. Approvals, rings & windows
@@ -203,8 +203,16 @@ reboot: "never|if_required|forced", deferral_hours: int }`.
 > that client, **and a global one only by the internal client's change, whose
 > automatic change it also is** (plan decision C8); a client without change
 > management has no gate and gets no automatic change (decision D4,
-> `docs/modules/change-mgmt/spec.md` §14). Automatic approval (PD-02) stays
-> global. The plan is
+> `docs/modules/change-mgmt/spec.md` §14). **Automatic approval (PD-02) is
+> filed under the reporting device's client** (amended 2026-10-29, final
+> review): the policy that asks for it is a policy of that client's group,
+> and a global row would let one client's policy clear the patch for every
+> client's test ring — a decision for every client that only a person with
+> every client may take (invariant 5a). It is looked up and inserted by
+> `(org, client, patch, ring)`, the insert `ON CONFLICT DO NOTHING` on
+> `uq_patch_approvals_client_patch_ring` so two scans of the client's
+> machines make one row; a revoked row of the client stays revoked, and the
+> `patch.auto_approved` audit names the client. The plan is
 > `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
 
 ## 8. Apply flow (`apply.py`) — dispatch + result ingestion

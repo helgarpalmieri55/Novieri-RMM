@@ -2,8 +2,8 @@
 2026-10-26 Task 7). Budget, BCP and change management are on or off per
 client (`clients.enabled_modules`). A WRITE for a client without the module
 is a 404 -- the module does not exist for that client, the same answer as a
-client outside the scope. Reads need nothing: that client simply has no
-rows (spec §3.2).
+client outside the scope. Reads are not guarded: what a client recorded while
+it had the module stays readable after the module is turned off (spec §3.2).
 
 Called in the SERVICE, after the row's client is known -- from the body on a
 create, from the loaded parent on every other write -- because a FastAPI

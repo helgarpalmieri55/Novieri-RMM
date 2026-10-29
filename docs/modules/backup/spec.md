@@ -155,9 +155,11 @@ and the `backup.*` permission seed + role grants.
 > `backup_chunk_copies` inherit it (H); all three carry the client policy of
 > `CLAUDE.md` invariant 5a. **A policy names only a repository of its own
 > client** (`its_backup_policy_repository_guard`): a group policy is its
-> group's client's, a group-less policy is one client's default, and a
-> policy for every client names no repository. Resolution is device group →
-> the device's client's default → the policy for every client. A run and a
+> group's client's, and a group-less policy is one client's default. **There
+> is no policy for every client**: `repository_id` is NOT NULL (0014), the
+> guard refuses a client-less policy naming one, and 0242 filed the
+> client-less defaults under the internal client. Resolution is device group
+> → the device's client's default. A run and a
 > point name a repository of their device's client (composite keys, `NOT
 > VALID`, so rows from before 0242 are history and are not re-judged); the
 > window refuses a device whose policy names another client's repository,
@@ -167,7 +169,11 @@ and the `backup.*` permission seed + role grants.
 > stops only its own policy's devices, recorded once per policy version, not
 > the organisation's whole sweep. Points taken before the upgrade by a
 > customer client's devices stay in the internal client's repository, where
-> they can still be restored; once that client's policy names its own
+> a person with every client (or with the internal client) can still browse
+> and restore them; a technician narrowed to the customer client cannot see
+> that repository, so for them browsing is a 404 and a restore dispatches
+> nothing, and the automatic test restore passes them over (§7.4 of
+> `spec-server-backup.md`). Once that client's policy names its own
 > repository, retention no longer prunes them. The plan is
 > `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
 

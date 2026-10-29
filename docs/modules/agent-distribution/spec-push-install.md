@@ -808,9 +808,15 @@ reach in addresses rather than in mask lengths.
 > client>)`), after a coarse check that the code is held in some client, so a
 > refusal is still the 403. The pacer continues a run only while the person
 > who confirmed it still holds `agent.push.run` and `credentials.checkout` in
-> the run's client. Run prefixes are listed for one credential
-> (`GET /agent-push/runs/prefixes?credential_id=`), so the subnets offered are
-> that client's authorized ones.
+> the run's client. `GET /agent-push/runs/prefixes` takes an optional
+> `credential_id`: with it, only that credential's client's active
+> authorizations are listed, and `credentials.checkout` is asked in that
+> client; without it, every visible client's active authorizations are listed
+> (each row names its client), and `credentials.checkout` must be held in
+> every client (`agent_push/api.py::list_push_run_prefixes`,
+> `run_list.authorized_prefixes`). A run is still built only from its
+> credential's client's subnets: `expand_prefix` and `create_run` check the
+> prefix against that client.
 
 ### 6.4 The uncomfortable part: `jobs.params` is a database column
 

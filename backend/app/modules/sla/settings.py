@@ -5,7 +5,8 @@ ONE ROW PER ORG, AND IT IS OPTIONAL. `sla_org_settings.org_id` is UNIQUE and
 most orgs will never have a row: §7's sweep already treats "no row" as the
 documented default (`sweep.DEFAULT_AUTO_CLOSE_AFTER_DAYS`, 7 days), so this
 module never creates a row on a READ. A `GET` that lazily INSERTs -- the shape
-`budget.fx.get_settings` uses -- would make an `sla.read` request a write, and
+`budget.fx.get_settings` had until MSP clients plan 2026-10-26 Task 8 made it
+pure too -- would make an `sla.read` request a write, and
 would populate the table for every org that ever opened the settings screen
 while changing nothing about behaviour. `get_auto_close_after_days` therefore
 returns the EFFECTIVE value (configured or default) and writes nothing; only

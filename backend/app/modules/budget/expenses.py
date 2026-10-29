@@ -44,7 +44,7 @@ rejection raises.
 is created for the client the caller names
 (`clients.client_for_new_budget_rows`), converted into THAT client's base
 currency, and never changes client. Every other write loads it and calls
-`require_budget` with its client before anything else (`_expense_for_write`).
+`require_budget` with its client before anything else (`expense_for_write`).
 What it points at is its client's: a category or cost center of another
 client is a 422 (the database holds the same rule,
 `fk_expense_*_client`), and so is a linked subscription, license, device or

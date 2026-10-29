@@ -308,11 +308,12 @@ async def start_run_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("provisioning.run")),
 ) -> RunStartResponse:
-    # EVERY CLIENT, IN PHASE 1. Imaging is hidden (MSP clients spec §1.4) and a
-    # run provisions into the internal client's Principal site
+    # EVERY CLIENT. Imaging is hidden (MSP clients spec §1.4) and a run
+    # provisions into the internal client's Principal site
     # (`dispatch.start_provision_run`), so a technician limited to some clients
     # is refused here, with the every-client sentence, rather than by RLS at
-    # the INSERT with a 500. PHASE 2: the client the machine is for.
+    # the INSERT with a 500. Phase 2 left provisioning to the internal client;
+    # a run for the client the machine is for is a later decision.
     require_all_clients(ctx)
     state = request.app.state
     wake_envelope: dict[str, Any] | None = None

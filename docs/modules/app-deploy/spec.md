@@ -277,6 +277,17 @@ re-checked agent-side. Keep the grammar small and validated; document each type.
   notification/deferral honored where the OS engine supports it
   (`deferral_hours`).
 
+  > **Amended 2026-10-29 (MSP clients phase 2, final review B2).** The create
+  > reads `window_cron` with `app.core.schedule.checked_window`, the check a
+  > backup policy's window passes: five readable fields that can match, at
+  > most 120 characters, blank stored as NULL; anything else is a 422 and
+  > nothing is written (the MCP tool runs the same route). A value the parser
+  > cannot read that is already stored is contained to its own deployment:
+  > the window sweep runs each deployment in a savepoint and logs and skips
+  > it, so it no longer rolls back every windowed deployment of the
+  > organisation, and `POST .../execute` on it is a 422 that says so. No route
+  > edits a deployment: the way out is a new deployment with a valid window.
+
 ## 8. Dispatch & result ingestion (§8)
 
 - `dispatch_deployment(session, job_engine, redis, *, org_id, deployment_id,

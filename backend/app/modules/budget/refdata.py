@@ -121,7 +121,7 @@ async def seed_default_categories(
     created for their own purpose. Adopting it would be a silent decision
     about how someone else's money is categorized.
 
-    Concurrency-safe, mirroring `fx.get_settings` (Task-5 finding F2) and
+    Concurrency-safe, mirroring `rates.settings_for_write` (Task-5 finding F2) and
     `feeds.materialize`'s own conflict-safe write (K3 fix): the in-memory
     `existing_keys` pre-check above is a fast path, not the sole guard --
     two concurrent first-ever calls for the same org (e.g. two requests
