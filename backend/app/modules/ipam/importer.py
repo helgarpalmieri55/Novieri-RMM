@@ -21,7 +21,9 @@ one line, from the file it is about to apply.
 
 Two consequences follow, and both are deliberate:
 
-1. **THE DIGEST COVERS THE MAPPING AS WELL AS THE FILE** (`preview_digest`).
+1. **THE DIGEST COVERS THE MAPPING AND THE VRF AS WELL AS THE FILE**
+   (`preview_digest`). The VRF since the MSP clients re-review (I-R1): the
+   same sheet into another client's network is another import.
    The mapping decides which spreadsheet column becomes `asset_label` and which
    becomes `hostname`, so "the same file with a different mapping" is a
    different import of the same bytes -- and a digest over the bytes alone
@@ -159,8 +161,16 @@ def file_digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def preview_digest(content: bytes, mapping: dict[str, str]) -> str:
-    """What `preview` returns and `apply` must echo: the file AND the mapping.
+def preview_digest(content: bytes, mapping: dict[str, str], vrf_id: UUID) -> str:
+    """What `preview` returns and `apply` must echo: the file, the mapping AND
+    the VRF the import resolved to.
+
+    **THE VRF, BECAUSE IT IS WHERE THE SHEET GOES** (MSP clients plan 2026-10-26
+    Task 11 re-review, I-R1). Two clients' networks can both hold the sheet's
+    addresses, so the same file and mapping into two VRFs are two imports -- one
+    of them into a client the preview never showed. It is the RESOLVED VRF, so
+    a target named by client and the same target named by VRF are one import,
+    and a client's `global` VRF is pinned however the request reached it.
 
     **BOTH, BECAUSE THE MAPPING IS HALF THE IMPORT.** It decides which column
     becomes `asset_label` and which becomes `hostname`, so the same bytes under
@@ -177,7 +187,9 @@ def preview_digest(content: bytes, mapping: dict[str, str]) -> str:
     between the two inputs is explicit" is a property this function should hold
     on its own terms, not one inherited from the encoding somebody might change.
 
-    Still 64 hex characters, so the wire contract is unchanged.
+    The VRF is its 16 raw bytes, fixed-length, between the mapping and the
+    file. Still 64 hex characters, so the wire contract is unchanged: a client
+    only ever echoes the value a preview answered.
     """
     canonical = json.dumps(
         dict(sorted(mapping.items())), separators=(",", ":")
@@ -185,6 +197,7 @@ def preview_digest(content: bytes, mapping: dict[str, str]) -> str:
     hasher = hashlib.sha256()
     hasher.update(len(canonical).to_bytes(8, "big"))
     hasher.update(canonical)
+    hasher.update(vrf_id.bytes)
     hasher.update(content)
     return hasher.hexdigest()
 
@@ -392,7 +405,7 @@ async def preview_import(
         counts[action] += 1
 
     return ImportPreview(
-        digest=preview_digest(content, mapping),
+        digest=preview_digest(content, mapping, vrf_id),
         total_rows=len(raw),
         creates=counts["create"],
         updates=counts["update"],
@@ -439,21 +452,26 @@ async def apply_import(
     # reached by a path where an unvalidated value had already been folded into
     # a security-shaped comparison.
     mapping = _validate_mapping(mapping)
-    expected = preview_digest(content, mapping)
+    # THE TARGET IS RESOLVED BEFORE THE DIGEST IS COMPARED, because the digest
+    # covers it: a sheet previewed into one VRF and applied into another --
+    # another client's, by a default that moved under the page -- is refused
+    # here like a stale digest, and the transaction that escapes with the
+    # refusal takes a `global` VRF this resolution may have created with it.
+    vrf_id, client_id = await _import_vrf(session, org_id, vrf_id=vrf_id, client_id=client_id)
+    expected = preview_digest(content, mapping, vrf_id)
     if digest != expected:
         raise IpamValidationError(
             tr(
-                "the digest does not match this file and mapping: preview and apply must "
-                "be about the same file AND the same column mapping (§8.1)"
+                "the digest does not match this file, mapping and VRF: preview and apply "
+                "must be about the same file, the same column mapping AND the same VRF (§8.1)"
             )
         )
     actual = file_digest(content)
     preview = await preview_import(
-        session, org_id, client_id=client_id, vrf_id=vrf_id, content=content, mapping=mapping
+        session, org_id, vrf_id=vrf_id, content=content, mapping=mapping
     )
     raw = _decode(content)
 
-    vrf_id, client_id = await _import_vrf(session, org_id, vrf_id=vrf_id, client_id=client_id)
     existing = await _existing(session, org_id, vrf_id)
 
     applied = 0
@@ -531,6 +549,8 @@ async def apply_import(
             # which is on the next line anyway.
             "file_digest": actual,
             "preview_digest": expected,
+            # WHERE IT WENT: with the file and the mapping, the whole import.
+            "vrf_id": str(vrf_id),
             "total_rows": preview.total_rows,
             "applied": applied,
             "creates": preview.creates,

@@ -48,6 +48,9 @@ MAPPING = {
     "Notes": "description",
 }
 
+#: A VRF for the digest's pure-function tests: the digest names its target.
+VRF = UUID(int=1)
+
 GOOD_CSV = (
     b"IP Address,Host,Owner,Notes\n"
     b"10.70.0.10,printer-1,Printer A,ground floor\n"
@@ -104,7 +107,7 @@ async def test_preview_writes_nothing_for_a_file_that_would_write_three_rows(
     """§8.1 step one. Counted BEFORE AND AFTER, over a file that really would
     write: a preview of an empty file writes nothing against any implementation,
     including one with no preview step at all."""
-    org, _, _ = await _fx(admin_engine, "prev")
+    org, vrf_id, _ = await _fx(admin_engine, "prev")
     before = await _address_count(admin_engine, org.org_id)
 
     async with AsyncSession(admin_engine) as session:
@@ -116,7 +119,7 @@ async def test_preview_writes_nothing_for_a_file_that_would_write_three_rows(
     assert (preview.total_rows, preview.creates, preview.errors) == (3, 3, 0)
     # The digest a preview hands back covers the file AND the mapping, so it is
     # NOT the file's sha256 -- which is what the audit row keeps separately.
-    assert preview.digest == preview_digest(GOOD_CSV, MAPPING)
+    assert preview.digest == preview_digest(GOOD_CSV, MAPPING, vrf_id)
     assert preview.digest != file_digest(GOOD_CSV)
     assert await _address_count(admin_engine, org.org_id) == before == 0
 
@@ -128,11 +131,11 @@ async def test_apply_writes_exactly_what_preview_predicted(
     claimant lands `assigned` and one without lands `reserved` -- "imported and
     assigned to nothing" is precisely what §2.6's exactly-one-claimant CHECK
     exists to keep out of a plan of record."""
-    org, _, _ = await _fx(admin_engine, "apply")
+    org, vrf_id, _ = await _fx(admin_engine, "apply")
     async with AsyncSession(admin_engine) as session:
         result = await apply_import(
             session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=GOOD_CSV,
-            mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING),
+            mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING, vrf_id),
         )
         await session.commit()
 
@@ -155,7 +158,7 @@ async def test_apply_refuses_a_file_that_is_not_the_one_previewed(
     The stored rows are asserted first: a mutation test that only observed
     `DID NOT RAISE` could not tell a refused apply from an accepted one.
     """
-    org, _, _ = await _fx(admin_engine, "digest")
+    org, vrf_id, _ = await _fx(admin_engine, "digest")
     other = GOOD_CSV.replace(b"10.70.0.10", b"10.70.0.99")
     # THE STORED ROWS ARE THE OBSERVATION, NOT THE EXCEPTION. On the accepting
     # path this COMMITS, so a mutation that drops the digest check writes three
@@ -166,7 +169,7 @@ async def test_apply_refuses_a_file_that_is_not_the_one_previewed(
         try:
             await apply_import(
                 session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=other,
-                mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING),
+                mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING, vrf_id),
             )
         except IpamValidationError:
             raised = True
@@ -238,21 +241,24 @@ def test_the_digest_does_not_depend_on_the_order_a_mapping_arrives_in() -> None:
     """
     forwards = {"IP Address": "address", "Host": "hostname", "Owner": "asset_label"}
     backwards = {"Owner": "asset_label", "Host": "hostname", "IP Address": "address"}
-    assert preview_digest(GOOD_CSV, forwards) == preview_digest(GOOD_CSV, backwards)
-    assert preview_digest(GOOD_CSV, forwards) != preview_digest(
-        GOOD_CSV, {"IP Address": "address", "Host": "asset_label", "Owner": "hostname"}
+    assert preview_digest(GOOD_CSV, forwards, VRF) == preview_digest(GOOD_CSV, backwards, VRF)
+    assert preview_digest(GOOD_CSV, forwards, VRF) != preview_digest(
+        GOOD_CSV, {"IP Address": "address", "Host": "asset_label", "Owner": "hostname"}, VRF
     )
 
 
-def test_the_digest_moves_when_either_half_moves() -> None:
-    """Both inputs are load-bearing, and the check is a check in both
-    directions: a digest that only tracked the file would accept a re-mapped
-    apply (the test above), and one that only tracked the mapping would accept a
-    swapped file."""
+def test_the_digest_moves_when_any_of_its_three_inputs_moves() -> None:
+    """Every input is load-bearing, and the check is a check in every
+    direction: a digest that only tracked the file would accept a re-mapped
+    apply (the test above), one that only tracked the mapping would accept a
+    swapped file, and one that did not track the VRF would accept a sheet
+    previewed into one client's network and applied into another's (MSP
+    clients plan 2026-10-26 Task 11 re-review, I-R1)."""
     mapping = {"A": "address"}
-    assert preview_digest(b"ab", mapping) != preview_digest(b"b", mapping)
-    assert preview_digest(b"", mapping) != preview_digest(b"", {"A": "hostname"})
-    assert preview_digest(b"ab", mapping) == preview_digest(b"ab", dict(mapping))
+    assert preview_digest(b"ab", mapping, VRF) != preview_digest(b"b", mapping, VRF)
+    assert preview_digest(b"", mapping, VRF) != preview_digest(b"", {"A": "hostname"}, VRF)
+    assert preview_digest(b"ab", mapping, VRF) == preview_digest(b"ab", dict(mapping), VRF)
+    assert preview_digest(b"ab", mapping, VRF) != preview_digest(b"ab", mapping, UUID(int=2))
 
 
 async def test_an_apply_that_never_previewed_is_accepted_and_that_is_documented(
@@ -275,11 +281,11 @@ async def test_an_apply_that_never_previewed_is_accepted_and_that_is_documented(
     starts failing** -- because a preview record was added -- the docstrings must
     change with it, not the test.
     """
-    org, _, _ = await _fx(admin_engine, "nopreview")
+    org, vrf_id, _ = await _fx(admin_engine, "nopreview")
     async with AsyncSession(admin_engine) as session:
         result = await apply_import(
             session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=GOOD_CSV,
-            mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING),
+            mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING, vrf_id),
         )
         await session.commit()
     assert result.applied == 3
@@ -332,7 +338,7 @@ async def test_apply_skips_the_bad_rows_but_still_reports_them(
     """A file with two bad rows applies the three good ones and returns all five
     verdicts. Reporting and applying are different questions and the answer to
     one must not be inferred from the other."""
-    org, _, _ = await _fx(admin_engine, "partial")
+    org, vrf_id, _ = await _fx(admin_engine, "partial")
     csv_bytes = (
         b"IP Address,Host,Owner,Notes\n"
         b"10.70.0.10,a,Printer A,x\n"
@@ -344,7 +350,7 @@ async def test_apply_skips_the_bad_rows_but_still_reports_them(
     async with AsyncSession(admin_engine) as session:
         result = await apply_import(
             session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=csv_bytes,
-            mapping=MAPPING, digest=preview_digest(csv_bytes, MAPPING),
+            mapping=MAPPING, digest=preview_digest(csv_bytes, MAPPING, vrf_id),
         )
         await session.commit()
     assert (result.total_rows, result.applied, result.errors) == (5, 3, 2)
@@ -365,7 +371,7 @@ async def test_apply_is_one_transaction_and_a_late_failure_writes_nothing(
     which §3.2 refuses -- so this is the ordinary "one row in the sheet is wrong"
     case, not a contrived exception.
     """
-    org, _, _ = await _fx(admin_engine, "atomic")
+    org, vrf_id, _ = await _fx(admin_engine, "atomic")
     csv_bytes = (
         b"IP Address,Host,Owner,Notes\n"
         b"10.70.0.10,a,Printer A,x\n"
@@ -376,7 +382,7 @@ async def test_apply_is_one_transaction_and_a_late_failure_writes_nothing(
         with pytest.raises(IpamValidationError):
             await apply_import(
                 session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=csv_bytes,
-                mapping=MAPPING, digest=preview_digest(csv_bytes, MAPPING),
+                mapping=MAPPING, digest=preview_digest(csv_bytes, MAPPING, vrf_id),
             )
         await session.rollback()
     assert await _address_count(admin_engine, org.org_id) == 0
@@ -400,11 +406,11 @@ async def test_an_import_never_creates_a_scan_authorization(
     The import genuinely succeeds (three rows written), so this is a statement
     about what an APPLIED import did not do.
     """
-    org, _, _ = await _fx(admin_engine, "noauth")
+    org, vrf_id, _ = await _fx(admin_engine, "noauth")
     async with AsyncSession(admin_engine) as session:
         result = await apply_import(
             session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=GOOD_CSV,
-            mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING),
+            mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING, vrf_id),
         )
         await session.commit()
     assert result.applied == 3
@@ -432,11 +438,11 @@ async def test_an_import_never_enables_a_sweep(admin_engine: AsyncEngine) -> Non
     merely `sweep_enabled` -- an import that set an interval or designated an
     agent would be the same defect in a quieter form.
     """
-    org, _, subnet_id = await _fx(admin_engine, "nosweep")
+    org, vrf_id, subnet_id = await _fx(admin_engine, "nosweep")
     async with AsyncSession(admin_engine) as session:
         await apply_import(
             session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=GOOD_CSV,
-            mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING),
+            mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING, vrf_id),
         )
         await session.commit()
 
@@ -454,11 +460,11 @@ async def test_apply_is_audited_with_the_counts_and_the_file_digest(
 ) -> None:
     """§11.3: the import is reproducible from the audit log alone -- which is
     what the digest is for."""
-    org, _, _ = await _fx(admin_engine, "auditimp")
+    org, vrf_id, _ = await _fx(admin_engine, "auditimp")
     async with AsyncSession(admin_engine) as session:
         await apply_import(
             session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=GOOD_CSV,
-            mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING),
+            mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING, vrf_id),
         )
         await session.commit()
 
@@ -476,6 +482,10 @@ async def test_apply_is_audited_with_the_counts_and_the_file_digest(
     assert row.meta["applied"] == 3
     assert row.meta["total_rows"] == 3
     assert row.meta["mapping"] == MAPPING
+    # AND WHERE IT WENT: the sheet, the mapping and the VRF are the whole
+    # import, and the digest covers all three (Task 11 re-review, M-R1).
+    assert row.meta["vrf_id"] == str(vrf_id)
+    assert row.meta["preview_digest"] == preview_digest(GOOD_CSV, MAPPING, vrf_id)
 
 
 async def test_a_conflicting_row_is_reported_and_not_applied(
@@ -492,7 +502,7 @@ async def test_a_conflicting_row_is_reported_and_not_applied(
     async with AsyncSession(admin_engine) as session:
         await apply_import(
             session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=GOOD_CSV,
-            mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING),
+            mapping=MAPPING, digest=preview_digest(GOOD_CSV, MAPPING, vrf_id),
         )
         await session.commit()
 
@@ -512,7 +522,7 @@ async def test_a_conflicting_row_is_reported_and_not_applied(
     async with AsyncSession(admin_engine) as session:
         result = await apply_import(
             session, org.org_id, client_id=org.org_id, actor_id=org.user_id, content=second,
-            mapping=MAPPING, digest=preview_digest(second, MAPPING),
+            mapping=MAPPING, digest=preview_digest(second, MAPPING, vrf_id),
         )
         await session.commit()
     assert result.applied == 1

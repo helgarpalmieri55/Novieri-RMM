@@ -788,6 +788,7 @@ export const ipam: Shape<typeof en> = {
     vrf: "En la VRF",
     vrfHelp: "La importación es del cliente de esta VRF. Cada dirección tiene que estar en una de sus subredes.",
     vrfOption: "{vrf} · {client}",
+    targetMoved: "Este archivo se previsualizó en otra VRF. Vuelve a previsualizarlo en la elegida antes de aplicar.",
     csvFile: "Archivo CSV",
     drop: "Suelta un CSV o haz clic",
     columns: "Columnas: {fields}. Todo lo demás se ignora y se informa.",

@@ -1278,11 +1278,11 @@ CATALOG: dict[str, str] = {
     "two columns map to the same field(s): {duplicated}": (
         "dos columnas se asignan al mismo campo: {duplicated}"
     ),
-    "the digest does not match this file and mapping: preview and apply must be about the "
-    "same file AND the same column mapping (§8.1)": (
-        "el hash no coincide con este archivo y esta correspondencia de columnas: la vista "
-        "previa y la aplicación deben tratar del mismo archivo Y de la misma correspondencia "
-        "de columnas (§8.1)"
+    "the digest does not match this file, mapping and VRF: preview and apply must be about "
+    "the same file, the same column mapping AND the same VRF (§8.1)": (
+        "el hash no coincide con este archivo, esta correspondencia de columnas y esta VRF: la "
+        "vista previa y la aplicación deben tratar del mismo archivo, de la misma "
+        "correspondencia de columnas Y de la misma VRF (§8.1)"
     ),
     "the file is not valid UTF-8: {exc}": "el archivo no es UTF-8 válido: {exc}",
     "the file has more than {max_import_rows} rows": (

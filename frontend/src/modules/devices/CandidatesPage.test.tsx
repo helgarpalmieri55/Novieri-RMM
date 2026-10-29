@@ -109,7 +109,8 @@ function renderPage(listAssetCandidates: () => Promise<unknown>, me: Partial<Me>
       </MemoryRouter>
     </QueryClientProvider>
   );
-  return render(ui);
+  // The client too, so a test can make the page read its list again.
+  return { ...render(ui), queryClient };
 }
 
 beforeEach(() => {
@@ -291,6 +292,61 @@ describe("CandidatesPage", () => {
 
     expect(await screen.findByText("1 candidate promoted to assets.")).toBeInTheDocument();
     expect(await screen.findByText("no such client")).toBeInTheDocument();
+  });
+
+  it("still sends a selected row a re-read dropped, and the server answers it", async () => {
+    // Task 11 re-review, M-R2: the selection is a snapshot of each ticked row.
+    promote.mockResolvedValue({
+      results: [
+        {
+          address: "10.0.0.1",
+          created: false,
+          device_id: null,
+          reason: "not a candidate: no current observation for this address",
+        },
+      ],
+    });
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce(page({ items: [candidate({ address: "10.0.0.1", client_id: "c-x" })] }))
+      .mockResolvedValue(page({ items: [candidate({ address: "10.0.0.2", client_id: "c-x" })] }));
+    const { queryClient } = renderPage(list);
+    await userEvent.click(await screen.findByRole("checkbox", { name: "10.0.0.1" }));
+    await queryClient.invalidateQueries({ queryKey: ["asset-candidates"] });
+    await screen.findByText("10.0.0.2");
+    expect(screen.queryByText("10.0.0.1")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: /promote 1/i }));
+    await waitFor(() => expect(promote).toHaveBeenCalledTimes(1));
+    expect(promote.mock.calls[0]?.[0]).toEqual({ client_id: "c-x", addresses: ["10.0.0.1"] });
+    expect(await screen.findByText(/Not promoted: 10\.0\.0\.1 \(not a candidate/)).toBeInTheDocument();
+  });
+
+  it("names every failure when every client's request fails", async () => {
+    promote.mockImplementation((body: { client_id: string }) =>
+      Promise.reject(
+        new ApiError(409, JSON.stringify({ detail: `client ${body.client_id} is archived` })),
+      ),
+    );
+    renderPage(() =>
+      Promise.resolve(
+        page({
+          items: [
+            candidate({ address: "10.0.0.1", client_id: "c-x" }),
+            candidate({ address: "10.0.0.2", client_id: "c-y" }),
+          ],
+          total: 2,
+        }),
+      ),
+    );
+    await userEvent.click(await screen.findByRole("checkbox", { name: "10.0.0.1" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "10.0.0.2" }));
+    await userEvent.click(screen.getByRole("button", { name: /promote/i }));
+
+    expect(await screen.findByText("client c-x is archived")).toBeInTheDocument();
+    expect(screen.getByText("client c-y is archived")).toBeInTheDocument();
+    // Nothing went through, so the selection stays for a second try.
+    expect(screen.getByRole("checkbox", { name: "10.0.0.1" })).toBeChecked();
   });
 
   it("lists the same address of two clients as two rows, selected apart", async () => {

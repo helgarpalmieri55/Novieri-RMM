@@ -196,10 +196,18 @@ async def get_vrf(session: AsyncSession, org_id: UUID, vrf_id: UUID) -> IpamVrf:
 
 
 async def list_vrfs(session: AsyncSession, org_id: UUID) -> list[IpamVrf]:
+    """The VRFs this session sees, in a TOTAL order: name, then client, then
+    id. Every client has a `global` VRF (migration 0240), so by name alone two
+    clients' tie and the order of a tie is whatever the plan produced -- and
+    the console's import page defaults to a listed VRF, so a tie that flipped
+    on a refetch moved its default to another client's network (Task 11
+    re-review, I-R1)."""
     return list(
         (
             await session.execute(
-                select(IpamVrf).where(IpamVrf.org_id == org_id).order_by(IpamVrf.name)
+                select(IpamVrf)
+                .where(IpamVrf.org_id == org_id)
+                .order_by(IpamVrf.name, IpamVrf.client_id, IpamVrf.id)
             )
         )
         .scalars()

@@ -794,6 +794,7 @@ export const ipam = {
     vrf: "Into the VRF",
     vrfHelp: "The import belongs to this VRF’s client. Every address must fall inside one of its subnets.",
     vrfOption: "{vrf} · {client}",
+    targetMoved: "This file was previewed into another VRF. Preview it again into the one chosen before applying.",
     csvFile: "CSV file",
     drop: "Drop a CSV or click",
     columns: "Columns: {fields}. Anything else is ignored and reported.",

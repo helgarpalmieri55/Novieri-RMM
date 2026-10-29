@@ -1810,7 +1810,7 @@ describe("the state helpers' sentences in Spanish", () => {
 
   it("says why an import cannot be applied", () => {
     const file = (name: string, size = 10) => ({ name, size, lastModified: 1 });
-    const previewed = { ...file("a.csv"), digest: "d" };
+    const previewed = { ...file("a.csv"), digest: "d", vrfId: null };
     setActiveLanguage("es");
     expect(importApplyBlockReason(null, null)).toBe("Elige un archivo CSV.");
     expect(importApplyBlockReason(file("a.csv"), null)).toMatch(/^Previsualiza primero este archivo\./);

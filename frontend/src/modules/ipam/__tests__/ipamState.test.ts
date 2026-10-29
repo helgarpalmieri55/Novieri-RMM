@@ -542,7 +542,7 @@ describe("buildSubnetTree", () => {
 
 describe("importApplyBlockReason", () => {
   const file = { name: "plan.csv", size: 1024, lastModified: 1000 };
-  const previewed = { ...file, digest: "a".repeat(64) };
+  const previewed = { ...file, digest: "a".repeat(64), vrfId: null };
 
   it("refuses apply when nothing has been previewed", () => {
     const reason = importApplyBlockReason(file, null);
@@ -565,7 +565,7 @@ describe("importApplyBlockReason", () => {
 
   it("refuses a file over the 10 MB import limit", () => {
     const big = { name: "plan.csv", size: 11 * 1024 * 1024, lastModified: 1000 };
-    expect(importApplyBlockReason(big, { ...big, digest: "b".repeat(64) })).toContain("10 MB");
+    expect(importApplyBlockReason(big, { ...big, digest: "b".repeat(64), vrfId: null })).toContain("10 MB");
   });
 });
 

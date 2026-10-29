@@ -597,6 +597,13 @@ export interface ImportRowOut {
   detail: Record<string, unknown>;
 }
 
+/**
+ * Where a CSV import goes: a VRF -- its client is the import's -- or, naming
+ * no VRF, a client's `global` VRF (MSP clients phase 2). Sent as `vrf_id` or
+ * `client_id`; the server's digest covers the VRF it resolves to.
+ */
+export type ImportTarget = { vrfId: string } | { clientId: string };
+
 export interface ImportPreviewOut {
   /** The sha256 an `apply` must ECHO to prove it is the file that was
    * previewed. This is the whole binding between the two steps (§8.1). */

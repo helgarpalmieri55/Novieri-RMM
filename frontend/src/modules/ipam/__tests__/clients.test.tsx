@@ -392,6 +392,75 @@ describe("an import goes where the operator points it: a VRF, whose client is th
   });
 });
 
+describe("an apply goes where its preview read, whatever the list says by then", () => {
+  // Task 11 re-review, I-R1: the default VRF is recomputed on every render, and
+  // a re-read of the VRF list (window focus, any invalidation) can move it.
+  const PREVIEW = {
+    digest: "a".repeat(64),
+    total_rows: 1,
+    creates: 1,
+    updates: 0,
+    conflicts: 0,
+    errors: 0,
+    rows: [{ line: 2, action: "create", address: "10.4.7.9", error: "", detail: {} }],
+  };
+  const X_GLOBAL: VrfOut = { id: "vrf-x", client_id: "c-x", name: "global", rd: null, description: "" };
+  const Y_GLOBAL: VrfOut = { id: "vrf-y", client_id: "c-y", name: "global", rd: null, description: "" };
+
+  async function previewHeld(listIpamVrfs: ReturnType<typeof vi.fn>) {
+    const previewIpamImport = vi.fn().mockResolvedValue(PREVIEW);
+    const applyIpamImport = vi.fn().mockResolvedValue({ ...PREVIEW, applied: 1 });
+    stubApi({ previewIpamImport, applyIpamImport, listIpamVrfs });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/ipam/import"]}>
+          <ImportPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const user = userEvent.setup();
+    const input = (await screen.findByLabelText("CSV file")) as HTMLInputElement;
+    await user.upload(input, new File(["address\n10.4.7.9\n"], "plan.csv", { type: "text/csv" }));
+    await user.selectOptions(await screen.findByLabelText("address"), "address");
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() => expect(previewIpamImport).toHaveBeenCalled());
+    return { queryClient, user, previewIpamImport, applyIpamImport };
+  }
+
+  it("applies into the previewed VRF when a re-read moves the default", async () => {
+    // A technician sees X's VRF alone; the preview reads it. Then the list is
+    // read again and Y's `global` sorts first: the default would now be Y's.
+    const listIpamVrfs = vi.fn().mockResolvedValue([X_GLOBAL]);
+    const { queryClient, user, previewIpamImport, applyIpamImport } = await previewHeld(listIpamVrfs);
+    expect(previewIpamImport.mock.calls[0]?.[2]).toEqual({ vrfId: "vrf-x" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Apply" })).not.toBeDisabled());
+
+    listIpamVrfs.mockResolvedValue([Y_GLOBAL, X_GLOBAL]);
+    await queryClient.invalidateQueries({ queryKey: ["ipam-vrfs"] });
+    await screen.findByRole("option", { name: "global · c-y" });
+
+    // The picker still shows what was previewed, and apply goes there.
+    expect((screen.getByLabelText("Into the VRF") as HTMLSelectElement).value).toBe("vrf-x");
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(applyIpamImport).toHaveBeenCalled());
+    expect(applyIpamImport.mock.calls[0]?.[3]).toEqual({ vrfId: "vrf-x" });
+  });
+
+  it("blocks the apply, saying why, when the picker no longer shows the previewed target", async () => {
+    // Previewed with no VRF listed (the internal client); then a VRF appears.
+    const listIpamVrfs = vi.fn().mockResolvedValue([]);
+    const { queryClient, applyIpamImport, previewIpamImport } = await previewHeld(listIpamVrfs);
+    expect(previewIpamImport.mock.calls[0]?.[2]).toEqual({ clientId: "o1" });
+
+    listIpamVrfs.mockResolvedValue([X_GLOBAL]);
+    await queryClient.invalidateQueries({ queryKey: ["ipam-vrfs"] });
+    expect(await screen.findByText(/previewed into another VRF/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+    expect(applyIpamImport).not.toHaveBeenCalled();
+  });
+});
+
 describe("the sweeper picker asks only when it may be used", () => {
   it("reads no machines for someone who cannot change the designation", async () => {
     const listDevices = vi.fn().mockResolvedValue({ items: [], total: 0 });

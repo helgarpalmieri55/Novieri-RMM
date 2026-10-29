@@ -132,11 +132,30 @@ interface PromoteOutcomes {
   failures: unknown[];
 }
 
+/** A selected row, as it was when it was ticked: whose it is, and its address. */
+interface Picked {
+  client_id: string;
+  address: string;
+}
+
+/** Every request of one click failed: each one's reason, not only the first. */
+class PromoteFailed extends Error {
+  constructor(readonly failures: readonly unknown[]) {
+    super("every promote request failed");
+    this.name = "PromoteFailed";
+  }
+}
+
 export function CandidatesPage() {
   const t = useT();
   const api = useApi();
   const queryClient = useQueryClient();
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // THE SELECTION IS A SNAPSHOT of each ticked row (its client and address),
+  // keyed by `rowKey`, not a set of keys read back against the list: a row a
+  // refetch drops between the tick and the click is still sent, and the
+  // server answers it per address ("not a candidate") instead of the page
+  // silently dropping it.
+  const [selected, setSelected] = useState<Map<string, Picked>>(new Map());
   const [scanning, setScanning] = useState(false);
 
   const candidates = useQuery({
@@ -178,12 +197,8 @@ export function CandidatesPage() {
     // results -- the page reports both.
     mutationFn: async () => {
       const byClient = new Map<string, string[]>();
-      for (const candidate of items) {
-        if (!selected.has(rowKey(candidate))) continue;
-        byClient.set(candidate.client_id, [
-          ...(byClient.get(candidate.client_id) ?? []),
-          candidate.address,
-        ]);
+      for (const picked of selected.values()) {
+        byClient.set(picked.client_id, [...(byClient.get(picked.client_id) ?? []), picked.address]);
       }
       const settled = await Promise.allSettled(
         [...byClient].map(([client_id, addresses]) =>
@@ -192,12 +207,13 @@ export function CandidatesPage() {
       );
       const results = settled.flatMap((s) => (s.status === "fulfilled" ? s.value.results : []));
       const failures = settled.flatMap((s) => (s.status === "rejected" ? [s.reason] : []));
-      // Nothing came back at all: the page's ordinary error line says why.
-      if (results.length === 0 && failures.length > 0) throw failures[0];
+      // Nothing came back at all: the selection stays, and the error lines
+      // say why -- every request's, not only the first.
+      if (results.length === 0 && failures.length > 0) throw new PromoteFailed(failures);
       return { results, failures };
     },
     onSuccess: () => {
-      setSelected(new Set());
+      setSelected(new Map());
       void queryClient.invalidateQueries({ queryKey: ["asset-candidates"] });
       void queryClient.invalidateQueries({ queryKey: ["devices"] });
     },
@@ -213,15 +229,16 @@ export function CandidatesPage() {
   }
   const shared = (candidate: AssetCandidate) => (seenAt.get(candidate.address) ?? 0) > 1;
 
-  function toggle(key: string) {
+  function toggle(candidate: AssetCandidate) {
     // The outcome below describes ONE promote of ONE selection. Leaving it on
     // screen while the operator builds the next selection makes it read as a
     // report on rows it never saw.
     promote.reset();
+    const key = rowKey(candidate);
     setSelected((current) => {
-      const next = new Set(current);
+      const next = new Map(current);
       if (next.has(key)) next.delete(key);
-      else next.add(key);
+      else next.set(key, { client_id: candidate.client_id, address: candidate.address });
       return next;
     });
   }
@@ -400,7 +417,7 @@ export function CandidatesPage() {
                               : candidate.address
                           }
                           checked={selected.has(rowKey(candidate))}
-                          onChange={() => toggle(rowKey(candidate))}
+                          onChange={() => toggle(candidate)}
                         />
                       </td>
                       {/* v3's row: a glyph leads, the address is the title,
@@ -470,11 +487,14 @@ export function CandidatesPage() {
         />
       </p>
 
-      {promote.isError && (
-        <p role="alert" className="form-error mt-3">
-          {describeSubmitError(promote.error)}
-        </p>
-      )}
+      {promote.isError &&
+        (promote.error instanceof PromoteFailed ? [...promote.error.failures] : [promote.error]).map(
+          (failure, at) => (
+            <p key={at} role="alert" className="form-error mt-3">
+              {describeSubmitError(failure)}
+            </p>
+          ),
+        )}
 
       {/* THE 200 THAT PROMOTED NOTHING. `POST /candidates/promote` answers
           per-address on purpose -- "one stale entry in a selection must not

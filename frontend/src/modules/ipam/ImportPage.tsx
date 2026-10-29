@@ -123,12 +123,17 @@ function CsvImportPanel() {
     setColumns(firstLine.split(",").map((column) => column.trim().replace(/^﻿/, "")));
   }
 
-  const blockReason = importApplyBlockReason(
-    file === null
-      ? null
-      : { name: file.name, size: file.size, lastModified: file.lastModified },
-    previewed,
-  );
+  const blockReason =
+    importApplyBlockReason(
+      file === null
+        ? null
+        : { name: file.name, size: file.size, lastModified: file.lastModified },
+      previewed,
+    ) ??
+    // The picker no longer shows the VRF the preview read -- a choice made
+    // since, or a list that first appeared after a preview into the internal
+    // client. Apply would still go where the preview read; say so instead.
+    (previewed !== null && previewed.vrfId !== vrfId ? t("ipam.importExport.targetMoved") : null);
   const mappingNamesAddress = Object.values(mapping).includes("address");
 
   return (
@@ -262,15 +267,22 @@ function CsvImportPanel() {
           disabled={preview.isPending || file === null || !mappingNamesAddress}
           onClick={() => {
             if (file === null) return;
+            // THE TARGET IS TAKEN ONCE, HERE. `vrfId` is recomputed on every
+            // render from the choice or the default, and a default can move
+            // when the VRF list is read again; what was previewed is what is
+            // applied, and the picker is pinned to it so it says so.
+            const target = vrfId;
             preview.mutate(
-              { file, mapping, vrfId },
+              { file, mapping, vrfId: target },
               {
                 onSuccess: (result) => {
+                  setVrfChoice(target);
                   setPreviewed({
                     name: file.name,
                     size: file.size,
                     lastModified: file.lastModified,
                     digest: result.digest,
+                    vrfId: target,
                   });
                 },
               },
@@ -283,7 +295,7 @@ function CsvImportPanel() {
           disabled={apply.isPending || blockReason !== null}
           onClick={() => {
             if (file === null || previewed === null) return;
-            apply.mutate({ file, mapping, digest: previewed.digest, vrfId });
+            apply.mutate({ file, mapping, digest: previewed.digest, vrfId: previewed.vrfId });
           }}
         />
         {blockReason !== null && <span className="form-hint">{blockReason}</span>}

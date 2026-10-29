@@ -315,6 +315,7 @@ import type {
   HistoryEntryOut as IpamHistoryEntryOut,
   ImportPreviewOut as IpamImportPreviewOut,
   ImportResultOut as IpamImportResultOut,
+  ImportTarget as IpamImportTarget,
   OrphanOut as IpamOrphanOut,
   RangeCreate as IpamRangeCreate,
   RangeOut as IpamRangeOut,
@@ -510,18 +511,6 @@ export interface DeviceHolder {
 export type DeviceState = "all" | "online" | "offline" | "assets" | "certs" | "review";
 
 /** What `GET /devices` accepts. Every field optional; absent means unfiltered. */
-/**
- * Where an IPAM CSV import goes: a VRF -- its client is the import's -- or,
- * naming no VRF, a client's `global` VRF (MSP clients phase 2).
- */
-export type IpamImportTarget = { vrfId: string } | { clientId: string };
-
-function importTargetQuery(target: IpamImportTarget): string {
-  return "vrfId" in target
-    ? `&vrf_id=${encodeURIComponent(target.vrfId)}`
-    : `&client_id=${encodeURIComponent(target.clientId)}`;
-}
-
 export interface DeviceListParams {
   q?: string;
   state?: DeviceState;
@@ -5103,7 +5092,7 @@ export class ApiClient {
   ): Promise<IpamImportPreviewOut> {
     return this.ipamImportRequest<IpamImportPreviewOut>(
       `/ipam/import/preview?mapping=${encodeURIComponent(JSON.stringify(mapping))}` +
-        importTargetQuery(target),
+        this.ipamImportTargetQuery(target),
       file,
     );
   }
@@ -5119,9 +5108,16 @@ export class ApiClient {
     return this.ipamImportRequest<IpamImportResultOut>(
       `/ipam/import/apply?mapping=${encodeURIComponent(JSON.stringify(mapping))}` +
         `&digest=${encodeURIComponent(digest)}` +
-        importTargetQuery(target),
+        this.ipamImportTargetQuery(target),
       file,
     );
+  }
+
+  // Where the import goes, as the query string names it: `vrf_id` or `client_id`.
+  private ipamImportTargetQuery(target: IpamImportTarget): string {
+    return "vrfId" in target
+      ? `&vrf_id=${encodeURIComponent(target.vrfId)}`
+      : `&client_id=${encodeURIComponent(target.clientId)}`;
   }
 
   // The CSV goes up as the RAW BODY (`_read_csv` -> `read_bounded_body`), not

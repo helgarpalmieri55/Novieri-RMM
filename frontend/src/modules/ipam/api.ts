@@ -30,15 +30,7 @@
 // telemetry, which is precisely the boundary this module does not cross.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type {
-  ApiError,
-  ClientSiteOut,
-  Device,
-  DevicePage,
-  IpamImportTarget,
-  Me,
-  Page,
-} from "../../lib/api";
+import type { ApiError, ClientSiteOut, Device, DevicePage, Me, Page } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { internalClientId, loadingUntilClient, requireKnown } from "../../lib/internalClient";
 import type {
@@ -53,6 +45,7 @@ import type {
   HistoryEntryOut,
   ImportPreviewOut,
   ImportResultOut,
+  ImportTarget,
   OrphanOut,
   RangeCreate,
   RangeOut,
@@ -686,7 +679,7 @@ export function useUpdateIpamSweepSettingsMutation() {
  * VRF chosen, the selected client's `global` VRF; until then the internal
  * client's (`useIpamClient`), and nothing is sent before `/me` answers.
  */
-function importTarget(vrfId: string | null, client: string | null): IpamImportTarget {
+function importTarget(vrfId: string | null, client: string | null): ImportTarget {
   return vrfId ? { vrfId } : { clientId: requireKnown(client) };
 }
 

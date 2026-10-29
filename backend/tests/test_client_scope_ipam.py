@@ -1718,17 +1718,22 @@ IMPORT_CSV = b"IP,Owner\n10.70.0.10,Printer A\n10.70.0.11,\n"
 
 async def _import(
     env: ApiEnv, headers: dict[str, str], client: UUID | None, *, apply: bool = False,
-    vrf: str | None = None,
+    vrf: str | None = None, digest: str | None = None,
 ) -> Any:
-    from app.modules.ipam.importer import preview_digest
-
+    """A preview, or an apply carrying `digest` -- by default the digest a
+    preview of the same target answers (it covers the file, the mapping and
+    the VRF the target resolves to), or a well-formed stand-in where the
+    target itself is refused."""
     params: dict[str, str] = {"mapping": json.dumps(IMPORT_MAPPING)}
     if client is not None:
         params["client_id"] = str(client)
     if vrf is not None:
         params["vrf_id"] = vrf
     if apply:
-        params["digest"] = preview_digest(IMPORT_CSV, IMPORT_MAPPING)
+        if digest is None:
+            previewed = await _import(env, headers, client, vrf=vrf)
+            digest = previewed.json()["digest"] if previewed.status_code == 200 else "0" * 64
+        params["digest"] = digest
     return await env.client.post(
         f"{I}/import/{'apply' if apply else 'preview'}", params=params, content=IMPORT_CSV,
         headers={**headers, "Content-Type": "text/csv"},
@@ -2077,3 +2082,78 @@ async def test_another_client_s_id_answers_a_narrowed_technician_an_empty_fleet(
     assert (theirs.json()["items"], theirs.json()["total"]) == ([], 0)
     own = await api_env.client.get("/api/v1/devices", params={"client_id": str(x)}, headers=x_tech)
     assert [d["id"] for d in own.json()["items"]] == [str(mine)]
+
+
+
+# --------------------------------------------------------------------------- #
+# Fix round 2 (task-11-review.md, re-review of fix round 1: I-R1, M-R1)
+# --------------------------------------------------------------------------- #
+
+
+async def test_an_apply_is_pinned_to_the_vrf_it_was_previewed_into(api_env: ApiEnv) -> None:
+    """I-R1: the digest covers the VRF the preview resolved, so a sheet
+    previewed into X's `global` VRF cannot be applied into Y's, nor into
+    another VRF of X, with that digest: each is refused as a stale digest is
+    (400), and nothing is written. Into the VRF it was previewed into, it
+    applies, and the audit event says which VRF that was (M-R1)."""
+    org = await api_env.create_org("i-import-pin")
+    x, _ = await client_with_site(api_env, org)
+    y, _ = await client_with_site(api_env, org)
+    admin = await _admin(api_env, org)
+    await _subnet(api_env, admin, "10.70.0.0/24", x)
+    await _subnet(api_env, admin, "10.70.0.0/24", y)
+    x_lan = await _created(api_env, "/vrfs", {"name": "LAN", "client_id": str(x)}, admin)
+    await _created(api_env, "/subnets", {"prefix": "10.70.0.0/24", "vrf_id": x_lan["id"]}, admin)
+    x_global, y_global = str(await _default_vrf(api_env, x)), str(await _default_vrf(api_env, y))
+
+    preview = await _import(api_env, admin, None, vrf=x_global)
+    assert preview.status_code == 200, preview.text
+    digest = preview.json()["digest"]
+    before = await _counts(api_env, org)
+    for elsewhere in (y_global, x_lan["id"]):
+        r = await _import(api_env, admin, None, apply=True, vrf=elsewhere, digest=digest)
+        assert r.status_code == 400, (elsewhere, r.text)
+        assert "digest does not match" in r.json()["detail"], r.text
+    by_client = await _import(api_env, admin, y, apply=True, digest=digest)
+    assert by_client.status_code == 400, by_client.text  # Y's global VRF, by client
+    assert await _counts(api_env, org) == before
+
+    applied = await _import(api_env, admin, None, apply=True, vrf=x_global, digest=digest)
+    assert applied.status_code == 200, applied.text
+    async with AsyncSession(api_env.admin_engine) as s:
+        rows = (await s.execute(
+            select(IpamAddress.vrf_id).where(IpamAddress.org_id == org)
+        )).scalars().all()
+        meta = (await s.execute(
+            select(AuditEvent.meta).where(
+                AuditEvent.org_id == org, AuditEvent.action == "ipam.import_applied")
+        )).scalar_one()
+    assert sorted(str(v) for v in rows) == [x_global] * 2
+    assert meta["vrf_id"] == x_global
+
+
+async def test_vrfs_are_listed_in_a_total_order(api_env: ApiEnv) -> None:
+    """I-R1, the third layer: every client has a `global` VRF, so by name
+    alone two clients' tie and their order is the plan's; the import page
+    defaults to a listed VRF, so that order must not move between reads. Name,
+    then client, then id -- Y's `global` is created first, and still listed
+    after X's."""
+    org = await api_env.create_org("i-vrf-order")
+    x, _ = await client_with_site(api_env, org)
+    y, _ = await client_with_site(api_env, org)
+    first, second = sorted((x, y), key=str)
+    admin = await _admin(api_env, org)
+    for client in (second, first):  # the later client's VRF is inserted first
+        await _created(api_env, "/vrfs", {"name": "global", "client_id": str(client)}, admin)
+    listed = await api_env.client.get(f"{I}/vrfs", headers=admin)
+    assert listed.status_code == 200, listed.text
+    globals_ = [v["client_id"] for v in listed.json() if v["name"] == "global"]
+    assert globals_[-2:] == [str(first), str(second)], globals_
+    # WHATEVER THE PLAN. Through the `(org_id, client_id, name)` index a tie
+    # already comes out in client order, which hides a missing tiebreak; a
+    # sequential scan reads the heap, where the later client's VRF is first.
+    async with org_session(org, clients=ClientScope.all(), engine=api_env.app_engine) as s:
+        for knob in ("enable_indexscan", "enable_bitmapscan", "enable_indexonlyscan"):
+            await s.execute(text(f"SET LOCAL {knob} = off"))
+        rows = await registry.list_vrfs(s, org)
+    assert [r.client_id for r in rows if r.name == "global"][-2:] == [first, second]
