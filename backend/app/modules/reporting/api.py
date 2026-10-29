@@ -52,7 +52,7 @@ from fastapi.responses import PlainTextResponse
 
 from app.api.deps import AuthContext, bound_auth_context, require_permission
 from app.core.i18n import tr
-from app.core.rbac import user_permission_codes
+from app.core.rbac import codes_held_anywhere
 from app.core.tenancy import org_session
 
 # IMPORTED FOR ITS SIDE EFFECT, AND THE SIDE EFFECT IS THE CATALOGUE. Importing
@@ -93,11 +93,12 @@ async def _catalogue(
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        # Org-wide grants only, `device_group_id` left at its `None` default --
-        # the same question `require_report_sources` asks, so the catalogue can
-        # never claim a report is runnable that the report itself would refuse
-        # (§0.6).
-        granted = await user_permission_codes(session, ctx.user_id)
+        # The codes held on ANY client -- the same question
+        # `require_report_sources` asks, so the catalogue can never claim a
+        # report is runnable that the report itself would refuse. The report
+        # then runs over the clients holding all of them (plan 2026-10-26 Task
+        # 14): a technician of one client sees what they can run there.
+        granted = await codes_held_anywhere(session, ctx.user_id)
     return build_catalogue(granted)
 
 
@@ -124,9 +125,16 @@ router.add_api_route(
 )
 
 
-def _make_handler(definition: ReportDefinition) -> Callable[..., Any]:
+def _make_handler(
+    definition: ReportDefinition, sources: Callable[..., Any]
+) -> Callable[..., Any]:
     """One handler per definition, closed over it. A SHELL: it resolves the
-    principal, opens the tenant session, calls the service, maps errors."""
+    principal, opens the tenant session, calls the service, maps errors.
+
+    `ctx` is the source conjunction's (`require_report_sources`): the
+    principal narrowed to the clients where it holds every code the report
+    needs, which is the scope the report runs under (plan 2026-10-26 Task 14).
+    """
     params_model = definition.params
 
     async def handler(
@@ -138,7 +146,7 @@ def _make_handler(definition: ReportDefinition) -> Callable[..., Any]:
         # a 200. With `Query()`, the whole query mapping is validated by the
         # model and an unknown parameter is a 422 (§6.5).
         params: Annotated[params_model, Query()],  # type: ignore[valid-type]
-        ctx: AuthContext = Depends(bound_auth_context),
+        ctx: AuthContext = Depends(sources),
     ) -> ReportPage[Any]:
         try:
             async with org_session(
@@ -163,7 +171,9 @@ def _make_handler(definition: ReportDefinition) -> Callable[..., Any]:
     return handler
 
 
-def _make_export_handler(definition: ReportDefinition) -> Callable[..., Any]:
+def _make_export_handler(
+    definition: ReportDefinition, sources: Callable[..., Any]
+) -> Callable[..., Any]:
     """One export handler per definition, closed over it.
 
     **AN EXPORT NEVER HAS A WEAKER GATE THAN THE REPORT IT EXPORTS.** It is
@@ -179,7 +189,7 @@ def _make_export_handler(definition: ReportDefinition) -> Callable[..., Any]:
         # Same `Annotated[Model, Query()]` as the report handler, for the same
         # reason: a misspelled filter must be a 422, not an unfiltered file.
         params: Annotated[params_model, Query()],  # type: ignore[valid-type]
-        ctx: AuthContext = Depends(bound_auth_context),
+        ctx: AuthContext = Depends(sources),
     ) -> PlainTextResponse:
         try:
             async with org_session(
@@ -238,19 +248,18 @@ def _generate_routes() -> None:
         page_model: Any = ReportPage[definition.row_model]  # type: ignore[name-defined]
         router.add_api_route(
             path=f"/reports/{definition.key}",
-            endpoint=_make_handler(definition),
+            # The conjunction is the handler's `ctx` (it narrows the scope the
+            # report runs under), not a second route-level dependency.
+            endpoint=_make_handler(definition, require_report_sources(definition.key)),
             methods=["GET"],
             response_model=page_model,
             summary=definition.summary,
             description=definition.description,
-            dependencies=[
-                Depends(require_permission("reporting.read")),
-                Depends(require_report_sources(definition.key)),
-            ],
+            dependencies=[Depends(require_permission("reporting.read"))],
         )
         router.add_api_route(
             path=export_path(definition.key).removeprefix(_MOUNT_PREFIX),
-            endpoint=_make_export_handler(definition),
+            endpoint=_make_export_handler(definition, require_report_sources(definition.key)),
             methods=["GET"],
             response_class=PlainTextResponse,
             summary=f"{definition.summary} As a CSV file.",
@@ -264,10 +273,7 @@ def _generate_routes() -> None:
                 "from a complete one once it is open in a spreadsheet. Exporting writes "
                 "one `report.exported` audit event; running the report writes none."
             ),
-            dependencies=[
-                Depends(require_permission("reporting.read")),
-                Depends(require_report_sources(definition.key)),
-            ],
+            dependencies=[Depends(require_permission("reporting.read"))],
         )
 
 

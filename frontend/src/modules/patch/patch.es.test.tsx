@@ -125,6 +125,7 @@ const RINGS = {
 
 const APPROVAL: PatchApproval = {
   id: "a1",
+  client_id: null,
   patch_id: "p1",
   patch_identifier: "KB5031354",
   ring_name: "pilot",

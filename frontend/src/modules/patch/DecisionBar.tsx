@@ -1,7 +1,12 @@
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ConfirmDialog } from "../../components/confirm";
+import { ForEveryClientToggle } from "../../components/forEveryClient";
 import { describeSubmitError } from "../../components/form";
 import { useT } from "../../i18n/context";
+import type { Me } from "../../lib/api";
+import { useApi } from "../../lib/ApiContext";
+import { newRowClient } from "../../lib/internalClient";
 import { Btn } from "../../shell/components";
 import { useAuthorizingChanges, usePatchBulkApproveMutation } from "./api";
 import {
@@ -81,10 +86,19 @@ export function DecisionBar({
   scopeName: string;
 }) {
   const t = useT();
+  const api = useApi();
   const approve = usePatchBulkApproveMutation();
   const changes = useAuthorizingChanges();
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const [ring, setRing] = useState<string>(ringOptions[0]?.name ?? "test");
   const [changeId, setChangeId] = useState<string>("");
+  // AN APPROVAL IS ONE CLIENT'S unless the person asks for every client's
+  // (MSP clients plan 2026-10-26 Task 14): a client's approval clears that
+  // client's machines in the ring, a global one every client's.
+  const [forEveryClient, setForEveryClient] = useState(false);
+  // `/me` had not answered when the approval was confirmed: nothing was sent,
+  // and the bar says why (`InternalScopeUnknown`).
+  const [ownerError, setOwnerError] = useState<unknown>(null);
   // TRUE only while the confirmation is open; nothing is sent until it is
   // answered.
   const [confirming, setConfirming] = useState(false);
@@ -163,6 +177,14 @@ export function DecisionBar({
               setConfirming(true);
             }}
           />
+          <ForEveryClientToggle
+            code="patch.approve"
+            checked={forEveryClient}
+            onChange={(checked) => {
+              setForEveryClient(checked);
+              approve.reset();
+            }}
+          />
           <Btn
             label={t("patch.decision.clearSelection")}
             ariaLabel={t("patch.decision.clearAria", { scope: scopeName })}
@@ -238,9 +260,9 @@ export function DecisionBar({
       {/* `String(approve.error)` rendered "Error: " for a bodyless 503 and was
           announced to nobody, so an approval the server refused looked like one
           it took. */}
-      {approve.isError ? (
+      {approve.isError || ownerError ? (
         <span role="alert" className="form-error w-full">
-          {describeSubmitError(approve.error)}
+          {describeSubmitError(approve.isError ? approve.error : ownerError)}
         </span>
       ) : null}
 
@@ -286,8 +308,25 @@ export function DecisionBar({
         onConfirm={() => {
           setConfirming(false);
           if (selectedIds.length === 0) return;
+          let owner: { client_id?: string };
+          try {
+            // PHASE 3: the client/site selector. Until it exists an approval
+            // is the organisation's internal client's (`lib/internalClient.ts`),
+            // or, when asked, every client's.
+            owner = newRowClient(me.data, forEveryClient);
+          } catch (error) {
+            // `/me` has not answered: nothing is sent without its client.
+            setOwnerError(error);
+            return;
+          }
+          setOwnerError(null);
           approve.mutate(
-            { patch_ids: [...selectedIds], ring_name: ring, ...(changeId ? { change_id: changeId } : {}) },
+            {
+              patch_ids: [...selectedIds],
+              ring_name: ring,
+              ...(changeId ? { change_id: changeId } : {}),
+              ...owner,
+            },
             // Cleared ONLY on a 2xx. A failed batch keeps the selection, so the
             // operator can read the error and retry the same decision rather
             // than reconstruct it.

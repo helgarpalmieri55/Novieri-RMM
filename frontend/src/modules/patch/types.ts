@@ -135,6 +135,9 @@ export interface ApprovalCreateRequest {
   /** An approved change this approval implements; required where a change
    *  gate covers the ring. */
   change_id?: string | null;
+  /** The client whose machines in the ring this clears. Absent: every
+   *  client's (a global approval), which needs access to every client. */
+  client_id?: string;
 }
 
 /**
@@ -150,6 +153,8 @@ export interface ApprovalCreateRequest {
  */
 export interface PatchApproval {
   id: string;
+  /** Whose machines it clears: a client's, or `null` for every client's. */
+  client_id: string | null;
   patch_id: string;
   /**
    * The update this approval clears, NAMED — `KB5031354`, `openssl-3.0.11`.
@@ -199,6 +204,8 @@ export interface BulkApprovalCreateRequest {
   patch_ids: string[];
   ring_name: string;
   change_id?: string | null;
+  /** As on `ApprovalCreateRequest`: absent is every client's. */
+  client_id?: string;
 }
 
 /**

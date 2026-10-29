@@ -260,6 +260,7 @@ function bulkResult(patchIds: string[], ring: string, alreadyInForce = 0): BulkA
   return {
     items: patchIds.map((patchId, index) => ({
       id: `bulk-a${index}`,
+      client_id: "o1",
       patch_id: patchId,
       patch_identifier: `KB-${patchId}`,
       ring_name: ring,
@@ -298,6 +299,7 @@ const POLICY: PatchPolicy = {
 
 const APPROVAL: PatchApproval = {
   id: "a1",
+  client_id: null,
   patch_id: "p1",
   patch_identifier: "KB5031354",
   ring_name: "pilot",
@@ -313,6 +315,7 @@ const APPROVAL: PatchApproval = {
  *  it rather than drop it. */
 const REVOKED_APPROVAL: PatchApproval = {
   id: "a2",
+  client_id: null,
   patch_id: "p1",
   patch_identifier: "KB5031354",
   ring_name: "broad",
@@ -590,10 +593,36 @@ describe("FleetPatchPage — the fleet view is one row per update, not per pair"
     await user.click(within(confirm).getByRole("button", { name: "Approve" }));
 
     expect(bulkApprovePatches).toHaveBeenCalledTimes(1);
+    // The approval is the internal client's -- `/me`'s `org_id` -- until the
+    // client selector exists (MSP clients plan 2026-10-26 Task 14).
     expect(bulkApprovePatches).toHaveBeenCalledWith({
       patch_ids: ["p1", "p3"],
       ring_name: "test",
+      client_id: "o1",
     });
+  });
+
+  it("approves for every client only when asked, sending no client", async () => {
+    // A global approval clears the update for every client's machines in the
+    // ring; it is a choice the person makes, not the default.
+    const user = userEvent.setup();
+    const bulkApprovePatches = vi.fn().mockResolvedValue(bulkResult(["p1"], "test"));
+    api = {
+      listPatchUpdates: vi.fn().mockResolvedValue(updatePage(MANY_UPDATES)),
+      bulkApprovePatches,
+    };
+    renderWithProviders(<FleetPatchPage />);
+
+    await screen.findByText("2023-10 Cumulative Update");
+    await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
+    await user.click(screen.getByRole("checkbox", { name: /For every client/ }));
+    await user.click(screen.getByRole("button", { name: /^Approve 1 update/ }));
+    const confirm = await screen.findByRole("dialog", {
+      name: "Approve updates into a deployment ring",
+    });
+    await user.click(within(confirm).getByRole("button", { name: "Approve" }));
+
+    expect(bulkApprovePatches).toHaveBeenCalledWith({ patch_ids: ["p1"], ring_name: "test" });
   });
 
   it("says how many machines the ring reaches before the approval is answered", async () => {
@@ -659,7 +688,11 @@ describe("FleetPatchPage — the fleet view is one row per update, not per pair"
     // A tick that survived a filter or a page change would let an operator
     // approve an update they can no longer see, which is the one thing a bulk
     // control must never do.
-    expect(bulkApprovePatches).toHaveBeenCalledWith({ patch_ids: ["p1"], ring_name: "test" });
+    expect(bulkApprovePatches).toHaveBeenCalledWith({
+      patch_ids: ["p1"],
+      ring_name: "test",
+      client_id: "o1",
+    });
   });
 
   it("offers no approval control at all until something is selected", async () => {
@@ -2224,6 +2257,7 @@ describe("FleetPatchPage — approving from the machine you opened", () => {
     expect(bulkApprovePatches).toHaveBeenCalledWith({
       patch_ids: ["p1", "p3"],
       ring_name: "test",
+      client_id: "o1",
     });
   });
 

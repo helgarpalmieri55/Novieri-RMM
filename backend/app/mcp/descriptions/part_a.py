@@ -130,7 +130,9 @@ PART_A: dict[str, str] = {
         "default."
     ),
     "POST /api/v1/docs/articles": (
-        "Creates a knowledge-base article from a title, body and category and returns it."
+        "Creates a knowledge-base article from a title, body and category and returns it. "
+        "Give client_id to file it under that client; without one it is every client's, "
+        "which needs access to every client."
     ),
     "GET /api/v1/docs/articles/{article_id}": (
         "Returns one article with its full body, version number, portal visibility and the "
@@ -145,7 +147,8 @@ PART_A: dict[str, str] = {
     ),
     "POST /api/v1/docs/articles/{article_id}/links": (
         "Links the article to a device, device group, credential, record or IPAM subnet or "
-        "address. Refused if the target is missing or already linked."
+        "address. Refused if the target is missing, already linked, or of another client "
+        "than the article's."
     ),
     "DELETE /api/v1/docs/articles/{article_id}/links/{link_id}": (
         "Removes one link between the article and an entity. The article and the entity "
@@ -166,7 +169,8 @@ PART_A: dict[str, str] = {
     ),
     "POST /api/v1/docs/documents": (
         "Creates a document entry holding only metadata (title, description, category); "
-        "the file itself is uploaded separately as a version."
+        "the file itself is uploaded separately as a version. Give client_id to file it "
+        "under that client; without one it is every client's."
     ),
     "GET /api/v1/docs/documents/{document_id}": (
         "Returns one stored document with its current file version's metadata (name, size, "
@@ -181,8 +185,9 @@ PART_A: dict[str, str] = {
         "uploads. Returns archived true."
     ),
     "POST /api/v1/docs/documents/{document_id}/links": (
-        "Links the document to a device, device group, credential, record or IPAM entity. "
-        "Credential links name metadata only, never a secret."
+        "Links the document to a device, device group, credential, record or IPAM entity "
+        "of its own client or every client's. Credential links name metadata only, never a "
+        "secret."
     ),
     "DELETE /api/v1/docs/documents/{document_id}/links/{link_id}": (
         "Removes one link between the document and an entity."
@@ -201,7 +206,8 @@ PART_A: dict[str, str] = {
     ),
     "POST /api/v1/docs/records": (
         "Creates a structured record of type service, vendor or location with free-form "
-        "fields. The network type is refused; create an IPAM subnet instead."
+        "fields. The network type is refused; create an IPAM subnet instead. Give "
+        "client_id to file it under that client; without one it is every client's."
     ),
     "GET /api/v1/docs/records/{record_id}": (
         "Returns one documentation record with its type, name, fields and current version."

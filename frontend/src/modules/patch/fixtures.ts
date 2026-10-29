@@ -274,10 +274,12 @@ const APPROVALS: ApprovalSeed[] = [
   { id: "apr-6", patch: "w-cu-10-22h2", ring: "broad", by: "usr-helgar", daysAgo: 8, revoked: { by: "usr-helgar", daysAgo: 2 } },
 ];
 
-function approval(seed: ApprovalSeed): PatchApproval {
+function approval(seed: ApprovalSeed, clientId: string | null = null): PatchApproval {
   const row = CATALOGUE.find((c) => c.id === seed.patch);
   return {
     id: seed.id,
+    // The seeded approvals predate per-client ones: every client's.
+    client_id: clientId,
     patch_id: seed.patch,
     patch_identifier: row?.identifier ?? null,
     ring_name: seed.ring,
@@ -422,7 +424,7 @@ const listPatchRings: FixtureMap["listPatchRings"] = () => {
 };
 
 const listPatchApprovals: FixtureMap["listPatchApprovals"] = (params = {}) => {
-  const rows = APPROVALS.map(approval)
+  const rows = APPROVALS.map((seed) => approval(seed))
     .filter((a) => !params.patch_id || a.patch_id === params.patch_id)
     .filter((a) => !params.ring || a.ring_name === params.ring)
     .filter((a) => params.revoked === undefined || a.revoked === params.revoked)
@@ -599,12 +601,18 @@ const applyPatches: FixtureMap["applyPatches"] = (body = {}) => {
 
 const approvePatch: FixtureMap["approvePatch"] = (body) => {
   if (!CATALOGUE.some((c) => c.id === body.patch_id)) throw notFound("patch");
-  return approval({ id: `apr-${Date.now()}`, patch: body.patch_id, ring: body.ring_name, by: "usr-helgar", daysAgo: 0 });
+  return approval(
+    { id: `apr-${Date.now()}`, patch: body.patch_id, ring: body.ring_name, by: "usr-helgar", daysAgo: 0 },
+    body.client_id ?? null,
+  );
 };
 
 const bulkApprovePatches: FixtureMap["bulkApprovePatches"] = (body) => {
   const items = body.patch_ids.map((patch, at) =>
-    approval({ id: `apr-bulk-${at}`, patch, ring: body.ring_name, by: "usr-helgar", daysAgo: 0 }),
+    approval(
+      { id: `apr-bulk-${at}`, patch, ring: body.ring_name, by: "usr-helgar", daysAgo: 0 },
+      body.client_id ?? null,
+    ),
   );
   const standing = body.patch_ids.filter((patch) => clearedRings(patch).includes(body.ring_name)).length;
   return { items, total: items.length, newly_approved: items.length - standing, already_in_force: standing };

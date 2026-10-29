@@ -458,18 +458,18 @@ const PATCH_FIXTURE_RINGS: PatchRingListResponse = {
 const PATCH_FIXTURE_APPROVALS: ApprovalListResponse = {
   items: [
     {
-      id: "a-1", patch_id: "p-1", patch_identifier: "KB5041585", ring_name: "test", approved_by: "alex.morgan@toeshee.example",
+      id: "a-1", client_id: null, patch_id: "p-1", patch_identifier: "KB5041585", ring_name: "test", approved_by: "alex.morgan@toeshee.example",
       approved_at: "2026-08-24T08:30:00Z", revoked: false, revoked_by: null, revoked_at: null,
     },
     {
-      id: "a-2", patch_id: "p-4", patch_identifier: "KB5041948", ring_name: "broad", approved_by: null,
+      id: "a-2", client_id: null, patch_id: "p-4", patch_identifier: "KB5041948", ring_name: "broad", approved_by: null,
       approved_at: "2026-08-22T02:00:00Z", revoked: false, revoked_by: null, revoked_at: null,
     },
     /* A WITHDRAWN CLEARANCE. The row survives the revoke so the trail holds,
        which means this list has to RENDER one as revoked rather than drop it --
        a state with its own paint, and one no browser had ever measured. */
     {
-      id: "a-3", patch_id: "p-3", patch_identifier: "macOS-15.6.1", ring_name: "pilot", approved_by: "sam.okafor@toeshee.example",
+      id: "a-3", client_id: null, patch_id: "p-3", patch_identifier: "macOS-15.6.1", ring_name: "pilot", approved_by: "sam.okafor@toeshee.example",
       approved_at: "2026-08-20T14:05:00Z", revoked: true,
       revoked_by: "alex.morgan@toeshee.example", revoked_at: "2026-08-25T09:12:00Z",
     },
@@ -835,6 +835,7 @@ const DOCS_FIXTURE_VERSIONS: DocDocumentVersion[] = [
 
 const DOCS_FIXTURE_DOCUMENT: DocDocument = {
   id: "doc-1",
+  client_id: null,
   title: "Core switch cabling diagram",
   description: "Building 2 comms room, as-built after the August move.",
   category: "Diagrams",
@@ -851,17 +852,17 @@ const DOCS_FIXTURE_DOCUMENT: DocDocument = {
 const DOCS_FIXTURE_LIST = {
   items: [
     {
-      id: "doc-1", title: "Core switch cabling diagram", description: "", category: "Diagrams",
+      id: "doc-1", client_id: null, title: "Core switch cabling diagram", description: "", category: "Diagrams",
       archived: false, current_version: 3, updated_at: "2026-08-24T08:14:00Z", link_count: 2,
     },
     {
-      id: "doc-2", title: "Acme support contract 2026", description: "", category: "Contracts",
+      id: "doc-2", client_id: null, title: "Acme support contract 2026", description: "", category: "Contracts",
       archived: false, current_version: 1, updated_at: "2026-08-02T09:30:00Z", link_count: 0,
     },
     {
       // A DOCUMENT WITH NO FILE, which is a legal state (§4.1) and the row an
       // operator misreads as broken if the list does not say so.
-      id: "doc-3", title: "Firewall configuration export", description: "", category: "Contracts",
+      id: "doc-3", client_id: null, title: "Firewall configuration export", description: "", category: "Contracts",
       archived: false, current_version: 0, updated_at: "2026-08-25T14:00:00Z", link_count: 1,
     },
   ],

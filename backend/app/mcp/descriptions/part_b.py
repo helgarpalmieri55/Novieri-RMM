@@ -419,14 +419,16 @@ PART_B: dict[str, str] = {
         "state, a page at a time."
     ),
     "POST /api/v1/patch/approvals": (
-        "Approves one patch for a deployment ring. Once approved, signed install jobs go to "
-        "that ring's devices automatically inside their maintenance windows, or sooner via "
-        "apply. Needs an approved change if a change gate covers the ring."
+        "Approves one patch for a ring: with client_id, for that client's devices in it; "
+        "without, for every client's. Signed install jobs then go to them inside their "
+        "maintenance windows. Needs an approved change of that client if a change gate "
+        "covers them."
     ),
     "POST /api/v1/patch/approvals/bulk": (
-        "Approves many patches for one ring in a single decision, all or nothing. Once "
-        "approved, signed install jobs go to that ring's devices automatically inside their "
-        "maintenance windows. Needs an approved change if a change gate covers the ring."
+        "Approves many patches for one ring in a single decision, all or nothing: with "
+        "client_id, for that client's devices in it; without, for every client's. Install "
+        "jobs then go to them inside their maintenance windows. A change gate needs that "
+        "client's approved change."
     ),
     "DELETE /api/v1/patch/approvals/{approval_id}": (
         "Revokes a patch approval so that patch is no longer eligible for that ring. "

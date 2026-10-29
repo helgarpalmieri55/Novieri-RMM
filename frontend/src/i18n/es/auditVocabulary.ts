@@ -154,6 +154,7 @@ export const auditActions: Shape<typeof enActions> = {
   device_removal_acknowledged: "Eliminación del dispositivo reconocida",
   device_review_approved: "Revisión del dispositivo aprobada",
   device_review_rejected: "Revisión del dispositivo rechazada",
+  device_site_changed: "Sede del dispositivo cambiada",
   device_group_archived: "Grupo de dispositivos archivado",
   device_group_created: "Grupo de dispositivos creado",
   device_group_members_added: "Dispositivos añadidos a un grupo",

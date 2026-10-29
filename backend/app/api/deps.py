@@ -12,7 +12,7 @@ refused here; the portal admits one through `admit(..., contacts=True)`.
 """
 
 import dataclasses
-from collections.abc import AsyncIterator, Callable, Coroutine
+from collections.abc import AsyncIterator, Callable, Coroutine, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -513,6 +513,64 @@ def require_permission(code: str) -> Callable[..., AsyncIterator[AuthContext]]:
         yield dataclasses.replace(ctx, clients=ctx.clients.intersect(holding))
 
     return dependency
+
+
+async def narrowed_to_every(
+    request: Request, ctx: AuthContext, codes: Iterable[str]
+) -> AuthContext:
+    """`ctx`, its clients narrowed to those where the person holds EVERY one
+    of `codes` (plan 2026-10-26 Task 14, T4-C2 items 2-3).
+
+    For a route whose rows need more than its gate's one code -- a report,
+    gated on `reporting.read`, reads the rows of each module it draws from
+    (`devices.read`, `health.read`, ...). Holding a source code on X is no
+    grant on Y's rows, so the request's RLS scope is the clients holding all
+    of them: each code's clients (`person_scope`, as `require_permission`
+    reads them) intersected in turn with `ctx.clients`, which already
+    carries the X-Client-Id narrowing -- never wider than it. Codes held on
+    DIFFERENT clients only intersect to the empty scope, which RLS answers
+    with zero rows: no widening, and no error either."""
+    scope = ctx.clients
+    for code in sorted(set(codes)):
+        scope = scope.intersect(
+            await person_scope(
+                org_id=ctx.org_id,
+                user_id=ctx.user_id,
+                code=code,
+                engine=request.app.state.app_engine,
+            )
+        )
+    return dataclasses.replace(ctx, clients=scope)
+
+
+async def narrowed_to_any(
+    request: Request, ctx: AuthContext, codes: Iterable[str]
+) -> AuthContext | None:
+    """`ctx`, its clients narrowed to those where the person holds AT LEAST
+    ONE of `codes` -- or None when they hold none of them on any client (the
+    caller's 403, as `require_permission` answers for one code).
+
+    For the read routes that serve two audiences on two codes (remote
+    sessions: an operator's `remote.control`, an auditor's
+    `remote.recordings.read`; plan 2026-10-26 Task 14, T4-C2 item 13): the
+    union of each code's clients, intersected with `ctx.clients`, so never
+    wider than the request's own header-narrowed scope."""
+    held = [
+        await person_scope(
+            org_id=ctx.org_id,
+            user_id=ctx.user_id,
+            code=code,
+            engine=request.app.state.app_engine,
+        )
+        for code in sorted(set(codes))
+    ]
+    every = next((scope for scope in held if scope.is_all), None)
+    union = every if every is not None else ClientScope.only(
+        frozenset().union(*(scope.ids for scope in held))
+    )
+    if union.is_empty:
+        return None
+    return dataclasses.replace(ctx, clients=ctx.clients.intersect(union))
 
 
 def require_permission_on_every_client(

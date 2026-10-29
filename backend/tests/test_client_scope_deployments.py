@@ -38,39 +38,20 @@ from app.modules.change_mgmt.gates import authorizing_change, deployment_gate
 from app.modules.deploy import api as deploy_api
 from app.modules.deploy.dispatch import dispatch_deployment, ingest_deploy_result
 from app.modules.deploy.schema import AppDeployResult
-from tests.client_scope_support import client_with_site, drop_client_keys, everything_on
+from tests.client_scope_support import (
+    client_with_site,
+    drop_client_keys,
+    everything_on,
+)
+from tests.client_scope_support import (
+    wait_until_blocked as _wait_until_blocked,
+)
 from tests.conftest import ApiEnv
 from tests.test_deploy_dispatch import _FakeArtifactSigner, _FakeJobEngine
 
 DEPLOYMENTS = "/api/v1/deploy/deployments"
 MODULE_OFF = "this client does not use that module"
 
-#: Some session other than the holder's (`:me`) is waiting for a `clients`
-#: row the holder locked. Postgres shows that wait in two rows: the waiter
-#: takes the row's TUPLE lock on `clients` (granted) and then waits for the
-#: holder's TRANSACTION (a `transactionid` lock, not granted) -- so a filter
-#: on `relation = 'clients' AND NOT granted` sees nothing. A second waiter
-#: would queue on the tuple lock itself, not granted; that counts too.
-WAITS_ON_A_CLIENT_ROW = text(
-    "SELECT count(*) FROM pg_locks t "
-    "WHERE t.locktype = 'tuple' AND t.relation = 'clients'::regclass AND t.pid <> :me "
-    "AND (NOT t.granted OR EXISTS ("
-    "  SELECT 1 FROM pg_locks w JOIN pg_locks h ON h.transactionid = w.transactionid "
-    "  WHERE w.pid = t.pid AND w.locktype = 'transactionid' AND NOT w.granted "
-    "  AND h.pid = :me AND h.locktype = 'transactionid' AND h.granted))"
-)
-
-
-async def _wait_until_blocked(observer: AsyncSession, holder_pid: int) -> bool:
-    for _ in range(400):
-        await asyncio.sleep(0.025)
-        waiting = (
-            await observer.execute(WAITS_ON_A_CLIENT_ROW, {"me": holder_pid})
-        ).scalar_one()
-        await observer.rollback()
-        if waiting:
-            return True
-    return False
 
 
 async def _device(

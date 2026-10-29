@@ -33,9 +33,9 @@ async def reporting_user(
     """A user in `org_id` holding exactly `codes` and nothing else.
 
     `client_id` scopes the grant to one client -- the §0.6 case (MSP clients
-    spec §2.1): `user_permission_codes` counts such a row ONLY when asked
-    about that same client, and every reporting gate asks with no client, so a
-    client-scoped grant holds nothing on every client.
+    spec §2.1): since plan 2026-10-26 Task 14 a report runs over the clients
+    where the person holds every code it needs, so such a grant reports over
+    that client only.
     """
     from app.models import Permission, Role, RolePermission, User, UserRole
 

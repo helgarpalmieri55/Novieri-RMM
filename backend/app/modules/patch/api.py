@@ -29,14 +29,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, require_permission
 from app.core.audit import audit_service
 from app.core.csv_export import escape_formula
+from app.core.global_rows import refuse_unless_every_client
 from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job
 from app.models import Device, DevicePatchStatus, Patch, PatchApproval, PatchPolicy
+from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.change_mgmt.gates import (
     authorizing_change,
     gate_said,
@@ -78,6 +81,7 @@ from app.modules.patch.reporting import (
     update_rollup,
 )
 from app.modules.patch.schema import PatchScanParams
+from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
 
 router = APIRouter(prefix="/patch", tags=["patch"])
 
@@ -202,6 +206,13 @@ class ScanResponse(BaseModel):
     job_ids: list[UUID]
 
 
+#: The approval's owner (MSP clients plan 2026-10-26 Task 14).
+APPROVAL_CLIENT_DESCRIPTION = (
+    "The client whose machines in the ring this approval clears. Omitted: every "
+    "client's (a global approval), which needs access to every client."
+)
+
+
 class ApprovalCreateRequest(BaseModel):
     patch_id: UUID
     #: 40 characters because `patch_approvals.ring_name` is `String(40)`;
@@ -211,6 +222,7 @@ class ApprovalCreateRequest(BaseModel):
     #: An approved change this approval implements. Required where a change
     #: gate covers the ring's machines; otherwise one is recorded for it.
     change_id: UUID | None = None
+    client_id: UUID | None = Field(default=None, description=APPROVAL_CLIENT_DESCRIPTION)
 
 
 class BulkApprovalCreateRequest(BaseModel):
@@ -227,6 +239,7 @@ class BulkApprovalCreateRequest(BaseModel):
     patch_ids: list[UUID] = Field(min_length=1, max_length=BULK_APPROVAL_MAX)
     ring_name: str = Field(min_length=1, max_length=40)
     change_id: UUID | None = None
+    client_id: UUID | None = Field(default=None, description=APPROVAL_CLIENT_DESCRIPTION)
 
 
 class ApprovalOut(BaseModel):
@@ -240,6 +253,8 @@ class ApprovalOut(BaseModel):
     """
 
     id: UUID
+    #: Whose machines it clears: a client's, or None for every client's.
+    client_id: UUID | None
     patch_id: UUID
     #: The update this clears, NAMED -- `KB5031354`, `linux-image-6.8`.
     #:
@@ -568,6 +583,7 @@ def _approval_out(row: PatchApproval, patch_identifier: str | None) -> ApprovalO
     caller unable to tell "unnamed" from "this route never bothered"."""
     return ApprovalOut(
         id=row.id,
+        client_id=row.client_id,
         patch_id=row.patch_id,
         patch_identifier=patch_identifier,
         ring_name=row.ring_name,
@@ -963,7 +979,12 @@ async def create_approval(
     ctx: AuthContext = Depends(require_permission("patch.approve")),
 ) -> ApprovalOut:
     outcomes = await _approve_with_change(
-        request, ctx, patch_ids=[body.patch_id], ring_name=body.ring_name, change_id=body.change_id
+        request,
+        ctx,
+        patch_ids=[body.patch_id],
+        ring_name=body.ring_name,
+        change_id=body.change_id,
+        client_id=body.client_id,
     )
     return outcomes[0][1]
 
@@ -991,7 +1012,12 @@ async def create_approvals_bulk(
     against their own selection.
     """
     outcomes = await _approve_with_change(
-        request, ctx, patch_ids=body.patch_ids, ring_name=body.ring_name, change_id=body.change_id
+        request,
+        ctx,
+        patch_ids=body.patch_ids,
+        ring_name=body.ring_name,
+        change_id=body.change_id,
+        client_id=body.client_id,
     )
     items = [out for _, out in outcomes]
     created = sum(1 for outcome, _ in outcomes if outcome.created)
@@ -1003,6 +1029,23 @@ async def create_approvals_bulk(
     )
 
 
+async def _approval_client(session: AsyncSession, org_id: UUID, client_id: UUID) -> None:
+    """The client a new approval is filed under, read FOR SHARE as the
+    write's FIRST lock (`client_for_new_rows`): a client the request cannot
+    see is a 404, an archived one a 409, Unassigned a 422."""
+    try:
+        client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
+    except ClientNotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such client")) from None
+    except NotAcceptingNewRows as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
+    if client.kind == CLIENT_KIND_UNASSIGNED:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            tr("a patch approval cannot be filed under Unassigned"),
+        )
+
+
 async def _approve_with_change(
     request: Request,
     ctx: AuthContext,
@@ -1010,6 +1053,7 @@ async def _approve_with_change(
     patch_ids: list[UUID],
     ring_name: str,
     change_id: UUID | None,
+    client_id: UUID | None,
 ) -> list[tuple[ApprovalOutcome, ApprovalOut]]:
     """Approve under the org's change policy.
 
@@ -1017,22 +1061,39 @@ async def _approve_with_change(
     every approval is linked to it. Without one, a change gate covering the
     ring's machines refuses (409, audited, committed); with no gate, an `auto`
     change record is written for the new approvals so the evidence exists.
+
+    `client_id` is the approvals' owner (MSP clients plan 2026-10-26 Task 14):
+    a client, whose machines in the ring are the ones cleared, gated and
+    flipped; or None, every client's. By decision C8 the change that
+    authorizes them -- named, or recorded automatically -- is that client's;
+    a global approval's is the INTERNAL client's, whose id is the org's:
+    Novieri decides it.
+
+    LOCK ORDER (`app.services.client_sites`): the owner's client row is read
+    FOR SHARE before anything takes the audit chain's lock -- by
+    `client_for_new_rows` for a client's approval, and for a global one by
+    the named change's module guard on the internal client
+    (`authorizing_change`). A global approval is refused under a narrowed
+    scope before anything is read.
     """
     refusal: str | None = None
     result: list[tuple[ApprovalOutcome, ApprovalOut]] = []
+    change_client = ctx.org_id if client_id is None else client_id
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
         try:
+            if client_id is None:
+                refuse_unless_every_client(session, "patch_approvals")
+            else:
+                await _approval_client(session, ctx.org_id, client_id)
             change = (
-                # No client rule yet: plan 2026-10-26 Task 14 names the client
-                # these approvals are for (C8).
-                await authorizing_change(session, ctx.org_id, change_id, client_id=None)
+                await authorizing_change(session, ctx.org_id, change_id, client_id=change_client)
                 if change_id is not None
                 else None
             )
             if change is None:
-                ring = await devices_in_ring(session, ctx.org_id, ring_name)
+                ring = await devices_in_ring(session, ctx.org_id, ring_name, client_id=client_id)
                 refusal = await patch_approval_gate(session, ctx.org_id, ring, ring_name)
             if refusal is not None:
                 await record_gate_refusal(
@@ -1043,8 +1104,9 @@ async def _approve_with_change(
                     target_id=ring_name,
                     reason=refusal,
                     metadata={"patch_ids": [str(p) for p in patch_ids]},
-                    # A ring's approval can reach many clients.
-                    client_id=None,
+                    # The refused approval's owner: a client's approval is
+                    # that client's act; a global one reaches every client.
+                    client_id=client_id,
                 )
             else:
                 outcomes = await approve_patches(
@@ -1053,6 +1115,7 @@ async def _approve_with_change(
                     actor_id=ctx.user_id,
                     patch_ids=patch_ids,
                     ring_name=ring_name,
+                    client_id=client_id,
                 )
                 approval_ids = [o.approval.id for o in outcomes]
                 if change is not None:
@@ -1070,11 +1133,9 @@ async def _approve_with_change(
                     await record_auto_change(
                         session,
                         org_id=ctx.org_id,
-                        # The approvals' client -- one call approves under one
-                        # client -- or, for a GLOBAL approval, the internal
-                        # client, whose id is the org's: Novieri decided it
-                        # (MSP clients plan 2026-10-26, C8).
-                        client_id=created[0].client_id or ctx.org_id,
+                        # C8: the approvals' client, or the internal client's
+                        # for a global approval.
+                        client_id=change_client,
                         actor_id=ctx.user_id,
                         title=f"Patch approval: {len(new)} update(s) for the {ring_name} ring",
                         description=(

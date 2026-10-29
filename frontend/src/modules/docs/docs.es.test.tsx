@@ -68,6 +68,7 @@ const DOCUMENTS = {
 
 const ARTICLE: DocArticle = {
   id: "a1",
+  client_id: "o1",
   title: "Procedimiento de copias",
   body: "# Copias\n\nSe hacen cada noche. [malo](javascript:alert(1))",
   category: "Procedimiento",
@@ -95,6 +96,7 @@ const PDF: DocDocumentVersion = {
 
 const DOC: DocDocument = {
   id: "d1",
+  client_id: "o1",
   title: "Contrato de soporte Acme",
   description: "Firmado el 1 de marzo.",
   category: "Contratos",

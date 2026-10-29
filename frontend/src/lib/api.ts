@@ -402,6 +402,14 @@ export type DeviceReviewState = "approved" | "pending" | "rejected";
  */
 export interface Device {
   id: string;
+  /**
+   * The device's client and site (MSP clients spec §1.5). OPTIONAL because
+   * they are additive: an API deployed before they were served simply does
+   * not send them. `PATCH /devices/{id}` with `site_id` moves a device to
+   * another site of its own client.
+   */
+  client_id?: string;
+  site_id?: string;
   /** NULL for an asset that has none: a switch, or hardware still in a box. */
   hostname: string | null;
   fqdn: string | null;
@@ -2090,7 +2098,7 @@ export class ApiClient {
     return this.request<DocArticle>(`/docs/articles/${id}`);
   }
 
-  createArticle(body: DocArticleInput): Promise<DocArticle> {
+  createArticle(body: DocArticleInput & NewDocClient): Promise<DocArticle> {
     return this.request<DocArticle>("/docs/articles", {
       method: "POST",
       body: JSON.stringify(body),
@@ -2139,11 +2147,13 @@ export class ApiClient {
     return this.request<Page<DocRecordOut>>(`/docs/records${suffix}`);
   }
 
-  createDocRecord(body: {
-    record_type: string;
-    name: string;
-    fields: Record<string, unknown>;
-  }): Promise<DocRecordOut> {
+  createDocRecord(
+    body: {
+      record_type: string;
+      name: string;
+      fields: Record<string, unknown>;
+    } & NewDocClient,
+  ): Promise<DocRecordOut> {
     return this.request<DocRecordOut>("/docs/records", {
       method: "POST",
       body: JSON.stringify(body),
@@ -2197,7 +2207,7 @@ export class ApiClient {
     return this.request<DocDocument>(`/docs/documents/${id}`);
   }
 
-  createDocument(body: DocDocumentInput): Promise<DocDocument> {
+  createDocument(body: DocDocumentInput & NewDocClient): Promise<DocDocument> {
     return this.request<DocDocument>("/docs/documents", {
       method: "POST",
       body: JSON.stringify(body),
@@ -5544,6 +5554,8 @@ export interface Credential {
 
 export interface DocArticleListItem {
   id: string;
+  /** The client it belongs to; `null` for every client's (global). */
+  client_id: string | null;
   title: string;
   category: string;
   archived: boolean;
@@ -5561,6 +5573,8 @@ export interface DocLink {
 
 export interface DocArticle {
   id: string;
+  /** The client it belongs to; `null` for every client's (global). */
+  client_id: string | null;
   title: string;
   body: string;
   category: string;
@@ -5578,6 +5592,15 @@ export interface DocArticleInput {
   category: string;
 }
 
+/**
+ * A new article, record or document names its client; without one it is
+ * every client's (global), which only someone with access to every client may
+ * create. Set once at creation: the edit bodies have no client.
+ */
+export interface NewDocClient {
+  client_id?: string;
+}
+
 export interface DocVersion {
   version: number;
   snapshot: Record<string, unknown>;
@@ -5587,6 +5610,8 @@ export interface DocVersion {
 
 export interface DocRecordOut {
   id: string;
+  /** The client it belongs to; `null` for every client's (global). */
+  client_id: string | null;
   record_type: string;
   name: string;
   fields: Record<string, unknown>;
@@ -5635,6 +5660,8 @@ export interface DocDocumentVersion {
 
 export interface DocDocumentListItem {
   id: string;
+  /** The client it belongs to; `null` for every client's (global). */
+  client_id: string | null;
   title: string;
   description: string;
   category: string;
@@ -5648,6 +5675,8 @@ export interface DocDocumentListItem {
 
 export interface DocDocument {
   id: string;
+  /** The client it belongs to; `null` for every client's (global). */
+  client_id: string | null;
   title: string;
   description: string;
   category: string;

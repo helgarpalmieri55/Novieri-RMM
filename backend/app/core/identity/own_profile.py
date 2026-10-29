@@ -79,6 +79,10 @@ async def _profile(session: AsyncSession, user: User) -> OwnProfile:
         phone=user.phone,
         timezone=user.timezone,
         locale=user.locale,
+        # EVERY-CLIENT GRANTS ONLY, BY DESIGN (plan 2026-10-26 Task 14 keeps it;
+        # T4-C2 item 1): `/me` answers "what may I do everywhere", which is what
+        # the console's chrome renders today. A map of codes per client is
+        # phase 3's, with the client selector that would read it.
         permissions=frozenset(await user_permission_codes(session, user.id)),
         roles=await user_role_names(session, user.id),
         external_subject=user.external_subject,

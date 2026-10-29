@@ -459,6 +459,9 @@ async def revoke_connection(
         # (MSP clients spec §2.2). Refused before anything is written.
         if body.scope == "everyone":
             require_all_clients(ctx)
+        # NO CLIENT, BY DESIGN (plan 2026-10-26 Task 14 keeps it): revoking
+        # everyone writes the organisation's revocation list, which is no one
+        # client's, so `orgs.manage` is asked on every client.
         if body.scope == "everyone" and not await has_permission(
             session, ctx.user_id, "orgs.manage"
         ):

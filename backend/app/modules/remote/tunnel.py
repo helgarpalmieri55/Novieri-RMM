@@ -46,19 +46,22 @@ class TunnelAuthError(Exception):
 
 
 async def owner_or_admin(
-    session: AsyncSession, *, user_id: UUID, session_technician_id: UUID
+    session: AsyncSession, *, user_id: UUID, session_technician_id: UUID, client_id: UUID
 ) -> bool:
     """Spec §11 ownership predicate, shared by the tunnel WS gate and the REST
     stop route so the check is defined ONCE.
 
     True iff ``user_id`` owns the session (is its technician) OR holds
-    ``orgs.manage`` (org-admin). The caller is responsible for having already
-    established the ``remote.control`` permission — this predicate only decides
-    owner-or-admin, not the base capability.
+    ``orgs.manage`` (org-admin) ON THE SESSION'S CLIENT, ``client_id`` -- its
+    machine's (MSP clients plan 2026-10-26 Task 14, T4-C2 item 13): an
+    administrator of another client is not one here. The caller is
+    responsible for having already established the ``remote.control``
+    permission — this predicate only decides owner-or-admin, not the base
+    capability.
     """
     if session_technician_id == user_id:
         return True
-    return await has_permission(session, user_id, "orgs.manage")
+    return await has_permission(session, user_id, "orgs.manage", client_id=client_id)
 
 
 async def authorize_tunnel(
@@ -158,14 +161,18 @@ async def authorize_tunnel(
     async with org_session(org_id, engine=app_engine, clients=clients) as s:
         row = (
             await s.execute(
-                select(RemoteSession.technician_id).where(RemoteSession.id == session_id)
+                select(RemoteSession.technician_id, RemoteSession.client_id).where(
+                    RemoteSession.id == session_id
+                )
             )
-        ).scalar_one_or_none()
+        ).one_or_none()
         if row is None:
             raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
                 4404, "no such session"
             )
-        if not await owner_or_admin(s, user_id=user_id, session_technician_id=row):
+        if not await owner_or_admin(
+            s, user_id=user_id, session_technician_id=row.technician_id, client_id=row.client_id
+        ):
             raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
                 4403, "not the session owner"
             )

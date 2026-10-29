@@ -194,9 +194,9 @@ PART_C: dict[str, str] = {
         "screen-share capability, and asset fields. A rejected device is not found."
     ),
     "PATCH /api/v1/devices/{device_id}": (
-        "Edits asset fields on a device; only the fields sent are written. Hostname, OS family, "
-        "serial, FQDN and architecture are refused on a device with an agent, as inventory would "
-        "overwrite them."
+        "Edits asset fields on a device; only the fields sent are written. site_id moves it to "
+        "another site of its own client. Hostname, OS family, serial, FQDN and architecture are "
+        "refused on a device with an agent, as inventory would overwrite them."
     ),
     "GET /api/v1/devices/{device_id}/health": (
         "Returns a device's effective health profile and the assignment that produced it, each "

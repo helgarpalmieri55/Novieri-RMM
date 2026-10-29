@@ -19,8 +19,11 @@ client's own. A client that does not use change management meets NO gate --
 it could never create the change one would demand -- and gets no automatic
 change. A deployment is gated as its own client (`deployments.client_id`, its
 target's, written by trigger: Task 9); a ring's approval as every client its
-machines belong to, each evaluated once. The change that authorizes a
-deployment is the deployment's client's (`authorizing_change`).
+machines belong to, each evaluated once -- a client's approval reaches that
+client's machines only (Task 14). The change that authorizes a deployment is
+the deployment's client's (`authorizing_change`), and the one that authorizes
+a patch approval is the approval's client's: for a global approval, the
+internal client's, whose id is the organisation's (decision C8).
 """
 
 from collections.abc import Callable, Iterable, Sequence
@@ -28,10 +31,13 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from uuid_extensions import uuid7
 
 from app.core.audit import audit_service
+from app.core.global_rows import refuse_unless_every_client
 from app.core.i18n import tr, use_locale
 from app.core.wire_words import say
 from app.models import ChangeGate, ChangeLink, ChangeRequest, Device, DeviceGroup
@@ -229,22 +235,20 @@ async def deployment_gate(
 
 
 async def authorizing_change(
-    session: AsyncSession, org_id: UUID, change_id: UUID, *, client_id: UUID | None
+    session: AsyncSession, org_id: UUID, change_id: UUID, *, client_id: UUID
 ) -> ChangeRequest:
     """The change, if it exists in this org and authorizes work now.
 
-    `client_id` is the client the work is for -- a deployment's -- and has
-    NO default: every caller decides. A change of another client is not
-    found, word for word: a narrowed session cannot see it, and a wider one
-    is told nothing more. And that client must use change management, since
-    linking the work is a write on its change (`require_module`, a 404).
-    That check reads the client FOR SHARE and is the write's FIRST lock,
-    before anything takes the audit chain's (`app.services.client_modules`):
+    `client_id` is the client the work is for -- a deployment's; a patch
+    approval's, or the internal client's for a global approval (C8; plan
+    2026-10-26 Task 14) -- and has NO default: every caller decides. A change
+    of another client is not found, word for word: a narrowed session cannot
+    see it, and a wider one is told nothing more. And that client must use
+    change management, since linking the work is a write on its change
+    (`require_module`, a 404). That check reads the client FOR SHARE and is
+    held until commit -- for a global patch approval it is the write's FIRST
+    lock, before anything takes the audit chain's (`app.services.client_modules`):
     call this before writing anything.
-
-    None asks neither: the patch approval path, until plan 2026-10-26 Task
-    14 names the client its approvals are for (C8: a global approval's is the
-    internal client's) -- passing it is all that path needs.
     """
     change = (
         await session.execute(
@@ -253,10 +257,9 @@ async def authorizing_change(
             )
         )
     ).scalar_one_or_none()
-    if change is None or (client_id is not None and change.client_id != client_id):
+    if change is None or change.client_id != client_id:
         raise ChangeNotFoundError(tr("no such change"))
-    if client_id is not None:
-        await require_module(session, org_id=org_id, client_id=client_id, module="change")
+    await require_module(session, org_id=org_id, client_id=client_id, module="change")
     if change.state not in AUTHORIZING_STATES:
         raise ChangeValidationError(
             tr(
@@ -274,19 +277,18 @@ async def has_authorizing_change(
     action_type: str,
     action_id: UUID,
     *,
-    client_id: UUID | None,
+    client_id: UUID,
 ) -> bool:
     """Whether an approved (or implementing) change is linked to the action.
 
-    `client_id` is the action's client -- a deployment's -- and has NO
+    `client_id` is the action's client -- a deployment's; a patch approval's,
+    or the internal client's for a global approval (C8) -- and has NO
     default: only a change OF THAT CLIENT authorizes it. Links made now are
     always same-client (`authorizing_change`, the link resolvers, an
     automatic change), but 0237 filed every existing change and link under
-    the internal client, so a deployment of X made before 0239 can be linked
-    to an approved change that is not X's; it must not pass X's gate.
-
-    None asks for no client: the patch sweep, until plan 2026-10-26 Task 14
-    names the client its approvals are for (C8).
+    the internal client, so a deployment or approval of X made before then
+    can be linked to an approved change that is not X's; it must not pass
+    X's gate.
     """
     query = (
         select(ChangeLink.id)
@@ -297,10 +299,9 @@ async def has_authorizing_change(
             ChangeLink.action_type == action_type,
             ChangeLink.action_id == action_id,
             ChangeRequest.state.in_(AUTHORIZING_STATES),
+            ChangeRequest.client_id == client_id,
         )
     )
-    if client_id is not None:
-        query = query.where(ChangeRequest.client_id == client_id)
     return (await session.execute(query.limit(1))).first() is not None
 
 
@@ -421,8 +422,9 @@ async def record_gate_refusal(
     client_id: UUID | None,
 ) -> None:
     """`client_id` is the refused action's client where it has one -- a
-    deployment's (plan 2026-10-26 Task 9) -- and has NO default: every caller
-    decides. None for a ring's approval, which can reach many clients."""
+    deployment's (plan 2026-10-26 Task 9), a client's patch approval's, a
+    device's withheld install (Task 14) -- and has NO default: every caller
+    decides. None for a global patch approval, which reaches every client."""
     await audit_service.record(
         session,
         org_id=org_id,
@@ -476,7 +478,19 @@ async def set_gate(
     gate is its group's client's, so that client must use change management
     (`ModuleNotEnabled`, 404) -- a gate it would meet but never satisfy is
     the D4 trap. A group-less gate here is the GLOBAL one: every client that
-    uses the module meets it."""
+    uses the module meets it, and it is written only under the every-client
+    scope.
+
+    ONE `INSERT ... ON CONFLICT DO UPDATE` on `uq_change_gates_client_group`
+    (MSP clients plan 2026-10-26 Task 14; ledger "upsert first-writer
+    races"), never look-then-insert: two colleagues setting the same gate at
+    once both found none and both inserted, and the second's transaction died
+    on the key -- a 500. Now the second replaces the first's flags. A group
+    gate's client is the trigger's (`its_client_from_parent`, migration
+    0231), read before the arbiter is checked, so the conflict is on that
+    group's row; a group-less one's is NULL, the global row (NULLS NOT
+    DISTINCT).
+    """
     if device_group_id is not None:
         group_client = (
             await session.execute(
@@ -488,25 +502,36 @@ async def set_gate(
         if group_client is None:
             raise ChangeValidationError(tr("no such device group"))
         await require_module(session, org_id=org_id, client_id=group_client, module="change")
+    else:
+        # The global row is a bulk write `app.core.global_rows`'s flush guard
+        # never sees: refused under a narrowed scope before anything is read.
+        refuse_unless_every_client(session, "change_gates")
     if not (applies_to_patches or applies_to_deployments):
         raise ChangeValidationError(tr("a gate must cover patch approvals, deployments, or both"))
-    query = select(ChangeGate).where(ChangeGate.org_id == org_id)
-    # A group's gate is the group's client's; a group-less one is the GLOBAL
-    # "every device" gate (phase 1 writes no client), and a client's
-    # group-less gate is another row (`uq_change_gates_client_group`,
-    # migration 0231, Task 8b).
-    query = query.where(
-        and_(ChangeGate.device_group_id.is_(None), ChangeGate.client_id.is_(None))
-        if device_group_id is None
-        else ChangeGate.device_group_id == device_group_id
+    insert = pg_insert(ChangeGate).values(
+        id=uuid7(),
+        org_id=org_id,
+        device_group_id=device_group_id,
+        applies_to_patches=applies_to_patches,
+        applies_to_deployments=applies_to_deployments,
+        created_by=actor_id,
     )
-    gate = (await session.execute(query)).scalar_one_or_none()
-    if gate is None:
-        gate = ChangeGate(org_id=org_id, device_group_id=device_group_id, created_by=actor_id)
-        session.add(gate)
-    gate.applies_to_patches = applies_to_patches
-    gate.applies_to_deployments = applies_to_deployments
-    await session.flush()
+    upsert = insert.on_conflict_do_update(
+        index_elements=["org_id", "client_id", "device_group_id"],
+        set_={
+            "applies_to_patches": insert.excluded.applies_to_patches,
+            "applies_to_deployments": insert.excluded.applies_to_deployments,
+            "updated_at": func.now(),
+        },
+    ).returning(ChangeGate.id)
+    gate_id = (await session.execute(upsert)).scalar_one()
+    gate = (
+        await session.execute(
+            select(ChangeGate)
+            .where(ChangeGate.id == gate_id)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
     await audit_service.record(
         session,
         org_id=org_id,
@@ -520,6 +545,8 @@ async def set_gate(
             "applies_to_patches": applies_to_patches,
             "applies_to_deployments": applies_to_deployments,
         },
+        # The gate's client: its group's, or none for the global gate.
+        client_id=gate.client_id,
     )
     return gate
 
@@ -534,6 +561,7 @@ async def remove_gate(
     ).scalar_one_or_none()
     if gate is None:
         raise ChangeNotFoundError(tr("no such gate"))
+    group_id, client_id = gate.device_group_id, gate.client_id
     await session.delete(gate)
     await session.flush()
     await audit_service.record(
@@ -544,5 +572,6 @@ async def remove_gate(
         action="change.gate_removed",
         target_type="change_gate",
         target_id=str(gate_id),
-        metadata={"device_group_id": str(gate.device_group_id) if gate.device_group_id else None},
+        metadata={"device_group_id": str(group_id) if group_id else None},
+        client_id=client_id,
     )

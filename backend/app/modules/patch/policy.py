@@ -90,9 +90,12 @@ class RingPopulation:
 
 
 async def resolve_ring_populations(
-    session: AsyncSession, org_id: UUID
+    session: AsyncSession, org_id: UUID, *, client_id: UUID | None = None
 ) -> list[RingPopulation]:
-    """Every ring in this org, in rollout order, with the devices in each.
+    """Every ring in this org, in rollout order, with the devices in each --
+    `client_id`'s devices only, when given: the population a client's patch
+    approval reaches (MSP clients plan 2026-10-26 Task 14). The rings
+    themselves are the org's either way.
 
     THE SAME QUESTION `resolve_patch_policy` ANSWERS, ASKED ONCE. Resolution
     order is identical and `tests/test_patch_policy.py::
@@ -158,7 +161,10 @@ async def resolve_ring_populations(
                     group_policy.device_group_id == Device.device_group_id,
                 ),
             )
-            .where(Device.org_id == org_id)
+            .where(
+                Device.org_id == org_id,
+                *([] if client_id is None else [Device.client_id == client_id]),
+            )
             .order_by(Device.id)
         )
     ).all()

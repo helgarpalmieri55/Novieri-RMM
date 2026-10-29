@@ -706,6 +706,10 @@ async def set_permissions(
     target, _cloned_from = await _resolve_for_write(session, org_id, role.id, actor_id)
 
     before = await _codes_of(session, target.id)
+    # EVERY-CLIENT GRANTS, BY DESIGN (plan 2026-10-26 Task 14 keeps it): the
+    # rail guards the codes that administer the whole organisation, so what it
+    # compares is what the actor holds everywhere -- a code kept on one client
+    # would not stop the lock-out this refuses.
     held_before = await user_permission_codes(session, actor_id)
     admins_before = await _holders_of(session, org_id, ORG_ADMIN_CODE)
 

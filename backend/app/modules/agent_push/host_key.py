@@ -56,12 +56,16 @@ row is changed only under scope all.
 """
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, or_, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from uuid_extensions import uuid7
 
 from app.core.audit import audit_service
+from app.core.global_rows import refuse_unless_every_client
 from app.core.i18n import tr
 from app.models import Device
 from app.modules.agent_push.errors import (
@@ -130,30 +134,57 @@ async def _row_for(
     ).scalar_one_or_none()
 
 
-async def _own_row(
-    session: AsyncSession, org_id: UUID, address: str, device_id: UUID | None
-) -> PushHostKey | None:
-    """The row an observation of `device_id` at `address` writes: its client's
-    own, or -- for no device -- the global one. Never the other namespace: a
-    device whose client this session cannot read matches nothing here (the
-    INSERT then meets the database's own refusal), never the global row."""
-    whose: ColumnElement[bool]
+async def _upsert_observation(
+    session: AsyncSession,
+    org_id: UUID,
+    *,
+    address: str,
+    device_id: UUID | None,
+    observed: dict[str, Any],
+) -> PushHostKey:
+    """Write `observed` onto the row an observation of `device_id` at
+    `address` owns -- its client's, or for no device the global one -- in
+    ONE `INSERT ... ON CONFLICT DO UPDATE` on `uq_push_host_key_client_address`
+    (MSP clients plan 2026-10-26 Task 14; ledger "upsert first-writer races").
+
+    Look-then-insert let two probes of one host that both found no row both
+    insert, and the loser's transaction died on the key: a 500 for an
+    observation that was merely second. Now the second updates the first's
+    row. The row's client is the trigger's (`its_client_from_parent`, from
+    the device), and the arbiter is checked after it, so the conflict is
+    always on the device's client's row and never on the global one. The
+    confirmation, a person's act, is never in the update.
+
+    A device this session cannot read in the organisation is refused here
+    rather than left to the trigger, which would read its client as NULL
+    and file the observation as the GLOBAL row -- the one namespace a
+    device's probe must never write (module docstring). No device: the
+    global row, a bulk write the flush guard never sees, so the every-client
+    refusal is asked first.
+    """
     if device_id is None:
-        whose = PushHostKey.client_id.is_(None)
-    else:
-        device_client = (
-            select(Device.client_id)
-            .where(Device.org_id == org_id, Device.id == device_id)
-            .scalar_subquery()
-        )
-        whose = PushHostKey.client_id == device_client
+        refuse_unless_every_client(session, "push_host_key")
+    elif await _client_of(session, org_id, device_id) is None:
+        raise PushNotFoundError(tr("no such device"))
+    insert = pg_insert(PushHostKey).values(
+        id=uuid7(), org_id=org_id, device_id=device_id, address=address, **observed
+    )
+    upsert = insert.on_conflict_do_update(
+        index_elements=["org_id", "client_id", "address"],
+        set_={
+            **{column: insert.excluded[column] for column in observed},
+            # The probing device, when the observation names one; else kept.
+            "device_id": func.coalesce(insert.excluded.device_id, PushHostKey.device_id),
+        },
+    ).returning(PushHostKey.id)
+    row_id = (await session.execute(upsert)).scalar_one()
     return (
         await session.execute(
-            select(PushHostKey).where(
-                PushHostKey.org_id == org_id, PushHostKey.address == address, whose
-            )
+            select(PushHostKey)
+            .where(PushHostKey.id == row_id)
+            .execution_options(populate_existing=True)
         )
-    ).scalar_one_or_none()
+    ).scalar_one()
 
 
 async def _audit_row(session: AsyncSession, row: PushHostKey) -> dict[str, str | None]:
@@ -226,34 +257,23 @@ async def record_observation(
     The row is the device's client's own, or -- for no device -- the global
     one (module docstring): a device's probe never touches a global row.
     """
-    row = await _own_row(session, org_id, address, device_id)
-    now = _utcnow()
-    if row is None:
-        row = PushHostKey(
-            org_id=org_id,
-            device_id=device_id,
-            address=address,
-            transport=transport,
-            observed_fingerprint=fingerprint,
-            observed_key_type=key_type,
-            observed_at=now,
-            observed_job_id=job_id,
-        )
-        session.add(row)
-    else:
-        row.observed_fingerprint = fingerprint
-        row.observed_key_type = key_type
-        row.observed_at = now
-        row.observed_job_id = job_id
-        row.transport = transport
-        # An SSH observation supersedes any WinRM readiness recorded for this
-        # address: the panel must not show "WinRM answers" for a host that now
-        # answers SSH.
-        row.readiness = None
-        if device_id is not None:
-            row.device_id = device_id
-        session.add(row)
-    await session.flush()
+    row = await _upsert_observation(
+        session,
+        org_id,
+        address=address,
+        device_id=device_id,
+        observed={
+            "transport": transport,
+            "observed_fingerprint": fingerprint,
+            "observed_key_type": key_type,
+            "observed_at": _utcnow(),
+            "observed_job_id": job_id,
+            # An SSH observation supersedes any WinRM readiness recorded for
+            # this address: the panel must not show "WinRM answers" for a
+            # host that now answers SSH.
+            "readiness": None,
+        },
+    )
     about = await _audit_row(session, row)
     await audit_service.record(
         session,
@@ -383,32 +403,20 @@ async def record_readiness(
     one, as in `record_observation`.
     """
     parsed = str(parse_target_address(address))
-    row = await _own_row(session, org_id, parsed, device_id)
-    now = _utcnow()
-    if row is None:
-        row = PushHostKey(
-            org_id=org_id,
-            device_id=device_id,
-            address=parsed,
-            transport="winrm",
-            observed_fingerprint=WINRM_OBSERVATION,
-            observed_key_type="",
-            observed_at=now,
-            observed_job_id=job_id,
-            readiness=readiness,
-        )
-        session.add(row)
-    else:
-        row.transport = "winrm"
-        row.observed_fingerprint = WINRM_OBSERVATION
-        row.observed_key_type = ""
-        row.observed_at = now
-        row.observed_job_id = job_id
-        row.readiness = readiness
-        if device_id is not None:
-            row.device_id = device_id
-        session.add(row)
-    await session.flush()
+    row = await _upsert_observation(
+        session,
+        org_id,
+        address=parsed,
+        device_id=device_id,
+        observed={
+            "transport": "winrm",
+            "observed_fingerprint": WINRM_OBSERVATION,
+            "observed_key_type": "",
+            "observed_at": _utcnow(),
+            "observed_job_id": job_id,
+            "readiness": readiness,
+        },
+    )
     about = await _audit_row(session, row)
     await audit_service.record(
         session,

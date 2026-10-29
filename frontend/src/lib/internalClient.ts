@@ -66,3 +66,18 @@ export function loadingUntilClient<R extends UseQueryResult<unknown, unknown>>(
 ): R {
   return client == null && query.isPending ? { ...query, isLoading: true } : query;
 }
+
+/**
+ * The client of a NEW piece of per-client configuration -- an article, a
+ * record, a document, a patch approval (MSP clients plan 2026-10-26 Task 14):
+ * the internal client, or, when the person asked for it to be every client's
+ * (`ForEveryClientToggle`), no client at all, which the server files as global.
+ * Spread into the create body. Throws `InternalScopeUnknown` before `/me` has
+ * answered, so nothing is sent without its client.
+ */
+export function newRowClient(
+  me: Pick<Me, "org_id"> | undefined,
+  forEveryClient: boolean,
+): { client_id?: string } {
+  return forEveryClient ? {} : { client_id: requireKnown(internalClientId(me)) };
+}

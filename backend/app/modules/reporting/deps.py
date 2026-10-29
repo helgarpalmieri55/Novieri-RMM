@@ -35,17 +35,22 @@ read routes; both are genuinely gated and both return `None` from
 is a finding about the remote module and belongs in its cycle. Reporting's rule:
 never fork `require_permission`, never hide a gate from the router.
 
-**ALL-CLIENTS GRANTS ONLY (§0.6).** `user_permission_codes` is called with
-`client_id` at its `None` default, so a `user_roles` row scoped to one client
-does not count. That is not an oversight: a fleet aggregate computed for
-someone entitled to part of the fleet is either wrong (the denominator
-includes devices they may not see) or a leak (it tells them how many there
-are).
+**PER CLIENT, BY RLS (MSP clients plan 2026-10-26 Task 14, T4-C2).** The gate
+counts a code held on ANY client (`codes_held_anywhere`), and the report then
+runs over the clients where the person holds `reporting.read` AND every source
+code (`app.api.deps.narrowed_to_every`): the dependency hands the handler that
+narrowed context. Phase 1 counted all-clients grants only, because §0.6's
+reason -- "a fleet aggregate computed for someone entitled to part of the fleet
+is either wrong (the denominator includes devices they may not see) or a leak
+(it tells them how many there are)" -- had no other answer then. It has one
+now: the aggregate is computed over exactly the part they are entitled to, by
+the database, so the denominator is theirs and nothing else is counted.
 
 **IT RUNS BEFORE THE HANDLER OPENS A DATA SESSION (§4.1).** FastAPI resolves
-route-level `dependencies=[...]` before the endpoint body, so no report query
-runs for an unauthorized caller and a timing difference cannot report on data
-the caller may not see.
+every dependency -- the route-level `reporting.read` gate first, this one as
+the handler's `ctx` -- before the endpoint body, so no report query runs for an
+unauthorized caller and a timing difference cannot report on data the caller
+may not see.
 """
 
 from collections.abc import Callable, Coroutine
@@ -53,8 +58,8 @@ from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request, status
 
-from app.api.deps import AuthContext, bound_auth_context
-from app.core.rbac import user_permission_codes
+from app.api.deps import AuthContext, bound_auth_context, narrowed_to_every
+from app.core.rbac import codes_held_anywhere
 from app.core.tenancy import org_session
 from app.modules.reporting.registry import REGISTRY
 
@@ -72,7 +77,7 @@ def require_report_sources(key: str) -> Callable[..., Coroutine[Any, Any, AuthCo
         async with org_session(
             ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
         ) as session:
-            granted = await user_permission_codes(session, ctx.user_id)
+            granted = await codes_held_anywhere(session, ctx.user_id)
         missing = sorted(definition.requires - granted)
         if missing:
             # The missing codes are NAMED. A report an operator cannot run is a
@@ -89,6 +94,9 @@ def require_report_sources(key: str) -> Callable[..., Coroutine[Any, Any, AuthCo
                     "missing": missing,
                 },
             )
-        return ctx
+        # The report's own scope: where the person holds all of them.
+        return await narrowed_to_every(
+            request, ctx, {"reporting.read", *definition.requires}
+        )
 
     return dependency

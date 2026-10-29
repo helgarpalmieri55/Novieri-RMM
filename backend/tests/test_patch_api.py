@@ -635,6 +635,9 @@ async def test_the_approval_list_names_the_patch_it_clears(api_env) -> None:
     assert row["patch_id"] == str(patch_id)
     assert set(row) == {
         "id",
+        # The approval's OWN column, not the join's: whose machines it clears
+        # (MSP clients plan 2026-10-26 Task 14).
+        "client_id",
         "patch_id",
         "patch_identifier",
         "ring_name",

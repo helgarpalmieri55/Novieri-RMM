@@ -157,6 +157,7 @@ export const auditActions = {
   device_removal_acknowledged: "Device removal acknowledged",
   device_review_approved: "Device review approved",
   device_review_rejected: "Device review rejected",
+  device_site_changed: "Device site changed",
   device_group_archived: "Device group archived",
   device_group_created: "Device group created",
   device_group_members_added: "Device group members added",

@@ -113,6 +113,9 @@ async def _resolve_wake(
     internal candidate look ambiguous. The internal client's id is the
     organisation's.
     """
+    # NO CLIENT, BY DESIGN (plan 2026-10-26 Task 14 keeps it; research-6 §3
+    # item 6): provisioning is the internal client's and its routes need every
+    # client, so the second grant is asked on every client too.
     if not await has_permission(session, actor_id, "site.wake"):
         raise ProvisioningPermissionError(
             tr(

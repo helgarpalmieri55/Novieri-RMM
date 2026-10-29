@@ -32,11 +32,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.storage import ObjectStore
-from app.core.wire_words import say
 from app.models import DocDocument, DocDocumentLink, DocDocumentVersion
 from app.modules.documentation.filetypes import UnsupportedFileType, sniff
-from app.modules.documentation.service import _LINK_TARGET_MODELS, LinkTargetNotFound
-from app.modules.documentation.words import LINK_TARGET_WORDS
+from app.modules.documentation.service import (
+    _LINK_TARGET_MODELS,
+    DocumentationClientError,
+    LinkTargetNotFound,
+    LinkTargetOfAnotherClient,
+    check_link_target,
+    client_for_documentation,
+)
 
 #: Per file (§4.2). Enforced by BOTH `app.core.http` guards in the route, in
 #: that order, plus this module's own check on a body already read.
@@ -98,7 +103,11 @@ async def _audit(
     action: str,
     document_id: UUID,
     metadata: dict[str, Any] | None = None,
+    *,
+    client_id: UUID | None,
 ) -> None:
+    """`client_id` is the document's (None: global), and has NO default:
+    every event decides (MSP clients plan 2026-10-26 Task 14)."""
     await audit_service.record(
         session,
         org_id=org_id,
@@ -108,6 +117,7 @@ async def _audit(
         target_type="doc_document",
         target_id=str(document_id),
         metadata=metadata or {},
+        client_id=client_id,
     )
 
 
@@ -124,9 +134,14 @@ async def create_document(
     title: str,
     description: str,
     category: str,
+    client_id: UUID | None,
 ) -> DocDocument:
+    """`client_id` is what the request named (None: global), checked by
+    `service.client_for_documentation` as the create's first lock."""
+    client_id = await client_for_documentation(session, org_id=org_id, client_id=client_id)
     document = DocDocument(
         org_id=org_id,
+        client_id=client_id,
         title=title,
         description=description,
         category=category,
@@ -142,6 +157,7 @@ async def create_document(
         "docs.document_created",
         document.id,
         {"title": title, "category": category},
+        client_id=client_id,
     )
     await session.flush()
     return document
@@ -263,6 +279,7 @@ async def update_document(
         "docs.document_updated",
         document.id,
         {"changed": changed},
+        client_id=document.client_id,
     )
     await session.flush()
     return True
@@ -274,7 +291,14 @@ async def archive_document(
     document.archived = True
     document.updated_by = actor_id
     session.add(document)
-    await _audit(session, document.org_id, actor_id, "docs.document_archived", document.id)
+    await _audit(
+        session,
+        document.org_id,
+        actor_id,
+        "docs.document_archived",
+        document.id,
+        client_id=document.client_id,
+    )
     await session.flush()
 
 
@@ -430,6 +454,7 @@ async def add_version(
             "content_type": content_type,
             "sha256": digest,
         },
+        client_id=document.client_id,
     )
     await session.flush()
     return version
@@ -523,6 +548,9 @@ async def record_download(
         "docs.document_downloaded",
         version.document_id,
         {"version": version.version, "filename": version.filename},
+        # The trigger's (its document's), loaded with the row: nothing has
+        # updated it in this session.
+        client_id=version.client_id,
     )
     await session.flush()
 
@@ -551,6 +579,12 @@ async def purge_version(
     """
     if version.purged_at is not None:
         return
+    # Read once, here, before anything is flushed: the column is the trigger's
+    # (`server_onupdate`), so after the UPDATE below is flushed it is expired
+    # and touching it would lazy-load (MissingGreenlet under asyncio). Nothing
+    # flushes before the audit call today, so this is defensive, not load-
+    # bearing -- it keeps a later edit that reads it post-flush from breaking.
+    client_id = version.client_id
     if version.object_key:
         await store.delete_doc_document(version.org_id, version.object_key)
     version.object_key = ""
@@ -569,6 +603,7 @@ async def purge_version(
             "byte_size": version.byte_size,
             "sha256": version.sha256,
         },
+        client_id=client_id,
     )
     await session.flush()
 
@@ -589,27 +624,17 @@ async def add_document_link(
     """The target is resolved INSIDE the tenant session, so a foreign-org
     target is indistinguishable from a nonexistent one -- 404 either way. That
     is the shipped module's own reasoning and it is not restated differently
-    here. The explicit `org_id` predicate is on the models that carry one; a
-    handful of link targets are org-scoped tables where the RLS policy is the
-    braces and this predicate is the belt."""
-    model = _LINK_TARGET_MODELS.get(target_type)
-    if model is None:
-        raise LinkTargetNotFound(
-            tr("unknown target type {target_type}", target_type=repr(target_type))
-        )
-    exists = (
-        await session.execute(
-            select(model.id).where(model.id == target_id, model.org_id == document.org_id)
-        )
-    ).scalar_one_or_none()
-    if exists is None:
-        raise LinkTargetNotFound(
-            tr(
-                "no {target_type} {target_id} in this organization",
-                target_type=say(LINK_TARGET_WORDS, target_type),
-                target_id=target_id,
-            )
-        )
+    here. The resolver and its rule are the article links' own
+    (`service.check_link_target`): the explicit `org_id` predicate is the
+    belt, the RLS policy the braces, and a client's document names only that
+    client's targets or global ones (MSP clients plan 2026-10-26 Task 14)."""
+    await check_link_target(
+        session,
+        org_id=document.org_id,
+        owner_client=document.client_id,
+        target_type=target_type,
+        target_id=target_id,
+    )
     link = DocDocumentLink(
         org_id=document.org_id,
         document_id=document.id,
@@ -625,6 +650,7 @@ async def add_document_link(
         "docs.document_link_added",
         document.id,
         {"target_type": target_type, "target_id": str(target_id)},
+        client_id=document.client_id,
     )
     await session.flush()
     return link
@@ -672,6 +698,7 @@ async def remove_document_link(
         "docs.document_link_removed",
         document.id,
         {"target_type": target_type, "target_id": str(target_id)},
+        client_id=document.client_id,
     )
     await session.flush()
     return True
@@ -759,7 +786,9 @@ __all__ = [
     "ORG_DOCUMENT_QUOTA_BYTES",
     "DocumentArchived",
     "DocumentNotFound",
+    "DocumentationClientError",
     "LinkTargetNotFound",
+    "LinkTargetOfAnotherClient",
     "QuotaExceeded",
     "UnsupportedFileType",
     "VersionPurged",

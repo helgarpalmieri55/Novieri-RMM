@@ -25,6 +25,7 @@ import type {
   DocSearchHit,
   DocVersion,
 } from "../../lib/api";
+import { ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 
 const MINUTE = 60_000;
@@ -139,6 +140,7 @@ const inPortal = new Set<string>();
 
 const listItem = (seed: ArticleSeed): DocArticleListItem => ({
   id: seed.id,
+  client_id: ORG_ID,
   title: seed.title,
   category: seed.category,
   archived: false,
@@ -172,6 +174,7 @@ const getArticle: FixtureMap["getArticle"] = (id) => {
   const seed = findArticle(id);
   const article: DocArticle = {
     id: seed.id,
+    client_id: ORG_ID,
     title: seed.title,
     body: seed.body,
     category: seed.category,
@@ -196,6 +199,7 @@ const articleVersions: FixtureMap["articleVersions"] = (id) => {
 
 const createArticle: FixtureMap["createArticle"] = (body) => ({
   id: `a-${Date.now()}`,
+  client_id: body.client_id ?? null,
   title: body.title,
   body: body.body,
   category: body.category,
@@ -228,6 +232,7 @@ const setArticlePortalVisibility: FixtureMap["setArticlePortalVisibility"] = (id
 const RECORDS: DocRecordOut[] = [
   {
     id: "rec-1",
+    client_id: ORG_ID,
     record_type: "service",
     name: "PostgreSQL primary (lis-db-01)",
     fields: { port: 5432, owner: "Platform team", runbook: "a-1" },
@@ -236,6 +241,7 @@ const RECORDS: DocRecordOut[] = [
   },
   {
     id: "rec-2",
+    client_id: ORG_ID,
     record_type: "vendor",
     name: "Veeam Software",
     fields: { contract: "VS-2026-0142", support: "+351 21 000 0100" },
@@ -244,6 +250,7 @@ const RECORDS: DocRecordOut[] = [
   },
   {
     id: "rec-3",
+    client_id: ORG_ID,
     record_type: "location",
     name: "Lisbon, rack B4",
     fields: { floor: -1, feeds: 2 },
@@ -252,6 +259,7 @@ const RECORDS: DocRecordOut[] = [
   },
   {
     id: "rec-4",
+    client_id: ORG_ID,
     record_type: "network",
     name: "VLAN 20 workstations",
     fields: { vlan: 20, cidr: "10.20.4.0/23" },
@@ -267,6 +275,7 @@ const listDocRecords: FixtureMap["listDocRecords"] = (recordType) => {
 
 const createDocRecord: FixtureMap["createDocRecord"] = (body) => ({
   id: `rec-${Date.now()}`,
+  client_id: body.client_id ?? null,
   record_type: body.record_type,
   name: body.name,
   fields: body.fields,
@@ -353,6 +362,7 @@ const DOCUMENTS: DocumentSeed[] = [
 
 const documentItem = (seed: DocumentSeed): DocDocumentListItem => ({
   id: seed.id,
+  client_id: ORG_ID,
   title: seed.title,
   description: seed.description,
   category: seed.category,
@@ -381,6 +391,7 @@ const getDocument: FixtureMap["getDocument"] = (id) => {
   const seed = findDocument(id);
   const doc: DocDocument = {
     id: seed.id,
+    client_id: ORG_ID,
     title: seed.title,
     description: seed.description,
     category: seed.category,
@@ -397,6 +408,7 @@ const documentVersions: FixtureMap["documentVersions"] = (id) => findDocument(id
 
 const createDocument: FixtureMap["createDocument"] = (body) => ({
   id: `doc-${Date.now()}`,
+  client_id: body.client_id ?? null,
   title: body.title,
   description: body.description,
   category: body.category,

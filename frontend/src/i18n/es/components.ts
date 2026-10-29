@@ -34,6 +34,10 @@ export const components: Shape<typeof en> = {
   chart: {
     category: "Categoría",
   },
+  forEveryClient: {
+    label: "Para todos los clientes",
+    hint: "Lo verán los técnicos de todos los clientes. Sin marcar, es del cliente propio de tu organización.",
+  },
   prerequisites: {
     checking: "Comprobando…",
     cannotCheckNeeds: "No se puede comprobar desde esta cuenta: hace falta {permissions}.",

@@ -151,6 +151,7 @@ const GROUP_ONE = { ...GROUP, id: "grp-2", name: "Un solo equipo", device_count:
 
 const ARTICLE = {
   id: ARTICLE_ID,
+  client_id: "o1",
   title: "Manual de conmutación",
   category: "manual",
   archived: false,

@@ -1265,6 +1265,7 @@ describe("bcp picker options", () => {
       [
         {
           id: "doc1",
+          client_id: "o1",
           title: "Failover",
           category: "runbook",
           archived: false,
@@ -1273,6 +1274,7 @@ describe("bcp picker options", () => {
         },
         {
           id: "doc2",
+          client_id: "o1",
           title: "Failover",
           category: "policy",
           archived: true,

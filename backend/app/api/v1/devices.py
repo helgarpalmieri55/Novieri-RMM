@@ -19,7 +19,13 @@ from app.modules.ipam.errors import IpamClientError, IpamConflictError, IpamNotF
 from app.modules.remote.capability import can_share_screen
 from app.services import device_review as review_svc
 from app.services.cert_renewal import cert_state
-from app.services.client_sites import NotAcceptingNewRows, SiteNotFound, site_for_new_rows
+from app.services.client_sites import (
+    NotAcceptingNewRows,
+    SiteNotFound,
+    SiteOfAnotherClient,
+    site_for_new_rows,
+    site_of_client,
+)
 from app.services.device_list import HOLDER_PERMISSION, DeviceHolder, device_page
 from app.services.dns_name import MAX_DNS_NAME, InvalidDnsName, normalise_dns_name
 
@@ -97,8 +103,8 @@ class AssetCreateRequest(AssetFields):
 
     `site_id` IS REQUIRED (MSP clients spec §1.5): every device belongs to a
     site, and to the site's client -- which is derived from the site, never
-    sent. Not on `AssetUpdateRequest`: a device's client never changes, and
-    moving one between its client's sites is not this route's.
+    sent. A device's client never changes; `AssetUpdateRequest.site_id` moves
+    it between its client's sites.
     """
 
     site_id: UUID = Field(
@@ -116,6 +122,15 @@ class AssetUpdateRequest(AssetFields):
 
     asset_type: str | None = Field(default=None, pattern=f"^({'|'.join(_ASSET_TYPES)})$")  # type: ignore[assignment]
     lifecycle: str | None = Field(default=None, pattern=f"^({'|'.join(_LIFECYCLES)})$")  # type: ignore[assignment]
+    #: MOVES THE DEVICE TO ANOTHER SITE OF ITS OWN CLIENT (MSP clients spec
+    #: §1.5; plan 2026-10-26 Task 14). A site of another client is a 422 --
+    #: the device's client never changes, and the trigger
+    #: `its_device_client_guard` refuses it too. `null` is a 422: a device
+    #: always has a site.
+    site_id: UUID | None = Field(
+        default=None,
+        description="Move the device to this site of its own client",
+    )
 
 
 class AssignedToOut(BaseModel):
@@ -131,6 +146,9 @@ class AssignedToOut(BaseModel):
 
 class DeviceOut(BaseModel):
     id: UUID
+    #: The device's client and site (MSP clients spec §1.5). ADDITIVE.
+    client_id: UUID
+    site_id: UUID
     # NULLABLE SINCE 0061 (asset-inventory spec §2). A switch has a name but no
     # hostname in this sense and no OS family at all; a laptop still in its box
     # has told us neither yet.
@@ -305,6 +323,8 @@ def _row_to_out(
 ) -> DeviceOut:
     return DeviceOut(
         id=device.id,
+        client_id=device.client_id,
+        site_id=device.site_id,
         hostname=device.hostname,
         fqdn=device.fqdn,
         os_family=device.os_family,
@@ -1092,8 +1112,22 @@ async def update_asset(
     request: Request,
     ctx: AuthContext = Depends(require_permission("assets.manage")),
 ) -> DeviceOut:
-    """Edit an asset. Only the fields present in the body are written."""
+    """Edit an asset. Only the fields present in the body are written.
+
+    `site_id` moves the device to another site of ITS client (plan 2026-10-26
+    Task 14): loaded with `site_of_client` -- the site, then the client, FOR
+    SHARE and held until commit, before anything is written -- so a site the
+    request cannot see is a 404, an archived one (or one of an archived
+    client) a 409, and another client's a 422. The move is audited
+    `device.site_changed` with both sites; any other field `asset.updated`.
+    """
     changes = body.model_dump(exclude_unset=True)
+    new_site = changes.pop("site_id", None)
+    if "site_id" in body.model_fields_set and new_site is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            tr("a device always has a site: name the site it moves to"),
+        )
     if "primary_ip" in changes and changes["primary_ip"] is not None:
         changes["primary_ip"] = str(changes["primary_ip"])
     if "architecture" in changes and changes["architecture"] is None:
@@ -1137,6 +1171,23 @@ async def update_asset(
                 ),
             )
 
+        old_site = device.site_id
+        moved = new_site is not None and new_site != old_site
+        if moved:
+            try:
+                site = await site_of_client(
+                    session, org_id=ctx.org_id, site_id=new_site, client_id=device.client_id
+                )
+            except SiteNotFound:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such site")) from None
+            except NotAcceptingNewRows as exc:
+                raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
+            except SiteOfAnotherClient as exc:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT, exc.detail
+                ) from None
+            device.site_id = site.id
+
         old_fqdn = device.fqdn
         for field, value in changes.items():
             setattr(device, field, value)
@@ -1146,19 +1197,33 @@ async def update_asset(
         # decides which Kerberos service a Windows push presents a domain
         # account to, so its old and new values are evidence -- and a DNS
         # name is not personal data.
-        metadata: dict[str, object] = {"fields": sorted(changes)}
-        if "fqdn" in changes:
-            metadata["fqdn"] = {"old": old_fqdn, "new": device.fqdn}
-        await audit_service.record(
-            session,
-            org_id=ctx.org_id,
-            actor_type="user",
-            actor_id=ctx.user_id,
-            action="asset.updated",
-            target_type="device",
-            target_id=str(device.id),
-            metadata=metadata,
-        )
+        if moved:
+            await audit_service.record(
+                session,
+                org_id=ctx.org_id,
+                actor_type="user",
+                actor_id=ctx.user_id,
+                action="device.site_changed",
+                target_type="device",
+                target_id=str(device.id),
+                metadata={"from_site_id": str(old_site), "to_site_id": str(device.site_id)},
+                client_id=device.client_id,
+            )
+        if changes or not moved:
+            metadata: dict[str, object] = {"fields": sorted(changes)}
+            if "fqdn" in changes:
+                metadata["fqdn"] = {"old": old_fqdn, "new": device.fqdn}
+            await audit_service.record(
+                session,
+                org_id=ctx.org_id,
+                actor_type="user",
+                actor_id=ctx.user_id,
+                action="asset.updated",
+                target_type="device",
+                target_id=str(device.id),
+                metadata=metadata,
+                client_id=device.client_id,
+            )
         await session.flush()
         return _row_to_out(
             device,

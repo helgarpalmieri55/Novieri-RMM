@@ -5,6 +5,14 @@ applied to a device once it has been approved for that device's ring. This
 module creates/revokes `patch_approvals` rows and flips the affected devices'
 `device_patch_status` rows accordingly. Every approve/revoke is written to the
 audit log.
+
+PER CLIENT, OR GLOBAL (MSP clients plan 2026-10-26 Task 14). An approval is
+one client's -- it clears the patch for THAT client's machines in the ring --
+or global, for every client's. The owner is decided by the caller (the route,
+with `client_for_new_rows`); a global approval is written only under the
+every-client scope. Approving or revoking flips the ring's machines of the
+approval's owner only, and a revoke leaves alone a machine another live
+approval still covers. Every event is filed under the approval's client.
 """
 
 from collections.abc import Sequence
@@ -83,8 +91,12 @@ async def _assert_patches_in_org(
         raise UnknownPatchError(missing)
 
 
-async def _devices_in_ring(session: AsyncSession, org_id: UUID, ring_name: str) -> list[UUID]:
-    """The devices one ring covers.
+async def _devices_in_ring(
+    session: AsyncSession, org_id: UUID, ring_name: str, *, client_id: UUID | None = None
+) -> list[UUID]:
+    """The devices one ring covers -- of `client_id` only, when given: a
+    client's approval reaches that client's machines in the ring and no
+    other's (MSP clients plan 2026-10-26 Task 14).
 
     RESOLVED FOR THE WHOLE FLEET IN ONE STATEMENT (`resolve_ring_populations`),
     not per device. The previous form ran `resolve_patch_policy` once per device
@@ -93,7 +105,7 @@ async def _devices_in_ring(session: AsyncSession, org_id: UUID, ring_name: str) 
     device by device, because an optimisation that quietly re-rings a machine
     approves software onto a machine nobody cleared it for.
     """
-    for population in await resolve_ring_populations(session, org_id):
+    for population in await resolve_ring_populations(session, org_id, client_id=client_id):
         if population.ring_name == ring_name:
             return list(population.device_ids)
     return []
@@ -110,23 +122,32 @@ async def _approve_one(
     patch_id: UUID,
     ring_name: str,
     device_ids: list[UUID],
+    client_id: UUID | None,
 ) -> ApprovalOutcome:
     """One `(patch, ring)` clearance, against a ring population already resolved.
 
     `device_ids` is passed IN rather than resolved here: a batch resolves the
     ring once and reuses it, and the answer cannot change part-way through a
     single transaction anyway. `approve_patch` below is this function with a
-    population of one ring's worth resolved for it.
+    population of one ring's worth resolved for it -- of `client_id`'s
+    machines, for a client's approval.
+
+    `client_id` is the approval's OWNER: a client, or None for the global
+    row. The row this is, or races, is that owner's:
+    `uq_patch_approvals_client_patch_ring` is per client, NULLS NOT DISTINCT
+    (migration 0231, Task 8b), so X's approval and the global one of the same
+    (patch, ring) are two rows, and each is looked up by its own owner.
     """
-    # The approval is GLOBAL (phase 1 writes no client), so the row it is, or
-    # races, is the global one: `uq_patch_approvals_client_patch_ring` is per
-    # client (migration 0231, Task 8b), and a client's approval of the same
-    # (patch, ring) is another row.
+    owner = (
+        PatchApproval.client_id.is_(None)
+        if client_id is None
+        else PatchApproval.client_id == client_id
+    )
     existing = (
         await session.execute(
             select(PatchApproval).where(
                 PatchApproval.org_id == org_id,
-                PatchApproval.client_id.is_(None),
+                owner,
                 PatchApproval.patch_id == patch_id,
                 PatchApproval.ring_name == ring_name,
             )
@@ -162,16 +183,18 @@ async def _approve_one(
         # and returns it immediately -- the identical no-op shape as the
         # "already approved and not revoked" branch above.
         #
-        # `patch_approvals` rows carry no client in phase 1: every approval is
-        # a global row, and a bulk INSERT never passes `app.core.global_rows`'s
-        # flush guard (the re-approval above, an ORM update, does).
-        refuse_unless_every_client(session, "patch_approvals")
+        # A GLOBAL approval is a bulk INSERT `app.core.global_rows`'s flush
+        # guard never sees (the re-approval above, an ORM update, it does): the
+        # every-client refusal is asked here. A client's approval needs none.
+        if client_id is None:
+            refuse_unless_every_client(session, "patch_approvals")
         inserted_id = (
             await session.execute(
                 pg_insert(PatchApproval)
                 .values(
                     id=uuid7(),
                     org_id=org_id,
+                    client_id=client_id,
                     patch_id=patch_id,
                     ring_name=ring_name,
                     approved_by=actor_id,
@@ -188,7 +211,7 @@ async def _approve_one(
                 await session.execute(
                     select(PatchApproval).where(
                         PatchApproval.org_id == org_id,
-                        PatchApproval.client_id.is_(None),
+                        owner,
                         PatchApproval.patch_id == patch_id,
                         PatchApproval.ring_name == ring_name,
                     )
@@ -226,6 +249,7 @@ async def _approve_one(
         target_type="patch",
         target_id=str(patch_id),
         metadata={"ring_name": ring_name, "devices_flipped": devices_flipped},
+        client_id=client_id,
     )
 
     await session.flush()
@@ -241,9 +265,12 @@ async def approve_patch(
     actor_id: UUID,
     patch_id: UUID,
     ring_name: str,
+    client_id: UUID | None = None,
 ) -> PatchApproval:
-    """Clear one patch for one ring. Raises `UnknownPatchError` if the patch is
-    not this org's -- see that exception for why an FK is not the check."""
+    """Clear one patch for one ring -- for `client_id`'s machines, or with
+    None (the default, phase 1's only kind) for every client's. Raises
+    `UnknownPatchError` if the patch is not this org's -- see that exception
+    for why an FK is not the check."""
     await _assert_patches_in_org(session, org_id, [patch_id])
     outcome = await _approve_one(
         session,
@@ -251,7 +278,8 @@ async def approve_patch(
         actor_id=actor_id,
         patch_id=patch_id,
         ring_name=ring_name,
-        device_ids=await _devices_in_ring(session, org_id, ring_name),
+        device_ids=await _devices_in_ring(session, org_id, ring_name, client_id=client_id),
+        client_id=client_id,
     )
     return outcome.approval
 
@@ -263,8 +291,12 @@ async def approve_patches(
     actor_id: UUID,
     patch_ids: Sequence[UUID],
     ring_name: str,
+    client_id: UUID | None = None,
 ) -> list[ApprovalOutcome]:
-    """Clear a SELECTION of patches for one ring, in the order they were named.
+    """Clear a SELECTION of patches for one ring, in the order they were named
+    -- for `client_id`'s machines, or with None for every client's (the
+    owner is the caller's to check: the route loads it with
+    `client_for_new_rows`).
 
     THE OPERATOR'S REPORT, 2026-08-24: "it is super hard to approve all updates
     one by one". Approval has always been fleet-wide -- `PatchApproval` is
@@ -292,7 +324,7 @@ async def approve_patches(
     """
     unique: list[UUID] = list(dict.fromkeys(patch_ids))
     await _assert_patches_in_org(session, org_id, unique)
-    device_ids = await _devices_in_ring(session, org_id, ring_name)
+    device_ids = await _devices_in_ring(session, org_id, ring_name, client_id=client_id)
     return [
         await _approve_one(
             session,
@@ -301,6 +333,7 @@ async def approve_patches(
             patch_id=patch_id,
             ring_name=ring_name,
             device_ids=device_ids,
+            client_id=client_id,
         )
         for patch_id in unique
     ]
@@ -439,13 +472,35 @@ async def revoke_approval(
     if approval is None:
         return False
 
+    owner = approval.client_id
     now = datetime.now(UTC)
     approval.revoked = True
     approval.revoked_by = actor_id
     approval.revoked_at = now
     session.add(approval)
 
-    device_ids = await _devices_in_ring(session, org_id, approval.ring_name)
+    # WHO ELSE STILL COVERS THIS (patch, ring): the owners of the other live
+    # approvals. A global one covers every machine, so nothing goes back to
+    # `missing`; a client's covers that client's. Read under the request's
+    # RLS, like the ring itself.
+    covering = set(
+        (
+            await session.execute(
+                select(PatchApproval.client_id).where(
+                    PatchApproval.org_id == org_id,
+                    PatchApproval.patch_id == approval.patch_id,
+                    PatchApproval.ring_name == approval.ring_name,
+                    PatchApproval.revoked.is_(False),
+                    PatchApproval.id != approval.id,
+                )
+            )
+        ).scalars()
+    )
+    device_ids = (
+        []
+        if None in covering
+        else await _devices_in_ring(session, org_id, approval.ring_name, client_id=owner)
+    )
     if device_ids:
         statuses = (
             await session.execute(
@@ -453,6 +508,7 @@ async def revoke_approval(
                     DevicePatchStatus.org_id == org_id,
                     DevicePatchStatus.patch_id == approval.patch_id,
                     DevicePatchStatus.device_id.in_(device_ids),
+                    DevicePatchStatus.client_id.not_in(covering),
                     DevicePatchStatus.state == "approved",
                 )
             )
@@ -470,6 +526,7 @@ async def revoke_approval(
         target_type="patch",
         target_id=str(approval.patch_id),
         metadata={"ring_name": approval.ring_name},
+        client_id=owner,
     )
 
     await session.flush()

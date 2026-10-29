@@ -4063,6 +4063,12 @@ CATALOG: dict[str, str] = {
     "no {target_type} {target_id} in this organization": (
         "no se encontró {target_type} {target_id} en esta organización"
     ),
+    "{target_type} {target_id} belongs to another client": (
+        "{target_type} {target_id} es de otro cliente"
+    ),
+    "documentation cannot be filed under Unassigned": (
+        "la documentación no puede pertenecer a «Sin asignar»"
+    ),
     "unknown record type {record_type}": "tipo de registro desconocido {record_type}",
     "invalid {record_type} record fields: {exc}": (
         "campos no válidos en el registro de tipo {record_type}: {exc}"
@@ -4223,6 +4229,12 @@ CATALOG: dict[str, str] = {
     "deployment target not found": "no existe el destino del despliegue",
     "a deployment cannot be filed under Unassigned": (
         "un despliegue no puede pertenecer a «Sin asignar»"
+    ),
+    "a patch approval cannot be filed under Unassigned": (
+        "una aprobación de parche no puede pertenecer a «Sin asignar»"
+    ),
+    "a device always has a site: name the site it moves to": (
+        "un dispositivo siempre tiene una sede: indica a qué sede se traslada"
     ),
     "the deployment target changed while it was being created; try again": (
         "el destino del despliegue cambió mientras se creaba; inténtalo de nuevo"

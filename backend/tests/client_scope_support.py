@@ -1,6 +1,7 @@
 """Clients, sites and per-client technicians for the client-scope tests, and
 spec §2.2's client policies written once (not a test module)."""
 
+import asyncio
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -193,3 +194,34 @@ async def drop_client_keys(session: AsyncSession, table: str, *constraints: str)
     rollback."""
     for name in constraints:
         await session.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT {name}"))
+
+
+#: Some session other than the holder's (`:me`) is waiting for a `clients`
+#: row the holder locked. Postgres shows that wait in two rows: the waiter
+#: takes the row's TUPLE lock on `clients` (granted) and then waits for the
+#: holder's TRANSACTION (a `transactionid` lock, not granted) -- so a filter
+#: on `relation = 'clients' AND NOT granted` sees nothing. A second waiter
+#: would queue on the tuple lock itself, not granted; that counts too.
+WAITS_ON_A_CLIENT_ROW = text(
+    "SELECT count(*) FROM pg_locks t "
+    "WHERE t.locktype = 'tuple' AND t.relation = 'clients'::regclass AND t.pid <> :me "
+    "AND (NOT t.granted OR EXISTS ("
+    "  SELECT 1 FROM pg_locks w JOIN pg_locks h ON h.transactionid = w.transactionid "
+    "  WHERE w.pid = t.pid AND w.locktype = 'transactionid' AND NOT w.granted "
+    "  AND h.pid = :me AND h.locktype = 'transactionid' AND h.granted))"
+)
+
+
+async def wait_until_blocked(observer: AsyncSession, holder_pid: int) -> bool:
+    """Whether, within ten seconds, a session waits on a `clients` row the
+    holder (`holder_pid`) locked: for the lock-order tests (plan 2026-10-26
+    Tasks 9 and 14)."""
+    for _ in range(400):
+        await asyncio.sleep(0.025)
+        waiting = (
+            await observer.execute(WAITS_ON_A_CLIENT_ROW, {"me": holder_pid})
+        ).scalar_one()
+        await observer.rollback()
+        if waiting:
+            return True
+    return False

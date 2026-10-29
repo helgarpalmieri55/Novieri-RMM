@@ -4,6 +4,15 @@ Every mutation runs in the tenant session, bumps current_version, snapshots
 into doc_versions, and writes an audit event. No-op updates do none of that.
 Link targets are resolved inside the tenant session, so RLS makes foreign-org
 targets indistinguishable from nonexistent ones.
+
+PER CLIENT, OR GLOBAL ON REQUEST (MSP clients plan 2026-10-26 Task 14). An
+article, record or document names its client at creation (`client_for_new_rows`
+in the caller's session: 404 for a client the request cannot see, 409 for an
+archived one, 422 for Unassigned); without one it is global -- every client's
+knowledge base, written only under the every-client scope
+(`app.core.global_rows`). Its versions and links take its client by trigger
+(migration 0231), and a client's row links only to that client's targets or to
+global ones. Every event is filed under the row's client.
 """
 
 import re
@@ -28,12 +37,102 @@ from app.models import (
     IpamAddress,
     IpamSubnet,
 )
+from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.documentation.schemas import validate_record_fields
 from app.modules.documentation.words import LINK_TARGET_WORDS
+from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
 
 
 class LinkTargetNotFound(Exception):
     pass
+
+
+class LinkTargetOfAnotherClient(Exception):
+    """A client's article or document naming another client's target: a 422
+    whose message is the sentence."""
+
+
+class DocumentationClientError(Exception):
+    """The client a new article, record or document names cannot take it:
+    `status_code` 404 (not visible), 409 (archived) or 422 (Unassigned), and
+    `detail` the sentence -- the routes answer with both as they are."""
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+async def client_for_documentation(
+    session: AsyncSession, *, org_id: UUID, client_id: UUID | None
+) -> UUID | None:
+    """The client a new documentation row is filed under, or None (global).
+
+    Loaded with `client_for_new_rows` in the caller's own session, so it is
+    read FOR SHARE as the create's FIRST lock, before its audit event
+    (`app.services.client_sites`). Global needs no check here: the row is
+    then written under the every-client scope or refused by
+    `app.core.global_rows` before any SQL is sent."""
+    if client_id is None:
+        return None
+    try:
+        client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
+    except ClientNotFound:
+        raise DocumentationClientError(404, tr("no such client")) from None
+    except NotAcceptingNewRows as exc:
+        raise DocumentationClientError(409, exc.detail) from None
+    if client.kind == CLIENT_KIND_UNASSIGNED:
+        raise DocumentationClientError(
+            422, tr("documentation cannot be filed under Unassigned")
+        )
+    return client.id
+
+
+async def check_link_target(
+    session: AsyncSession,
+    *,
+    org_id: UUID,
+    owner_client: UUID | None,
+    target_type: str,
+    target_id: UUID,
+) -> None:
+    """`LinkTargetNotFound` for an unknown type or a target this session
+    cannot see in the organisation; `LinkTargetOfAnotherClient` when the
+    article or document is a client's (`owner_client`) and the target is
+    another client's. A global target -- a credential with no group, a
+    global record -- serves every client; a global article or document may
+    name any target the caller can see, as it always could.
+
+    Shared by article and document links: one resolver (`_LINK_TARGET_MODELS`)
+    and one rule. Every target model carries `org_id` and `client_id`; the
+    `org_id` predicate is the belt, RLS the braces."""
+    model = _LINK_TARGET_MODELS.get(target_type)
+    if model is None:
+        raise LinkTargetNotFound(
+            tr("unknown target type {target_type}", target_type=repr(target_type))
+        )
+    found = (
+        await session.execute(
+            select(model.client_id).where(model.id == target_id, model.org_id == org_id)
+        )
+    ).one_or_none()
+    if found is None:
+        raise LinkTargetNotFound(
+            tr(
+                "no {target_type} {target_id} in this organization",
+                target_type=say(LINK_TARGET_WORDS, target_type),
+                target_id=target_id,
+            )
+        )
+    target_client = found[0]
+    if owner_client is not None and target_client not in (None, owner_client):
+        raise LinkTargetOfAnotherClient(
+            tr(
+                "{target_type} {target_id} belongs to another client",
+                target_type=say(LINK_TARGET_WORDS, target_type),
+                target_id=target_id,
+            )
+        )
 
 
 _LINK_TARGET_MODELS: dict[str, Any] = {
@@ -76,7 +175,11 @@ async def _audit(
     action: str,
     target_id: UUID,
     metadata: dict[str, Any] | None = None,
+    *,
+    client_id: UUID | None,
 ) -> None:
+    """`client_id` is the article's or record's (None: global), and has NO
+    default: every event decides."""
     await audit_service.record(
         session,
         org_id=org_id,
@@ -86,6 +189,7 @@ async def _audit(
         target_type="doc",
         target_id=str(target_id),
         metadata=metadata,
+        client_id=client_id,
     )
 
 
@@ -128,9 +232,14 @@ async def create_article(
     title: str,
     body: str,
     category: str,
+    client_id: UUID | None,
 ) -> DocArticle:
+    """`client_id` is what the request named (None: global); checked here
+    with `client_for_documentation`, the create's first lock."""
+    client_id = await client_for_documentation(session, org_id=org_id, client_id=client_id)
     article = DocArticle(
         org_id=org_id,
+        client_id=client_id,
         title=title,
         body=body,
         category=category,
@@ -147,7 +256,9 @@ async def create_article(
         snapshot=_article_snapshot(article),
         article_id=article.id,
     )
-    await _audit(session, org_id, actor_id, "docs.article_created", article.id)
+    await _audit(
+        session, org_id, actor_id, "docs.article_created", article.id, client_id=client_id
+    )
     await session.flush()
     return article
 
@@ -175,7 +286,14 @@ async def update_article(
         snapshot=_article_snapshot(article),
         article_id=article.id,
     )
-    await _audit(session, article.org_id, actor_id, "docs.article_updated", article.id)
+    await _audit(
+        session,
+        article.org_id,
+        actor_id,
+        "docs.article_updated",
+        article.id,
+        client_id=article.client_id,
+    )
     await session.flush()
     return True
 
@@ -186,7 +304,14 @@ async def archive_article(
     article.archived = True
     article.updated_by = actor_id
     session.add(article)
-    await _audit(session, article.org_id, actor_id, "docs.article_archived", article.id)
+    await _audit(
+        session,
+        article.org_id,
+        actor_id,
+        "docs.article_archived",
+        article.id,
+        client_id=article.client_id,
+    )
     await session.flush()
 
 
@@ -210,6 +335,7 @@ async def set_portal_visibility(
         "docs.article_portal_visibility_changed",
         article.id,
         {"portal_visible": visible},
+        client_id=article.client_id,
     )
     await session.flush()
     return True
@@ -223,15 +349,22 @@ async def create_record(
     record_type: str,
     name: str,
     fields: dict[str, Any],
+    client_id: UUID | None,
 ) -> DocRecord:
+    """`client_id` as in `create_article`. The fields are validated first --
+    a pure check that reads nothing -- so the client is still the first
+    lock."""
     superseded = _SUPERSEDED_RECORD_TYPES.get(record_type)
     if superseded is not None:
         raise ValueError(tr_marked(superseded))
+    validated = validate_record_fields(record_type, fields)
+    client_id = await client_for_documentation(session, org_id=org_id, client_id=client_id)
     record = DocRecord(
         org_id=org_id,
+        client_id=client_id,
         record_type=record_type,
         name=name,
-        fields=validate_record_fields(record_type, fields),
+        fields=validated,
         created_by=actor_id,
         updated_by=actor_id,
     )
@@ -245,7 +378,9 @@ async def create_record(
         snapshot=_record_snapshot(record),
         record_id=record.id,
     )
-    await _audit(session, org_id, actor_id, "docs.record_created", record.id)
+    await _audit(
+        session, org_id, actor_id, "docs.record_created", record.id, client_id=client_id
+    )
     await session.flush()
     return record
 
@@ -273,7 +408,14 @@ async def update_record(
         snapshot=_record_snapshot(record),
         record_id=record.id,
     )
-    await _audit(session, record.org_id, actor_id, "docs.record_updated", record.id)
+    await _audit(
+        session,
+        record.org_id,
+        actor_id,
+        "docs.record_updated",
+        record.id,
+        client_id=record.client_id,
+    )
     await session.flush()
     return True
 
@@ -284,7 +426,14 @@ async def archive_record(
     record.archived = True
     record.updated_by = actor_id
     session.add(record)
-    await _audit(session, record.org_id, actor_id, "docs.record_archived", record.id)
+    await _audit(
+        session,
+        record.org_id,
+        actor_id,
+        "docs.record_archived",
+        record.id,
+        client_id=record.client_id,
+    )
     await session.flush()
 
 
@@ -296,22 +445,13 @@ async def add_link(
     target_type: str,
     target_id: UUID,
 ) -> DocLink:
-    model = _LINK_TARGET_MODELS.get(target_type)
-    if model is None:
-        raise LinkTargetNotFound(
-            tr("unknown target type {target_type}", target_type=repr(target_type))
-        )
-    exists = (
-        await session.execute(select(model.id).where(model.id == target_id))
-    ).scalar_one_or_none()
-    if exists is None:
-        raise LinkTargetNotFound(
-            tr(
-                "no {target_type} {target_id} in this organization",
-                target_type=say(LINK_TARGET_WORDS, target_type),
-                target_id=target_id,
-            )
-        )
+    await check_link_target(
+        session,
+        org_id=article.org_id,
+        owner_client=article.client_id,
+        target_type=target_type,
+        target_id=target_id,
+    )
     link = DocLink(
         org_id=article.org_id,
         article_id=article.id,
@@ -319,7 +459,14 @@ async def add_link(
         target_id=target_id,
     )
     session.add(link)
-    await _audit(session, article.org_id, actor_id, "docs.link_added", article.id)
+    await _audit(
+        session,
+        article.org_id,
+        actor_id,
+        "docs.link_added",
+        article.id,
+        client_id=article.client_id,
+    )
     await session.flush()
     return link
 
@@ -335,7 +482,14 @@ async def remove_link(
     if link is None:
         return False
     await session.delete(link)
-    await _audit(session, article.org_id, actor_id, "docs.link_removed", article.id)
+    await _audit(
+        session,
+        article.org_id,
+        actor_id,
+        "docs.link_removed",
+        article.id,
+        client_id=article.client_id,
+    )
     await session.flush()
     return True
 
