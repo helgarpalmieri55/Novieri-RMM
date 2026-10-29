@@ -169,6 +169,7 @@ async def _decide(
             world.org.org_id,
             addresses=[parse_target_address(address)],
             credential_id=world.credential_id,
+            client_id=world.org.org_id,
             now=now,
         )
     return decisions[0]
@@ -424,6 +425,9 @@ def test_every_named_reason_carries_a_remedy() -> None:
         # MSP clients (invariant 5a): vouched-for rows of more than one client
         # hold the address, so it names no single machine.
         "ambiguous_asset",
+        # Plan 2026-10-26 Task 12: the address is a vouched machine of another
+        # client than the push's credential.
+        "credential_missing",
     }
     for reason, help_text in REFUSAL_REASONS.items():
         assert len(help_text) > 80, reason
@@ -701,6 +705,7 @@ async def test_another_orgs_asset_authorization_scope_and_site_server_count_for_
         a.org_id,
         addresses=[parse_target_address(TARGET)],
         credential_id=a_credential,
+        client_id=a.org_id,
     )
     assert set(decisions[0].refusals) == {
         "no_asset",

@@ -13,7 +13,15 @@ as blocked, with every reason, and is not part of what is confirmed.
 **THE DIGEST IS OVER THE READY PAIRS** (R7). What a person confirms is "install
 on these machines". A blocked machine that turns ready between showing and
 confirming must change the digest, or they would have confirmed a machine
-they were told would not be touched.
+they were told would not be touched. **AND OVER THE CLIENT AND THE
+CREDENTIAL** (plan 2026-10-26 Task 12; 2a(f) "bound by a digest of that
+list"): a confirmation shown for one credential is not a confirmation for
+another, of the same client or of another one, however alike the lists.
+
+**ONE CLIENT'S SUBNET** (Task 12). A run is made in its credential's client:
+the subnet must be one of THAT client's active authorizations, and the list
+is that client's vouched machines in it -- another client's machines at the
+same addresses are not candidates, and not counted.
 
 **READS ONLY.** Nothing here writes a row, decrypts a secret or signs
 anything, and `expand_prefix` takes no vault. Every query carries an explicit
@@ -31,8 +39,11 @@ from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import N_, tr, tr_marked
-from app.core.rbac import has_permission
-from app.modules.agent_push.credential_scope import resolve_push_credential
+from app.core.rbac import codes_held_anywhere, has_permission
+from app.modules.agent_push.credential_scope import (
+    credential_client,
+    resolve_push_credential,
+)
 from app.modules.agent_push.dispatch import pre_dispatch_checks
 from app.modules.agent_push.errors import PushPermissionError, PushValidationError
 from app.modules.agent_push.models import PushAuthorization
@@ -90,17 +101,23 @@ class RunListRow:
         return not self.reasons
 
 
-def compute_list_digest(pairs: Iterable[tuple[UUID, str]]) -> str:
-    """SHA-256 over the sorted `(device_id, address)` pairs: one
-    `<device_id>|<address>` line each, sorted, joined by a newline, UTF-8,
-    lowercase hex. Only the server computes it; the console echoes it back."""
-    lines = sorted(f"{device_id}|{address}" for device_id, address in pairs)
+def compute_list_digest(
+    pairs: Iterable[tuple[UUID, str]], *, client_id: UUID, credential_id: UUID
+) -> str:
+    """SHA-256 over `client:<client_id>` and `credential:<credential_id>`,
+    then the sorted `(device_id, address)` pairs, one `<device_id>|<address>`
+    line each: every line joined by a newline, UTF-8, lowercase hex. Only the
+    server computes it; the console echoes it back."""
+    lines = [f"client:{client_id}", f"credential:{credential_id}"]
+    lines.extend(sorted(f"{device_id}|{address}" for device_id, address in pairs))
     return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
 class RunList:
     prefix: str
+    #: The run's client: its credential's (Task 12).
+    client_id: UUID
     credential_id: UUID
     credential_name: str
     rows: tuple[RunListRow, ...]
@@ -110,6 +127,10 @@ class RunList:
     #: Rows somebody vouched for that are still waiting for review: never
     #: listed. Remedy: approve them.
     awaiting_review_count: int
+    #: Addresses the ladder answered `ambiguous_asset` for (research-4 §I4):
+    #: never listed, never in the digest, and counted rather than dropped in
+    #: silence. Always 0 while the ladder is asked for one client, as it is.
+    ambiguous_count: int = 0
 
     @property
     def ready_rows(self) -> tuple[RunListRow, ...]:
@@ -117,7 +138,11 @@ class RunList:
 
     @property
     def list_digest(self) -> str:
-        return compute_list_digest((row.device_id, row.address) for row in self.ready_rows)
+        return compute_list_digest(
+            ((row.device_id, row.address) for row in self.ready_rows),
+            client_id=self.client_id,
+            credential_id=self.credential_id,
+        )
 
 
 _CHECKOUT_REQUIRED = N_(
@@ -126,74 +151,112 @@ _CHECKOUT_REQUIRED = N_(
 )
 
 
+async def _checkout_anywhere(session: AsyncSession, actor_id: UUID) -> None:
+    """The conjunction's first half: `credentials.checkout` in SOME client,
+    refused before anything is read for a caller who may decrypt nothing
+    anywhere."""
+    if "credentials.checkout" not in await codes_held_anywhere(session, actor_id):
+        raise PushPermissionError(tr_marked(_CHECKOUT_REQUIRED))
+
+
+async def _checkout_in(session: AsyncSession, actor_id: UUID, client_id: UUID) -> None:
+    """The conjunction in the run's client -- the credential's (Task 12): a
+    technician holding both codes on one client builds runs there."""
+    if not await has_permission(session, actor_id, "credentials.checkout", client_id=client_id):
+        raise PushPermissionError(tr_marked(_CHECKOUT_REQUIRED))
+
+
 async def authorized_prefixes(
-    session: AsyncSession, org_id: UUID, *, actor_id: UUID, now: datetime | None = None
+    session: AsyncSession,
+    org_id: UUID,
+    *,
+    actor_id: UUID,
+    credential_id: UUID | None = None,
+    now: datetime | None = None,
 ) -> list[PushAuthorization]:
-    """The subnets a run may be built from: this org's ACTIVE push
-    authorizations. Nothing else may be chosen, and nothing may be typed.
+    """The subnets a run may be built from: ACTIVE push authorizations.
+    Nothing else may be chosen, and nothing may be typed.
+
+    With `credential_id`, the authorizations of THAT credential's client --
+    the only subnets a run with it may be built from (Task 12) -- under the
+    `credentials.checkout` conjunction in that client. Without one, every
+    client's this session sees, and the conjunction must hold in every client.
 
     Refuses (`PushPermissionError`) a caller without `credentials.checkout`,
     the same conjunction every use of this list requires (`expand_prefix`,
     `create_run`): someone who may not build a run is not shown where one may
     be built."""
-    if not await has_permission(session, actor_id, "credentials.checkout"):
-        raise PushPermissionError(tr_marked(_CHECKOUT_REQUIRED))
     stamp = now or _utcnow()
-    rows = await session.execute(
-        select(PushAuthorization)
-        .where(
-            PushAuthorization.org_id == org_id,
-            PushAuthorization.revoked_at.is_(None),
-            or_(PushAuthorization.expires_at.is_(None), PushAuthorization.expires_at > stamp),
-        )
-        .order_by(PushAuthorization.prefix)
+    query = select(PushAuthorization).where(
+        PushAuthorization.org_id == org_id,
+        PushAuthorization.revoked_at.is_(None),
+        or_(PushAuthorization.expires_at.is_(None), PushAuthorization.expires_at > stamp),
     )
+    if credential_id is None:
+        if not await has_permission(session, actor_id, "credentials.checkout"):
+            raise PushPermissionError(tr_marked(_CHECKOUT_REQUIRED))
+    else:
+        await _checkout_anywhere(session, actor_id)
+        credential = await resolve_push_credential(session, org_id, credential_id)
+        client_id = credential_client(credential)
+        await _checkout_in(session, actor_id, client_id)
+        query = query.where(PushAuthorization.client_id == client_id)
+    rows = await session.execute(query.order_by(PushAuthorization.prefix))
     return list(rows.scalars())
 
 
 async def _is_authorized_prefix(
-    session: AsyncSession, org_id: UUID, prefix: str, now: datetime
+    session: AsyncSession, org_id: UUID, client_id: UUID, prefix: str, now: datetime
 ) -> bool:
     row = (
         await session.execute(
             text(
                 "SELECT 1 FROM push_authorization"
-                " WHERE org_id = :org AND revoked_at IS NULL"
+                " WHERE org_id = :org AND client_id = :client AND revoked_at IS NULL"
                 "   AND (expires_at IS NULL OR expires_at > :now)"
                 "   AND prefix = CAST(:prefix AS cidr)"
                 " LIMIT 1"
             ),
-            {"org": str(org_id), "now": now, "prefix": prefix},
+            {"org": str(org_id), "client": str(client_id), "now": now, "prefix": prefix},
         )
     ).first()
     return row is not None
 
 
 async def _candidate_addresses(
-    session: AsyncSession, org_id: UUID, prefix: str
+    session: AsyncSession, org_id: UUID, client_id: UUID, prefix: str
 ) -> list[IPAddress]:
-    """Every address inside `prefix` that a vouched-for, approved row holds
-    (CLAUDE.md 2a(d), R5). Containment is decided by Postgres in native `inet`."""
+    """Every address inside `prefix` that a vouched-for, approved row OF THE
+    RUN'S CLIENT holds (CLAUDE.md 2a(d), R5; Task 12). Containment is decided
+    by Postgres in native `inet`."""
     rows = (
         await session.execute(
             text(
                 "SELECT DISTINCT primary_ip FROM devices"
-                " WHERE org_id = :org"
+                " WHERE org_id = :org AND client_id = :client"
                 "   AND primary_ip <<= CAST(:prefix AS cidr)"
                 "   AND provenance = ANY(CAST(:vouched AS text[]))"
                 "   AND review_state = 'approved'"
                 " ORDER BY primary_ip"
             ),
-            {"org": str(org_id), "prefix": prefix, "vouched": list(VOUCHED_PROVENANCE)},
+            {
+                "org": str(org_id),
+                "client": str(client_id),
+                "prefix": prefix,
+                "vouched": list(VOUCHED_PROVENANCE),
+            },
         )
     ).all()
     return [parse_target_address(str(row.primary_ip)) for row in rows]
 
 
-async def _unlisted_counts(session: AsyncSession, org_id: UUID, prefix: str) -> tuple[int, int]:
-    """`(unvouched, awaiting review)`: the rows inside `prefix` that are never
-    listed, only counted, each with its own remedy (design §1.2; review
-    item 6).
+async def _unlisted_counts(
+    session: AsyncSession, org_id: UUID, client_id: UUID, prefix: str
+) -> tuple[int, int]:
+    """`(unvouched, awaiting review)`: the run's client's rows inside
+    `prefix` that are never listed, only counted, each with its own remedy
+    (design §1.2; review item 6). Another client's rows are not this run's to
+    count (Task 12).
 
     * UNVOUCHED is every provenance OUTSIDE the allowlist, not `= 'sweep'`:
       anything added to `devices.provenance` later is refused by silence
@@ -212,12 +275,18 @@ async def _unlisted_counts(session: AsyncSession, org_id: UUID, prefix: str) -> 
                 "   count(*) FILTER (WHERE provenance = ANY(CAST(:vouched AS text[]))"
                 "     AND review_state = 'pending') AS awaiting_review"
                 " FROM devices d"
-                " WHERE d.org_id = :org AND d.primary_ip <<= CAST(:prefix AS cidr)"
+                " WHERE d.org_id = :org AND d.client_id = :client"
+                "   AND d.primary_ip <<= CAST(:prefix AS cidr)"
                 "   AND d.review_state <> 'rejected'"
                 "   AND NOT EXISTS (SELECT 1 FROM agents a"
                 "                   WHERE a.org_id = d.org_id AND a.device_id = d.id)"
             ),
-            {"org": str(org_id), "prefix": prefix, "vouched": list(VOUCHED_PROVENANCE)},
+            {
+                "org": str(org_id),
+                "client": str(client_id),
+                "prefix": prefix,
+                "vouched": list(VOUCHED_PROVENANCE),
+            },
         )
     ).one()
     return int(row.unvouched), int(row.awaiting_review)
@@ -268,31 +337,35 @@ async def expand_prefix(
     """The list for `prefix` and `credential_id`, as a person will be shown it.
 
     Raises, in this order:
-    * `PushPermissionError` when the caller does not hold `credentials.checkout`.
-      This is the same conjunction `request_push_batch` checks first, because a
-      caller who may not use a stored secret must not be told which machines it
-      would reach;
-    * `PushNotFoundError` / `PushValidationError` for a credential that is not
-      this org's, or not a push credential;
-    * `PushValidationError` for a prefix that is not an active authorization
-      exactly as authorized, a list longer than `PUSH_RUN_LIST_MAX`, or more
-      than `PUSH_RUN_MAX` ready machines.
+    * `PushPermissionError` when the caller holds `credentials.checkout` in no
+      client. This is the same conjunction `request_push_batch` checks first,
+      because a caller who may not use a stored secret must not be told which
+      machines it would reach;
+    * `PushNotFoundError` / `PushValidationError` / `PushClientError` for a
+      credential that is not this org's (or not visible), not a push
+      credential, or of no client;
+    * `PushPermissionError` when the caller does not hold
+      `credentials.checkout` in the credential's client, the run's;
+    * `PushValidationError` for a prefix that is not one of that client's
+      active authorizations exactly as authorized, a list longer than
+      `PUSH_RUN_LIST_MAX`, or more than `PUSH_RUN_MAX` ready machines.
     """
-    if not await has_permission(session, actor_id, "credentials.checkout"):
-        raise PushPermissionError(tr_marked(_CHECKOUT_REQUIRED))
+    await _checkout_anywhere(session, actor_id)
     stamp = now or _utcnow()
     canonical = str(parse_prefix(prefix))
     credential = await resolve_push_credential(session, org_id, credential_id)
-    if not await _is_authorized_prefix(session, org_id, canonical, stamp):
+    client_id = credential_client(credential)
+    await _checkout_in(session, actor_id, client_id)
+    if not await _is_authorized_prefix(session, org_id, client_id, canonical, stamp):
         raise PushValidationError(
             tr(
-                "{canonical} is not one of this organization's active push authorizations. "
+                "{canonical} is not one of this client's active push authorizations. "
                 "A subnet push is built from one of those, exactly as authorized; a holder "
                 "of agent.push.scope.manage authorizes a prefix",
                 canonical=canonical,
             )
         )
-    addresses = await _candidate_addresses(session, org_id, canonical)
+    addresses = await _candidate_addresses(session, org_id, client_id, canonical)
     if len(addresses) > PUSH_RUN_LIST_MAX:
         raise PushValidationError(
             tr(
@@ -305,12 +378,22 @@ async def expand_prefix(
             )
         )
     decisions = await evaluate_targets(
-        session, org_id, addresses=addresses, credential_id=credential_id, now=stamp
+        session,
+        org_id,
+        addresses=addresses,
+        credential_id=credential_id,
+        client_id=client_id,
+        now=stamp,
     )
     candidates: list[tuple[TargetDecision, UUID]] = []
+    ambiguous = 0
     for decision in decisions:
         if decision.device_id is not None:
             candidates.append((decision, decision.device_id))
+        elif "ambiguous_asset" in decision.refusals:
+            # Counted, never listed (research-4 §I4): an address that does not
+            # name one machine is not a machine a person can confirm.
+            ambiguous += 1
     device_ids = [device_id for _decision, device_id in candidates]
     enrolled = await _enrolled(session, org_id, device_ids)
     facts = await _device_facts(session, org_id, device_ids)
@@ -358,12 +441,14 @@ async def expand_prefix(
                 push_run_max=PUSH_RUN_MAX,
             )
         )
-    unvouched, awaiting_review = await _unlisted_counts(session, org_id, canonical)
+    unvouched, awaiting_review = await _unlisted_counts(session, org_id, client_id, canonical)
     return RunList(
         prefix=canonical,
+        client_id=client_id,
         credential_id=credential.id,
         credential_name=credential.name,
         rows=tuple(rows),
         unvouched_count=unvouched,
         awaiting_review_count=awaiting_review,
+        ambiguous_count=ambiguous,
     )

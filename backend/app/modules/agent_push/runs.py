@@ -15,6 +15,15 @@ implements. `tests/test_agent_push_dispatches_nothing.py` holds this file to
 that. Even which version of a secret is current reaches this file only as the
 dispatcher's opaque `credential_fingerprint`.
 
+**A RUN IS ONE CLIENT'S** (MSP clients, plan 2026-10-26 Task 12). Its client
+is its credential's (`its_push_run_client_guard`, migration 0241), its
+targets are that client's machines, and the pacer re-runs the ladder inside
+that client before every target. One run may be active per CLIENT (operator
+decision D3), each with at most `PUSH_RUN_CONCURRENCY` in flight. The beat
+continues each run in a session whose scope is that run's client alone
+(`app/worker.py::push_run_tick_all_orgs`), so the database refuses any row of
+another; it still never starts, resumes or widens one (2a(e)).
+
 **EVERY QUERY CARRIES AN EXPLICIT `org_id` PREDICATE**, as in the rest of the
 package, in addition to RLS.
 """
@@ -32,8 +41,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.core.audit import audit_service
 from app.core.events import publish as publish_event
 from app.core.i18n import N_, tr
-from app.core.rbac import has_permission
-from app.models import Agent, Job, JobStatus
+from app.core.rbac import codes_held_anywhere, has_permission
+from app.models import Agent, Device, Job, JobStatus
 from app.modules.agent_push.credential_scope import resolve_push_credential
 from app.modules.agent_push.errors import (
     PushConflictError,
@@ -43,6 +52,7 @@ from app.modules.agent_push.errors import (
     PushPermissionError,
     PushValidationError,
 )
+from app.modules.agent_push.locks import lock_target_scope, sites_of
 from app.modules.agent_push.models import (
     PUSH_RUN_ACTIVE_STATES,
     PUSH_RUN_TARGET_STATES,
@@ -78,7 +88,6 @@ __all__ = [
     "resume_run",
     "run_counts",
     "settle_target_for_job",
-    "tick",
 ]
 
 logger = logging.getLogger(__name__)
@@ -141,9 +150,10 @@ RUN_REFUSAL_REASONS: dict[str, str] = {
     ),
     "credential_missing": (
         N_(
-            "the run's credential no longer exists, or is no longer a push credential. "
-            "Nothing is presented with a secret the operator has withdrawn. Start a new "
-            "run with a current credential"
+            "the run's credential no longer exists, is no longer a push credential, or is "
+            "not a credential of this machine's client. Nothing is presented with a secret "
+            "the operator has withdrawn, nor to another client's machine. Start a new run "
+            "with a current credential of the machine's client"
         )
     ),
     "target_changed": (
@@ -179,12 +189,14 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-async def _lock_org_runs(session: AsyncSession, org_id: UUID) -> None:
-    """Serialize run creation per org, so two confirmations cannot both pass
-    the "no active run" check. `uq_push_run_active` is the backstop."""
+async def _lock_client_runs(session: AsyncSession, org_id: UUID, client_id: UUID) -> None:
+    """Serialize run creation per CLIENT (D3), so two confirmations for one
+    client cannot both pass the "no active run" check, while another
+    client's confirmation does not wait. `uq_push_run_active` is the
+    backstop."""
     await session.execute(
-        text("SELECT pg_advisory_xact_lock(hashtext('push_run:' || :org))"),
-        {"org": str(org_id)},
+        text("SELECT pg_advisory_xact_lock(hashtext('push_run:' || :org || ':' || :client))"),
+        {"org": str(org_id), "client": str(client_id)},
     )
 
 
@@ -209,8 +221,14 @@ async def create_run(
       conjunction;
     * `PushListChangedError` when the digest does not match;
     * `PushValidationError` when nothing is ready;
-    * `PushConflictError` when a run is already running, paused or stopped by
-      the lockout guard.
+    * `PushConflictError` when a run OF THE CREDENTIAL'S CLIENT is already
+      running, paused or stopped by the lockout guard (D3: one per client).
+
+    The run is the credential's client's, and so is every target: the list
+    was expanded inside that client (`expand_prefix`). Its sites and client
+    are locked FOR SHARE before the run lock and the first audit
+    (`locks.lock_target_scope`): the pacer that the API runs in this same
+    transaction mints their tokens after that audit.
     """
     stamp = now or _utcnow()
     confirmed = await expand_prefix(
@@ -235,25 +253,32 @@ async def create_run(
         raise PushValidationError(
             tr("no machine in this subnet is ready for a push, so there is nothing to confirm")
         )
-    await _lock_org_runs(session, org_id)
+    client_id = confirmed.client_id
+    await lock_target_scope(
+        session, org_id, await sites_of(session, org_id, (row.device_id for row in ready))
+    )
+    await _lock_client_runs(session, org_id, client_id)
     active = (
         await session.execute(
             select(PushRun.id).where(
-                PushRun.org_id == org_id, PushRun.state.in_(PUSH_RUN_ACTIVE_STATES)
+                PushRun.org_id == org_id,
+                PushRun.client_id == client_id,
+                PushRun.state.in_(PUSH_RUN_ACTIVE_STATES),
             )
         )
     ).first()
     if active is not None:
         raise PushConflictError(
             tr(
-                "this organization already has a push run that is running, paused or "
-                "stopped after sign-in failures: one active run per organization. Let it "
-                "finish, or cancel it, first"
+                "this client already has a push run that is running, paused or stopped "
+                "after sign-in failures: one active run per client. Let it finish, or "
+                "cancel it, first"
             )
         )
 
     run = PushRun(
         org_id=org_id,
+        client_id=client_id,
         created_by=actor_id,
         credential_id=confirmed.credential_id,
         prefix=confirmed.prefix,
@@ -292,12 +317,14 @@ async def create_run(
         action="push.run.started",
         target_type="push_run",
         target_id=str(run.id),
+        client_id=client_id,
         metadata={
             "prefix": confirmed.prefix,
             "credential_id": str(confirmed.credential_id),
             "credential_name": confirmed.credential_name,
             "target_count": len(ready),
             "blocked_count": len(confirmed.rows) - len(ready),
+            "ambiguous_count": confirmed.ambiguous_count,
             "list_digest": confirmed.list_digest,
             "concurrency": PUSH_RUN_CONCURRENCY,
         },
@@ -393,6 +420,7 @@ async def _audit_control(
         action=action,
         target_type="push_run",
         target_id=str(run.id),
+        client_id=run.client_id,
         metadata={
             "prefix": str(run.prefix),
             "state": run.state,
@@ -457,18 +485,27 @@ async def resume_run(
     `auth_failed` nor a sign-in, even one that reports after the Resume -- and
     the run goes back to ONE target until a sign-in in this window succeeds.
 
-    Needs `credentials.checkout` as well as `agent.push.run`, because
-    resuming causes stored secrets to be decrypted and presented again."""
-    if not await has_permission(session, actor_id, "credentials.checkout"):
-        raise PushPermissionError(
-            tr(
-                "resuming a push run requires the `credentials.checkout` permission as "
-                "well as `agent.push.run`: it presents a stored secret to the machines "
-                "still waiting"
-            )
+    Needs `credentials.checkout` as well as `agent.push.run` -- in the run's
+    client (Task 12) -- because resuming causes stored secrets to be
+    decrypted and presented again. The waiting targets' sites and client are
+    locked before the resume's audit: the pacer the API runs next, in this
+    transaction, mints their tokens after it (`locks.lock_target_scope`)."""
+    refused = PushPermissionError(
+        tr(
+            "resuming a push run requires the `credentials.checkout` permission as "
+            "well as `agent.push.run`: it presents a stored secret to the machines "
+            "still waiting"
         )
+    )
+    if "credentials.checkout" not in await codes_held_anywhere(session, actor_id):
+        raise refused
     stamp = now or _utcnow()
     run = await _locked_run(session, org_id, run_id)
+    if not await has_permission(
+        session, actor_id, "credentials.checkout", client_id=run.client_id
+    ):
+        raise refused
+    await _lock_waiting_scope(session, run)
     if run.state not in ("paused", "stopped_credential"):
         final = tr(" A cancelled run is final.") if run.state == "cancelled" else ""
         raise PushConflictError(
@@ -632,21 +669,45 @@ async def _count_state(session: AsyncSession, run: PushRun, *states: str) -> int
 
 
 async def _run_credential(session: AsyncSession, run: PushRun) -> Any | None:
-    """The run's credential, metadata only, or `None` if it is gone or no
-    longer a push credential. It is resolved again on every pass, never cached."""
+    """The run's credential, metadata only, or `None` if it is gone, no
+    longer a push credential, or not of the run's client (which the database
+    already forbids: `its_push_run_client_guard`). It is resolved again on
+    every pass, never cached."""
     if run.credential_id is None:
         return None
     try:
-        return await resolve_push_credential(session, run.org_id, run.credential_id)
+        return await resolve_push_credential(
+            session, run.org_id, run.credential_id, client_id=run.client_id
+        )
     except PushError:
         return None
 
 
-async def _owner_may_push(session: AsyncSession, user_id: UUID) -> bool:
-    """The conjunction `request_push_batch` checks first (R10)."""
-    return await has_permission(session, user_id, "agent.push.run") and await has_permission(
-        session, user_id, "credentials.checkout"
-    )
+async def _owner_may_push(session: AsyncSession, user_id: UUID, client_id: UUID) -> bool:
+    """The conjunction `request_push_batch` checks first (R10), in the run's
+    client: the person who confirmed the run still holds both codes THERE."""
+    return await has_permission(
+        session, user_id, "agent.push.run", client_id=client_id
+    ) and await has_permission(session, user_id, "credentials.checkout", client_id=client_id)
+
+
+async def _lock_waiting_scope(session: AsyncSession, run: PushRun) -> None:
+    """The sites of the run's waiting targets, then their client, FOR SHARE
+    (`locks.lock_target_scope`), read in one statement."""
+    sites = (
+        await session.execute(
+            select(Device.site_id)
+            .join(PushRunTarget, PushRunTarget.device_id == Device.id)
+            .where(
+                Device.org_id == run.org_id,
+                PushRunTarget.org_id == run.org_id,
+                PushRunTarget.run_id == run.id,
+                PushRunTarget.state == "waiting",
+            )
+            .distinct()
+        )
+    ).scalars()
+    await lock_target_scope(session, run.org_id, list(sites))
 
 
 async def _is_enrolled(session: AsyncSession, org_id: UUID, device_id: UUID) -> bool:
@@ -683,6 +744,7 @@ async def _recheck(
             run.org_id,
             addresses=[parse_target_address(str(target.address))],
             credential_id=credential.id,
+            client_id=run.client_id,
             now=now,
         )
         reasons.extend(r for r in decision.refusals if r not in reasons)
@@ -721,6 +783,7 @@ async def _refuse_target(
         action="push.refused",
         target_type="push_target",
         target_id=str(target.address),
+        client_id=run.client_id,
         metadata={
             "target_address": str(target.address),
             "reasons": list(reasons),
@@ -835,6 +898,7 @@ async def _stop_if_locked_out(
         action="push.run.stopped",
         target_type="push_run",
         target_id=str(run.id),
+        client_id=run.client_id,
         metadata={
             "reason": "auth_failures",
             "auth_failures": failures,
@@ -866,7 +930,7 @@ async def _stop_if_locked_out(
             "stopped_at": now.isoformat(),
         },
         actor_user_id=None,
-        client_id=None,  # plan 2026-10-26 Task 12 sets the run's client
+        client_id=run.client_id,
     )
     return True
 
@@ -914,7 +978,7 @@ async def _fill(
     )
     if not waiting:
         return []
-    owner_ok = await _owner_may_push(session, run.created_by)
+    owner_ok = await _owner_may_push(session, run.created_by, run.client_id)
     envelopes: list[Envelope] = []
     for target in waiting:
         if room <= 0:
@@ -996,6 +1060,7 @@ async def _record_dispatch_failure(
         action="push.run.dispatch_failed",
         target_type="push_target",
         target_id=str(target.address),
+        client_id=run.client_id,
         metadata={
             "target_address": str(target.address),
             "run_id": str(run.id),
@@ -1024,6 +1089,7 @@ async def _complete_if_done(session: AsyncSession, run: PushRun, now: datetime) 
         action="push.run.completed",
         target_type="push_run",
         target_id=str(run.id),
+        client_id=run.client_id,
         metadata={
             "prefix": str(run.prefix),
             "counts": counts,
@@ -1047,7 +1113,7 @@ async def _complete_if_done(session: AsyncSession, run: PushRun, now: datetime) 
             "finished_at": now.isoformat(),
         },
         actor_user_id=None,
-        client_id=None,  # plan 2026-10-26 Task 12 sets the run's client
+        client_id=run.client_id,
     )
 
 
@@ -1064,7 +1130,8 @@ async def advance_run(
 
     1. `SELECT ... FOR UPDATE` on the run: two concurrent callers (the beat, a
        person's Start or Resume) serialize here, so in-flight never exceeds
-       `PUSH_RUN_CONCURRENCY`.
+       `PUSH_RUN_CONCURRENCY`. Then the waiting targets' sites and client FOR
+       SHARE, before any audit of this pass (`locks.lock_target_scope`).
     2. Settle every in-flight target from its job row.
     3. Only while the run is `running`: stop it as `stopped_credential` if the
        lockout guard's limit is reached (§1.4a); otherwise re-run the whole
@@ -1086,6 +1153,7 @@ async def advance_run(
     ).scalar_one_or_none()
     if run is None:
         return []
+    await _lock_waiting_scope(session, run)
     await _reconcile(session, run, stamp)
     envelopes: list[Envelope] = []
     if run.state != "running":
@@ -1122,38 +1190,20 @@ def _live_condition() -> Any:
     return PushRun.state.in_(PUSH_RUN_ACTIVE_STATES) | in_flight
 
 
-async def tick(
-    session: AsyncSession,
-    org_id: UUID,
-    *,
-    dispatcher: RunTargetDispatcher,
-    now: datetime | None = None,
-) -> list[Envelope]:
-    """One pass over this org's live runs: running, paused or
-    `stopped_credential` (never resumed here, only settled), or cancelled but
-    with installs still in flight to settle."""
-    stamp = now or _utcnow()
-    run_ids = list(
-        (
-            await session.execute(
-                select(PushRun.id)
-                .where(PushRun.org_id == org_id, _live_condition())
-                .order_by(PushRun.created_at)
-            )
-        ).scalars()
-    )
-    envelopes: list[Envelope] = []
-    for run_id in run_ids:
-        envelopes.extend(
-            await advance_run(session, org_id, run_id, dispatcher=dispatcher, now=stamp)
-        )
-    return envelopes
+async def org_ids_with_live_runs(admin_engine: AsyncEngine) -> list[tuple[UUID, UUID, UUID]]:
+    """`(org_id, run_id, client_id)` of every live run -- running, paused or
+    `stopped_credential` (never resumed by the beat, only settled), or
+    cancelled with installs still in flight to settle -- oldest first within
+    an org, in ONE statement.
 
-
-async def org_ids_with_live_runs(admin_engine: AsyncEngine) -> list[UUID]:
-    """Read on the ADMIN engine, exactly as `agent_update.reconcile._org_ids`
-    is: the beat must find the orgs before it can open a tenant session for
-    any. It returns ids only, and returns at once when no run is live."""
+    Read on the ADMIN engine, exactly as `agent_update.reconcile._org_ids`
+    is: the beat must find the runs before it can open a tenant session for
+    any, and it opens one per run, scoped to that run's client
+    (`app/worker.py::push_run_tick_all_orgs`). Ids only."""
     async with AsyncSession(admin_engine) as session:
-        rows = await session.execute(select(PushRun.org_id).where(_live_condition()).distinct())
-        return list(rows.scalars())
+        rows = await session.execute(
+            select(PushRun.org_id, PushRun.id, PushRun.client_id)
+            .where(_live_condition())
+            .order_by(PushRun.org_id, PushRun.created_at, PushRun.id)
+        )
+        return [(row.org_id, row.id, row.client_id) for row in rows]

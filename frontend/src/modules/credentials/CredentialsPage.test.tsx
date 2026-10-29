@@ -32,6 +32,7 @@ function credential(overrides: Partial<Credential> = {}): Credential {
     name: "Domain support admin",
     type: "windows_admin",
     device_group_id: null,
+    client_id: null,
     created_at: "2026-08-01T00:00:00Z",
     last_used_at: null,
     has_secret: true,
@@ -39,7 +40,9 @@ function credential(overrides: Partial<Credential> = {}): Credential {
   };
 }
 
-const ME: Me = { permissions: ["credentials.manage"] } as Me;
+// `org_id` is the internal client's id, which a push credential is filed
+// under until the client selector exists (`lib/internalClient.ts`).
+const ME: Me = { permissions: ["credentials.manage"], org_id: "o1" } as Me;
 
 /**
  * THE ROUTE TABLE, READ FROM `App.tsx` ITSELF.
@@ -697,6 +700,27 @@ describe("CredentialsPage — credential types as a person reads them", () => {
     });
   });
 
+  it("files a push install credential under the internal client, and only a push credential", async () => {
+    // MSP clients phase 2, Task 12: a push credential has exactly one client.
+    // The ssh_key above is sent with none and serves every client, as before.
+    const user = userEvent.setup();
+    const createCredential = vi.fn().mockResolvedValue(credential({ type: "push_install" }));
+    renderPage({ listCredentials: () => Promise.resolve([]), createCredential });
+    await user.click(await screen.findByRole("button", { name: /new credential/i }));
+
+    await user.selectOptions(screen.getByLabelText("Type"), "push_install");
+    await user.type(screen.getByLabelText("Name"), "Branch installer");
+    await user.type(screen.getByLabelText("Secret"), "s3cret");
+    await user.click(screen.getByRole("button", { name: "Store" }));
+
+    expect(createCredential).toHaveBeenCalledExactlyOnceWith({
+      name: "Branch installer",
+      type: "push_install",
+      client_id: "o1",
+      secret: "s3cret",
+    });
+  });
+
   // AUDIT [LOW]: "'Credential types 0' is misleading given the Type dropdown
   // offers three; the card appears to count *used* types while reading as a
   // capability count."
@@ -878,9 +902,17 @@ describe("CredentialsPage — a Windows domain account", () => {
     await user.click(within(dialog).getByRole("button", { name: "Store" }));
 
     expect(createCredential).toHaveBeenCalledTimes(1);
-    const body = createCredential.mock.calls[0]![0] as { name: string; type: string; secret: string };
+    const body = createCredential.mock.calls[0]![0] as {
+      name: string;
+      type: string;
+      secret: string;
+      client_id?: string;
+    };
     expect(body.name).toBe("Workstation installer");
     expect(body.type).toBe("windows_domain");
+    // A push credential has exactly one client: the internal one, until the
+    // client selector exists (MSP clients phase 2, Task 12).
+    expect(body.client_id).toBe("o1");
     // The password byte-for-byte, as every other vault secret; an empty
     // optional field is left out rather than stored as "".
     expect(JSON.parse(body.secret)).toEqual({
@@ -888,6 +920,28 @@ describe("CredentialsPage — a Windows domain account", () => {
       secret: " s3cret ",
       kdc: "dc1.corp.example.com",
     });
+  });
+
+  it("sends no push credential before its client is known", async () => {
+    const user = userEvent.setup();
+    const createCredential = vi.fn().mockResolvedValue(credential({ type: "windows_domain" }));
+    renderPage(
+      {
+        me: vi.fn().mockResolvedValue({ permissions: ["credentials.manage"] } as Me),
+        listCredentials: () => Promise.resolve([]),
+        createCredential,
+      },
+      "/credentials?new=windows_domain",
+    );
+    const dialog = await screen.findByRole("dialog", { name: "New credential" });
+    await user.type(within(dialog).getByLabelText("Name"), "Workstation installer");
+    await user.type(within(dialog).getByLabelText(/^Account/), "svc-push@corp.example.com");
+    await user.type(within(dialog).getByLabelText(/^Password/), "s3cret");
+    await user.click(within(dialog).getByRole("button", { name: "Store" }));
+    expect(
+      await within(dialog).findByText(/cannot tell which client this is for\. Nothing was sent/),
+    ).toBeInTheDocument();
+    expect(createCredential).not.toHaveBeenCalled();
   });
 
   it("names the missing account and password rather than storing half a credential", async () => {

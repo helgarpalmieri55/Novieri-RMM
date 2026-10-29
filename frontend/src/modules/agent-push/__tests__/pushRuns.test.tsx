@@ -19,6 +19,7 @@ vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 function run(state: PushRunState = "running", over: Partial<PushRunOut> = {}): PushRunOut {
   return {
     id: "run-1",
+    client_id: "o1",
     prefix: "10.20.4.0/24",
     credential_id: "c1",
     credential_name: "Push install · rack B4",

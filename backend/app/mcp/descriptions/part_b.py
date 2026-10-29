@@ -87,12 +87,13 @@ PART_B: dict[str, str] = {
     ),
     # --- agent-push ---
     "GET /api/v1/agent-push/authorizations": (
-        "Lists the network prefixes this organization has authorized for credentialed agent "
-        "push installs, including expired ones. Revoked grants only if asked."
+        "Lists the network prefixes each client has authorized for credentialed agent push "
+        "installs, including expired ones. Revoked grants only if asked."
     ),
     "POST /api/v1/agent-push/authorizations": (
-        "Authorizes a network prefix as a place where a stored credential may be presented "
-        "to machines for a push install. High privilege; widens what pushes can reach."
+        "Authorizes a network prefix of one named client as a place where that client's "
+        "push credentials may be presented to its machines. High privilege; widens what "
+        "pushes can reach."
     ),
     "DELETE /api/v1/agent-push/authorizations/{authorization_id}": (
         "Revokes a push authorization so its prefix is no longer a valid push target. "
@@ -103,8 +104,8 @@ PART_B: dict[str, str] = {
         "Names the credentials but never returns a secret."
     ),
     "POST /api/v1/agent-push/credential-scopes": (
-        "Binds a dedicated push-install credential to an address prefix, allowing it to be "
-        "presented there. High privilege. Refuses any other credential type."
+        "Binds a dedicated push-install credential to an address prefix of its client, "
+        "allowing it to be presented there. High privilege. Refuses any other credential type."
     ),
     "DELETE /api/v1/agent-push/credential-scopes/{scope_id}": (
         "Unbinds a credential from a prefix so it can no longer be presented to addresses "
@@ -119,22 +120,21 @@ PART_B: dict[str, str] = {
         "later pushes to it. High consequence; must equal the last probe's fingerprint."
     ),
     "POST /api/v1/agent-push/requests": (
-        "Probes or installs the agent on explicitly named, unenrolled addresses through a "
-        "site server. An install presents a stored credential to each target. Refused whole "
-        "if any target fails any bound."
+        "Probes or installs the agent on explicitly named, unenrolled addresses of the "
+        "credential's client, through that client's site server. An install presents the "
+        "credential to each target. Refused whole if any target fails any bound."
     ),
     "GET /api/v1/agent-push/runs": (
-        "Lists this organization's push install runs with state and progress."
+        "Lists push install runs with their client, state and progress."
     ),
     "POST /api/v1/agent-push/runs": (
-        "Starts a push install run over the named machines of an authorized subnet, "
-        "confirmed by the list digest from the preview. The platform keeps dispatching the "
-        "remaining targets, up to 50 in flight, until the run is paused or cancelled. "
-        "Refused if the list changed."
+        "Starts a push run over the named machines of an authorized subnet of the "
+        "credential's client, confirmed by the preview's digest. Up to 50 in flight until "
+        "paused or cancelled; one active run per client. Refused if the list changed."
     ),
     "GET /api/v1/agent-push/runs/prefixes": (
-        "Lists the authorized subnets a push run may be built from, with address counts and "
-        "expiry. Read-only."
+        "Lists the authorized subnets a push run may be built from -- with credential_id, "
+        "that credential's client's -- with address counts and expiry. Read-only."
     ),
     "GET /api/v1/agent-push/runs/preview": (
         "Expands an authorized subnet into the named machines a push run would cover, with "

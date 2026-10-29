@@ -795,6 +795,15 @@ async def test_the_unique_key_guard_is_not_vacuous(admin_engine) -> None:
     for name in ("uq_ipam_vlan_site_vid", "uq_ipam_subnet_org_vrf_prefix",
                  "uq_ipam_address_org_vrf_addr"):
         assert leaky_because(by_name[name], pinning[by_name[name].table]) is None, name
+    # Push install (plan 2026-10-26 Task 12): 0077's per-organisation active
+    # authorization and 0200's one-active-run-per-organisation are LEAKY; a
+    # credential scope's key holds its credential, the inheritance foreign key.
+    assert old("push_authorization", "org_id", "prefix") is not None
+    assert old("push_run", "org_id") is not None
+    assert "credential_id" in pinning["push_credential_scope"]
+    assert leaky_because(
+        by_name["uq_push_credential_scope_active"], pinning["push_credential_scope"]
+    ) is None
 
 
 #: Migration 0231's per-client natural keys (Task 8b), with their columns and
@@ -859,6 +868,12 @@ PER_CLIENT_KEYS: dict[str, tuple[str, tuple[str, ...], bool]] = {
     "uq_ipam_vrf_client_name": ("ipam_vrf", ("org_id", "client_id", "name"), False),
     "uq_ipam_vlan_client_vid": ("ipam_vlan", ("org_id", "client_id", "vid"), False),
     "uq_ipam_vlan_site_vid": ("ipam_vlan", ("org_id", "site_id", "vid"), False),
+    # Plan 2026-10-26 Task 12 (migration 0241): a prefix is authorized per
+    # client, and one run is active per client (operator decision D3).
+    "uq_push_authorization_client_active": (
+        "push_authorization", ("org_id", "client_id", "prefix"), False,
+    ),
+    "uq_push_run_active": ("push_run", ("org_id", "client_id"), False),
 }
 
 

@@ -32,6 +32,7 @@ function credential(overrides: Partial<Credential> = {}): Credential {
     name: "Domain support admin",
     type: "windows_admin",
     device_group_id: null,
+    client_id: null,
     created_at: "2026-08-01T00:00:00Z",
     last_used_at: null,
     has_secret: true,

@@ -11,6 +11,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
+import { ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 import type {
   HostKeyOut,
@@ -22,11 +23,17 @@ import type {
 } from "./types";
 
 const DAY = 24 * 60 * 60_000;
+/**
+ * The fixture org's internal client: the org's own id (`fixtures/core.ts`'s
+ * `me`), where every row here belongs until the client selector exists.
+ */
+const INTERNAL = ORG_ID;
 const inDays = (days: number): string => new Date(Date.now() + days * DAY).toISOString();
 
 const GRANTS: PushAuthorizationOut[] = [
   {
     id: "pa-1",
+    client_id: INTERNAL,
     prefix: "10.20.4.0/24",
     address_count: 256,
     note: "Lisbon floor 3, via rack-b4-relay",
@@ -38,6 +45,7 @@ const GRANTS: PushAuthorizationOut[] = [
   },
   {
     id: "pa-2",
+    client_id: INTERNAL,
     prefix: "10.30.1.0/24",
     address_count: 256,
     note: "Porto office rollout",
@@ -49,6 +57,7 @@ const GRANTS: PushAuthorizationOut[] = [
   },
   {
     id: "pa-3",
+    client_id: INTERNAL,
     prefix: "10.20.9.0/24",
     address_count: 256,
     note: "Pilot, superseded",
@@ -63,6 +72,7 @@ const GRANTS: PushAuthorizationOut[] = [
 const SCOPES: PushCredentialScopeOut[] = [
   {
     id: "pcs-1",
+    client_id: INTERNAL,
     credential_id: "cred-push-b4",
     credential_name: "Push install · rack B4",
     prefix: "10.20.4.0/24",
@@ -75,6 +85,7 @@ const SCOPES: PushCredentialScopeOut[] = [
   },
   {
     id: "pcs-2",
+    client_id: INTERNAL,
     credential_id: "cred-push-porto",
     credential_name: "Push install · Porto",
     prefix: "10.30.1.0/24",
@@ -87,6 +98,7 @@ const SCOPES: PushCredentialScopeOut[] = [
   },
   {
     id: "pcs-3",
+    client_id: INTERNAL,
     credential_id: "cred-push-pilot",
     credential_name: "Push install · pilot",
     prefix: "10.20.9.0/24",
@@ -104,6 +116,7 @@ const listPushAuthorizations: FixtureMap["listPushAuthorizations"] = (includeRev
 
 const createPushAuthorization: FixtureMap["createPushAuthorization"] = (body) => ({
   id: `pa-${Date.now()}`,
+  client_id: body.client_id,
   prefix: body.prefix,
   address_count: 256,
   note: body.note,
@@ -121,6 +134,7 @@ const listPushCredentialScopes: FixtureMap["listPushCredentialScopes"] = (includ
 
 const bindPushCredentialScope: FixtureMap["bindPushCredentialScope"] = (body) => ({
   id: `pcs-${Date.now()}`,
+  client_id: INTERNAL,
   credential_id: body.credential_id,
   credential_name: SCOPES.find((s) => s.credential_id === body.credential_id)?.credential_name ?? "Push install",
   prefix: body.prefix,
@@ -144,6 +158,7 @@ const unbindPushCredentialScope: FixtureMap["unbindPushCredentialScope"] = () =>
 const HOST_KEYS: HostKeyOut[] = [
   {
     address: "10.20.4.12",
+    client_id: INTERNAL,
     transport: "ssh",
     observed_fingerprint: "SHA256:q3Vd2mX0Jc8pZ1uYkT7rHs4nLw9aGf6eBi5oCxRtUvE",
     observed_key_type: "ssh-ed25519",
@@ -158,6 +173,7 @@ const HOST_KEYS: HostKeyOut[] = [
   },
   {
     address: "10.20.4.31",
+    client_id: INTERNAL,
     transport: "winrm",
     observed_fingerprint: "winrm",
     observed_key_type: "",
@@ -172,6 +188,7 @@ const HOST_KEYS: HostKeyOut[] = [
   },
   {
     address: "10.20.4.32",
+    client_id: INTERNAL,
     transport: "winrm",
     observed_fingerprint: "winrm",
     observed_key_type: "",
@@ -209,6 +226,7 @@ const confirmPushHostKey: FixtureMap["confirmPushHostKey"] = (body) => {
 /** A run on the Lisbon floor, part-way through (design 2026-09-30 §1.7). */
 const RUN: PushRunOut = {
   id: "run-1",
+  client_id: INTERNAL,
   prefix: "10.20.4.0/24",
   credential_id: "cred-push-b4",
   credential_name: "Push install · rack B4",
@@ -237,6 +255,7 @@ const RUN_TARGETS: PushRunTargetOut[] = [
 
 const PREVIEW: PushRunPreviewOut = {
   prefix: "10.20.4.0/24",
+  client_id: INTERNAL,
   credential_id: "cred-push-b4",
   credential_name: "Push install · rack B4",
   list_digest: "cd".repeat(32),
@@ -244,6 +263,7 @@ const PREVIEW: PushRunPreviewOut = {
   blocked_count: 2,
   unvouched_count: 4,
   awaiting_review_count: 1,
+  ambiguous_count: 0,
   run_max: 1024,
   concurrency: 50,
   rows: [
@@ -257,6 +277,7 @@ const PREVIEW: PushRunPreviewOut = {
 const listPushRunPrefixes: FixtureMap["listPushRunPrefixes"] = () =>
   GRANTS.filter((g) => g.revoked_at === null).map((g) => ({
     prefix: g.prefix,
+    client_id: g.client_id,
     address_count: g.address_count,
     expires_at: g.expires_at,
   }));

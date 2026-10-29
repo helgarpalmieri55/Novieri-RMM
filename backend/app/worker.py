@@ -2095,8 +2095,15 @@ async def push_run_tick_all_orgs(now: datetime | None = None) -> int:
     jobs ended without reaching the gateway's result handler, and fills freed
     capacity -- which the gateway cannot do, because it holds no vault. The
     vault, signer and object store are fleet-wide preconditions, resolved
-    before the loop. One org per transaction, and envelopes are published only
-    after that org commits. One org's failure is contained; see
+    before the loop.
+
+    ONE RUN PER TRANSACTION, IN ITS OWN CLIENT'S SCOPE (MSP clients, plan
+    2026-10-26 Task 12). A run is one client's, so each is advanced in an
+    `org_session` that sees that client alone: the database refuses any row
+    of another, whatever the pacer's own queries say, and one run's failure
+    does not roll another's dispatches back. Envelopes are published only
+    after that run commits. The every-client scope is not used here. One
+    org's failure is contained (its later runs wait for the next beat); see
     `_OrgCycleFailures`.
     """
     settings = get_settings()
@@ -2118,22 +2125,27 @@ async def push_run_tick_all_orgs(now: datetime | None = None) -> int:
     failures = _OrgCycleFailures("push.run_tick")
     total = 0
     try:
-        org_ids = await push_runs_module.org_ids_with_live_runs(admin_engine)
-        for org_id in org_ids:
+        live: dict[UUID, list[tuple[UUID, UUID]]] = {}
+        for org_id, run_id, client_id in await push_runs_module.org_ids_with_live_runs(
+            admin_engine
+        ):
+            live.setdefault(org_id, []).append((run_id, client_id))
+        for org_id in live:
             try:
-                async with org_session(
-                    org_id, engine=app_engine, clients=ClientScope.all()
-                ) as session:
-                    envelopes = await push_runs_module.tick(
-                        session, org_id, dispatcher=dispatcher, now=now
-                    )
-                # Transaction committed: safe to hand the signed jobs to agents.
-                for device_id, envelope in envelopes:
-                    await publish_job(redis, device_id, envelope)
-                total += len(envelopes)
+                for run_id, client_id in live[org_id]:
+                    async with org_session(
+                        org_id, engine=app_engine, clients=ClientScope.only([client_id])
+                    ) as session:
+                        envelopes = await push_runs_module.advance_run(
+                            session, org_id, run_id, dispatcher=dispatcher, now=now
+                        )
+                    # Committed: safe to hand the signed jobs to agents.
+                    for device_id, envelope in envelopes:
+                        await publish_job(redis, device_id, envelope)
+                    total += len(envelopes)
             except Exception as exc:  # noqa: BLE001 - contained, see `_OrgCycleFailures`
                 failures.contain(org_id, exc)
-        failures.raise_if_total(len(org_ids))
+        failures.raise_if_total(len(live))
     finally:
         await redis.aclose()
         await app_engine.dispose()

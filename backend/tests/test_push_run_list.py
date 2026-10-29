@@ -110,12 +110,19 @@ async def test_each_blocked_reason_is_named(
 async def test_the_digest_is_over_the_sorted_ready_pairs(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
+    """The sorted ready pairs -- AFTER the run's client and credential (plan
+    2026-10-26 Task 12; 2a(f) "bound by a digest of that list"), so a list
+    confirmed for one credential is not confirmed for another."""
     world = await run_world(admin_engine, "rl-dig", octet=83, count=2)
     listed = await _expand(app_engine, world)
-    lines = sorted(f"{r.device_id}|{r.address}" for r in listed.ready_rows)
+    lines = [f"client:{world.client_id}", f"credential:{world.credential_id}"]
+    lines += sorted(f"{r.device_id}|{r.address}" for r in listed.ready_rows)
     assert listed.list_digest == hashlib.sha256("\n".join(lines).encode()).hexdigest()
     pairs = [(r.device_id, r.address) for r in listed.ready_rows]
-    assert run_list.compute_list_digest(pairs) == run_list.compute_list_digest(reversed(pairs))
+    bound = {"client_id": world.client_id, "credential_id": world.credential_id}
+    assert run_list.compute_list_digest(pairs, **bound) == run_list.compute_list_digest(
+        reversed(pairs), **bound
+    )
 
     # A ready machine turning blocked changes the digest (R7).
     async with AsyncSession(admin_engine) as session:
@@ -131,10 +138,10 @@ async def test_only_an_active_authorization_exactly_as_authorized_may_be_expande
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
     world = await run_world(admin_engine, "rl-auth", octet=84, count=1)
-    with pytest.raises(PushValidationError, match="not one of this organization"):
+    with pytest.raises(PushValidationError, match="not one of this client"):
         await _expand(app_engine, world, prefix="10.84.0.0/25")
     await seed_push_authorization(admin_engine, world.org, "10.84.4.0/24", revoked=True)
-    with pytest.raises(PushValidationError, match="not one of this organization"):
+    with pytest.raises(PushValidationError, match="not one of this client"):
         await _expand(app_engine, world, prefix="10.84.4.0/24")
 
 

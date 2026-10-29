@@ -14,6 +14,7 @@ import {
   usePushRequestMutation,
 } from "./api";
 import {
+  hostKeysForClient,
   isWinrmRow,
   kdcNotFound,
   refusalReasonLabel,
@@ -24,7 +25,6 @@ import {
 import {
   PUSH_BATCH_MAX,
   WINDOWS_DOMAIN_CREDENTIAL_TYPE,
-  type HostKeyOut,
   type PushRefusalDetail,
 } from "./types";
 
@@ -86,8 +86,11 @@ interface Props {
    * probe row is a WinRM row is treated as Windows whether listed here or not.
    */
   windowsTargets?: readonly string[];
-  /** The chosen push credential — id, label and type only, never a secret. */
-  credential: { id: string; name: string; type?: string };
+  /**
+   * The chosen push credential — id, label, type and client only, never a
+   * secret. Its client is the push's (MSP clients phase 2, Task 12).
+   */
+  credential: { id: string; name: string; type?: string; client_id?: string | null };
 }
 
 /** The structured 422 body (spec §9), or null for any other failure. */
@@ -112,11 +115,8 @@ export function PushPreflightPanel({ targets, windowsTargets = [], credential }:
   const install = usePushRequestMutation();
   const confirm = useConfirmHostKeyMutation();
 
-  const byAddress = useMemo(() => {
-    const map = new Map<string, HostKeyOut>();
-    for (const k of hostKeys.data ?? []) map.set(k.address, k);
-    return map;
-  }, [hostKeys.data]);
+  const client = credential.client_id ?? null;
+  const byAddress = useMemo(() => hostKeysForClient(hostKeys.data ?? [], client), [hostKeys.data, client]);
 
   const isWindows = (address: string) => {
     const row = byAddress.get(address);

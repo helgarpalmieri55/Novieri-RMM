@@ -20,6 +20,11 @@ received the pre-authentication of a Domain-Admin-capable account. So:
   (case-insensitive, on a label boundary): `pc1.corp.example.com` is inside
   `CORP.EXAMPLE.COM`; `pc1.notcorp.example.com` and `corp.example.com` itself
   are not.
+
+**THE ROW IS ITS CREDENTIAL'S CLIENT'S** (H, migration 0241; plan 2026-10-26
+Task 12): the trigger copies the client, so `record_realm` sends none, and a
+`windows_domain` credential with no client is refused at `POST /credentials`
+before a realm is ever recorded for it.
 """
 
 import json

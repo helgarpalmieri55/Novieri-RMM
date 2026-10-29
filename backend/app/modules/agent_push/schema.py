@@ -53,8 +53,13 @@ class _Strict(BaseModel):
 
 
 class AuthorizationCreate(_Strict):
-    """Authorize credentialed pushes inside one prefix."""
+    """Authorize credentialed pushes inside one prefix of one client's
+    network."""
 
+    client_id: UUID = Field(
+        description="The client whose network the prefix is. A push is authorized "
+        "there for that client's machines only."
+    )
     prefix: str = Field(
         min_length=1,
         max_length=64,
@@ -78,6 +83,7 @@ class AuthorizationOut(_Strict):
     """One `push_authorization` row, with its reach stated in addresses."""
 
     id: UUID = Field(description="The authorization's id.")
+    client_id: UUID = Field(description="The client whose network the prefix is.")
     prefix: str = Field(description="The authorized prefix, canonicalised.")
     address_count: int = Field(
         description="How many addresses this grant reaches. Not a mask length."
@@ -117,6 +123,7 @@ class CredentialScopeOut(_Strict):
     """
 
     id: UUID = Field(description="The scope's id.")
+    client_id: UUID = Field(description="The credential's client, which the scope is in.")
     credential_id: UUID = Field(description="The credential this scope binds.")
     credential_name: str = Field(description="The credential's label.")
     prefix: str = Field(description="Where the credential may be presented.")
@@ -203,6 +210,11 @@ class HostKeyOut(_Strict):
     it. Public key material only -- never a secret."""
 
     address: str = Field(description="The target address.")
+    client_id: UUID | None = Field(
+        default=None,
+        description="The client whose machine holds the address; null for a key "
+        "recorded before its machine was known.",
+    )
     transport: str = Field(description="ssh or winrm.")
     observed_fingerprint: str = Field(description="What the last probe saw.")
     observed_key_type: str = Field(description="e.g. ssh-ed25519.")
@@ -244,6 +256,7 @@ class RunPrefixOut(_Strict):
     """A subnet a run may be built from: an ACTIVE push authorization."""
 
     prefix: str = Field(description="The authorized prefix, exactly as authorized.")
+    client_id: UUID = Field(description="The client whose network it is.")
     address_count: int = Field(description="How many addresses it reaches.")
     expires_at: datetime | None = Field(description="When the authorization lapses, if ever.")
 
@@ -263,9 +276,13 @@ class RunPreviewOut(_Strict):
     """The list a person is asked to confirm, and the digest that binds it."""
 
     prefix: str = Field(description="The subnet that built the list.")
+    client_id: UUID = Field(description="The run's client: the credential's.")
     credential_id: UUID = Field(description="The credential the run would present.")
     credential_name: str = Field(description="Its label.")
-    list_digest: str = Field(description="SHA-256 of the ready (device_id, address) pairs.")
+    list_digest: str = Field(
+        description="SHA-256 binding the client, the credential and the ready "
+        "(device_id, address) pairs."
+    )
     ready_count: int = Field(description="Machines that would be installed.")
     blocked_count: int = Field(description="Machines listed and not ready.")
     unvouched_count: int = Field(
@@ -273,6 +290,10 @@ class RunPreviewOut(_Strict):
     )
     awaiting_review_count: int = Field(
         description="Vouched-for rows in the subnet still waiting for review: not listed."
+    )
+    ambiguous_count: int = Field(
+        description="Addresses that name no single machine: not listed. Always 0 inside "
+        "one client."
     )
     run_max: int = Field(description="The most ready machines one run may hold.")
     concurrency: int = Field(description="The most installs in flight at once.")
@@ -304,6 +325,7 @@ class RunOut(_Strict):
     """One push run."""
 
     id: UUID
+    client_id: UUID = Field(description="The run's client: its credential's.")
     prefix: str
     credential_id: UUID | None = Field(description="Null once the credential is gone.")
     credential_name: str

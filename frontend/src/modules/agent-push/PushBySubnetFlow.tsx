@@ -1,12 +1,14 @@
 // "By subnet": the list a person confirms, built from a subnet (design
 // 2026-09-30 §1.1, §1.7; CLAUDE.md 2a(f) as amended 2026-09-30).
 //
-//   1. THE SUBNET is one of this organization's active push authorizations,
-//      chosen from a list. There is no text box: a subnet that is not
-//      authorized cannot be chosen, and none can be typed.
-//   2. THE CREDENTIAL is one push credential. One run presents one credential,
-//      so machines of the other kind are listed as not ready, never
-//      half-pushed.
+//   1. THE CREDENTIAL is one push credential, chosen FIRST. One run presents
+//      one credential, so machines of the other kind are listed as not ready,
+//      never half-pushed -- and a run is made in its credential's CLIENT (MSP
+//      clients phase 2, Task 12), so the credential decides which subnets
+//      there are to choose from.
+//   2. THE SUBNET is one of that client's active push authorizations, chosen
+//      from a list. There is no text box: a subnet that is not authorized
+//      cannot be chosen, and none can be typed.
 //   3. THE LIST is every vouched-for machine the subnet holds, each with why it
 //      is or is not ready. Every row is shown; there is no "and 40 more".
 //   4. START sends back the list's digest, so what is confirmed is these
@@ -34,11 +36,11 @@ import { isListChanged, readinessChip } from "./runState";
 export function PushBySubnetFlow({ onClose }: { onClose: () => void }) {
   const t = useT();
   const navigate = useNavigate();
-  const prefixes = usePushRunPrefixes();
   const credentials = usePushCredentials();
   const [prefix, setPrefix] = useState("");
   const [credentialId, setCredentialId] = useState("");
   const [changed, setChanged] = useState(false);
+  const prefixes = usePushRunPrefixes(credentialId);
   const preview = usePushRunPreview(prefix, credentialId);
   const start = useCreatePushRunMutation();
   const list = preview.data;
@@ -71,29 +73,15 @@ export function PushBySubnetFlow({ onClose }: { onClose: () => void }) {
       }
     >
       <div className="form-grid">
-        <Field label={t("agentPush.subnet.subnet")}>
-          <select
-            className="select-field"
-            value={prefix}
-            onChange={(event) => {
-              setPrefix(event.target.value);
-              setChanged(false);
-            }}
-          >
-            <option value="">{t("agentPush.subnet.chooseSubnet")}</option>
-            {(prefixes.data ?? []).map((p) => (
-              <option key={p.prefix} value={p.prefix}>
-                {t("agentPush.subnet.addressesInOption", { prefix: p.prefix, formatted: formatCount(p.address_count) })}
-              </option>
-            ))}
-          </select>
-        </Field>
         <Field label={t("agentPush.shared.credential")}>
           <select
             className="select-field"
             value={credentialId}
             onChange={(event) => {
               setCredentialId(event.target.value);
+              // Another credential may be another client's: its subnets are
+              // not this one's, so the subnet is chosen again.
+              setPrefix("");
               setChanged(false);
             }}
           >
@@ -101,6 +89,26 @@ export function PushBySubnetFlow({ onClose }: { onClose: () => void }) {
             {(credentials.data ?? []).map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} ({credentialTypeLabel(c.type)})
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={t("agentPush.subnet.subnet")}>
+          <select
+            className="select-field"
+            value={prefix}
+            disabled={credentialId === ""}
+            onChange={(event) => {
+              setPrefix(event.target.value);
+              setChanged(false);
+            }}
+          >
+            <option value="">
+              {credentialId === "" ? t("agentPush.subnet.credentialFirst") : t("agentPush.subnet.chooseSubnet")}
+            </option>
+            {(prefixes.data ?? []).map((p) => (
+              <option key={p.prefix} value={p.prefix}>
+                {t("agentPush.subnet.addressesInOption", { prefix: p.prefix, formatted: formatCount(p.address_count) })}
               </option>
             ))}
           </select>
@@ -180,6 +188,9 @@ export function PushBySubnetFlow({ onClose }: { onClose: () => void }) {
           ) : null}
           {list.awaiting_review_count > 0 ? (
             <p className="note mt-3">{t("agentPush.subnet.awaitingReview", { count: list.awaiting_review_count })}</p>
+          ) : null}
+          {list.ambiguous_count > 0 ? (
+            <p className="note mt-3">{t("agentPush.subnet.ambiguous", { count: list.ambiguous_count })}</p>
           ) : null}
           {start.isError && !isListChanged(start.error) ? (
             <p role="alert" className="form-error mt-3">

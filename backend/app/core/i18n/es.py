@@ -2401,11 +2401,11 @@ CATALOG: dict[str, str] = {
         "el campo {key} de una credencial windows_domain debe ser una cadena cuando está "
         "presente"
     ),
-    "{canonical} is not one of this organization's active push authorizations. A subnet "
+    "{canonical} is not one of this client's active push authorizations. A subnet "
     "push is built from one of those, exactly as authorized; a holder of "
     "agent.push.scope.manage authorizes a prefix": (
-        "{canonical} no es una de las autorizaciones de instalación remota activas de esta "
-        "organización. Una instalación remota por subred se construye a partir de una de "
+        "{canonical} no es una de las autorizaciones de instalación remota activas de este "
+        "cliente. Una instalación remota por subred se construye a partir de una de "
         "ellas, exactamente como se autorizó; quien tenga agent.push.scope.manage autoriza un "
         "prefijo"
     ),
@@ -2431,11 +2431,11 @@ CATALOG: dict[str, str] = {
         "ningún equipo de esta subred está listo para una instalación remota, así que no hay "
         "nada que confirmar"
     ),
-    "this organization already has a push run that is running, paused or stopped after "
-    "sign-in failures: one active run per organization. Let it finish, or cancel it, first": (
-        "esta organización ya tiene una ejecución de instalación remota en curso, en pausa o "
+    "this client already has a push run that is running, paused or stopped after "
+    "sign-in failures: one active run per client. Let it finish, or cancel it, first": (
+        "este cliente ya tiene una ejecución de instalación remota en curso, en pausa o "
         "detenida por fallos de inicio de sesión: solo se permite una ejecución activa por "
-        "organización. Deja que termine, o cancélala, primero"
+        "cliente. Deja que termine, o cancélala, primero"
     ),
     "push run {run_id} not found": "no se encontró la ejecución de instalación remota {run_id}",
     "only a running push run can be paused; this one is {run_state}": (
@@ -2506,10 +2506,23 @@ CATALOG: dict[str, str] = {
         "por el sistema (especificación §3). Una persona con agent.push.scope.manage pone su "
         "nombre en cada inicio de sesión administrativo que causa esta plataforma"
     ),
-    "{network} is already authorized for push install in this organization; revoke the "
+    "{network} is already authorized for push install in this client; revoke the "
     "existing authorization before creating another": (
-        "{network} ya está autorizada para la instalación remota en esta organización; revoca "
+        "{network} ya está autorizada para la instalación remota en este cliente; revoca "
         "la autorización existente antes de crear otra"
+    ),
+    "a push authorization cannot be filed under Unassigned": (
+        "una autorización de instalación remota no se puede archivar en Sin asignar"
+    ),
+    "a push credential belongs to one client": (
+        "una credencial de instalación remota pertenece a un solo cliente"
+    ),
+    "credential {credential_id} belongs to another client": (
+        "la credencial {credential_id} es de otro cliente"
+    ),
+    "that device group belongs to another client": "ese grupo de dispositivos es de otro cliente",
+    "a credential cannot be filed under Unassigned": (
+        "una credencial no se puede archivar en Sin asignar"
     ),
     "push authorization {authorization_id} not found": (
         "no se encontró la autorización de instalación remota {authorization_id}"
@@ -2689,12 +2702,14 @@ CATALOG: dict[str, str] = {
         "credentials.checkout, así que no se instala nada más con su confirmación. Inicia una "
         "ejecución nueva"
     ),
-    "the run's credential no longer exists, or is no longer a push credential. Nothing is "
-    "presented with a secret the operator has withdrawn. Start a new run with a current "
-    "credential": (
-        "la credencial de la ejecución ya no existe, o ya no es una credencial de instalación "
-        "remota. No se presenta nada con un secreto que la persona operadora ha retirado. "
-        "Inicia una ejecución nueva con una credencial vigente"
+    "the run's credential no longer exists, is no longer a push credential, or is not a "
+    "credential of this machine's client. Nothing is presented with a secret the operator "
+    "has withdrawn, nor to another client's machine. Start a new run with a current "
+    "credential of the machine's client": (
+        "la credencial de la ejecución ya no existe, ya no es una credencial de instalación "
+        "remota, o no es una credencial del cliente de este equipo. No se presenta nada con un "
+        "secreto que la persona operadora ha retirado, ni al equipo de otro cliente. Inicia "
+        "una ejecución nueva con una credencial vigente del cliente del equipo"
     ),
     "this address now belongs to a different machine record from the one that was "
     "confirmed, or the confirmed record is gone. Confirm it in a new run": (
@@ -2731,15 +2746,23 @@ CATALOG: dict[str, str] = {
         "avala"
     ),
     "device records of more than one client, each vouched for by a person, hold this "
-    "address, so it does not name one machine and nothing is chosen for you. Choose the "
-    "client in the client selector and push again: inside one client the address names "
-    "that client's machine, and only that client's site server may carry the credential "
-    "to it": (
+    "address, so it does not name one machine and nothing is chosen for you. A push is made "
+    "in the client of its credential: inside that client the address names that client's "
+    "machine, and only that client's site server may carry the credential to it. Choose a "
+    "push credential of the machine's client": (
         "registros de dispositivo de más de un cliente, cada uno avalado por una persona, "
         "tienen esta dirección, así que no nombra un solo equipo y no se elige ninguno por ti. "
-        "Elige el cliente en el selector de clientes e instala de nuevo: dentro de un cliente "
+        "Una instalación remota se hace en el cliente de su credencial: dentro de ese cliente "
         "la dirección nombra el equipo de ese cliente, y solo un servidor de sitio de ese "
-        "cliente puede llevarle la credencial"
+        "cliente puede llevarle la credencial. Elige una credencial de instalación remota del "
+        "cliente del equipo"
+    ),
+    "the machine at this address belongs to another client than the chosen credential, and "
+    "a credential is presented only to machines of its own client. Choose a push credential "
+    "of the machine's client": (
+        "el equipo de esta dirección es de otro cliente que la credencial elegida, y una "
+        "credencial solo se presenta a equipos de su propio cliente. Elige una credencial de "
+        "instalación remota del cliente del equipo"
     ),
     "no active push authorization covers this address. Deny by default: authorizing an "
     "IPAM scan of the same prefix authorizes nothing here, because authorizing an ICMP "

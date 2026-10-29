@@ -145,7 +145,6 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "provision_enroll_dispatch_sweep_all_orgs",
         "provision_timeout_sweep_all_orgs",
         "licenses_compliance_sweep_all_orgs",
-        "push_run_tick_all_orgs",
         "device_group_reevaluate_all_orgs",
         "platform_health_notify_all_orgs",
         "subscription_alerts_all_orgs",

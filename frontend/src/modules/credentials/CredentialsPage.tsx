@@ -14,6 +14,8 @@ import { useApi } from "../../lib/ApiContext";
 import { RelTime } from "../../components/reltime";
 import { RowMenu } from "../../components/rowmenu";
 import { useOrgZone } from "../../lib/zone";
+import { internalClientId, requireKnown } from "../../lib/internalClient";
+import { PUSHABLE_CREDENTIAL_TYPES } from "../agent-push/types";
 import { CredentialPrerequisites } from "./CredentialPrerequisites";
 import { Icon } from "../../shell/icons";
 import {
@@ -542,6 +544,8 @@ function CreateCredentialDialog({
   const [caPem, setCaPem] = useState("");
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const isWindowsDomain = type === "windows_domain";
+  // Same `["me"]` key the shell already holds, so this is a cache read.
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
 
   const create = useMutation({
     // `name` is trimmed on the way out; `secret` DELIBERATELY IS NOT. Trailing
@@ -557,6 +561,15 @@ function CreateCredentialDialog({
       api.createCredential({
         name: name.trim(),
         type,
+        // A push credential has exactly one client (MSP clients phase 2, Task
+        // 12): every push made with it is made in that client. Any other type
+        // is sent without one and serves every client, as before.
+        // PHASE 3: the client/site selector. Until it exists that is the
+        // organisation's internal client, whose id is the organisation's --
+        // `/me`'s `org_id` (`lib/internalClient.ts`).
+        ...(PUSHABLE_CREDENTIAL_TYPES.includes(type)
+          ? { client_id: requireKnown(internalClientId(me.data)) }
+          : {}),
         secret: isWindowsDomain
           ? JSON.stringify({
               username: account.trim(),

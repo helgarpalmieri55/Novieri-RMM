@@ -41,6 +41,7 @@ async def _dispatch_one(app_engine: AsyncEngine, world: RunWorld, dispatcher, ru
             world.org.org_id,
             addresses=[parse_target_address(world.addresses[0])],
             credential_id=world.credential_id,
+            client_id=world.client_id,
         )
         return await dispatcher.dispatch_target(
             session,

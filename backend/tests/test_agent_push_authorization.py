@@ -70,6 +70,7 @@ async def test_a_grant_is_created_canonicalised_and_audited(
             session,
             org.org_id,
             actor_id=org.user_id,
+            client_id=org.org_id,
             prefix="10.4.7.9/24",
             note="branch onboarding",
         )
@@ -101,7 +102,7 @@ async def test_a_grant_with_no_actor_is_refused_before_the_database(
     async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushValidationError) as exc:
             await create_authorization(
-                session, org.org_id, actor_id=None, prefix="10.0.0.0/24"
+                session, org.org_id, actor_id=None, client_id=org.org_id, prefix="10.0.0.0/24"
             )
     assert "no system-authorized push scope" in str(exc.value)
 
@@ -116,7 +117,7 @@ async def test_a_malformed_prefix_is_refused(
     async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushValidationError):
             await create_authorization(
-                session, org.org_id, actor_id=org.user_id, prefix=prefix
+                session, org.org_id, actor_id=org.user_id, client_id=org.org_id, prefix=prefix
             )
 
 
@@ -129,12 +130,13 @@ async def test_a_second_active_grant_for_one_prefix_is_a_conflict(
     org = await seed_org(admin_engine, "push-dupe-svc")
     async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await create_authorization(
-            session, org.org_id, actor_id=org.user_id, prefix="10.5.0.0/24"
+            session, org.org_id, actor_id=org.user_id, client_id=org.org_id, prefix="10.5.0.0/24"
         )
     async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(PushConflictError) as exc:
             await create_authorization(
-                session, org.org_id, actor_id=org.user_id, prefix="10.5.0.0/24"
+                session, org.org_id, actor_id=org.user_id, client_id=org.org_id,
+                prefix="10.5.0.0/24",
             )
     assert "revoke the existing authorization" in str(exc.value)
 
@@ -155,7 +157,7 @@ async def test_a_revoked_prefix_may_be_authorized_again(
     # operator acts, not three statements one operator ran without leaving.
     async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         first = await create_authorization(
-            session, org.org_id, actor_id=org.user_id, prefix="10.6.0.0/24"
+            session, org.org_id, actor_id=org.user_id, client_id=org.org_id, prefix="10.6.0.0/24"
         )
         first_id = first.id
     async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
@@ -164,7 +166,7 @@ async def test_a_revoked_prefix_may_be_authorized_again(
         )
     async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         await create_authorization(
-            session, org.org_id, actor_id=org.user_id, prefix="10.6.0.0/24"
+            session, org.org_id, actor_id=org.user_id, client_id=org.org_id, prefix="10.6.0.0/24"
         )
 
     async with AsyncSession(admin_engine) as session:
@@ -324,7 +326,8 @@ async def test_a_grant_created_for_one_org_is_invisible_to_the_other_on_the_admi
     a = await seed_org(admin_engine, "push-ten-w-a")
     b = await seed_org(admin_engine, "push-ten-w-b")
     await create_authorization(
-        bypassrls_session, a.org_id, actor_id=a.user_id, prefix="10.33.0.0/24"
+        bypassrls_session, a.org_id, actor_id=a.user_id, client_id=a.org_id,
+        prefix="10.33.0.0/24",
     )
     await bypassrls_session.commit()
 

@@ -2391,8 +2391,11 @@ export class ApiClient {
   // Push runs (design 2026-09-30). Every route is `agent.push.run`; preview,
   // create and resume also need `credentials.checkout`, server-side. None is
   // ever retried by the caller.
-  listPushRunPrefixes(): Promise<PushRunPrefixOut[]> {
-    return this.request<PushRunPrefixOut[]>("/agent-push/runs/prefixes");
+  // The subnets a run with `credentialId` may be built from: its client's
+  // active authorizations (MSP clients phase 2, Task 12).
+  listPushRunPrefixes(credentialId: string): Promise<PushRunPrefixOut[]> {
+    const query = new URLSearchParams({ credential_id: credentialId });
+    return this.request<PushRunPrefixOut[]>(`/agent-push/runs/prefixes?${query.toString()}`);
   }
 
   previewPushRun(prefix: string, credentialId: string): Promise<PushRunPreviewOut> {
@@ -2433,6 +2436,8 @@ export class ApiClient {
     name: string;
     type: string;
     secret: string;
+    /** Required for a push credential (`push_install`, `windows_domain`): it has exactly one client. */
+    client_id?: string;
   }): Promise<Credential> {
     return this.request<Credential>("/credentials", {
       method: "POST",
@@ -5528,6 +5533,8 @@ export interface Credential {
   name: string;
   type: string;
   device_group_id: string | null;
+  /** The client the credential serves; null is every client's. A push credential always has one. */
+  client_id: string | null;
   created_at: string | null;
   last_used_at: string | null;
   has_secret: boolean;

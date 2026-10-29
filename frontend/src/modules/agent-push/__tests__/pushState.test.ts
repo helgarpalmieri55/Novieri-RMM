@@ -182,6 +182,7 @@ describe("windowsProbeReadiness", () => {
   function row(address: string, overrides: Partial<HostKeyOut> = {}): HostKeyOut {
     return {
       address,
+      client_id: null,
       transport: "winrm",
       observed_fingerprint: "winrm",
       observed_key_type: "",
@@ -272,6 +273,9 @@ describe("refusalReasonLabel", () => {
         "host_key_unconfirmed",
         "no_asset",
         "ambiguous_asset",
+        // Plan 2026-10-26 Task 12: the machine is another client's than the
+        // chosen credential's.
+        "credential_missing",
         "no_authorization",
         "no_site_server",
         "no_winrm_site_server",

@@ -27,6 +27,14 @@ credential; the reverse is enforced in `app/modules/remote/service.py`, which
 is the only other place in this repository that presents a stored credential to
 a machine.
 
+**A PUSH CREDENTIAL HAS EXACTLY ONE CLIENT** (MSP clients, plan 2026-10-26
+Task 12; Annex A). Its scopes and its realm are H from it (migration 0241),
+and the client of every push made with it is its client: the address must be
+a vouched machine of that client, covered by an authorization of that client,
+originated by a site server of that client. `resolve_push_credential` refuses
+one with no client wherever a push resolves it, before the scope's NOT NULL
+could answer for it.
+
 **WHAT THIS MODULE CANNOT ENFORCE, SAID PLAINLY** (spec §6.2, §1.3 item 2). It
 cannot check what rights the account actually holds in somebody else's
 directory. A `push_install` credential that is a Domain Admin satisfies every
@@ -44,9 +52,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import text
 
 from app.core.audit import audit_service
-from app.core.i18n import tr
+from app.core.i18n import N_, tr, tr_marked
 from app.models import Credential
 from app.modules.agent_push.errors import (
+    PushClientError,
     PushConflictError,
     PushNotFoundError,
     PushValidationError,
@@ -55,10 +64,12 @@ from app.modules.agent_push.models import PushCredentialScope
 from app.modules.agent_push.net import parse_prefix, prefix_size
 
 __all__ = [
+    "ONE_CLIENT",
     "PUSHABLE_CREDENTIAL_TYPES",
     "PUSH_CREDENTIAL_TYPE",
     "WINDOWS_DOMAIN_CREDENTIAL_TYPE",
     "bind_scope",
+    "credential_client",
     "refuse_push_install_credential",
     "list_scopes",
     "resolve_push_credential",
@@ -76,17 +87,21 @@ PUSHABLE_CREDENTIAL_TYPES = frozenset({PUSH_CREDENTIAL_TYPE, WINDOWS_DOMAIN_CRED
 
 _MAX_NOTE = 500
 
+#: The refusal of a push credential with no client, wherever it is met: at
+#: `POST /credentials`, at binding a scope, at every resolve for a push.
+ONE_CLIENT = N_("a push credential belongs to one client")
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
 async def resolve_push_credential(
-    session: AsyncSession, org_id: UUID, credential_id: UUID
+    session: AsyncSession, org_id: UUID, credential_id: UUID, *, client_id: UUID | None = None
 ) -> Credential:
     """The credential row, by id and METADATA ONLY -- never its plaintext.
 
-    Two refusals, and they are deliberately different:
+    Four refusals, and they are deliberately different:
 
     * NOT IN THIS ORG -> `PushNotFoundError`, which the API maps to 404 and
       never 403. A 403 would confirm that the id exists somewhere, which is a
@@ -96,6 +111,11 @@ async def resolve_push_credential(
       resolves a credential for a push rather than only at bind time: a
       credential whose type was edited after its scopes were bound must stop
       working immediately, not at the next bind.
+    * NO CLIENT -> `PushClientError` (422): a push credential has exactly one
+      client, the one every push made with it is in (Task 12).
+    * ANOTHER CLIENT than `client_id`, when the caller already has one (a
+      run is its credential's client's) -> `PushClientError`: the pacer reads
+      it as `credential_missing`.
     """
     credential = (
         await session.execute(
@@ -121,7 +141,25 @@ async def resolve_push_credential(
                 pushable_credential_types=sorted(PUSHABLE_CREDENTIAL_TYPES),
             )
         )
+    if credential.client_id is None:
+        raise PushClientError(tr_marked(ONE_CLIENT))
+    if client_id is not None and credential.client_id != client_id:
+        raise PushClientError(
+            tr(
+                "credential {credential_id} belongs to another client",
+                credential_id=credential_id,
+            )
+        )
     return credential
+
+
+def credential_client(credential: Credential) -> UUID:
+    """The client of a push credential -- the client every push made with it
+    is in. `resolve_push_credential` has already refused one with none; this
+    says so to the type checker, and refuses again rather than trusting it."""
+    if credential.client_id is None:
+        raise PushClientError(tr_marked(ONE_CLIENT))
+    return credential.client_id
 
 
 async def bind_scope(
@@ -140,6 +178,10 @@ async def bind_scope(
     independent bounds in spec §5.1, and there is no graceful degradation
     between "25 machines inside one authorized prefix" and "every machine the
     credential can authenticate to".
+
+    The scope is the credential's client's (H, migration 0241): none is sent,
+    and a credential with no client is refused (`PushClientError`) before the
+    insert, whose NOT NULL would otherwise answer with a 500.
     """
     if actor_id is None:
         raise PushValidationError(
@@ -200,6 +242,7 @@ async def bind_scope(
         action="push.credential_scope_bound",
         target_type="push_credential_scope",
         target_id=str(row.id),
+        client_id=credential.client_id,
         metadata={
             "credential_id": str(credential_id),
             # THE NAME, NEVER THE SECRET, AND NEVER THE `vault_ref`. Invariant
@@ -239,6 +282,9 @@ async def unbind_scope(
         raise PushConflictError(
             tr("push credential scope {scope_id} is already unbound", scope_id=scope_id)
         )
+    # Read BEFORE the flush: the trigger-written client is `server_onupdate`,
+    # so an UPDATE of the row expires it.
+    client_id = row.client_id
     row.unbound_at = _utcnow()
     row.unbound_by = actor_id
     await session.flush()
@@ -250,6 +296,7 @@ async def unbind_scope(
         action="push.credential_scope_unbound",
         target_type="push_credential_scope",
         target_id=str(row.id),
+        client_id=client_id,
         metadata={
             "credential_id": str(row.credential_id),
             "prefix": str(row.prefix),

@@ -115,6 +115,7 @@ async def grant_org_admin(env_or_engine: Any, org: PushOrg) -> None:
 @dataclass(frozen=True)
 class RunWorld:
     org: PushOrg
+    client_id: UUID
     credential_id: UUID
     prefix: str
     addresses: tuple[str, ...]
@@ -131,17 +132,28 @@ async def run_world(
     confirmed_keys: bool = True,
     with_release: bool = True,
     architecture: str = "amd64",
+    org: PushOrg | None = None,
+    client: tuple[UUID, UUID] | None = None,
 ) -> RunWorld:
     """An org in which every bound holds for `count` Linux machines on
-    `10.<octet>.0.0/24`, starting at `.10`. The org's user is an org-admin."""
+    `10.<octet>.0.0/24`, starting at `.10`. The org's user is an org-admin.
+
+    Everything is the internal client's unless `client` names another as
+    `(client_id, site_id)` (plan 2026-10-26 Task 12: the credential, the
+    authorization, the site server and the machines are then all that
+    client's). `org` reuses an existing org, for a second client's world."""
     engine: AsyncEngine = admin_engine_of(env_or_engine)
-    org = await seed_org(engine, tag)
-    await grant_org_admin(engine, org)
-    credential_id = await seed_credential(engine, org)
+    if org is None:
+        org = await seed_org(engine, tag)
+        await grant_org_admin(engine, org)
+    client_id, site_id = client if client is not None else (org.org_id, org.org_id)
+    credential_id = await seed_credential(engine, org, client_id=client_id)
     prefix = f"10.{octet}.0.0/24"
-    await seed_push_authorization(engine, org, prefix)
+    await seed_push_authorization(engine, org, prefix, client_id=client_id)
     await seed_push_credential_scope(engine, org, credential_id, prefix)
-    _ss, ss_device = await seed_push_site_server(engine, org.org_id, segments=[prefix])
+    _ss, ss_device = await seed_push_site_server(
+        engine, org.org_id, segments=[prefix], client_id=client_id, site_id=site_id
+    )
     if with_release:
         await seed_agent_release(engine, os_name="linux", arch="amd64")
     addresses: list[str] = []
@@ -150,7 +162,12 @@ async def run_world(
         address = f"10.{octet}.0.{10 + index}"
         device_ids.append(
             await seed_asset(
-                engine, org.org_id, primary_ip=address, architecture=architecture
+                engine,
+                org.org_id,
+                primary_ip=address,
+                architecture=architecture,
+                client_id=client_id,
+                site_id=site_id,
             )
         )
         if confirmed_keys:
@@ -158,6 +175,7 @@ async def run_world(
         addresses.append(address)
     return RunWorld(
         org=org,
+        client_id=client_id,
         credential_id=credential_id,
         prefix=prefix,
         addresses=tuple(addresses),

@@ -70,6 +70,7 @@ from app.models import (
     BudgetLine,
     ChangeRequest,
     Client,
+    Credential,
     Deployment,
     Device,
     DeviceGroup,
@@ -95,6 +96,10 @@ from app.models import (
     Person,
     PersonLogin,
     Policy,
+    PushAuthorization,
+    PushCredentialScope,
+    PushRun,
+    PushRunTarget,
     Script,
     ScriptPolicy,
     Site,
@@ -131,6 +136,12 @@ GUARDED = {
     "C-devices": "device site belongs to another client",
     "C-sites": "names a client of another organization",
     "C-deployments": "deployment target is not visible",
+    # Plan 2026-10-26 Task 12 (0241): a run of a client the scope cannot see
+    # names a credential it cannot see either, so its guard refuses first; a
+    # target of such a run is refused by 0200's own guard, which cannot find
+    # the run.
+    "C-push_run": "push run belongs to its credential's client",
+    "H-push_run_target-via-push_run": "is not a run of this organization",
 }
 
 
@@ -154,6 +165,8 @@ class Side:
     expense_category: UUID
     vrf: UUID  # an IPAM VRF, and a subnet in it
     subnet: UUID
+    credential: UUID  # a push credential, and an unsealed run with it
+    run: UUID
 
 
 @dataclass(frozen=True)
@@ -205,6 +218,19 @@ def _expense_category(org: UUID, client: UUID, actor: UUID) -> ExpenseCategory:
     return ExpenseCategory(
         org_id=org, client_id=client, key=f"k-{uuid4().hex[:6]}", name="n", created_by=actor
     )
+
+
+def _run(org: UUID, client: UUID, credential: UUID, actor: UUID) -> PushRun:
+    """Unsealed, so its targets may be written; finished, so any number of
+    them fit beside the one active run per client (D3)."""
+    return PushRun(
+        org_id=org, client_id=client, credential_id=credential, created_by=actor,
+        prefix="10.0.0.0/24", list_digest="d" * 64, state="completed", target_count=0,
+    )
+
+
+def _prefix() -> str:
+    return f"10.{uuid4().int % 250 + 1}.{uuid4().int % 256}.0/24"
 
 
 def _ticket(org: UUID, client: UUID, queue: UUID, category: UUID, actor: UUID) -> Ticket:
@@ -259,12 +285,18 @@ async def _side(
         s.add_all([test, vrf])
         await s.flush()
         subnet = IpamSubnet(org_id=org, vrf_id=vrf.id, prefix="10.0.0.0/24")
-        s.add(subnet)
+        credential = Credential(
+            org_id=org, client_id=client.id, name="push", type="push_install", vault_ref=""
+        )
+        s.add_all([subnet, credential])
+        await s.flush()
+        run = _run(org, client.id, credential.id, actor)
+        s.add(run)
         await s.commit()
     return Side(
         client.id, site.id, device.id, group.id, job.id, alert.id, record.id, ticket.id,
         person.id, subscription.id, plan.id, test.id, budget.id, expense_category.id,
-        vrf.id, subnet.id,
+        vrf.id, subnet.id, credential.id, run.id,
     )
 
 
@@ -504,6 +536,21 @@ PATHS: dict[str, tuple[str, Make]] = {
     "H-ipam_range-via-ipam_subnet": ("ipam_range", lambda w, s: IpamRange(
         org_id=w.org, subnet_id=s.subnet, kind="reserved", start_address="10.0.0.10",
         end_address="10.0.0.20",
+    )),
+    # Push install (0241). A prefix is one client's network; a run is its
+    # credential's client's; a scope its credential's; a target its run's.
+    "C-push_authorization": ("push_authorization", lambda w, s: PushAuthorization(
+        org_id=w.org, client_id=s.client, prefix=_prefix(), authorized_by=w.actor
+    )),
+    "C-push_run": ("push_run", lambda w, s: _run(w.org, s.client, s.credential, w.actor)),
+    "H-push_credential_scope-via-credentials": ("push_credential_scope", lambda w, s: (
+        PushCredentialScope(
+            org_id=w.org, credential_id=s.credential, prefix=_prefix(), bound_by=w.actor
+        )
+    )),
+    "H-push_run_target-via-push_run": ("push_run_target", lambda w, s: PushRunTarget(
+        org_id=w.org, run_id=s.run, device_id=s.device, address=f"10.0.0.{uuid4().int % 250}",
+        position=uuid4().int % 100000, state="waiting",
     )),
     # The client is never sent: the trigger takes it from the target (0239).
     "C-deployments": ("deployments", lambda w, s: Deployment(

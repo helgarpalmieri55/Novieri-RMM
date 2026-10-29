@@ -1,10 +1,14 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { NoValue } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
 import { describeSubmitError } from "../../components/form";
 import { Button, Field, Td, Th, inputClass } from "../../components/ui";
+import type { Me } from "../../lib/api";
+import { useApi } from "../../lib/ApiContext";
 import { formatDate, toInstant } from "../../lib/datetime";
+import { internalClientId, requireKnown } from "../../lib/internalClient";
 import {
   FilterBar,
   PageHead,
@@ -255,7 +259,10 @@ function GrantRow({
 
 function GrantForm() {
   const t = useT();
+  const api = useApi();
   const create = useCreatePushAuthorizationMutation();
+  // Same `["me"]` key the shell already holds, so this is a cache read.
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const zone = useUserTimezone();
   const [prefix, setPrefix] = useState("");
   const [note, setNote] = useState("");
@@ -353,7 +360,14 @@ function GrantForm() {
         <Button
           onClick={() =>
             create.mutate(
-              {
+              () => ({
+                // A prefix is one client's network (MSP clients phase 2,
+                // Task 12): the grant authorizes pushes to that client's
+                // machines only.
+                // PHASE 3: the client/site selector. Until it exists that is
+                // the organisation's internal client, whose id is the
+                // organisation's -- `/me`'s `org_id` (`lib/internalClient.ts`).
+                client_id: requireKnown(internalClientId(me.data)),
                 prefix,
                 note,
                 // THE FIELD IS A WALL CLOCK; the API stores an instant.
@@ -364,7 +378,7 @@ function GrantForm() {
                 // the screen. On a grant that authorizes credentialed logins,
                 // an unintended extension is the dangerous direction.
                 expires_at: expiresAt === "" ? null : toInstant(`${expiresAt}T00:00`, zone),
-              },
+              }),
               {
                 onSuccess: () => {
                   setPrefix("");

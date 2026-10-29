@@ -15,10 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, require_permission
 from app.core.audit import audit_service
-from app.core.i18n import tr
+from app.core.i18n import tr, tr_marked
 from app.core.tenancy import org_session
-from app.models import Credential
+from app.models import Credential, DeviceGroup
+from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.agent_push import credential_realm
+from app.modules.agent_push.credential_scope import ONE_CLIENT, PUSHABLE_CREDENTIAL_TYPES
+from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
 
 # A Windows domain push account's realm is read off its user principal name
 # when it is saved and recorded unencrypted (review I1): dispatch refuses a
@@ -44,6 +47,11 @@ class CredentialCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     type: str = Field(min_length=1, max_length=50)
     device_group_id: UUID | None = None
+    # MSP clients (plan 2026-10-26 Task 12). With a device group the client is
+    # the group's, and a different one here is a 422; without one, this. A
+    # push credential (`push_install`, `windows_domain`) has exactly one client;
+    # any other type with none is every client's, as before.
+    client_id: UUID | None = None
     secret: str = Field(min_length=1)
 
 
@@ -61,6 +69,8 @@ class CredentialOut(BaseModel):
     name: str
     type: str
     device_group_id: UUID | None
+    #: The client this credential serves; null is every client's.
+    client_id: UUID | None
     created_at: datetime | None
     last_used_at: datetime | None
     has_secret: bool
@@ -76,6 +86,7 @@ def _out(credential: Credential) -> CredentialOut:
         name=credential.name,
         type=credential.type,
         device_group_id=credential.device_group_id,
+        client_id=credential.client_id,
         created_at=credential.created_at,
         last_used_at=credential.last_used_at,
         has_secret=credential.ciphertext is not None,
@@ -97,6 +108,47 @@ async def _get(session: AsyncSession, org_id: UUID, credential_id: UUID) -> Cred
     return credential
 
 
+async def _client_of_new_credential(
+    session: AsyncSession, org_id: UUID, body: CredentialCreate
+) -> UUID | None:
+    """The client a new credential is filed under (MSP clients spec §1.5):
+    its group's when it names one -- a body client that differs is a 422 --
+    else the body's, loaded as every new row's client is
+    (`client_for_new_rows`, held FOR SHARE until commit: 404 invisible, 409
+    archived), and never Unassigned (C10). `None` is every client's."""
+    client_id = body.client_id
+    if body.device_group_id is not None:
+        group_client = (
+            await session.execute(
+                select(DeviceGroup.client_id).where(
+                    DeviceGroup.id == body.device_group_id, DeviceGroup.org_id == org_id
+                )
+            )
+        ).scalar_one_or_none()
+        if group_client is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such device group"))
+        if client_id is not None and client_id != group_client:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                tr("that device group belongs to another client"),
+            )
+        client_id = group_client
+    if client_id is None:
+        return None
+    try:
+        client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
+    except ClientNotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such client")) from None
+    except NotAcceptingNewRows as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
+    if client.kind == CLIENT_KIND_UNASSIGNED:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            tr("a credential cannot be filed under Unassigned"),
+        )
+    return client_id
+
+
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=CredentialOut)
 async def create_credential(
     body: CredentialCreate,
@@ -104,10 +156,20 @@ async def create_credential(
     ctx: AuthContext = Depends(require_permission("credentials.manage")),
 ) -> CredentialOut:
     state = request.app.state
+    if (
+        body.type in PUSHABLE_CREDENTIAL_TYPES
+        and body.client_id is None
+        and body.device_group_id is None
+    ):
+        # A push credential has exactly one client (Task 12): every push made
+        # with it is made in that client, and its scopes and realm are H.
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, tr_marked(ONE_CLIENT))
     realm = _windows_domain_realm(body.secret) if body.type == _WINDOWS_DOMAIN else None
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
+        client_id = await _client_of_new_credential(session, ctx.org_id, body)
         credential = Credential(
             org_id=ctx.org_id,
+            client_id=client_id,
             name=body.name,
             type=body.type,
             device_group_id=body.device_group_id,
@@ -136,6 +198,7 @@ async def create_credential(
             action="credential.created",
             target_type="credential",
             target_id=str(credential.id),
+            client_id=client_id,
             metadata={"name": body.name, "type": body.type},
         )
         await session.flush()
@@ -185,6 +248,7 @@ async def checkout_credential(
     state = request.app.state
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         credential = await _get(session, ctx.org_id, credential_id)
+        client_id = credential.client_id  # read before the update below expires it
         if credential.type in _NEVER_CHECKED_OUT:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
@@ -203,6 +267,7 @@ async def checkout_credential(
             action="credential.checked_out",
             target_type="credential",
             target_id=str(credential_id),
+            client_id=client_id,
             metadata={"reason": body.reason, "name": credential.name},
         )
         await session.flush()
@@ -219,6 +284,7 @@ async def update_credential(
     state = request.app.state
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         credential = await _get(session, ctx.org_id, credential_id)
+        client_id = credential.client_id  # read before the update below expires it
         credential.name = body.name
         if body.secret is not None:
             if credential.type == _WINDOWS_DOMAIN:
@@ -242,6 +308,7 @@ async def update_credential(
                 action="credential.rotated",
                 target_type="credential",
                 target_id=str(credential.id),
+                client_id=client_id,
                 metadata={"name": body.name},
             )
         session.add(credential)
@@ -268,6 +335,7 @@ async def delete_credential(
             action="credential.deleted",
             target_type="credential",
             target_id=str(credential_id),
+            client_id=credential.client_id,
             metadata={"name": credential.name},
         )
         await session.delete(credential)

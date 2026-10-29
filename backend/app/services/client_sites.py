@@ -41,9 +41,12 @@ contact or audit lock. IPAM is the documented exception: its creates lock the
 client, may insert the client's `global` VRF, and only then lock the site
 (`app.modules.ipam.clients` explains why that cannot deadlock with an
 archive). A path that already holds the audit chain's lock when
-it gets here would invert that order; push install minting a token per target
-after the previous target's audit is the one such path (a cycle there needs an
-archive of a client with no active device, and resolves as one 40P01).
+it gets here would invert that order. Push install is the one path that mints
+a token per target after an audit event of the same transaction (the previous
+target's `push.dispatched`, the pacer's `push.refused`, a run's start or
+resume); it takes every target's site, then client, FOR SHARE and sorted
+before its first audit (`app.modules.agent_push.locks.lock_target_scope`,
+plan 2026-10-26 Task 12), so each mint finds its rows already held.
 """
 
 from typing import Any

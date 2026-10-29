@@ -57,6 +57,8 @@ from app.models.vault import OrgVaultKey
 from app.modules.agent_push.models import (
     PushAuthorization,
     PushCredentialScope,
+    PushRun,
+    PushRunTarget,
 )
 from app.modules.agent_update.models import (
     AgentUpdateRing,
@@ -249,6 +251,8 @@ __all__ = [
     "AgentUpdateRollout",
     "AgentUpdateTarget",
     "PushCredentialScope",
+    "PushRun",
+    "PushRunTarget",
     "Expense",
     "ExpenseCategory",
     "FxRate",

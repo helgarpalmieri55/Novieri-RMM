@@ -103,6 +103,15 @@ async def _resolve_wake(
       candidate for a target on `10.20.7.5`, and between one declared for
       `10.20.0.0/16` and one declared for `10.20.7.0/24` the /24 is the machine
       actually on that wire.
+
+    **AND ONLY THE INTERNAL CLIENT'S SITE SERVERS ARE CANDIDATES** (MSP
+    clients, plan 2026-10-26 Task 12; research-4 §I6). Provisioning is the
+    internal client's -- the run is filed under it and the route needs every
+    client -- so the wake is originated on the internal client's LAN. Another
+    client's site server, however specific its segment, would put the packet
+    on that client's network; and without a segment it would make the one
+    internal candidate look ambiguous. The internal client's id is the
+    organisation's.
     """
     if not await has_permission(session, actor_id, "site.wake"):
         raise ProvisioningPermissionError(
@@ -115,7 +124,7 @@ async def _resolve_wake(
 
     try:
         candidates = await list_site_servers(
-            session, org_id, enabled=True, segment=wake.segment
+            session, org_id, enabled=True, segment=wake.segment, client_id=org_id
         )
     except SiteServerError as exc:
         raise ProvisioningValidationError(str(exc)) from None

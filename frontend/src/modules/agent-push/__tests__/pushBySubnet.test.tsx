@@ -10,10 +10,12 @@ import { PushInstallChooser } from "../PushInstallChooser";
 import type { PushRunPreviewOut } from "../types";
 
 // **THE LAST SCREEN BEFORE A CREDENTIAL IS PRESENTED TO A WHOLE SUBNET.** Each
-// assertion is a claim the screen makes to the operator: only authorized
-// subnets can be chosen, every listed machine is shown with why it is or is
-// not ready, the count on the button is the ready count, and a list that
-// changed is shown again rather than started.
+// assertion is a claim the screen makes to the operator: the credential comes
+// first, because a run is made in its credential's client (MSP clients phase
+// 2, Task 12); only that client's authorized subnets can be chosen; every
+// listed machine is shown with why it is or is not ready, the count on the
+// button is the ready count, and a list that changed is shown again rather
+// than started.
 
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -21,6 +23,8 @@ vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 function preview(over: Partial<PushRunPreviewOut> = {}): PushRunPreviewOut {
   return {
     prefix: "10.20.4.0/24",
+    client_id: "o1",
+    ambiguous_count: 0,
     credential_id: "c1",
     credential_name: "Push install · rack B4",
     list_digest: "ab".repeat(32),
@@ -44,10 +48,17 @@ function stubApi(overrides: Partial<Record<string, ReturnType<typeof vi.fn>>> = 
   const api = {
     me: vi.fn().mockResolvedValue({ user_id: "u1", org_id: "o1", email: "a@b.c", display_name: "A", permissions: ["agent.push.run"] }),
     listCredentials: vi.fn().mockResolvedValue([
-      { id: "c1", name: "Push install · rack B4", type: "push_install", device_group_id: null, created_at: null, last_used_at: null, has_secret: true },
-      { id: "c2", name: "Remote control", type: "remote_control", device_group_id: null, created_at: null, last_used_at: null, has_secret: true },
+      { id: "c1", name: "Push install · rack B4", type: "push_install", device_group_id: null, client_id: "o1", created_at: null, last_used_at: null, has_secret: true },
+      { id: "c3", name: "Push install · Porto", type: "push_install", device_group_id: null, client_id: "client-porto", created_at: null, last_used_at: null, has_secret: true },
+      { id: "c2", name: "Remote control", type: "remote_control", device_group_id: null, client_id: null, created_at: null, last_used_at: null, has_secret: true },
     ]),
-    listPushRunPrefixes: vi.fn().mockResolvedValue([{ prefix: "10.20.4.0/24", address_count: 256, expires_at: null }]),
+    listPushRunPrefixes: vi.fn().mockImplementation((credentialId: string) =>
+      Promise.resolve(
+        credentialId === "c1"
+          ? [{ prefix: "10.20.4.0/24", client_id: "o1", address_count: 256, expires_at: null }]
+          : [{ prefix: "10.30.1.0/24", client_id: "client-porto", address_count: 256, expires_at: null }],
+      ),
+    ),
     previewPushRun: vi.fn().mockResolvedValue(preview()),
     createPushRun: vi.fn().mockResolvedValue({ id: "run-9" }),
     listPushHostKeys: vi.fn().mockResolvedValue([]),
@@ -72,24 +83,53 @@ function renderChooser(machines: never[] = []) {
 }
 
 async function choose(user: ReturnType<typeof userEvent.setup>) {
-  // The subnet list arrives asynchronously; choose only once it is there.
-  await waitFor(() => expect(screen.getByRole("option", { name: /10\.20\.4\.0\/24/ })).toBeTruthy());
-  await user.selectOptions(await screen.findByLabelText("Subnet"), "10.20.4.0/24");
+  // The credential first: its client's subnets arrive asynchronously, and are
+  // chosen only once they are there.
   await waitFor(() => expect(screen.getByRole("option", { name: /rack B4/ })).toBeTruthy());
-  await user.selectOptions(screen.getByLabelText("Credential"), "c1");
+  await user.selectOptions(await screen.findByLabelText("Credential"), "c1");
+  await waitFor(() => expect(screen.getByRole("option", { name: /10\.20\.4\.0\/24/ })).toBeTruthy());
+  await user.selectOptions(screen.getByLabelText("Subnet"), "10.20.4.0/24");
 }
 
 beforeEach(() => mockUseApi.mockReset());
 
 describe("Push install by subnet", () => {
   it("opens on By subnet when nothing is ticked, and offers only authorized subnets, never a text box", async () => {
-    stubApi();
+    const user = userEvent.setup();
+    const api = stubApi();
     renderChooser();
     expect((screen.getByRole("radio", { name: /By subnet/ }) as HTMLInputElement).checked).toBe(true);
     const subnet = await screen.findByLabelText("Subnet");
+    await waitFor(() => expect(screen.getByRole("option", { name: /rack B4/ })).toBeTruthy());
+    await user.selectOptions(screen.getByLabelText("Credential"), "c1");
     await waitFor(() => expect(within(subnet).getAllByRole("option")).toHaveLength(2));
     expect(within(subnet).getByRole("option", { name: /10\.20\.4\.0\/24/ })).toBeTruthy();
+    expect(api.listPushRunPrefixes).toHaveBeenCalledWith("c1");
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("asks for the credential before any subnet, and offers that credential's client's subnets only", async () => {
+    // A run is made in its credential's client (MSP clients phase 2, Task 12):
+    // nothing is listed before a credential is chosen, and another credential
+    // -- of another client -- offers its own client's subnets, the subnet
+    // chosen for the first one forgotten.
+    const user = userEvent.setup();
+    const api = stubApi();
+    renderChooser();
+    const subnet = (await screen.findByLabelText("Subnet")) as HTMLSelectElement;
+    expect(subnet.disabled).toBe(true);
+    expect(within(subnet).getAllByRole("option").map((o) => o.textContent)).toEqual(["Choose the credential first"]);
+    expect(api.listPushRunPrefixes).not.toHaveBeenCalled();
+
+    await choose(user);
+    await screen.findByRole("table", { name: "Machines in this subnet" });
+    await user.selectOptions(screen.getByLabelText("Credential"), "c3");
+    await waitFor(() => expect(within(subnet).getByRole("option", { name: /10\.30\.1\.0\/24/ })).toBeTruthy());
+    expect(api.listPushRunPrefixes).toHaveBeenLastCalledWith("c3");
+    expect(within(subnet).queryByRole("option", { name: /10\.20\.4\.0\/24/ })).toBeNull();
+    expect(subnet.value).toBe("");
+    expect(api.previewPushRun).toHaveBeenCalledTimes(1);
+    expect(api.previewPushRun).toHaveBeenCalledWith("10.20.4.0/24", "c1");
   });
 
   it("says why no subnet is offered to someone who may not use a stored secret", async () => {
@@ -104,7 +144,10 @@ describe("Push install by subnet", () => {
         ),
       ),
     });
+    const user = userEvent.setup();
     renderChooser();
+    await waitFor(() => expect(screen.getByRole("option", { name: /rack B4/ })).toBeTruthy());
+    await user.selectOptions(screen.getByLabelText("Credential"), "c1");
     expect((await screen.findByRole("alert")).textContent).toMatch(/credentials\.checkout/);
     expect(within(screen.getByLabelText("Subnet")).getAllByRole("option")).toHaveLength(1);
   });
@@ -130,8 +173,18 @@ describe("Push install by subnet", () => {
     expect(within(table).getByText("Not probed")).toBeTruthy();
     expect(screen.getByText(/3 machines in this subnet are not listed because nobody has vouched for them/)).toBeTruthy();
     expect(screen.getByText(/1 machine in this subnet is not listed because it is waiting for review/)).toBeTruthy();
+    // Inside one client no address is ambiguous, and nothing is said of it.
+    expect(screen.queryByText(/does not name one machine|do not name one machine/)).toBeNull();
     expect(screen.getByRole("button", { name: "Start push to 2 machines" })).toBeTruthy();
     expect(screen.queryByText(/and \d+ more/i)).toBeNull();
+  });
+
+  it("says how many addresses were not listed because they name no single machine", async () => {
+    const user = userEvent.setup();
+    stubApi({ previewPushRun: vi.fn().mockResolvedValue(preview({ ambiguous_count: 2 })) });
+    renderChooser();
+    await choose(user);
+    expect(await screen.findByText("2 addresses in this subnet are not listed because they do not name one machine.")).toBeTruthy();
   });
 
   it("says nothing about unlisted machines when there are none", async () => {

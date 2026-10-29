@@ -308,6 +308,20 @@ describe("ApiClient", () => {
     expect(JSON.parse(init.body as string)).toEqual({ client_id: "c2" });
   });
 
+  // MSP clients phase 2, Task 12: a run is built in its credential's client,
+  // so the subnets it may be built from are asked for with that credential.
+  it("asks for a push run's subnets with the credential", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(new Response("[]", { status: 200 })));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient(() => "t", vi.fn());
+    await client.listPushRunPrefixes("c 1");
+    expect((fetchMock.mock.calls[0] as [string])[0]).toBe(
+      "/api/v1/agent-push/runs/prefixes?credential_id=c+1",
+    );
+  });
+
   it("names the target in the query string: an IPAM import, and one client's fleet", async () => {
     // MSP clients phase 2, Task 11: an import goes into the chosen VRF (its
     // client is the import's) or a client's `global` VRF; the sweeper picker

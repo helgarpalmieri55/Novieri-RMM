@@ -200,13 +200,16 @@ async def test_a_pending_row_is_not_a_vouched_push_target(admin_engine: AsyncEng
         admin_engine, org.org_id, review_state="pending", primary_ip="10.9.9.9"
     )
     address = ipaddress.ip_address("10.9.9.9")
+    # The device is the internal client's, whose id is the organisation's:
+    # a push is asked for one client's machine (Task 12).
+    client_id = org.org_id
     async with AsyncSession(admin_engine) as session:
-        assert await _asset_for(session, org.org_id, address) is None
+        assert await _asset_for(session, org.org_id, address, client_id) is None
         await session.execute(
             update(Device).where(Device.id == device_id).values(review_state="approved")
         )
         await session.flush()
-        assert await _asset_for(session, org.org_id, address) == device_id
+        assert await _asset_for(session, org.org_id, address, client_id) == device_id
 
 
 async def test_a_running_job_on_a_pending_device_can_still_be_cancelled(

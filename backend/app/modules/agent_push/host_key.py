@@ -159,7 +159,8 @@ async def _own_row(
 async def _audit_row(session: AsyncSession, row: PushHostKey) -> dict[str, str | None]:
     """The row an event is about: two clients' rows share the address that is
     the event's target. `client_id` is the trigger's, read back after the
-    write (an UPDATE expires it)."""
+    write (an UPDATE expires it). The event is filed under it too (plan
+    2026-10-26 Task 12): NULL for a global row, which is every client's."""
     await session.refresh(row, ["client_id"])
     return {
         "host_key_id": str(row.id),
@@ -253,6 +254,7 @@ async def record_observation(
             row.device_id = device_id
         session.add(row)
     await session.flush()
+    about = await _audit_row(session, row)
     await audit_service.record(
         session,
         org_id=org_id,
@@ -261,6 +263,7 @@ async def record_observation(
         action="push.host_key_observed",
         target_type="push_target",
         target_id=address,
+        client_id=row.client_id,
         # THE FINGERPRINT IS PUBLIC KEY MATERIAL, NOT A SECRET. It is exactly
         # what an operator must compare against the target out-of-band, so it
         # belongs in the record. No credential is anywhere near this path.
@@ -269,7 +272,7 @@ async def record_observation(
             "key_type": key_type,
             "transport": transport,
             "job_id": None if job_id is None else str(job_id),
-            **await _audit_row(session, row),
+            **about,
         },
     )
     return row
@@ -334,6 +337,7 @@ async def confirm_host_key(
     row.confirmed_by = actor_id
     session.add(row)
     await session.flush()
+    about = await _audit_row(session, row)
     await audit_service.record(
         session,
         org_id=org_id,
@@ -342,10 +346,11 @@ async def confirm_host_key(
         action="push.host_key_confirmed",
         target_type="push_target",
         target_id=parsed,
+        client_id=row.client_id,
         metadata={
             "fingerprint": fingerprint,
             "key_type": row.observed_key_type,
-            **await _audit_row(session, row),
+            **about,
         },
     )
     return row
@@ -404,6 +409,7 @@ async def record_readiness(
             row.device_id = device_id
         session.add(row)
     await session.flush()
+    about = await _audit_row(session, row)
     await audit_service.record(
         session,
         org_id=org_id,
@@ -412,13 +418,14 @@ async def record_readiness(
         action="push.winrm_readiness_observed",
         target_type="push_target",
         target_id=parsed,
+        client_id=row.client_id,
         # Booleans about what answered. No credential was presented to learn
         # them -- the probe carries none (design §2.4, §C1).
         metadata={
             "transport": "winrm",
             **readiness,
             "job_id": None if job_id is None else str(job_id),
-            **await _audit_row(session, row),
+            **about,
         },
     )
     return row

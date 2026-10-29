@@ -47,6 +47,7 @@ const inDays = (days: number): string => new Date(Date.now() + days * 86_400_000
 function grant(overrides: Partial<PushAuthorizationOut> = {}): PushAuthorizationOut {
   return {
     id: "g1",
+    client_id: "o1",
     prefix: "10.20.4.0/24",
     address_count: 256,
     note: "Planta 3 de Lisboa",
@@ -69,6 +70,7 @@ const GRANTS: PushAuthorizationOut[] = [
 function scope(overrides: Partial<PushCredentialScopeOut> = {}): PushCredentialScopeOut {
   return {
     id: "s1",
+    client_id: "o1",
     credential_id: "c1",
     credential_name: "Instalación del rack B4",
     prefix: "10.20.4.0/24",
@@ -130,6 +132,7 @@ const RELEASES = ["windows", "linux", "darwin"].flatMap((os) =>
 function hostKey(address: string, overrides: Partial<HostKeyOut> = {}): HostKeyOut {
   return {
     address,
+    client_id: null,
     transport: "ssh",
     observed_fingerprint: "SHA256:q3Vd2mX0Jc8pZ1uYkT7rHs4nLw9aGf6eBi5oCxRtUvE",
     observed_key_type: "ssh-ed25519",
@@ -152,6 +155,7 @@ function winrmRow(address: string, overrides: Partial<HostKeyOut> = {}): HostKey
 function run(state: PushRunState = "running", over: Partial<PushRunOut> = {}): PushRunOut {
   return {
     id: "run-1",
+    client_id: "o1",
     prefix: "10.20.4.0/24",
     credential_id: "c1",
     credential_name: "Instalación del rack B4",
@@ -184,6 +188,8 @@ const TARGETS: PushRunTargetOut[] = [
 function preview(over: Partial<PushRunPreviewOut> = {}): PushRunPreviewOut {
   return {
     prefix: "10.20.4.0/24",
+    client_id: "o1",
+    ambiguous_count: 0,
     credential_id: "c1",
     credential_name: "Instalación del rack B4",
     list_digest: "ab".repeat(32),
@@ -532,12 +538,15 @@ describe("push install pages in Spanish", () => {
         <Route path="/" element={<PushInstallChooser machines={[]} onRemove={() => {}} onClose={() => {}} />} />
       </Routes>,
     );
-    await waitFor(() => expect(screen.getByRole("option", { name: /10\.20\.4\.0\/24/ })).toBeInTheDocument());
-    expect(screen.getByRole("option", { name: "10.20.4.0/24 (256 direcciones)" })).toBeInTheDocument();
+    // The credential first (MSP clients phase 2, Task 12): until then the
+    // subnet list says so, in Spanish.
+    expect(await screen.findByRole("option", { name: "Elige primero la credencial" })).toBeInTheDocument();
     expect(screen.getByText(/instalados 50 a la vez/)).toBeInTheDocument();
-    await user.selectOptions(await screen.findByLabelText("Subred"), "10.20.4.0/24");
     await waitFor(() => expect(screen.getByRole("option", { name: /Instalación del rack B4/ })).toBeInTheDocument());
     await user.selectOptions(screen.getByLabelText("Credencial"), "c1");
+    await waitFor(() => expect(screen.getByRole("option", { name: /10\.20\.4\.0\/24/ })).toBeInTheDocument());
+    expect(screen.getByRole("option", { name: "10.20.4.0/24 (256 direcciones)" })).toBeInTheDocument();
+    await user.selectOptions(await screen.findByLabelText("Subred"), "10.20.4.0/24");
     const table = await screen.findByRole("table", { name: "Equipos de esta subred" });
     expect(within(table).getByText("Sin sondear")).toBeInTheDocument();
     expect(within(table).getByText("El tipo de credencial no coincide")).toBeInTheDocument();
@@ -555,26 +564,32 @@ describe("push install pages in Spanish", () => {
   });
 
   it("words the By subnet flow with one unlisted machine, no authorized subnet, and a refused listing", async () => {
+    const user = userEvent.setup();
+    const pickCredential = async () => {
+      await waitFor(() => expect(screen.getByRole("option", { name: /Instalación del rack B4/ })).toBeInTheDocument());
+      await user.selectOptions(screen.getByLabelText("Credencial"), "c1");
+    };
     stubApi({ listPushRunPrefixes: vi.fn().mockResolvedValue([]) });
     const none = renderPage(<PushInstallChooser machines={[]} onRemove={() => {}} onClose={() => {}} />);
-    expect(await screen.findByText(/Todavía no hay ninguna subred autorizada para la instalación remota/)).toBeInTheDocument();
+    await pickCredential();
+    expect(await screen.findByText(/Todavía no hay ninguna subred autorizada para la instalación remota del cliente de esta credencial/)).toBeInTheDocument();
     expectNoEnglish(none.container);
     none.unmount();
 
-    const user = userEvent.setup();
-    stubApi({ previewPushRun: vi.fn().mockResolvedValue(preview({ unvouched_count: 1, awaiting_review_count: 0, ready_count: 1 })) });
+    stubApi({ previewPushRun: vi.fn().mockResolvedValue(preview({ unvouched_count: 1, awaiting_review_count: 0, ready_count: 1, ambiguous_count: 1 })) });
     const one = renderPage(<PushInstallChooser machines={[]} onRemove={() => {}} onClose={() => {}} />);
+    await pickCredential();
     await waitFor(() => expect(screen.getByRole("option", { name: /10\.20\.4\.0\/24/ })).toBeInTheDocument());
     await user.selectOptions(await screen.findByLabelText("Subred"), "10.20.4.0/24");
-    await waitFor(() => expect(screen.getByRole("option", { name: /Instalación del rack B4/ })).toBeInTheDocument());
-    await user.selectOptions(screen.getByLabelText("Credencial"), "c1");
     expect(await screen.findByText(/1 equipo de esta subred no aparece en la lista porque nadie lo ha avalado/)).toBeInTheDocument();
+    expect(screen.getByText("1 dirección de esta subred no aparece en la lista porque no nombra un solo equipo.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Iniciar la instalación remota en 1 equipo" })).toBeInTheDocument();
     expectNoEnglish(one.container);
     one.unmount();
 
     stubApi({ listPushRunPrefixes: vi.fn().mockRejectedValue(new ApiError(403, JSON.stringify({ detail: "no" }))) });
     const refused = renderPage(<PushInstallChooser machines={[]} onRemove={() => {}} onClose={() => {}} />);
+    await pickCredential();
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expectNoEnglish(refused.container);
   });

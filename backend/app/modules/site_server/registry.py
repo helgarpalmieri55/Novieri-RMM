@@ -46,9 +46,10 @@ migration 0231), and the site it is filed under -- `site_id`, grouping only,
 which replaced the IPAM site in migration 0240 -- is one of that client's
 sites (422, and `fk_site_server_site_client` underneath). The site plays no
 part in what the server serves: push install chooses an originator by segment
-and by client (`agent_push.preflight._site_server_for`), wake by segment
-(`provisioning.dispatch`; its client filter is plan 2026-10-26 Task 12) --
-never by site.
+and by the push's client (`agent_push.preflight._site_server_for`), wake by
+segment and the internal client, whose provisioning it serves
+(`provisioning.dispatch._resolve_wake`, plan 2026-10-26 Task 12) -- never by
+site.
 """
 
 from collections.abc import Sequence
@@ -329,8 +330,9 @@ async def list_site_servers(
     `client_id` keeps only the site servers whose device belongs to that
     client (`site_server.client_id`, inherited from the device). A push picks
     its originator with it (`agent_push.preflight._site_server_for`): the
-    machine that will hold a decrypted credential is one of the target's own
-    client, whatever the session's scope.
+    machine that will hold a decrypted credential is one of the push's own
+    client, whatever the session's scope. A provisioning wake picks the
+    internal client's (`provisioning.dispatch._resolve_wake`).
 
     `segment` filters by CONTAINMENT (`<<=`), not equality: asking "who serves
     10.20.7.0/24" must find the branch server declared for `10.20.0.0/16`,
