@@ -26,6 +26,7 @@ import { translate } from "../../i18n/core";
 import { formatDateTime } from "../../lib/datetime";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { internalClientId, requireKnown } from "../../lib/internalClient";
 import { Icon } from "../../shell/icons";
 import { useBackupRepositories, useCreateBackupRepositoryMutation } from "./api";
 import { repositoryStateKind, repositoryStateLabel } from "./backupState";
@@ -191,6 +192,13 @@ export function RepositoriesPage() {
         key={createOpen ? "open" : "closed"}
         open={createOpen}
         onClose={() => setCreateOpen(false)}
+        // A repository is ONE client's: its key travels to every device that
+        // backs up into it (MSP clients phase 2, Task 13). Nothing on this
+        // page is a row of a client to take it from.
+        // PHASE 3: the client/site selector. Until it exists that is the
+        // organisation's internal client, whose id is the organisation's --
+        // `/me`'s `org_id` (`lib/internalClient.ts`).
+        clientId={internalClientId(me.data)}
       />
     </div>
   );
@@ -200,7 +208,16 @@ const repositoryRules = (): readonly FieldRule[] => [
   { name: "name", label: translate("backup.repositories.name") },
 ];
 
-function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function CreateRepositoryDialog({
+  open,
+  onClose,
+  clientId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** The client the repository is filed under; `null` until it is known. */
+  clientId: string | null;
+}) {
   const t = useT();
   const create = useCreateBackupRepositoryMutation();
   const [name, setName] = useState("");
@@ -215,7 +232,7 @@ function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () 
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
     create.mutate(
-      { name: name.trim() },
+      () => ({ client_id: requireKnown(clientId), name: name.trim() }),
       {
         onSuccess: () => {
           setName("");

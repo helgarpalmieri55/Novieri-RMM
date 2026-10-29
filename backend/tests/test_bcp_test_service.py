@@ -66,7 +66,7 @@ async def _seed_device(admin_engine: AsyncEngine, org_id: UUID, hostname: str) -
 async def _seed_repo(admin_engine: AsyncEngine, org_id: UUID) -> UUID:
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         repo = BackupRepository(
-            org_id=org_id,
+            org_id=org_id, client_id=org_id,
             name="repo-1",
             storage_ref="s3://bucket/repo-1",
             encryption_key_ref="vault://key-1",

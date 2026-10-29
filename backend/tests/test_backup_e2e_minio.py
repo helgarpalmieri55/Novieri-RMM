@@ -111,9 +111,13 @@ async def _seed(admin_engine: AsyncEngine, app_engine: AsyncEngine, vault: Local
         org_id, user_id, device_id = org.id, user.id, device.id
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(session, vault, org_id=org_id, actor_id=user_id,
+                                       client_id=org_id,
                                        name="primary")
-        session.add(BackupPolicy(org_id=org_id, repository_id=repo.id, sources={"paths": ["/srv"]},
-                                 window_cron=None, retention_gfs={}, enabled=True))
+        # The internal client's default policy: the device is the internal
+        # client's, and so is the repository (plan 2026-10-26 Task 13).
+        session.add(BackupPolicy(org_id=org_id, client_id=org_id, repository_id=repo.id,
+                                 sources={"paths": ["/srv"]}, window_cron=None,
+                                 retention_gfs={}, enabled=True))
         repo_id = repo.id
     return org_id, user_id, device_id, repo_id
 

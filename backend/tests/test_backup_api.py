@@ -76,7 +76,7 @@ async def _seed_point(api_env, org_id: UUID, device_id: UUID, actor_id: UUID) ->
     Returns `(repository_id, backup_point_id)`."""
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
-            session, api_env.app.state.vault, org_id=org_id, actor_id=actor_id,
+            session, api_env.app.state.vault, org_id=org_id, actor_id=actor_id, client_id=org_id,
             name=f"repo-{uuid4().hex[:8]}",
         )
         await session.commit()
@@ -140,7 +140,8 @@ async def test_create_repository_forbidden_for_technician_ok_for_org_admin(api_e
     org_id = await api_env.create_org("backup")
     tech = await api_env.create_user(org_id, "technician")
     admin = await api_env.create_user(org_id, "org-admin")
-    body = {"name": "primary"}
+    # A repository is one client's (plan 2026-10-26 Task 13): the internal one.
+    body = {"name": "primary", "client_id": str(org_id)}
 
     forbidden = await api_env.client.post(
         "/api/v1/backup/repositories", json=body, headers=await api_env.headers(org_id, tech)
@@ -181,11 +182,15 @@ async def test_put_policy_forbidden_for_technician_ok_for_org_admin(api_env) -> 
     admin_headers = await api_env.headers(org_id, admin)
 
     repo_resp = await api_env.client.post(
-        "/api/v1/backup/repositories", json={"name": "primary"}, headers=admin_headers
+        "/api/v1/backup/repositories", json={"name": "primary", "client_id": str(org_id)},
+        headers=admin_headers,
     )
     repository_id = repo_resp.json()["id"]
 
+    # The internal client's default policy: a policy for every client names no
+    # repository (plan 2026-10-26 Task 13).
     body = {
+        "client_id": str(org_id),
         "repository_id": repository_id,
         "sources": {"paths": ["/data"]},
         "window_cron": None,
@@ -208,7 +213,7 @@ async def test_put_policy_unknown_repository_is_404(api_env) -> None:
     admin = await api_env.create_user(org_id, "org-admin")
     resp = await api_env.client.put(
         "/api/v1/backup/policies",
-        json={"repository_id": str(uuid4()), "sources": {}},
+        json={"client_id": str(org_id), "repository_id": str(uuid4()), "sources": {}},
         headers=await api_env.headers(org_id, admin),
     )
     assert resp.status_code == 404
@@ -229,7 +234,8 @@ async def test_run_dispatches_signed_job_and_audits_user_actor(api_env) -> None:
     tech_headers = await api_env.headers(org_id, tech)
 
     repo_resp = await api_env.client.post(
-        "/api/v1/backup/repositories", json={"name": "primary"}, headers=admin_headers
+        "/api/v1/backup/repositories", json={"name": "primary", "client_id": str(org_id)},
+        headers=admin_headers,
     )
     assert repo_resp.status_code == 201, repo_resp.text
     repository_id = repo_resp.json()["id"]
@@ -237,6 +243,7 @@ async def test_run_dispatches_signed_job_and_audits_user_actor(api_env) -> None:
     policy_resp = await api_env.client.put(
         "/api/v1/backup/policies",
         json={
+            "client_id": str(org_id),
             "repository_id": repository_id,
             "sources": {"paths": ["/data"]},
             "window_cron": None,

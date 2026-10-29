@@ -206,12 +206,13 @@ PART_B: dict[str, str] = {
         "location on its device and checksums it. Does not touch any real destination."
     ),
     "GET /api/v1/backup/policies": (
-        "Lists the backup policies (sources, window, retention, repository) for the "
-        "organization default and for device groups."
+        "Lists the backup policies the caller's clients can see (client, device group, "
+        "sources, window, retention, repository): each client's default and each group's."
     ),
     "PUT /api/v1/backup/policies": (
-        "Creates or replaces the backup policy for the organization default or one device "
-        "group. Governs scheduled backups on the devices it covers. Audited."
+        "Creates or replaces one device group's backup policy, or a client's default "
+        "(client_id, no group). The repository must be that client's. Governs scheduled "
+        "backups on the devices it covers. Audited."
     ),
     "GET /api/v1/backup/recovery-keys": (
         "Lists the backup recovery keys' public keys, fingerprints and proof status. "
@@ -222,16 +223,17 @@ PART_B: dict[str, str] = {
         "points needing verification and deduplication savings. Read-only."
     ),
     "GET /api/v1/backup/repositories": (
-        "Lists the backup repositories (name, dedup parameters, off-site target link). "
-        "Keys are never returned."
+        "Lists the backup repositories the caller's clients can see (client, name, dedup "
+        "parameters, off-site target link). Keys are never returned."
     ),
     "POST /api/v1/backup/repositories": (
-        "Creates an encrypted backup repository and generates its master key into the "
-        "vault. The key is not returned."
+        "Creates an encrypted backup repository for one client (client_id) and generates "
+        "its master key into the vault. Only that client's devices use it. The key is not "
+        "returned."
     ),
     "PUT /api/v1/backup/repositories/{repository_id}/offsite": (
-        "Links a repository to an off-site target so its recovery points get copied there, "
-        "or unlinks it with a null target. Audited."
+        "Links a repository to an off-site target, global or of the repository's client, so "
+        "its recovery points get copied there, or unlinks it with a null target. Audited."
     ),
     # --- deploy ---
     "GET /api/v1/deploy/deployments": (

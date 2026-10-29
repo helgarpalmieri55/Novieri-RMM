@@ -58,6 +58,7 @@ vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 function group(overrides: Partial<DeviceGroup> = {}): DeviceGroup {
   return {
     id: "g-1",
+    client_id: ORG,
     name: "servers",
     parent_group_id: null,
     description: "",

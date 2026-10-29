@@ -125,6 +125,7 @@ const DEVICE_PAGE = { items: DEVICES, total: DEVICES.length };
 const DEVICE_GROUPS: DeviceGroup[] = [
   {
     id: "grp-build",
+    client_id: "o1",
     name: "Build runners",
     parent_group_id: null,
     description: "",

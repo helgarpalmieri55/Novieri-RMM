@@ -165,10 +165,8 @@ CATALOG: dict[str, Entry] = {
     "site_server": H("devices", "device_id"),
 }
 
-PENDING_PHASE_2: frozenset[str] = frozenset(
-    {
-        "backup_repositories", "backup_chunks", "backup_chunk_copies",
-    }
-)
+# Empty since plan 2026-10-26 Task 13 (migration 0242, backup repositories);
+# Task 15 deletes it.
+PENDING_PHASE_2: frozenset[str] = frozenset()
 
 PHASE_1 = {t: e for t, e in CATALOG.items() if e.kind != "G" and t not in PENDING_PHASE_2}

@@ -1319,6 +1319,8 @@ export interface AgentDeploymentToken {
  */
 export interface DeviceGroup {
   id: string;
+  /** The client whose devices the group organises, fixed for the group's life. */
+  client_id: string;
   name: string;
   parent_group_id: string | null;
   description: string;

@@ -151,6 +151,7 @@ const DEVICE_PAGE = { items: DEVICES, total: DEVICES.length };
 
 const GROUP: DeviceGroup = {
   id: "grp-build",
+  client_id: "o1",
   name: "Equipo de compilación",
   parent_group_id: null,
   description: "",

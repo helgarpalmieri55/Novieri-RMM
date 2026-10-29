@@ -77,7 +77,7 @@ export const backup = {
     deviceEmptyHint:
       "No devices to choose from. A computer appears here once it runs the agent (Devices → Add a computer); you may also not have permission to list them.",
     repositoryEmptyHint:
-      "No backup repositories exist. Create one on the Repositories tab; you may also not have permission to list them.",
+      "No backup repository of this policy’s client exists. Create one on the Repositories tab; you may also not have permission to list them.",
     groupDevices: { one: "{count} device", other: "{count} devices" },
     // The sublabel's wire words, lower case.
     noAgent: "no agent",
@@ -216,8 +216,10 @@ export const backup = {
     colRepository: "Repository",
     colWindow: "Window",
     colState: "State",
-    allDevices: "All devices",
-    everyDeviceWithAgent: "Every device with an agent",
+    // A policy with no group is ONE client's default (MSP clients phase 2,
+    // Task 13), never every device's.
+    clientDefault: "Client default",
+    clientDefaultHint: "Every device of the client that no group policy covers",
     alwaysOpen: "Always open",
     edit: "Edit",
   },

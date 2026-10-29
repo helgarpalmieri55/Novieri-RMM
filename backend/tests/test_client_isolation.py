@@ -63,6 +63,8 @@ from app.core.client_scope import ClientScope
 from app.core.client_scope_catalog import PHASE_1
 from app.core.tenancy import org_session
 from app.models import (
+    BackupChunk,
+    BackupRepository,
     BcpPlan,
     BcpTest,
     BcpTestStep,
@@ -167,6 +169,7 @@ class Side:
     subnet: UUID
     credential: UUID  # a push credential, and an unsealed run with it
     run: UUID
+    repository: UUID  # a backup repository (0242: one client's)
 
 
 @dataclass(frozen=True)
@@ -226,6 +229,12 @@ def _run(org: UUID, client: UUID, credential: UUID, actor: UUID) -> PushRun:
     return PushRun(
         org_id=org, client_id=client, credential_id=credential, created_by=actor,
         prefix="10.0.0.0/24", list_digest="d" * 64, state="completed", target_count=0,
+    )
+
+
+def _repository(org: UUID, client: UUID, name: str) -> BackupRepository:
+    return BackupRepository(
+        org_id=org, client_id=client, name=name, storage_ref="s", encryption_key_ref="k"
     )
 
 
@@ -291,12 +300,14 @@ async def _side(
         s.add_all([subnet, credential])
         await s.flush()
         run = _run(org, client.id, credential.id, actor)
-        s.add(run)
+        # The same name on both sides: unique per client since 0242.
+        repository = _repository(org, client.id, "principal")
+        s.add_all([run, repository])
         await s.commit()
     return Side(
         client.id, site.id, device.id, group.id, job.id, alert.id, record.id, ticket.id,
         person.id, subscription.id, plan.id, test.id, budget.id, expense_category.id,
-        vrf.id, subnet.id, credential.id, run.id,
+        vrf.id, subnet.id, credential.id, run.id, repository.id,
     )
 
 
@@ -551,6 +562,13 @@ PATHS: dict[str, tuple[str, Make]] = {
     "H-push_run_target-via-push_run": ("push_run_target", lambda w, s: PushRunTarget(
         org_id=w.org, run_id=s.run, device_id=s.device, address=f"10.0.0.{uuid4().int % 250}",
         position=uuid4().int % 100000, state="waiting",
+    )),
+    # Backup (0242). A repository is one client's; a chunk is its repository's.
+    "C-backup_repositories": ("backup_repositories", lambda w, s: _repository(
+        w.org, s.client, f"r-{uuid4().hex[:6]}"
+    )),
+    "H-backup_chunks-via-backup_repositories": ("backup_chunks", lambda w, s: BackupChunk(
+        org_id=w.org, repository_id=s.repository, chunk_id=uuid4().hex * 2
     )),
     # The client is never sent: the trigger takes it from the target (0239).
     "C-deployments": ("deployments", lambda w, s: Deployment(

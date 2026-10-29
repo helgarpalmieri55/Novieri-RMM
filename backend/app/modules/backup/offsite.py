@@ -20,7 +20,10 @@ Security properties, each tested:
 - Only ciphertext moves: the worker opens the repository key to read the
   manifest's chunk list and to name chunks, never to decrypt a data chunk.
 - Nothing is copied until the org has a proven recovery key, and each
-  repository key is written off-site wrapped to every proven key.
+  repository key is written off-site wrapped to every proven key that is
+  global or of the repository's client -- never to another client's, whose
+  operators could then open this client's copy (MSP clients plan 2026-10-26
+  Task 13). A repository's target is global or of its client, too.
 - Rows make replication resumable at chunk granularity; each step commits.
 
 Off-site layout, under `{prefix}{repository_id}/`:
@@ -90,6 +93,12 @@ NOT_TESTED_MESSAGE = N_(
 
 class OffsiteError(ValueError):
     """A refusal whose message is safe to show the operator."""
+
+
+class OffsiteClientError(OffsiteError):
+    """A target of another client than the repository's (MSP clients plan
+    2026-10-26 Task 13): a 422 with the sentence, not the 409 of a target
+    that is not ready yet."""
 
 
 @dataclass(frozen=True)
@@ -375,7 +384,10 @@ async def set_repository_target(
     actor_id: UUID,
 ) -> BackupRepository:
     """Switch off-site copying on (a tested target) or off (None) for one
-    repository. On requires a proven recovery key and a passed test."""
+    repository. On requires a target that is global or of the repository's
+    client (`OffsiteClientError`, a 422), a proven recovery key its key can
+    be wrapped to (global or of that client, as `prepare_repository` wraps),
+    and a passed test. Audited in the repository's client."""
     repo = (
         await session.execute(
             select(BackupRepository).where(
@@ -385,11 +397,14 @@ async def set_repository_target(
     ).scalar_one_or_none()
     if repo is None:
         raise LookupError(tr("no such repository"))
+    client_id = repo.client_id
     if target_id is not None:
         target = await get_target(session, org_id, target_id)
         if target is None:
             raise LookupError(tr("no such off-site target"))
-        if not await proven_recovery_keys(session, org_id):
+        if target.client_id is not None and target.client_id != client_id:
+            raise OffsiteClientError(tr("that off-site target belongs to another client"))
+        if not await proven_recovery_keys(session, org_id, client_id=client_id):
             raise OffsiteError(tr_marked(NO_RECOVERY_KEY_MESSAGE))
         if target.state != "ok":
             raise OffsiteError(tr_marked(NOT_TESTED_MESSAGE))
@@ -407,6 +422,7 @@ async def set_repository_target(
             "target_id": str(target_id) if target_id else None,
             "previous_target_id": str(previous) if previous else None,
         },
+        client_id=client_id,
     )
     await session.flush()
     return repo
@@ -616,10 +632,14 @@ async def prepare_repository(
     now: datetime,
 ) -> None:
     """Refuse an unlockable bucket and a keyless org, then make sure the key
-    objects and the repository catalog are there. Raises `OffsiteError`."""
+    objects and the repository catalog are there. Raises `OffsiteError`.
+
+    The repository key is wrapped to the proven recovery keys that are global
+    or of the repository's client, and to no other client's (module
+    docstring)."""
     if not await object_lock_enabled(client, target.bucket):
         raise OffsiteError(tr_marked(LOCK_REQUIRED_MESSAGE))
-    keys = await proven_recovery_keys(session, repo.org_id)
+    keys = await proven_recovery_keys(session, repo.org_id, client_id=repo.client_id)
     if not keys:
         raise OffsiteError(tr_marked(NO_RECOVERY_KEY_MESSAGE))
     base = repository_base(target, repo.id)

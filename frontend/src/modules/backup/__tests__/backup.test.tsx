@@ -13,6 +13,8 @@ import {
   REPOSITORY_PICKER_EMPTY_HINT,
   devicePickerOptions,
   nameForOption,
+  policyClient,
+  repositoriesOfClient,
   repositoryPickerOptions,
 } from "../pickerOptions";
 import {
@@ -171,6 +173,7 @@ const DEVICES: Page<Device> = {
 const REPOSITORIES: Repository[] = [
   {
     id: "repo1",
+    client_id: "o1",
     name: "primary-vault",
     storage_ref: "s3://backups/primary",
     state: "active",
@@ -773,6 +776,7 @@ describe("RepositoriesPage", () => {
 const POLICIES: BackupPolicy[] = [
   {
     id: "pol1",
+    client_id: "o1",
     device_group_id: null,
     repository_id: "repo1",
     sources: {},
@@ -785,6 +789,7 @@ const POLICIES: BackupPolicy[] = [
 const DEVICE_GROUPS: DeviceGroup[] = [
   {
     id: "grp-build",
+    client_id: "o1",
     name: "Build runners",
     parent_group_id: null,
     description: "",
@@ -827,27 +832,31 @@ describe("BackupPolicyEditor", () => {
     expect(screen.queryByText("grp-build")).not.toBeInTheDocument();
   });
 
-  it("names an org-wide policy's scope as 'All devices'", async () => {
+  // MSP clients phase 2, Task 13: a policy with no group is ONE client's
+  // default, never every device's -- the scope says so.
+  it("names a group-less policy's scope as its client's default", async () => {
     renderWithProviders(<BackupPolicyEditor />);
 
-    expect(await screen.findByText("All devices")).toBeInTheDocument();
+    expect(await screen.findByText("Client default")).toBeInTheDocument();
+    expect(screen.getByText("Every device of the client that no group policy covers")).toBeInTheDocument();
+    expect(screen.queryByText("All devices")).not.toBeInTheDocument();
   });
 
   // CYCLE 9. The pasted "Device group ID (blank = org-wide)" field is a
   // picker now, fed by the same endpoint the Device groups page lists from,
   // with the blank scope offered as an explicit choice rather than an empty
   // box.
-  it("offers device groups from a picker, with All devices as an explicit choice", async () => {
+  it("offers device groups from a picker, with the client default as an explicit choice", async () => {
     const user = userEvent.setup();
     renderWithProviders(<BackupPolicyEditor />);
 
     await user.click(await screen.findByRole("button", { name: "New policy" }));
     const field = screen.getByLabelText("Applies to");
     expect(field).toHaveAttribute("role", "combobox");
-    expect(field).toHaveValue("All devices");
+    expect(field).toHaveValue("Client default");
 
     await user.click(field);
-    expect(await screen.findByRole("option", { name: /^All devices/ })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: /^Client default/ })).toBeInTheDocument();
     expect(await screen.findByRole("option", { name: /Build runners/ })).toBeInTheDocument();
   });
 
@@ -864,9 +873,11 @@ describe("BackupPolicyEditor", () => {
     await waitFor(() => expect(api.upsertBackupPolicy).toHaveBeenCalled());
     const [sent] = (api.upsertBackupPolicy as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(sent.device_group_id).toBe("grp-build");
+    // A group's policy is the group's client's: the server takes it from the group.
+    expect(sent).not.toHaveProperty("client_id");
   });
 
-  it("posts null for the device group when All devices is left chosen", async () => {
+  it("posts null for the device group, and the internal client, when the client default is left chosen", async () => {
     api.upsertBackupPolicy = vi.fn().mockResolvedValue(POLICIES[0]);
     const user = userEvent.setup();
     renderWithProviders(<BackupPolicyEditor />);
@@ -878,6 +889,9 @@ describe("BackupPolicyEditor", () => {
     await waitFor(() => expect(api.upsertBackupPolicy).toHaveBeenCalled());
     const [sent] = (api.upsertBackupPolicy as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(sent.device_group_id).toBeNull();
+    // PHASE 3: no client selector yet, so a new client default is the
+    // internal client's -- `/me`'s `org_id`.
+    expect(sent.client_id).toBe("o1");
   });
 
   // The reading half of cycle 6: the Repository column was `repository_id`,
@@ -951,7 +965,7 @@ describe("BackupPolicyEditor", () => {
     );
 
     await user.click(screen.getByLabelText("Repository"));
-    expect(await screen.findByText(/No backup repositories exist\./)).toBeInTheDocument();
+    expect(await screen.findByText(/No backup repository of this policy’s client exists\./)).toBeInTheDocument();
   });
 
   it("posts the id of the repository that was picked", async () => {
@@ -966,6 +980,114 @@ describe("BackupPolicyEditor", () => {
     await waitFor(() => expect(api.upsertBackupPolicy).toHaveBeenCalled());
     const [sent] = (api.upsertBackupPolicy as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(sent.repository_id).toBe("repo1");
+  });
+
+  // ------------------------------------------------------------------------
+  // MSP clients phase 2, Task 13. A repository serves ONE client -- its key
+  // travels to every device that backs up into it -- so a policy names only
+  // a repository of its own client: the picker lists that client's, taken
+  // from the group chosen or the policy being edited.
+  // ------------------------------------------------------------------------
+
+  const CUSTOMER_REPOSITORY: Repository = {
+    ...(REPOSITORIES[0] as Repository),
+    id: "repo-y",
+    client_id: "c-y",
+    name: "customer-vault",
+    storage_ref: "s3://backups/customer",
+  };
+  const CUSTOMER_GROUP: DeviceGroup = {
+    ...(DEVICE_GROUPS[0] as DeviceGroup),
+    id: "grp-y",
+    client_id: "c-y",
+    name: "Customer servers",
+  };
+
+  function twoClients() {
+    api.listBackupRepositories = vi.fn().mockResolvedValue([...REPOSITORIES, CUSTOMER_REPOSITORY]);
+    api.listDeviceGroups = vi.fn().mockResolvedValue({
+      ...DEVICE_GROUP_PAGE,
+      items: [...DEVICE_GROUPS, CUSTOMER_GROUP],
+      total: 2,
+    });
+    api.upsertBackupPolicy = vi.fn().mockResolvedValue(POLICIES[0]);
+  }
+
+  /** The options the Repository picker opens with (left open: the next click elsewhere closes it). */
+  async function repositoryOptions(user: ReturnType<typeof userEvent.setup>): Promise<string[]> {
+    await user.click(screen.getByRole("combobox", { name: "Repository" }));
+    const listbox = await screen.findByRole("listbox", { name: "Repository" });
+    return within(listbox).queryAllByRole("option").map((option) => option.textContent ?? "");
+  }
+
+  /** `pickEntity`, by the combobox's role: an open list carries the same name. */
+  async function choose(user: ReturnType<typeof userEvent.setup>, label: string, option: RegExp) {
+    await user.click(screen.getByRole("combobox", { name: label }));
+    await user.click(await screen.findByRole("option", { name: option }));
+  }
+
+  it("offers a new policy only its client's repositories, following the group chosen", async () => {
+    twoClients();
+    const user = userEvent.setup();
+    renderWithProviders(<BackupPolicyEditor />);
+    await user.click(await screen.findByRole("button", { name: "New policy" }));
+
+    // The client default: the internal client's (PHASE 3), whose repository
+    // is primary-vault.
+    const internal = await repositoryOptions(user);
+    expect(internal.some((name) => name.includes("primary-vault"))).toBe(true);
+    expect(internal.some((name) => name.includes("customer-vault"))).toBe(false);
+
+    await choose(user, "Applies to", /Customer servers/);
+    const customer = await repositoryOptions(user);
+    expect(customer.some((name) => name.includes("customer-vault"))).toBe(true);
+    expect(customer.some((name) => name.includes("primary-vault"))).toBe(false);
+
+    await choose(user, "Repository", /customer-vault/);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.upsertBackupPolicy).toHaveBeenCalled());
+    const [sent] = (api.upsertBackupPolicy as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(sent).toMatchObject({ device_group_id: "grp-y", repository_id: "repo-y" });
+    expect(sent).not.toHaveProperty("client_id");
+  });
+
+  it("drops a repository picked for another client when the group changes", async () => {
+    twoClients();
+    const user = userEvent.setup();
+    renderWithProviders(<BackupPolicyEditor />);
+    await user.click(await screen.findByRole("button", { name: "New policy" }));
+
+    await choose(user, "Repository", /primary-vault/);
+    await choose(user, "Applies to", /Customer servers/);
+    expect(screen.getByRole("combobox", { name: "Repository" })).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Repository is required");
+    expect(api.upsertBackupPolicy).not.toHaveBeenCalled();
+  });
+
+  it("edits a stored policy within its own client, and sends that client for a default", async () => {
+    twoClients();
+    api.listBackupPolicies = vi.fn().mockResolvedValue([
+      // A customer's default naming the internal client's repository, as
+      // migration 0242 can leave a policy: not this policy's to keep.
+      { ...(POLICIES[0] as BackupPolicy), client_id: "c-y", repository_id: "repo1" },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<BackupPolicyEditor />);
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+
+    expect(screen.getByRole("combobox", { name: "Repository" })).toHaveValue("");
+    const offered = await repositoryOptions(user);
+    expect(offered.some((name) => name.includes("customer-vault"))).toBe(true);
+    expect(offered.some((name) => name.includes("primary-vault"))).toBe(false);
+
+    await choose(user, "Repository", /customer-vault/);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.upsertBackupPolicy).toHaveBeenCalled());
+    const [sent] = (api.upsertBackupPolicy as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    // The row's own client, not the internal one.
+    expect(sent).toMatchObject({ device_group_id: null, client_id: "c-y", repository_id: "repo-y" });
   });
 
   it("says it is loading rather than showing an empty table", async () => {
@@ -984,6 +1106,41 @@ describe("BackupPolicyEditor", () => {
     api.listBackupPolicies = vi.fn().mockResolvedValue([]);
     renderWithProviders(<BackupPolicyEditor />);
     expect(await screen.findByText("No backup policies configured.")).toBeInTheDocument();
+  });
+});
+
+describe("the client a policy is, and the repositories it may name", () => {
+  const groups = [
+    { id: "g-x", client_id: "c-x" },
+    { id: "g-y", client_id: "c-y" },
+  ];
+
+  it("takes a group's client, the stored row's own first", () => {
+    expect(policyClient(null, "g-y", groups, "internal")).toBe("c-y");
+    expect(policyClient({ device_group_id: "g-y", client_id: "c-y" }, "g-y", groups, "internal")).toBe("c-y");
+    // The stored policy's group, before the groups have loaded.
+    expect(policyClient({ device_group_id: "g-y", client_id: "c-y" }, "g-y", [], "internal")).toBe("c-y");
+    // Another group than the stored one: that group's.
+    expect(policyClient({ device_group_id: "g-y", client_id: "c-y" }, "g-x", groups, "internal")).toBe("c-x");
+    // Not loaded yet: no client, so nothing is offered.
+    expect(policyClient(null, "g-y", [], "internal")).toBeNull();
+  });
+
+  it("keeps a client default to its own client, and a new one to the fallback", () => {
+    expect(policyClient({ device_group_id: null, client_id: "c-y" }, "", groups, "internal")).toBe("c-y");
+    expect(policyClient(null, "", groups, "internal")).toBe("internal");
+    // A stored group policy moved to no group is a new default.
+    expect(policyClient({ device_group_id: "g-y", client_id: "c-y" }, "", groups, "internal")).toBe("internal");
+    expect(policyClient(null, "", groups, null)).toBeNull();
+  });
+
+  it("offers a client's repositories only, and none for no client", () => {
+    const repositories = [
+      { ...(REPOSITORIES[0] as Repository), id: "r-x", client_id: "c-x" },
+      { ...(REPOSITORIES[0] as Repository), id: "r-y", client_id: "c-y" },
+    ];
+    expect(repositoriesOfClient(repositories, "c-y").map((r) => r.id)).toEqual(["r-y"]);
+    expect(repositoriesOfClient(repositories, null)).toEqual([]);
   });
 });
 
@@ -1111,6 +1268,20 @@ describe("CreateRepositoryDialog failure and validation", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/unavailable right now/);
     expect(alert.textContent).not.toContain("Error:");
+  });
+
+  // MSP clients phase 2, Task 13: a repository is ONE client's, and nothing
+  // on this page is a row to take the client from.
+  it("files a new repository under the internal client", async () => {
+    const user = userEvent.setup();
+    await openCreateDialog(user);
+
+    await user.type(screen.getByLabelText("Name"), "cold-vault");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => expect(api.createBackupRepository).toHaveBeenCalled());
+    // PHASE 3: the internal client -- `/me`'s `org_id` -- until the selector.
+    expect(api.createBackupRepository).toHaveBeenCalledWith({ client_id: "o1", name: "cold-vault" });
   });
 
   it("translates a FastAPI 422 rather than printing its JSON", async () => {

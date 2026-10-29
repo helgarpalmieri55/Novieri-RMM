@@ -51,7 +51,7 @@ async def _seed_org(admin_engine: AsyncEngine, slug: str) -> dict[str, UUID]:
         await session.flush()
 
         repo = BackupRepository(
-            org_id=org.id,
+            org_id=org.id, client_id=org.id,
             name="repo-1",
             storage_ref="s3://bucket/repo-1",
             encryption_key_ref="vault://key-1",

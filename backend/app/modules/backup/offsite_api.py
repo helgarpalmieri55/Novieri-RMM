@@ -29,6 +29,7 @@ from app.modules.backup.models import (
 )
 from app.modules.backup.offsite import (
     TARGET_NAME_KEY,
+    OffsiteClientError,
     OffsiteError,
     OffsiteSecret,
     create_target,
@@ -347,6 +348,8 @@ async def set_repository_offsite(
             )
         except LookupError as exc:
             raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+        except OffsiteClientError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
         except OffsiteError as exc:
             raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
         return RepositoryOffsiteOut(repository_id=repo.id, offsite_target_id=repo.offsite_target_id)

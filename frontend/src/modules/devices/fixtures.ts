@@ -88,6 +88,8 @@ const GROUP_SEEDS: GroupSeed[] = [
 function group(seed: GroupSeed): DeviceGroup {
   return {
     id: seed.id,
+    // Every worked group is the organisation's own IT's: the internal client.
+    client_id: ORG_ID,
     name: seed.name,
     parent_group_id: seed.parent,
     description: seed.description,

@@ -66,6 +66,7 @@ export const auditActions: Shape<typeof enActions> = {
   auth_passkey_registered: "Clave de acceso registrada",
   auth_passkey_removed: "Clave de acceso eliminada",
   backup_dedup_refused: "Deduplicación de copia de seguridad rechazada",
+  backup_dispatch_refused: "Despacho de copia de seguridad rechazado",
   backup_dispatched: "Copia de seguridad despachada",
   backup_evidence_exported: "Evidencias de copia de seguridad exportadas",
   backup_gc: "Repositorio depurado",

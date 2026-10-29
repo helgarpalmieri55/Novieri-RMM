@@ -30,7 +30,7 @@ async def test_create_repository_sets_encryption_key_ref(
     org_id, actor_id = await _org(admin_engine)
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
-            session, vault, org_id=org_id, actor_id=actor_id, name="primary"
+            session, vault, org_id=org_id, actor_id=actor_id, client_id=org_id, name="primary"
         )
         await session.commit()
     assert repo.encryption_key_ref
@@ -45,7 +45,7 @@ async def test_open_repo_key_roundtrips_the_sealed_master_key(
     org_id, actor_id = await _org(admin_engine)
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
-            session, vault, org_id=org_id, actor_id=actor_id, name="primary"
+            session, vault, org_id=org_id, actor_id=actor_id, client_id=org_id, name="primary"
         )
         repo_id = repo.id
         await session.commit()
@@ -66,7 +66,7 @@ async def test_db_column_holds_sealed_string_not_the_raw_key(
     org_id, actor_id = await _org(admin_engine)
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
-            session, vault, org_id=org_id, actor_id=actor_id, name="primary"
+            session, vault, org_id=org_id, actor_id=actor_id, client_id=org_id, name="primary"
         )
         repo_id = repo.id
         await session.commit()
@@ -91,7 +91,7 @@ async def test_repository_created_audit_has_no_key_in_metadata(
     org_id, actor_id = await _org(admin_engine)
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
-            session, vault, org_id=org_id, actor_id=actor_id, name="primary"
+            session, vault, org_id=org_id, actor_id=actor_id, client_id=org_id, name="primary"
         )
         repo_id = repo.id
         await session.commit()
@@ -125,7 +125,7 @@ async def test_org_b_cannot_open_org_as_repo_key_because_rls_hides_the_row(
     org_b, _ = await _org(admin_engine)
     async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
-            session, vault, org_id=org_a, actor_id=actor_a, name="primary"
+            session, vault, org_id=org_a, actor_id=actor_a, client_id=org_a, name="primary"
         )
         repo_id = repo.id
         await session.commit()
@@ -176,7 +176,8 @@ async def test_the_repo_key_org_predicate_holds_where_rls_is_not_doing_the_rejec
     repos: dict[str, object] = {}
     for key, org_id, actor_id in (("a", org_a, actor_a), ("b", org_b, actor_b)):
         repo = await create_repository(
-            bypassrls_session, vault, org_id=org_id, actor_id=actor_id, name=f"primary-{key}"
+            bypassrls_session, vault, org_id=org_id, actor_id=actor_id,
+            client_id=org_id, name=f"primary-{key}"
         )
         repos[key] = repo.id
     await bypassrls_session.commit()

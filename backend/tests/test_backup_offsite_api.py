@@ -137,7 +137,8 @@ async def test_enabling_off_site_without_a_recovery_key_is_a_409_that_says_why(
     api_env: Any,
 ) -> None:
     org_id, headers = await _admin(api_env)
-    repo = await api_env.client.post("/api/v1/backup/repositories", json={"name": "primary"},
+    repo = await api_env.client.post("/api/v1/backup/repositories",
+                                     json={"name": "primary", "client_id": str(org_id)},
                                      headers=headers)
     target = await api_env.client.post("/api/v1/backup/offsite-targets", json=_TARGET,
                                        headers=headers)

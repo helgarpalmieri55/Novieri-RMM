@@ -136,6 +136,11 @@ class DeviceGroupOut(BaseModel):
     """
 
     id: UUID = Field(description="Group id -- the value every group-scoped act takes")
+    #: THE CLIENT WHOSE DEVICES THE GROUP ORGANISES (MSP clients spec §1.5),
+    #: fixed for the group's life. A policy for the group is that client's,
+    #: so a console offering it a backup repository offers that client's
+    #: (plan 2026-10-26 Task 13).
+    client_id: UUID = Field(description="The client whose devices this group organises")
     name: str = Field(description="Operator-facing label, unique among this org's live groups")
     parent_group_id: UUID | None = Field(
         description="Parent in the hierarchy health resolution walks upward, or null"
@@ -289,6 +294,7 @@ async def list_groups(
             items=[
                 DeviceGroupOut(
                     id=group.id,
+                    client_id=group.client_id,
                     name=group.name,
                     parent_group_id=group.parent_group_id,
                     description=group.description,
@@ -453,6 +459,7 @@ class MembersAddResponse(BaseModel):
 def _out(group: Any, device_count: int) -> DeviceGroupOut:
     return DeviceGroupOut(
         id=group.id,
+        client_id=group.client_id,
         name=group.name,
         parent_group_id=group.parent_group_id,
         description=group.description,

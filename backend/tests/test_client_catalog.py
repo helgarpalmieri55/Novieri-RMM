@@ -428,10 +428,14 @@ CLIENT_KEYS = {
     # A subnet's VLAN is of the subnet's client (plan 2026-10-26 Task 10
     # review, M3): the key `fk_ipam_subnet_vlan_client` references.
     "uq_ipam_vlan_id_client",
+    # A backup run's and point's repository is of the row's client (plan
+    # 2026-10-26 Task 13): the key `fk_backup_<runs|points>_repository_client`
+    # references.
+    "uq_backup_repositories_id_client",
 }
 CLIENT_FK = re.compile(
     r"fk_\w+_(client_org|site_client|person_client|category_client|cost_center_client"
-    r"|vlan_client)"
+    r"|vlan_client|repository_client)"
 )
 
 
@@ -462,7 +466,8 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
                     "                       OR c.conname LIKE 'fk\\_%\\_person\\_client' "
                     "                       OR c.conname LIKE 'fk\\_%\\_category\\_client' "
                     "                       OR c.conname LIKE 'fk\\_%\\_cost\\_center\\_client' "
-                    "                       OR c.conname LIKE 'fk\\_%\\_vlan\\_client')) "
+                    "                       OR c.conname LIKE 'fk\\_%\\_vlan\\_client' "
+                    "                       OR c.conname LIKE 'fk\\_%\\_repository\\_client')) "
                     "   OR (c.contype = 'u' AND c.conname = ANY (:keys))"
                 ),
                 {"keys": sorted(CLIENT_KEYS)},
@@ -526,6 +531,9 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
         }
         # A subnet's VLAN is of the subnet's client (Task 10 review, M3).
         | {"fk_ipam_subnet_vlan_client"}
+        # A backup run's and point's repository is of the row's client (plan
+        # 2026-10-26 Task 13; NOT VALID, so history is not re-judged).
+        | {"fk_backup_runs_repository_client", "fk_backup_points_repository_client"}
         | CLIENT_KEYS
     )
     assert set(live) == expected, f"live vs catalog: {sorted(set(live) ^ expected)}"
@@ -804,6 +812,13 @@ async def test_the_unique_key_guard_is_not_vacuous(admin_engine) -> None:
     assert leaky_because(
         by_name["uq_push_credential_scope_active"], pinning["push_credential_scope"]
     ) is None
+    # Backup repositories (plan 2026-10-26 Task 13): 0014's per-organisation
+    # repository name is LEAKY; a chunk's and a chunk copy's keys hold their
+    # repository, the inheritance foreign key.
+    assert old("backup_repositories", "org_id", "name") is not None
+    for name, table in (("uq_backup_chunks_repo_chunk", "backup_chunks"),
+                        ("uq_backup_chunk_copies_target_chunk", "backup_chunk_copies")):
+        assert leaky_because(by_name[name], pinning[table]) is None, name
 
 
 #: Migration 0231's per-client natural keys (Task 8b), with their columns and
@@ -874,6 +889,11 @@ PER_CLIENT_KEYS: dict[str, tuple[str, tuple[str, ...], bool]] = {
         "push_authorization", ("org_id", "client_id", "prefix"), False,
     ),
     "uq_push_run_active": ("push_run", ("org_id", "client_id"), False),
+    # Plan 2026-10-26 Task 13 (migration 0242): a repository's name is its
+    # client's.
+    "uq_backup_repositories_client_name": (
+        "backup_repositories", ("org_id", "client_id", "name"), False,
+    ),
 }
 
 

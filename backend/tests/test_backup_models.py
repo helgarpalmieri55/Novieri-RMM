@@ -36,7 +36,7 @@ async def test_backup_models_roundtrip(admin_engine: AsyncEngine, app_engine: As
     org_id, device_id, user_id = await _org_device_user(admin_engine)
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         repo = BackupRepository(
-            org_id=org_id,
+            org_id=org_id, client_id=org_id,
             name="primary",
             storage_ref="s3://bucket/org",
             encryption_key_ref="vault://key/1",
@@ -48,7 +48,7 @@ async def test_backup_models_roundtrip(admin_engine: AsyncEngine, app_engine: As
         assert repo.dedup_params == {"chunk_avg": 1048576, "hash": "buzhash"}
 
         policy = BackupPolicy(
-            org_id=org_id,
+            org_id=org_id, client_id=org_id,
             repository_id=repo.id,
             retention_gfs={"daily": 7, "weekly": 4, "monthly": 12, "yearly": 1},
         )

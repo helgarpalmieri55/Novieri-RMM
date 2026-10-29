@@ -4137,6 +4137,24 @@ CATALOG: dict[str, str] = {
         "Esa respuesta no coincide. Comprueba que has usado la clave correcta."
     ),
     "no such repository": "no existe ese repositorio",
+    # A backup repository serves one client (plan 2026-10-26 Task 13).
+    "a backup repository cannot be filed under Unassigned": (
+        "un repositorio de copias no puede quedar en Sin asignar"
+    ),
+    "a backup policy cannot be filed under Unassigned": (
+        "una política de copias no puede quedar en Sin asignar"
+    ),
+    "a repository with that name exists in this client": (
+        "ya existe un repositorio con ese nombre en este cliente"
+    ),
+    "that repository belongs to another client": "ese repositorio es de otro cliente",
+    "a policy for every client cannot name a repository; give each client its own": (
+        "una política para todos los clientes no puede nombrar un repositorio; dale a cada "
+        "cliente el suyo"
+    ),
+    "that off-site target belongs to another client": (
+        "ese almacenamiento externo es de otro cliente"
+    ),
     "The stored off-site credential is not usable.": (
         "La credencial guardada del almacenamiento externo no se puede usar."
     ),

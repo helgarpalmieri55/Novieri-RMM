@@ -1,8 +1,9 @@
 """Backup engine module tables (docs/modules/backup/spec.md §4).
 
-BackupRepository is the org-scoped dedup/encrypted storage target;
-BackupPolicy governs sources/schedule/retention per device-group (or org-wide
-when device_group_id is NULL); BackupRun records a signed backup.run job's
+BackupRepository is ONE client's dedup/encrypted storage target (migration
+0242: its key travels to every device that uses it, so it is never shared);
+BackupPolicy governs sources/schedule/retention per device-group, or per
+client when device_group_id is NULL; BackupRun records a signed backup.run job's
 outcome; BackupPoint is a completed, restorable snapshot produced by a
 successful run; RestoreJob records a signed backup.restore job (restore or
 proven-restore/verify). All five tables are tenant-scoped and RLS-forced by
@@ -18,6 +19,7 @@ from sqlalchemy import (
     Boolean,
     FetchedValue,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -35,11 +37,24 @@ from app.models.base import Base, TimestampMixin, client_org_fk, uuid7_pk
 class BackupRepository(TimestampMixin, Base):
     __tablename__ = "backup_repositories"
     __table_args__ = (
-        UniqueConstraint("org_id", "name", name="uq_backup_repositories_org_name"),
+        client_org_fk("backup_repositories"),
+        # A name is one client's (migration 0242, plan 2026-10-26 Task 13).
+        UniqueConstraint(
+            "org_id", "client_id", "name", name="uq_backup_repositories_client_name"
+        ),
+        # What a run's and a point's `(repository_id, client_id)` reference:
+        # a run or point names a repository of its own device's client.
+        UniqueConstraint("id", "client_id", name="uq_backup_repositories_id_client"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C), plan 2026-10-26 C1: the ONE client whose
+    # devices back up here, set by the application from the request. Its
+    # master key travels in their signed jobs and its chunks are deduplicated
+    # here, so a repository shared by two clients would hand one the other's
+    # key.
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     storage_ref: Mapped[str] = mapped_column(Text)
     encryption_key_ref: Mapped[str] = mapped_column(Text)
@@ -74,6 +89,16 @@ class BackupChunk(TimestampMixin, Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the backup_repositories row named by repository_id (migration 0242):
+    # never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     repository_id: Mapped[UUID] = mapped_column(ForeignKey("backup_repositories.id"))
     chunk_id: Mapped[str] = mapped_column(String(64))
 
@@ -86,7 +111,10 @@ class BackupPolicy(TimestampMixin, Base):
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
     # MSP clients spec, Annex A (O): NULL is every client. While
     # device_group_id is set, trigger its_client_from_parent copies its client
-    # (migration 0231), so the value is read back after the INSERT.
+    # (migration 0231), so the value is read back after the INSERT. With no
+    # group it is the application's: that client's default policy. A policy
+    # names only a repository of its own client, so one of every client
+    # names none (`its_backup_policy_repository_guard`, migration 0242).
     client_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("clients.id"),
         index=True,
@@ -106,7 +134,18 @@ class BackupPolicy(TimestampMixin, Base):
 
 class BackupRun(TimestampMixin, Base):
     __tablename__ = "backup_runs"
-    __table_args__ = (Index("ix_backup_runs_state", "org_id", "state"),)
+    __table_args__ = (
+        Index("ix_backup_runs_state", "org_id", "state"),
+        # The repository is of the run's (its device's) client (migration
+        # 0242). NOT VALID in the database: rows from before it are history;
+        # every new row is checked -- and so is an old one that the same
+        # transaction already wrote once, so write such a row once.
+        ForeignKeyConstraint(
+            ["repository_id", "client_id"],
+            ["backup_repositories.id", "backup_repositories.client_id"],
+            name="fk_backup_runs_repository_client",
+        ),
+    )
     # state: pending | running | success | failed | missed
 
     id: Mapped[UUID] = uuid7_pk()
@@ -143,6 +182,12 @@ class BackupPoint(TimestampMixin, Base):
     __table_args__ = (
         Index("ix_backup_points_device", "org_id", "device_id", "taken_at"),
         Index("ix_backup_points_consistency", "org_id", "consistency_level"),
+        # As on `backup_runs` (migration 0242, NOT VALID).
+        ForeignKeyConstraint(
+            ["repository_id", "client_id"],
+            ["backup_repositories.id", "backup_repositories.client_id"],
+            name="fk_backup_points_repository_client",
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()
@@ -302,6 +347,16 @@ class BackupChunkCopy(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the backup_repositories row named by repository_id (migration 0242):
+    # never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     repository_id: Mapped[UUID] = mapped_column(ForeignKey("backup_repositories.id"))
     target_id: Mapped[UUID] = mapped_column(ForeignKey("backup_offsite_targets.id"))
     chunk_id: Mapped[str] = mapped_column(String(64))

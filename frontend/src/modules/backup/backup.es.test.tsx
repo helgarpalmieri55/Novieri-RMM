@@ -119,6 +119,7 @@ const DEVICES = {
 
 const REPO: Repository = {
   id: "repo1",
+  client_id: "o1",
   name: "bóveda-principal",
   storage_ref: "s3://copias/principal",
   state: "active",
@@ -205,6 +206,7 @@ const MANIFEST: BackupManifest = {
 
 const GROUP: DeviceGroup = {
   id: "grp1",
+  client_id: "o1",
   name: "Servidores de Lisboa",
   parent_group_id: null,
   description: "",
@@ -218,6 +220,7 @@ const GROUPS = { items: [GROUP, { ...GROUP, id: "grp2", name: "Un solo equipo", 
 function policy(over: Partial<BackupPolicy> = {}): BackupPolicy {
   return {
     id: "pol1",
+    client_id: "o1",
     device_group_id: null,
     repository_id: "repo1",
     sources: {},
@@ -589,7 +592,9 @@ describe("the backup policies page, in Spanish", () => {
     for (const header of ["Ámbito", "Repositorio", "Ventana", "Estado"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
     }
-    expect(screen.getAllByText("Todos los dispositivos con agente")).toHaveLength(2);
+    // A group-less policy is ONE client's default (MSP clients phase 2, Task
+    // 13), so its scope no longer says "every device with an agent".
+    expect(screen.getAllByText("Todos los dispositivos del cliente que ninguna política de grupo cubre")).toHaveLength(2);
     expect(screen.getAllByText("Siempre abierta")).toHaveLength(1);
     expect(screen.getByText("Todos los días, de 01:00 a 05:00")).toBeInTheDocument();
     expect(screen.getByText("*/7 3 * * *")).toBeInTheDocument();
@@ -630,7 +635,11 @@ describe("the backup policies page, in Spanish", () => {
     expect(within(dialog).getByText("Ventana de copia (UTC, opcional)")).toBeInTheDocument();
     expect(within(dialog).getByText("Habilitada")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("combobox", { name: "Se aplica a" }));
-    expect(await screen.findByRole("option", { name: /Todos los dispositivos.*Todos los dispositivos con agente/ })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("option", {
+        name: /Predeterminada del cliente.*Todos los dispositivos del cliente que ninguna política de grupo cubre/,
+      }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Servidores de Lisboa.*3 dispositivos/ })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Un solo equipo.*1 dispositivo$/ })).toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: /Un solo equipo/ }));

@@ -76,7 +76,7 @@ def store(tmp_path: Path):
 async def _protected(admin_engine: AsyncEngine, app_engine: AsyncEngine, vault: Any) -> Any:
     org = await seed_org(admin_engine, app_engine, vault, "tr")
     async with AsyncSession(admin_engine) as s:
-        s.add(BackupPolicy(org_id=org.org_id, repository_id=org.repository_id,
+        s.add(BackupPolicy(org_id=org.org_id, client_id=org.org_id, repository_id=org.repository_id,
                            sources={"paths": ["/"]}, window_cron=None, retention_gfs={},
                            enabled=True))
         await s.commit()

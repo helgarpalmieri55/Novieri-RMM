@@ -186,9 +186,10 @@ async def _seed(
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(session, vault, org_id=org_id, actor_id=user_id,
+                                       client_id=org_id,
                                        name="primary")
         policy = BackupPolicy(
-            org_id=org_id,
+            org_id=org_id, client_id=org_id,
             repository_id=repo.id,
             device_group_id=None,
             sources={"paths": ["/srv"]},

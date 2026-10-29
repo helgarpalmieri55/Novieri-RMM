@@ -46,6 +46,7 @@ from app.modules.backup import dedup
 from app.modules.backup.read import READ_GRANT_TTL, answer_read_query
 from app.modules.backup.repository import create_repository
 from tests.backup_dedup_fixtures import SEED_NOW, DedupOrg, seed_dedup_org
+from tests.client_scope_support import drop_client_keys
 
 _NOW = SEED_NOW
 _SUFFIXES = ["chunks/ab/abcd", "manifests/m1"]
@@ -161,7 +162,8 @@ async def _second_repository(
     are built, so its `storage_ref` is genuine rather than hand-written."""
     async with org_session(a.org_id, engine=app_engine, clients=ClientScope.all()) as inner:
         repo = await create_repository(
-            inner, vault, org_id=a.org_id, actor_id=a.user_id, name=f"second-{uuid4().hex[:8]}"
+            inner, vault, org_id=a.org_id, actor_id=a.user_id,
+            client_id=a.org_id, name=f"second-{uuid4().hex[:8]}"
         )
         await inner.flush()
         return repo.id
@@ -541,28 +543,40 @@ async def test_a_repository_row_belonging_to_another_org_is_not_reachable(
     does not resolve. Under the mutation it does, the derived prefix becomes
     `<org A>/backup/<org B repo>` -- a prefix belonging to neither tenant's real
     layout -- and the derived-vs-stored check catches it one layer in.
+
+    Since migration 0242 the database refuses that row too: a point names a
+    repository of its own client (`fk_backup_points_repository_client`), and
+    B's is B's. So it is planted with that key dropped, and the query answered
+    and its refusal read, inside one transaction that is rolled back (plan
+    2026-10-26, lesson 2): the org predicate is still what is under test.
     """
     a, r, _ = await seed_restore(admin_engine, app_engine, vault, "rdt-h")
     b, _, _ = await seed_restore(admin_engine, app_engine, vault, "rdt-i")
 
     async with AsyncSession(admin_engine) as session:
+        await drop_client_keys(session, "backup_points", "fk_backup_points_repository_client")
         await session.execute(
             text("UPDATE backup_points SET repository_id = :repo WHERE id = :id"),
             {"repo": b.repository_id, "id": r.point_id},
         )
-        await session.commit()
-
-    async with AsyncSession(admin_engine) as session:
         reply = await answer_read_query(
             session, object_store, _query(r.job_id),
             org_id=a.org_id, device_id=a.device_id, now=_NOW,
         )
-        await session.commit()
+        reasons = [
+            str(meta.get("reason"))
+            for meta in (
+                await session.execute(
+                    select(AuditEvent.meta).where(
+                        AuditEvent.org_id == a.org_id,
+                        AuditEvent.action == "backup.read_refused",
+                    )
+                )
+            ).scalars()
+        ]
+        await session.rollback()
 
-    assert (reply, await _refusal_reasons(admin_engine, a.org_id)) == (
-        None,
-        ["no_such_repository"],
-    )
+    assert (reply, reasons) == (None, ["no_such_repository"])
 
 
 async def test_a_storage_ref_that_does_not_match_the_derived_prefix_yields_no_grant(

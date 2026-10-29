@@ -12,6 +12,12 @@
  * "drag to paint", and `WeekPainter` is that grid. The raw expression stays
  * reachable under Advanced, and a stored value the grid cannot draw opens
  * there.
+ *
+ * A POLICY IS ONE CLIENT'S, AND SO IS ITS REPOSITORY (MSP clients phase 2,
+ * Task 13: a repository's key travels to every device that backs up into it).
+ * A group's policy is its group's client's; one with no group is a client's
+ * default. The repository picker lists only that client's repositories
+ * (`policyClient`, `repositoriesOfClient`), and the server refuses any other.
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -26,6 +32,7 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { internalClientId, requireKnown } from "../../lib/internalClient";
 import { Icon } from "../../shell/icons";
 import {
   useBackupPolicies,
@@ -36,6 +43,8 @@ import {
 import {
   groupPickerOptions,
   nameForOption,
+  policyClient,
+  repositoriesOfClient,
   repositoryPickerEmptyHint,
   repositoryPickerOptions,
 } from "./pickerOptions";
@@ -212,10 +221,10 @@ export function BackupPolicyEditor() {
                     <div className="cell-title">
                       {policy.device_group_id
                         ? (nameForOption(groupOptions, policy.device_group_id) ?? policy.device_group_id)
-                        : t("backup.policies.allDevices")}
+                        : t("backup.policies.clientDefault")}
                     </div>
                     {policy.device_group_id ? null : (
-                      <div className="cell-sub">{t("backup.policies.everyDeviceWithAgent")}</div>
+                      <div className="cell-sub">{t("backup.policies.clientDefaultHint")}</div>
                     )}
                   </Td>
                   <Td>{nameForOption(repositoryOptions, policy.repository_id)}</Td>
@@ -286,6 +295,8 @@ function PolicyDialog({
   onClose: () => void;
 }) {
   const t = useT();
+  const api = useApi();
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const repositories = useBackupRepositories();
   const groups = useDeviceGroups();
   const upsert = useUpsertBackupPolicyMutation();
@@ -299,17 +310,30 @@ function PolicyDialog({
   // a language switch re-words the sentences.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
-  const repositoryOptions = repositoryPickerOptions(repositories.data ?? []);
+  // The client this policy is, from the row where there is one: the policy
+  // being edited, or the group chosen.
+  // PHASE 3: the client/site selector. A new client default has no row to
+  // take its client from, so until the selector exists it is the
+  // organisation's internal client -- `/me`'s `org_id` (`lib/internalClient.ts`).
+  const client = policyClient(existing, deviceGroupId, groups.data ?? [], internalClientId(me.data));
+  const clientRepositories = repositoriesOfClient(repositories.data ?? [], client);
+  const repositoryOptions = repositoryPickerOptions(clientRepositories);
+  // A repository of another client is not this policy's to name -- one a
+  // stored policy kept from before the rule, or one picked before the group
+  // changed -- so it is not selected, and Save asks for one of this client's.
+  const chosenRepository = clientRepositories.some((repo) => repo.id === repositoryId)
+    ? repositoryId
+    : "";
   // Gated on a settled query so a slow fetch never reads as an empty one.
-  const noRepositories = repositories.isSuccess && (repositories.data?.length ?? 0) === 0;
-  // "All devices" is a real, explicit choice -- not an unlabelled blank --
-  // so it is an entry in the list itself, with the id an org-wide policy
+  const noRepositories = repositories.isSuccess && clientRepositories.length === 0;
+  // The client default is a real, explicit choice -- not an unlabelled blank
+  // -- so it is an entry in the list itself, with the id a group-less policy
   // actually carries (none, i.e. "").
   const groupOptions = [
     {
       id: "",
-      label: t("backup.policies.allDevices"),
-      sublabel: t("backup.policies.everyDeviceWithAgent"),
+      label: t("backup.policies.clientDefault"),
+      sublabel: t("backup.policies.clientDefaultHint"),
     },
     ...groupPickerOptions(groups.data ?? []),
   ];
@@ -317,13 +341,16 @@ function PolicyDialog({
   function submit() {
     // The previous outcome must not be readable as this one.
     upsert.reset();
-    const next: Attempt = { rules: policyRules, values: { repositoryId } };
+    const next: Attempt = { rules: policyRules, values: { repositoryId: chosenRepository } };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
     upsert.mutate(
-      {
+      () => ({
         device_group_id: deviceGroupId || null,
-        repository_id: repositoryId,
+        // A group's policy is the group's client's, which the server takes
+        // from the group; a client default has nothing else to name it.
+        ...(deviceGroupId ? {} : { client_id: requireKnown(client) }),
+        repository_id: chosenRepository,
         window_cron: windowCron || null,
         enabled,
         // PUT /backup/policies is a full-body upsert (mirrors
@@ -335,7 +362,7 @@ function PolicyDialog({
         // schema to build a form against yet).
         sources: existing?.sources ?? {},
         retention_gfs: existing?.retention_gfs ?? {},
-      },
+      }),
       {
         onSuccess: () => {
           onClose();
@@ -354,7 +381,7 @@ function PolicyDialog({
           before: there was no <form> on this dialog at all. */}
       <Form onSubmit={submit}>
         <div className="form-grid">
-          {/* No `emptyHint`: `groupOptions` always carries the "All devices"
+          {/* No `emptyHint`: `groupOptions` always carries the client-default
               entry, so this list can never be empty (picker.tsx review
               finding 8). */}
           <EntityPicker
@@ -377,7 +404,7 @@ function PolicyDialog({
           <EntityPicker
             label={t("backup.policyDialog.repository")}
             options={repositoryOptions}
-            value={repositoryId}
+            value={chosenRepository}
             onChange={setRepositoryId}
             loading={repositories.isLoading}
             emptyHint={repositoryPickerEmptyHint()}

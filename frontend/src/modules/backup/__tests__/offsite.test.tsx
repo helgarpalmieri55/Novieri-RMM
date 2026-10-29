@@ -69,6 +69,7 @@ const TARGET: OffsiteTarget = {
 
 const REPO: Repository = {
   id: "r1",
+  client_id: "o1",
   name: "primary",
   storage_ref: "o1/backup/r1",
   state: "active",

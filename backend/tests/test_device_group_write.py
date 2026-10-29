@@ -570,7 +570,7 @@ async def _seed_blocker(
             session.add(PatchPolicy(org_id=org_id, device_group_id=group_id))
         elif kind == "backup_policies":
             repository = BackupRepository(
-                org_id=org_id,
+                org_id=org_id, client_id=org_id,
                 name=f"repo-{uuid4().hex[:6]}",
                 storage_ref="file:///dev/null",
                 encryption_key_ref="vault://nothing",

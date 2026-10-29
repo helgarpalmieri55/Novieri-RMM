@@ -11,6 +11,15 @@ effective policy, decide whether a run is due (`schedule.py`), then open the tar
 repository's master key from the vault and hand it to the agent only inside
 the signed job params — the repository key must never appear anywhere else
 (not in the audit log, not in a log line, not in an API response).
+
+The repository is the DEVICE'S CLIENT'S, or nothing is dispatched (MSP
+clients plan 2026-10-26 Task 13, C1). The database already keeps a policy and
+its repository in one client (`its_backup_policy_repository_guard`, migration
+0242), and a run and its repository (`fk_backup_runs_repository_client`); this
+check is the net under them, for a policy from before that guard. The window
+sweep runs this under scope all, where RLS hides no client: the refusal is
+audited `backup.dispatch_refused` in the device's client, and the key is
+never opened.
 """
 
 import base64
@@ -177,7 +186,7 @@ async def dispatch_due_backup(
         await _record_missed(
             session,
             org_id=org_id,
-            device_id=device_id,
+            device=device,
             repository_id=policy.repository_id,
             fire_at=decision.fire_at,
             now=now,
@@ -185,19 +194,40 @@ async def dispatch_due_backup(
     return []
 
 
+async def _repository_client(
+    session: AsyncSession, org_id: UUID, repository_id: UUID
+) -> UUID | None:
+    return (
+        await session.execute(
+            select(BackupRepository.client_id).where(
+                BackupRepository.org_id == org_id, BackupRepository.id == repository_id
+            )
+        )
+    ).scalar_one_or_none()
+
+
 async def _record_missed(
     session: AsyncSession,
     *,
     org_id: UUID,
-    device_id: UUID,
+    device: Device,
     repository_id: UUID | None,
     fire_at: datetime,
     now: datetime,
 ) -> None:
     """One `missed` row per fire. `started_at = fire_at` is what makes it count
-    as "acted on" for that fire, so it is never written twice or retried."""
+    as "acted on" for that fire, so it is never written twice or retried.
+
+    None when the repository is not the device's client's: such a row could
+    only name it, which `fk_backup_runs_repository_client` refuses -- an
+    error that would roll back the sweep for the whole organisation. Every
+    dispatch the window tried for that fire was refused and audited
+    (`_refuse_foreign_repository`); that is the fire's record."""
     if repository_id is None:
         return
+    if await _repository_client(session, org_id, repository_id) != device.client_id:
+        return
+    device_id = device.id
     session.add(
         BackupRun(
             org_id=org_id,
@@ -223,6 +253,37 @@ async def _record_missed(
         target_type="device",
         target_id=str(device_id),
         metadata={"device_id": str(device_id), "scheduled_for": rfc3339(fire_at)},
+        client_id=device.client_id,
+    )
+    await session.flush()
+
+
+async def _refuse_foreign_repository(
+    session: AsyncSession,
+    *,
+    org_id: UUID,
+    device: Device,
+    repository_id: UUID,
+    actor_id: UUID | None,
+    actor_type: Literal["user", "agent", "system"],
+) -> None:
+    """The module docstring's net: audited, like every refusal of the module
+    (`backup.dedup_refused`, `backup.read_refused`), with a reason from a
+    fixed vocabulary and no key material (invariant 3)."""
+    await audit_service.record(
+        session,
+        org_id=org_id,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        action="backup.dispatch_refused",
+        target_type="device",
+        target_id=str(device.id),
+        metadata={
+            "reason": "repository_of_another_client",
+            "device_id": str(device.id),
+            "repository_id": str(repository_id),
+        },
+        client_id=device.client_id,
     )
     await session.flush()
 
@@ -260,6 +321,13 @@ async def _dispatch_for_policy(
     if device.os_family is None:
         # An asset row (a switch, hardware in its box): nothing to back up.
         return []
+    if repo.client_id != device.client_id:
+        await _refuse_foreign_repository(
+            session, org_id=org_id, device=device, repository_id=repo.id,
+            actor_id=actor_id, actor_type=actor_type,
+        )
+        return []
+    client_id = device.client_id
 
     key = await open_repo_key(session, vault, org_id=org_id, repository_id=repo.id)
 
@@ -310,6 +378,7 @@ async def _dispatch_for_policy(
             "device_id": str(device_id),
             "job_id": str(job.id),
         },
+        client_id=client_id,
     )
 
     await session.flush()
@@ -404,7 +473,10 @@ async def ingest_backup_result(
     or actively unsafe agent report must never crash or wedge this handler;
     it must always resolve to a terminal state (the Task-8-deploy coercion
     lesson, applied here to the success-without-manifest and unsafe-manifest
-    cases too).
+    cases too). So does a success for a run whose repository is not the
+    run's client's -- one dispatched before migration 0242 filed the
+    repository under the internal client: its point cannot be recorded (the
+    composite key refuses it), and the object store is never opened for it.
 
     Finishes with a single `backup.result` audit event, system-attributed
     since this runs in the kernel's result handler, not on behalf of any
@@ -427,6 +499,19 @@ async def ingest_backup_result(
     ).scalar_one_or_none()
     if run is None:
         return  # no matching row; the agent's report must never fail the job
+    # Read now: the state update below expires it (written by trigger).
+    client_id = run.client_id
+    # Asked BEFORE the run is touched, so its changes reach the database in
+    # ONE update. A run from before migration 0242 may not satisfy
+    # `fk_backup_runs_repository_client` (NOT VALID), and Postgres re-checks
+    # an unchanged key once the row has been written by the current
+    # transaction: a query here, between two batches of changes, would
+    # autoflush the first and make the second fail on that key.
+    foreign = (
+        result.state == "success"
+        and bool(result.manifest_ref)
+        and await _repository_client(session, org_id, run.repository_id) != client_id
+    )
 
     audit_metadata: dict[str, Any] = {"device_id": str(device_id)}
     # Format-2 agents report these on failure too.
@@ -434,7 +519,16 @@ async def ingest_backup_result(
     if result.consistency is not None:
         run.consistency = result.consistency.model_dump()
 
-    if result.state == "success" and result.manifest_ref:
+    if foreign:
+        # A run dispatched before migration 0242 into a repository that is
+        # now another client's: its point could name only that repository,
+        # which `fk_backup_points_repository_client` refuses. Landed failed,
+        # never recorded under the other client.
+        run.state = "failed"
+        run.error = "the run's repository belongs to another client"
+        audit_metadata["unexpected_result_state"] = "repository_of_another_client"
+        run.finished_at = now
+    elif result.state == "success" and result.manifest_ref:
         try:
             manifest_ref = _resolve_manifest_ref(
                 object_store_factory(), run.org_id, run.repository_id, result.manifest_ref
@@ -496,6 +590,7 @@ async def ingest_backup_result(
         target_type="device",
         target_id=str(device_id),
         metadata={**audit_metadata, "state": run.state},
+        client_id=client_id,
     )
 
     await session.flush()

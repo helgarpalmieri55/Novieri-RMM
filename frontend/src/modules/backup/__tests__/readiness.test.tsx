@@ -29,6 +29,7 @@ const REPO: Repository = {
 function policy(overrides: Partial<BackupPolicy> = {}): BackupPolicy {
   return {
     id: "pol-1",
+    client_id: "o1",
     device_group_id: null,
     repository_id: "repo-1",
     sources: {},
