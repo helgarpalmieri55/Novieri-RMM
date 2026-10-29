@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_extensions import uuid7
@@ -272,19 +272,30 @@ async def ingest_scan(
             # review D Important 1): the policy that asked for it is of a
             # group of that client, and a global row would clear the patch
             # for every client's ring -- a decision only a person with every
-            # client takes (`approve.py`). A revoked row of the client stays
-            # revoked: the look-up finds it and nothing is inserted.
-            existing_approval = (
+            # client takes (`approve.py`).
+            #
+            # A PERSON'S REVOCATION WINS (controller decision on the final
+            # review): a revoked (patch, ring) approval, the global one or
+            # the client's own, stops it -- no row, the device not marked
+            # approved, nothing audited. A live one of either owner already
+            # covers the client's machines: nothing to insert. Another
+            # client's row, revoked or not, says nothing about this client.
+            owners = (
                 await session.execute(
-                    select(PatchApproval.id).where(
+                    select(PatchApproval.client_id, PatchApproval.revoked).where(
                         PatchApproval.org_id == org_id,
-                        PatchApproval.client_id == device.client_id,
+                        or_(
+                            PatchApproval.client_id.is_(None),
+                            PatchApproval.client_id == device.client_id,
+                        ),
                         PatchApproval.patch_id == patch.id,
                         PatchApproval.ring_name == AUTO_APPROVE_RING,
                     )
                 )
-            ).scalar_one_or_none()
-            if existing_approval is None:
+            ).all()
+            if any(revoked for _, revoked in owners):
+                continue
+            if not owners:
                 # Two scans of the client's machines can both miss the
                 # look-up; the loser's insert is a no-op, not a unique
                 # violation that rolls back its whole scan.

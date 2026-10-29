@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -233,3 +234,99 @@ async def test_two_concurrent_scans_of_one_client_make_one_approval(
         assert (await ingest_scan(a, device, _scan())).auto_approved == 1
     assert interleaved
     assert [a.client_id for a in await _approvals(admin_engine, estate)] == [estate.y]
+
+
+# --------------------------------------------------------------------------- #
+# A person's revocation wins over the automatic approval (controller decision
+# on the final review's F2 concern)
+# --------------------------------------------------------------------------- #
+
+
+async def _plant(
+    admin_engine: AsyncEngine, estate: Estate, client_id: UUID | None, *, revoked: bool
+) -> UUID:
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        row = PatchApproval(
+            org_id=estate.org,
+            client_id=client_id,
+            patch_id=estate.patch,
+            ring_name=AUTO_APPROVE_RING,
+            approved_by=None,
+            revoked=revoked,
+            revoked_at=datetime.now(UTC) if revoked else None,
+        )
+        s.add(row)
+        await s.commit()
+        return row.id
+
+
+async def _status(app_engine: AsyncEngine, estate: Estate, device_id: UUID) -> str:
+    async with org_session(estate.org, engine=app_engine, clients=ClientScope.all()) as s:
+        return (
+            await s.execute(
+                select(DevicePatchStatus.state).where(DevicePatchStatus.device_id == device_id)
+            )
+        ).scalar_one()
+
+
+async def _auto_audits(admin_engine: AsyncEngine, estate: Estate) -> list[UUID | None]:
+    async with AsyncSession(admin_engine) as s:
+        return list(
+            (
+                await s.execute(
+                    select(AuditEvent.client_id).where(
+                        AuditEvent.org_id == estate.org,
+                        AuditEvent.action == "patch.auto_approved",
+                    )
+                )
+            ).scalars()
+        )
+
+
+@pytest.mark.parametrize("revoked_owner", ["global", "own"])
+async def test_a_revocation_global_or_the_client_s_stops_the_automatic_approval(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine, revoked_owner: str
+) -> None:
+    """A person revoked (patch, test) -- for every client, or for this client
+    -- and the next scan of the client's machine must not undo it: no row of
+    the client, the device not marked approved, nothing audited as
+    automatically approved."""
+    estate = await _estate(admin_engine)
+    planted = await _plant(
+        admin_engine, estate, None if revoked_owner == "global" else estate.y, revoked=True
+    )
+    device = estate.y_devices[0]
+    assert await _ingest(app_engine, estate.org, device) == 0
+
+    approvals = await _approvals(admin_engine, estate)
+    assert [(a.id, a.revoked) for a in approvals] == [(planted, True)]
+    assert await _status(app_engine, estate, device) == "missing"
+    assert await _auto_audits(admin_engine, estate) == []
+
+
+async def test_another_client_s_revocation_does_not_stop_this_client_s_approval(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    estate = await _estate(admin_engine)
+    await _plant(admin_engine, estate, estate.x, revoked=True)
+    device = estate.y_devices[0]
+    assert await _ingest(app_engine, estate.org, device) == 1
+
+    approvals = {a.client_id: a.revoked for a in await _approvals(admin_engine, estate)}
+    assert approvals == {estate.x: True, estate.y: False}
+    assert await _status(app_engine, estate, device) == "approved"
+    assert await _auto_audits(admin_engine, estate) == [estate.y]
+
+
+async def test_a_live_global_approval_leaves_nothing_to_insert(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """The client's machines are already covered by the global row: the scan
+    adds no row of the client (and, as before, marks the device approved)."""
+    estate = await _estate(admin_engine)
+    planted = await _plant(admin_engine, estate, None, revoked=False)
+    device = estate.y_devices[0]
+    await _ingest(app_engine, estate.org, device)
+
+    assert [a.id for a in await _approvals(admin_engine, estate)] == [planted]
+    assert await _status(app_engine, estate, device) == "approved"
