@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -98,8 +99,15 @@ func TestATamperedChunkLeavesTheOriginalAndIsReportedByPath(t *testing.T) {
 	if err := os.WriteFile(target, original, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Swap every chunk object's ciphertext for another chunk's: each still
+	// Give every chunk object the next chunk's ciphertext: each still
 	// decrypts, none hashes to its id.
+	//
+	// A ROTATION over a copy of the values, not pairwise swaps in place: the
+	// swaps (i, i+1 mod n) for i = 0..n-1 leave keys[0] holding its own
+	// ciphertext, and keys come from map iteration, so 1 run in ~100 left
+	// this test's file untampered and the restore rightly replaced the
+	// original (flaky on macOS CI, 2026-10-29). Sorted, so a failure
+	// reproduces.
 	store.mu.Lock()
 	var keys []string
 	for k := range store.objects {
@@ -107,9 +115,17 @@ func TestATamperedChunkLeavesTheOriginalAndIsReportedByPath(t *testing.T) {
 			keys = append(keys, k)
 		}
 	}
-	for i := range keys {
-		j := (i + 1) % len(keys)
-		store.objects[keys[i]], store.objects[keys[j]] = store.objects[keys[j]], store.objects[keys[i]]
+	if len(keys) < 2 {
+		store.mu.Unlock()
+		t.Fatalf("need at least two chunk objects to tamper with, have %d", len(keys))
+	}
+	sort.Strings(keys)
+	vals := make([][]byte, len(keys))
+	for i, k := range keys {
+		vals[i] = store.objects[k]
+	}
+	for i, k := range keys {
+		store.objects[k] = vals[(i+1)%len(keys)]
 	}
 	store.mu.Unlock()
 
