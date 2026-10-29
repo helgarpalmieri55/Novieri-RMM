@@ -31,6 +31,15 @@ export const devicePickerEmptyHint = (): string => translate("backup.picker.devi
 export const repositoryPickerEmptyHint = (): string => translate("backup.picker.repositoryEmptyHint");
 
 /**
+ * The same empty list for a policy of a client the Repositories page cannot
+ * file a repository under: until the client selector exists it files under
+ * the internal client only (PHASE 3), so the hint names where that client's
+ * repository is made instead, and the editor offers no link.
+ */
+export const repositoryPickerEmptyHintElsewhere = (): string =>
+  translate("backup.picker.repositoryEmptyHintElsewhere");
+
+/**
  * The same two sentences as load-time snapshots, kept only because the
  * module's unit tests import the names. Components call the functions above,
  * which follow the language.

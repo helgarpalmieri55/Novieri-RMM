@@ -20,6 +20,15 @@ check is the net under them, for a policy from before that guard. The window
 sweep runs this under scope all, where RLS hides no client: the refusal is
 audited `backup.dispatch_refused` in the device's client, and the key is
 never opened.
+
+The window records that refusal ONCE per device and policy version
+(`refusal_lookup`): a fire stays due for six hours and the sweep runs every
+15 minutes, so recording each one wrote up to 24 rows per fire per device
+into the hash-chained log, for every device of a customer client 0242 left on
+an organisation repository (review of 2240971, Important 1). Nothing else
+changes -- no job, no key, the health check and the coverage report still
+show the device unprotected -- and a person's Run now is recorded every time,
+because it is their act (invariant 4).
 """
 
 import base64
@@ -28,14 +37,14 @@ from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
 from app.core.storage import ObjectStore, _safe_object_suffix
 from app.core.stored_english import stored_in_english
 from app.core.vault import VaultService
-from app.models import BackupPoint, BackupRepository, BackupRun, Device, Job
+from app.models import AuditEvent, BackupPoint, BackupRepository, BackupRun, Device, Job
 from app.modules.backup.policy import ResolvedBackupPolicy, resolve_backup_policy
 from app.modules.backup.repository import open_repo_key
 from app.modules.backup.schedule import BACKUP_JOB_TTL, START_DEADLINE, decide, rfc3339
@@ -258,30 +267,94 @@ async def _record_missed(
     await session.flush()
 
 
+REFUSED = "backup.dispatch_refused"
+FOREIGN_REPOSITORY = "repository_of_another_client"
+#: The action as an inline SQL literal, never a bound parameter: the partial
+#: index `ix_audit_backup_dispatch_refused` (migration 0242) is usable only
+#: when the planner can prove its predicate, and a generic plan comparing
+#: `action` with `$n` -- which asyncpg's prepared statements reach after a
+#: few runs -- never can (the 0220 precedent, `app/mcp/api.py`).
+_REFUSED_SQL = "'backup.dispatch_refused'"
+
+
+def _policy_version(policy: ResolvedBackupPolicy) -> str:
+    """Which save of the policy a refusal was made under: its `updated_at`,
+    to the microsecond. Compared for equality, never ordered against the
+    audit `ts` -- that is cut to the whole second, so "newer than" would miss
+    a refusal made in the policy's own second and record a second one. Every
+    resolved policy is a row and has one; the empty string is only typing's."""
+    return policy.updated_at.astimezone(UTC).isoformat() if policy.updated_at else ""
+
+
+def refusal_lookup(
+    *,
+    org_id: UUID,
+    device_id: UUID,
+    client_id: UUID,
+    repository_id: UUID,
+    policy_id: UUID | None,
+    policy_version: str,
+) -> Select[Any]:
+    """Has this device's refusal already been recorded, in its client, for
+    this repository and this version of the policy? One probe of
+    `ix_audit_backup_dispatch_refused (org_id, target_id)`, which holds only
+    refusals; the rest of the predicate filters the few rows of one device."""
+    return (
+        select(AuditEvent.id)
+        .where(
+            AuditEvent.org_id == org_id,
+            AuditEvent.action == literal_column(_REFUSED_SQL),
+            AuditEvent.target_type == "device",
+            AuditEvent.target_id == str(device_id),
+            AuditEvent.client_id == client_id,
+            AuditEvent.meta["reason"].astext == FOREIGN_REPOSITORY,
+            AuditEvent.meta["repository_id"].astext == str(repository_id),
+            AuditEvent.meta["policy_id"].astext == str(policy_id),
+            AuditEvent.meta["policy_updated_at"].astext == policy_version,
+        )
+        .limit(1)
+    )
+
+
 async def _refuse_foreign_repository(
     session: AsyncSession,
     *,
     org_id: UUID,
     device: Device,
+    policy: ResolvedBackupPolicy,
     repository_id: UUID,
     actor_id: UUID | None,
     actor_type: Literal["user", "agent", "system"],
 ) -> None:
     """The module docstring's net: audited, like every refusal of the module
     (`backup.dedup_refused`, `backup.read_refused`), with a reason from a
-    fixed vocabulary and no key material (invariant 3)."""
+    fixed vocabulary and no key material (invariant 3) -- once per device
+    and policy version when the window asks (`refusal_lookup`), every time
+    a person does."""
+    version = _policy_version(policy)
+    if actor_type == "system" and (
+        await session.execute(
+            refusal_lookup(
+                org_id=org_id, device_id=device.id, client_id=device.client_id,
+                repository_id=repository_id, policy_id=policy.id, policy_version=version,
+            )
+        )
+    ).first() is not None:
+        return
     await audit_service.record(
         session,
         org_id=org_id,
         actor_type=actor_type,
         actor_id=actor_id,
-        action="backup.dispatch_refused",
+        action=REFUSED,
         target_type="device",
         target_id=str(device.id),
         metadata={
-            "reason": "repository_of_another_client",
+            "reason": FOREIGN_REPOSITORY,
             "device_id": str(device.id),
             "repository_id": str(repository_id),
+            "policy_id": str(policy.id),
+            "policy_updated_at": version,
         },
         client_id=device.client_id,
     )
@@ -323,7 +396,7 @@ async def _dispatch_for_policy(
         return []
     if repo.client_id != device.client_id:
         await _refuse_foreign_repository(
-            session, org_id=org_id, device=device, repository_id=repo.id,
+            session, org_id=org_id, device=device, policy=policy, repository_id=repo.id,
             actor_id=actor_id, actor_type=actor_type,
         )
         return []

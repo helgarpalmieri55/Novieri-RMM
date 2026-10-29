@@ -78,6 +78,8 @@ export const backup = {
       "No devices to choose from. A computer appears here once it runs the agent (Devices → Add a computer); you may also not have permission to list them.",
     repositoryEmptyHint:
       "No backup repository of this policy’s client exists. Create one on the Repositories tab; you may also not have permission to list them.",
+    repositoryEmptyHintElsewhere:
+      "No backup repository of this policy’s client exists. Until the console can choose a client, that client’s repository is created through the API or an AI connection (MCP); you may also not have permission to list them.",
     groupDevices: { one: "{count} device", other: "{count} devices" },
     // The sublabel's wire words, lower case.
     noAgent: "no agent",

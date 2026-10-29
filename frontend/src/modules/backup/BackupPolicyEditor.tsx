@@ -46,6 +46,7 @@ import {
   policyClient,
   repositoriesOfClient,
   repositoryPickerEmptyHint,
+  repositoryPickerEmptyHintElsewhere,
   repositoryPickerOptions,
 } from "./pickerOptions";
 import type { BackupPolicy } from "./types";
@@ -326,6 +327,11 @@ function PolicyDialog({
     : "";
   // Gated on a settled query so a slow fetch never reads as an empty one.
   const noRepositories = repositories.isSuccess && clientRepositories.length === 0;
+  // PHASE 3: the client/site selector. The Repositories page files a new
+  // repository under the internal client only, so it is no place to send a
+  // person whose policy is another client's: for that one the hint says where
+  // its repository is made, and there is no link.
+  const elsewhere = me.data !== undefined && client !== null && client !== internalClientId(me.data);
   // The client default is a real, explicit choice -- not an unlabelled blank
   // -- so it is an entry in the list itself, with the id a group-less policy
   // actually carries (none, i.e. "").
@@ -407,10 +413,10 @@ function PolicyDialog({
             value={chosenRepository}
             onChange={setRepositoryId}
             loading={repositories.isLoading}
-            emptyHint={repositoryPickerEmptyHint()}
+            emptyHint={elsewhere ? repositoryPickerEmptyHintElsewhere() : repositoryPickerEmptyHint()}
             placeholder={t("backup.policyDialog.searchRepositories")}
           />
-          {noRepositories ? (
+          {noRepositories && !elsewhere ? (
             <p className="form-hint">
               <Link to="/backup/repositories">{t("backup.policyDialog.createRepository")}</Link>
             </p>

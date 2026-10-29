@@ -50,6 +50,7 @@ from app.gateway.dispatch import publish_job
 from app.models import BackupPoint, BackupPolicy, BackupRepository
 from app.modules.backup.clients import BackupClientError
 from app.modules.backup.dispatch import dispatch_backup
+from app.modules.backup.integrity import violated_constraint
 from app.modules.backup.policy import upsert_policy as upsert_backup_policy
 from app.modules.backup.reporting import (
     backup_evidence_rows,
@@ -64,10 +65,6 @@ router = APIRouter(prefix="/backup", tags=["backup"])
 
 #: Migration 0242's per-client name key.
 REPOSITORY_NAME_KEY = "uq_backup_repositories_client_name"
-
-
-def _constraint(exc: IntegrityError) -> str | None:
-    return getattr(getattr(exc.orig, "__cause__", None), "constraint_name", None)
 
 
 # --------------------------------------------------------------------------- #
@@ -305,7 +302,7 @@ async def create_repository_route(
         except IntegrityError as exc:
             # The name is taken in this client: the key is per client, so the
             # answer says nothing about another client's names.
-            if _constraint(exc) == REPOSITORY_NAME_KEY:
+            if violated_constraint(exc) == REPOSITORY_NAME_KEY:
                 raise HTTPException(
                     status.HTTP_409_CONFLICT,
                     tr("a repository with that name exists in this client"),

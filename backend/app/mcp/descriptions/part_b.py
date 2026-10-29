@@ -211,8 +211,9 @@ PART_B: dict[str, str] = {
     ),
     "PUT /api/v1/backup/policies": (
         "Creates or replaces one device group's backup policy, or a client's default "
-        "(client_id, no group). The repository must be that client's. Governs scheduled "
-        "backups on the devices it covers. Audited."
+        "(client_id, no group). The repository must be that client's, except to switch a "
+        "stored policy off (enabled false) naming the repository it already names. Governs "
+        "scheduled backups on the devices it covers. Audited."
     ),
     "GET /api/v1/backup/recovery-keys": (
         "Lists the backup recovery keys' public keys, fingerprints and proof status. "

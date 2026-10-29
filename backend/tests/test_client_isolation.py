@@ -64,6 +64,8 @@ from app.core.client_scope_catalog import PHASE_1
 from app.core.tenancy import org_session
 from app.models import (
     BackupChunk,
+    BackupChunkCopy,
+    BackupOffsiteTarget,
     BackupRepository,
     BcpPlan,
     BcpTest,
@@ -170,6 +172,7 @@ class Side:
     credential: UUID  # a push credential, and an unsealed run with it
     run: UUID
     repository: UUID  # a backup repository (0242: one client's)
+    target: UUID  # an off-site target of the client's, for a chunk copy
 
 
 @dataclass(frozen=True)
@@ -302,12 +305,15 @@ async def _side(
         run = _run(org, client.id, credential.id, actor)
         # The same name on both sides: unique per client since 0242.
         repository = _repository(org, client.id, "principal")
-        s.add_all([run, repository])
+        target = BackupOffsiteTarget(
+            org_id=org, client_id=client.id, name="fuera", bucket="b", credential_id=credential.id
+        )
+        s.add_all([run, repository, target])
         await s.commit()
     return Side(
         client.id, site.id, device.id, group.id, job.id, alert.id, record.id, ticket.id,
         person.id, subscription.id, plan.id, test.id, budget.id, expense_category.id,
-        vrf.id, subnet.id, credential.id, run.id, repository.id,
+        vrf.id, subnet.id, credential.id, run.id, repository.id, target.id,
     )
 
 
@@ -570,6 +576,12 @@ PATHS: dict[str, tuple[str, Make]] = {
     "H-backup_chunks-via-backup_repositories": ("backup_chunks", lambda w, s: BackupChunk(
         org_id=w.org, repository_id=s.repository, chunk_id=uuid4().hex * 2
     )),
+    "H-backup_chunk_copies-via-backup_repositories": (
+        "backup_chunk_copies", lambda w, s: BackupChunkCopy(
+            org_id=w.org, repository_id=s.repository, target_id=s.target,
+            chunk_id=uuid4().hex * 2, object_name="o",
+        )
+    ),
     # The client is never sent: the trigger takes it from the target (0239).
     "C-deployments": ("deployments", lambda w, s: Deployment(
         org_id=w.org, package_id=w.package, action="install", target_type="device",

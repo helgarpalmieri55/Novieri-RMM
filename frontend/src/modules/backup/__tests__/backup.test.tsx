@@ -15,6 +15,7 @@ import {
   nameForOption,
   policyClient,
   repositoriesOfClient,
+  repositoryPickerEmptyHintElsewhere,
   repositoryPickerOptions,
 } from "../pickerOptions";
 import {
@@ -1066,6 +1067,31 @@ describe("BackupPolicyEditor", () => {
     expect(api.upsertBackupPolicy).not.toHaveBeenCalled();
   });
 
+  it("sends no one to the Repositories page for a client it cannot file a repository under", async () => {
+    twoClients();
+    api.listBackupRepositories = vi.fn().mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderWithProviders(<BackupPolicyEditor />);
+    await user.click(await screen.findByRole("button", { name: "New policy" }));
+
+    // The internal client's default: the Repositories page files its
+    // repository, so it is linked.
+    expect(await screen.findByRole("link", { name: /Create a backup repository/ })).toHaveAttribute(
+      "href",
+      "/backup/repositories",
+    );
+
+    // A customer's group: that page cannot file one under the customer, so
+    // the hint says where it is made and there is no link.
+    await choose(user, "Applies to", /Customer servers/);
+    expect(screen.queryByRole("link", { name: /Create a backup repository/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("combobox", { name: "Repository" }));
+    expect(
+      await screen.findByText(/that client’s repository is created through the API or an AI connection \(MCP\)/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Create one on the Repositories tab/)).not.toBeInTheDocument();
+  });
+
   it("edits a stored policy within its own client, and sends that client for a default", async () => {
     twoClients();
     api.listBackupPolicies = vi.fn().mockResolvedValue([
@@ -1784,6 +1810,8 @@ describe("backup picker options", () => {
     expect(DEVICE_PICKER_EMPTY_HINT).toMatch(/permission/);
     expect(REPOSITORY_PICKER_EMPTY_HINT).toMatch(/Repositories tab/);
     expect(REPOSITORY_PICKER_EMPTY_HINT).toMatch(/permission/);
+    expect(repositoryPickerEmptyHintElsewhere()).not.toMatch(/Repositories tab/);
+    expect(repositoryPickerEmptyHintElsewhere()).toMatch(/permission/);
   });
 });
 

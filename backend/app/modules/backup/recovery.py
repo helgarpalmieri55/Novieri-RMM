@@ -41,6 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
 from app.core.i18n import tr
+from app.modules.backup.integrity import violated_constraint
 from app.modules.backup.models import BackupRecoveryKey
 
 ALG = "X25519-HKDF-SHA256-AES-256-GCM"
@@ -193,8 +194,7 @@ async def register_recovery_key(
         await session.flush()
     except IntegrityError as exc:
         # Two registrations raced past the check: the key's own refusal.
-        constraint = getattr(getattr(exc.orig, "__cause__", None), "constraint_name", None)
-        if constraint == ACTIVE_KEY:
+        if violated_constraint(exc) == ACTIVE_KEY:
             raise _already_registered() from None
         raise
     challenge = _issue_challenge(row, now)

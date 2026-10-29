@@ -77,6 +77,8 @@ export const backup: Shape<typeof en> = {
       "No hay dispositivos entre los que elegir. Un equipo aparece aquí en cuanto ejecuta el agente (Dispositivos → Añadir un equipo); también puede que no tengas permiso para listarlos.",
     repositoryEmptyHint:
       "No hay ningún repositorio de copia de seguridad del cliente de esta política. Crea uno en la pestaña Repositorios; también puede que no tengas permiso para listarlos.",
+    repositoryEmptyHintElsewhere:
+      "No hay ningún repositorio de copia de seguridad del cliente de esta política. Hasta que la consola pueda elegir un cliente, el repositorio de ese cliente se crea mediante la API o una conexión de IA (MCP); también puede que no tengas permiso para listarlos.",
     groupDevices: { one: "{count} dispositivo", other: "{count} dispositivos" },
     noAgent: "sin agente",
     agentOnline: "en línea",

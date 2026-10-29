@@ -15,7 +15,13 @@ default policy -- refused by silence, the right direction (no data to keep,
 spec P7). A group policy of a customer client's group keeps the repository it
 names, which is now another client's: the guard below refuses that pairing
 the next time it is written, and the dispatcher refuses it every time and
-records why (`backup.dispatch_refused`).
+records why (`backup.dispatch_refused`) -- once per device and policy
+version, asked through `ix_audit_backup_dispatch_refused`, a partial index of
+`audit_events (org_id, target_id)` holding only those rows (the 0220
+precedent). It is built inside this transaction: `audit_events` is
+append-only by trigger and not partitioned, the build's SHARE lock holds
+audit appends for the seconds it takes at this table's size, and `migrate`
+runs before `api` starts.
 
 A policy names only a repository of its own client
 (`its_backup_policy_repository_guard`). Its trigger is named
@@ -37,7 +43,9 @@ One consequence to keep: an UPDATE that leaves the key alone is not checked,
 UNLESS the same transaction has already written that row -- Postgres then
 re-checks the key, and a row from before 0242 fails it. So a transaction
 writes such a row at most once (`backup.dispatch.ingest_backup_result` asks
-its question before touching the run, for exactly this).
+its question before touching the run, for exactly this), and
+`tests/test_client_scope_backup.py::test_every_writer_writes_a_row_from_before_0242_once`
+drives every writer of runs and points through such a row.
 
 Backfills, each scoped to the row's own organisation: a repository takes the
 internal client of its organisation (`org_id`, the id convention); a chunk
@@ -194,9 +202,14 @@ def upgrade() -> None:
     )
     for table in ["backup_repositories", *[t for t, _, _ in H]]:
         _isolate(table)
+    op.execute(
+        "CREATE INDEX ix_audit_backup_dispatch_refused ON audit_events (org_id, target_id) "
+        "WHERE action = 'backup.dispatch_refused'"
+    )
 
 
 def downgrade() -> None:
+    op.execute("DROP INDEX ix_audit_backup_dispatch_refused")
     op.execute("DROP TRIGGER its_zz_backup_policy_repository_guard ON backup_policies")
     op.execute("DROP FUNCTION its_backup_policy_repository_guard()")
     for table in RUN_TABLES:

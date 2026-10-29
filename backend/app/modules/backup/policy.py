@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
 from app.models import Device
-from app.modules.backup.clients import client_for_policy
+from app.modules.backup.clients import client_for_policy, policy_repository
 from app.modules.backup.models import BackupPolicy
 from app.services.client_sites import loaded_client
 
@@ -45,6 +45,9 @@ class ResolvedBackupPolicy:
     retention_gfs: dict[str, Any]
     id: UUID | None = None
     created_at: datetime | None = None
+    # Which save of the row this is: the dispatcher records a refusal once per
+    # device and version (`dispatch.refusal_lookup`).
+    updated_at: datetime | None = None
 
 
 def _from_row(row: BackupPolicy, *, repository: bool = True) -> ResolvedBackupPolicy:
@@ -55,6 +58,7 @@ def _from_row(row: BackupPolicy, *, repository: bool = True) -> ResolvedBackupPo
         retention_gfs=row.retention_gfs,
         id=row.id,
         created_at=row.created_at,
+        updated_at=row.updated_at,
     )
 
 
@@ -120,20 +124,27 @@ async def upsert_policy(
     row and its client.
 
     The client, and the repository's being that client's, come first
-    (`clients.client_for_policy`: `BackupClientError` 404/409/422, the
-    client read FOR SHARE as this write's first lock), before anything is
-    written or audited.
+    (`clients.client_for_policy`, `clients.policy_repository`:
+    `BackupClientError` 404/409/422, the client read FOR SHARE as this
+    write's first lock), before anything is written or audited.
+
+    ONE EXCEPTION, and nothing wider (review of 2240971, Important 1): a write
+    that switches the STORED policy off and names the repository it already
+    names is not asked about that repository. Migration 0242 can leave a
+    customer client's policy naming a repository that is now another
+    client's, which the dispatcher refuses at every window; this is how a
+    person stops it before that client has a repository of its own. Its
+    repository is not written, so `its_zz_backup_policy_repository_guard`
+    (UPDATE OF the repository, the client and the group) does not fire.
+    Switching it on again, or naming any other repository, is checked as
+    always.
 
     As in patch's upsert_policy: for a default (device_group_id IS NULL)
     there is no unique constraint preventing duplicate rows, so we
     deterministically take the first existing one of the client rather than
     risk inserting a second."""
     policy_client = await client_for_policy(
-        session,
-        org_id=org_id,
-        device_group_id=device_group_id,
-        client_id=client_id,
-        repository_id=repository_id,
+        session, org_id=org_id, device_group_id=device_group_id, client_id=client_id
     )
     query = select(BackupPolicy).where(BackupPolicy.org_id == org_id)
     if device_group_id is None:
@@ -143,6 +154,11 @@ async def upsert_policy(
     else:
         query = query.where(BackupPolicy.device_group_id == device_group_id)
     row = (await session.execute(query.order_by(BackupPolicy.id).limit(1))).scalar_one_or_none()
+    stops_stored = row is not None and not enabled and row.repository_id == repository_id
+    if not stops_stored:
+        await policy_repository(
+            session, org_id=org_id, client_id=policy_client, repository_id=repository_id
+        )
 
     created = row is None
     if row is None:
@@ -152,7 +168,8 @@ async def upsert_policy(
         if device_group_id is None:
             row.client_id = policy_client
         session.add(row)
-    row.repository_id = repository_id
+    if row.repository_id != repository_id:
+        row.repository_id = repository_id
     row.sources = sources
     row.window_cron = window_cron
     row.retention_gfs = retention_gfs

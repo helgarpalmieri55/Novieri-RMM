@@ -753,6 +753,15 @@ class AuditEvent(Base):
             "ts",
             postgresql_where=text("action = 'mcp.tool_called'"),
         ),
+        # Migration 0242, for the backup window's "already recorded?" probe
+        # (`app/modules/backup/dispatch.py::refusal_lookup`): one device's
+        # refusals, and no other action's rows.
+        Index(
+            "ix_audit_backup_dispatch_refused",
+            "org_id",
+            "target_id",
+            postgresql_where=text("action = 'backup.dispatch_refused'"),
+        ),
         # Migration 0233: an informative client must still be one of the
         # event's own organisation's (a foreign key ignores RLS).
         client_org_fk("audit_events"),

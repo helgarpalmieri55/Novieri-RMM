@@ -21,6 +21,7 @@ from app.api.deps import AuthContext, require_permission
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.tenancy import org_session
+from app.modules.backup.integrity import violated_constraint
 from app.modules.backup.models import (
     BackupOffsiteTarget,
     BackupPoint,
@@ -218,9 +219,7 @@ def _name_exists() -> HTTPException:
 def _name_clash(exc: IntegrityError) -> bool:
     """A unique violation on the target-name key: two writes raced past the
     check (or a rename met a name), and the answer is the check's 409."""
-    return getattr(getattr(exc.orig, "__cause__", None), "constraint_name", None) == (
-        TARGET_NAME_KEY
-    )
+    return violated_constraint(exc) == TARGET_NAME_KEY
 
 
 # --------------------------------------------------------------------------- #

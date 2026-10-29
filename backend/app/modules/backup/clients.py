@@ -17,11 +17,15 @@ and names only a repository of that client.
   name no repository: a 422 (`EVERY_CLIENT_REPOSITORY`). The client is then
   held like a new row's, because an upsert creates the row the first time
   (the precedent: budget settings, `budget.clients.client_for_budget_settings`).
+- The repository a policy names is its client's (`policy_repository`), or a
+  422 -- checked by the write unless it only STOPS the stored policy as it
+  stands (`policy.upsert_policy`).
 
 LOCK ORDER (`app.services.client_sites`): the client, read FOR SHARE, is the
 FIRST lock of the write that calls these -- before any backup row and before
 the audit chain's -- which is the order an archive takes them in. The group
-is read before it and the repository after it; neither read takes a lock.
+is read before it; the stored policy and the repository after it; none of
+those reads takes a lock.
 """
 
 from uuid import UUID
@@ -84,11 +88,9 @@ async def client_for_policy(
     org_id: UUID,
     device_group_id: UUID | None,
     client_id: UUID | None,
-    repository_id: UUID,
 ) -> UUID:
     """The client of the policy a `PUT /backup/policies` writes (module
-    docstring), held FOR SHARE until commit -- after checking that the
-    repository it names is that client's. Every lookup carries `org_id`."""
+    docstring), held FOR SHARE until commit. Every lookup carries `org_id`."""
     if device_group_id is not None:
         group_client = (
             await session.execute(
@@ -108,6 +110,15 @@ async def client_for_policy(
         session, org_id, client_id,
         unassigned=tr("a backup policy cannot be filed under Unassigned"),
     )
+    return client_id
+
+
+async def policy_repository(
+    session: AsyncSession, *, org_id: UUID, client_id: UUID, repository_id: UUID
+) -> None:
+    """The repository a policy of `client_id` names is that client's: a 404
+    when this organisation has no such repository (or the session cannot see
+    it), a 422 when it is another client's."""
     repository_client = (
         await session.execute(
             select(BackupRepository.client_id).where(
@@ -119,4 +130,3 @@ async def client_for_policy(
         raise BackupClientError(404, tr("no such repository"))
     if repository_client != client_id:
         raise BackupClientError(422, tr("that repository belongs to another client"))
-    return client_id

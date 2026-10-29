@@ -31,14 +31,17 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from blake3 import blake3
 from moto import mock_aws
-from sqlalchemy import func, select, text
+from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.client_scope import ClientScope
+from app.core.config import override_settings
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
+from app.core.vault import LocalVaultService
 from app.models import (
     AuditEvent,
     BackupChunk,
@@ -50,16 +53,19 @@ from app.models import (
     Device,
     DeviceGroup,
     Job,
+    RestoreJob,
     User,
 )
 from app.models.core import JobStatus
-from app.modules.backup.clients import BackupClientError, client_for_policy
+from app.modules.backup.clients import BackupClientError, client_for_policy, policy_repository
 from app.modules.backup.dispatch import (
     dispatch_backup,
     dispatch_due_backup,
     ingest_backup_result,
+    refusal_lookup,
 )
-from app.modules.backup.gc import gc_repository
+from app.modules.backup.gc import gc_repository, seal_chunk, verify_point
+from app.modules.backup.health import SUCCESS_AGE, run_backup_health_sweep
 from app.modules.backup.offsite import (
     NO_RECOVERY_KEY_MESSAGE,
     OffsiteClientError,
@@ -69,8 +75,20 @@ from app.modules.backup.offsite import (
     set_repository_target,
 )
 from app.modules.backup.policy import resolve_backup_policy
+from app.modules.backup.reconcile import reconcile_stuck
 from app.modules.backup.repository import create_repository, open_repo_key
-from app.modules.backup.schema import BackupRunResult
+from app.modules.backup.restore import ingest_restore_result, seal_manifest
+from app.modules.backup.schema import (
+    BackupManifest,
+    BackupRestoreResult,
+    BackupRunResult,
+    FiletreeStream,
+    ManifestEntry,
+)
+from app.modules.health.models import HealthAlert
+from app.modules.reporting.definitions.backup_coverage import BackupCoverageParams
+from app.modules.reporting.registry import REGISTRY
+from app.modules.reporting.service import execute_report
 from tests.backup_offsite_fixtures import (
     LOCK_BUCKET,
     OffsiteOrg,
@@ -80,8 +98,10 @@ from tests.backup_offsite_fixtures import (
     make_buckets,
 )
 from tests.client_scope_support import client_with_site, drop_client_keys, everything_on
-from tests.conftest import ApiEnv
+from tests.conftest import ApiEnv, _psql
+from tests.health_fixtures import seed_assignment, seed_check, seed_profile
 from tests.test_backup_dispatch import _FakeJobEngine
+from tests.test_backup_worker import _settings as _worker_settings
 
 BK = "/api/v1/backup"
 GUARD = "backup policy names another client's repository"
@@ -159,7 +179,7 @@ async def _service_repo(env: ApiEnv, org: UUID, client: UUID, actor: UUID) -> UU
 async def _forced_policy(
     env: ApiEnv, org: UUID, repository: UUID, *, group: UUID | None = None,
     client: UUID | None = None, window_cron: str | None = None,
-    created_at: datetime | None = None,
+    created_at: datetime | None = None, retention_gfs: dict[str, int] | None = None,
 ) -> UUID:
     """A policy written with the guard switched off, inside one committed
     transaction (DDL is transactional, so no other session ever sees the
@@ -172,7 +192,8 @@ async def _forced_policy(
         ))
         policy = BackupPolicy(org_id=org, repository_id=repository, device_group_id=group,
                               client_id=client, sources={"paths": ["/srv"]},
-                              window_cron=window_cron, retention_gfs={}, enabled=True)
+                              window_cron=window_cron, retention_gfs=retention_gfs or {},
+                              enabled=True)
         s.add(policy)
         await s.flush()
         if created_at is not None:
@@ -603,6 +624,83 @@ async def test_a_policy_is_refused_where_its_client_cannot_take_one(api_env: Api
         assert await _written(api_env, org) == before
 
 
+async def test_a_legacy_policy_can_be_stopped_without_a_repository_of_its_own(
+    api_env: ApiEnv,
+) -> None:
+    """Review of 2240971, Important 1: a policy 0242 leaves naming another
+    client's repository can be switched off as it stands -- `enabled=false`
+    and its stored repository -- so a person can stop the refusals before
+    Y has a repository of its own. The guard allows it (it fires only on
+    UPDATE OF the repository, the client and the group); the write keeps the
+    pairing it found, is audited in the policy's client, and the positive
+    twin is the same body for a group-less default."""
+    org = await api_env.create_org("bk-stop")
+    x, _ = await client_with_site(api_env, org)
+    y, _ = await client_with_site(api_env, org)
+    admin = await _admin(api_env, org)
+    actor = await _user_id(api_env, org)
+    x_repo = await _service_repo(api_env, org, x, actor)
+    group = await _group(api_env, org, y)
+    grouped = await _forced_policy(api_env, org, x_repo, group=group, window_cron="0 2 * * *")
+    default = await _forced_policy(api_env, org, x_repo, client=y, window_cron="0 2 * * *")
+
+    for policy, scope in ((grouped, {"device_group_id": str(group)}),
+                          (default, {"client_id": str(y)})):
+        body = {**scope, "repository_id": str(x_repo), "sources": {"paths": ["/srv"]},
+                "window_cron": "0 2 * * *", "enabled": False}
+        r = await api_env.client.put(f"{BK}/policies", json=body, headers=admin)
+        assert r.status_code == 200, r.text
+        assert (r.json()["id"], r.json()["client_id"], r.json()["enabled"]) == (
+            str(policy), str(y), False
+        )
+        async with AsyncSession(api_env.admin_engine) as s:
+            stored = (await s.execute(select(BackupPolicy).where(
+                BackupPolicy.id == policy))).scalar_one()
+            assert (stored.enabled, stored.repository_id, stored.client_id) == (False, x_repo, y)
+    changed = await _events(api_env, org, "backup.policy_changed")
+    assert [(e.target_id, e.client_id, e.meta["created"]) for e in changed] == [
+        (str(grouped), y, False), (str(default), y, False),
+    ]
+
+
+async def test_a_legacy_policy_is_never_switched_on_or_repointed_across_clients(
+    api_env: ApiEnv,
+) -> None:
+    """The stop is that and nothing wider: switching the same policy on, or
+    naming a third repository of another client while switching it off, is
+    the 422 of any policy naming another client's repository -- and so is a
+    NEW disabled policy naming one (there is no stored pairing to keep).
+    Nothing is written anywhere, the audit log included."""
+    org = await api_env.create_org("bk-stop-only")
+    x, _ = await client_with_site(api_env, org)
+    y, _ = await client_with_site(api_env, org)
+    admin = await _admin(api_env, org)
+    actor = await _user_id(api_env, org)
+    x_repo = await _service_repo(api_env, org, x, actor)
+    x_other = await _service_repo(api_env, org, x, actor)
+    group = await _group(api_env, org, y)
+    fresh_group = await _group(api_env, org, y)
+    policy = await _forced_policy(api_env, org, x_repo, group=group, window_cron="0 2 * * *")
+    async with AsyncSession(api_env.admin_engine) as s:
+        await s.execute(text("UPDATE backup_policies SET enabled = false WHERE id = :p"),
+                        {"p": policy})
+        await s.commit()
+    cases = [
+        {"device_group_id": str(group), "repository_id": str(x_repo), "enabled": True},
+        {"device_group_id": str(group), "repository_id": str(x_other), "enabled": False},
+        {"device_group_id": str(fresh_group), "repository_id": str(x_repo), "enabled": False},
+    ]
+    for body in cases:
+        before = await _written(api_env, org)
+        r = await api_env.client.put(f"{BK}/policies", json=body, headers=admin)
+        assert (r.status_code, r.json()) == (422, {"detail": OTHER_CLIENT_REPO}), (body, r.text)
+        assert await _written(api_env, org) == before
+    async with AsyncSession(api_env.admin_engine) as s:
+        stored = (await s.execute(select(BackupPolicy).where(
+            BackupPolicy.id == policy))).scalar_one()
+        assert (stored.enabled, stored.repository_id) == (False, x_repo)
+
+
 async def test_a_policy_write_takes_its_client_before_the_audit_chain(
     api_env: ApiEnv,
 ) -> None:
@@ -799,7 +897,9 @@ async def test_the_window_never_hands_a_device_another_client_s_repository(
 
 async def test_run_now_refuses_another_client_s_repository_too(api_env: ApiEnv) -> None:
     """The on-demand path is the same `_dispatch_for_policy`: an empty job
-    list, and the refusal recorded."""
+    list, and the refusal recorded -- EVERY time. A person's Run now is
+    their act, recorded each time it is refused (invariant 4); only the
+    window's own repetition is recorded once (below)."""
     org = await api_env.create_org("bk-runnow")
     x, _ = await client_with_site(api_env, org)
     y, y_site = await client_with_site(api_env, org)
@@ -809,10 +909,11 @@ async def test_run_now_refuses_another_client_s_repository_too(api_env: ApiEnv) 
     group = await _group(api_env, org, y)
     await _forced_policy(api_env, org, x_repo, group=group)
     device = await _device(api_env, org, y, y_site, group)
-    r = await api_env.client.post(f"{BK}/devices/{device}/run", headers=admin)
-    assert (r.status_code, r.json()) == (200, {"job_ids": []}), r.text
-    (refusal,) = await _events(api_env, org, "backup.dispatch_refused")
-    assert (refusal.actor_type, refusal.client_id) == ("user", y)
+    for _ in range(2):
+        r = await api_env.client.post(f"{BK}/devices/{device}/run", headers=admin)
+        assert (r.status_code, r.json()) == (200, {"job_ids": []}), r.text
+    refusals = await _events(api_env, org, "backup.dispatch_refused")
+    assert [(e.actor_type, e.client_id) for e in refusals] == [("user", y), ("user", y)]
 
 
 async def test_a_missed_fire_is_recorded_in_the_device_s_client(api_env: ApiEnv) -> None:
@@ -831,6 +932,160 @@ async def test_a_missed_fire_is_recorded_in_the_device_s_client(api_env: ApiEnv)
     assert (missed.target_id, missed.client_id) == (str(device), y)
     assert await _count(api_env, BackupRun, BackupRun.device_id == device,
                         BackupRun.state == "missed") == 1
+
+
+REFUSAL_LOOKUP = "'backup.dispatch_refused'"
+
+
+async def _refused_world(
+    env: ApiEnv, tag: str
+) -> tuple[UUID, UUID, UUID, UUID, list[UUID], UUID]:
+    """(org, Y, X's repository, the legacy policy, the two devices of Y under
+    it, a device of Y under Y's own repository): a group policy of Y naming
+    X's repository, as 0242 leaves one, its window at 02:00, everything
+    protected since long ago."""
+    org = await env.create_org(tag)
+    x, _ = await client_with_site(env, org)
+    y, y_site = await client_with_site(env, org)
+    actor = await _user_id(env, org)
+    x_repo = await _service_repo(env, org, x, actor)
+    y_repo = await _service_repo(env, org, y, actor)
+    bad_group = await _group(env, org, y)
+    good_group = await _group(env, org, y)
+    policy = await _forced_policy(env, org, x_repo, group=bad_group, window_cron="0 2 * * *",
+                                  created_at=_LONG_AGO)
+    await _policy(env, org, y_repo, group=good_group, window_cron="0 2 * * *",
+                  created_at=_LONG_AGO)
+    refused = [await _device(env, org, y, y_site, bad_group, created_at=_LONG_AGO)
+               for _ in range(2)]
+    served = await _device(env, org, y, y_site, good_group, created_at=_LONG_AGO)
+    return org, y, x_repo, policy, refused, served
+
+
+async def _sweep(env: ApiEnv, org: UUID, devices: list[UUID], now: datetime) -> list[str]:
+    """One window sweep over `devices` as the worker runs it -- scope all, one
+    transaction -- returning every statement it sent."""
+    seen: list[str] = []
+
+    def tick(_conn: Any, _cursor: Any, statement: str, *_: Any) -> None:
+        seen.append(statement)
+
+    engine = env.app_engine.sync_engine
+    event.listen(engine, "before_cursor_execute", tick)
+    try:
+        async with org_session(org, clients=ClientScope.all(), engine=env.app_engine) as s:
+            for device in devices:
+                await dispatch_due_backup(s, _FakeJobEngine(), env.app.state.vault,
+                                          org_id=org, device_id=device, now=now)
+    finally:
+        event.remove(engine, "before_cursor_execute", tick)
+    return seen
+
+
+async def test_the_window_records_a_refusal_once_per_device_and_policy_version(
+    api_env: ApiEnv,
+) -> None:
+    """Review of 2240971, Important 1: the sweep runs every 15 minutes and a
+    fire stays due for six hours, so recording every refusal wrote up to 24
+    rows per fire per device into the hash-chained log. Three sweeps inside
+    one fire write ONE refusal per device. Each sweep asks once per refused
+    device whether it has already recorded one -- one indexed lookup, no
+    fan-out -- and never asks for a device it dispatches."""
+    org, _y, x_repo, policy, refused, served = await _refused_world(api_env, "bk-once")
+    for minute in (5, 20, 35):
+        seen = await _sweep(api_env, org, [*refused, served], _tomorrow(2, minute))
+        assert len([q for q in seen if REFUSAL_LOOKUP in q]) == len(refused), minute
+    refusals = await _events(api_env, org, "backup.dispatch_refused")
+    assert sorted(e.target_id for e in refusals) == sorted(str(d) for d in refused)
+    assert {(e.actor_type, e.meta["repository_id"], e.meta["policy_id"]) for e in refusals} == {
+        ("system", str(x_repo), str(policy))
+    }
+    for device in refused:
+        assert await _count(api_env, BackupRun, BackupRun.device_id == device) == 0
+    assert await _count(api_env, BackupRun, BackupRun.device_id == served) == 1
+
+
+async def test_a_refusal_is_recorded_again_once_its_policy_changes(api_env: ApiEnv) -> None:
+    """The record is per policy VERSION: once the policy is saved again (its
+    `updated_at` moves) the next sweep records one new refusal per device,
+    and the sweeps after it none."""
+    org, _y, _x_repo, policy, refused, _served = await _refused_world(api_env, "bk-again")
+    await _sweep(api_env, org, refused, _tomorrow(2, 5))
+    async with AsyncSession(api_env.admin_engine) as s:
+        row = (await s.execute(select(BackupPolicy).where(BackupPolicy.id == policy))
+               ).scalar_one()
+        first_version = row.updated_at
+        row.sources = {"paths": ["/srv", "/home"]}
+        await s.commit()
+    for minute in (20, 35):
+        await _sweep(api_env, org, refused, _tomorrow(2, minute))
+    refusals = await _events(api_env, org, "backup.dispatch_refused")
+    assert sorted(e.target_id for e in refusals) == sorted(str(d) for d in refused * 2)
+    versions = [e.meta["policy_updated_at"] for e in refusals]
+    assert versions[:2] == [first_version.astimezone(UTC).isoformat()] * 2
+    assert versions[2] == versions[3] != versions[0]
+
+
+async def test_a_refused_device_still_reads_as_not_backed_up(api_env: ApiEnv) -> None:
+    """Recording the refusal once hides nothing else: the health check still
+    alerts on a device that has not been backed up for days, and the
+    coverage report still lists it unprotected."""
+    org, _y, _x_repo, _policy_id, refused, _served = await _refused_world(api_env, "bk-seen")
+    for minute in (5, 20):
+        await _sweep(api_env, org, refused, _tomorrow(2, minute))
+    profile = await seed_profile(api_env.admin_engine, org)
+    await seed_assignment(api_env.admin_engine, org, profile)
+    await seed_check(api_env.admin_engine, org, profile, check_type=SUCCESS_AGE,
+                     comparator="gt", threshold_num=50, severity="critical", for_ticks=1)
+    async with org_session(org, clients=ClientScope.all(), engine=api_env.app_engine) as s:
+        await run_backup_health_sweep(s, org, now=_tomorrow(3))
+    async with AsyncSession(api_env.admin_engine) as s:
+        alerted = set((await s.execute(select(HealthAlert.device_id).where(
+            HealthAlert.org_id == org, HealthAlert.check_type == SUCCESS_AGE,
+            HealthAlert.state != "cleared",
+        ))).scalars())
+    assert set(refused) <= alerted
+    async with org_session(org, clients=ClientScope.all(), engine=api_env.app_engine) as s:
+        page = await execute_report(s, REGISTRY["backup-coverage"], BackupCoverageParams(),
+                                    org_id=org)
+    by_id = {row.device_id: row for row in page.rows}
+    for device in refused:
+        assert (by_id[device].policy_present, by_id[device].coverage) == (True, "unprotected")
+
+
+def _lookup_sql() -> str:
+    """The window's "already refused?" question as PostgreSQL receives it,
+    every bound parameter a `$n` -- a prepared statement's shape."""
+    import re
+
+    from sqlalchemy.dialects import postgresql
+
+    compiled = str(
+        refusal_lookup(
+            org_id=uuid4(), device_id=uuid4(), client_id=uuid4(), repository_id=uuid4(),
+            policy_id=uuid4(), policy_version="2026-01-01T00:00:00+00:00",
+        ).compile(dialect=postgresql.dialect())
+    )
+    names: list[str] = []
+
+    def positional(match: "re.Match[str]") -> str:
+        names.append(match.group(1))
+        return f"${len(names)}"
+
+    return re.sub(r"%\((\w+)\)s", positional, compiled)
+
+
+async def test_the_refusal_lookup_is_one_index_probe_even_in_a_generic_plan(
+    api_env: ApiEnv, pg_cluster: Any
+) -> None:
+    """The lookup states the action as an inline literal, so the planner
+    proves `ix_audit_backup_dispatch_refused`'s predicate even in the generic
+    plan asyncpg's prepared statements reach after a few runs (the 0220
+    precedent, `tests/test_mcp_admin_api.py`)."""
+    sql = _lookup_sql()
+    assert "audit_events.action = 'backup.dispatch_refused'" in sql
+    plan = _psql("SET enable_seqscan = off; EXPLAIN (GENERIC_PLAN) " + sql, pg_cluster.dbname)
+    assert "ix_audit_backup_dispatch_refused" in plan, plan
 
 
 async def test_another_org_s_policy_planted_under_this_client_resolves_nothing(
@@ -895,30 +1150,30 @@ async def test_another_org_s_device_resolves_nothing_here(api_env: ApiEnv) -> No
 
 
 async def test_a_policy_s_client_lookups_keep_to_their_org(api_env: ApiEnv) -> None:
-    """THE ORG PREDICATES of `client_for_policy` and of the repository
-    create's client, on the admin engine (no RLS): org B's group, org B's
-    repository and org B's client are, for org A, things that do not
-    exist -- the 404 each gets when absent, not the 422 or the other 404 the
-    row would earn if it were found."""
+    """THE ORG PREDICATES of `client_for_policy`, `policy_repository` and
+    the repository create's client, on the admin engine (no RLS): org B's
+    group, org B's repository and org B's client are, for org A, things that
+    do not exist -- the 404 each gets when absent, not the 422 or the other
+    404 the row would earn if it were found."""
     a = await api_env.create_org("bk-orgs-a")
     b = await api_env.create_org("bk-orgs-b")
     a_actor = await _user_id(api_env, a)
-    a_repo = await _service_repo(api_env, a, a, a_actor)
     b_repo = await _service_repo(api_env, b, b, await _user_id(api_env, b))
     b_group = await _group(api_env, b, b)
-    cases: list[tuple[dict[str, Any], str]] = [
-        ({"device_group_id": b_group, "client_id": None, "repository_id": a_repo},
+    cases: list[tuple[Callable[[AsyncSession], Any], str]] = [
+        (lambda s: client_for_policy(s, org_id=a, device_group_id=b_group, client_id=None),
          "no such device group"),
-        ({"device_group_id": None, "client_id": a, "repository_id": b_repo},
+        (lambda s: policy_repository(s, org_id=a, client_id=a, repository_id=b_repo),
          "no such repository"),
-        ({"device_group_id": None, "client_id": b, "repository_id": a_repo}, "no such client"),
+        (lambda s: client_for_policy(s, org_id=a, device_group_id=None, client_id=b),
+         "no such client"),
     ]
-    for kwargs, detail in cases:
+    for call, detail in cases:
         async with AsyncSession(api_env.admin_engine) as s:
             with pytest.raises(BackupClientError) as refused:
-                await client_for_policy(s, org_id=a, **kwargs)
+                await call(s)
             await s.rollback()
-        assert (refused.value.status_code, refused.value.detail) == (404, detail), kwargs
+        assert (refused.value.status_code, refused.value.detail) == (404, detail), detail
     async with AsyncSession(api_env.admin_engine) as s:
         with pytest.raises(BackupClientError) as refused:
             await create_repository(s, api_env.app.state.vault, org_id=a, actor_id=a_actor,
@@ -1014,7 +1269,8 @@ async def test_a_run_from_before_0242_lands_failed_rather_than_on_another_client
     The run is planted the way history holds it: committed in an earlier
     transaction (the key dropped and added back NOT VALID inside it), so the
     result's UPDATE of its state is not re-judged -- Postgres re-checks a
-    row's unchanged key only when the same transaction inserted it."""
+    row's unchanged key only when the same transaction inserted or updated
+    it."""
     org = await api_env.create_org("bk-legacy-run")
     x, _ = await client_with_site(api_env, org)
     y, y_site = await client_with_site(api_env, org)
@@ -1074,6 +1330,149 @@ async def test_a_run_from_before_0242_lands_failed_rather_than_on_another_client
     assert warnings == ["files changed during read"]
     assert result.client_id == y
     assert result.meta["unexpected_result_state"] == "repository_of_another_client"
+
+
+LEGACY_WRITERS = ["retention", "verify_point", "restore_verify", "reconcile_stuck",
+                  "failed_result"]
+
+
+async def _legacy_history(
+    env: ApiEnv, store: ObjectStore, vault: LocalVaultService, now: datetime
+) -> dict[str, Any]:
+    """A device of Y with a run and two points in X's repository, committed
+    the way history holds them: written before 0242, so they break both
+    composite keys (dropped and added back NOT VALID inside the planting
+    transaction). The run is still running on a job that expired hours ago;
+    each point has a sealed manifest and chunk in the store; the newer one
+    has a verify-mode restore in flight; Y's policy still names X's
+    repository and keeps one day."""
+    org = await env.create_org("bk-history")
+    x, _ = await client_with_site(env, org)
+    y, y_site = await client_with_site(env, org)
+    actor = await _user_id(env, org)
+    async with org_session(org, clients=ClientScope.all(), engine=env.app_engine) as s:
+        repo = (await create_repository(s, vault, org_id=org, actor_id=actor, client_id=x,
+                                        name="x")).id
+        key = await open_repo_key(s, vault, org_id=org, repository_id=repo)
+    group = await _group(env, org, y)
+    await _forced_policy(env, org, repo, group=group, retention_gfs={"daily": 1})
+    device = await _device(env, org, y, y_site, group)
+    refs: dict[str, str] = {}
+    for name in ("old", "new"):
+        plaintext = f"legacy-{name}".encode()
+        chunk = blake3(plaintext).hexdigest()
+        await store.put_backup_chunk(org, repo, chunk, seal_chunk(key, plaintext))
+        manifest = BackupManifest(schema_version=1, streams=[FiletreeStream(
+            type="filetree", entries=[ManifestEntry(
+                path=f"/srv/{name}", kind="file", mode=0o644, size=len(plaintext),
+                mtime=1700000000.0, chunk_ids=[chunk])])])
+        refs[name] = await store.put_backup_object(org, repo, f"manifests/{uuid4().hex}",
+                                                   seal_manifest(key, manifest))
+    async with AsyncSession(env.admin_engine, expire_on_commit=False) as s:
+        await drop_client_keys(s, "backup_runs", RUN_FK)
+        await drop_client_keys(s, "backup_points", POINT_FK)
+        job = Job(org_id=org, type="backup.run", target_type="device", target_id=device,
+                  params={}, nonce=uuid4().hex, issued_at=now - timedelta(hours=4),
+                  expires_at=now - timedelta(hours=2), status=JobStatus.running)
+        restore = Job(org_id=org, type="backup.restore", target_type="device", target_id=device,
+                      params={}, nonce=uuid4().hex, issued_at=now,
+                      expires_at=now + timedelta(hours=1), status=JobStatus.running)
+        s.add_all([job, restore])
+        await s.flush()
+        run = BackupRun(org_id=org, device_id=device, repository_id=repo, job_id=job.id,
+                        state="running", actor_type="system", started_at=now - timedelta(hours=4))
+        s.add(run)
+        await s.flush()
+        points = {
+            name: BackupPoint(org_id=org, device_id=device, repository_id=repo,
+                              backup_run_id=run.id, taken_at=now - age, manifest_ref=refs[name],
+                              size=1, state="complete")
+            for name, age in (("old", timedelta(days=3)), ("new", timedelta(hours=1)))
+        }
+        s.add_all(points.values())
+        await s.flush()
+        s.add(RestoreJob(org_id=org, device_id=device, backup_point_id=points["new"].id,
+                         job_id=restore.id, mode="verify", state="running", actor_type="system"))
+        for table, key_name in (("backup_runs", RUN_FK), ("backup_points", POINT_FK)):
+            await s.execute(text(
+                f"ALTER TABLE {table} ADD CONSTRAINT {key_name} FOREIGN KEY "
+                "(repository_id, client_id) REFERENCES backup_repositories (id, client_id) "
+                "NOT VALID"
+            ))
+        await s.commit()
+        assert (run.client_id, points["new"].client_id) == (y, y)
+    return {"org": org, "repo": repo, "run": run.id, "job": job, "restore": restore,
+            "old": points["old"].id, "new": points["new"].id}
+
+
+@pytest.mark.parametrize("writer", LEGACY_WRITERS)
+async def test_every_writer_writes_a_row_from_before_0242_once(
+    api_env: ApiEnv, pg_cluster: Any, tmp_path: Path, writer: str
+) -> None:
+    """Review of 2240971, Important 2. A run or point from before 0242 can
+    break its composite key, and Postgres re-checks an unchanged key on an
+    UPDATE of a row the same transaction already wrote: a writer that
+    UPDATEs such a row twice in one transaction fails on it. This drives
+    every current writer of `backup_runs` / `backup_points` through one --
+    the retention sweep (with the GC after it), `verify_point`, a
+    verify-mode `ingest_restore_result`, `reconcile_stuck` and a failure
+    result -- and each must land its change. A writer that grows a second
+    UPDATE (a flush between two of its attribute writes) turns its case
+    red (the mutants in the Task 13 report)."""
+    from app import worker
+
+    settings = _worker_settings(pg_cluster, tmp_path)
+    vault = LocalVaultService(tmp_path / "vault-root.key")
+    now = datetime.now(UTC)
+    with mock_aws():
+        store = ObjectStore(settings)
+        history = await _legacy_history(api_env, store, vault, now)
+        org = history["org"]
+        try:
+            if writer == "retention":
+                with override_settings(settings):
+                    await worker.backup_retention_gc_all_orgs(now)
+            else:
+                async with org_session(org, clients=ClientScope.all(),
+                                       engine=api_env.app_engine) as s:
+                    if writer == "verify_point":
+                        assert await verify_point(s, store, vault, org_id=org,
+                                                  backup_point_id=history["new"], now=now)
+                    elif writer == "restore_verify":
+                        await ingest_restore_result(s, history["restore"], BackupRestoreResult(
+                            state="success", restored_bytes=1, verified=True, mismatch=[]))
+                    elif writer == "reconcile_stuck":
+                        assert (await reconcile_stuck(s, org, now=now))["runs"] == 1
+                    else:
+                        await ingest_backup_result(
+                            s, lambda: None, history["job"],  # type: ignore[arg-type, return-value]
+                            BackupRunResult(state="failed", bytes_protected=0, bytes_stored=0,
+                                            chunk_count=0, error="disk",
+                                            warnings=["files changed during read"],
+                                            consistency={"level": "live",
+                                                         "crash_consistent": False}))
+            async with AsyncSession(api_env.admin_engine) as s:
+                run_state = (await s.execute(select(BackupRun.state).where(
+                    BackupRun.id == history["run"]))).scalar_one()
+                points = {
+                    name: (await s.execute(select(BackupPoint).where(
+                        BackupPoint.id == history[name]))).scalar_one()
+                    for name in ("old", "new")
+                }
+        finally:
+            async with AsyncSession(api_env.admin_engine) as s:
+                await s.execute(text("DELETE FROM restore_jobs WHERE org_id = :o"), {"o": org})
+                await s.execute(text("DELETE FROM backup_points WHERE org_id = :o"), {"o": org})
+                await s.execute(text("DELETE FROM backup_runs WHERE org_id = :o"), {"o": org})
+                await s.commit()
+    landed = {
+        "retention": (points["old"].state, points["new"].state) == ("pruned", "complete"),
+        "verify_point": points["new"].verified_at is not None,
+        "restore_verify": points["new"].restore_tested_at is not None,
+        "reconcile_stuck": run_state == "failed",
+        "failed_result": run_state == "failed",
+    }
+    assert landed[writer], (writer, run_state, {n: p.state for n, p in points.items()})
 
 
 # --------------------------------------------------------------------------- #
@@ -1275,7 +1674,8 @@ async def test_every_repository_and_policy_event_names_its_client(
                                      json={"target_id": target_id}, headers=admin)
         assert r.status_code == 200, r.text
     events = await _events(api_env, org)
-    assert sorted({(e.action, e.client_id) for e in events}, key=repr) == sorted({
+    # A LIST, so an event written twice is a failure too.
+    assert sorted(((e.action, e.client_id) for e in events), key=repr) == sorted([
         ("backup.repository_created", x),
         ("backup.repository_created", y),
         ("backup.policy_changed", x),
@@ -1286,7 +1686,7 @@ async def test_every_repository_and_policy_event_names_its_client(
         ("backup.recovery_key_proven", None),
         ("credential.created", None),
         ("backup.offsite_target_created", None),
-    }, key=repr)
+    ], key=repr)
 
 
 async def test_every_dispatch_event_names_the_device_s_client(api_env: ApiEnv) -> None:
