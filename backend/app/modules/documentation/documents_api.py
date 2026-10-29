@@ -421,7 +421,9 @@ async def upload_version(
                 ),
             )
         try:
-            await svc.assert_not_already_full(session, ctx.org_id)
+            await svc.assert_not_already_full(
+                session, ctx.org_id, client_id=document.client_id
+            )
         except svc.QuotaExceeded as exc:
             raise HTTPException(status.HTTP_507_INSUFFICIENT_STORAGE, str(exc)) from None
 

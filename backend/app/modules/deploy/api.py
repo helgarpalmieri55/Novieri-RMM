@@ -37,6 +37,7 @@ from app.api.deps import AuthContext, require_permission, require_permission_on_
 from app.core.audit import audit_service
 from app.core.http import read_bounded_body, reject_oversized_content_length
 from app.core.i18n import N_, tr
+from app.core.schedule import InvalidWindow, checked_window
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job
@@ -567,6 +568,15 @@ async def create_deployment(
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.create")),
 ) -> DeploymentOut:
+    # The window is read first of all, with the sweep's own parser (final
+    # review B2): the window sweep runs one transaction per organisation, so a
+    # value it cannot read stopped every windowed deployment of every client
+    # in it -- and no route edits or deletes a deployment. Refused before any
+    # row is read, it holds nothing and writes nothing.
+    try:
+        window_cron = checked_window(body.window_cron)
+    except InvalidWindow as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
     refusal: str | None = None
     out: DeploymentOut | None = None
     async with org_session(
@@ -651,7 +661,7 @@ async def create_deployment(
                 action=body.action,
                 target_type=body.target_type,
                 target_id=body.target_id,
-                window_cron=body.window_cron,
+                window_cron=window_cron,
                 requested_by=ctx.user_id,
                 state="pending",
             )

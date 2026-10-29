@@ -204,6 +204,8 @@ async def wake_via_site_server(
         action="site.wake_dispatched",
         target_type="site_server",
         target_id=str(site_server.id),
+        # The site server's client, its device's (Task 12): the wake is its act.
+        client_id=site_server.client_id,
         metadata={
             "job_id": str(job.id),
             "device_id": str(site_server.device_id),

@@ -64,7 +64,8 @@ from app.modules.backup.policy import resolve_backup_policy
 from app.modules.backup.reconcile import reconcile_stuck
 from app.modules.backup.retention import select_gfs
 from app.modules.deploy.artifacts import LazyObjectStoreSigner
-from app.modules.deploy.dispatch import dispatch_deployment
+from app.modules.deploy.dispatch import UnreadableWindow, dispatch_deployment
+from app.modules.deploy.packages import DeployValidationError
 from app.modules.deploy.script_policies import run_policy_sweep
 from app.modules.health import baseline as health_baseline_module
 from app.modules.health import sweep as health_sweep_module
@@ -1252,15 +1253,39 @@ async def deploy_window_sweep_all_orgs(now: datetime) -> int:
                         )
                     ).scalars().all()
                     for deployment_id in deployment_ids:
-                        dispatched = await dispatch_deployment(
-                            session,
-                            job_engine,
-                            org_id=org_id,
-                            deployment_id=deployment_id,
-                            now=now,
-                            actor_type="system",
-                            artifact_urls=artifact_urls,
-                        )
+                        # Each deployment in a savepoint of its own (final
+                        # review B2): one its own data stops -- a window
+                        # stored before the API checked windows, a package
+                        # with no artifact -- rolls back only itself, never
+                        # the organisation's others. An error of anything
+                        # else (the database, the signer) still fails the
+                        # organisation's cycle, as before.
+                        try:
+                            async with session.begin_nested():
+                                dispatched = await dispatch_deployment(
+                                    session,
+                                    job_engine,
+                                    org_id=org_id,
+                                    deployment_id=deployment_id,
+                                    now=now,
+                                    actor_type="system",
+                                    artifact_urls=artifact_urls,
+                                )
+                        except UnreadableWindow as exc:
+                            logger.warning(
+                                "deploy window sweep: deployment %s skipped: its window "
+                                "cannot be read (%r)",
+                                deployment_id,
+                                exc.window,
+                            )
+                            continue
+                        except DeployValidationError as exc:
+                            logger.warning(
+                                "deploy window sweep: deployment %s skipped: %s",
+                                deployment_id,
+                                exc,
+                            )
+                            continue
                         pending.extend(dispatched)
                 # Transaction committed: safe to publish the signed jobs.
                 for _job_id, device_id, envelope in pending:

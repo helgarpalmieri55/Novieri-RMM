@@ -46,7 +46,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
-from app.core.i18n import tr
+from app.core.i18n import N_, tr
 from app.models import (
     BackupPolicy,
     Client,
@@ -66,7 +66,7 @@ from app.modules.inventory.rules import (
     rule_bearing_groups_query,
 )
 from app.modules.inventory.schema import InventoryDocument
-from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
+from app.services.client_sites import ClientRefusesNewRow, named_client_for_new_rows
 
 logger = logging.getLogger("its.device_groups")
 
@@ -574,15 +574,21 @@ async def create_device_group(
     `client_id` IS REQUIRED (MSP clients spec §1.5): a group organises one
     client's devices. A client the session cannot see -- another
     organisation's, or one outside the caller's scope -- is a 404, the same
-    for both, and an archived client takes no new group (409); its parent, if
-    any, has to be of the same client, and its name is unique within it.
+    for both, and an archived client takes no new group (409), nor does
+    Unassigned (422, plan C10: the inbox for what has no owner, which no
+    device can be of); its parent, if any, has to be of the same client, and
+    its name is unique within it.
     """
     try:
-        await client_for_new_rows(session, org_id=org_id, client_id=client_id)
-    except ClientNotFound:
-        raise DeviceGroupError(404, tr("unknown client")) from None
-    except NotAcceptingNewRows as exc:
-        raise DeviceGroupError(409, exc.detail) from None
+        await named_client_for_new_rows(
+            session,
+            org_id=org_id,
+            client_id=client_id,
+            unassigned=N_("a device group cannot be filed under Unassigned"),
+            not_found=N_("unknown client"),
+        )
+    except ClientRefusesNewRow as exc:
+        raise DeviceGroupError(exc.status_code, exc.detail) from None
     if not await _live_name_is_free(session, org_id, client_id, name, excluding=None):
         raise DeviceGroupError(409, tr("a group of that name already exists"))
 

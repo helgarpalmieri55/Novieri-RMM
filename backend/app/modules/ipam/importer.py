@@ -96,6 +96,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
 from app.core.csv_export import escape_formula
+from app.core.global_rows import session_scope
 from app.core.i18n import tr
 from app.models import DocRecord
 from app.modules.ipam.addresses import assign, reserve, update_address
@@ -622,9 +623,12 @@ async def convert_doc_records(
 
     THE SUBNET IS THE RECORD'S CLIENT'S (migration 0240), in that client's
     `global` VRF; a record with no client -- Novieri's own documentation -- is
-    the internal client's, whose id is the organisation's. ONE AUDIT EVENT PER
-    CLIENT the run filed into or would have, each carrying that client and its
-    own counts; a run that found no record writes one for the organisation.
+    the internal client's, whose id is the organisation's -- and only a person
+    with every client converts one, since that archives a global row: under a
+    narrower scope it is skipped, with that reason, in both runs. ONE AUDIT
+    EVENT PER CLIENT the run filed into or would have, each carrying that
+    client and its own counts; a run that found no record writes one for the
+    organisation.
     """
     records = (
         (
@@ -652,9 +656,28 @@ async def convert_doc_records(
     #: Per client the records are filed under: (converted, skipped).
     tally: dict[UUID, list[int]] = {}
 
+    # A record with no client is for every client, and converting it archives
+    # it: a write to a global row, which only the every-client scope makes
+    # (`app.core.global_rows`). Under any other scope -- one that includes
+    # the internal client sees such a record -- both runs skip it with that
+    # reason, so the dry run says what the real run will do rather than
+    # promising a conversion that ends the request in a 403 (final review C).
+    scope = session_scope(session)
+    every_client = scope is None or scope.is_all
+
     for record in records:
         client_id = record.client_id or org_id
         counts = tally.setdefault(client_id, [0, 0])
+        if record.client_id is None and not every_client:
+            skipped.append(
+                SkippedRecord(
+                    record.id,
+                    record.name,
+                    tr("a record for every client is converted only by someone with every client"),
+                )
+            )
+            counts[1] += 1
+            continue
         fields = record.fields if isinstance(record.fields, dict) else {}
         raw_cidr = fields.get("cidr")
         if not raw_cidr:

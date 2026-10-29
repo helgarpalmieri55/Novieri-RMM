@@ -82,11 +82,12 @@ async def _require_offboard(session: AsyncSession, ctx: AuthContext, client_id: 
 
 
 async def _checklist_out(
-    session: AsyncSession, org_id: UUID, person_id: UUID, checklist_id: UUID
+    session: AsyncSession, ctx: AuthContext, person_id: UUID, checklist_id: UUID
 ) -> ChecklistOut:
+    org_id = ctx.org_id
     person = await service.load_person(session, org_id, person_id)
     row = await checklists.load_checklist(session, org_id, person_id, checklist_id)
-    facts = await checklists.gather_facts(session, org_id, person)
+    facts = await checklists.gather_facts(session, org_id, person, viewer_id=ctx.user_id)
     view: dict[str, Any] = await checklists.checklist_view(session, org_id, row, facts)
     return ChecklistOut.model_validate(view)
 
@@ -398,7 +399,7 @@ async def start_checklist(
                 person_id=person_id,
                 kind=body.kind,
             )
-            return await _checklist_out(session, ctx.org_id, person_id, row.id)
+            return await _checklist_out(session, ctx, person_id, row.id)
         except PeopleError as exc:
             raise _http(exc) from exc
 
@@ -430,7 +431,7 @@ async def update_step(
                 state=body.state,
                 note=body.note,
             )
-            return await _checklist_out(session, ctx.org_id, person_id, checklist_id)
+            return await _checklist_out(session, ctx, person_id, checklist_id)
         except PeopleError as exc:
             raise _http(exc) from exc
 
@@ -453,7 +454,7 @@ async def _close(
                 checklist_id=checklist_id,
                 outcome=outcome,
             )
-            return await _checklist_out(session, ctx.org_id, person_id, checklist_id)
+            return await _checklist_out(session, ctx, person_id, checklist_id)
         except PeopleError as exc:
             raise _http(exc) from exc
 

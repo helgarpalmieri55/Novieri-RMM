@@ -44,6 +44,7 @@ from app.api.deps import AuthContext, require_permission
 from app.core.audit import audit_service
 from app.core.csv_export import escape_formula
 from app.core.i18n import tr
+from app.core.schedule import InvalidWindow
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job
@@ -59,7 +60,6 @@ from app.modules.backup.reporting import (
 )
 from app.modules.backup.repository import create_repository
 from app.modules.backup.restore import browse_manifest, dispatch_restore
-from app.modules.backup.schedule import InvalidWindow
 from app.modules.backup.schema import BackupManifest
 
 router = APIRouter(prefix="/backup", tags=["backup"])
@@ -97,9 +97,10 @@ class RepositoryCreateRequest(BaseModel):
 
 class PolicyOut(BaseModel):
     id: UUID
-    # The group's client, or the client whose default this is. NULL only on
-    # a row from before migration 0242's guard, which names no repository
-    # the resolution will use.
+    # The group's client, or the client whose default this is. There is no
+    # policy for every client (`backup/policy.py`): NULL only on a row planted
+    # around migration 0242's guard, whose repository the resolution never
+    # uses.
     client_id: UUID | None
     device_group_id: UUID | None
     repository_id: UUID

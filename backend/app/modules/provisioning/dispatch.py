@@ -135,10 +135,11 @@ async def _resolve_wake(
     if not candidates:
         raise ProvisioningValidationError(
             tr(
-                "no enabled site server serves {segment}: "
-                "a Wake-on-LAN packet must originate on the target's own segment, and "
-                "nothing in this org is declared for it. Promote a site server on that "
-                "segment, or start the run without wake_on_lan",
+                "no enabled site server of the organization's own client serves {segment}: "
+                "a Wake-on-LAN packet must originate on the target's own segment, and a "
+                "provisioning wake goes only through that client's site servers, none of "
+                "which is declared for it. Promote one of its site servers on that segment, "
+                "or start the run without wake_on_lan",
                 segment=wake.segment or tr("the requested segment"),
             )
         )
@@ -146,8 +147,8 @@ async def _resolve_wake(
     if wake.segment is None and len(candidates) > 1:
         raise ProvisioningValidationError(
             tr(
-                "wake_on_lan.segment was not given and this org has {count} "
-                "enabled site servers: with no segment there is nothing to filter on, "
+                "wake_on_lan.segment was not given and the organization's own client has "
+                "{count} enabled site servers: with no segment there is nothing to filter on, "
                 "so {target_mac} cannot be located and picking a server would put "
                 "the magic packet on whichever LAN happened to be registered first. "
                 "Name the segment the target is on",
@@ -210,8 +211,11 @@ async def start_provision_run(
 
     run = ProvisionRun(
         org_id=org_id,
-        # The internal client, like the token below (PHASE 2: the machine's
-        # client). Not NULL, which an O table reads as every client: the agent
+        # The internal client, like the token below: provisioning stays the
+        # internal client's -- phase 2 did not bring imaging, hidden by MSP
+        # clients spec §1.4, into the clients model; a run for another
+        # client's machine is a later decision. Not NULL, which an O table
+        # reads as every client: the agent
         # enrols under its token's client alone, and binding this run to the
         # device it produced is an UPDATE that client's scope has to reach.
         client_id=org_id,
@@ -229,10 +233,11 @@ async def start_provision_run(
         issued = await create_token(
             session,
             org_id=org_id,
-            # PHASE 2: the client the machine is provisioned for (plan "Fuera de
-            # esta fase"). Imaging is hidden in phase 1 (MSP clients spec §1.4),
-            # so the machine joins the internal client's Principal site, whose id
-            # is the organisation's (plan Global Constraints: id convention).
+            # The internal client's Principal site, whose id is the
+            # organisation's (plan Global Constraints: id convention): imaging
+            # is hidden (MSP clients spec §1.4) and phase 2 left it to the
+            # internal client; provisioning a machine for another client is a
+            # later decision.
             site_id=org_id,
             created_by=actor_id,
             name=f"provision:{run.id}",

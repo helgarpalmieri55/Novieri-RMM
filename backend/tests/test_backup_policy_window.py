@@ -6,7 +6,8 @@ reads it with `app.core.schedule.last_fire`, which raises on anything that is
 not five valid cron fields, and the sweep runs ONE transaction per
 organisation: one bad expression rolled back every device's window in that
 organisation, every 15 minutes. So the write now reads the expression with
-that same parser (`backup.schedule.checked_window`) and refuses what it
+that same parser (`app.core.schedule.checked_window`, which deployments
+share since the final review) and refuses what it
 refuses: a 422 with a sentence in the person's language, and nothing written
 anywhere, the audit log included. `null` is no window (backups on demand
 only); an empty or blank string is the same and is stored as NULL. The check
@@ -29,12 +30,12 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.client_scope import ClientScope
+from app.core.schedule import InvalidWindow, checked_window
 from app.core.tenancy import org_session
 from app.models import AuditEvent, BackupPolicy, BackupRun, Device, DeviceGroup
 from app.modules.backup.dispatch import dispatch_due_backup
 from app.modules.backup.policy import upsert_policy
 from app.modules.backup.repository import create_repository
-from app.modules.backup.schedule import InvalidWindow, checked_window
 from tests.conftest import ApiEnv
 from tests.mcp_support import (
     MCP_BASE,
@@ -128,8 +129,8 @@ def test_what_the_parser_would_choke_on_is_refused_before_it() -> None:
     from unittest import mock
 
     with (
-        mock.patch("app.modules.backup.schedule.parse_cron") as parser,
-        mock.patch("app.modules.backup.schedule.last_fire") as fire,
+        mock.patch("app.core.schedule.parse_cron") as parser,
+        mock.patch("app.core.schedule.last_fire") as fire,
     ):
         for cron in UNREAD:
             with pytest.raises(InvalidWindow):
@@ -320,10 +321,11 @@ async def test_one_unreadable_stored_window_stops_only_its_own_policy(api_env: A
 async def test_an_unreadable_window_of_a_policy_for_every_client_is_recorded_once(
     api_env: ApiEnv,
 ) -> None:
-    """A policy for every client has no client, so its record has none: the
+    """A client-less policy has no client, so its record has none: the
     "already recorded?" question compares clients with IS NOT DISTINCT FROM,
-    or a NULL would never match and every sweep would record it again. The
-    row is forced in with the repository guard off, as 0242 can leave one."""
+    or a NULL would never match and every sweep would record it again. There
+    is no policy for every client (`backup/policy.py`), so the row is forced
+    in with the repository guard off, as only a hand could plant one."""
     from datetime import UTC, datetime, timedelta
 
     from tests.client_scope_support import client_with_site

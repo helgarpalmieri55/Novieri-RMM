@@ -291,18 +291,23 @@ async def test_provisioning_a_wake_with_no_site_server_for_the_segment(
 ) -> None:
     """provisioning/dispatch.py `_resolve_wake`: the wake is refused, with the
     segment the person named, before any run exists. The 422 comes from a
-    profile-less request, so the refusal under test is the first one raised."""
+    profile-less request, so the refusal under test is the first one raised.
+    It names the internal client (final review C): only that client's site
+    servers are candidates, so "nothing in this org" was not true."""
     env, headers = admin
     english = (
-        "no enabled site server serves 10.9.9.0/24: a Wake-on-LAN packet must originate on "
-        "the target's own segment, and nothing in this org is declared for it. Promote a "
-        "site server on that segment, or start the run without wake_on_lan"
+        "no enabled site server of the organization's own client serves 10.9.9.0/24: a "
+        "Wake-on-LAN packet must originate on the target's own segment, and a provisioning "
+        "wake goes only through that client's site servers, none of which is declared for "
+        "it. Promote one of its site servers on that segment, or start the run without "
+        "wake_on_lan"
     )
     spanish = (
-        "ningún servidor de sitio habilitado atiende 10.9.9.0/24: un paquete de Wake-on-LAN "
-        "tiene que originarse en el propio segmento del destino, y nada en esta organización "
-        "está declarado para él. Promueve un servidor de sitio en ese segmento o inicia la "
-        "ejecución sin wake_on_lan"
+        "ningún servidor de sitio habilitado del cliente propio de la organización atiende "
+        "10.9.9.0/24: un paquete de Wake-on-LAN tiene que originarse en el propio segmento "
+        "del destino, y un encendido de aprovisionamiento solo pasa por los servidores de "
+        "sitio de ese cliente, ninguno de los cuales está declarado para él. Promueve uno de "
+        "sus servidores de sitio en ese segmento o inicia la ejecución sin wake_on_lan"
     )
     with mock_aws():
         env.app.state.object_store = ObjectStore(env.settings)

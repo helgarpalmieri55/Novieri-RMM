@@ -3,10 +3,11 @@
 
 Once a device's newest successful test restore is older than
 `TEST_RESTORE_EVERY`, the sweep dispatches a `verify` restore of its newest
-complete point: a random sample of up to `SAMPLE_FILES` files, capped at
-`SAMPLE_BYTES`, restored into the agent's scratch directory, every chunk
-checked, then deleted. The result stamps `restore_tested_at` with level `read`
-and scope `sampled`, so a sample is never reported as a full restore.
+complete point in a repository of the device's own client: a random sample of
+up to `SAMPLE_FILES` files, capped at `SAMPLE_BYTES`, restored into the
+agent's scratch directory, every chunk checked, then deleted. The result
+stamps `restore_tested_at` with level `read` and scope `sampled`, so a sample
+is never reported as a full restore.
 
 A released agent verifies the whole point whatever the selection says, so a
 point larger than the sample cap is not test-restored until the agent honours
@@ -27,7 +28,7 @@ from app.core.storage import ObjectStore
 from app.core.vault import VaultService
 from app.models import Device
 from app.modules.backup.dispatch import _JobEngineLike
-from app.modules.backup.models import BackupPoint, RestoreJob
+from app.modules.backup.models import BackupPoint, BackupRepository, RestoreJob
 from app.modules.backup.policy import resolve_backup_policy
 from app.modules.backup.restore import browse_manifest, dispatch_restore
 from app.modules.backup.schema import BackupManifest
@@ -74,15 +75,15 @@ async def dispatch_due_test_restores(
     pending: list[tuple[UUID, UUID, dict[str, Any]]] = []
     devices = (
         await session.execute(
-            select(Device.id).where(
+            select(Device.id, Device.client_id).where(
                 Device.org_id == org_id,
                 Device.status == "active",
                 Device.lifecycle == "in_service",
                 Device.os_family.is_not(None),
             )
         )
-    ).scalars().all()
-    for device_id in devices:
+    ).all()
+    for device_id, client_id in devices:
         if await resolve_backup_policy(session, org_id, device_id) is None:
             continue
         last_tested = (
@@ -107,13 +108,25 @@ async def dispatch_due_test_restores(
         ).scalar_one_or_none()
         if busy is not None:
             continue
+        # Only a point in a repository of the DEVICE'S client (5a, C1; final
+        # review D). A point from before 0242 can sit in a repository that is
+        # now another client's -- the internal one's -- and restoring it would
+        # send this device that repository's key and read grants over its
+        # whole prefix. This sweep is nobody's decision; a person's manual
+        # restore of such a point is an audited act of its own.
         point = (
             await session.execute(
                 select(BackupPoint)
+                .join(
+                    BackupRepository,
+                    (BackupRepository.id == BackupPoint.repository_id)
+                    & (BackupRepository.org_id == org_id),
+                )
                 .where(
                     BackupPoint.org_id == org_id,
                     BackupPoint.device_id == device_id,
                     BackupPoint.state == "complete",
+                    BackupRepository.client_id == client_id,
                 )
                 .order_by(BackupPoint.taken_at.desc(), BackupPoint.id.desc())
                 .limit(1)

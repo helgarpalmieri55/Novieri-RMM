@@ -10,13 +10,11 @@ The deadline and runtime are per-workload columns in the spec; until workloads
 exist they are these defaults, applied to every policy.
 """
 
-import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from app.core.i18n import N_, tr_marked
-from app.core.schedule import last_fire, parse_cron
+from app.core.schedule import last_fire
 
 # How long after a scheduled time a backup may still start.
 START_DEADLINE = timedelta(minutes=360)
@@ -43,70 +41,6 @@ def parse_rfc3339(value: str) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
-
-
-#: `backup_policies.window_cron` is a `String(120)`.
-_WINDOW_MAX = 120
-INVALID_WINDOW = N_(
-    "window_cron must be a cron expression of five fields (minute hour day-of-month month "
-    "day-of-week), or null for no window"
-)
-
-
-class InvalidWindow(ValueError):
-    """A `window_cron` the sweep could not read. Its text is the sentence the
-    API answers, in the person's language."""
-
-    def __init__(self) -> None:
-        super().__init__(tr_marked(INVALID_WINDOW))
-
-
-#: Every character the grammar has (`*`, `*/n`, `a-b`, `a-b/n`, numbers, comma
-#: lists), and the blanks between fields. ASCII only, on purpose: `int()`, which
-#: the parser reads each number with, also takes `_` (`9_9_9` is 999), a sign,
-#: and every script's digits (`int("٩٩")` is 99) -- all outside the grammar.
-_WINDOW_GRAMMAR = re.compile(r"[0-9*/,\- \t]+")
-
-
-def checked_window(cron: str | None) -> str | None:
-    """The `window_cron` a policy may store (re-reviews of b805432 and 421c806).
-
-    `None` is no window: backups on demand only. An empty or blank string
-    means the same and is stored as `None`, so "send nothing" and "send an
-    empty field" are one thing rather than a value the sweep would choke on.
-    What passes is stored stripped of surrounding blanks.
-
-    Anything else must be what the sweep can read, and more:
-
-    1. Only the grammar's own characters (`_WINDOW_GRAMMAR`), and no number of
-       more than two ASCII digits (no field reaches 100), and no longer than
-       the column (120). These run first, without the parser: it runs here on
-       a request, and these are the shapes that once made it expand a huge
-       range (`0-999999999`, or `0-9_9_9_9_9_9_9_9_9` through `int()`).
-    2. `parse_cron` -- what `last_fire` reads every window with at every sweep
-       -- must read it.
-    3. No field may match nothing (`30-10`, `*/-1`): the sweep reads such a
-       window, and it never opens.
-
-    Any refusal is `InvalidWindow`. The window sweep runs one transaction per
-    organisation; `dispatch_due_backup` contains a window it cannot read to
-    its own policy, but a window that is refused here never gets that far."""
-    if cron is None or not cron.strip():
-        return None
-    value = cron.strip()
-    if (
-        len(value) > _WINDOW_MAX
-        or not _WINDOW_GRAMMAR.fullmatch(value)
-        or any(len(n) > 2 for n in re.findall(r"[0-9]+", value))
-    ):
-        raise InvalidWindow()
-    try:
-        fields = parse_cron(value)
-    except ValueError:
-        raise InvalidWindow() from None
-    if not all((fields.minutes, fields.hours, fields.doms, fields.months, fields.dows)):
-        raise InvalidWindow()
-    return value
 
 
 @dataclass(frozen=True)

@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
+from app.core.i18n import tr
 from app.core.schedule import in_window
 from app.models import Deployment, DeploymentResult, Device, Job, Package
 from app.modules.change_mgmt.gates import (
@@ -39,6 +40,7 @@ from app.modules.deploy.artifacts import (
     is_artifact_backed,
 )
 from app.modules.deploy.detect import device_in_desired_state
+from app.modules.deploy.packages import DeployValidationError
 from app.modules.deploy.schema import AppDeployResult
 
 # NAMES THE DEPLOYMENT, NEVER THE PARAMS. `artifact_ref` is a presigned URL and
@@ -48,6 +50,23 @@ from app.modules.deploy.schema import AppDeployResult
 # needs to correlate a dispatch — ids and the installer type — and nothing that
 # would let a reader of the log perform the download.
 logger = logging.getLogger("its.deploy.dispatch")
+
+
+class UnreadableWindow(DeployValidationError):
+    """A stored `window_cron` the parser cannot read. A `DeployValidationError`,
+    so `execute` answers it as one (a 422 with this sentence, in the person's
+    language); the window sweep contains it to its own deployment. `window`
+    is the stored value."""
+
+    def __init__(self, window: str) -> None:
+        self.window = window
+        super().__init__(
+            tr(
+                "this deployment's window cannot be read ({window}); create it again with a "
+                "valid one",
+                window=window,
+            )
+        )
 
 
 class _JobEngineLike(Protocol):
@@ -165,8 +184,16 @@ async def dispatch_deployment(
     # Read now: the state update below expires it (written by trigger).
     client_id = deployment.client_id
 
-    if deployment.window_cron is not None and not in_window(deployment.window_cron, now):
-        return []
+    if deployment.window_cron is not None:
+        try:
+            open_now = in_window(deployment.window_cron, now)
+        except ValueError:
+            # Stored before the API checked windows (`checked_window`), or
+            # straight into the table: the caller decides -- the window sweep
+            # skips this deployment, `execute` answers a 422.
+            raise UnreadableWindow(deployment.window_cron) from None
+        if not open_now:
+            return []
 
     if await deployment_refusal(session, org_id, deployment, actor_id=actor_id) is not None:
         return []

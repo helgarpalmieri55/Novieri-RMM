@@ -485,3 +485,81 @@ async def test_the_fleet_list_shows_a_holder_only_where_the_viewer_reads_people(
     assert hidden["items"] == [] and hidden["total"] == 0
     found = (await api_env.client.get("/api/v1/devices?q=xavier", headers=viewer)).json()
     assert [i["hostname"] for i in found["items"]] == ["x-pc"]
+
+
+async def _ticket_in(
+    env: ApiEnv, org: UUID, client: UUID, requester: UUID, subject: str
+) -> UUID:
+    from app.models import Ticket, TicketCategory, TicketQueue
+
+    async with AsyncSession(env.admin_engine, expire_on_commit=False) as s:
+        queue = TicketQueue(
+            org_id=org, key=f"q-{uuid4().hex[:8]}", name="Q", created_by=requester
+        )
+        s.add(queue)
+        await s.flush()
+        category = TicketCategory(
+            org_id=org, key=f"c-{uuid4().hex[:8]}", name="C", type="incident",
+            default_queue_id=queue.id, created_by=requester,
+        )
+        s.add(category)
+        await s.flush()
+        ticket = Ticket(
+            org_id=org, client_id=client, number=f"T-{uuid4().hex[:8]}", type="incident",
+            category_id=category.id, queue_id=queue.id, status="new", subject=subject,
+            requester_id=requester, origin="technician", created_by=requester,
+        )
+        s.add(ticket)
+        await s.commit()
+        return ticket.id
+
+
+async def test_the_person_page_shows_only_tickets_whose_client_the_viewer_reads(
+    api_env: ApiEnv,
+) -> None:
+    """Final review B1 Important 1 (`detail.py:194,221`): the tickets section
+    was gated on `ticket.read` held on the PERSON's client and its rows were
+    filtered only by the `people.read` scope. A staff person is the internal
+    client's (C4) but raises tickets in any client, so `people.read` +
+    `ticket.read` on the internal client and `people.read` alone on X showed
+    X's ticket number and subject -- while the ticket itself is a 404. The
+    leaver checklist's open-ticket count (`checklists.py:362`) had the same
+    shape, as a number."""
+    org = await api_env.create_org("p-tickets")
+    x, _ = await client_with_site(api_env, org)
+    admin = await _admin(api_env, org)
+    staff = await _user_id(api_env, await api_env.create_user(org))
+    assert (await api_env.client.get(API, headers=admin)).status_code == 200
+    async with AsyncSession(api_env.admin_engine) as s:
+        person = (
+            await s.execute(select(Person.id).where(Person.user_id == staff))
+        ).scalar_one()
+    ticket = await _ticket_in(api_env, org, x, staff, "X's confidential subject")
+    opened = await api_env.client.post(
+        f"{API}/{person}/checklists", json={"kind": "leaver"}, headers=admin
+    )
+    assert opened.status_code == 201, opened.text
+
+    sub = await api_env.create_user(org)
+    await _grant(api_env, org, sub, ("people.read", "ticket.read"), org)
+    await _grant(api_env, org, sub, ("people.read",), x)
+    viewer = await api_env.headers(org, sub)
+    direct = await api_env.client.get(f"/api/v1/service-desk/tickets/{ticket}", headers=viewer)
+    assert direct.status_code == 404, direct.text
+
+    def tickets_step(body: dict[str, object]) -> dict[str, object]:
+        checklist = body["checklist"]
+        assert isinstance(checklist, dict)
+        return next(s for s in checklist["steps"] if s["key"] == "tickets")
+
+    page = await api_env.client.get(f"{API}/{person}", headers=viewer)
+    assert page.status_code == 200, page.text
+    assert page.json()["tickets"] == []
+    assert "confidential" not in page.text
+    assert tickets_step(page.json())["checked"] is True
+
+    await _grant(api_env, org, sub, ("ticket.read",), x)
+    page = await api_env.client.get(f"{API}/{person}", headers=viewer)
+    assert page.status_code == 200, page.text
+    assert [t["ticket_id"] for t in page.json()["tickets"]] == [str(ticket)]
+    assert tickets_step(page.json())["checked"] is False

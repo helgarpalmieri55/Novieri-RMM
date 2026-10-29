@@ -1478,6 +1478,107 @@ async def test_every_writer_writes_a_row_from_before_0242_once(
     assert landed[writer], (writer, run_state, {n: p.state for n, p in points.items()})
 
 
+async def _sealed_point(
+    env: ApiEnv, store: ObjectStore, vault: LocalVaultService, org: UUID, device: UUID,
+    repo: UUID, *, taken_at: datetime, legacy: bool,
+) -> UUID:
+    """A complete point of `device` in `repo`, its manifest and chunk sealed
+    in the store. `legacy`: the repository is of another client, as a point
+    from before 0242 can be -- planted with both composite keys dropped and
+    added back NOT VALID inside the one committed transaction."""
+    async with org_session(org, clients=ClientScope.all(), engine=env.app_engine) as s:
+        key = await open_repo_key(s, vault, org_id=org, repository_id=repo)
+    plaintext = f"file-{uuid4().hex}".encode()
+    chunk = blake3(plaintext).hexdigest()
+    await store.put_backup_chunk(org, repo, chunk, seal_chunk(key, plaintext))
+    manifest = BackupManifest(schema_version=1, streams=[FiletreeStream(
+        type="filetree", entries=[ManifestEntry(
+            path="/srv/a", kind="file", mode=0o644, size=len(plaintext),
+            mtime=1700000000.0, chunk_ids=[chunk])])])
+    ref = await store.put_backup_object(org, repo, f"manifests/{uuid4().hex}",
+                                        seal_manifest(key, manifest))
+    async with AsyncSession(env.admin_engine, expire_on_commit=False) as s:
+        if legacy:
+            await drop_client_keys(s, "backup_runs", RUN_FK)
+            await drop_client_keys(s, "backup_points", POINT_FK)
+        run = BackupRun(org_id=org, device_id=device, repository_id=repo, state="success",
+                        actor_type="system", started_at=taken_at)
+        s.add(run)
+        await s.flush()
+        point = BackupPoint(org_id=org, device_id=device, repository_id=repo,
+                            backup_run_id=run.id, taken_at=taken_at, manifest_ref=ref,
+                            size=len(plaintext), state="complete")
+        s.add(point)
+        await s.flush()
+        if legacy:
+            for table, key_name in (("backup_runs", RUN_FK), ("backup_points", POINT_FK)):
+                await s.execute(text(
+                    f"ALTER TABLE {table} ADD CONSTRAINT {key_name} FOREIGN KEY "
+                    "(repository_id, client_id) REFERENCES backup_repositories (id, client_id) "
+                    "NOT VALID"
+                ))
+        await s.commit()
+        return point.id
+
+
+@pytest.mark.parametrize("own", ["newer", "older", "none"])
+async def test_the_test_restore_sweep_picks_only_a_point_of_the_device_s_client(
+    api_env: ApiEnv, tmp_path: Path, own: str
+) -> None:
+    """Final review D (C1). The automatic test restore took a device's newest
+    complete point whatever its repository: for a point from before 0242 in
+    a repository now the internal client's, X's device was sent that
+    repository's key and read grants over its whole prefix. Now only a point
+    in a repository of the device's client is picked, newer or older than
+    the legacy one; with none, nothing is dispatched. (A person's manual
+    restore is an audited act of its own and is not changed.)"""
+    from app.modules.backup.test_restore import dispatch_due_test_restores
+
+    org = await api_env.create_org(f"bk-test-restore-{own}")
+    x, x_site = await client_with_site(api_env, org)
+    actor = await _user_id(api_env, org)
+    vault = api_env.app.state.vault
+    internal_repo = await _service_repo(api_env, org, org, actor)
+    x_repo = await _service_repo(api_env, org, x, actor)
+    group = await _group(api_env, org, x)
+    await _policy(api_env, org, x_repo, group=group)
+    device = await _device(api_env, org, x, x_site, group)
+    now = datetime.now(UTC)
+    ages = {"newer": (timedelta(days=3), timedelta(hours=1)),
+            "older": (timedelta(hours=1), timedelta(days=3))}
+    with mock_aws():
+        store = ObjectStore(local_settings(tmp_path))
+        try:
+            legacy_age, own_age = ages.get(own, (timedelta(hours=1), None))
+            legacy = await _sealed_point(api_env, store, vault, org, device, internal_repo,
+                                         taken_at=now - legacy_age, legacy=True)
+            mine = (
+                await _sealed_point(api_env, store, vault, org, device, x_repo,
+                                    taken_at=now - own_age, legacy=False)
+                if own_age is not None else None
+            )
+            engine = _FakeJobEngine()
+            async with org_session(org, clients=ClientScope.all(),
+                                   engine=api_env.app_engine) as s:
+                pending = await dispatch_due_test_restores(s, engine, vault, store,
+                                                           org_id=org, now=now)
+            async with AsyncSession(api_env.admin_engine) as s:
+                chosen = (await s.execute(select(RestoreJob.backup_point_id).where(
+                    RestoreJob.org_id == org))).scalars().all()
+        finally:
+            async with AsyncSession(api_env.admin_engine) as s:
+                await s.execute(text("DELETE FROM restore_jobs WHERE org_id = :o"), {"o": org})
+                await s.execute(text("DELETE FROM backup_points WHERE org_id = :o"), {"o": org})
+                await s.execute(text("DELETE FROM backup_runs WHERE org_id = :o"), {"o": org})
+                await s.commit()
+    assert legacy not in chosen
+    if mine is None:
+        assert (pending, chosen, engine.created) == ([], [], [])
+    else:
+        assert chosen == [mine]
+        assert [c["params"]["repository_id"] for c in engine.created] == [str(x_repo)]
+
+
 # --------------------------------------------------------------------------- #
 # Off-site: a target and the keys of the repository's client, or global
 # --------------------------------------------------------------------------- #

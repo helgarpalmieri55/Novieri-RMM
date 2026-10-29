@@ -334,7 +334,7 @@ async def test_leaver_steps_tick_from_live_data_and_completion_waits_for_them(
             person = await service.load_person(s, org_id, person_id)
             row = await checklists.load_checklist(s, org_id, person_id, checklist_id)
             return await checklists.checklist_view(
-                s, org_id, row, await checklists.gather_facts(s, org_id, person)
+                s, org_id, row, await checklists.gather_facts(s, org_id, person, viewer_id=actor)
             )
 
     steps = {s["key"]: s for s in (await view())["steps"]}

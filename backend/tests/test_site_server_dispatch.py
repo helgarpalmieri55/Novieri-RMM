@@ -538,3 +538,46 @@ async def test_an_unknown_site_server_id_is_not_found(
                 target_mac="a4:bb:6d:11:22:33",
             )
     assert await _jobs(admin_engine, org.org_id) == []
+
+
+async def test_the_wake_is_audited_under_the_site_server_s_client(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine, tmp_path: Path
+) -> None:
+    """Final review C: `site.wake_dispatched` was recorded with no client. A
+    site server is one client's (its device's), and so is the wake it sends."""
+    from app.models import Client, Site
+
+    org = await seed_org(admin_engine, "ssd-client")
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        client = Client(org_id=org.org_id, name=f"X {uuid4().hex[:6]}", kind="customer")
+        s.add(client)
+        await s.flush()
+        site = Site(org_id=org.org_id, client_id=client.id, name="Principal")
+        s.add(site)
+        await s.commit()
+    device = await seed_device(admin_engine, org.org_id, client_id=client.id, site_id=site.id)
+    await seed_agent(admin_engine, org.org_id, device)
+    site_server_id = await seed_site_server(
+        admin_engine, org.org_id, device_id=device, segments=["10.20.7.0/24"]
+    )
+    async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
+        await wake_via_site_server(
+            session,
+            _engine_for(tmp_path),
+            org_id=org.org_id,
+            site_server_id=site_server_id,
+            target_mac="A4-BB-6D-11-22-33",
+            segment="10.20.7.31",
+            actor_id=org.user_id,
+        )
+    async with AsyncSession(admin_engine) as s:
+        clients = (
+            await s.execute(
+                text(
+                    "SELECT client_id FROM audit_events WHERE org_id = :org"
+                    "   AND action = 'site.wake_dispatched'"
+                ),
+                {"org": org.org_id},
+            )
+        ).scalars().all()
+    assert clients == [client.id]

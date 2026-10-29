@@ -373,6 +373,32 @@ async def resolve_scope_devices(
     return device_ids
 
 
+async def plan_scope_devices(session: AsyncSession, org_id: UUID, plan: BcpPlan) -> set[UUID]:
+    """`plan`'s scope expanded (`resolve_scope_devices`), kept to the PLAN'S
+    CLIENT's devices -- what a plan's evidence and coverage count.
+
+    `_validate_scope` holds a new scope to the plan's client, but a plan from
+    before migration 0237 was filed under the internal client with whatever
+    it named, and a scope is never re-checked: without this, an internal
+    plan naming a customer's device copied that device's hostname and backup
+    coverage into its evidence (final review B2). The org predicate stays in
+    `resolve_scope_devices`, where its own tests show it is load-bearing."""
+    devices = await resolve_scope_devices(session, org_id, plan.scope)
+    if not devices:
+        return set()
+    return set(
+        (
+            await session.execute(
+                select(Device.id).where(
+                    Device.org_id == org_id,
+                    Device.client_id == plan.client_id,
+                    Device.id.in_(devices),
+                )
+            )
+        ).scalars()
+    )
+
+
 async def _load_test(session: AsyncSession, org_id: UUID, test_id: UUID) -> BcpTest:
     test = (
         await session.execute(
@@ -487,7 +513,7 @@ async def record_test(
 
     resolved_executed_at = executed_at if executed_at is not None else datetime.now(UTC)
 
-    devices = await resolve_scope_devices(session, org_id, plan.scope)
+    devices = await plan_scope_devices(session, org_id, plan)
     rows = await backup_evidence_rows(session, org_id)
     scoped_rows = [row for row in rows if row["device_id"] in devices]
 

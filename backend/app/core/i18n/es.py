@@ -152,6 +152,10 @@ CATALOG: dict[str, str] = {
         "window_cron debe ser una expresión cron de cinco campos (minuto hora día-del-mes mes "
         "día-de-la-semana), o null para no tener ventana"
     ),
+    "this deployment's window cannot be read ({window}); create it again with a valid one": (
+        "la ventana de este despliegue no se puede leer ({window}); créalo de nuevo con una "
+        "válida"
+    ),
     "no JWKS key for kid {kid}": "no hay clave JWKS para el kid {kid}",
     "token has no kid header": "el token no tiene encabezado kid",
     "this token is not an access token": "este token no es un token de acceso",
@@ -1433,6 +1437,9 @@ CATALOG: dict[str, str] = {
     ),
     "client_id {claimed} contradicts the client of the VRF or site named": (
         "client_id {claimed} contradice el cliente de la VRF o la sede indicadas"
+    ),
+    "a record for every client is converted only by someone with every client": (
+        "un registro para todos los clientes solo lo convierte alguien con todos los clientes"
     ),
     "IPAM records cannot be filed under Unassigned": (
         "los registros de IPAM no pueden pertenecer a «Sin asignar»"
@@ -4042,10 +4049,15 @@ CATALOG: dict[str, str] = {
     "change action: cancel": "cancelar",
     "change action: revise": "corregir",
     # --- documentation ---
-    "organization document storage quota reached ({usage} of {quota} bytes used). Purge or "
-    "archive documents to free space.": (
-        "se alcanzó la cuota de almacenamiento de documentos de la organización ({usage} de "
+    "this client's document storage quota is reached ({usage} of {quota} bytes used). "
+    "Purge or archive documents to free space.": (
+        "se alcanzó la cuota de almacenamiento de documentos de este cliente ({usage} de "
         "{quota} bytes usados). Purga o archiva documentos para liberar espacio."
+    ),
+    "the documents for every client have reached their storage quota ({usage} of "
+    "{quota} bytes used). Purge or archive documents to free space.": (
+        "los documentos para todos los clientes alcanzaron su cuota de almacenamiento "
+        "({usage} de {quota} bytes usados). Purga o archiva documentos para liberar espacio."
     ),
     "no document {document_id} in this organization": (
         "no hay ningún documento {document_id} en esta organización"
@@ -4229,6 +4241,9 @@ CATALOG: dict[str, str] = {
     "deployment target not found": "no existe el destino del despliegue",
     "a deployment cannot be filed under Unassigned": (
         "un despliegue no puede pertenecer a «Sin asignar»"
+    ),
+    "a device group cannot be filed under Unassigned": (
+        "un grupo de equipos no puede pertenecer a «Sin asignar»"
     ),
     "a patch approval cannot be filed under Unassigned": (
         "una aprobación de parche no puede pertenecer a «Sin asignar»"
@@ -4515,20 +4530,23 @@ CATALOG: dict[str, str] = {
         "enviar un paquete mágico a un segmento de la red local es un acto distinto de iniciar "
         "una ejecución de aprovisionamiento"
     ),
-    "no enabled site server serves {segment}: a Wake-on-LAN packet must originate on the "
-    "target's own segment, and nothing in this org is declared for it. Promote a site server "
-    "on that segment, or start the run without wake_on_lan": (
-        "ningún servidor de sitio habilitado atiende {segment}: un paquete de Wake-on-LAN tiene "
-        "que originarse en el propio segmento del destino, y nada en esta organización está "
-        "declarado para él. Promueve un servidor de sitio en ese segmento o inicia la "
-        "ejecución sin wake_on_lan"
+    "no enabled site server of the organization's own client serves {segment}: a Wake-on-LAN "
+    "packet must originate on the target's own segment, and a provisioning wake goes only "
+    "through that client's site servers, none of which is declared for it. Promote one of its "
+    "site servers on that segment, or start the run without wake_on_lan": (
+        "ningún servidor de sitio habilitado del cliente propio de la organización atiende "
+        "{segment}: un paquete de Wake-on-LAN tiene que originarse en el propio segmento del "
+        "destino, y un encendido de aprovisionamiento solo pasa por los servidores de sitio de "
+        "ese cliente, ninguno de los cuales está declarado para él. Promueve uno de sus "
+        "servidores de sitio en ese segmento o inicia la ejecución sin wake_on_lan"
     ),
     "the requested segment": "el segmento solicitado",
-    "wake_on_lan.segment was not given and this org has {count} enabled site servers: with no "
-    "segment there is nothing to filter on, so {target_mac} cannot be located and picking a "
-    "server would put the magic packet on whichever LAN happened to be registered first. Name "
-    "the segment the target is on": (
-        "no se indicó wake_on_lan.segment y esta organización tiene {count} servidores de sitio "
+    "wake_on_lan.segment was not given and the organization's own client has {count} enabled "
+    "site servers: with no segment there is nothing to filter on, so {target_mac} cannot be "
+    "located and picking a server would put the magic packet on whichever LAN happened to be "
+    "registered first. Name the segment the target is on": (
+        "no se indicó wake_on_lan.segment y el cliente propio de la organización tiene {count} "
+        "servidores de sitio "
         "habilitados: sin segmento no hay nada por lo que filtrar, así que no se puede ubicar "
         "{target_mac} y elegir un servidor pondría el paquete mágico en la red local que "
         "estuviera registrada primero. Indica el segmento en el que está el destino"

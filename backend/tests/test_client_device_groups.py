@@ -390,6 +390,35 @@ async def test_a_group_is_not_created_for_an_archived_client(api_env) -> None:
     assert response.json()["detail"] == "that client is archived"
 
 
+async def test_a_group_is_not_filed_under_unassigned(api_env) -> None:
+    """Final review A (plan C10): Unassigned is the inbox for what has no
+    owner -- mail and the tickets it opens -- and `docs/04-data-model.md`
+    says nothing else is filed under it. A group was: the create took any
+    visible, unarchived client. Now a 422 like every other family, and
+    nothing written."""
+    from sqlalchemy import func, text
+
+    org = await api_env.create_org("cdg")
+    headers = await _admin(api_env, org)
+    async with AsyncSession(api_env.admin_engine) as s:
+        unassigned = (await s.execute(text(
+            "SELECT id FROM clients WHERE org_id = :o AND kind = 'unassigned'"
+        ), {"o": org})).scalar_one()
+    for language, sentence in (
+        ("en", "a device group cannot be filed under Unassigned"),
+        ("es", "un grupo de equipos no puede pertenecer a «Sin asignar»"),
+    ):
+        response = await api_env.client.post(
+            GROUPS,
+            headers={**headers, "Accept-Language": language},
+            json={"name": "servers", "client_id": str(unassigned)},
+        )
+        assert (response.status_code, response.json()) == (422, {"detail": sentence})
+    async with AsyncSession(api_env.admin_engine) as s:
+        assert (await s.execute(select(func.count()).select_from(DeviceGroup).where(
+            DeviceGroup.org_id == org))).scalar_one() == 0
+
+
 async def test_an_asset_is_not_created_at_a_site_of_an_archived_client(api_env) -> None:
     org = await api_env.create_org("cdg")
     _, site_id = await client_with_site(api_env, org, client_archived=True)

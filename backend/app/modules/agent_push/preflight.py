@@ -396,8 +396,10 @@ async def _vouched_asset(
     **THE PUSH'S CLIENT, IN THE QUERY.** Inside an MSP organization two
     customers can use the same private range, so one address may be held by
     machines of two clients. The push is made in its credential's client, and
-    only that client's machine is a target -- not by RLS (the pacer and an
-    every-client technician see every client) but by `client_id` here. Never
+    only that client's machine is a target -- by `client_id` here, not left to
+    RLS: an every-client technician sees every client's machines. (The pacer
+    runs each run in its own client's scope, `ClientScope.only([run.client_id])`
+    in `worker.py`, and asks the same question the same way.) Never
     "the lowest id", which would push to whichever customer's machine
     happened to be recorded first.
 
@@ -549,7 +551,7 @@ async def _site_server_for(
     address: IPAddress,
     *,
     transport: str | None,
-    client_id: UUID | None,
+    client_id: UUID,
 ) -> tuple[UUID, UUID] | None:
     """The enabled site server OF `client_id` whose declared segments contain
     this address, and -- for a `winrm` target -- whose agent advertises the
@@ -561,9 +563,8 @@ async def _site_server_for(
     machine of that client. Applied in the query, not left to RLS: a
     technician who holds every client sees every client's site servers, and
     one of another client declared for a MORE SPECIFIC segment would
-    otherwise come first. `evaluate_targets` always passes the push's client;
-    `client_id=None` ("any client this session sees") is left for callers
-    that only ask whether a segment is served at all.
+    otherwise come first. `client_id` is REQUIRED, never "any client this
+    session sees": every caller (`evaluate_targets`) passes the push's client.
 
     **`list_site_servers` IS REUSED RATHER THAN RE-QUERIED**, and that matters
     for a reason the site-server module already wrote down: containment makes

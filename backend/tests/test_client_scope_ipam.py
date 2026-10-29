@@ -1861,6 +1861,49 @@ async def test_a_documented_network_is_filed_under_its_record_s_client(
     ], key=str)
 
 
+async def test_a_narrowed_conversion_skips_a_record_for_every_client_in_both_runs(
+    api_env: ApiEnv,
+) -> None:
+    """Final review C: under a scope that is not every client but includes
+    the internal one, a GLOBAL `network` record is visible and the dry run
+    called it convertible -- then the real run archived it, a write to a
+    global row, and the whole request was a 403. Now both runs skip it with
+    the same reason, the rest converts, and the record stays as it was."""
+    org = await api_env.create_org("i-docnet-narrow")
+    narrowed = await everything_on(api_env, org, org)
+    async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
+        everyones = DocRecord(org_id=org, record_type="network", name="hq-lan",
+                              fields={"cidr": "10.74.0.0/24"})
+        own = DocRecord(org_id=org, client_id=org, record_type="network", name="own-lan",
+                        fields={"cidr": "10.75.0.0/24"})
+        s.add_all([everyones, own])
+        await s.commit()
+    reason = "a record for every client is converted only by someone with every client"
+    for dry_run in ("true", "false"):
+        r = await api_env.client.post(
+            f"{I}/import/doc-records", params={"dry_run": dry_run}, headers=narrowed
+        )
+        assert r.status_code == 200, r.text
+        assert [c["name"] for c in r.json()["converted"]] == ["own-lan"], r.text
+        assert [(k["record_id"], k["reason"]) for k in r.json()["skipped"]] == [
+            (str(everyones.id), reason)
+        ], r.text
+    es = await api_env.client.post(
+        f"{I}/import/doc-records", params={"dry_run": "true"},
+        headers={**narrowed, "Accept-Language": "es"},
+    )
+    assert [k["reason"] for k in es.json()["skipped"]] == [
+        "un registro para todos los clientes solo lo convierte alguien con todos los clientes"
+    ], es.text
+    async with AsyncSession(api_env.admin_engine) as s:
+        archived = dict((await s.execute(select(DocRecord.name, DocRecord.archived).where(
+            DocRecord.org_id == org))).all())
+        prefixes = {str(p) for p in (await s.execute(select(IpamSubnet.prefix).where(
+            IpamSubnet.org_id == org))).scalars()}
+    assert archived == {"hq-lan": False, "own-lan": True}
+    assert prefixes == {"10.75.0.0/24"}
+
+
 # --------------------------------------------------------------------------- #
 # Events, the fleet list's client filter, and every audit of these paths
 # --------------------------------------------------------------------------- #

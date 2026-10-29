@@ -716,14 +716,16 @@ async def test_a_clients_approval_is_not_the_global_one(
     assert again.id == made.id
 
 
-async def test_patch_ingest_reads_the_global_approval_not_a_clients(
+async def test_patch_ingest_reads_the_device_s_clients_approval_not_the_global_one(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
-    """Task 8b review I2. The scan's auto-approval (PD-02) is global, like an
-    operator's: a client's approval of the same (patch, ring) is another row.
-    Taken for the global one, it skipped the global approval while the
-    device's status was flipped to approved anyway; beside a global one it
-    was two rows for `scalar_one_or_none`, a 500."""
+    """Task 8b review I2, corrected by the final review (D Important 1). The
+    scan's auto-approval (PD-02) is the reporting device's client's: the
+    global approval of the same (patch, ring) is another row. Looked up
+    without its owner, the two rows were two results for
+    `scalar_one_or_none`, a 500. This test used to expect a new GLOBAL row
+    beside X's -- the defect: one client's policy cleared the patch for every
+    client's ring. X's own row is the one the scan finds."""
     w = await _world(admin_engine)
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         device = await s.get(Device, w.x.device)
@@ -780,8 +782,7 @@ async def test_patch_ingest_reads_the_global_approval_not_a_clients(
                 await s.execute(select(PatchApproval).where(PatchApproval.patch_id == patch.id))
             ).scalars()
         }
-    assert set(approvals) == {None, w.x.client}
-    assert approvals[None].approved_by is None  # the system's
+    assert set(approvals) == {w.x.client}  # no global row is written
     assert approvals[w.x.client].id == theirs.id
 
 

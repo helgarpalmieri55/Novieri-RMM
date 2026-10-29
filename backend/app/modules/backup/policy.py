@@ -3,15 +3,16 @@ and the write that sets one (`upsert_policy`).
 
 Resolution order (MSP clients plan 2026-10-26 Task 13): the device's group
 policy -> its CLIENT'S default policy (`client_id = device.client_id`,
-`device_group_id IS NULL`) -> a policy for every client (no client, no group)
--> None (no enabled policy applies; the caller treats this as "nothing
-scheduled for this device").
+`device_group_id IS NULL`) -> None (no enabled policy applies; the caller
+treats this as "nothing scheduled for this device").
 
-A policy for every client names no repository: a repository is one client's
-(migration 0242), and `its_backup_policy_repository_guard` refuses the pairing.
-So such a policy serves only what is not the repository (the window, the
-retention), and resolving to one gives `repository_id=None` -- whatever a
-row from before that guard says -- so it never hands a device a key.
+THERE IS NO POLICY FOR EVERY CLIENT. `backup_policies.repository_id` is NOT
+NULL (migration 0014), a repository is one client's (0242), and
+`its_backup_policy_repository_guard` refuses a client-less policy naming one;
+0242 filed the client-less defaults under the internal client. The query
+below still orders a client-less row last and resolves it with
+`repository_id=None`, so a row planted around the guard never hands a device
+a key -- a step no row the application can write reaches.
 
 The two group-less steps are one query, ordered client's first: Postgres's
 UNIQUE constraints do not prevent several rows with a NULL device_group_id
@@ -31,10 +32,10 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
+from app.core.schedule import checked_window
 from app.models import Device
 from app.modules.backup.clients import client_for_policy, policy_repository
 from app.modules.backup.models import BackupPolicy
-from app.modules.backup.schedule import checked_window
 from app.services.client_sites import loaded_client
 
 
@@ -145,7 +146,7 @@ async def upsert_policy(
     always.
 
     The window is read first of all, with the sweep's own parser
-    (`schedule.checked_window`): `InvalidWindow` before any row is read or
+    (`app.core.schedule.checked_window`): `InvalidWindow` before any row is read or
     locked, so a refused window holds nothing and writes nothing.
 
     As in patch's upsert_policy: for a default (device_group_id IS NULL)
