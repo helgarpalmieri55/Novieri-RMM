@@ -59,6 +59,7 @@ from app.modules.backup.reporting import (
 )
 from app.modules.backup.repository import create_repository
 from app.modules.backup.restore import browse_manifest, dispatch_restore
+from app.modules.backup.schedule import InvalidWindow
 from app.modules.backup.schema import BackupManifest
 
 router = APIRouter(prefix="/backup", tags=["backup"])
@@ -345,7 +346,8 @@ async def upsert_policy(
     ctx: AuthContext = Depends(require_permission("backup.policy.manage")),
 ) -> PolicyOut:
     """One group's policy, or one client's default (no group, `client_id`).
-    The repository must be the policy's client's (`policy.upsert_policy`)."""
+    The repository must be the policy's client's, and the window one the
+    sweep can read (`policy.upsert_policy`)."""
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
@@ -364,6 +366,8 @@ async def upsert_policy(
             )
         except BackupClientError as exc:
             raise HTTPException(exc.status_code, exc.detail) from None
+        except InvalidWindow as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         return _policy_out(row, client_id)
 
 

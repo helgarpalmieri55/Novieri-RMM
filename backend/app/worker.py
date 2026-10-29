@@ -1627,55 +1627,13 @@ async def backup_retention_gc_all_orgs(now: datetime) -> int:
         async with AsyncSession(admin_engine) as session:
             org_ids = list((await session.execute(select(Organization.id))).scalars())
         for org_id in org_ids:
-            org_pruned = 0
             try:
                 async with org_session(
                     org_id, engine=app_engine, clients=ClientScope.all()
                 ) as session:
-                    device_ids = (
-                        await session.execute(select(Device.id).where(Device.org_id == org_id))
-                    ).scalars().all()
-                    touched_repos: set[UUID] = set()
-                    for device_id in device_ids:
-                        policy = await resolve_backup_policy(session, org_id, device_id)
-                        if policy is None or not policy.retention_gfs:
-                            continue
-                        points = (
-                            (
-                                await session.execute(
-                                    select(BackupPoint).where(
-                                        BackupPoint.org_id == org_id,
-                                        BackupPoint.device_id == device_id,
-                                        BackupPoint.repository_id == policy.repository_id,
-                                        BackupPoint.state != "pruned",
-                                    )
-                                )
-                            )
-                            .scalars()
-                            .all()
-                        )
-                        _keep_ids, prune_ids = select_gfs(list(points), policy.retention_gfs, now)
-                        # A point not yet copied off-site is never pruned locally.
-                        prune_ids -= await offsite_hold(session, org_id, prune_ids)
-                        if not prune_ids:
-                            continue
-                        for point in points:
-                            if point.id in prune_ids:
-                                point.state = "pruned"
-                        org_pruned += len(prune_ids)
-                        if policy.repository_id is not None:
-                            touched_repos.add(policy.repository_id)
-                        await session.flush()
-
-                    for repository_id in touched_repos:
-                        await gc_repository(
-                            session,
-                            object_store,
-                            vault,
-                            org_id=org_id,
-                            repository_id=repository_id,
-                            now=now,
-                        )
+                    org_pruned = await backup_retention_gc_org(
+                        session, org_id, object_store=object_store, vault=vault, now=now
+                    )
                 # Transaction committed: the prunes are real, so count them.
                 total_pruned += org_pruned
             except Exception as exc:  # noqa: BLE001 - contained, see `_OrgCycleFailures`
@@ -1685,6 +1643,68 @@ async def backup_retention_gc_all_orgs(now: datetime) -> int:
         await app_engine.dispose()
         await admin_engine.dispose()
     return total_pruned
+
+
+async def backup_retention_gc_org(
+    session: AsyncSession,
+    org_id: UUID,
+    *,
+    object_store: ObjectStore,
+    vault: VaultService,
+    now: datetime,
+) -> int:
+    """ONE organisation's retention and GC, inside the caller's tenant
+    transaction (`backup_retention_gc_all_orgs` above, which explains the
+    mark and sweep phases). Returns the points marked `pruned`; they are real
+    only once the caller commits. Split out so a test can drive one
+    organisation's body rather than every organisation of a shared database
+    (re-review of b805432)."""
+    device_ids = (
+        await session.execute(select(Device.id).where(Device.org_id == org_id))
+    ).scalars().all()
+    pruned = 0
+    touched_repos: set[UUID] = set()
+    for device_id in device_ids:
+        policy = await resolve_backup_policy(session, org_id, device_id)
+        if policy is None or not policy.retention_gfs:
+            continue
+        points = (
+            (
+                await session.execute(
+                    select(BackupPoint).where(
+                        BackupPoint.org_id == org_id,
+                        BackupPoint.device_id == device_id,
+                        BackupPoint.repository_id == policy.repository_id,
+                        BackupPoint.state != "pruned",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        _keep_ids, prune_ids = select_gfs(list(points), policy.retention_gfs, now)
+        # A point not yet copied off-site is never pruned locally.
+        prune_ids -= await offsite_hold(session, org_id, prune_ids)
+        if not prune_ids:
+            continue
+        for point in points:
+            if point.id in prune_ids:
+                point.state = "pruned"
+        pruned += len(prune_ids)
+        if policy.repository_id is not None:
+            touched_repos.add(policy.repository_id)
+        await session.flush()
+
+    for repository_id in touched_repos:
+        await gc_repository(
+            session,
+            object_store,
+            vault,
+            org_id=org_id,
+            repository_id=repository_id,
+            now=now,
+        )
+    return pruned
 
 
 async def backup_verification_sweep_all_orgs(now: datetime) -> int:

@@ -10,10 +10,12 @@ The deadline and runtime are per-workload columns in the spec; until workloads
 exist they are these defaults, applied to every policy.
 """
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
+from app.core.i18n import N_, tr_marked
 from app.core.schedule import last_fire
 
 # How long after a scheduled time a backup may still start.
@@ -41,6 +43,52 @@ def parse_rfc3339(value: str) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+#: `backup_policies.window_cron` is a `String(120)`.
+_WINDOW_MAX = 120
+INVALID_WINDOW = N_(
+    "window_cron must be a cron expression of five fields (minute hour day-of-month month "
+    "day-of-week), or null for no window"
+)
+
+
+class InvalidWindow(ValueError):
+    """A `window_cron` the sweep could not read. Its text is the sentence the
+    API answers, in the person's language."""
+
+    def __init__(self) -> None:
+        super().__init__(tr_marked(INVALID_WINDOW))
+
+
+def checked_window(cron: str | None) -> str | None:
+    """The `window_cron` a policy may store (re-review of b805432, Important).
+
+    `None` is no window: backups on demand only. An empty or blank string
+    means the same and is stored as `None`, so "send nothing" and "send an
+    empty field" are one thing rather than a value the sweep would choke on.
+    Anything else is read with `last_fire` -- the parser `decide` uses at every
+    sweep -- and refused (`InvalidWindow`) if it raises: the window sweep runs
+    one transaction per organisation, so one expression it cannot read rolls
+    back every device's window in that organisation, every 15 minutes. What
+    passes is stored stripped of surrounding blanks.
+
+    Two refusals come BEFORE the parser, because it runs here on a request:
+    an expression longer than the column (120), and a number of more than two
+    digits -- no cron field reaches 100, and `_parse_cron_field` expands a
+    range into a set before it checks the bounds, so "0-999999999" would
+    hold the request (and its memory) for as long as that takes."""
+    if cron is None or not cron.strip():
+        return None
+    if len(cron) > _WINDOW_MAX or any(len(n) > 2 for n in re.findall(r"\d+", cron)):
+        raise InvalidWindow()
+    try:
+        # Every field is parsed before any date is looked at, so one minute
+        # of lookback reads the whole expression without scanning eight days.
+        last_fire(cron, datetime(2026, 1, 1, tzinfo=UTC), lookback=timedelta(minutes=1))
+    except ValueError:
+        raise InvalidWindow() from None
+    return cron.strip()
 
 
 @dataclass(frozen=True)

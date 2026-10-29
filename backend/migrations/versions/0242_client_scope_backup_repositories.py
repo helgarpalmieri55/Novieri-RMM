@@ -19,9 +19,12 @@ records why (`backup.dispatch_refused`) -- once per device and policy
 version, asked through `ix_audit_backup_dispatch_refused`, a partial index of
 `audit_events (org_id, target_id)` holding only those rows (the 0220
 precedent). It is built inside this transaction: `audit_events` is
-append-only by trigger and not partitioned, the build's SHARE lock holds
-audit appends for the seconds it takes at this table's size, and `migrate`
-runs before `api` starts.
+append-only by trigger and not partitioned, so a plain CREATE INDEX is
+correct. Its SHARE lock holds every audit append until this migration
+commits -- and in an upgrade the OLD api and worker are still running while
+`migrate` runs (the deploy note's step 6), so their audit writes, and the
+requests and sweeps waiting on them, stall for the build's duration: seconds
+at this table's size.
 
 A policy names only a repository of its own client
 (`its_backup_policy_repository_guard`). Its trigger is named

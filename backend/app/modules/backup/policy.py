@@ -34,6 +34,7 @@ from app.core.audit import audit_service
 from app.models import Device
 from app.modules.backup.clients import client_for_policy, policy_repository
 from app.modules.backup.models import BackupPolicy
+from app.modules.backup.schedule import checked_window
 from app.services.client_sites import loaded_client
 
 
@@ -139,10 +140,15 @@ async def upsert_policy(
     Switching it on again, or naming any other repository, is checked as
     always.
 
+    The window is read first of all, with the sweep's own parser
+    (`schedule.checked_window`): `InvalidWindow` before any row is read or
+    locked, so a refused window holds nothing and writes nothing.
+
     As in patch's upsert_policy: for a default (device_group_id IS NULL)
     there is no unique constraint preventing duplicate rows, so we
     deterministically take the first existing one of the client rather than
     risk inserting a second."""
+    window_cron = checked_window(window_cron)
     policy_client = await client_for_policy(
         session, org_id=org_id, device_group_id=device_group_id, client_id=client_id
     )

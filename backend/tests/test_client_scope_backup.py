@@ -38,7 +38,6 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.client_scope import ClientScope
-from app.core.config import override_settings
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
@@ -1414,7 +1413,9 @@ async def test_every_writer_writes_a_row_from_before_0242_once(
     UPDATE of a row the same transaction already wrote: a writer that
     UPDATEs such a row twice in one transaction fails on it. This drives
     every current writer of `backup_runs` / `backup_points` through one --
-    the retention sweep (with the GC after it), `verify_point`, a
+    one organisation's retention sweep (`worker.backup_retention_gc_org`,
+    the body the all-organisations sweep runs per organisation, with the GC
+    after it), `verify_point`, a
     verify-mode `ingest_restore_result`, `reconcile_stuck` and a failure
     result -- and each must land its change. A writer that grows a second
     UPDATE (a flush between two of its attribute writes) turns its case
@@ -1429,28 +1430,29 @@ async def test_every_writer_writes_a_row_from_before_0242_once(
         history = await _legacy_history(api_env, store, vault, now)
         org = history["org"]
         try:
-            if writer == "retention":
-                with override_settings(settings):
-                    await worker.backup_retention_gc_all_orgs(now)
-            else:
-                async with org_session(org, clients=ClientScope.all(),
-                                       engine=api_env.app_engine) as s:
-                    if writer == "verify_point":
-                        assert await verify_point(s, store, vault, org_id=org,
-                                                  backup_point_id=history["new"], now=now)
-                    elif writer == "restore_verify":
-                        await ingest_restore_result(s, history["restore"], BackupRestoreResult(
-                            state="success", restored_bytes=1, verified=True, mismatch=[]))
-                    elif writer == "reconcile_stuck":
-                        assert (await reconcile_stuck(s, org, now=now))["runs"] == 1
-                    else:
-                        await ingest_backup_result(
-                            s, lambda: None, history["job"],  # type: ignore[arg-type, return-value]
-                            BackupRunResult(state="failed", bytes_protected=0, bytes_stored=0,
-                                            chunk_count=0, error="disk",
-                                            warnings=["files changed during read"],
-                                            consistency={"level": "live",
-                                                         "crash_consistent": False}))
+            async with org_session(org, clients=ClientScope.all(),
+                                   engine=api_env.app_engine) as s:
+                if writer == "retention":
+                    # One organisation's body of the retention sweep, GC
+                    # included, in the sweep's own transaction shape.
+                    assert await worker.backup_retention_gc_org(
+                        s, org, object_store=store, vault=vault, now=now) == 1
+                elif writer == "verify_point":
+                    assert await verify_point(s, store, vault, org_id=org,
+                                              backup_point_id=history["new"], now=now)
+                elif writer == "restore_verify":
+                    await ingest_restore_result(s, history["restore"], BackupRestoreResult(
+                        state="success", restored_bytes=1, verified=True, mismatch=[]))
+                elif writer == "reconcile_stuck":
+                    assert (await reconcile_stuck(s, org, now=now))["runs"] == 1
+                else:
+                    await ingest_backup_result(
+                        s, lambda: None, history["job"],  # type: ignore[arg-type, return-value]
+                        BackupRunResult(state="failed", bytes_protected=0, bytes_stored=0,
+                                        chunk_count=0, error="disk",
+                                        warnings=["files changed during read"],
+                                        consistency={"level": "live",
+                                                     "crash_consistent": False}))
             async with AsyncSession(api_env.admin_engine) as s:
                 run_state = (await s.execute(select(BackupRun.state).where(
                     BackupRun.id == history["run"]))).scalar_one()

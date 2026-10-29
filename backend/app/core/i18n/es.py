@@ -147,6 +147,11 @@ CATALOG: dict[str, str] = {
     "invalid cron expression (expected 5 fields): {cron}": (
         "expresión cron no válida (se esperaban 5 campos): {cron}"
     ),
+    "window_cron must be a cron expression of five fields (minute hour day-of-month month "
+    "day-of-week), or null for no window": (
+        "window_cron debe ser una expresión cron de cinco campos (minuto hora día-del-mes mes "
+        "día-de-la-semana), o null para no tener ventana"
+    ),
     "no JWKS key for kid {kid}": "no hay clave JWKS para el kid {kid}",
     "token has no kid header": "el token no tiene encabezado kid",
     "this token is not an access token": "este token no es un token de acceso",

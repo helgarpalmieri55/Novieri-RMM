@@ -267,7 +267,6 @@ async def _record_missed(
     await session.flush()
 
 
-REFUSED = "backup.dispatch_refused"
 FOREIGN_REPOSITORY = "repository_of_another_client"
 #: The action as an inline SQL literal, never a bound parameter: the partial
 #: index `ix_audit_backup_dispatch_refused` (migration 0242) is usable only
@@ -346,7 +345,7 @@ async def _refuse_foreign_repository(
         org_id=org_id,
         actor_type=actor_type,
         actor_id=actor_id,
-        action=REFUSED,
+        action="backup.dispatch_refused",
         target_type="device",
         target_id=str(device.id),
         metadata={
