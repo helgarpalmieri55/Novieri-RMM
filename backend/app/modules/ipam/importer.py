@@ -98,12 +98,11 @@ from app.core.i18n import tr
 from app.models import DocRecord
 from app.modules.ipam.addresses import assign, reserve, update_address
 from app.modules.ipam.allocation import ALLOCATION_METHODS
-from app.modules.ipam.clients import client_for_ipam_row
 from app.modules.ipam.errors import IpamValidationError
 from app.modules.ipam.models import IpamAddress, IpamDrift, IpamSubnet, IpamVlan
 from app.modules.ipam.net import parse_address, parse_mac
 from app.modules.ipam.reconcile import DRIFT_CLASSES
-from app.modules.ipam.registry import ensure_default_vrf
+from app.modules.ipam.registry import vrf_for_new_row
 from app.modules.ipam.subnets import create_subnet
 
 __all__ = [
@@ -336,33 +335,40 @@ def _classify(values: dict[str, str], row: IpamAddress | None) -> tuple[str, str
     return "update", ""
 
 
-async def _import_vrf(session: AsyncSession, org_id: UUID, client_id: UUID) -> UUID:
-    """The VRF an import reads and writes: its client's `global` one, once the
+async def _import_vrf(
+    session: AsyncSession, org_id: UUID, *, vrf_id: UUID | None, client_id: UUID | None
+) -> tuple[UUID, UUID]:
+    """`(vrf_id, client_id)` of what an import reads and writes, as every IPAM
+    create resolves it (`registry.vrf_for_new_row`): a named VRF decides the
+    client (404 when the caller cannot see it, 422 when a named client
+    contradicts it); with none, the named client's `global` VRF. Either way the
     client may take new IPAM rows -- seen (404 otherwise), active (409) and not
-    "Sin asignar" (422), read FOR SHARE until commit (`client_for_ipam_row`).
-    Checked BEFORE the VRF is created, so a client the caller cannot reach is a
-    refusal rather than the RLS error a 500 would be, and a refused import
-    writes nothing at all."""
-    client_id = await client_for_ipam_row(session, org_id, client_id)
-    return await ensure_default_vrf(session, org_id, client_id)
+    "Sin asignar" (422), read FOR SHARE until commit -- and it is checked BEFORE
+    a `global` VRF is created, so a client the caller cannot reach is a refusal
+    rather than the RLS error a 500 would be, and a refused import writes
+    nothing at all. Naming the VRF is how a technician limited to some clients
+    imports into one of theirs: the VRFs they can list are exactly those."""
+    return await vrf_for_new_row(session, org_id, vrf_id=vrf_id, client_id=client_id)
 
 
 async def preview_import(
     session: AsyncSession,
     org_id: UUID,
     *,
-    client_id: UUID,
+    client_id: UUID | None = None,
+    vrf_id: UUID | None = None,
     content: bytes,
     mapping: dict[str, str],
 ) -> ImportPreview:
     """§8.1 step one. **WRITES NOTHING** -- asserted by row counts before and
     after, not by reading the code.
 
-    Against `client_id`'s `global` VRF (one per client since migration 0240).
-    The client is loaded first, as every IPAM create's is (`_import_vrf`)."""
+    Against `vrf_id`, or `client_id`'s `global` VRF (one per client since
+    migration 0240). The client is loaded first, as every IPAM create's is
+    (`_import_vrf`)."""
     mapping = _validate_mapping(mapping)
     raw = _decode(content)
-    vrf_id = await _import_vrf(session, org_id, client_id)
+    vrf_id, _ = await _import_vrf(session, org_id, vrf_id=vrf_id, client_id=client_id)
     existing = await _existing(session, org_id, vrf_id)
 
     rows: list[ImportRow] = []
@@ -401,7 +407,8 @@ async def apply_import(
     org_id: UUID,
     *,
     actor_id: UUID | None,
-    client_id: UUID,
+    client_id: UUID | None = None,
+    vrf_id: UUID | None = None,
     content: bytes,
     mapping: dict[str, str],
     digest: str,
@@ -442,11 +449,11 @@ async def apply_import(
         )
     actual = file_digest(content)
     preview = await preview_import(
-        session, org_id, client_id=client_id, content=content, mapping=mapping
+        session, org_id, client_id=client_id, vrf_id=vrf_id, content=content, mapping=mapping
     )
     raw = _decode(content)
 
-    vrf_id = await _import_vrf(session, org_id, client_id)
+    vrf_id, client_id = await _import_vrf(session, org_id, vrf_id=vrf_id, client_id=client_id)
     existing = await _existing(session, org_id, vrf_id)
 
     applied = 0

@@ -791,6 +791,9 @@ export const ipam = {
     csvSubtitle: "Preview writes nothing; apply writes. Up to {megabytes} MB and {rows} rows.",
     csvNote:
       "There is no column for an address’s state: that only changes through the address’s own actions, so every change is in the audit log.",
+    vrf: "Into the VRF",
+    vrfHelp: "The import belongs to this VRF’s client. Every address must fall inside one of its subnets.",
+    vrfOption: "{vrf} · {client}",
     csvFile: "CSV file",
     drop: "Drop a CSV or click",
     columns: "Columns: {fields}. Anything else is ignored and reported.",

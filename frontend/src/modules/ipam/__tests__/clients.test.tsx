@@ -316,9 +316,11 @@ describe("the designated sweeper is one of the subnet's client's machines", () =
   });
 });
 
-describe("an import names its client", () => {
-  async function previewAndApply(): Promise<void> {
-    const user = userEvent.setup();
+describe("an import goes where the operator points it: a VRF, whose client is the import's", () => {
+  // Operator decision 2026-10-28, "use the row's client": the import's client
+  // comes from the VRF chosen. The VRFs listed are those of the clients the
+  // person can see, so a technician limited to one client imports into it.
+  async function chooseAndPreview(user: ReturnType<typeof userEvent.setup>): Promise<void> {
     renderWithProviders(<ImportPage />);
     const input = (await screen.findByLabelText("CSV file")) as HTMLInputElement;
     await user.upload(
@@ -328,7 +330,6 @@ describe("an import names its client", () => {
     await user.selectOptions(await screen.findByLabelText("address"), "address");
     await user.click(screen.getByRole("button", { name: "Preview" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Apply" })).not.toBeDisabled());
-    await user.click(screen.getByRole("button", { name: "Apply" }));
   }
 
   const PREVIEW = {
@@ -340,16 +341,78 @@ describe("an import names its client", () => {
     errors: 0,
     rows: [{ line: 2, action: "create", address: "10.4.7.9", error: "", detail: {} }],
   };
+  const X_GLOBAL: VrfOut = { id: "vrf-x", client_id: "c-x", name: "global", rd: null, description: "" };
+  const OWN_GLOBAL: VrfOut = { id: "vrf-o", client_id: "o1", name: "global", rd: null, description: "" };
 
-  it("previews and applies into the internal client, the same one both times", async () => {
+  it("names a narrowed technician's own client: their VRF, not the internal client", async () => {
+    // `/me` is the organisation's (o1), but this technician sees X's VRF alone.
     const previewIpamImport = vi.fn().mockResolvedValue(PREVIEW);
     const applyIpamImport = vi.fn().mockResolvedValue({ ...PREVIEW, applied: 1 });
-    stubApi({ previewIpamImport, applyIpamImport });
-    await previewAndApply();
+    stubApi({ previewIpamImport, applyIpamImport, listIpamVrfs: vi.fn().mockResolvedValue([X_GLOBAL]) });
+    const user = userEvent.setup();
+    await chooseAndPreview(user);
+    await user.click(screen.getByRole("button", { name: "Apply" }));
 
     await waitFor(() => expect(applyIpamImport).toHaveBeenCalled());
-    // PHASE 3: the selected client; the internal one, `/me`'s `org_id`, until then.
-    expect(previewIpamImport.mock.calls[0]?.[2]).toBe("o1");
-    expect(applyIpamImport.mock.calls[0]?.slice(2)).toEqual(["a".repeat(64), "o1"]);
+    expect(previewIpamImport.mock.calls[0]?.[2]).toEqual({ vrfId: "vrf-x" });
+    expect(applyIpamImport.mock.calls[0]?.slice(2)).toEqual(["a".repeat(64), { vrfId: "vrf-x" }]);
+  });
+
+  it("starts on the internal client's global VRF, and another choice clears the preview", async () => {
+    const previewIpamImport = vi.fn().mockResolvedValue(PREVIEW);
+    const applyIpamImport = vi.fn().mockResolvedValue({ ...PREVIEW, applied: 1 });
+    stubApi({
+      previewIpamImport,
+      applyIpamImport,
+      listIpamVrfs: vi.fn().mockResolvedValue([X_GLOBAL, OWN_GLOBAL]),
+    });
+    const user = userEvent.setup();
+    await chooseAndPreview(user);
+    expect(previewIpamImport.mock.calls[0]?.[2]).toEqual({ vrfId: "vrf-o" });
+
+    // Another VRF is another import: the verdict read so far was not about it.
+    await user.selectOptions(screen.getByLabelText("Into the VRF"), "vrf-x");
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Apply" })).not.toBeDisabled());
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(applyIpamImport).toHaveBeenCalled());
+    expect(previewIpamImport.mock.calls[1]?.[2]).toEqual({ vrfId: "vrf-x" });
+    expect(applyIpamImport.mock.calls[0]?.[3]).toEqual({ vrfId: "vrf-x" });
+  });
+
+  it("names the internal client only when no VRF is listed", async () => {
+    // PHASE 3: the selected client's global VRF; the internal one, `/me`'s `org_id`, until then.
+    const previewIpamImport = vi.fn().mockResolvedValue(PREVIEW);
+    stubApi({ previewIpamImport, listIpamVrfs: vi.fn().mockResolvedValue([]) });
+    const user = userEvent.setup();
+    await chooseAndPreview(user);
+    expect(screen.queryByLabelText("Into the VRF")).toBeNull();
+    expect(previewIpamImport.mock.calls[0]?.[2]).toEqual({ clientId: "o1" });
+  });
+});
+
+describe("the sweeper picker asks only when it may be used", () => {
+  it("reads no machines for someone who cannot change the designation", async () => {
+    const listDevices = vi.fn().mockResolvedValue({ items: [], total: 0 });
+    stubApi({ listDevices });
+    renderWithProviders(<SweepPanel subnet={subnet({ client_id: "c-x" })} canRun canManage={false} />);
+    await screen.findByText("Not authorized");
+    expect(listDevices).not.toHaveBeenCalled();
+  });
+
+  it("offers approved machines only, and names one with no hostname by its address", async () => {
+    const listDevices = vi.fn().mockResolvedValue({
+      items: [
+        { ...machine("m-1", "", "online"), primary_ip: "10.4.7.20" },
+        { ...machine("m-2", "pending-01", "online"), review_state: "pending" },
+      ],
+      total: 2,
+    });
+    stubApi({ listDevices });
+    renderWithProviders(<SweepPanel subnet={subnet({ client_id: "c-x" })} canRun canManage />);
+    const picker = await screen.findByLabelText("Designated agent");
+    await within(picker).findByRole("option", { name: "10.4.7.20" });
+    expect(within(picker).queryByRole("option", { name: "pending-01" })).toBeNull();
   });
 });

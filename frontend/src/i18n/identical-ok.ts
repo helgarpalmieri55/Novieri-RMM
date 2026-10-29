@@ -78,6 +78,7 @@ export const IDENTICAL_OK: Record<string, string> = {
   "ipam.fields.vrf": "\"VRF\" is an acronym (virtual routing and forwarding), written the same in Spanish.",
   "ipam.vlan.label": "Only a placeholder and the acronym \"VLAN\", written the same in Spanish.",
   "ipam.vlan.named": "Only placeholders and the acronym \"VLAN\", written the same in Spanish.",
+  "ipam.importExport.vrfOption": "Only placeholders (the VRF's name and its client's) and a separator, the same in Spanish.",
   "ipam.addressStatus.dhcp.label": "\"DHCP\" is an acronym (dynamic host configuration protocol), written the same in Spanish.",
   "ipam.allocation.label.dhcp": "\"DHCP\" is an acronym (dynamic host configuration protocol), written the same in Spanish.",
   "ipam.allocation.label.slaac": "\"SLAAC\" is an acronym (stateless address autoconfiguration), written the same in Spanish.",

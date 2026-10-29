@@ -1718,12 +1718,15 @@ IMPORT_CSV = b"IP,Owner\n10.70.0.10,Printer A\n10.70.0.11,\n"
 
 async def _import(
     env: ApiEnv, headers: dict[str, str], client: UUID | None, *, apply: bool = False,
+    vrf: str | None = None,
 ) -> Any:
     from app.modules.ipam.importer import preview_digest
 
     params: dict[str, str] = {"mapping": json.dumps(IMPORT_MAPPING)}
     if client is not None:
         params["client_id"] = str(client)
+    if vrf is not None:
+        params["vrf_id"] = vrf
     if apply:
         params["digest"] = preview_digest(IMPORT_CSV, IMPORT_MAPPING)
     return await env.client.post(
@@ -1950,3 +1953,127 @@ async def test_every_sweep_promotion_and_import_audit_names_its_client(
         )).all()
     assert {r.action for r in rows} == AUDITED_TASK_11
     assert {(r.action, r.client_id) for r in rows if r.client_id != x} == set()
+
+
+
+# --------------------------------------------------------------------------- #
+# Fix round 1 (task-11-review.md: I1, M1, M2, M8)
+# --------------------------------------------------------------------------- #
+
+NO_SUBNET = (
+    "this address is in no registered subnet: register its subnet, at a site, "
+    "before adding the machine"
+)
+
+
+async def test_a_candidate_in_no_registered_subnet_is_told_so(api_env: ApiEnv) -> None:
+    """M2: a sighting outside every registered subnet (an orphan) is refused
+    with its own sentence -- there is no subnet to give a site -- never a 500,
+    and nothing is written."""
+    org = await api_env.create_org("i-orphan")
+    x, _ = await client_with_site(api_env, org)
+    admin = await _admin(api_env, org)
+    vrf = await _created(api_env, "/vrfs", {"name": "LAN", "client_id": str(x)}, admin)
+    await upsert_observation_row(
+        api_env, org, vrf_id=UUID(vrf["id"]), address="10.99.0.9", source="sweep",
+        method="icmp", confidence="low",
+    )
+    before = await _counts(api_env, org)
+    r = await api_env.client.post(
+        PROMOTE, json={"client_id": str(x), "addresses": ["10.99.0.9"]}, headers=admin
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["results"] == [
+        {"address": "10.99.0.9", "created": False, "device_id": None, "reason": NO_SUBNET}
+    ]
+    assert await _counts(api_env, org) == before
+
+
+async def test_a_promoted_machine_is_filed_under_the_client_the_promotion_named(
+    api_env: ApiEnv,
+) -> None:
+    """M1: the machine and its audit take the validated, locked client -- the
+    one the promotion named -- never the subnet's on trust. Nothing ties an
+    observation's `subnet_id` to its own client, so X's sighting can name Y's
+    subnet (planted here); that candidate is refused rather than filed under Y
+    at Y's site, and nothing is written."""
+    org = await api_env.create_org("i-m1")
+    x, _ = await client_with_site(api_env, org)
+    y, y_site = await client_with_site(api_env, org)
+    admin = await _admin(api_env, org)
+    x_subnet = await _subnet(api_env, admin, "10.98.0.0/24", x)
+    y_subnet = await _subnet(api_env, admin, "10.98.0.0/24", y, y_site)
+    await upsert_observation_row(
+        api_env, org, vrf_id=UUID(x_subnet["vrf_id"]), address="10.98.0.9",
+        subnet_id=UUID(y_subnet["id"]), source="sweep", method="icmp", confidence="low",
+    )
+    before = await _counts(api_env, org)
+    r = await api_env.client.post(
+        PROMOTE, json={"client_id": str(x), "addresses": ["10.98.0.9"]}, headers=admin
+    )
+    assert r.status_code == 200, r.text
+    [result] = r.json()["results"]
+    assert (result["created"], result["device_id"]) == (False, None), result
+    assert "not a candidate" in result["reason"]
+    assert await _counts(api_env, org) == before
+
+
+async def test_an_import_into_a_chosen_vrf_takes_its_client(api_env: ApiEnv) -> None:
+    """I1 (operator decision 2026-10-28, "use the row's client"): an import may
+    name a VRF instead of a client, and the VRF decides the client -- so a
+    technician narrowed to X imports into X's network by choosing X's VRF,
+    the only ones their console lists. Y's VRF is a 404, a client that
+    contradicts the VRF a 422, and each refusal writes nothing."""
+    org = await api_env.create_org("i-import-vrf2")
+    x, _ = await client_with_site(api_env, org)
+    y, _ = await client_with_site(api_env, org)
+    admin = await _admin(api_env, org)
+    x_lan = await _created(api_env, "/vrfs", {"name": "LAN", "client_id": str(x)}, admin)
+    y_lan = await _created(api_env, "/vrfs", {"name": "LAN", "client_id": str(y)}, admin)
+    await _created(api_env, "/subnets", {"prefix": "10.70.0.0/24", "vrf_id": x_lan["id"]}, admin)
+    x_tech = await everything_on(api_env, org, x)
+    before = await _counts(api_env, org)
+    for apply in (False, True):
+        for headers, client, vrf, status in (
+            (x_tech, None, y_lan["id"], 404),
+            (admin, y, x_lan["id"], 422),
+        ):
+            r = await _import(api_env, headers, client, apply=apply, vrf=vrf)
+            assert r.status_code == status, (apply, vrf, r.text)
+    assert await _counts(api_env, org) == before
+
+    preview = await _import(api_env, x_tech, None, vrf=x_lan["id"])
+    assert (preview.status_code, preview.json()["creates"]) == (200, 2), preview.text
+    applied = await _import(api_env, x_tech, None, apply=True, vrf=x_lan["id"])
+    assert applied.status_code == 200, applied.text
+    async with AsyncSession(api_env.admin_engine) as s:
+        rows = (await s.execute(
+            select(IpamAddress.vrf_id, IpamAddress.client_id).where(IpamAddress.org_id == org)
+        )).all()
+        audited = (await s.execute(
+            select(AuditEvent.client_id).where(
+                AuditEvent.org_id == org, AuditEvent.action == "ipam.import_applied")
+        )).scalars().all()
+    assert sorted((str(v), c) for v, c in rows) == [(x_lan["id"], x)] * 2
+    assert audited == [x]
+
+
+async def test_another_client_s_id_answers_a_narrowed_technician_an_empty_fleet(
+    api_env: ApiEnv,
+) -> None:
+    """M8: `GET /devices?client_id=` filters, it never widens. A technician of
+    X naming Y gets an empty page -- RLS still decides what they see -- and
+    naming X gets X's machines."""
+    org = await api_env.create_org("i-fleet-narrow")
+    x, x_site = await client_with_site(api_env, org)
+    y, y_site = await client_with_site(api_env, org)
+    mine = await seed_device(api_env, org, client_id=x, site_id=x_site)
+    await seed_device(api_env, org, client_id=y, site_id=y_site)
+    x_tech = await everything_on(api_env, org, x)
+    theirs = await api_env.client.get(
+        "/api/v1/devices", params={"client_id": str(y)}, headers=x_tech
+    )
+    assert theirs.status_code == 200, theirs.text
+    assert (theirs.json()["items"], theirs.json()["total"]) == ([], 0)
+    own = await api_env.client.get("/api/v1/devices", params={"client_id": str(x)}, headers=x_tech)
+    assert [d["id"] for d in own.json()["items"]] == [str(mine)]

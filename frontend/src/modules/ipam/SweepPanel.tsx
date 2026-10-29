@@ -48,9 +48,9 @@ import { Btn, Panel, StatusPill } from "../../shell/components";
 // THE DESIGNATED AGENT IS PICKED FROM THE SUBNET'S CLIENT'S MACHINES (MSP
 // clients phase 2): two clients can both run 10.0.0.0/24 on unrelated wires,
 // so the server refuses another client's machine and never borrows one to
-// sweep. The picker offers only those that run an agent -- a machine without
-// one cannot sweep -- and keeps a designation it cannot list, so saving the
-// interval never silently clears it.
+// sweep. The picker offers only those the server would accept that the fleet
+// list can show -- approved, with an agent -- and keeps a designation it cannot
+// list, so saving the interval never silently clears it.
 export function SweepPanel({
   subnet,
   canRun,
@@ -65,7 +65,7 @@ export function SweepPanel({
   const runs = useIpamSweepRuns(subnet.id);
   const dispatch = useDispatchIpamSweepMutation();
   const settings = useUpdateIpamSweepSettingsMutation();
-  const machines = useSweeperChoices(subnet.client_id);
+  const machines = useSweeperChoices(subnet.client_id, canManage);
 
   const [enabled, setEnabled] = useState(subnet.sweep_enabled);
   const [deviceId, setDeviceId] = useState(subnet.sweep_device_id ?? "");
@@ -195,7 +195,7 @@ export function SweepPanel({
                   )}
                   {machines.data?.map((machine) => (
                     <option key={machine.id} value={machine.id}>
-                      {machine.hostname ?? machine.primary_ip ?? machine.id}
+                      {machine.hostname || machine.primary_ip || machine.id}
                     </option>
                   ))}
                 </select>

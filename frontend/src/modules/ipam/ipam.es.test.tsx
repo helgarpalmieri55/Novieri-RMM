@@ -1401,6 +1401,11 @@ describe("the scan authorizations page in Spanish", () => {
 describe("the import and export page in Spanish", () => {
   const csv = (name: string, text = "address,hostname,,foo\n10.1.1.1,a,b,c\n") => new File([text], name, { type: "text/csv" });
   const fileInput = () => document.querySelector('input[type="file"]') as HTMLInputElement;
+  // The column-mapping pickers: every select but the VRF the sheet goes into.
+  const mappingSelects = () => {
+    const vrf = screen.queryByLabelText("En la VRF");
+    return [...document.querySelectorAll("select")].filter((select) => select !== vrf);
+  };
 
   it("offers the three panels to a caller who may manage", async () => {
     stub();
@@ -1435,7 +1440,9 @@ describe("the import and export page in Spanish", () => {
     expect(screen.getAllByRole("option", { name: "Ignorar esta columna" }).length).toBe(4);
     expect(screen.getByText(/Una columna debe corresponder a/)).toBeInTheDocument();
     expect(screen.getByText("Previsualiza primero este archivo. Aplicar queda ligado al hash que devuelve la vista previa, así que un archivo que nunca se previsualizó no se puede aplicar.")).toBeInTheDocument();
-    const selects = document.querySelectorAll("select");
+    // The VRF the sheet goes into is its own picker, in Spanish too.
+    expect(screen.getByLabelText("En la VRF")).toBeInTheDocument();
+    const selects = mappingSelects();
     await user.selectOptions(selects[0]!, "address");
     await user.selectOptions(selects[1]!, "hostname");
     await user.click(screen.getByRole("button", { name: "Previsualizar" }));
@@ -1469,7 +1476,7 @@ describe("the import and export page in Spanish", () => {
     const user = userEvent.setup();
     await screen.findByText("Importar direcciones desde un CSV");
     await user.upload(fileInput(), csv("plan.csv"));
-    await user.selectOptions(document.querySelectorAll("select")[0]!, "address");
+    await user.selectOptions(mappingSelects()[0]!, "address");
     await user.click(screen.getByRole("button", { name: "Previsualizar" }));
     await screen.findByText("Vista previa: no se ha escrito nada");
     await user.upload(fileInput(), csv("otro.csv", "address\n10.1.1.2\n"));
@@ -1489,7 +1496,7 @@ describe("the import and export page in Spanish", () => {
     const user = userEvent.setup();
     await screen.findByText("Importar direcciones desde un CSV");
     await user.upload(fileInput(), csv("one.csv", "address\n10.0.0.1\n"));
-    await user.selectOptions(document.querySelectorAll("select")[0]!, "address");
+    await user.selectOptions(mappingSelects()[0]!, "address");
     await user.click(screen.getByRole("button", { name: "Previsualizar" }));
     expect(await screen.findByText(/1 fila, hash/)).toBeInTheDocument();
     expect(screen.queryByText(/1 filas/)).toBeNull();
@@ -1511,7 +1518,7 @@ describe("the import and export page in Spanish", () => {
     const user = userEvent.setup();
     await screen.findByText("Importar direcciones desde un CSV");
     await user.upload(fileInput(), csv("big.csv", "address\n10.1.1.1\n"));
-    await user.selectOptions(document.querySelectorAll("select")[0]!, "address");
+    await user.selectOptions(mappingSelects()[0]!, "address");
     await user.click(screen.getByRole("button", { name: "Previsualizar" }));
     expect(await screen.findByText("Mostrando las primeras 200 de 205 filas.")).toBeInTheDocument();
     expect(screen.getAllByText("No se informa nada más").length).toBeGreaterThan(0);

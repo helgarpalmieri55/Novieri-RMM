@@ -4,10 +4,13 @@ import { Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
 import { useApi } from "../../lib/ApiContext";
+import { useClientName } from "../settings/api";
 import {
   useApplyIpamImportMutation,
   useConvertIpamDocRecordsMutation,
+  useIpamClient,
   useIpamPermissions,
+  useIpamVrfs,
   usePreviewIpamImportMutation,
 } from "./api";
 import { IpamNav } from "./IpamNav";
@@ -21,7 +24,7 @@ import {
   type PreviewedFile,
 } from "./ipamState";
 import { variantKind } from "./kinds";
-import type { ImportRowOut } from "./types";
+import type { ImportRowOut, VrfOut } from "./types";
 import { IMPORT_FIELDS, MAX_IMPORT_BYTES, MAX_IMPORT_ROWS } from "./types";
 import { Icon } from "../../shell/icons";
 import { Btn, PageHead, Panel, StatusPill } from "../../shell/components";
@@ -74,10 +77,30 @@ export function ImportPage() {
   );
 }
 
+/**
+ * The VRF an import goes into until the operator picks another: the internal
+ * client's `global` one when it is listed, else the first listed -- the VRFs
+ * listed are exactly those of the clients the operator can see, so a
+ * technician limited to one client starts on theirs. `null` with none listed:
+ * the import then names the internal client (`ipam/api.ts`, PHASE 3).
+ */
+function defaultImportVrf(vrfs: readonly VrfOut[], client: string | null): string | null {
+  const internalGlobal = vrfs.find((vrf) => vrf.client_id === client && vrf.name === "global");
+  return internalGlobal?.id ?? vrfs[0]?.id ?? null;
+}
+
 function CsvImportPanel() {
   const t = useT();
   const preview = usePreviewIpamImportMutation();
   const apply = useApplyIpamImportMutation();
+  // WHERE THE SHEET GOES. The import's client is the chosen VRF's (operator
+  // decision 2026-10-28: "use the row's client"), named by the client's name
+  // for someone holding `clients.read`, its id otherwise.
+  const vrfs = useIpamVrfs();
+  const client = useIpamClient();
+  const clientName = useClientName();
+  const [vrfChoice, setVrfChoice] = useState<string | null>(null);
+  const vrfId = vrfChoice ?? defaultImportVrf(vrfs.data ?? [], client);
   const [file, setFile] = useState<File | null>(null);
   const [columns, setColumns] = useState<string[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
@@ -119,6 +142,29 @@ function CsvImportPanel() {
       <p className="note" style={{ marginBottom: 14 }}>
         {t("ipam.importExport.csvNote")}
       </p>
+
+      {(vrfs.data?.length ?? 0) > 0 && (
+        <Field label={t("ipam.importExport.vrf")} help={t("ipam.importExport.vrfHelp")}>
+          <select
+            className={inputClass}
+            value={vrfId ?? ""}
+            onChange={(e) => {
+              setVrfChoice(e.target.value);
+              // Another VRF is another import: the verdict read so far was
+              // about the old one, and its digest does not cover the target.
+              setPreviewed(null);
+              apply.reset();
+              preview.reset();
+            }}
+          >
+            {vrfs.data?.map((vrf) => (
+              <option key={vrf.id} value={vrf.id}>
+                {t("ipam.importExport.vrfOption", { vrf: vrf.name, client: clientName(vrf.client_id) })}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
 
       <Field label={t("ipam.importExport.csvFile")}>
         {/* THE NATIVE CONTROL STAYS -- it is what the browser's picker and the
@@ -217,7 +263,7 @@ function CsvImportPanel() {
           onClick={() => {
             if (file === null) return;
             preview.mutate(
-              { file, mapping },
+              { file, mapping, vrfId },
               {
                 onSuccess: (result) => {
                   setPreviewed({
@@ -237,7 +283,7 @@ function CsvImportPanel() {
           disabled={apply.isPending || blockReason !== null}
           onClick={() => {
             if (file === null || previewed === null) return;
-            apply.mutate({ file, mapping, digest: previewed.digest });
+            apply.mutate({ file, mapping, digest: previewed.digest, vrfId });
           }}
         />
         {blockReason !== null && <span className="form-hint">{blockReason}</span>}

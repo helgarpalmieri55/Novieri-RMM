@@ -192,6 +192,8 @@ export const devices: Shape<typeof en> = {
     emptySwept: "No queda nada sin explicar en las subredes que se barrieron.",
     emptyAll: "No queda nada sin explicar: todas las direcciones pertenecen a un registro.",
     select: "Seleccionar",
+    ofClient: "Cliente: {client}",
+    selectOfClient: "{address} de {client}",
     address: "Dirección",
     mac: "MAC",
     vendor: "Fabricante",

@@ -193,28 +193,123 @@ describe("CandidatesPage", () => {
     });
   });
 
-  it("names the client whose candidates it promotes: the internal one until phase 3", async () => {
-    // A promotion is of ONE client's candidates; each machine takes its
-    // subnet's client and site. PHASE 3: the selected client.
-    renderPage(() => Promise.resolve(page()));
+  it("names the row's own client, not the internal one", async () => {
+    // Operator decision 2026-10-28, "use the row's client": a technician
+    // narrowed to X sees X's candidates, and `/me` is the organisation's (o1).
+    renderPage(() => Promise.resolve(page({ items: [candidate({ client_id: "c-x" })] })));
     await screen.findByText("172.22.104.55");
     await userEvent.click(screen.getByRole("checkbox", { name: /172\.22\.104\.55/ }));
     await userEvent.click(screen.getByRole("button", { name: /promote/i }));
 
     await waitFor(() => expect(promote).toHaveBeenCalledTimes(1));
     expect(promote.mock.calls[0]?.[0]).toEqual({
-      client_id: "o1",
+      client_id: "c-x",
       addresses: ["172.22.104.55"],
     });
   });
 
-  it("lists the same address of two clients as two rows", async () => {
+  it("sends one request per client the selected rows are of", async () => {
+    renderPage(() =>
+      Promise.resolve(
+        page({
+          items: [
+            candidate({ address: "10.0.0.1", client_id: "c-x" }),
+            candidate({ address: "10.0.0.2", client_id: "c-y" }),
+            candidate({ address: "10.0.0.3", client_id: "c-x" }),
+          ],
+          total: 3,
+        }),
+      ),
+    );
+    await screen.findByText("10.0.0.1");
+    for (const address of ["10.0.0.1", "10.0.0.2", "10.0.0.3"]) {
+      await userEvent.click(screen.getByRole("checkbox", { name: address }));
+    }
+    await userEvent.click(screen.getByRole("button", { name: /promote/i }));
+
+    await waitFor(() => expect(promote).toHaveBeenCalledTimes(2));
+    const bodies = promote.mock.calls.map((call) => call[0] as { client_id: string });
+    expect(bodies.sort((a, b) => a.client_id.localeCompare(b.client_id))).toEqual([
+      { client_id: "c-x", addresses: ["10.0.0.1", "10.0.0.3"] },
+      { client_id: "c-y", addresses: ["10.0.0.2"] },
+    ]);
+  });
+
+  it("reports every client's outcome together", async () => {
+    promote.mockImplementation((body: { client_id: string; addresses: string[] }) =>
+      Promise.resolve({
+        results: body.addresses.map((address) =>
+          body.client_id === "c-x"
+            ? { address, created: true, device_id: "d-1", reason: "created" }
+            : { address, created: false, device_id: null, reason: "already an asset" },
+        ),
+      }),
+    );
+    renderPage(() =>
+      Promise.resolve(
+        page({
+          items: [
+            candidate({ address: "10.0.0.1", client_id: "c-x" }),
+            candidate({ address: "10.0.0.2", client_id: "c-y" }),
+          ],
+          total: 2,
+        }),
+      ),
+    );
+    await screen.findByText("10.0.0.1");
+    await userEvent.click(screen.getByRole("checkbox", { name: "10.0.0.1" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "10.0.0.2" }));
+    await userEvent.click(screen.getByRole("button", { name: /promote/i }));
+
+    const outcome = await screen.findByRole("alert");
+    expect(outcome).toHaveTextContent("1 of 2 promoted. Not promoted: 10.0.0.2 (already an asset).");
+  });
+
+  it("still reports one client's results when another client's request fails", async () => {
+    promote.mockImplementation((body: { client_id: string; addresses: string[] }) =>
+      body.client_id === "c-x"
+        ? Promise.resolve({
+            results: [{ address: "10.0.0.1", created: true, device_id: "d-1", reason: "created" }],
+          })
+        : Promise.reject(new ApiError(404, JSON.stringify({ detail: "no such client" }))),
+    );
+    renderPage(() =>
+      Promise.resolve(
+        page({
+          items: [
+            candidate({ address: "10.0.0.1", client_id: "c-x" }),
+            candidate({ address: "10.0.0.2", client_id: "c-y" }),
+          ],
+          total: 2,
+        }),
+      ),
+    );
+    await screen.findByText("10.0.0.1");
+    await userEvent.click(screen.getByRole("checkbox", { name: "10.0.0.1" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "10.0.0.2" }));
+    await userEvent.click(screen.getByRole("button", { name: /promote/i }));
+
+    expect(await screen.findByText("1 candidate promoted to assets.")).toBeInTheDocument();
+    expect(await screen.findByText("no such client")).toBeInTheDocument();
+  });
+
+  it("lists the same address of two clients as two rows, selected apart", async () => {
     renderPage(() =>
       Promise.resolve(
         page({ items: [candidate(), candidate({ client_id: "c-y" })], total: 2 }),
       ),
     );
     expect(await screen.findAllByText("172.22.104.55")).toHaveLength(2);
+    // Each row says whose it is -- the client's name for someone holding
+    // `clients.read`, its id otherwise -- so its checkbox is its own.
+    const own = screen.getByRole("checkbox", { name: "172.22.104.55 of o1" });
+    const theirs = screen.getByRole("checkbox", { name: "172.22.104.55 of c-y" });
+    await userEvent.click(theirs);
+    expect(theirs).toBeChecked();
+    expect(own).not.toBeChecked();
+    await userEvent.click(screen.getByRole("button", { name: /promote 1/i }));
+    await waitFor(() => expect(promote).toHaveBeenCalledTimes(1));
+    expect(promote.mock.calls[0]?.[0]).toEqual({ client_id: "c-y", addresses: ["172.22.104.55"] });
   });
 
   it("will not promote nothing", async () => {

@@ -510,6 +510,18 @@ export interface DeviceHolder {
 export type DeviceState = "all" | "online" | "offline" | "assets" | "certs" | "review";
 
 /** What `GET /devices` accepts. Every field optional; absent means unfiltered. */
+/**
+ * Where an IPAM CSV import goes: a VRF -- its client is the import's -- or,
+ * naming no VRF, a client's `global` VRF (MSP clients phase 2).
+ */
+export type IpamImportTarget = { vrfId: string } | { clientId: string };
+
+function importTargetQuery(target: IpamImportTarget): string {
+  return "vrfId" in target
+    ? `&vrf_id=${encodeURIComponent(target.vrfId)}`
+    : `&client_id=${encodeURIComponent(target.clientId)}`;
+}
+
 export interface DeviceListParams {
   q?: string;
   state?: DeviceState;
@@ -5082,31 +5094,32 @@ export class ApiClient {
 
   // Step one of two. WRITES NOTHING; the digest it returns is what `apply` must
   // echo, which is the only thing binding the two steps to one file.
-  // `clientId` is the client whose `global` VRF the sheet goes into; the
-  // server refuses an import that names none.
+  // `target` is where the sheet goes: a VRF, whose client is the import's, or
+  // a client's `global` VRF. The server refuses an import that names neither.
   async previewIpamImport(
     file: File,
     mapping: Record<string, string>,
-    clientId: string,
+    target: IpamImportTarget,
   ): Promise<IpamImportPreviewOut> {
     return this.ipamImportRequest<IpamImportPreviewOut>(
       `/ipam/import/preview?mapping=${encodeURIComponent(JSON.stringify(mapping))}` +
-        `&client_id=${encodeURIComponent(clientId)}`,
+        importTargetQuery(target),
       file,
     );
   }
 
   // Step two. The digest is REQUIRED and must be the one preview returned for
-  // this exact file -- into the same client.
+  // this exact file -- into the same target.
   async applyIpamImport(
     file: File,
     mapping: Record<string, string>,
     digest: string,
-    clientId: string,
+    target: IpamImportTarget,
   ): Promise<IpamImportResultOut> {
     return this.ipamImportRequest<IpamImportResultOut>(
       `/ipam/import/apply?mapping=${encodeURIComponent(JSON.stringify(mapping))}` +
-        `&digest=${encodeURIComponent(digest)}&client_id=${encodeURIComponent(clientId)}`,
+        `&digest=${encodeURIComponent(digest)}` +
+        importTargetQuery(target),
       file,
     );
   }

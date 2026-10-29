@@ -30,7 +30,15 @@
 // telemetry, which is precisely the boundary this module does not cross.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ApiError, ClientSiteOut, Device, DevicePage, Me, Page } from "../../lib/api";
+import type {
+  ApiError,
+  ClientSiteOut,
+  Device,
+  DevicePage,
+  IpamImportTarget,
+  Me,
+  Page,
+} from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { internalClientId, loadingUntilClient, requireKnown } from "../../lib/internalClient";
 import type {
@@ -624,12 +632,23 @@ export function useDispatchIpamSweepMutation() {
  * machine (422) and the sweeper never borrows one; this is what keeps the
  * picker from offering it.
  */
-export function useSweeperChoices(clientId: string) {
+export function useSweeperChoices(clientId: string, enabled: boolean) {
   const api = useApi();
   return useQuery<DevicePage, ApiError, Device[]>({
     queryKey: ["devices", { clientId, limit: SWEEPER_CHOICES }],
     queryFn: () => api.listDevices({ clientId, limit: SWEEPER_CHOICES }),
-    select: (page) => page.items.filter((device) => device.agent_status !== null),
+    // Only for someone who may change the designation: a read-only viewer
+    // without `devices.read` would meet a 403 for a picker they never see.
+    enabled,
+    // What the server's own check (`sweep._designated`) accepts and this list
+    // can show: an agent, approved (absent means approved). Whether the agent
+    // advertises `net.sweep` is not on the fleet list; one that does not is
+    // ignored by the server, which then auto-selects.
+    select: (page) =>
+      page.items.filter(
+        (device) =>
+          device.agent_status !== null && (device.review_state ?? "approved") === "approved",
+      ),
     ...NO_RETRY,
   });
 }
@@ -658,8 +677,18 @@ export function useUpdateIpamSweepSettingsMutation() {
 // guard.
 
 //
-// An import NAMES ITS CLIENT: the sheet goes into that client's `global` VRF,
-// and the server refuses one that names none.
+// AN IMPORT NAMES WHERE IT GOES: the VRF the page chose -- its client is the
+// import's, which is how a technician limited to one client imports into it --
+// or, with none chosen, a client's `global` VRF. The server refuses neither.
+
+/**
+ * The target of an import whose page chose `vrfId`, or none. PHASE 3: with no
+ * VRF chosen, the selected client's `global` VRF; until then the internal
+ * client's (`useIpamClient`), and nothing is sent before `/me` answers.
+ */
+function importTarget(vrfId: string | null, client: string | null): IpamImportTarget {
+  return vrfId ? { vrfId } : { clientId: requireKnown(client) };
+}
 
 export function usePreviewIpamImportMutation() {
   const api = useApi();
@@ -667,10 +696,10 @@ export function usePreviewIpamImportMutation() {
   return useMutation<
     ImportPreviewOut,
     ApiError,
-    { file: File; mapping: Record<string, string> }
+    { file: File; mapping: Record<string, string>; vrfId: string | null }
   >({
-    // PHASE 3: the selected client; until then the internal one (`useIpamClient`).
-    mutationFn: ({ file, mapping }) => api.previewIpamImport(file, mapping, requireKnown(client)),
+    mutationFn: ({ file, mapping, vrfId }) =>
+      api.previewIpamImport(file, mapping, importTarget(vrfId, client)),
   });
 }
 
@@ -681,11 +710,12 @@ export function useApplyIpamImportMutation() {
   return useMutation<
     ImportResultOut,
     ApiError,
-    { file: File; mapping: Record<string, string>; digest: string }
+    { file: File; mapping: Record<string, string>; digest: string; vrfId: string | null }
   >({
-    // PHASE 3: the selected client -- the one previewed; until then the internal one.
-    mutationFn: ({ file, mapping, digest }) =>
-      api.applyIpamImport(file, mapping, digest, requireKnown(client)),
+    // Into the same target the preview read: the page clears the preview
+    // whenever the VRF changes.
+    mutationFn: ({ file, mapping, digest, vrfId }) =>
+      api.applyIpamImport(file, mapping, digest, importTarget(vrfId, client)),
     onSuccess: () => {
       invalidateAddressEffects(queryClient);
     },

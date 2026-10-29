@@ -267,11 +267,14 @@ async def promote(
     every create's (`client_for_ipam_row`: 404 unseen, 409 archived, 422 "Sin
     asignar"), and the candidates are re-derived within it, so Y's sighting is
     "not a candidate" of X whoever asks -- RLS hides it from a technician of X
-    anyway, and an every-client one gets the same answer. Each machine takes the
-    client AND THE SITE OF ITS SUBNET: a device needs a site, a client has no
+    anyway, and an every-client one gets the same answer. Each machine is filed
+    under THAT client -- the validated, locked one, which its subnet's must
+    equal (a sighting naming another client's subnet is not this client's
+    candidate) -- AT ITS SUBNET'S SITE: a device needs a site, a client has no
     marked default one, so a candidate whose subnet has no site is refused with
-    the sentence that says what to do (decision C7), and one whose site is
-    archived is refused as a hand-typed asset there would be.
+    the sentence that says what to do (decision C7), one in no registered
+    subnet with its own, and one whose site is archived as a hand-typed asset
+    there would be.
 
     IDEMPOTENT ON `primary_ip`, WITHIN THE CLIENT. Two operators looking at the
     same list, or one double-click, must not produce two rows; and it must not
@@ -370,8 +373,38 @@ async def promote(
             )
             continue
         subnet = subnets.get(candidate.subnet_id) if candidate.subnet_id else None
-        site = sites.get(subnet.site_id) if subnet is not None and subnet.site_id else None
-        if subnet is None or site is None:
+        if subnet is None:
+            # AN ORPHAN: seen outside every registered subnet, so there is no
+            # subnet to give a site to -- C7's sentence would point at nothing.
+            results.append(
+                PromotionResult(
+                    address=address,
+                    created=False,
+                    device_id=None,
+                    reason=tr(
+                        "this address is in no registered subnet: register its subnet, at a "
+                        "site, before adding the machine"
+                    ),
+                )
+            )
+            continue
+        if subnet.client_id != client_id:
+            # NOTHING TIES AN OBSERVATION'S `subnet_id` TO ITS CLIENT, so a
+            # sighting of this client can name another client's subnet. Filed
+            # under that subnet it would be the other client's machine, at the
+            # other client's site, from a promotion that named this one: it is
+            # not this client's candidate.
+            results.append(
+                PromotionResult(
+                    address=address,
+                    created=False,
+                    device_id=None,
+                    reason=tr("not a candidate: no current observation for this address"),
+                )
+            )
+            continue
+        site = sites.get(subnet.site_id) if subnet.site_id else None
+        if site is None:
             results.append(
                 PromotionResult(
                     address=address,
@@ -399,8 +432,9 @@ async def promote(
             # moves is when it runs.
             id=uuid7(),
             org_id=org_id,
-            # THE SUBNET'S CLIENT AND SITE (C7): where the machine was seen.
-            client_id=subnet.client_id,
+            # THE CLIENT THE PROMOTION NAMED -- validated and locked, and the
+            # subnet's, checked above -- AND THE SUBNET'S SITE (C7).
+            client_id=client_id,
             site_id=site.id,
             source="discovery",
             # A PERSON PICKED THIS ONE. That is the whole difference between
@@ -435,7 +469,7 @@ async def promote(
             action="asset.promoted",
             target_type="device",
             target_id=str(device.id),
-            client_id=subnet.client_id,
+            client_id=client_id,
             # The EVIDENCE, not just the outcome: `confidence` says whether ARP
             # or only ICMP saw this, which is what an auditor needs to judge how
             # much the row is worth.

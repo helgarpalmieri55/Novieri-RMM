@@ -1439,6 +1439,11 @@ CATALOG: dict[str, str] = {
     "assign the subnet to a site before adding its machines": (
         "asigna una sede a la subred antes de añadir sus equipos"
     ),
+    "this address is in no registered subnet: register its subnet, at a site, before adding "
+    "the machine": (
+        "esta dirección no está en ninguna subred registrada: registra su subred, con una sede, "
+        "antes de añadir el equipo"
+    ),
     "{count} subnet": "{count} subred",
     "{count} subnets": "{count} subredes",
     "{count} VLAN": "{count} VLAN",
