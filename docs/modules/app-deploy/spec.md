@@ -285,7 +285,11 @@ re-checked agent-side. Keep the grammar small and validated; document each type.
   > cannot read that is already stored is contained to its own deployment:
   > the window sweep runs each deployment in a savepoint and logs and skips
   > it, so it no longer rolls back every windowed deployment of the
-  > organisation, and `POST .../execute` on it is a 422 that says so. No route
+  > organisation, and `POST .../execute` on it is a 422 that says so. The
+  > same containment covers any refusal of the deployment's own data (a
+  > `DeployValidationError`, e.g. a package whose artifact was never
+  > uploaded); an error of anything else (the database, the signer) still
+  > fails the organisation's cycle. No route
   > edits a deployment: the way out is a new deployment with a valid window.
 
 ## 8. Dispatch & result ingestion (§8)

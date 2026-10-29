@@ -354,9 +354,10 @@ async def client_usage_bytes(
 
 
 def _quota_message(usage: int, client_id: UUID | None) -> str:
-    """The 507, with the owner's usage: the caller's own client's, or -- the
-    documents for every client, which only an every-client person can write
-    to -- that bucket's."""
+    """The 507, with the owner's usage: the document's client's (for an
+    every-client admin uploading to X's document, X's), or -- the documents
+    for every client, which only an every-client person can write to -- that
+    bucket's."""
     if client_id is None:
         return tr(
             "the documents for every client have reached their storage quota ({usage} of "

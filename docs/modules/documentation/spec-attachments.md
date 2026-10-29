@@ -269,8 +269,9 @@ override is a small later change. Overturnable: §17 D6.
 > and kept to that document's `client_id` (or to the documents with none) —
 > never as "whatever the caller's scope can see", so an every-client admin and
 > a technician narrowed to X get the same number for the same upload. The 507
-> names the owner's usage: the caller's own client's, or the every-client
-> bucket's, which only an every-client person can write to. **The documents'
+> names the owner's usage: the document's client's (for an every-client admin
+> uploading to X's document, X's), or the every-client bucket's, which only an
+> every-client person can write to. **The documents'
 > share of the shared volume is therefore bounded by the cap times the number
 > of clients plus one, and grows as clients are added**: size the volume, which
 > backups share, for that. (Before this, the `SUM` ran under the caller's
@@ -753,7 +754,8 @@ detail. **No shape, anywhere, contains `object_key`.** F1b.
 Status codes: 400 bad filename; 404 missing or cross-org document, version, or
 link target; **409** either an archived document being sent a new version or a
 duplicate link; 410 purged version; 413 over per-file cap; 415 unsupported type;
-507 over org quota.
+507 over the document's owner's quota (its client's, or the every-client
+documents'; §0.10).
 
 Route ordering: every path above is under the literal prefix `/docs/documents`,
 so none of them shadows the shipped `/docs/articles`, `/docs/records` or
@@ -1033,7 +1035,7 @@ states of §11.7; `tsc --strict` and a build.
    storage layout block.
 8. `deploy/README.md` — a documents subsection beside the Budget and Service
    Desk attachment ones, stating the key layout, the 25 MiB cap and the 5 GiB
-   org quota.
+   quota (per client since 2026-10-29, §0.10).
 9. `docs/modules/documentation/spec.md` — a one-line pointer at the top to this
    file. Its own §1–§8 are unchanged.
 

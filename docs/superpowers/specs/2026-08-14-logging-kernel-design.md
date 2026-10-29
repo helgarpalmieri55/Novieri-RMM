@@ -177,7 +177,8 @@ them.
 
 **NOW 107, MSP clients phase 2 final review.** One static WARNING in
 `app/worker.py::deploy_window_sweep_all_orgs`, when a deployment's own data
-(a stored window the parser cannot read) stops it and the sweep goes on with
+(any `DeployValidationError`: a stored window the parser cannot read, a
+package whose artifact was never uploaded) stops it and the sweep goes on with
 the organisation's others. `extra` = the deployment id and the exception type;
 never the stored value, never `str(exc)`.
 

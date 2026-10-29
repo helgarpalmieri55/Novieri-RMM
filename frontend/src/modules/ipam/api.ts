@@ -198,16 +198,13 @@ export function useCreateIpamVrfMutation() {
 }
 
 /**
- * The sites a VLAN or a subnet may name: the client's own (`GET
+ * The sites a VLAN or a subnet may name: its client's own (`GET
  * /clients/{id}/sites`, phase 1). IPAM keeps no sites of its own since
- * migration 0240, and creates none -- a site is a client's office, managed
- * with the client. LOADING until the client is known, not empty.
- */
-/**
- * The sites of `of` -- a row's own client, whose sites alone it may name --
- * or, with no argument, of the client this console files new rows under
- * (`useIpamClient`). `null` waits: the row, or the VRF that decides it, has
- * not loaded yet.
+ * migration 0240, and creates none -- a site is a client's office. `of` is a
+ * row's own client, whose sites alone it may name; with no argument, the
+ * client this console files new rows under (`useIpamClient`). LOADING until
+ * the client is known, not empty; `null` waits: the row, or the VRF that
+ * decides it, has not loaded yet.
  */
 export function useIpamSites(of?: string | null) {
   const api = useApi();
