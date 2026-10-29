@@ -64,7 +64,7 @@ from app.modules.backup.policy import resolve_backup_policy
 from app.modules.backup.reconcile import reconcile_stuck
 from app.modules.backup.retention import select_gfs
 from app.modules.deploy.artifacts import LazyObjectStoreSigner
-from app.modules.deploy.dispatch import UnreadableWindow, dispatch_deployment
+from app.modules.deploy.dispatch import dispatch_deployment
 from app.modules.deploy.packages import DeployValidationError
 from app.modules.deploy.script_policies import run_policy_sweep
 from app.modules.health import baseline as health_baseline_module
@@ -1271,19 +1271,18 @@ async def deploy_window_sweep_all_orgs(now: datetime) -> int:
                                     actor_type="system",
                                     artifact_urls=artifact_urls,
                                 )
-                        except UnreadableWindow as exc:
-                            logger.warning(
-                                "deploy window sweep: deployment %s skipped: its window "
-                                "cannot be read (%r)",
-                                deployment_id,
-                                exc.window,
-                            )
-                            continue
                         except DeployValidationError as exc:
+                            # One line per skipped deployment, by type
+                            # (`UnreadableWindow` for a stored window the
+                            # parser cannot read): the stored value and the
+                            # sentence are the deployment's data, not the log's.
                             logger.warning(
-                                "deploy window sweep: deployment %s skipped: %s",
-                                deployment_id,
-                                exc,
+                                "deploy window sweep: a deployment its own data stops was "
+                                "skipped; the others go on",
+                                extra={
+                                    "deployment_id": deployment_id,
+                                    "reason": type(exc).__name__,
+                                },
                             )
                             continue
                         pending.extend(dispatched)

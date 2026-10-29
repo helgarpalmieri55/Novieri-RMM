@@ -225,10 +225,15 @@ async def test_one_unreadable_stored_window_stops_only_its_own_deployment(
     assert states[valid] == "dispatching"
     assert {states[d] for d in unreadable.values()} == {"pending"}
     assert jobs == 1
-    mine = [r for r in caplog.records if any(str(d) in r.getMessage()
-                                             for d in unreadable.values())]
-    assert sorted(r.getMessage() for r in mine) == sorted(
-        f"deploy window sweep: deployment {d} skipped: its window cannot be read ({w!r})"
-        for w, d in unreadable.items()
+    # One line per unreadable deployment, by type, with a constant message
+    # (`tests/test_logging_discipline.py`): no stored value, no traceback.
+    mine = [r for r in caplog.records
+            if getattr(r, "deployment_id", None) in set(unreadable.values())]
+    assert sorted(str(r.deployment_id) for r in mine) == sorted(
+        str(d) for d in unreadable.values()
     )
-    assert all(r.exc_info is None for r in mine)
+    assert {(r.getMessage(), r.reason, r.exc_info) for r in mine} == {(
+        "deploy window sweep: a deployment its own data stops was skipped; the others go on",
+        "UnreadableWindow",
+        None,
+    )}
