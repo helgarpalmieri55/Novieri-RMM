@@ -94,6 +94,24 @@ positive = headroom).
 The review-queue "ignore" sink so OS components / free tools stop reappearing
 (§4). Kept deliberately small (exact-name ignore only).
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Task 6): licenses belong
+> to a client, and compliance is counted per client** (migration 0236).
+> `license` and `license_compliance_snapshot` are C, and `license_allocation`
+> inherits the license's client (H); the client policy of `CLAUDE.md`
+> invariant 5a is on all three. `vendor` and `software_product` stay the
+> organisation's (G). `POST /licenses` names its client (404 not visible, 409
+> archived, 422 Unassigned). An allocation's target — device, person or
+> account — is the license's client's (`its_license_allocation_target_guard`;
+> a technician's account is the internal client's, plan decision C4), and
+> another client's is a 422. **Compliance (§4) is one row per client and
+> product, and costs and renewals one row per client, never summed across
+> clients**, in the route and in the daily sweep (§7): one client's
+> entitlements are matched against that client's installs. `software_ignore` is O: a name ignored for one client
+> stays in the other clients' review queues, and a global ignore still needs
+> every client. Every license and allocation audit event carries the
+> license's client. The plan is
+> `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 ---
 
 ## 3. Vendor management

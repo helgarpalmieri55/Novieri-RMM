@@ -115,6 +115,25 @@ and `created_at`/`updated_at` timestamps.
 Migration: additive Alembic revision after Phase 4's head, with the `_rls`
 helper and the `deploy.*` permission seed + role grants.
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Task 9): a deployment
+> belongs to its target's client** (migration 0239). `deployments` gains
+> `client_id` (C) and the client policy of `CLAUDE.md` invariant 5a;
+> `deployment_results` and `script_runs` already carried their device's
+> client, and `packages` and `scripts` stay the organisation's. **The client
+> is written by a trigger, `its_deployment_client`, from `target_type` and
+> `target_id`** (existing rows took their target's, or the internal client's
+> when the target was gone): a target the session cannot see, or a client
+> that contradicts the target's, is refused by name. The request body names
+> no client. `POST /deploy/deployments` resolves the device or group in the
+> caller's own scope first, so another client's target is the 404 a missing
+> one is; a target of an archived client is a 409, and one in Unassigned a
+> 422 (plan decision C10). The deployment's client then decides its gates,
+> its automatic change (`docs/modules/change-mgmt/spec.md` §14) and every
+> audit event, and only a change of that client authorizes it. Dispatch,
+> which the window sweep runs under the every-client scope, reaches only
+> devices of the deployment's client, named or members of the group. The
+> plan is `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 ## 5. Wire contracts & the shared install-engine interface (§5)
 
 Pydantic v2 models with `ConfigDict(extra="forbid")`, exported to

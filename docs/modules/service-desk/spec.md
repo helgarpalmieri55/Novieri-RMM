@@ -98,6 +98,28 @@ wiring — but the migration must still declare the policies, or those tests fai
 Migration is the next in sequence (current head is `0022`; the implementation
 plan's first task confirms it).
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Tasks 2 and 3): a ticket
+> belongs to a client.** `ticket` carries `client_id` (C, migration 0234:
+> existing tickets took their device's client, else a contact requester's,
+> else the internal client), and its five children — comments, attachments,
+> approvals, status history and `ticket_sla` — inherit it from the ticket (H).
+> The restrictive client policy of `CLAUDE.md` invariant 5a is on all six,
+> beside `portal_isolation`. A new ticket takes its device's client, or the
+> client the request names; neither, or two that disagree, is a 422, and only
+> mail files a ticket under Unassigned (plan decision C10).
+> `its_ticket_client_guard` holds the device and a contact requester to the
+> ticket's client, and an assignee must hold `ticket.read` there.
+> `POST /service-desk/tickets/{id}/move` moves a ticket to another active
+> client, which the mover must hold `ticket.write` in. A ticket with a device
+> does not move (409, decision C9: take the device off first), nor does one an
+> alert or a change opened (origin `alert` or `integration`), or one a health
+> alert still names. The children follow the ticket, an assignee without
+> `ticket.read` in the destination is taken off it, and the SLA is resolved
+> again for the new client — or removed, when nothing resolves there
+> (`docs/modules/sla/spec.md` §3.3). Notifications about a ticket reach only that client's contacts and
+> staff with a role in that client (`app/modules/notification/routing.py`).
+> The plan is `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 ### `ticket_queue`
 `id, org_id, key (str(64)), name (str(255)), description (Text, default ""),
 active (bool, default True), sort_order (int, default 0), created_by,

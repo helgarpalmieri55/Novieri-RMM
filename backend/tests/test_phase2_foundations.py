@@ -1,18 +1,22 @@
 """Phase-2 foundations (plan 2026-10-26, Task 1): the internal client is born
 with the three optional modules (C2), an audit event can name its subject's
 client without breaking the chain of the events that do not (C6), and a
-domain event carries its subject's client."""
+domain event carries its subject's client. And Task 15's closing checks: no
+family is pending, and `domain_events` is under the generic O rule."""
 
 import hashlib
 import subprocess
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+import app.core.client_scope_catalog as catalog
 from app.core.audit import AuditEntry, AuditService
 from app.core.client_scope import ClientScope
 from app.core.events import publish
+from app.core.global_rows import GlobalRowNotWritable
 from app.core.tenancy import org_session
 from app.jobs.canonical import canonical_bytes, rfc3339
 from app.models import AuditEvent, Client, DomainEvent, Organization
@@ -215,3 +219,80 @@ async def test_the_audit_column_is_nullable_and_unindexed_by_policy(
             )
         ).scalar_one()
     assert policies == set() and nullable == "YES"
+
+
+def test_no_family_is_pending_any_more() -> None:
+    assert not hasattr(catalog, "PENDING_PHASE_2")
+    assert not hasattr(catalog, "PHASE_1")
+    assert set(catalog.SCOPED) == {
+        t for t, e in catalog.CATALOG.items() if e.kind != "G"
+    }
+
+
+def test_only_a_platform_probe_publishes_without_a_client() -> None:
+    """Task 1 made `client_id` a required keyword of `publish`; every family
+    task replaced its `None`. What is left is the platform probe."""
+    root = Path(__file__).resolve().parents[1] / "app"
+    hits = [
+        f"{p.relative_to(root)}:{n}"
+        for p in root.rglob("*.py")
+        for n, line in enumerate(p.read_text().splitlines(), 1)
+        if "client_id=None" in line and "plan 2026-10-26" in line
+    ]
+    assert hits == [], hits
+
+
+async def test_a_narrowed_scope_cannot_write_a_client_less_domain_event(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """`domain_events` back under the generic O check (0243): a NULL client
+    is written only under scope all.
+
+    Refused LOUDLY, by the global-rows guard before any SQL is sent (a 403
+    in a request), not by RLS's WITH CHECK (a 500): the guard has no
+    exception for `domain_events` any more. That the database refuses too,
+    past the guard, is `test_client_scope_rls.py::
+    test_a_domain_event_with_no_client_is_written_only_under_scope_all`."""
+    org = await _org(admin_engine)
+    customer = await _customer(admin_engine, org)
+    try:
+        async with org_session(org, engine=app_engine, clients=ClientScope.only([customer])) as s:
+            await publish(
+                s, org_id=org, event_type="device.joined_via_link", subject_type="device",
+                subject_id=uuid4(), payload={}, actor_user_id=None, client_id=None,
+            )
+    except GlobalRowNotWritable as exc:
+        assert exc.table == "domain_events"
+    else:
+        raise AssertionError("a narrowed scope wrote an event for every client")
+
+
+async def test_a_narrowed_scope_cannot_release_a_domain_event_to_every_client(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """The other half of the exemption 0243 ends: an event of the scope's own
+    client is not turned into an event for every client either -- refused by
+    the guard's UPDATE branch, before any SQL, like any O row released."""
+    org = await _org(admin_engine)
+    customer = await _customer(admin_engine, org)
+    subject = uuid4()
+    async with org_session(org, engine=app_engine, clients=ClientScope.only([customer])) as s:
+        await publish(
+            s, org_id=org, event_type="device.joined_via_link", subject_type="device",
+            subject_id=subject, payload={}, actor_user_id=None, client_id=customer,
+        )
+    try:
+        async with org_session(org, engine=app_engine, clients=ClientScope.only([customer])) as s:
+            event = (
+                await s.execute(select(DomainEvent).where(DomainEvent.subject_id == subject))
+            ).scalar_one()
+            event.client_id = None
+    except GlobalRowNotWritable as exc:
+        assert exc.table == "domain_events"
+    else:
+        raise AssertionError("a narrowed scope released an event to every client")
+    async with AsyncSession(admin_engine) as s:
+        stored = (
+            await s.execute(select(DomainEvent.client_id).where(DomainEvent.subject_id == subject))
+        ).scalar_one()
+    assert stored == customer

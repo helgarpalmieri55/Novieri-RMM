@@ -10,10 +10,9 @@ G  no client scoping. A column named client_id there means something else:
    and `email_oauth_app`. On `audit_events` it is the informative client of
    the event's subject (hashed when set, read by no policy: phase 2 C6).
 
-`PENDING_PHASE_2` are C/H tables whose module code must start writing
-client_id before the column can be NOT NULL (plan "Fuera de esta fase"). The
-phase-2 plan's last task deletes that set; until then those tables are exempt
-from the policy check, and from nothing else.
+`SCOPED` is every C, H and O table: each one carries the restrictive
+`client_isolation` policy (migrations 0231 to 0243), and no family is pending
+since plan 2026-10-26 Task 15.
 """
 
 from dataclasses import dataclass
@@ -165,8 +164,4 @@ CATALOG: dict[str, Entry] = {
     "site_server": H("devices", "device_id"),
 }
 
-# Empty since plan 2026-10-26 Task 13 (migration 0242, backup repositories);
-# Task 15 deletes it.
-PENDING_PHASE_2: frozenset[str] = frozenset()
-
-PHASE_1 = {t: e for t, e in CATALOG.items() if e.kind != "G" and t not in PENDING_PHASE_2}
+SCOPED = {t: e for t, e in CATALOG.items() if e.kind != "G"}

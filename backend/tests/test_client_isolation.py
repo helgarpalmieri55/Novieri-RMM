@@ -1,4 +1,4 @@
-"""Spec §5 tests 3-8, over every phase-1 table, through the real RLS.
+"""Spec §5 tests 3-8, over every scoped table, through the real RLS.
 
 Seeding is through the ADMIN engine (no RLS), asserting is through
 `org_session` (RLS on) as `app_user`. The fixture makes the client the ONLY
@@ -12,7 +12,7 @@ WHERE EACH SPEC §5 TEST LIVES. Names alone are in this file; `rls::` is
 the catalog's literal copy.
 
 3. Isolation over the whole catalog.
-   - EVERY phase-1 table, and `clients`, structurally:
+   - EVERY scoped table, and `clients`, structurally:
      `test_every_scoped_table_hides_other_clients_rows` -- RLS enabled and
      forced, not owned by `app_user`, and exactly spec §2.2's client policies,
      expression by expression; with `test_the_app_role_is_held_by_rls`.
@@ -60,7 +60,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.client_scope import ClientScope
-from app.core.client_scope_catalog import PHASE_1
+from app.core.client_scope_catalog import SCOPED
 from app.core.tenancy import org_session
 from app.models import (
     BackupChunk,
@@ -383,12 +383,12 @@ async def _unscoped(org: UUID, app_engine: AsyncEngine) -> AsyncIterator[AsyncSe
 
 
 # --------------------------------------------------------------------------- #
-# Spec §5 test 3, structurally: every phase-1 table.
+# Spec §5 test 3, structurally: every scoped table.
 # --------------------------------------------------------------------------- #
 
-#: Every phase-1 table (C, H and O), and `clients`, which is G in the catalog
+#: Every scoped table (C, H and O), and `clients`, which is G in the catalog
 #: but carries a client policy of its own (0231).
-SWEPT = [*sorted(PHASE_1), "clients"]
+SWEPT = [*sorted(SCOPED), "clients"]
 
 
 async def test_the_app_role_is_held_by_rls(app_engine: AsyncEngine) -> None:

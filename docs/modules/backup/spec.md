@@ -144,6 +144,33 @@ policy `USING (org_id = current_setting('app.current_org', true)::uuid)`, and
 Migration: additive Alembic revision after Phase 5's head, with the `_rls` helper
 and the `backup.*` permission seed + role grants.
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Task 13 and its
+> reviews): a backup repository serves one client** (migration 0242; plan
+> decision C1). The reason is the key, not the row filter: a repository's
+> master key travels in the signed parameters of every device that backs up
+> into it, and chunks are deduplicated per repository (§5.2), so a repository
+> shared by two clients would hand one client's devices the other's key.
+> `backup_repositories` is C (existing repositories went to the internal
+> client; a name is unique per client), and `backup_chunks` and
+> `backup_chunk_copies` inherit it (H); all three carry the client policy of
+> `CLAUDE.md` invariant 5a. **A policy names only a repository of its own
+> client** (`its_backup_policy_repository_guard`): a group policy is its
+> group's client's, a group-less policy is one client's default, and a
+> policy for every client names no repository. Resolution is device group →
+> the device's client's default → the policy for every client. A run and a
+> point name a repository of their device's client (composite keys, `NOT
+> VALID`, so rows from before 0242 are history and are not re-judged); the
+> window refuses a device whose policy names another client's repository,
+> opens no key, and records `backup.dispatch_refused` **once per device and
+> policy version**. `window_cron` is validated on write (five cron fields,
+> or no window: a 422 otherwise), and a stored window the sweep cannot read
+> stops only its own policy's devices, recorded once per policy version, not
+> the organisation's whole sweep. Points taken before the upgrade by a
+> customer client's devices stay in the internal client's repository, where
+> they can still be restored; once that client's policy names its own
+> repository, retention no longer prunes them. The plan is
+> `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 ## 5. Repository format (§5) — pinned now
 
 Engine-internal, produced by the agent, consumed on restore/verify. Specified

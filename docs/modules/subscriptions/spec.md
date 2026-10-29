@@ -88,6 +88,19 @@ The immutable change-history trail (distinct from the audit log: this is
 business history surfaced in the UI; the audit log is the tamper-evident
 security record).
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Task 6): a subscription
+> belongs to a client** (migration 0236). `subscription` is C;
+> `seat_assignment`, `subscription_event` and `subscription_alert_sent`
+> inherit its client (H), and all four carry the client policy of
+> `CLAUDE.md` invariant 5a. `POST /subscriptions` names its client (404 not
+> visible, 409 archived, 422 Unassigned). A seat's person and a linked
+> license (§6) are the subscription's client's, and another client's is a
+> 422; seats matched by address resolve people inside that client. Spend
+> (§7) is one row per client and currency, never summed across clients.
+> Renewal alerts and every subscription and seat audit event carry the
+> subscription's client. The plan is
+> `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 ---
 
 ## 3. Subscription lifecycle & change history

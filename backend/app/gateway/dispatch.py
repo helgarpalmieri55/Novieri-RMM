@@ -6,9 +6,9 @@ Channels:
 - ui:{org_id}:{client_id} — live status events about one client's rows (a
   device, a job, anything carrying `client_id`), consumed by the operator UI
   WebSocket of a person whose scope holds that client (MSP clients spec §2.6).
-- ui:{org_id}:global — live events about rows with no client (phase 1:
-  tickets and the rest of `PENDING_PHASE_2`, org settings). Every scope hears
-  it, so a global event never carries a client's data.
+- ui:{org_id}:global — live events about rows with no client (an O table's
+  every-client rows, org settings). Every scope hears it, so a global event
+  never carries a client's data.
 
 handle_agent_message() is the single entry point for agent->server messages.
 Identity is never taken from message content: the device binding comes from

@@ -644,12 +644,41 @@ matching `WITH CHECK` — invariant #5, with a behavioural cross-org test per
 table (§13). The Phase 0 RLS-completeness test that walks `pg_tables` /
 `pg_policies` covers them automatically.
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Tasks 10 and 11): IPAM
+> is per client** (migration 0240). `ipam_vrf` and `ipam_vlan` are C
+> (existing rows went to the internal client). `ipam_subnet` is H from its
+> VRF: `vrf_id` is NOT NULL (§0.7), so a subnet's client is its VRF's.
+> `ipam_range` and `ipam_sweep_run` inherit from the subnet;
+> `ipam_address`, `ipam_observation`, `ipam_drift` and
+> `ipam_scan_authorization` from the VRF. All nine carry the client policy of
+> `CLAUDE.md` invariant 5a. A VRF's name is unique per client, and each client
+> has its own `global` VRF. **`ipam_site` (§2.2) no longer exists** (plan
+> decision C3): 0240 dropped it without copying rows. A VLAN, a subnet and a
+> site server name one of the client's own sites in `sites` (`site_id`, held
+> to the row's client by `fk_<table>_site_client`); a VLAN id is unique per
+> site, or per client for a VLAN with no site. **A sweep stays inside its
+> subnet's client**: the sweeper, a designated sweeper and the preferred site
+> server are machines of that client. **Candidates and promotion stay inside
+> it too**: an address is a candidate of one client, and promoting it needs
+> its subnet to have a site, whose client and site the new machine takes
+> (decision C7). A candidate whose subnet has no site is refused with "assign
+> the subnet to a site before adding its machines", and a sweep's automatic
+> creation leaves it on the Discovered list. **An import names its VRF**
+> (`?vrf_id=`) **or, without one, its client** (`?client_id=`, whose `global`
+> VRF it fills), and the apply step runs only against the VRF the preview
+> was for. Converting documentation `network` records (§8.3) files each one
+> under its record's client, or the internal client for a global record. The
+> plan is `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 ### 2.1 `ipam_vrf`
 `id (uuid7 PK), org_id FK, name (str 100), rd (str 64, nullable), description,
 created_by, created_at, updated_at`. Unique `(org_id, name)`. A `global` row is
 created lazily on first subnet write (§0.7).
 
 ### 2.2 `ipam_site`
+*Dropped by migration 0240 (MSP clients plan 2026-10-26, Task 10): sites are
+the clients' `sites`. Kept below as history.*
+
 `id, org_id FK, name (str 200), doc_record_id (FK → doc_records, nullable),
 description, created_at, updated_at`. Unique `(org_id, name)`.
 

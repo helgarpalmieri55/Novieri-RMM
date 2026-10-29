@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.client_scope_catalog import PHASE_1
+from app.core.client_scope_catalog import SCOPED
 from app.models import Client, Permission, Role, RolePermission, Site, User, UserRole
 from tests.conftest import ApiEnv
 
@@ -94,16 +94,11 @@ _NULL_PINNED = (
     f"(client_id IS NULL AND ({_SCOPE} = 'all' OR ({_SCOPE} = 'list' AND "
     "nullif(current_setting('app.current_clients', true), '') IS NOT NULL)))"
 )
-# ... and written, changed or deleted only under scope all.
+# ... and written, changed or deleted only under scope all -- on EVERY O
+# table. There is no exception left: `users` left it in Task 8 (no narrowed
+# path writes a staff row) and `domain_events` in plan 2026-10-26 Task 15
+# (migration 0243: every publisher names its subject's client).
 _NULL_ALL = f"(client_id IS NULL AND {_SCOPE} = 'all')"
-
-#: THE EXCEPTION, NAMED: the one O table whose `client_isolation` WITH CHECK
-#: admits a NULL row under any pinned scope -- phase 1's client-less domain
-#: events. `users` left it in Task 8: no narrowed path writes a staff row
-#: (`PATCH /me` and the login bookkeeping run under scope all since Task 6b),
-#: so a staff row is created, changed and deleted only under scope all, like
-#: any other global row. Anything else here is a finding.
-NULL_WRITABLE_FROM_ANY_SCOPE = frozenset({"domain_events"})
 
 Shape = tuple[str, str | None, str | None]  # (cmd, USING, WITH CHECK) as written
 
@@ -120,14 +115,13 @@ def expected_client_policies(table: str) -> dict[str, Shape]:
                 f"{_SCOPE} = 'all' OR its_client_visible(id)",
             )
         }
-    entry = PHASE_1[table]
+    entry = SCOPED[table]
     if entry.kind in {"C", "H"}:
         return {"client_isolation": ("ALL", _VISIBLE, _VISIBLE)}
     read = f"{_NULL_PINNED} OR {_VISIBLE}"
     modify = f"{_NULL_ALL} OR {_VISIBLE}"
-    insert = read if table in NULL_WRITABLE_FROM_ANY_SCOPE else modify
     policies: dict[str, Shape] = {
-        "client_isolation": ("ALL", read, insert),
+        "client_isolation": ("ALL", read, modify),
         # `users` included since Task 8: a narrowed scope changes no column
         # of a staff row (`its_user_identity_guard` then holds a visible
         # contact's kind and external_subject; its status is its client's

@@ -106,6 +106,12 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "COMPUTES a person's scope rather than using one: an all-clients grant "
         "(user_roles.client_id NULL) is the every-client scope (spec §2.1-2.2)"
     ),
+    "app/core/rbac.py::scopes_by_code": (
+        "COMPUTES, like clients_holding, the scope of each code the person holds, from one "
+        "read of their grants: an all-clients grant of a code is that code's every-client "
+        "scope. Only intersected, never used as a session's scope (the report catalogue, "
+        "plan 2026-10-26 Task 14 review)"
+    ),
     # -- (d) personal: the caller's own row, which belongs to no client --------
     **_reviewed(
         "app/core/identity/own_profile.py",

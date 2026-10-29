@@ -442,8 +442,8 @@ async def test_a_module_event_queued_after_an_update_names_the_jobs_client(
 
 
 async def test_a_global_event_reaches_a_narrowed_technician(api_env, live_api) -> None:
-    """Rows with no client (phase 1: tickets and the rest of PENDING_PHASE_2,
-    org settings) publish on `ui:{org}:global`, which every scope hears."""
+    """Rows with no client (an O table's every-client rows, org settings)
+    publish on `ui:{org}:global`, which every scope hears."""
     from app.gateway.dispatch import publish_global_ui_event
 
     org_id, (x, _y), _devices = await _two_clients(api_env, "ws-global")

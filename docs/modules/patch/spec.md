@@ -186,6 +186,27 @@ reboot: "never|if_required|forced", deferral_hours: int }`.
   window with a duration, within it). Resolved to the agent's local scheduler so
   the agent also honors it if the control plane is unreachable at window time.
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Task 14 and its review):
+> an approval belongs to one client, or to every client.** `patch_approvals`
+> is O: `POST /patch/approvals[/bulk]` takes an optional `client_id` (404 not
+> visible, 409 archived, 422 Unassigned). With one, the approval is that
+> client's and flips only that client's machines in the ring; without one it
+> is global, covers every client's machines in the ring, and writing it needs
+> every client. Every reader — the apply sweep, the ring's approved patches
+> and the compliance report — accepts an approval that is global or of the
+> device's own client, never another client's. Revoking a client's approval
+> flips only that client's machines no other live approval still covers, and
+> nothing while a global approval for the same patch and ring is live. The
+> console files an approval under the internal client unless the person ticks
+> **"For every client"**; one made from a machine's drill-down is filed under
+> that machine's client. A client's approval is authorized only by a change of
+> that client, **and a global one only by the internal client's change, whose
+> automatic change it also is** (plan decision C8); a client without change
+> management has no gate and gets no automatic change (decision D4,
+> `docs/modules/change-mgmt/spec.md` §14). Automatic approval (PD-02) stays
+> global. The plan is
+> `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 ## 8. Apply flow (`apply.py`) — dispatch + result ingestion
 
 - **Dispatch** (worker or operator, `patch.apply` permission): select

@@ -90,6 +90,25 @@ per person. Nobody is starting and leaving at once.
 **`seat_assignment.person_id`** and **`license_allocation.person_id`**:
 nullable FK → `person`, indexed `(org_id, person_id)`.
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Task 5): a person
+> belongs to a client** (migration 0235). `person` is C; `person_login`,
+> `person_checklist` and `person_checklist_step` inherit its client (H), and
+> all four carry the client policy of `CLAUDE.md` invariant 5a. A contact's
+> person is in the contact's client; a technician's in the internal client
+> (plan decision C4). Existing people were filed the same way. A person's
+> address and a sign-in name are unique per client, not per organisation
+> (`uq_person_client_lower_email`, `uq_person_login_client_login`), and every
+> lookup by address or sign-in name stays inside one client: inventory
+> resolves a sign-in in the device's client, and the account sync links an
+> account only to a person of its own client. `POST /people` names its client
+> (404 not visible, 409 archived, 422 Unassigned). Who uses a device is one of
+> the device's client's people (`fk_device_person_person_client`); links that
+> disagreed were unlinked and handed back to inventory, and a holder of
+> another client is a 422. A seat's or an allocation's person is of the
+> seat's or license's client (`docs/modules/licenses/spec.md` §2). Leaver
+> checklists need `people.offboard` in the person's client. The plan is
+> `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 ### 1.1 Backfill (in the same migration, forward only)
 
 1. `person` from `users`. One person per distinct `(org_id, lower(email))`,

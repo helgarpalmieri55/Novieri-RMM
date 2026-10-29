@@ -240,29 +240,51 @@ async def test_no_scope_guc_hides_global_rows_and_staff_too(
         assert (await s.execute(text(probe), ids)).scalar_one() == 2
 
 
-async def test_a_narrowed_scope_publishes_a_domain_event(
+async def test_a_domain_event_with_no_client_is_written_only_under_scope_all(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
-    """`events.publish` takes the subject's client (phase 2 Task 1), but until
-    each family's task passes one, and for a platform probe for good, an event
-    is written with NULL client from ANY pinned scope -- or every route that
-    publishes fails under a narrowed one."""
+    """`domain_events` is under the generic O check since 0243 (plan
+    2026-10-26 Task 15): every publisher names its subject's client, so a
+    narrowed scope writes its own clients' events and nothing else, and a NULL
+    client -- an event for every client, the platform probe's -- is written
+    only under scope all. The refusals are raw SQL, past the ORM guard
+    (`app/core/global_rows.py`): the database is what refuses."""
     c = await _two_clients(admin_engine)
-    subject = uuid4()
+    insert = (
+        "INSERT INTO domain_events (id, org_id, client_id, event_type, subject_type, "
+        "subject_id, payload, occurred_at, created_at) VALUES (gen_random_uuid(), :o, :c, "
+        "'ticket.assigned', 'ticket', :s, '{}', now(), now())"
+    )
+    for client in (None, c.y):  # every client's, then another client's
+        with pytest.raises(DBAPIError, match="row-level security"):
+            async with org_session(
+                c.org, clients=ClientScope.only([c.x]), engine=app_engine
+            ) as s:
+                await s.execute(text(insert), {"o": c.org, "c": client, "s": uuid4()})
+    own, every = uuid4(), uuid4()
     async with org_session(c.org, clients=ClientScope.only([c.x]), engine=app_engine) as s:
         await publish(
             s, org_id=c.org, event_type="ticket.assigned", subject_type="ticket",
-            subject_id=subject, payload={}, actor_user_id=None, client_id=None,
+            subject_id=own, payload={}, actor_user_id=None, client_id=c.x,
         )
-        await s.flush()
+    async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:
+        await publish(
+            s, org_id=c.org, event_type="ticket.assigned", subject_type="ticket",
+            subject_id=every, payload={}, actor_user_id=None, client_id=None,
+        )
     async with AsyncSession(admin_engine) as s:
-        stored = (
-            await s.execute(
-                text("SELECT client_id FROM domain_events WHERE subject_id = :s"),
-                {"s": subject},
-            )
-        ).scalars().all()
-    assert stored == [None]
+        stored = dict(
+            (
+                await s.execute(
+                    text(
+                        "SELECT subject_id, client_id FROM domain_events "
+                        "WHERE org_id = :o"
+                    ),
+                    {"o": c.org},
+                )
+            ).tuples().all()
+        )
+    assert stored == {own: c.x, every: None}
 
 
 async def test_a_site_with_a_device_cannot_change_client(admin_engine: AsyncEngine) -> None:
@@ -563,8 +585,11 @@ async def test_a_narrowed_scope_cannot_change_or_delete_global_rows(
 async def test_a_narrowed_scope_cannot_change_or_delete_a_global_event(
     admin_engine: AsyncEngine, app_engine: AsyncEngine
 ) -> None:
-    """`domain_events` takes a NULL row from any pinned scope (phase 1), but
-    changing or deleting one is a change to every client's outbox."""
+    """A NULL event is an event for every client: since 0243 only scope all
+    writes one (`test_a_domain_event_with_no_client_is_written_only_under_scope_all`),
+    and changing or deleting one is a change to every client's outbox, so a
+    narrowed scope reads it and does neither -- the generic O rule, with no
+    exception left for `domain_events`."""
     c = await _two_clients(admin_engine)
     subject = uuid4()
     async with org_session(c.org, clients=ClientScope.all(), engine=app_engine) as s:

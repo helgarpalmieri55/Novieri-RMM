@@ -189,6 +189,30 @@ plain org-scoped id reference with **no foreign key**, matching the posture
 Subscriptions took for `license_ref`. A link that no longer resolves is
 reported as unresolved, never an error.
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Task 8): budget is per
+> client, with its own currency and fiscal year** (migration 0238).
+> `budget_settings`, `cost_center`, `expense_category`, `budget` and
+> `expense` are C (existing rows went to the internal client), and
+> `budget_line` inherits its budget's client (H); all six carry the client
+> policy of `CLAUDE.md` invariant 5a. **`budget_settings` is one row per
+> client**, its primary key the client: each client has its own base currency
+> and fiscal-year start month, and §3's base-currency guard counts that
+> client's expenses only. A client's settings row is made by its first
+> change, never by a read. Category keys, cost-center codes, budget names and
+> the renewal-feed slot are unique per client, and a line's or an expense's
+> category and cost center are the row's own client's (another client's is a
+> 422, as is a linked subscription, license, device or change of another
+> client). `fx_rate` stays the organisation's (G): a rate names the currency
+> it converts into, by default the internal client's base currency. Budget is
+> an optional module: every write names its client and is a 404 with the
+> module's sentence for a client without it; creates are 404 not visible,
+> 409 archived, 422 Unassigned. **A client that turns budget off can still
+> export what it recorded**: the two exports check visibility, not the
+> module. Settings, the forecast and the exports name a client in the query,
+> and the renewal feed projects one client's subscriptions and licenses into
+> that client's categories and currency. The plan is
+> `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 ---
 
 ## 3. Base currency & FX conversion

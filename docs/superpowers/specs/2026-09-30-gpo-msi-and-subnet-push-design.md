@@ -85,6 +85,16 @@ These are listed **as blocked, with the reason**:
 - **Fixed list:** targets are written once, at creation. No code path inserts
   into `push_run_target` for an existing run.
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Task 12).** §1.2's "one
+> active run per organization" is now **one active run per client** (operator
+> decision D3, 2026-10-26): `uq_push_run_active` is `(org_id, client_id)`
+> (migration 0241), and each run still has at most 50 machines in flight. A
+> run is its credential's client's (`push_run.client_id`): §1.2's expansion
+> lists only that client's vouched-for machines under that client's
+> authorizations, and §1.3's digest is SHA-256 over the client, the credential
+> and the sorted `(device_id, address)` pairs, so a confirmation binds both.
+> `docs/modules/agent-distribution/spec-push-install.md` §3 has the rest.
+
 ### 1.4 Pacing: at most 50 in flight
 
 The pacer is `app/modules/agent_push/runs.py`, with the function

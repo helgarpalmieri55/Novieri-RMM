@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import Column, ForeignKeyConstraint, Index, UniqueConstraint, text
 
 from app.core.client_scope import ALL_SCOPE_ALLOWLIST
-from app.core.client_scope_catalog import CATALOG, PENDING_PHASE_2, PHASE_1
+from app.core.client_scope_catalog import CATALOG, SCOPED
 from app.core.global_rows import SECOND_PARENTS
 from app.models.base import Base
 from tests.client_scope_support import deparse_policies, expected_client_policies
@@ -207,11 +207,6 @@ def test_every_table_is_classified() -> None:
     assert set(CATALOG) - live == set(), "catalog names tables that do not exist"
 
 
-def test_pending_tables_are_in_the_catalog_and_not_global() -> None:
-    assert PENDING_PHASE_2 <= set(CATALOG)
-    assert all(CATALOG[t].kind in {"C", "H"} for t in PENDING_PHASE_2)
-
-
 # H children of an O parent. Their client_id is NOT NULL, so a parent row with
 # no client (Novieri's own credential) makes the insert fail -- which is the
 # point: Annex A, "`credentials`, que tiene que tener cliente". Any other H
@@ -257,8 +252,8 @@ OTHER_POLICIES: dict[str, set[str]] = {
 }
 
 
-async def test_phase_1_tables_carry_the_restrictive_policy(admin_engine) -> None:
-    tables = [*PHASE_1, "clients"]
+async def test_scoped_tables_carry_the_restrictive_policy(admin_engine) -> None:
+    tables = [*SCOPED, "clients"]
     expected = {t: expected_client_policies(t) for t in tables}
     async with admin_engine.connect() as conn:
         rows = (
@@ -295,7 +290,7 @@ async def test_phase_1_tables_carry_the_restrictive_policy(admin_engine) -> None
                 f"{table}.{name}: live\n  USING {row.qual}\n  CHECK {row.with_check}\n"
                 f"expected\n  USING {deparsed[shape][0]}\n  CHECK {deparsed[shape][1]}"
             )
-        if table in PHASE_1 and PHASE_1[table].kind == "O":
+        if table in SCOPED and SCOPED[table].kind == "O":
             assert "IS NULL" in have["client_isolation"].qual, f"{table}: O reads NULL rows"
 
 
@@ -320,7 +315,7 @@ def _edges() -> dict[tuple[str, str], tuple[str, str]]:
     device OR a group, its own trigger), plus the second parents."""
     edges = {
         (t, "its_client_from_parent"): (e.parent, e.fk)
-        for t, e in PHASE_1.items()
+        for t, e in SCOPED.items()
         if e.parent is not None and e.fk is not None and t != "jobs"
     }
     edges.update(EXTRA_PARENT_TRIGGERS)
@@ -497,7 +492,7 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
     expected = (
         {
             f"fk_{t}_client_org"
-            for t, e in PHASE_1.items()
+            for t, e in SCOPED.items()
             if e.kind == "O" or (e.kind == "C" and t != "sites")
         }
         | {"fk_user_roles_client_org"}
@@ -553,7 +548,7 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
 # INSERT dies on the index -- a 500 where an every-client admin gets a 409,
 # which tells X's technician Y's names one guess at a time (Task 7's
 # `device_groups`, Task 8's review). And two clients cannot both have
-# "Servers". So every unique key on a phase-1 table must be one of:
+# "Servers". So every unique key on a scoped table must be one of:
 #
 #   SAFE   it holds `client_id`; or a column that PINS the row's client -- the
 #          catalog's inheritance fk, a second parent's fk (`global_rows.
@@ -583,7 +578,7 @@ SURROGATE_COLUMNS: dict[tuple[str, str], str] = {
     ),
 }
 
-#: Unique keys on phase-1 tables that are deliberately organisation-wide.
+#: Unique keys on scoped tables that are deliberately organisation-wide.
 #: Each is LEAKY by the rules above, and kept on purpose; the reason says why
 #: no client namespace applies. A key that stops being LEAKY, or stops
 #: existing, fails `test_the_org_wide_keys_have_not_rotted`.
@@ -657,9 +652,9 @@ async def _unique_keys(admin_engine) -> tuple[list[UniqueKey], dict[str, frozens
 
 
 async def _unique_keys_on(conn) -> tuple[list[UniqueKey], dict[str, frozenset[str]]]:
-    """Every unique index (constraints' included) on a phase-1 table, and per
+    """Every unique index (constraints' included) on a scoped table, and per
     table the columns that pin a row's client."""
-    tables = list(PHASE_1)
+    tables = list(SCOPED)
     rows = (
         await conn.execute(
             text(
@@ -714,7 +709,7 @@ async def _unique_keys_on(conn) -> tuple[list[UniqueKey], dict[str, frozenset[st
         for r in rows
     ]
     pinning: dict[str, set[str]] = {}
-    for table, entry in PHASE_1.items():
+    for table, entry in SCOPED.items():
         pins = pinning.setdefault(table, set())
         if entry.fk is not None:
             pins.add(entry.fk)
@@ -732,7 +727,7 @@ async def _unique_keys_on(conn) -> tuple[list[UniqueKey], dict[str, frozenset[st
 
 async def test_natural_keys_on_per_client_tables_are_per_client(admin_engine) -> None:
     """THE GUARD (Task 8b). Introspects the live database, so a migration that
-    adds `UNIQUE (org_id, name)` to a phase-1 table goes red here, not in a
+    adds `UNIQUE (org_id, name)` to a scoped table goes red here, not in a
     narrowed technician's 500."""
     keys, pinning = await _unique_keys(admin_engine)
     leaky = {
@@ -779,7 +774,7 @@ async def test_the_unique_key_guard_is_not_vacuous(admin_engine) -> None:
     for name in safe:
         assert leaky_because(by_name[name], pinning[by_name[name].table]) is None, name
     assert "site_id" in pinning["install_links"] and "record_id" in pinning["doc_versions"]
-    assert len(keys) > 100, len(keys)  # every phase-1 primary key, at least
+    assert len(keys) > 100, len(keys)  # every scoped table's primary key, at least
 
     def old(table: str, *columns: str, nnd: bool = False) -> str | None:
         key = UniqueKey(table, "old", columns, frozenset({"org_id"}), nnd)
