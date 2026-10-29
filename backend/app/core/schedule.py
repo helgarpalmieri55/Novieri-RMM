@@ -3,6 +3,7 @@ module that gates dispatch on a maintenance window (patch — docs/modules/patch
 spec.md — and deploy).
 """
 
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
 from app.core.i18n import tr
@@ -15,6 +16,13 @@ def _parse_cron_field(field: str, lo: int, hi: int) -> set[int]:
     Raises `ValueError` if any expanded value falls outside `[lo, hi]` — an
     out-of-range value would otherwise silently never match, which could
     disable a device's maintenance window forever with no error.
+
+    A range is judged by its two ends BEFORE it is expanded: the values of
+    `range(start, end + 1, step)` all lie between its first and last, so the
+    ends decide exactly what expanding then checking decided -- without first
+    building a set of every number in `0-999999999`, which held the process
+    (and its memory) for as long as that took. What an expression yields is
+    unchanged; which out-of-range value the refusal names may differ.
     """
     values: set[int] = set()
     for raw_part in field.split(","):
@@ -33,19 +41,60 @@ def _parse_cron_field(field: str, lo: int, hi: int) -> set[int]:
             start, end = int(start_s), int(end_s)
         else:
             start = end = int(base)
-        values.update(range(start, end + 1, step))
-    for value in values:
-        if value < lo or value > hi:
-            raise ValueError(
-                tr(
-                    "cron field value {value} out of range [{lo}, {hi}] in field {field}",
-                    value=value,
-                    lo=lo,
-                    hi=hi,
-                    field=repr(field),
+        span = range(start, end + 1, step)
+        if span:
+            low, high = min(span[0], span[-1]), max(span[0], span[-1])
+            if low < lo or high > hi:
+                raise ValueError(
+                    tr(
+                        "cron field value {value} out of range [{lo}, {hi}] in field {field}",
+                        value=low if low < lo else high,
+                        lo=lo,
+                        hi=hi,
+                        field=repr(field),
+                    )
                 )
-            )
+        values.update(span)
     return values
+
+
+@dataclass(frozen=True)
+class CronFields:
+    """A five-field expression, read: the matching values of each field, and
+    whether day-of-month and day-of-week are restricted (for the OR rule)."""
+
+    minutes: set[int]
+    hours: set[int]
+    doms: set[int]
+    months: set[int]
+    dows: set[int]
+    dom_restricted: bool
+    dow_restricted: bool
+
+
+def parse_cron(cron: str) -> CronFields:
+    """Read `cron` the way `last_fire` does, or raise `ValueError`. Day of
+    week 7 is Sunday, as 0 is."""
+    parts = cron.split()
+    if len(parts) != 5:
+        raise ValueError(tr("invalid cron expression (expected 5 fields): {cron}", cron=repr(cron)))
+    minute_f, hour_f, dom_f, month_f, dow_f = parts
+    minutes = _parse_cron_field(minute_f, 0, 59)
+    hours = _parse_cron_field(hour_f, 0, 23)
+    months = _parse_cron_field(month_f, 1, 12)
+    doms = _parse_cron_field(dom_f, 1, 31)
+    dows = _parse_cron_field(dow_f, 0, 7)
+    if 7 in dows:
+        dows.add(0)
+    return CronFields(
+        minutes=minutes,
+        hours=hours,
+        doms=doms,
+        months=months,
+        dows=dows,
+        dom_restricted=dom_f.strip() != "*",
+        dow_restricted=dow_f.strip() != "*",
+    )
 
 
 def window_open(cron: str | None, now: datetime) -> bool:
@@ -169,19 +218,14 @@ def last_fire(
     minute. Same field grammar and day-of-month/day-of-week OR rule as
     `window_open`, evaluated in `now`'s timezone.
     """
-    parts = cron.split()
-    if len(parts) != 5:
-        raise ValueError(tr("invalid cron expression (expected 5 fields): {cron}", cron=repr(cron)))
-    minute_f, hour_f, dom_f, month_f, dow_f = parts
-    minutes = sorted(_parse_cron_field(minute_f, 0, 59), reverse=True)
-    hours = sorted(_parse_cron_field(hour_f, 0, 23), reverse=True)
-    months = _parse_cron_field(month_f, 1, 12)
-    dom_restricted = dom_f.strip() != "*"
-    dow_restricted = dow_f.strip() != "*"
-    doms = _parse_cron_field(dom_f, 1, 31)
-    dows = _parse_cron_field(dow_f, 0, 7)
-    if 7 in dows:
-        dows.add(0)
+    fields = parse_cron(cron)
+    minutes = sorted(fields.minutes, reverse=True)
+    hours = sorted(fields.hours, reverse=True)
+    months = fields.months
+    dom_restricted = fields.dom_restricted
+    dow_restricted = fields.dow_restricted
+    doms = fields.doms
+    dows = fields.dows
 
     def day_matches(day: date) -> bool:
         if day.month not in months:

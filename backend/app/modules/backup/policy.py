@@ -49,6 +49,9 @@ class ResolvedBackupPolicy:
     # Which save of the row this is: the dispatcher records a refusal once per
     # device and version (`dispatch.refusal_lookup`).
     updated_at: datetime | None = None
+    # The row's own client: a group's, a client's default's, or none (a policy
+    # for every client). What a refusal of the policy itself is filed under.
+    client_id: UUID | None = None
 
 
 def _from_row(row: BackupPolicy, *, repository: bool = True) -> ResolvedBackupPolicy:
@@ -60,6 +63,7 @@ def _from_row(row: BackupPolicy, *, repository: bool = True) -> ResolvedBackupPo
         id=row.id,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        client_id=row.client_id,
     )
 
 

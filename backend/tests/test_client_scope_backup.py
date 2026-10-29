@@ -1061,7 +1061,8 @@ def _lookup_sql() -> str:
 
     compiled = str(
         refusal_lookup(
-            org_id=uuid4(), device_id=uuid4(), client_id=uuid4(), repository_id=uuid4(),
+            org_id=uuid4(), target_type="device", target_id=uuid4(), client_id=uuid4(),
+            reason="repository_of_another_client", repository_id=uuid4(),
             policy_id=uuid4(), policy_version="2026-01-01T00:00:00+00:00",
         ).compile(dialect=postgresql.dialect())
     )

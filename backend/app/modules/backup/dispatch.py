@@ -21,6 +21,11 @@ sweep runs this under scope all, where RLS hides no client: the refusal is
 audited `backup.dispatch_refused` in the device's client, and the key is
 never opened.
 
+A window the parser cannot read (one stored before the API checked windows)
+is contained to its own policy: `dispatch_due_backup` skips the device and
+records the policy once per version, reason `unreadable_window`, instead of
+raising inside the organisation's one sweep transaction.
+
 The window records that refusal ONCE per device and policy version
 (`refusal_lookup`): a fire stays due for six hours and the sweep runs every
 15 minutes, so recording each one wrote up to 24 rows per fire per device
@@ -172,13 +177,23 @@ async def dispatch_due_backup(
         )
     ).scalar_one()
     since = [t for t in (policy.created_at, device.created_at) if t is not None]
-    decision = decide(
-        policy.window_cron,
-        now,
-        protected_since=max(since) if since else now,
-        last_started_at=last_started_at,
-        running=await _run_in_progress(session, org_id, device_id),
-    )
+    running = await _run_in_progress(session, org_id, device_id)
+    try:
+        decision = decide(
+            policy.window_cron,
+            now,
+            protected_since=max(since) if since else now,
+            last_started_at=last_started_at,
+            running=running,
+        )
+    except ValueError:
+        # A window the parser cannot read -- stored before the API checked
+        # windows (`schedule.checked_window`). Raised here it would roll back
+        # the whole organisation's sweep, which is ONE transaction, every 15
+        # minutes: so this device is skipped, the rest of the sweep goes on,
+        # and the policy is recorded once per version.
+        await _refuse_unreadable_window(session, org_id=org_id, policy=policy)
+        return []
     if decision.action == "dispatch":
         return await _dispatch_for_policy(
             session,
@@ -268,6 +283,7 @@ async def _record_missed(
 
 
 FOREIGN_REPOSITORY = "repository_of_another_client"
+UNREADABLE_WINDOW = "unreadable_window"
 #: The action as an inline SQL literal, never a bound parameter: the partial
 #: index `ix_audit_backup_dispatch_refused` (migration 0242) is usable only
 #: when the planner can prove its predicate, and a generic plan comparing
@@ -288,31 +304,33 @@ def _policy_version(policy: ResolvedBackupPolicy) -> str:
 def refusal_lookup(
     *,
     org_id: UUID,
-    device_id: UUID,
-    client_id: UUID,
-    repository_id: UUID,
+    target_type: str,
+    target_id: UUID,
+    client_id: UUID | None,
+    reason: str,
     policy_id: UUID | None,
     policy_version: str,
+    repository_id: UUID | None = None,
 ) -> Select[Any]:
-    """Has this device's refusal already been recorded, in its client, for
-    this repository and this version of the policy? One probe of
-    `ix_audit_backup_dispatch_refused (org_id, target_id)`, which holds only
-    refusals; the rest of the predicate filters the few rows of one device."""
-    return (
-        select(AuditEvent.id)
-        .where(
-            AuditEvent.org_id == org_id,
-            AuditEvent.action == literal_column(_REFUSED_SQL),
-            AuditEvent.target_type == "device",
-            AuditEvent.target_id == str(device_id),
-            AuditEvent.client_id == client_id,
-            AuditEvent.meta["reason"].astext == FOREIGN_REPOSITORY,
-            AuditEvent.meta["repository_id"].astext == str(repository_id),
-            AuditEvent.meta["policy_id"].astext == str(policy_id),
-            AuditEvent.meta["policy_updated_at"].astext == policy_version,
-        )
-        .limit(1)
-    )
+    """Has this refusal already been recorded -- for this target (a device, or
+    a policy), in its client, for this reason (and repository) and this
+    version of the policy? One probe of `ix_audit_backup_dispatch_refused
+    (org_id, target_id)`, which holds only refusals; the rest of the predicate
+    filters the few rows of one target. A policy for every client has no
+    client, hence IS NOT DISTINCT FROM."""
+    conditions = [
+        AuditEvent.org_id == org_id,
+        AuditEvent.action == literal_column(_REFUSED_SQL),
+        AuditEvent.target_type == target_type,
+        AuditEvent.target_id == str(target_id),
+        AuditEvent.client_id.is_not_distinct_from(client_id),
+        AuditEvent.meta["reason"].astext == reason,
+        AuditEvent.meta["policy_id"].astext == str(policy_id),
+        AuditEvent.meta["policy_updated_at"].astext == policy_version,
+    ]
+    if repository_id is not None:
+        conditions.append(AuditEvent.meta["repository_id"].astext == str(repository_id))
+    return select(AuditEvent.id).where(*conditions).limit(1)
 
 
 async def _refuse_foreign_repository(
@@ -334,7 +352,8 @@ async def _refuse_foreign_repository(
     if actor_type == "system" and (
         await session.execute(
             refusal_lookup(
-                org_id=org_id, device_id=device.id, client_id=device.client_id,
+                org_id=org_id, target_type="device", target_id=device.id,
+                client_id=device.client_id, reason=FOREIGN_REPOSITORY,
                 repository_id=repository_id, policy_id=policy.id, policy_version=version,
             )
         )
@@ -356,6 +375,44 @@ async def _refuse_foreign_repository(
             "policy_updated_at": version,
         },
         client_id=device.client_id,
+    )
+    await session.flush()
+
+
+async def _refuse_unreadable_window(
+    session: AsyncSession, *, org_id: UUID, policy: ResolvedBackupPolicy
+) -> None:
+    """`dispatch_due_backup`'s containment, recorded on the POLICY (not per
+    device), once per policy version (`refusal_lookup`): the window
+    expression is what is wrong, and saving a valid one is the fix."""
+    if policy.id is None:
+        return
+    version = _policy_version(policy)
+    if (
+        await session.execute(
+            refusal_lookup(
+                org_id=org_id, target_type="backup_policy", target_id=policy.id,
+                client_id=policy.client_id, reason=UNREADABLE_WINDOW,
+                policy_id=policy.id, policy_version=version,
+            )
+        )
+    ).first() is not None:
+        return
+    await audit_service.record(
+        session,
+        org_id=org_id,
+        actor_type="system",
+        actor_id=None,
+        action="backup.dispatch_refused",
+        target_type="backup_policy",
+        target_id=str(policy.id),
+        metadata={
+            "reason": UNREADABLE_WINDOW,
+            "policy_id": str(policy.id),
+            "policy_updated_at": version,
+            "window_cron": policy.window_cron,
+        },
+        client_id=policy.client_id,
     )
     await session.flush()
 
