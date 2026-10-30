@@ -18,6 +18,7 @@ vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
 const ARTICLE: DocArticle = {
   id: "a1",
+  client_id: "o1",
   title: "Connect to the office wifi",
   body: "Pick the Staff network.",
   category: "Help",

@@ -30,6 +30,7 @@ from app.modules.people.checklists import (
     checklist_view,
     gather_facts,
     open_checklist,
+    tickets_the_viewer_reads,
 )
 from app.modules.people.service import list_logins, load_person
 
@@ -49,6 +50,7 @@ async def _account(
     roles = await user_role_names(session, user.id)
     return {
         "user_id": user.id,
+        "kind": user.kind,
         "email": user.email,
         "status": user.status,
         "last_login_at": user.last_login_at,
@@ -155,8 +157,11 @@ async def _seats(session: AsyncSession, org_id: UUID, person_id: UUID) -> list[d
 
 
 async def _tickets(
-    session: AsyncSession, org_id: UUID, user_id: UUID | None
+    session: AsyncSession, org_id: UUID, user_id: UUID | None, viewer_id: UUID
 ) -> list[dict[str, Any]]:
+    """The person's open tickets the viewer may read: each in a client where
+    they hold `ticket.read`, which is not the person's client for a staff
+    person (`tickets_the_viewer_reads`)."""
     if user_id is None:
         return []
     rows = (
@@ -166,6 +171,7 @@ async def _tickets(
                 Ticket.org_id == org_id,
                 Ticket.requester_id == user_id,
                 Ticket.status.not_in(CLOSED_TICKET_STATUSES),
+                tickets_the_viewer_reads(org_id, viewer_id),
             )
             .order_by(Ticket.created_at.desc())
         )
@@ -187,9 +193,12 @@ async def person_detail(
     session: AsyncSession, *, org_id: UUID, viewer_id: UUID, person_id: UUID
 ) -> dict[str, Any]:
     person = await load_person(session, org_id, person_id)
-    held = await user_permission_codes(session, viewer_id)
+    # What the viewer may read ABOUT THIS PERSON: the codes they hold on
+    # every client, or on the person's own (plan 2026-10-26 Task 5). Without
+    # the client, a technician of X saw X's people with every section hidden.
+    held = await user_permission_codes(session, viewer_id, client_id=person.client_id)
     devices = await _devices(session, org_id, person.id)
-    facts = await gather_facts(session, org_id, person)
+    facts = await gather_facts(session, org_id, person, viewer_id=viewer_id)
     current = await open_checklist(session, org_id, person.id)
     history = (
         await session.execute(
@@ -214,7 +223,9 @@ async def person_detail(
         ),
         "seats": await _seats(session, org_id, person.id) if "subscriptions.read" in held else None,
         "tickets": (
-            await _tickets(session, org_id, person.user_id) if "ticket.read" in held else None
+            await _tickets(session, org_id, person.user_id, viewer_id)
+            if "ticket.read" in held
+            else None
         ),
         "checklist": (
             await checklist_view(session, org_id, current, facts) if current is not None else None

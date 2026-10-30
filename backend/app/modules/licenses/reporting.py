@@ -15,14 +15,21 @@ that audit call belongs to the API layer that wraps `export_rows`, never to
 this pure read function.)
 
 Every query below filters on `org_id` for every table involved (`License`,
-`SoftwareProduct`, and -- via `product_installed_device_ids` --
+`SoftwareProduct`, and -- via `matching.client_titles` --
 `InstalledSoftware`) per the tenancy invariant (#5) -- RLS is the backstop,
 not the only line of defense.
+
+A license is ONE client's (plan 2026-10-26 Task 6), and nothing here adds
+two clients together: compliance is counted per client (X's breach is not
+hidden by Y's spare seats), costs are summed per client, and each renewal row
+names its license's client. The client is an explicit predicate or grouping
+column, never left to RLS, which under scope all narrows nothing.
 
 `export_rows` never includes `key` or `key_sealed` (invariant #3): CSV export
 exists for entitlement true-up, not credential export.
 """
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -30,51 +37,96 @@ from uuid import UUID
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import License, SoftwareProduct
-from app.modules.licenses.matching import product_installed_device_ids
+from app.models import Client, License, SoftwareProduct
+from app.models.clients import CLIENT_KIND_UNASSIGNED
+from app.modules.licenses.matching import client_titles, devices_matching
 
 
-async def compliance_summary(session: AsyncSession, org_id: UUID) -> list[dict[str, Any]]:
-    """Per-product compliance position, org-scoped, computed live.
+async def reported_clients(session: AsyncSession, org_id: UUID) -> list[UUID]:
+    """The clients a compliance position is computed for: the active ones
+    this session sees. "Sin asignar" holds no sites, so no devices and no
+    licenses (C10), and has none; an archived client takes nothing new."""
+    return list(
+        (
+            await session.execute(
+                select(Client.id)
+                .where(
+                    Client.org_id == org_id,
+                    Client.status == "active",
+                    Client.kind != CLIENT_KIND_UNASSIGNED,
+                )
+                .order_by(Client.id)
+            )
+        ).scalars()
+    )
 
-    For each `SoftwareProduct` in the org: `entitled` is the sum of
-    `entitlements` over that product's org-scoped `License` rows (`0` if it
-    has none); `installed` is `len(product_installed_device_ids(...))` --
-    the count of distinct org devices with software matching any of the
-    product's match rules; `delta = entitled - installed`; `breach` is `True`
-    when `installed > entitled`.
+
+async def compliance_by_client(
+    session: AsyncSession, org_id: UUID, client_ids: Sequence[UUID]
+) -> list[dict[str, Any]]:
+    """Per-product compliance position of each of `client_ids`, org-scoped,
+    computed live: the rows of the first client, then the second's, each in
+    catalogue order.
+
+    For each `SoftwareProduct` in the org (the catalogue is shared) and each
+    client: `entitled` is the sum of `entitlements` over that product's
+    `License` rows of that client (`0` if it has none); `installed` is the
+    count of distinct devices of that client with software matching any of
+    the product's match rules (`devices_matching`); `delta = entitled -
+    installed`; `breach` is `True` when `installed > entitled`. Both sides
+    carry the org and the client as explicit predicates.
+
+    THE STATEMENT COUNT DOES NOT GROW WITH THE CATALOGUE (review M1 of plan
+    2026-10-26 Task 6): one read of the products, one entitlement query
+    grouped by (client, product) for every client at once, and one load of
+    each client's installed titles, matched against every product in memory.
+    It was two queries per client per product, on a read `/licenses` makes
+    on every page load.
     """
+    if not client_ids:
+        return []
     products = (
         (await session.execute(select(SoftwareProduct).where(SoftwareProduct.org_id == org_id)))
         .scalars()
         .all()
     )
+    entitled: dict[tuple[UUID, UUID], int] = {
+        (client_id, product_id): int(total)
+        for client_id, product_id, total in (
+            await session.execute(
+                select(License.client_id, License.product_id, func.sum(License.entitlements))
+                .where(License.org_id == org_id, License.client_id.in_(client_ids))
+                .group_by(License.client_id, License.product_id)
+            )
+        ).all()
+    }
 
     result: list[dict[str, Any]] = []
-    for product in products:
-        entitled = (
-            await session.execute(
-                select(func.coalesce(func.sum(License.entitlements), 0)).where(
-                    License.org_id == org_id, License.product_id == product.id
-                )
+    for client_id in client_ids:
+        titles = await client_titles(session, org_id, client_id=client_id)
+        for product in products:
+            owned = entitled.get((client_id, product.id), 0)
+            installed = len(devices_matching(product, titles))
+            result.append(
+                {
+                    "client_id": client_id,
+                    "product_id": product.id,
+                    "name": product.name,
+                    "entitled": owned,
+                    "installed": installed,
+                    "delta": owned - installed,
+                    "breach": installed > owned,
+                }
             )
-        ).scalar_one()
-        entitled = int(entitled)
-
-        installed = len(await product_installed_device_ids(session, org_id, product))
-
-        result.append(
-            {
-                "product_id": product.id,
-                "name": product.name,
-                "entitled": entitled,
-                "installed": installed,
-                "delta": entitled - installed,
-                "breach": installed > entitled,
-            }
-        )
-
     return result
+
+
+async def compliance_summary(
+    session: AsyncSession, org_id: UUID, *, client_id: UUID
+) -> list[dict[str, Any]]:
+    """Per-product compliance position of ONE client: `compliance_by_client`
+    for that client alone (three statements whatever the catalogue holds)."""
+    return await compliance_by_client(session, org_id, [client_id])
 
 
 async def renewal_calendar(
@@ -87,6 +139,7 @@ async def renewal_calendar(
     license with BOTH dates qualifying emits TWO rows -- one per triggering
     date, each with its own `trigger` (`"renewal"` or `"maintenance"`) and
     `due_in_days = (due_date - now.date()).days`. Sorted by `due_date` asc.
+    Each row names its license's client.
     """
     today = now.date()
     window_end = today + timedelta(days=within_days)
@@ -113,6 +166,7 @@ async def renewal_calendar(
             rows.append(
                 {
                     "license_id": lic.id,
+                    "client_id": lic.client_id,
                     "product_id": lic.product_id,
                     "trigger": "renewal",
                     "due_date": lic.renews_at,
@@ -126,6 +180,7 @@ async def renewal_calendar(
             rows.append(
                 {
                     "license_id": lic.id,
+                    "client_id": lic.client_id,
                     "product_id": lic.product_id,
                     "trigger": "maintenance",
                     "due_date": lic.maintenance_expires_at,
@@ -138,27 +193,34 @@ async def renewal_calendar(
 
 
 async def cost_view(session: AsyncSession, org_id: UUID) -> list[dict[str, Any]]:
-    """Cost grouped by `(product_id, currency)`, org-scoped -- summed `cost`
-    per group. Licenses with a NULL `cost` or NULL `currency` are skipped
-    (there is nothing meaningful to sum or group them by). Deliberately NO
-    cross-currency sum: a product's USD and EUR licenses stay in separate
-    rows rather than being added together.
+    """Cost grouped by `(client_id, product_id, currency)`, org-scoped --
+    summed `cost` per group. Licenses with a NULL `cost` or NULL `currency`
+    are skipped (there is nothing meaningful to sum or group them by).
+    Deliberately NO cross-currency sum: a product's USD and EUR licenses stay
+    in separate rows rather than being added together -- and no cross-client
+    sum either: what X pays is not what Y pays.
     """
     rows = (
         await session.execute(
-            select(License.product_id, License.currency, func.sum(License.cost))
+            select(License.client_id, License.product_id, License.currency, func.sum(License.cost))
             .where(
                 License.org_id == org_id,
                 License.cost.is_not(None),
                 License.currency.is_not(None),
             )
-            .group_by(License.product_id, License.currency)
+            .group_by(License.client_id, License.product_id, License.currency)
+            .order_by(License.client_id, License.product_id, License.currency)
         )
     ).all()
 
     return [
-        {"product_id": product_id, "currency": currency, "total_cost": total_cost}
-        for product_id, currency, total_cost in rows
+        {
+            "client_id": client_id,
+            "product_id": product_id,
+            "currency": currency,
+            "total_cost": total_cost,
+        }
+        for client_id, product_id, currency, total_cost in rows
     ]
 
 

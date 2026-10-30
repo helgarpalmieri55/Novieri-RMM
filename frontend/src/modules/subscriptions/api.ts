@@ -49,7 +49,11 @@ export function useCreateSubscriptionMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: SubscriptionCreate) => api.createSubscription(body),
+    // The body is BUILT HERE, inside the mutation, not before it: a body that
+    // cannot name its client yet throws `InternalScopeUnknown`
+    // (`lib/internalClient.ts`), which then fails the mutation -- so the
+    // form's error surface says why and nothing is sent.
+    mutationFn: (build: () => SubscriptionCreate) => api.createSubscription(build()),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
       void queryClient.invalidateQueries({ queryKey: ["subscription-spend"] });

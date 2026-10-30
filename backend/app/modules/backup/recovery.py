@@ -35,12 +35,13 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
 from app.core.i18n import tr
+from app.modules.backup.integrity import violated_constraint
 from app.modules.backup.models import BackupRecoveryKey
 
 ALG = "X25519-HKDF-SHA256-AES-256-GCM"
@@ -193,8 +194,7 @@ async def register_recovery_key(
         await session.flush()
     except IntegrityError as exc:
         # Two registrations raced past the check: the key's own refusal.
-        constraint = getattr(getattr(exc.orig, "__cause__", None), "constraint_name", None)
-        if constraint == ACTIVE_KEY:
+        if violated_constraint(exc) == ACTIVE_KEY:
             raise _already_registered() from None
         raise
     challenge = _issue_challenge(row, now)
@@ -286,13 +286,23 @@ async def prove_recovery_key(
     await session.flush()
 
 
-async def proven_recovery_keys(session: AsyncSession, org_id: UUID) -> list[BackupRecoveryKey]:
+async def proven_recovery_keys(
+    session: AsyncSession, org_id: UUID, *, client_id: UUID
+) -> list[BackupRecoveryKey]:
+    """The proven, unretired keys a repository of `client_id` may be wrapped
+    to: the global ones and that client's own (MSP clients plan 2026-10-26
+    Task 13). Another client's key would let its holders open this client's
+    off-site copy."""
     return list(
         (
             await session.execute(
                 select(BackupRecoveryKey)
                 .where(
                     BackupRecoveryKey.org_id == org_id,
+                    or_(
+                        BackupRecoveryKey.client_id.is_(None),
+                        BackupRecoveryKey.client_id == client_id,
+                    ),
                     BackupRecoveryKey.proven_at.is_not(None),
                     BackupRecoveryKey.retired_at.is_(None),
                 )

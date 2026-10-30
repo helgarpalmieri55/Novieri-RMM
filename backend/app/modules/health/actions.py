@@ -250,6 +250,9 @@ def _require_dispatch_grant(action: ApprovedAction, permissions: Collection[str]
     PURE AND SYNCHRONOUS: no session, no clock. The permission set is resolved
     once by the caller (`user_permission_codes`) and passed in, so this function
     cannot accidentally answer a different question from the route's own gate.
+    It is the set held ON THE ALERT'S CLIENT (MSP clients plan 2026-10-26 Task
+    14): the job lands on that client's machine, and a grant on another client
+    is no grant here.
     """
     required = dispatch_permission_for(action.job_type)
     if required is None:

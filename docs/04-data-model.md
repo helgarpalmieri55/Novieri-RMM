@@ -105,6 +105,22 @@ classifies every table with an `org_id` as C, H, O or G. The design, the table
 classification and the refinements made while building it are in
 `docs/superpowers/specs/2026-10-23-msp-clientes-design.md`.
 
+**Amended 2026-10-29 (MSP clients plan 2026-10-26, phase 2).** Every C, H and
+O table is under that second layer now (`client_scope_catalog.SCOPED`,
+migrations 0231 to 0243); no family is pending. Tickets and their children,
+people, licenses and subscriptions, deployments, IPAM, push authorizations and
+runs, backup repositories and the optional modules (change management, BCP,
+budget) belong to a client, set from their parent or target where they have
+one, and named by the request where they do not. `domain_events` is an O
+table like the others: a row with no client, an event for every client, is
+written only under the every-client scope. `ipam_site` is gone; IPAM names
+the clients' `sites`. The `unassigned` client receives the inbound mail no
+contact or domain claims, which stays quarantined (operator decision D1), and
+the tickets mail opens for a technician whose domain no client holds; nothing
+else is filed under it. A client's `enabled_modules` decide, per client,
+whether budget, BCP and change management apply to it, and the internal
+client holds all three.
+
 ### Device
 
 A managed asset (computer or server). The central entity most modules attach to.
@@ -196,6 +212,10 @@ Immutable, hash-chained record of every privileged action.
 
 - `id`, `org_id`, `ts`, `actor_type` (user/agent/system), `actor_id`, `action`,
   `target_type`, `target_id`, `metadata` (jsonb), `prev_hash`, `hash`
+- `client_id` (nullable, since MSP clients plan 2026-10-26 Task 1): the
+  client of the event's subject, informative. It is hashed only when set, so
+  every event written before it verifies unchanged, and no client policy
+  reads it: the log is read with `audit.read` on every client.
 - `hash = H(prev_hash || canonical(event))`. Append-only; no updates or deletes.
 
 ## Object storage layout (not in PostgreSQL)

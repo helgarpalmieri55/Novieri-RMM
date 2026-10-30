@@ -40,6 +40,7 @@ import { ADDRESS_STATUSES, DRIFT_CLASSES } from "../types";
 
 function drift(overrides: Partial<DriftOut> = {}): DriftOut {
   return {
+    client_id: "o1",
     id: "d1",
     vrf_id: "v1",
     subnet_id: "s1",
@@ -62,6 +63,7 @@ function drift(overrides: Partial<DriftOut> = {}): DriftOut {
 
 function scope(overrides: Partial<ScopeOut> = {}): ScopeOut {
   return {
+    client_id: "o1",
     id: "sc1",
     vrf_id: "v1",
     prefix: "10.4.7.0/24",
@@ -76,6 +78,7 @@ function scope(overrides: Partial<ScopeOut> = {}): ScopeOut {
 
 function subnet(overrides: Partial<SubnetOut> = {}): SubnetOut {
   return {
+    client_id: "o1",
     id: "s1",
     vrf_id: "v1",
     prefix: "10.4.7.0/24",
@@ -464,6 +467,7 @@ describe("effectiveSweepScope", () => {
 describe("describeSweepRun", () => {
   function run(overrides: Partial<SweepRunOut> = {}): SweepRunOut {
     return {
+      client_id: "o1",
       id: "r1",
       subnet_id: "s1",
       job_id: "j1",
@@ -538,7 +542,7 @@ describe("buildSubnetTree", () => {
 
 describe("importApplyBlockReason", () => {
   const file = { name: "plan.csv", size: 1024, lastModified: 1000 };
-  const previewed = { ...file, digest: "a".repeat(64) };
+  const previewed = { ...file, digest: "a".repeat(64), vrfId: null };
 
   it("refuses apply when nothing has been previewed", () => {
     const reason = importApplyBlockReason(file, null);
@@ -561,7 +565,7 @@ describe("importApplyBlockReason", () => {
 
   it("refuses a file over the 10 MB import limit", () => {
     const big = { name: "plan.csv", size: 11 * 1024 * 1024, lastModified: 1000 };
-    expect(importApplyBlockReason(big, { ...big, digest: "b".repeat(64) })).toContain("10 MB");
+    expect(importApplyBlockReason(big, { ...big, digest: "b".repeat(64), vrfId: null })).toContain("10 MB");
   });
 });
 

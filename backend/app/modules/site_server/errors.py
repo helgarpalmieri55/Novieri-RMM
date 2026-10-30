@@ -27,6 +27,13 @@ class SiteServerNotFoundError(SiteServerValidationError):
     """
 
 
+class SiteServerClientError(SiteServerValidationError):
+    """The site named is another client's than the device's (maps to HTTP
+    422; MSP clients plan 2026-10-26 Task 10). A site server's site is one of
+    its device's client's sites -- `fk_site_server_site_client` holds it in
+    the database too."""
+
+
 class SiteServerConflictError(SiteServerError):
     """A promotion refused because of the device's state, not the request's
     shape (maps to HTTP 409): a device waiting for review (install-link spec

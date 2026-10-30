@@ -33,17 +33,30 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.client_scope import ClientScope
 from app.models import AuditEvent, Device, JobStatus
+from tests.client_scope_support import drop_client_keys
 from tests.ipam_fixtures import (
     complete_sweep,
     dispatch_sweep,
     seed_agent,
     seed_device,
     seed_org,
+    seed_subnet,
     seed_vrf,
     sweep_document,
     sweep_host,
     upsert_observation_row,
 )
+
+
+async def _sited_subnet(engine: AsyncEngine, org_id: UUID, prefix: str) -> Any:
+    """A subnet of the internal client at its Principal site (both carry the
+    organisation's id), loaded: what `auto_create_from_sweep` files under."""
+    from app.modules.ipam.models import IpamSubnet
+
+    vrf_id = await seed_vrf(engine, org_id)
+    subnet_id = await seed_subnet(engine, org_id, vrf_id=vrf_id, prefix=prefix, site_id=org_id)
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        return await session.get(IpamSubnet, subnet_id)
 
 
 async def _devices(engine: AsyncEngine, org_id: UUID) -> list[Device]:
@@ -487,44 +500,62 @@ async def test_another_orgs_inventory_neither_suppresses_nor_receives_a_row(
     in A's inventory caused by B's data. Proved falsifiable: with `org_id`
     removed from the two lookup predicates, this test fails on the first
     assertion.
+
+    ORG B'S DEVICE CARRIES ORG A'S CLIENT (MSP clients plan 2026-10-26 Task
+    11, lesson 2). The lookups are the swept subnet's client's too, and B's
+    own client would be excluded by that predicate alone, leaving the org one
+    untested. A row of B under A's internal client is impossible while
+    `fk_devices_client_org` holds, so it is planted with that key dropped, in
+    a transaction that is rolled back -- and everything is asserted inside it.
     """
     from app.modules.ipam.candidates import SweepSighting, auto_create_from_sweep
 
     org_a = await seed_org(admin_engine, "ten-a")
     org_b = await seed_org(admin_engine, "ten-b")
-    await seed_device(
-        admin_engine,
-        org_b.org_id,
-        source="manual",
-        provenance="operator",
-        primary_ip="10.70.0.90",
-        nics={"items": [{"identifier": "a4:bb:6d:ab:cd:ef", "mac": "a4:bb:6d:ab:cd:ef"}]},
-    )
+    subnet = await _sited_subnet(admin_engine, org_a.org_id, "10.70.0.0/24")
+    mac = "a4:bb:6d:ab:cd:ef"
 
     async with AsyncSession(admin_engine) as session:
+        await drop_client_keys(session, "devices", "fk_devices_client_org")
+        planted = Device(
+            org_id=org_b.org_id,
+            client_id=org_a.org_id,  # org A's internal client
+            site_id=org_a.org_id,
+            source="manual",
+            provenance="operator",
+            primary_ip="10.70.0.90",
+            nics={"items": [{"identifier": mac, "mac": mac}]},
+        )
+        session.add(planted)
+        await session.flush()
         results = await auto_create_from_sweep(
             session,
             org_a.org_id,
+            subnet=subnet,
             sightings=[
                 SweepSighting(
                     address="10.70.0.90",
-                    mac="a4:bb:6d:ab:cd:ef",
+                    mac=mac,
                     hostname="",
                     confidence="medium",
                 )
             ],
             sweep_run_id=uuid4(),
-            subnet_id=uuid4(),
         )
-        await session.commit()
-
-    assert [r.created for r in results] == [True], results
-    assert [str(d.primary_ip) for d in await _found(admin_engine, org_a.org_id)] == [
-        "10.70.0.90"
-    ]
-    # And nothing was written into B, whose row is untouched.
-    assert await _found(admin_engine, org_b.org_id) == []
-    async with AsyncSession(admin_engine) as session:
+        await session.flush()
+        assert [r.created for r in results] == [True], results
+        in_a = (
+            await session.execute(
+                select(Device.id, Device.primary_ip).where(
+                    Device.org_id == org_a.org_id, Device.provenance == "sweep"
+                )
+            )
+        ).all()
+        assert [(r.id, str(r.primary_ip)) for r in in_a] == [
+            (results[0].device_id, "10.70.0.90")
+        ]
+        # And nothing was written into B: its own seeded device and the
+        # planted one, untouched.
         in_b = (
             await session.execute(
                 select(func.count())
@@ -532,7 +563,8 @@ async def test_another_orgs_inventory_neither_suppresses_nor_receives_a_row(
                 .where(Device.org_id == org_b.org_id)
             )
         ).scalar_one()
-    assert in_b == 2, "a row was created in the wrong org"
+        assert in_b == 2, "a row was created in the wrong org"
+        await session.rollback()
 
 
 class _LockCountingSession:
@@ -584,6 +616,7 @@ async def test_a_whole_sweep_appends_its_audit_events_under_one_lock(
     from app.modules.ipam.candidates import SweepSighting, auto_create_from_sweep
 
     org = await seed_org(admin_engine, "onelock")
+    subnet = await _sited_subnet(admin_engine, org.org_id, "10.90.0.0/24")
     sightings = [
         SweepSighting(address=f"10.90.0.{n}", mac=None, hostname="", confidence="low")
         for n in range(256)
@@ -591,7 +624,11 @@ async def test_a_whole_sweep_appends_its_audit_events_under_one_lock(
     async with AsyncSession(admin_engine) as session:
         counter = _LockCountingSession(session)
         results = await auto_create_from_sweep(
-            counter, org.org_id, sightings=sightings, sweep_run_id=uuid4()
+            counter,
+            org.org_id,
+            subnet=subnet,
+            sightings=sightings,
+            sweep_run_id=uuid4(),
         )
         await session.commit()
 

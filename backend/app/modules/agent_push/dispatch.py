@@ -77,6 +77,7 @@ from app.modules.agent_push.jobtypes import (
     PushCredential,
     PushRelease,
 )
+from app.modules.agent_push.locks import lock_target_scope, sites_of
 from app.modules.agent_push.models import PushBatchTarget
 from app.modules.agent_push.preflight import (
     PushBatchOutcome,
@@ -205,7 +206,8 @@ async def _record_refusals(
     extras: dict[str, dict[str, str]],
 ) -> None:
     """`push.refused`, one row per refused address, exactly as the ladder
-    writes them; the route commits them and then raises 422."""
+    writes them, in the push's client (its credential's); the route commits
+    them and then raises 422."""
     for address, reasons in sorted(refusals.items()):
         await audit_service.record(
             session,
@@ -215,6 +217,7 @@ async def _record_refusals(
             action="push.refused",
             target_type="push_target",
             target_id=address,
+            client_id=credential.client_id,
             metadata={
                 "target_address": address,
                 "reasons": reasons,
@@ -641,6 +644,19 @@ async def dispatch_push_batch(
     confirmed = checks.confirmed
     enroll_url = checks.enroll_url
     realm = checks.realm
+
+    if kind == "install":
+        # LOCK ORDER (research-4 §I5): every target's site and client FOR SHARE
+        # NOW, before the first target's `push.dispatched` takes the audit
+        # chain and the next target's token mint would take them after it.
+        # Probes mint no token.
+        await lock_target_scope(
+            session,
+            org_id,
+            await sites_of(
+                session, org_id, (d.device_id for d in outcome.decisions if d.device_id)
+            ),
+        )
 
     batch_id = uuid4()
     dispatched: list[_DispatchedTarget] = []
@@ -1124,6 +1140,9 @@ async def _audit_dispatched(
         action="push.dispatched",
         target_type="push_target",
         target_id=decision.address,
+        # The push's client -- its credential's -- in which the ladder found
+        # this machine and its site server (Task 12).
+        client_id=decision.client_id,
         metadata=metadata,
     )
 
@@ -1390,13 +1409,17 @@ async def record_install_result(
     session: AsyncSession, job: Job, result: dict[str, Any]
 ) -> None:
     """`push.result` (spec §9). The credential is already scrubbed from
-    `jobs.params` by the terminal scrubber; nothing here reads or records it."""
+    `jobs.params` by the terminal scrubber; nothing here reads or records it.
+    The event is the job's client's -- its site server's, the push's."""
+    from app.gateway.dispatch import job_client
+
     await audit_service.record(
         session,
         org_id=job.org_id,
         actor_type="agent",
         actor_id=None,
         action="push.result",
+        client_id=await job_client(session, job.id),
         target_type="push_target",
         target_id=str(result.get("target_address") or job.params.get("target_address") or ""),
         metadata={

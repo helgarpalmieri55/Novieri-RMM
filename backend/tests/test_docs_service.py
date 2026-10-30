@@ -38,6 +38,7 @@ async def test_create_and_update_version_and_audit(admin_engine, app_engine) -> 
             title="Server build runbook",
             body="# Steps\n1. image\n2. join domain",
             category="Runbooks",
+            client_id=None,
         )
         assert article.current_version == 1
 
@@ -82,7 +83,8 @@ async def test_archive_hides_but_keeps_history(admin_engine, app_engine) -> None
     org_id, user_id, _ = await _org_user(admin_engine)
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         article = await svc.create_article(
-            session, org_id=org_id, actor_id=user_id, title="Old doc", body="x", category="G"
+            session, org_id=org_id, actor_id=user_id, title="Old doc", body="x", category="G",
+            client_id=None,
         )
         await svc.archive_article(session, article, actor_id=user_id)
         assert article.archived is True
@@ -120,6 +122,7 @@ async def test_record_lifecycle(admin_engine, app_engine) -> None:
             record_type="vendor",
             name="Dell ProSupport",
             fields={"contact_email": "support@dell.example", "contract_end": "2027-01-31"},
+            client_id=None,
         )
         assert record.current_version == 1
         changed = await svc.update_record(
@@ -139,7 +142,8 @@ async def test_links_validate_in_org_targets(admin_engine, app_engine) -> None:
     foreign_org, _, foreign_device = await _org_user(admin_engine)
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         article = await svc.create_article(
-            session, org_id=org_id, actor_id=user_id, title="Linked", body="b", category="G"
+            session, org_id=org_id, actor_id=user_id, title="Linked", body="b", category="G",
+            client_id=None,
         )
         link = await svc.add_link(
             session, article, actor_id=user_id, target_type="device", target_id=device_id

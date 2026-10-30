@@ -57,13 +57,16 @@ export function roleLabels(roles: readonly string[]): string {
 
 export interface SiteServerOut {
   id: string;
+  /** The device's client: a site server serves its own client's segments. */
+  client_id: string;
   device_id: string;
   name: string;
   segments: string[];
   roles: string[];
   enabled: boolean;
   notes: string;
-  ipam_site_id: string | null;
+  /** One of the device's client's sites, grouping only (was `ipam_site_id`). */
+  site_id: string | null;
   agent_status: string | null;
   agent_last_seen_at: string | null;
 }
@@ -73,7 +76,7 @@ export interface SiteServerCreate {
   segments: string[];
   roles?: string[];
   name?: string | null;
-  ipam_site_id?: string | null;
+  site_id?: string | null;
   notes?: string;
 }
 
@@ -83,12 +86,12 @@ export interface SiteServerUpdate {
   roles?: string[] | null;
   notes?: string | null;
   enabled?: boolean | null;
-  ipam_site_id?: string | null;
+  site_id?: string | null;
 }
 
 export interface SiteServerFilters {
   enabled?: boolean;
-  ipam_site_id?: string;
+  site_id?: string;
   /** Containment, not equality: `10.20.7.0/24` finds a server declared for `10.20.0.0/16`. */
   segment?: string;
 }

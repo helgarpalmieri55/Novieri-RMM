@@ -12,6 +12,7 @@ from sqlalchemy import (
     Date,
     FetchedValue,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     SmallInteger,
     String,
@@ -21,7 +22,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 PERSON_STATUSES = ("starting", "active", "leaving", "left")
 PERSON_SOURCES = ("account", "operator")
@@ -38,9 +39,12 @@ def _in(column: str, values: tuple[str, ...]) -> str:
 class Person(Base):
     __tablename__ = "person"
     __table_args__ = (
+        # One address per person WITHIN A CLIENT (migration 0235): two
+        # customers can each employ an ana@gmail.com.
         Index(
-            "uq_person_org_lower_email",
+            "uq_person_client_lower_email",
             "org_id",
+            "client_id",
             text("lower(email)"),
             unique=True,
             postgresql_where=text("email IS NOT NULL"),
@@ -48,10 +52,22 @@ class Person(Base):
         Index("ix_person_org_status", "org_id", "status"),
         CheckConstraint(_in("status", PERSON_STATUSES), name="ck_person_status"),
         CheckConstraint(_in("source", PERSON_SOURCES), name="ck_person_source"),
+        client_org_fk("person"),
+        # The target of `(person_id, client_id)` keys: a row naming a person
+        # is of that person's client (`device_person`, migration 0235).
+        UniqueConstraint("id", "client_id", name="uq_person_id_client"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0235):
+    # the client the caller names (`service.create_person`), or, for the
+    # person of an account, the account's -- a contact's client, the internal
+    # client for staff (plan 2026-10-26 C4). `its_person_account_guard` holds
+    # a linked person to that rule. Never changes: no update schema carries
+    # it, and `fk_device_person_person_client` pins a person who holds a
+    # device.
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
     display_name: Mapped[str] = mapped_column(String(200))
     email: Mapped[str | None] = mapped_column(String(320), default=None)
     user_id: Mapped[UUID | None] = mapped_column(
@@ -74,12 +90,23 @@ class PersonLogin(Base):
 
     __tablename__ = "person_login"
     __table_args__ = (
-        UniqueConstraint("org_id", "login", name="uq_person_login_org_login"),
+        # A sign-in name names one person WITHIN A CLIENT (migration 0235):
+        # `corp\jperez` at two customers is two people.
+        UniqueConstraint("org_id", "client_id", "login", name="uq_person_login_client_login"),
         Index("ix_person_login_person", "person_id"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # person (migration 0235): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     person_id: Mapped[UUID] = mapped_column(ForeignKey("person.id"))
     login: Mapped[str] = mapped_column(String(256))
     created_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), default=None)
@@ -94,6 +121,15 @@ class DevicePerson(Base):
     __table_args__ = (
         Index("ix_device_person_org_person", "org_id", "person_id"),
         CheckConstraint(_in("source", LINK_SOURCES), name="ck_device_person_source"),
+        # Who uses a device is one of the device's client's people (migration
+        # 0235). A foreign key ignores RLS, so under scope all this is the
+        # only thing between X's computer and Y's person; a NULL person_id
+        # skips it.
+        ForeignKeyConstraint(
+            ["person_id", "client_id"],
+            ["person.id", "person.client_id"],
+            name="fk_device_person_person_client",
+        ),
     )
 
     device_id: Mapped[UUID] = mapped_column(ForeignKey("devices.id"), primary_key=True)
@@ -133,6 +169,15 @@ class PersonChecklist(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # person (migration 0235): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     person_id: Mapped[UUID] = mapped_column(ForeignKey("person.id"))
     kind: Mapped[str] = mapped_column(String(12))
     status: Mapped[str] = mapped_column(String(12), default="open")
@@ -151,6 +196,15 @@ class PersonChecklistStep(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # person_checklist (migration 0235): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     checklist_id: Mapped[UUID] = mapped_column(ForeignKey("person_checklist.id"))
     key: Mapped[str] = mapped_column(String(40))
     position: Mapped[int] = mapped_column(SmallInteger)

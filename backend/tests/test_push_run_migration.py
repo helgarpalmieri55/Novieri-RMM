@@ -29,20 +29,23 @@ async def _insert_run(
     sealed: bool = True,
     credential_id: UUID | None = None,
     device_id: UUID | None = None,
+    client_id: UUID | None = None,
 ) -> UUID:
+    """A run of `client_id` -- the internal client unless named (plan
+    2026-10-26 Task 12: a run is its credential's client's)."""
     run_id = uuid4()
     async with AsyncSession(admin_engine) as session:
         await session.execute(
             text(
-                "INSERT INTO push_run (id, org_id, created_by, credential_id, prefix,"
+                "INSERT INTO push_run (id, org_id, client_id, created_by, credential_id, prefix,"
                 " list_digest, state, target_count, created_at, sealed_at, updated_at,"
                 " auth_window_started_at)"
-                " VALUES (:id, :org, :user, :cred, CAST('10.61.0.0/24' AS cidr), :digest,"
+                " VALUES (:id, :org, :client, :user, :cred, CAST('10.61.0.0/24' AS cidr), :digest,"
                 " :state, 1, now(), NULL, now(), now())"
             ),
             {
-                "id": run_id, "org": org.org_id, "user": org.user_id,
-                "digest": DIGEST, "state": state, "cred": credential_id,
+                "id": run_id, "org": org.org_id, "client": client_id or org.org_id,
+                "user": org.user_id, "digest": DIGEST, "state": state, "cred": credential_id,
             },
         )
         await session.execute(
@@ -106,33 +109,45 @@ async def test_a_run_cannot_be_written_into_another_org(
 ) -> None:
     mine = await seed_org(admin_engine, "pr-ins")
     theirs = await seed_org(admin_engine, "pr-ins2")
-    with pytest.raises(DBAPIError):
+    with pytest.raises(DBAPIError, match="row-level security"):
         async with org_session(
             mine.org_id, engine=app_engine, clients=ClientScope.all()
         ) as session:
             await session.execute(
                 text(
-                    "INSERT INTO push_run (id, org_id, created_by, prefix, list_digest,"
-                    " state, target_count, created_at, updated_at, auth_window_started_at)"
-                    " VALUES (:id, :org, :user, CAST('10.61.0.0/24' AS cidr), :d,"
+                    "INSERT INTO push_run (id, org_id, client_id, created_by, prefix,"
+                    " list_digest, state, target_count, created_at, updated_at,"
+                    " auth_window_started_at)"
+                    " VALUES (:id, :org, :org, :user, CAST('10.61.0.0/24' AS cidr), :d,"
                     " 'running', 1, now(), now(), now())"
                 ),
                 {"id": uuid4(), "org": theirs.org_id, "user": theirs.user_id, "d": DIGEST},
             )
 
 
-async def test_one_active_run_per_org_is_a_database_rule(admin_engine: AsyncEngine) -> None:
+async def test_one_active_run_per_client_is_a_database_rule(admin_engine: AsyncEngine) -> None:
+    """One active run per CLIENT since migration 0241 (operator decision D3,
+    2026-10-26; it was one per organization): every assertion below holds
+    for one client exactly as it did for the organization, and another
+    client of the same organization may have its own."""
+    from tests.agent_push_fixtures import seed_client
+
     org = await seed_org(admin_engine, "pr-one")
     await _insert_run(admin_engine, org, state="running")
-    with pytest.raises(DBAPIError):
+    with pytest.raises(DBAPIError, match="uq_push_run_active"):
         await _insert_run(admin_engine, org, state="paused")
     # A run the lockout guard stopped is still active (spec §1.4a): a person
     # must resume or cancel it before another run may start.
-    with pytest.raises(DBAPIError):
+    with pytest.raises(DBAPIError, match="uq_push_run_active"):
         await _insert_run(admin_engine, org, state="stopped_credential")
     # Finished runs are history, not active: any number may exist.
     await _insert_run(admin_engine, org, state="completed")
     await _insert_run(admin_engine, org, state="cancelled")
+    # Another client's run is not this client's: it may be active too, once.
+    other, _site = await seed_client(admin_engine, org.org_id)
+    await _insert_run(admin_engine, org, state="running", client_id=other)
+    with pytest.raises(DBAPIError, match="uq_push_run_active"):
+        await _insert_run(admin_engine, org, state="paused", client_id=other)
 
 
 async def test_a_sealed_run_takes_no_new_target(admin_engine: AsyncEngine) -> None:

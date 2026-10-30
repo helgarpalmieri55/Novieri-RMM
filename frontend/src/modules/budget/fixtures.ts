@@ -19,6 +19,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
+import { ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 import type {
   BudgetLineOut,
@@ -51,7 +52,10 @@ const ELAPSED = new Date().getMonth() + 1;
 
 /* ---------------------------------------------------------------- settings */
 
+// Every row here is the internal client's (`ORG_ID`, the id convention): what
+// the console works on until the client selector exists (PHASE 3).
 const SETTINGS: SettingsOut = {
+  client_id: ORG_ID,
   base_currency: "EUR",
   fiscal_year_start_month: 1,
   updated_by: ME,
@@ -61,18 +65,18 @@ const SETTINGS: SettingsOut = {
 /* ------------------------------------------------------------- categories */
 
 const CATEGORIES: CategoryOut[] = [
-  { id: "cat-infra", key: "infrastructure", name: "Infrastructure", system_key: null, active: true, sort_order: 10, created_at: ago(400) },
-  { id: "cat-software", key: "software", name: "Software", system_key: "software", active: true, sort_order: 20, created_at: ago(400) },
-  { id: "cat-hardware", key: "hardware_refresh", name: "Hardware refresh", system_key: null, active: true, sort_order: 30, created_at: ago(400) },
-  { id: "cat-services", key: "services", name: "Services", system_key: null, active: true, sort_order: 40, created_at: ago(400) },
-  { id: "cat-training", key: "training", name: "Training", system_key: null, active: false, sort_order: 90, created_at: ago(400) },
+  { id: "cat-infra", client_id: ORG_ID, key: "infrastructure", name: "Infrastructure", system_key: null, active: true, sort_order: 10, created_at: ago(400) },
+  { id: "cat-software", client_id: ORG_ID, key: "software", name: "Software", system_key: "software", active: true, sort_order: 20, created_at: ago(400) },
+  { id: "cat-hardware", client_id: ORG_ID, key: "hardware_refresh", name: "Hardware refresh", system_key: null, active: true, sort_order: 30, created_at: ago(400) },
+  { id: "cat-services", client_id: ORG_ID, key: "services", name: "Services", system_key: null, active: true, sort_order: 40, created_at: ago(400) },
+  { id: "cat-training", client_id: ORG_ID, key: "training", name: "Training", system_key: null, active: false, sort_order: 90, created_at: ago(400) },
 ];
 
 const COST_CENTERS: CostCenterOut[] = [
-  { id: "cc-ops", code: "IT-OPS", name: "IT operations", external_ref: "SAP 4410", active: true, created_at: ago(400) },
-  { id: "cc-sec", code: "IT-SEC", name: "Security", external_ref: "SAP 4412", active: true, created_at: ago(400) },
-  { id: "cc-euc", code: "IT-EUC", name: "End-user computing", external_ref: "SAP 4415", active: true, created_at: ago(400) },
-  { id: "cc-legacy", code: "IT-LEG", name: "Legacy datacentre", external_ref: null, active: false, created_at: ago(400) },
+  { id: "cc-ops", client_id: ORG_ID, code: "IT-OPS", name: "IT operations", external_ref: "SAP 4410", active: true, created_at: ago(400) },
+  { id: "cc-sec", client_id: ORG_ID, code: "IT-SEC", name: "Security", external_ref: "SAP 4412", active: true, created_at: ago(400) },
+  { id: "cc-euc", client_id: ORG_ID, code: "IT-EUC", name: "End-user computing", external_ref: "SAP 4415", active: true, created_at: ago(400) },
+  { id: "cc-legacy", client_id: ORG_ID, code: "IT-LEG", name: "Legacy datacentre", external_ref: null, active: false, created_at: ago(400) },
 ];
 
 /* --------------------------------------------------------------- fx rates */
@@ -95,9 +99,9 @@ function rateFor(currency: string, date: string): string | null {
 /* ----------------------------------------------------------------- budgets */
 
 const BUDGETS: BudgetOut[] = [
-  { id: "bud-1", fiscal_year: FISCAL_YEAR, name: `FY${String(FISCAL_YEAR).slice(2)} IT operating`, granularity: "month", status: "active", created_at: ago(280) },
-  { id: "bud-2", fiscal_year: FISCAL_YEAR - 1, name: `FY${String(FISCAL_YEAR - 1).slice(2)} IT operating`, granularity: "month", status: "closed", created_at: ago(640) },
-  { id: "bud-3", fiscal_year: FISCAL_YEAR + 1, name: `FY${String(FISCAL_YEAR + 1).slice(2)} draft`, granularity: "quarter", status: "draft", created_at: ago(12) },
+  { id: "bud-1", client_id: ORG_ID, fiscal_year: FISCAL_YEAR, name: `FY${String(FISCAL_YEAR).slice(2)} IT operating`, granularity: "month", status: "active", created_at: ago(280) },
+  { id: "bud-2", client_id: ORG_ID, fiscal_year: FISCAL_YEAR - 1, name: `FY${String(FISCAL_YEAR - 1).slice(2)} IT operating`, granularity: "month", status: "closed", created_at: ago(640) },
+  { id: "bud-3", client_id: ORG_ID, fiscal_year: FISCAL_YEAR + 1, name: `FY${String(FISCAL_YEAR + 1).slice(2)} draft`, granularity: "quarter", status: "draft", created_at: ago(12) },
 ];
 
 /** Planned cents per category per month for the open budget. */
@@ -173,6 +177,7 @@ function expense(seed: ExpenseSeed): ExpenseOut {
   const month = date.slice(0, 7);
   return {
     id: seed.id,
+    client_id: ORG_ID,
     expense_date: date,
     amount: seed.amount,
     currency: seed.currency,
@@ -274,7 +279,7 @@ const getBudgetPosition: FixtureMap["getBudgetPosition"] = (budgetId) => {
 
 /* ------------------------------------------------------------------ reads */
 
-const getBudgetSettings: FixtureMap["getBudgetSettings"] = () => SETTINGS;
+const getBudgetSettings: FixtureMap["getBudgetSettings"] = (clientId) => ({ ...SETTINGS, client_id: clientId });
 
 const listBudgetCategories: FixtureMap["listBudgetCategories"] = (includeInactive = false) =>
   CATEGORIES.filter((c) => includeInactive || c.active);
@@ -306,8 +311,9 @@ const listExpenses: FixtureMap["listExpenses"] = (filters = {}) =>
 
 /* ----------------------------------------------------------------- writes */
 
-const updateBudgetSettings: FixtureMap["updateBudgetSettings"] = (body) => ({
+const updateBudgetSettings: FixtureMap["updateBudgetSettings"] = (clientId, body) => ({
   ...SETTINGS,
+  client_id: clientId,
   base_currency: body.base_currency ?? SETTINGS.base_currency,
   fiscal_year_start_month: body.fiscal_year_start_month ?? SETTINGS.fiscal_year_start_month,
   updated_at: new Date().toISOString(),
@@ -315,6 +321,7 @@ const updateBudgetSettings: FixtureMap["updateBudgetSettings"] = (body) => ({
 
 const createBudgetCategory: FixtureMap["createBudgetCategory"] = (body) => ({
   id: `cat-${Date.now()}`,
+  client_id: body.client_id,
   key: body.key,
   name: body.name,
   system_key: null,
@@ -331,6 +338,7 @@ const updateBudgetCategory: FixtureMap["updateBudgetCategory"] = (id, body) => {
 
 const createCostCenter: FixtureMap["createCostCenter"] = (body) => ({
   id: `cc-${Date.now()}`,
+  client_id: body.client_id,
   code: body.code,
   name: body.name,
   external_ref: body.external_ref ?? null,
@@ -347,7 +355,7 @@ const updateCostCenter: FixtureMap["updateCostCenter"] = (id, body) => {
 const createFxRate: FixtureMap["createFxRate"] = (body) => ({
   id: `fx-${Date.now()}`,
   from_currency: body.from_currency,
-  to_currency: SETTINGS.base_currency,
+  to_currency: body.to_currency ?? SETTINGS.base_currency,
   rate: body.rate,
   effective_date: body.effective_date,
   created_at: new Date().toISOString(),
@@ -361,6 +369,7 @@ const updateFxRate: FixtureMap["updateFxRate"] = (id, body) => {
 
 const createBudget: FixtureMap["createBudget"] = (body) => ({
   id: `bud-${Date.now()}`,
+  client_id: body.client_id,
   fiscal_year: body.fiscal_year,
   name: body.name,
   granularity: body.granularity,

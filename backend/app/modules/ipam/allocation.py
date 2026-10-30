@@ -53,6 +53,7 @@ from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.models import Device, Policy
 from app.modules.ipam.errors import (
+    IpamClientError,
     IpamConflictError,
     IpamTooLargeError,
     IpamValidationError,
@@ -74,6 +75,7 @@ from app.modules.ipam.net import (
 )
 from app.modules.ipam.observations import observation_ttl_days
 from app.modules.ipam.subnets import get_subnet, lock_address_plan
+from app.services.client_sites import loaded_client
 
 __all__ = [
     "ADDRESS_STATES",
@@ -621,6 +623,11 @@ async def claim_address(
     broadcast address, no unresolved `conflict` drift, a device that resolves
     in-org -- are enforced once rather than in two places that drift apart.
 
+    THE DEVICE IS OF THE ADDRESS'S CLIENT (MSP clients, invariant 5a): the
+    subnet's, which is its VRF's and so the address row's. A machine the
+    caller cannot see is "not found", as another org's is; one they can see,
+    of another client, is a 422 that says so.
+
     THE ACTOR IS NEVER AN AGENT. There is no ingestion path into this function;
     §0.6's split is what stops a device coming online from overwriting an
     operator's record, and it is a property of who calls this, enforced by there
@@ -646,13 +653,15 @@ async def claim_address(
 
     has_label = validate_claimant(device_id, asset_label)
     if device_id is not None:
-        found = (
+        machine_client = (
             await session.execute(
-                select(Device.id).where(Device.org_id == org_id, Device.id == device_id)
+                select(Device.client_id).where(Device.org_id == org_id, Device.id == device_id)
             )
         ).scalar_one_or_none()
-        if found is None:
+        if machine_client is None:
             raise IpamValidationError(tr("device {device_id} not found", device_id=device_id))
+        if machine_client != subnet.client_id:
+            raise IpamClientError(tr("that machine belongs to another client"))
     mac_text: str | None = None
     if mac:
         mac_text = parse_mac(str(mac))
@@ -760,6 +769,8 @@ async def claim_address(
         action="ipam.address_assigned",
         target_type="ipam_address",
         target_id=str(row.id),
+        # The subnet's, as the address's is: both are its VRF's.
+        client_id=subnet.client_id,
         metadata={
             "address": str(parsed),
             "subnet_id": str(subnet.id),
@@ -772,6 +783,7 @@ async def claim_address(
         },
     )
     await session.flush()
+    await loaded_client(session, row)  # an UPDATE expired it; the response names it
     return row
 
 

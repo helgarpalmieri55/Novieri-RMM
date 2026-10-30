@@ -8,10 +8,12 @@
  * honest number behind them:
  *
  * - "Monthly run rate" -- `GET /subscriptions/spend` (useSpend) returns
- *   `by_currency` as ONE ROW PER CURRENCY (invariant #6: money is Decimal,
- *   never summed across currencies). A subscription registry with vendors in
- *   more than one currency has no single "run rate" number to show; only
- *   collapsed to a card when every row shares one currency.
+ *   `by_currency` as ONE ROW PER (CLIENT, CURRENCY) (invariant #6: money is
+ *   Decimal, never summed across currencies; and since MSP clients phase 2
+ *   never summed across clients either). A registry with more than one such
+ *   row has no single "run rate" number to show, so the card appears only
+ *   when there is exactly one row: one client, paying in one currency. Two
+ *   clients sharing a currency are two rows, and hide it too.
  * - "Savings identified" -- has no definition in the backend. Idle-seat cost
  *   (`useIdleSeats`) is the closest data, but it is per-subscription and
  *   per-currency too, and "identified savings" implies a tracked decision
@@ -32,6 +34,7 @@ import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDate } from "../../lib/datetime";
+import { internalClientId, requireKnown } from "../../lib/internalClient";
 import { humaniseEnum } from "../../lib/labels";
 import {
   useCreateSubscriptionMutation,
@@ -205,7 +208,7 @@ export function SubscriptionsPage() {
     .sort((a, b) => (a.days_to_renewal ?? 0) - (b.days_to_renewal ?? 0))[0];
   const noticeDue = renewalRows.filter((row) => row.action_required);
 
-  // Single-currency only -- see the module docstring above.
+  // Exactly one (client, currency) row only -- see the module docstring above.
   const byCurrency = spend.data?.by_currency ?? [];
   const monthlyRunRate = byCurrency.length === 1 ? byCurrency[0] : null;
 
@@ -453,6 +456,8 @@ export function SubscriptionsPage() {
 
 function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useT();
+  const api = useApi();
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const create = useCreateSubscriptionMutation();
   const vendors = useVendorDirectory();
   const users = useOrgUsers();
@@ -520,8 +525,15 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
 
+    // A subscription is one client's (MSP clients phase 2): its seats are held
+    // by that client's people.
+    // PHASE 3: the client/site selector. Until it exists that is the
+    // organisation's internal client, whose id is the organisation's --
+    // `/me`'s `org_id` (`lib/internalClient.ts`).
+    const internalClient = internalClientId(me.data);
     create.mutate(
-      {
+      () => ({
+        client_id: requireKnown(internalClient),
         service_name: serviceName,
         billing_cycle: billingCycle,
         // Money stays a STRING to the wire (module docstring / invariant #6).
@@ -540,7 +552,7 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
         // A count, guarded by `noticeDays` above before this Number() runs.
         notice_days: Number(noticeDaysValue),
         auto_renew: autoRenew,
-      },
+      }),
       {
         onSuccess: () => {
           reset();

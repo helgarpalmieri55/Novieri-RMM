@@ -147,6 +147,15 @@ CATALOG: dict[str, str] = {
     "invalid cron expression (expected 5 fields): {cron}": (
         "expresión cron no válida (se esperaban 5 campos): {cron}"
     ),
+    "window_cron must be a cron expression of five fields (minute hour day-of-month month "
+    "day-of-week), or null for no window": (
+        "window_cron debe ser una expresión cron de cinco campos (minuto hora día-del-mes mes "
+        "día-de-la-semana), o null para no tener ventana"
+    ),
+    "this deployment's window cannot be read ({window}); create it again with a valid one": (
+        "la ventana de este despliegue no se puede leer ({window}); créalo de nuevo con una "
+        "válida"
+    ),
     "no JWKS key for kid {kid}": "no hay clave JWKS para el kid {kid}",
     "token has no kid header": "el token no tiene encabezado kid",
     "this token is not an access token": "este token no es un token de acceso",
@@ -1278,11 +1287,11 @@ CATALOG: dict[str, str] = {
     "two columns map to the same field(s): {duplicated}": (
         "dos columnas se asignan al mismo campo: {duplicated}"
     ),
-    "the digest does not match this file and mapping: preview and apply must be about the "
-    "same file AND the same column mapping (§8.1)": (
-        "el hash no coincide con este archivo y esta correspondencia de columnas: la vista "
-        "previa y la aplicación deben tratar del mismo archivo Y de la misma correspondencia "
-        "de columnas (§8.1)"
+    "the digest does not match this file, mapping and VRF: preview and apply must be about "
+    "the same file, the same column mapping AND the same VRF (§8.1)": (
+        "el hash no coincide con este archivo, esta correspondencia de columnas y esta VRF: la "
+        "vista previa y la aplicación deben tratar del mismo archivo, de la misma "
+        "correspondencia de columnas Y de la misma VRF (§8.1)"
     ),
     "the file is not valid UTF-8: {exc}": "el archivo no es UTF-8 válido: {exc}",
     "the file has more than {max_import_rows} rows": (
@@ -1291,8 +1300,8 @@ CATALOG: dict[str, str] = {
     "already assigned to device {device_id}": "ya está asignada al dispositivo {device_id}",
     "already assigned to {asset_label}": "ya está asignada a {asset_label}",
     "no cidr field": "no hay campo cidr",
-    "no VLAN with vid {raw_vlan} in this org; vlan_id left null": (
-        "no hay ninguna VLAN con vid {raw_vlan} en esta organización; vlan_id se deja en null"
+    "no VLAN with vid {raw_vlan} in this client; vlan_id left null": (
+        "no hay ninguna VLAN con vid {raw_vlan} en este cliente; vlan_id se deja en null"
     ),
     "gateway {raw_gateway} is not inside {prefix}; left null": (
         "la puerta de enlace {raw_gateway} no está dentro de {prefix}; se deja en null"
@@ -1398,7 +1407,6 @@ CATALOG: dict[str, str] = {
         "no es candidata: no hay ninguna observación actual de esta dirección"
     ),
     "VRF": "VRF",
-    "site": "sitio",
     "VLAN": "VLAN",
     "{field} must be a non-empty string": "{field} debe ser una cadena no vacía",
     "{field} must be at most {maximum} characters": (
@@ -1410,21 +1418,43 @@ CATALOG: dict[str, str] = {
     ),
     "VRF {vrf_id} not found": "no se encontró la VRF {vrf_id}",
     "could not create the default VRF": "no se pudo crear la VRF predeterminada",
-    "a VRF named {name} already exists in this org": (
-        "ya existe en esta organización una VRF llamada {name}"
+    "a VRF named {name} already exists in this client": (
+        "ya existe en este cliente una VRF llamada {name}"
     ),
-    "site {site_id} not found": "no se encontró el sitio {site_id}",
-    "a site named {name} already exists in this org": (
-        "ya existe en esta organización un sitio llamado {name}"
-    ),
+    "site {site_id} not found": "no se encontró la sede {site_id}",
     "VLAN {vlan_id} not found": "no se encontró la VLAN {vlan_id}",
     "vid must be an integer; got {vid}": "vid debe ser un entero; se recibió {vid}",
     "vid must be between 1 and 4094; got {vid}": "vid debe estar entre 1 y 4094; se recibió {vid}",
-    "at site {site_id}": "en el sitio {site_id}",
-    "org-wide": "en toda la organización",
+    "at site {site_id}": "en la sede {site_id}",
+    "without a site in this client": "sin sede en este cliente",
     "VLAN {vid} already exists {scope}": "la VLAN {vid} ya existe {scope}",
-    "a {noun} named {name} already exists in this org": (
-        "ya existe en esta organización un registro de {noun} llamado {name}"
+    "a {noun} named {name} already exists in this client": (
+        "ya existe en este cliente un registro de {noun} llamado {name}"
+    ),
+    # IPAM per client (plan 2026-10-26 Task 10).
+    "name the client: a row with no VRF or site takes the one the request names": (
+        "indica el cliente: un registro sin VRF ni sede pertenece al que nombra la petición"
+    ),
+    "client_id {claimed} contradicts the client of the VRF or site named": (
+        "client_id {claimed} contradice el cliente de la VRF o la sede indicadas"
+    ),
+    "a record for every client is converted only by someone with every client": (
+        "un registro para todos los clientes solo lo convierte alguien con todos los clientes"
+    ),
+    "IPAM records cannot be filed under Unassigned": (
+        "los registros de IPAM no pueden pertenecer a «Sin asignar»"
+    ),
+    "site {site_id} belongs to another client": "la sede {site_id} es de otro cliente",
+    "VLAN {vlan_id} belongs to another client": "la VLAN {vlan_id} es de otro cliente",
+    # Sweeps, candidates and promotion inside the client (plan 2026-10-26 Task 11).
+    "that machine belongs to another client": "ese equipo es de otro cliente",
+    "assign the subnet to a site before adding its machines": (
+        "asigna una sede a la subred antes de añadir sus equipos"
+    ),
+    "this address is in no registered subnet: register its subnet, at a site, before adding "
+    "the machine": (
+        "esta dirección no está en ninguna subred registrada: registra su subred, con una sede, "
+        "antes de añadir el equipo"
     ),
     "{count} subnet": "{count} subred",
     "{count} subnets": "{count} subredes",
@@ -2383,11 +2413,11 @@ CATALOG: dict[str, str] = {
         "el campo {key} de una credencial windows_domain debe ser una cadena cuando está "
         "presente"
     ),
-    "{canonical} is not one of this organization's active push authorizations. A subnet "
+    "{canonical} is not one of this client's active push authorizations. A subnet "
     "push is built from one of those, exactly as authorized; a holder of "
     "agent.push.scope.manage authorizes a prefix": (
-        "{canonical} no es una de las autorizaciones de instalación remota activas de esta "
-        "organización. Una instalación remota por subred se construye a partir de una de "
+        "{canonical} no es una de las autorizaciones de instalación remota activas de este "
+        "cliente. Una instalación remota por subred se construye a partir de una de "
         "ellas, exactamente como se autorizó; quien tenga agent.push.scope.manage autoriza un "
         "prefijo"
     ),
@@ -2413,11 +2443,11 @@ CATALOG: dict[str, str] = {
         "ningún equipo de esta subred está listo para una instalación remota, así que no hay "
         "nada que confirmar"
     ),
-    "this organization already has a push run that is running, paused or stopped after "
-    "sign-in failures: one active run per organization. Let it finish, or cancel it, first": (
-        "esta organización ya tiene una ejecución de instalación remota en curso, en pausa o "
+    "this client already has a push run that is running, paused or stopped after "
+    "sign-in failures: one active run per client. Let it finish, or cancel it, first": (
+        "este cliente ya tiene una ejecución de instalación remota en curso, en pausa o "
         "detenida por fallos de inicio de sesión: solo se permite una ejecución activa por "
-        "organización. Deja que termine, o cancélala, primero"
+        "cliente. Deja que termine, o cancélala, primero"
     ),
     "push run {run_id} not found": "no se encontró la ejecución de instalación remota {run_id}",
     "only a running push run can be paused; this one is {run_state}": (
@@ -2488,10 +2518,23 @@ CATALOG: dict[str, str] = {
         "por el sistema (especificación §3). Una persona con agent.push.scope.manage pone su "
         "nombre en cada inicio de sesión administrativo que causa esta plataforma"
     ),
-    "{network} is already authorized for push install in this organization; revoke the "
+    "{network} is already authorized for push install in this client; revoke the "
     "existing authorization before creating another": (
-        "{network} ya está autorizada para la instalación remota en esta organización; revoca "
+        "{network} ya está autorizada para la instalación remota en este cliente; revoca "
         "la autorización existente antes de crear otra"
+    ),
+    "a push authorization cannot be filed under Unassigned": (
+        "una autorización de instalación remota no se puede archivar en Sin asignar"
+    ),
+    "a push credential belongs to one client": (
+        "una credencial de instalación remota pertenece a un solo cliente"
+    ),
+    "credential {credential_id} belongs to another client": (
+        "la credencial {credential_id} es de otro cliente"
+    ),
+    "that device group belongs to another client": "ese grupo de dispositivos es de otro cliente",
+    "a credential cannot be filed under Unassigned": (
+        "una credencial no se puede archivar en Sin asignar"
     ),
     "push authorization {authorization_id} not found": (
         "no se encontró la autorización de instalación remota {authorization_id}"
@@ -2671,12 +2714,14 @@ CATALOG: dict[str, str] = {
         "credentials.checkout, así que no se instala nada más con su confirmación. Inicia una "
         "ejecución nueva"
     ),
-    "the run's credential no longer exists, or is no longer a push credential. Nothing is "
-    "presented with a secret the operator has withdrawn. Start a new run with a current "
-    "credential": (
-        "la credencial de la ejecución ya no existe, o ya no es una credencial de instalación "
-        "remota. No se presenta nada con un secreto que la persona operadora ha retirado. "
-        "Inicia una ejecución nueva con una credencial vigente"
+    "the run's credential no longer exists, is no longer a push credential, or is not a "
+    "credential of this machine's client. Nothing is presented with a secret the operator "
+    "has withdrawn, nor to another client's machine. Start a new run with a current "
+    "credential of the machine's client": (
+        "la credencial de la ejecución ya no existe, ya no es una credencial de instalación "
+        "remota, o no es una credencial del cliente de este equipo. No se presenta nada con un "
+        "secreto que la persona operadora ha retirado, ni al equipo de otro cliente. Inicia "
+        "una ejecución nueva con una credencial vigente del cliente del equipo"
     ),
     "this address now belongs to a different machine record from the one that was "
     "confirmed, or the confirmed record is gone. Confirm it in a new run": (
@@ -2713,15 +2758,23 @@ CATALOG: dict[str, str] = {
         "avala"
     ),
     "device records of more than one client, each vouched for by a person, hold this "
-    "address, so it does not name one machine and nothing is chosen for you. Choose the "
-    "client in the client selector and push again: inside one client the address names "
-    "that client's machine, and only that client's site server may carry the credential "
-    "to it": (
+    "address, so it does not name one machine and nothing is chosen for you. A push is made "
+    "in the client of its credential: inside that client the address names that client's "
+    "machine, and only that client's site server may carry the credential to it. Choose a "
+    "push credential of the machine's client": (
         "registros de dispositivo de más de un cliente, cada uno avalado por una persona, "
         "tienen esta dirección, así que no nombra un solo equipo y no se elige ninguno por ti. "
-        "Elige el cliente en el selector de clientes e instala de nuevo: dentro de un cliente "
+        "Una instalación remota se hace en el cliente de su credencial: dentro de ese cliente "
         "la dirección nombra el equipo de ese cliente, y solo un servidor de sitio de ese "
-        "cliente puede llevarle la credencial"
+        "cliente puede llevarle la credencial. Elige una credencial de instalación remota del "
+        "cliente del equipo"
+    ),
+    "the machine at this address belongs to another client than the chosen credential, and "
+    "a credential is presented only to machines of its own client. Choose a push credential "
+    "of the machine's client": (
+        "el equipo de esta dirección es de otro cliente que la credencial elegida, y una "
+        "credencial solo se presenta a equipos de su propio cliente. Elige una credencial de "
+        "instalación remota del cliente del equipo"
     ),
     "no active push authorization covers this address. Deny by default: authorizing an "
     "IPAM scan of the same prefix authorizes nothing here, because authorizing an ICMP "
@@ -3595,6 +3648,51 @@ CATALOG: dict[str, str] = {
     "no such account": "no existe esa cuenta",
     "that account already belongs to someone else": "esa cuenta ya es de otra persona",
     "a person needs a name": "una persona necesita un nombre",
+    # A person belongs to one client (MSP clients plan 2026-10-26 Task 5).
+    "a person cannot be filed under Unassigned": (
+        "una persona no puede pertenecer a «Sin asignar»"
+    ),
+    "that account belongs to another client": "esa cuenta es de otro cliente",
+    "that person belongs to another client": "esa persona es de otro cliente",
+    # Licenses and subscriptions belong to one client (plan 2026-10-26 Task 6).
+    "a license cannot be filed under Unassigned": (
+        "una licencia no puede pertenecer a «Sin asignar»"
+    ),
+    "a subscription cannot be filed under Unassigned": (
+        "una suscripción no puede pertenecer a «Sin asignar»"
+    ),
+    "nothing is ignored for Unassigned: it has no computers": (
+        "no se ignora nada para «Sin asignar»: no tiene equipos"
+    ),
+    "the allocation target belongs to another client": (
+        "el destino de la asignación es de otro cliente"
+    ),
+    "that license belongs to another client": "esa licencia es de otro cliente",
+    # Optional modules per client; changes and BCP plans belong to one client
+    # (plan 2026-10-26 Task 7).
+    "this client does not use that module": "este cliente no usa ese módulo",
+    "a change cannot be filed under Unassigned": (
+        "un cambio no puede pertenecer a «Sin asignar»"
+    ),
+    "a BCP plan cannot be filed under Unassigned": (
+        "un plan de continuidad no puede pertenecer a «Sin asignar»"
+    ),
+    "scope ref belongs to another client: {kind}:{ref_id}": (
+        "la referencia del ámbito es de otro cliente: {kind}:{ref_id}"
+    ),
+    "procedure_ref belongs to another client: {ref_id}": (
+        "procedure_ref es de otro cliente: {ref_id}"
+    ),
+    "that change belongs to another client": "ese cambio es de otro cliente",
+    # Budget belongs to one client (plan 2026-10-26 Task 8).
+    "nothing is budgeted under Unassigned": "en «Sin asignar» no se presupuesta nada",
+    "expense category {category_id} belongs to another client": (
+        "la categoría de gasto {category_id} es de otro cliente"
+    ),
+    "cost center {cost_center_id} belongs to another client": (
+        "el centro de costo {cost_center_id} es de otro cliente"
+    ),
+    "{link_type} {link_id} belongs to another client": "{link_type} {link_id} es de otro cliente",
     "Their sign-in is turned off": "Su inicio de sesión está desactivado",
     "Every computer is in a group": "Todos los equipos están en un grupo",
     "Nothing installed through ITMS yet": "Todavía no se ha instalado nada con ITMS",
@@ -3931,7 +4029,6 @@ CATALOG: dict[str, str] = {
     "emergency change requires retrospective approval before completion": (
         "un cambio de emergencia necesita aprobación retroactiva antes de completarse"
     ),
-    "change not found": "no se encontró el cambio",
     "unknown action_type {action_type}": "action_type desconocido {action_type}",
     "linked action not found": "no se encontró la acción vinculada",
     "action already linked to this change": "la acción ya está vinculada a este cambio",
@@ -3952,10 +4049,15 @@ CATALOG: dict[str, str] = {
     "change action: cancel": "cancelar",
     "change action: revise": "corregir",
     # --- documentation ---
-    "organization document storage quota reached ({usage} of {quota} bytes used). Purge or "
-    "archive documents to free space.": (
-        "se alcanzó la cuota de almacenamiento de documentos de la organización ({usage} de "
+    "this client's document storage quota is reached ({usage} of {quota} bytes used). "
+    "Purge or archive documents to free space.": (
+        "se alcanzó la cuota de almacenamiento de documentos de este cliente ({usage} de "
         "{quota} bytes usados). Purga o archiva documentos para liberar espacio."
+    ),
+    "the documents for every client have reached their storage quota ({usage} of "
+    "{quota} bytes used). Purge or archive documents to free space.": (
+        "los documentos para todos los clientes alcanzaron su cuota de almacenamiento "
+        "({usage} de {quota} bytes usados). Purga o archiva documentos para liberar espacio."
     ),
     "no document {document_id} in this organization": (
         "no hay ningún documento {document_id} en esta organización"
@@ -3972,6 +4074,12 @@ CATALOG: dict[str, str] = {
     "unknown target type {target_type}": "tipo de destino desconocido {target_type}",
     "no {target_type} {target_id} in this organization": (
         "no se encontró {target_type} {target_id} en esta organización"
+    ),
+    "{target_type} {target_id} belongs to another client": (
+        "{target_type} {target_id} es de otro cliente"
+    ),
+    "documentation cannot be filed under Unassigned": (
+        "la documentación no puede pertenecer a «Sin asignar»"
     ),
     "unknown record type {record_type}": "tipo de registro desconocido {record_type}",
     "invalid {record_type} record fields: {exc}": (
@@ -4052,6 +4160,24 @@ CATALOG: dict[str, str] = {
         "Esa respuesta no coincide. Comprueba que has usado la clave correcta."
     ),
     "no such repository": "no existe ese repositorio",
+    # A backup repository serves one client (plan 2026-10-26 Task 13).
+    "a backup repository cannot be filed under Unassigned": (
+        "un repositorio de copias no puede quedar en Sin asignar"
+    ),
+    "a backup policy cannot be filed under Unassigned": (
+        "una política de copias no puede quedar en Sin asignar"
+    ),
+    "a repository with that name exists in this client": (
+        "ya existe un repositorio con ese nombre en este cliente"
+    ),
+    "that repository belongs to another client": "ese repositorio es de otro cliente",
+    "a policy for every client cannot name a repository; give each client its own": (
+        "una política para todos los clientes no puede nombrar un repositorio; dale a cada "
+        "cliente el suyo"
+    ),
+    "that off-site target belongs to another client": (
+        "ese almacenamiento externo es de otro cliente"
+    ),
     "The stored off-site credential is not usable.": (
         "La credencial guardada del almacenamiento externo no se puede usar."
     ),
@@ -4112,6 +4238,22 @@ CATALOG: dict[str, str] = {
     ),
     "no such package": "no existe ese paquete",
     "no such deployment": "no existe ese despliegue",
+    "deployment target not found": "no existe el destino del despliegue",
+    "a deployment cannot be filed under Unassigned": (
+        "un despliegue no puede pertenecer a «Sin asignar»"
+    ),
+    "a device group cannot be filed under Unassigned": (
+        "un grupo de equipos no puede pertenecer a «Sin asignar»"
+    ),
+    "a patch approval cannot be filed under Unassigned": (
+        "una aprobación de parche no puede pertenecer a «Sin asignar»"
+    ),
+    "a device always has a site: name the site it moves to": (
+        "un dispositivo siempre tiene una sede: indica a qué sede se traslada"
+    ),
+    "the deployment target changed while it was being created; try again": (
+        "el destino del despliegue cambió mientras se creaba; inténtalo de nuevo"
+    ),
     "unknown rule type: {rule_type}": "tipo de regla desconocido: {rule_type}",
     # --- remote ---
     "{from_state} -> {to_state}": "{from_state} -> {to_state}",
@@ -4388,20 +4530,23 @@ CATALOG: dict[str, str] = {
         "enviar un paquete mágico a un segmento de la red local es un acto distinto de iniciar "
         "una ejecución de aprovisionamiento"
     ),
-    "no enabled site server serves {segment}: a Wake-on-LAN packet must originate on the "
-    "target's own segment, and nothing in this org is declared for it. Promote a site server "
-    "on that segment, or start the run without wake_on_lan": (
-        "ningún servidor de sitio habilitado atiende {segment}: un paquete de Wake-on-LAN tiene "
-        "que originarse en el propio segmento del destino, y nada en esta organización está "
-        "declarado para él. Promueve un servidor de sitio en ese segmento o inicia la "
-        "ejecución sin wake_on_lan"
+    "no enabled site server of the organization's own client serves {segment}: a Wake-on-LAN "
+    "packet must originate on the target's own segment, and a provisioning wake goes only "
+    "through that client's site servers, none of which is declared for it. Promote one of its "
+    "site servers on that segment, or start the run without wake_on_lan": (
+        "ningún servidor de sitio habilitado del cliente propio de la organización atiende "
+        "{segment}: un paquete de Wake-on-LAN tiene que originarse en el propio segmento del "
+        "destino, y un encendido de aprovisionamiento solo pasa por los servidores de sitio de "
+        "ese cliente, ninguno de los cuales está declarado para él. Promueve uno de sus "
+        "servidores de sitio en ese segmento o inicia la ejecución sin wake_on_lan"
     ),
     "the requested segment": "el segmento solicitado",
-    "wake_on_lan.segment was not given and this org has {count} enabled site servers: with no "
-    "segment there is nothing to filter on, so {target_mac} cannot be located and picking a "
-    "server would put the magic packet on whichever LAN happened to be registered first. Name "
-    "the segment the target is on": (
-        "no se indicó wake_on_lan.segment y esta organización tiene {count} servidores de sitio "
+    "wake_on_lan.segment was not given and the organization's own client has {count} enabled "
+    "site servers: with no segment there is nothing to filter on, so {target_mac} cannot be "
+    "located and picking a server would put the magic packet on whichever LAN happened to be "
+    "registered first. Name the segment the target is on": (
+        "no se indicó wake_on_lan.segment y el cliente propio de la organización tiene {count} "
+        "servidores de sitio "
         "habilitados: sin segmento no hay nada por lo que filtrar, así que no se puede ubicar "
         "{target_mac} y elegir un servidor pondría el paquete mágico en la red local que "
         "estuviera registrada primero. Indica el segmento en el que está el destino"

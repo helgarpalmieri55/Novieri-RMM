@@ -9,6 +9,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -19,17 +20,22 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, uuid7_pk
+from app.models.base import Base, client_org_fk, uuid7_pk
 
 
 class BcpPlan(Base):
     __tablename__ = "bcp_plan"
     __table_args__ = (
         Index("ix_bcp_plan_state", "org_id", "state"),
+        client_org_fk("bcp_plan"),
     )
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). Set by the application (migration 0237):
+    # the client the caller names (`service.create_plan`). Never changes: no
+    # update schema carries it, and its tests, steps and findings inherit it.
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str] = mapped_column(Text)
     scope: Mapped[list[Any]] = mapped_column(JSONB, default=list)
@@ -53,6 +59,15 @@ class BcpTest(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # bcp_plan (migration 0237): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     plan_id: Mapped[UUID] = mapped_column(ForeignKey("bcp_plan.id"))
     type: Mapped[str] = mapped_column(String(16))
     scheduled_for: Mapped[datetime | None] = mapped_column(default=None)
@@ -75,6 +90,15 @@ class BcpTestStep(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # bcp_test (migration 0237): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     test_id: Mapped[UUID] = mapped_column(ForeignKey("bcp_test.id"))
     ordinal: Mapped[int] = mapped_column(Integer)
     description: Mapped[str] = mapped_column(Text)
@@ -91,6 +115,15 @@ class BcpFinding(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # bcp_test (migration 0237): never sent; the INSERT reads it back.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     test_id: Mapped[UUID] = mapped_column(ForeignKey("bcp_test.id"))
     description: Mapped[str] = mapped_column(Text)
     severity: Mapped[str] = mapped_column(String(10))

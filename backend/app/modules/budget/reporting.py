@@ -48,8 +48,8 @@ boundary changes which projection it suppresses) -- and with NO status
 filter at all (EXISTENCE is what matters for the guard, regardless of
 whether the row is `expected` or `confirmed`, and regardless of FX
 convertibility). This key is
-**deliberately BROADER than `feeds.py`'s own `uq_expense_autofeed`** (`(org_id,
-source, link_id, period_key) WHERE source <> 'manual'`) -- the two answer
+**deliberately BROADER than `feeds.py`'s own `uq_expense_client_autofeed`**
+(`(org_id, client_id, source, link_id, period_key) WHERE source <> 'manual'`) -- the two answer
 different questions and must NOT be "fixed" back into agreement.
 `feeds.materialize`'s pre-check asks "does an AUTO-MATERIALIZED row already
 own this slot" (keyed on `source`, since only an auto-fed row's `source` is
@@ -140,6 +140,19 @@ the same `fiscal_year` (different `name`s, spec §2's uniqueness allows it),
 both would report identical actual/committed/projected figures, differing
 only in `planned`. Spec doesn't call for expense-to-budget partitioning in
 v1, so this is a deliberate, documented limitation rather than a bug.
+
+**One client at a time (MSP clients plan 2026-10-26 Task 8).** A budget is
+one client's, and so are its figures: `variance()`/`position()` count the
+budget's client's expenses and projections alone, in that client's fiscal
+calendar and base currency. `forecast()` and both exports are one client's by
+the caller's choice -- each client has its own base currency, and summing
+across clients would mix currencies -- for a client this session can see
+(else the 404 of one that does not exist). A client without the budget
+module, or archived, has no forecast (empty rows), and its reads seed nothing:
+`variance()` and `forecast()` seed default categories only for a client that
+uses budget and is not archived (`clients.budget_in_use`), and `variance()`
+projects nothing for any other. Its exports still answer: what it recorded
+stays exportable.
 """
 
 import calendar
@@ -154,6 +167,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.i18n import tr
 from app.models import BudgetLine, CostCenter, Expense, ExpenseCategory
 from app.modules.budget.budgets import get_budget
+from app.modules.budget.clients import budget_in_use, visible_client
 from app.modules.budget.errors import BudgetValidationError
 from app.modules.budget.feeds import project_costs
 from app.modules.budget.fx import convert_for, get_settings
@@ -247,7 +261,7 @@ async def _resolve_cost_center_names(
 
 
 async def _resolve_projection_categories(
-    session: AsyncSession, org_id: UUID, system_keys: set[str]
+    session: AsyncSession, org_id: UUID, client_id: UUID, system_keys: set[str]
 ) -> dict[str, UUID]:
     """Resolve every `system_key` a batch of `ProjectedCost`s needs, UP
     FRONT -- mirrors `feeds.materialize`'s spec §6.1 rule: a projection this
@@ -257,7 +271,7 @@ async def _resolve_projection_categories(
     understated) or guessing a category (spec §6.1 forbids that outright)."""
     resolved: dict[str, UUID] = {}
     for system_key in system_keys:
-        category = await category_by_system_key(session, org_id, system_key)
+        category = await category_by_system_key(session, org_id, system_key, client_id=client_id)
         if category is None:
             raise BudgetValidationError(
                 tr(
@@ -271,7 +285,7 @@ async def _resolve_projection_categories(
 
 
 async def _materialized_keys(
-    session: AsyncSession, org_id: UUID, link_ids: set[UUID]
+    session: AsyncSession, org_id: UUID, client_id: UUID, link_ids: set[UUID]
 ) -> set[tuple[str, UUID, str]]:
     """The single "is this projected cost already REPRESENTED by an existing
     expense row" guard shared by `variance()` and `forecast()` -- previously
@@ -328,8 +342,8 @@ async def _materialized_keys(
     pre-check verbatim): a void row still counts as "represented" here, or a
     voided auto-fed cost would resurrect as `projected` forever (spec §2).
 
-    **Deliberately BROADER than `feeds.py`'s own `uq_expense_autofeed`**
-    (`(org_id, source, link_id, period_key) WHERE source <> 'manual'`) --
+    **Deliberately BROADER than `feeds.py`'s own `uq_expense_client_autofeed`**
+    (`(org_id, client_id, source, link_id, period_key) WHERE source <> 'manual'`) --
     the two answer DIFFERENT questions and must not be "fixed" back into
     agreement. `feeds.materialize`'s pre-check asks "does an
     AUTO-MATERIALIZED row already own this slot" (it only ever needs to know
@@ -340,7 +354,11 @@ async def _materialized_keys(
     hand-entered" -- a strictly broader question -- so it keys on
     `link_type` instead, which both kinds of row can carry meaningfully. Do
     not narrow this back to `source` or to `feeds.py`'s key: that is exactly
-    what produced M1."""
+    what produced M1.
+
+    Only `client_id`'s expense rows count (plan 2026-10-26 Task 8): the
+    projections asked about are that client's, and so is what represents
+    them."""
     if not link_ids:
         return set()
     rows = await session.execute(
@@ -348,6 +366,7 @@ async def _materialized_keys(
             Expense.link_type, Expense.link_id, Expense.expense_date, Expense.period_key
         ).where(
             Expense.org_id == org_id,
+            Expense.client_id == client_id,
             Expense.link_id.in_(link_ids),
         )
     )
@@ -390,15 +409,25 @@ async def variance(
     unplanned spend; see the module docstring's "not partitioned by budget"
     note for the corresponding limitation.
 
-    `actor_id` is used only to lazily seed the org's default categories
-    (C1 fix) if they don't exist yet -- there is no org-bootstrap hook
-    anywhere in the platform that does this ahead of time, so without it
-    this function 400s via `_resolve_projection_categories` for any org with
-    a subscription or license renewing in the requested range.
+    `actor_id` is used only to lazily seed the client's default categories
+    (C1 fix) if they don't exist yet -- there is no bootstrap hook anywhere
+    in the platform that does this ahead of time, so without it this
+    function 400s via `_resolve_projection_categories` for any client with a
+    subscription or license renewing in the requested range.
+
+    The budget's client is the report's (module docstring): its expenses,
+    its projections, its fiscal calendar and base currency. For a client
+    that does not use budget (it was turned off after the budget was made),
+    or that is archived, nothing is seeded and nothing is projected
+    (`budget_in_use`): that client has no forecast, and its report is the
+    lines and expenses it already has.
     """
     budget = await get_budget(session, org_id, budget_id)  # 404 if cross-org/missing
-    await seed_default_categories(session, org_id, actor_id)
-    settings = await get_settings(session, org_id)
+    client_id = budget.client_id
+    budgeted = await budget_in_use(session, org_id, client_id)
+    if budgeted:
+        await seed_default_categories(session, org_id, actor_id, client_id=client_id)
+    settings = await get_settings(session, org_id, client_id)
     count = period_count(budget.granularity)
     year_start, _ = period_bounds(
         budget.fiscal_year, settings.fiscal_year_start_month, budget.granularity, 1
@@ -435,6 +464,7 @@ async def variance(
             await session.execute(
                 select(Expense).where(
                     Expense.org_id == org_id,
+                    Expense.client_id == client_id,
                     Expense.expense_date >= year_start,
                     Expense.expense_date <= year_end,
                     Expense.status != "void",
@@ -467,12 +497,18 @@ async def variance(
                 unconvertible_count += 1
                 _add_unconvertible(unconvertible_totals, expense.currency, expense.amount)
 
-    projections = await project_costs(session, org_id, from_date=year_start, to_date=year_end)
+    projections = (
+        await project_costs(
+            session, org_id, client_id=client_id, from_date=year_start, to_date=year_end
+        )
+        if budgeted
+        else []
+    )
     category_by_key = await _resolve_projection_categories(
-        session, org_id, {p.category_system_key for p in projections}
+        session, org_id, client_id, {p.category_system_key for p in projections}
     )
     materialized_keys = await _materialized_keys(
-        session, org_id, {p.link_id for p in projections}
+        session, org_id, client_id, {p.link_id for p in projections}
     )
     for proj in projections:
         idx = period_for_date(
@@ -484,7 +520,7 @@ async def variance(
         if (proj.link_type, proj.link_id, proj.period_key) in materialized_keys:
             continue  # the double-count guard: already represented, never also projected
         _, amount_base = await convert_for(
-            session, org_id, proj.amount, proj.currency, proj.on_date
+            session, org_id, proj.amount, proj.currency, proj.on_date, client_id=client_id
         )
         key = (category_id, None, idx)
         if amount_base is not None:
@@ -540,10 +576,11 @@ async def position(
     overstate a quarterly budget's monthly rate 3x) -- and a straight-line
     `projected_year_end`. `elapsed_periods` itself still comes from the
     FISCAL calendar via `periods.period_for_date`, never wall-clock month
-    count.
+    count. The budget's client's confirmed expenses alone, in its fiscal
+    calendar (module docstring).
     """
     budget = await get_budget(session, org_id, budget_id)  # 404 if cross-org/missing
-    settings = await get_settings(session, org_id)
+    settings = await get_settings(session, org_id, budget.client_id)
     count = period_count(budget.granularity)
     year_start, _ = period_bounds(
         budget.fiscal_year, settings.fiscal_year_start_month, budget.granularity, 1
@@ -573,6 +610,7 @@ async def position(
                 await session.execute(
                     select(Expense).where(
                         Expense.org_id == org_id,
+                        Expense.client_id == budget.client_id,
                         Expense.status == "confirmed",
                         Expense.expense_date >= year_start,
                         Expense.expense_date <= ytd_end,
@@ -639,12 +677,12 @@ async def position(
 
 
 # ---------------------------------------------------------------------------
-# forecast (org-wide, not scoped to a single budget -- spec §6.2)
+# forecast (one client's, not scoped to a single budget -- spec §6.2)
 # ---------------------------------------------------------------------------
 
 
 async def forecast(
-    session: AsyncSession, org_id: UUID, actor_id: UUID, *, months: int
+    session: AsyncSession, org_id: UUID, actor_id: UUID, *, client_id: UUID, months: int
 ) -> dict[str, Any]:
     """Read-time projection over Subscriptions/Licenses for the next
     `months` calendar months from today, INCLUDING the current one (spec
@@ -655,30 +693,41 @@ async def forecast(
     from "still pure projection" without summing the two into one
     ambiguous figure (spec §6.2).
 
-    `actor_id` is used only to lazily seed the org's default categories
-    (C1 fix), same rationale as `variance()`."""
+    `actor_id` is used only to lazily seed the client's default categories
+    (C1 fix), same rationale as `variance()`.
+
+    `client_id`'s subscriptions and licenses, in its base currency: a client
+    this session can see (else the 404 of one that does not exist). A client
+    without the budget module, or archived, has no forecast -- empty rows,
+    and nothing seeded (`budget_in_use`; a read is never a 409)."""
     if months < 1:
         raise BudgetValidationError(tr("months must be >= 1"))
-
-    await seed_default_categories(session, org_id, actor_id)
-
-    today = date.today()
-    to_date = _add_months_end(today, months - 1)
-    projections = await project_costs(session, org_id, from_date=today, to_date=to_date)
-    category_by_key = await _resolve_projection_categories(
-        session, org_id, {p.category_system_key for p in projections}
-    )
-
-    materialized_keys = await _materialized_keys(
-        session, org_id, {p.link_id for p in projections}
-    )
+    await visible_client(session, org_id, client_id)
 
     out_rows: list[dict[str, Any]] = []
     unconvertible_count = 0
     unconvertible_totals: dict[str, Decimal] = {}
+    if not await budget_in_use(session, org_id, client_id):
+        return {"rows": out_rows, "unconvertible_count": 0, "unconvertible_by_currency": {}}
+
+    await seed_default_categories(session, org_id, actor_id, client_id=client_id)
+
+    today = date.today()
+    to_date = _add_months_end(today, months - 1)
+    projections = await project_costs(
+        session, org_id, client_id=client_id, from_date=today, to_date=to_date
+    )
+    category_by_key = await _resolve_projection_categories(
+        session, org_id, client_id, {p.category_system_key for p in projections}
+    )
+
+    materialized_keys = await _materialized_keys(
+        session, org_id, client_id, {p.link_id for p in projections}
+    )
+
     for proj in projections:
         _, amount_base = await convert_for(
-            session, org_id, proj.amount, proj.currency, proj.on_date
+            session, org_id, proj.amount, proj.currency, proj.on_date, client_id=client_id
         )
         if amount_base is None:
             unconvertible_count += 1
@@ -709,17 +758,33 @@ async def forecast(
 # ---------------------------------------------------------------------------
 
 
+async def _export_client(session: AsyncSession, org_id: UUID, client_id: UUID) -> None:
+    """Both exports are one client's (module docstring): a client this
+    session can see (else the 404 of one that does not exist), whether or
+    not it still uses budget, and archived or not. A client that turned the
+    module off keeps the expenses it recorded -- its lists, `variance()` and
+    `position()` still show them -- and the export is how that history
+    leaves (Task 8 review, controller's decision). No module check, so no
+    lock either: the export only reads. The route's audit row does carry a
+    foreign key to the client (`fk_audit_events_client_org`, 0233), and its
+    check takes FOR KEY SHARE on the client row -- which does not conflict
+    with the FOR NO KEY UPDATE an archive holds (`client_sites`), so the
+    export never waits on an archive."""
+    await visible_client(session, org_id, client_id)
+
+
 async def _export_expenses(
     session: AsyncSession,
     org_id: UUID,
     *,
+    client_id: UUID,
     date_from: date | None,
     date_to: date | None,
     include_unconfirmed: bool = True,
 ) -> list[Expense]:
-    """Shared query for both exports: non-void, optionally date-bounded,
-    ordered deterministically (spec: "any list-equality assertion... needs
-    an explicit ORDER BY").
+    """Shared query for both exports: `client_id`'s expenses, non-void,
+    optionally date-bounded, ordered deterministically (spec: "any
+    list-equality assertion... needs an explicit ORDER BY").
 
     `include_unconfirmed` (I2 fix) defaults to `True`, preserving
     `export_rows`' existing behavior (every non-void row, `expected` or
@@ -729,7 +794,9 @@ async def _export_expenses(
     row (a projected/materialized cost nobody has confirmed) would reach the
     ERP indistinguishable from a real, asserted cost -- exactly the failure
     spec §0.3's confirm/void split exists to prevent, one layer up."""
-    stmt = select(Expense).where(Expense.org_id == org_id, Expense.status != "void")
+    stmt = select(Expense).where(
+        Expense.org_id == org_id, Expense.client_id == client_id, Expense.status != "void"
+    )
     if not include_unconfirmed:
         stmt = stmt.where(Expense.status == "confirmed")
     if date_from is not None:
@@ -744,6 +811,7 @@ async def export_rows(
     session: AsyncSession,
     org_id: UUID,
     *,
+    client_id: UUID,
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> list[dict[str, Any]]:
@@ -753,8 +821,11 @@ async def export_rows(
     cost-center names are resolved for readability; an id that fails to
     resolve for THIS org is suppressed together with its name (never just
     the name -- see module docstring's Phase-12 lesson) rather than leaking
-    the raw id."""
-    expenses = await _export_expenses(session, org_id, date_from=date_from, date_to=date_to)
+    the raw id. One client's rows (`_export_client`)."""
+    await _export_client(session, org_id, client_id)
+    expenses = await _export_expenses(
+        session, org_id, client_id=client_id, date_from=date_from, date_to=date_to
+    )
 
     vendor_ids = {e.vendor_id for e in expenses if e.vendor_id is not None}
     category_ids = {e.category_id for e in expenses}
@@ -806,6 +877,7 @@ async def odoo_export_rows(
     session: AsyncSession,
     org_id: UUID,
     *,
+    client_id: UUID,
     date_from: date | None = None,
     date_to: date | None = None,
     include_unconfirmed: bool = False,
@@ -827,11 +899,14 @@ async def odoo_export_rows(
     without this default, Odoo books 12 months of SaaS as real cost for 11
     renewals that have not happened yet, at amounts nobody confirmed. Pass
     `include_unconfirmed=True` as an explicit opt-in for a caller that
-    genuinely wants everything."""
-    settings = await get_settings(session, org_id)
+    genuinely wants everything. One client's rows, in its base currency
+    (`_export_client`)."""
+    await _export_client(session, org_id, client_id)
+    settings = await get_settings(session, org_id, client_id)
     expenses = await _export_expenses(
         session,
         org_id,
+        client_id=client_id,
         date_from=date_from,
         date_to=date_to,
         include_unconfirmed=include_unconfirmed,

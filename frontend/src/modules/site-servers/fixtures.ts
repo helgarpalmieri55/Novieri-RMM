@@ -16,6 +16,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
+import { ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 import type { SegmentCheckOut, SiteServerOut } from "./types";
 
@@ -25,25 +26,28 @@ const ago = (minutes: number): string => new Date(Date.now() - minutes * MINUTE)
 const servers = (): SiteServerOut[] => [
   {
     id: "ss-1",
+    // The fleet's devices are the internal client's, whose id is the org's.
+    client_id: ORG_ID,
     device_id: "dev-5",
     name: "rack-b4-relay",
     segments: ["10.20.4.0/24", "10.20.9.0/24"],
     roles: ["wake"],
     enabled: true,
     notes: "Lisbon office relay. Sweeps the rack and workstation VLANs.",
-    ipam_site_id: "site-lisbon",
+    site_id: "site-lisbon",
     agent_status: "online",
     agent_last_seen_at: ago(1),
   },
   {
     id: "ss-2",
+    client_id: ORG_ID,
     device_id: "dev-8",
     name: "por-branch-relay",
     segments: ["10.30.1.0/24"],
     roles: ["wake"],
     enabled: false,
     notes: "Demoted 2026-08-30 while the Porto file server is rebuilt.",
-    ipam_site_id: "site-porto",
+    site_id: "site-porto",
     agent_status: "offline",
     agent_last_seen_at: ago(26 * 60),
   },
@@ -59,7 +63,7 @@ const listSiteServers: FixtureMap["listSiteServers"] = (filters = {}) =>
   servers().filter(
     (server) =>
       (filters.enabled === undefined || server.enabled === filters.enabled) &&
-      (!filters.ipam_site_id || server.ipam_site_id === filters.ipam_site_id) &&
+      (!filters.site_id || server.site_id === filters.site_id) &&
       (!filters.segment || server.segments.includes(filters.segment)),
   );
 
@@ -90,13 +94,14 @@ const getSiteServerSegmentCheck: FixtureMap["getSiteServerSegmentCheck"] = (id) 
 
 const promoteSiteServer: FixtureMap["promoteSiteServer"] = (body) => ({
   id: `ss-${body.device_id}`,
+  client_id: ORG_ID,
   device_id: body.device_id,
   name: body.name ?? body.device_id,
   segments: body.segments,
   roles: body.roles ?? ["wake"],
   enabled: true,
   notes: body.notes ?? "",
-  ipam_site_id: body.ipam_site_id ?? null,
+  site_id: body.site_id ?? null,
   agent_status: "online",
   agent_last_seen_at: ago(0),
 });
@@ -110,7 +115,7 @@ const updateSiteServer: FixtureMap["updateSiteServer"] = (id, body) => {
     roles: body.roles ?? server.roles,
     notes: body.notes ?? server.notes,
     enabled: body.enabled ?? server.enabled,
-    ipam_site_id: body.ipam_site_id === undefined ? server.ipam_site_id : body.ipam_site_id,
+    site_id: body.site_id === undefined ? server.site_id : body.site_id,
   };
 };
 

@@ -13,7 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
-from app.models import Deployment, DeploymentResult, Device, Organization, Package
+from app.models import (
+    Deployment,
+    DeploymentResult,
+    Device,
+    DeviceGroup,
+    Organization,
+    Package,
+)
 from app.modules.deploy.models import Script, ScriptRun
 from app.modules.deploy.reporting import deployment_report, fleet_deploy_report
 
@@ -63,7 +70,9 @@ async def _seed_org(admin_engine: AsyncEngine, slug: str) -> dict[str, UUID | li
         package = Package(
             org_id=org.id, name="Acme", version="1.0", os_family="windows", installer_type="msi"
         )
-        session.add(package)
+        # A deployment's target exists: its client is the target's (0239).
+        group = DeviceGroup(org_id=org.id, client_id=org.id, name="Acme targets")
+        session.add_all([package, group])
         await session.flush()
 
         now = _dt.datetime.now(_dt.UTC)
@@ -73,7 +82,7 @@ async def _seed_org(admin_engine: AsyncEngine, slug: str) -> dict[str, UUID | li
             package_id=package.id,
             action="install",
             target_type="group",
-            target_id=uuid4(),
+            target_id=group.id,
             state="complete",
             created_at=now - _dt.timedelta(minutes=10),
         )
@@ -82,7 +91,7 @@ async def _seed_org(admin_engine: AsyncEngine, slug: str) -> dict[str, UUID | li
             package_id=package.id,
             action="install",
             target_type="group",
-            target_id=uuid4(),
+            target_id=group.id,
             state="dispatching",
             created_at=now - _dt.timedelta(minutes=5),
         )
@@ -264,7 +273,9 @@ async def test_fleet_deploy_report_no_result_rows_yields_zero_success_rate(
         package = Package(
             org_id=org.id, name="Acme", version="1.0", os_family="windows", installer_type="msi"
         )
-        session.add(package)
+        # A deployment's target exists: its client is the target's (0239).
+        group = DeviceGroup(org_id=org.id, client_id=org.id, name="Acme targets")
+        session.add_all([package, group])
         await session.flush()
 
         deployment = Deployment(
@@ -272,7 +283,7 @@ async def test_fleet_deploy_report_no_result_rows_yields_zero_success_rate(
             package_id=package.id,
             action="install",
             target_type="group",
-            target_id=uuid4(),
+            target_id=group.id,
             state="pending",
         )
         session.add(deployment)

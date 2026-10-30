@@ -31,7 +31,7 @@ function stubApi(overrides: Partial<ApiClient>, permissions: string[]): ApiClien
       permissions,
     }),
     listIpamVrfs: vi.fn().mockResolvedValue([]),
-    listIpamSites: vi.fn().mockResolvedValue([]),
+    listClientSites: vi.fn().mockResolvedValue([]),
     listIpamVlans: vi.fn().mockResolvedValue([]),
     listIpamSubnets: vi.fn().mockResolvedValue([]),
     getIpamSubnet: vi.fn(),
@@ -48,6 +48,7 @@ function stubApi(overrides: Partial<ApiClient>, permissions: string[]): ApiClien
 
 function subnet(overrides: Partial<SubnetOut> = {}): SubnetOut {
   return {
+    client_id: "o1",
     id: "s1",
     vrf_id: "v1",
     prefix: "10.4.7.0/24",

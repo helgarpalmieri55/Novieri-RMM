@@ -71,10 +71,17 @@ class SenderResolution:
     """`user_id is None` means QUARANTINE. `reason` is recorded on the
     `inbound_message` row so an admin can see what arrived and why it was
     refused -- silently dropping mail makes 'the helpdesk ignored my email'
-    indistinguishable from 'the helpdesk never received it' (spec §5.1)."""
+    indistinguishable from 'the helpdesk never received it' (spec §5.1).
+
+    `kind` and `client_id` are the resolved user's own (`staff`, or `contact`
+    and the client that contact belongs to): the first step of the client
+    rule (MSP clients spec §3.3, `services/client_routing.py`). Both are None
+    when the sender did not resolve."""
 
     user_id: UUID | None
     reason: str
+    kind: str | None = None
+    client_id: UUID | None = None
 
 
 async def resolve_sender(
@@ -104,7 +111,7 @@ async def resolve_sender(
     matches = list(
         (
             await session.execute(
-                select(User.id)
+                select(User.id, User.kind, User.client_id)
                 .where(
                     User.org_id == org_id,
                     func.lower(User.email) == address,
@@ -112,9 +119,7 @@ async def resolve_sender(
                 )
                 .limit(2)
             )
-        )
-        .scalars()
-        .all()
+        ).all()
     )
     if not matches:
         inactive = (
@@ -133,7 +138,8 @@ async def resolve_sender(
         # NEVER guess which human sent it (spec §5.1). Two users in one org
         # may legitimately share an address.
         return SenderResolution(None, f"ambiguous sender: {address} matches multiple users")
-    return SenderResolution(matches[0], "")
+    user_id, kind, client_id = matches[0]
+    return SenderResolution(user_id, "", kind, client_id)
 
 
 def extract_reply_token(recipients: Sequence[str]) -> str | None:

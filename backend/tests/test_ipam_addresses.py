@@ -97,7 +97,12 @@ async def test_absent_to_reserved(admin_engine: AsyncEngine) -> None:
     org, _, _ = await _fixture(admin_engine, "res")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         row = await reserve(
-            session, org.org_id, org.user_id, address="10.60.0.5", description="core switch"
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.5",
+            description="core switch",
         )
         await session.commit()
     assert row.state == "reserved"
@@ -119,7 +124,9 @@ async def test_reserving_an_address_outside_every_subnet_is_refused(
     org, _, _ = await _fixture(admin_engine, "resout")
     async with AsyncSession(admin_engine) as session:
         with pytest.raises(IpamValidationError, match="no registered subnet"):
-            await reserve(session, org.org_id, org.user_id, address="192.0.2.5")
+            await reserve(
+                session, org.org_id, org.user_id, client_id=org.org_id, address="192.0.2.5"
+            )
 
 
 async def test_reserving_inside_a_container_subnet_is_refused(
@@ -128,7 +135,9 @@ async def test_reserving_inside_a_container_subnet_is_refused(
     org, _, _ = await _fixture(admin_engine, "rescont", kind="container")
     async with AsyncSession(admin_engine) as session:
         with pytest.raises(IpamValidationError, match="container"):
-            await reserve(session, org.org_id, org.user_id, address="10.60.0.5")
+            await reserve(
+                session, org.org_id, org.user_id, client_id=org.org_id, address="10.60.0.5"
+            )
 
 
 async def test_the_network_and_broadcast_addresses_are_refused(
@@ -142,8 +151,8 @@ async def test_the_network_and_broadcast_addresses_are_refused(
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         for edge in ("10.60.0.0", "10.60.0.255"):
             with pytest.raises(IpamValidationError, match="network or broadcast"):
-                await reserve(session, org.org_id, org.user_id, address=edge)
-        await reserve(session, org.org_id, org.user_id, address="10.60.0.5")
+                await reserve(session, org.org_id, org.user_id, client_id=org.org_id, address=edge)
+        await reserve(session, org.org_id, org.user_id, client_id=org.org_id, address="10.60.0.5")
         await session.commit()
 
 
@@ -153,7 +162,7 @@ async def test_a_slash_31_has_no_forbidden_endpoints(admin_engine: AsyncEngine) 
     org, _, _ = await _fixture(admin_engine, "p2p", prefix="10.61.0.0/31")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         for address in ("10.61.0.0", "10.61.0.1"):
-            await reserve(session, org.org_id, org.user_id, address=address)
+            await reserve(session, org.org_id, org.user_id, client_id=org.org_id, address=address)
         await session.commit()
 
 
@@ -164,6 +173,7 @@ async def test_absent_to_assigned_with_a_device(admin_engine: AsyncEngine) -> No
             session,
             org.org_id,
             org.user_id,
+            client_id=org.org_id,
             address="10.60.0.5",
             device_id=org.device_id,
             hostname="wks-042",
@@ -178,12 +188,19 @@ async def test_absent_to_assigned_with_a_device(admin_engine: AsyncEngine) -> No
 async def test_free_to_assigned(admin_engine: AsyncEngine) -> None:
     org, _, _ = await _fixture(admin_engine, "f2a")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        await create_address(session, org.org_id, org.user_id, address="10.60.0.5")
+        await create_address(
+            session, org.org_id, org.user_id, client_id=org.org_id, address="10.60.0.5"
+        )
         await session.commit()
     assert (await _state_of(admin_engine, org.org_id, "10.60.0.5"))[0] == "free"
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         await assign(
-            session, org.org_id, org.user_id, address="10.60.0.5", asset_label="printer-3"
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.5",
+            asset_label="printer-3",
         )
         await session.commit()
     state, device_id, label, _, _ = await _state_of(admin_engine, org.org_id, "10.60.0.5")
@@ -193,9 +210,14 @@ async def test_free_to_assigned(admin_engine: AsyncEngine) -> None:
 async def test_reserved_to_assigned(admin_engine: AsyncEngine) -> None:
     org, _, _ = await _fixture(admin_engine, "r2a")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        await reserve(session, org.org_id, org.user_id, address="10.60.0.5")
+        await reserve(session, org.org_id, org.user_id, client_id=org.org_id, address="10.60.0.5")
         await assign(
-            session, org.org_id, org.user_id, address="10.60.0.5", device_id=org.device_id
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.5",
+            device_id=org.device_id,
         )
         await session.commit()
     assert (await _state_of(admin_engine, org.org_id, "10.60.0.5"))[0] == "assigned"
@@ -210,12 +232,24 @@ async def test_assigned_to_assigned_is_refused(admin_engine: AsyncEngine) -> Non
     other = await seed_device(admin_engine, org.org_id)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         await assign(
-            session, org.org_id, org.user_id, address="10.60.0.5", device_id=org.device_id
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.5",
+            device_id=org.device_id,
         )
         await session.commit()
     async with AsyncSession(admin_engine) as session:
         with pytest.raises(IpamConflictError, match="already assigned"):
-            await assign(session, org.org_id, org.user_id, address="10.60.0.5", device_id=other)
+            await assign(
+                session,
+                org.org_id,
+                org.user_id,
+                client_id=org.org_id,
+                address="10.60.0.5",
+                device_id=other,
+            )
     # ... and the original claimant is untouched.
     assert (await _state_of(admin_engine, org.org_id, "10.60.0.5"))[1] == org.device_id
 
@@ -235,6 +269,7 @@ async def test_assigned_to_free_clears_the_claimant_and_keeps_the_row(
             session,
             org.org_id,
             org.user_id,
+            client_id=org.org_id,
             address="10.60.0.5",
             device_id=org.device_id,
             mac="a4:bb:6d:11:22:33",
@@ -262,7 +297,12 @@ async def test_release_records_the_previous_claimant(admin_engine: AsyncEngine) 
     org, _, _ = await _fixture(admin_engine, "relaudit")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         row = await assign(
-            session, org.org_id, org.user_id, address="10.60.0.5", device_id=org.device_id
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.5",
+            device_id=org.device_id,
         )
         await release(session, org.org_id, org.user_id, row.id)
         await session.commit()
@@ -283,9 +323,14 @@ async def test_assigned_to_reserved_clears_the_claimant(admin_engine: AsyncEngin
     org, _, _ = await _fixture(admin_engine, "a2r")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         await assign(
-            session, org.org_id, org.user_id, address="10.60.0.5", device_id=org.device_id
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.5",
+            device_id=org.device_id,
         )
-        await reserve(session, org.org_id, org.user_id, address="10.60.0.5")
+        await reserve(session, org.org_id, org.user_id, client_id=org.org_id, address="10.60.0.5")
         await session.commit()
     assert await _state_of(admin_engine, org.org_id, "10.60.0.5") == (
         "reserved",
@@ -299,7 +344,9 @@ async def test_assigned_to_reserved_clears_the_claimant(admin_engine: AsyncEngin
 async def test_reserved_to_free(admin_engine: AsyncEngine) -> None:
     org, _, _ = await _fixture(admin_engine, "r2f")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        row = await reserve(session, org.org_id, org.user_id, address="10.60.0.5")
+        row = await reserve(
+            session, org.org_id, org.user_id, client_id=org.org_id, address="10.60.0.5"
+        )
         await release(session, org.org_id, org.user_id, row.id)
         await session.commit()
     assert (await _state_of(admin_engine, org.org_id, "10.60.0.5"))[0] == "free"
@@ -311,7 +358,12 @@ async def test_any_to_deprecated(admin_engine: AsyncEngine) -> None:
     org, _, _ = await _fixture(admin_engine, "dep")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         row = await assign(
-            session, org.org_id, org.user_id, address="10.60.0.5", device_id=org.device_id
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.5",
+            device_id=org.device_id,
         )
         await deprecate(session, org.org_id, org.user_id, row.id)
         await session.commit()
@@ -327,19 +379,31 @@ async def test_deprecated_cannot_be_assigned_directly(admin_engine: AsyncEngine)
     `deprecated` would be neither."""
     org, _, _ = await _fixture(admin_engine, "dep2a")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        row = await create_address(session, org.org_id, org.user_id, address="10.60.0.5")
+        row = await create_address(
+            session, org.org_id, org.user_id, client_id=org.org_id, address="10.60.0.5"
+        )
         await deprecate(session, org.org_id, org.user_id, row.id)
         await session.commit()
         address_id = row.id
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         with pytest.raises(IpamConflictError, match="deprecated"):
             await assign(
-                session, org.org_id, org.user_id, address="10.60.0.5", device_id=org.device_id
+                session,
+                org.org_id,
+                org.user_id,
+                client_id=org.org_id,
+                address="10.60.0.5",
+                device_id=org.device_id,
             )
         # ... but releasing it first is the documented route, and it works.
         await release(session, org.org_id, org.user_id, address_id)
         await assign(
-            session, org.org_id, org.user_id, address="10.60.0.5", device_id=org.device_id
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.5",
+            device_id=org.device_id,
         )
         await session.commit()
     assert (await _state_of(admin_engine, org.org_id, "10.60.0.5"))[0] == "assigned"
@@ -360,12 +424,15 @@ async def test_both_claimants_and_neither_claimant_are_refused_at_the_service(
     org, _, _ = await _fixture(admin_engine, "claim")
     async with AsyncSession(admin_engine) as session:
         with pytest.raises(IpamValidationError, match="claimant"):
-            await assign(session, org.org_id, org.user_id, address="10.60.0.5")
+            await assign(
+                session, org.org_id, org.user_id, client_id=org.org_id, address="10.60.0.5"
+            )
         with pytest.raises(IpamValidationError, match="claimant"):
             await assign(
                 session,
                 org.org_id,
                 org.user_id,
+                client_id=org.org_id,
                 address="10.60.0.5",
                 device_id=org.device_id,
                 asset_label="printer-3",
@@ -383,6 +450,7 @@ async def test_a_device_from_another_org_is_refused(admin_engine: AsyncEngine) -
                 session,
                 org.org_id,
                 org.user_id,
+                client_id=org.org_id,
                 address="10.60.0.5",
                 device_id=other.device_id,
             )
@@ -417,17 +485,25 @@ async def test_a_static_assignment_inside_a_dhcp_pool_is_refused(
                 session,
                 org.org_id,
                 org.user_id,
+                client_id=org.org_id,
                 address="10.60.0.150",
                 device_id=org.device_id,
             ),
-            reserve(session, org.org_id, org.user_id, address="10.60.0.150"),
+            reserve(
+                session, org.org_id, org.user_id, client_id=org.org_id, address="10.60.0.150"
+            ),
         ):
             try:
                 await attempt
             except IpamConflictError as exc:
                 refusals.append(str(exc))
         await assign(
-            session, org.org_id, org.user_id, address="10.60.0.5", device_id=org.device_id
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.5",
+            device_id=org.device_id,
         )
         await session.commit()
 
@@ -470,7 +546,12 @@ async def test_a_reserved_range_does_not_block_assignment(admin_engine: AsyncEng
         await session.commit()
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         await assign(
-            session, org.org_id, org.user_id, address="10.60.0.15", device_id=org.device_id
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.15",
+            device_id=org.device_id,
         )
         await session.commit()
     assert (await _state_of(admin_engine, org.org_id, "10.60.0.15"))[0] == "assigned"
@@ -503,6 +584,7 @@ async def test_no_ingestion_path_can_change_state(admin_engine: AsyncEngine) -> 
             session,
             org.org_id,
             org.user_id,
+            client_id=org.org_id,
             address="10.60.0.42",
             device_id=org.device_id,
             mac="a4:bb:6d:11:22:33",
@@ -594,12 +676,19 @@ async def test_address_history_returns_only_this_addresss_events(
     org, _, _ = await _fixture(admin_engine, "hist")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         first = await assign(
-            session, org.org_id, org.user_id, address="10.60.0.5", device_id=org.device_id
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.5",
+            device_id=org.device_id,
         )
         await session.commit()
         first_id = first.id
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        second = await reserve(session, org.org_id, org.user_id, address="10.60.0.6")
+        second = await reserve(
+            session, org.org_id, org.user_id, client_id=org.org_id, address="10.60.0.6"
+        )
         await session.commit()
         second_id = second.id
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
@@ -633,7 +722,12 @@ async def test_address_history_is_org_scoped_on_the_admin_engine(
     org_b, _, _ = await _fixture(admin_engine, "histb", prefix="10.62.0.0/24")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         row_b = await assign(
-            session, org_b.org_id, org_b.user_id, address="10.62.0.5", device_id=org_b.device_id
+            session,
+            org_b.org_id,
+            org_b.user_id,
+            client_id=org_b.org_id,
+            address="10.62.0.5",
+            device_id=org_b.device_id,
         )
         await session.commit()
         b_id = row_b.id
@@ -665,22 +759,35 @@ async def test_address_history_detail_names_only_this_org_and_this_address(
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         a_id = (
             await assign(
-                session, org_a.org_id, org_a.user_id,
-                address="10.60.0.5", device_id=org_a.device_id,
+                session,
+                org_a.org_id,
+                org_a.user_id,
+                client_id=org_a.org_id,
+                address="10.60.0.5",
+                device_id=org_a.device_id,
             )
         ).id
         await session.commit()
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         # Same address text, same prefix, different org.
         await assign(
-            session, org_b.org_id, org_b.user_id,
-            address="10.60.0.5", device_id=org_b.device_id,
+            session,
+            org_b.org_id,
+            org_b.user_id,
+            client_id=org_b.org_id,
+            address="10.60.0.5",
+            device_id=org_b.device_id,
         )
         # ...and a SECOND address in org A, so "filtered to one address" is not
         # satisfied by there being only one.
         await assign(
-            session, org_a.org_id, org_a.user_id,
-            address="10.60.0.6", device_id=org_a.device_id, allocation_method="dhcp",
+            session,
+            org_a.org_id,
+            org_a.user_id,
+            client_id=org_a.org_id,
+            address="10.60.0.6",
+            device_id=org_a.device_id,
+            allocation_method="dhcp",
         )
         await session.commit()
 
@@ -743,6 +850,7 @@ async def test_search_by_mac_finds_every_address_across_subnets(
             session,
             org.org_id,
             org.user_id,
+            client_id=org.org_id,
             address="10.63.0.5",
             asset_label="printer-3",
             mac="A4-BB-6D-11-22-33",
@@ -773,7 +881,12 @@ async def test_search_by_ip_returns_the_subnet_the_record_and_the_observations(
     org, vrf_id, subnet_id = await _fixture(admin_engine, "sip")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         await assign(
-            session, org.org_id, org.user_id, address="10.60.0.5", device_id=org.device_id
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.5",
+            device_id=org.device_id,
         )
         await upsert_observation(
             session,
@@ -806,8 +919,8 @@ async def test_search_by_cidr_returns_everything_inside_it(
     await seed_subnet(admin_engine, org.org_id, vrf_id=vrf_id, prefix="10.65.7.0/24")
     await seed_subnet(admin_engine, org.org_id, vrf_id=vrf_id, prefix="10.65.70.0/24")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        await reserve(session, org.org_id, org.user_id, address="10.65.7.5")
-        await reserve(session, org.org_id, org.user_id, address="10.65.70.5")
+        await reserve(session, org.org_id, org.user_id, client_id=org.org_id, address="10.65.7.5")
+        await reserve(session, org.org_id, org.user_id, client_id=org.org_id, address="10.65.70.5")
         await session.commit()
     async with AsyncSession(admin_engine) as session:
         result = await search(session, org.org_id, "10.65.7.0/24")
@@ -822,6 +935,7 @@ async def test_search_by_hostname_and_device_name(admin_engine: AsyncEngine) -> 
             session,
             org.org_id,
             org.user_id,
+            client_id=org.org_id,
             address="10.60.0.5",
             device_id=org.device_id,
             hostname="mail-relay-01",
@@ -849,6 +963,7 @@ async def test_search_is_org_scoped_on_the_admin_engine(admin_engine: AsyncEngin
             session,
             org_b.org_id,
             org_b.user_id,
+            client_id=org_b.org_id,
             address="10.60.0.5",
             device_id=org_b.device_id,
             mac="a4:bb:6d:11:22:33",
@@ -873,7 +988,9 @@ async def test_update_address_edits_description_but_never_state(
     `fields` dict away from being false for operators too."""
     org, _, _ = await _fixture(admin_engine, "upd")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        row = await reserve(session, org.org_id, org.user_id, address="10.60.0.5")
+        row = await reserve(
+            session, org.org_id, org.user_id, client_id=org.org_id, address="10.60.0.5"
+        )
         await session.commit()
         address_id = row.id
     refusal = None
@@ -909,7 +1026,9 @@ async def test_an_address_id_from_another_org_is_not_found(
     org_a, _, _ = await _fixture(admin_engine, "getxa")
     org_b, _, _ = await _fixture(admin_engine, "getxb", prefix="10.66.0.0/24")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        row = await reserve(session, org_b.org_id, org_b.user_id, address="10.66.0.5")
+        row = await reserve(
+            session, org_b.org_id, org_b.user_id, client_id=org_b.org_id, address="10.66.0.5"
+        )
         await session.commit()
         b_id = row.id
     async with AsyncSession(admin_engine) as session:
@@ -927,6 +1046,7 @@ async def test_an_ipv6_address_is_documented_and_assigned(admin_engine: AsyncEng
             session,
             org.org_id,
             org.user_id,
+            client_id=org.org_id,
             address="2001:db8:7::42",
             device_id=org.device_id,
         )
@@ -972,11 +1092,21 @@ async def test_an_unresolved_conflict_finding_blocks_assignment(
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         with pytest.raises(IpamConflictError, match="conflict"):
             await assign(
-                session, org.org_id, org.user_id, address="10.60.0.5", device_id=org.device_id
+                session,
+                org.org_id,
+                org.user_id,
+                client_id=org.org_id,
+                address="10.60.0.5",
+                device_id=org.device_id,
             )
         # The resolved finding does not block.
         await assign(
-            session, org.org_id, org.user_id, address="10.60.0.9", device_id=org.device_id
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.9",
+            device_id=org.device_id,
         )
         await session.commit()
     assert (await _state_of(admin_engine, org.org_id, "10.60.0.9"))[0] == "assigned"
@@ -1020,7 +1150,11 @@ async def test_an_acknowledged_conflict_no_longer_blocks_assignment(
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         with pytest.raises(IpamConflictError, match="conflict"):
             await assign(
-                session, org.org_id, org.user_id, address="10.60.0.5",
+                session,
+                org.org_id,
+                org.user_id,
+                client_id=org.org_id,
+                address="10.60.0.5",
                 device_id=org.device_id,
             )
 
@@ -1037,7 +1171,11 @@ async def test_an_acknowledged_conflict_no_longer_blocks_assignment(
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         await assign(
-            session, org.org_id, org.user_id, address="10.60.0.5",
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.5",
             device_id=org.device_id,
         )
         await session.commit()
@@ -1082,12 +1220,20 @@ async def test_suppression_lifts_the_assignment_block_only_while_it_lasts(
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         await assign(
-            session, org.org_id, org.user_id, address="10.60.0.5",
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.5",
             device_id=org.device_id,
         )
         with pytest.raises(IpamConflictError, match="conflict"):
             await assign(
-                session, org.org_id, org.user_id, address="10.60.0.9",
+                session,
+                org.org_id,
+                org.user_id,
+                client_id=org.org_id,
+                address="10.60.0.9",
                 device_id=org.device_id,
             )
         await session.commit()
@@ -1103,7 +1249,12 @@ async def test_the_actor_is_recorded_and_is_never_an_agent(
     org, _, _ = await _fixture(admin_engine, "actor")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         row = await assign(
-            session, org.org_id, org.user_id, address="10.60.0.5", device_id=org.device_id
+            session,
+            org.org_id,
+            org.user_id,
+            client_id=org.org_id,
+            address="10.60.0.5",
+            device_id=org.device_id,
         )
         await release(session, org.org_id, org.user_id, row.id)
         await deprecate(session, org.org_id, org.user_id, row.id)

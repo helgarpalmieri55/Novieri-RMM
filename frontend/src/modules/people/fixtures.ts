@@ -6,6 +6,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
+import { ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 import type { PersonDetailOut, PersonListRow, UnmatchedOut } from "./types";
 
@@ -15,6 +16,8 @@ const ago = (days: number): string => new Date(Date.now() - days * DAY).toISOStr
 const PEOPLE: PersonListRow[] = [
   {
     id: "person-maria",
+    // The internal client, whose id is the organisation's.
+    client_id: ORG_ID,
     display_name: "Maria Garcia",
     email: "maria.garcia@toeshee.example",
     user_id: null,
@@ -29,6 +32,7 @@ const PEOPLE: PersonListRow[] = [
   },
   {
     id: "person-sam",
+    client_id: ORG_ID,
     display_name: "Sam Okafor",
     email: "sam.okafor@toeshee.example",
     user_id: null,

@@ -20,6 +20,7 @@ from sqlalchemy import select
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent
+from tests.client_scope_support import internal_client
 from tests.conftest import ApiEnv
 
 
@@ -45,6 +46,7 @@ async def _create_subscription(
     renews_at: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
+        "client_id": await internal_client(api_env, headers),
         "service_name": service_name,
         "billing_cycle": billing_cycle,
         "cost_per_cycle": cost_per_cycle,
@@ -91,6 +93,7 @@ async def test_create_subscription_ok_for_technician_forbidden_for_read_only(
     forbidden = await api_env.client.post(
         "/api/v1/subscriptions",
         json={
+            "client_id": str(org_id),
             "service_name": "Other",
             "billing_cycle": "monthly",
             "cost_per_cycle": 10,
@@ -271,6 +274,7 @@ async def test_reports_ok_for_read(api_env: ApiEnv) -> None:
     forbidden = await api_env.client.post(
         "/api/v1/subscriptions",
         json={
+            "client_id": str(org_id),
             "service_name": "x",
             "billing_cycle": "monthly",
             "cost_per_cycle": 1,
@@ -313,6 +317,7 @@ async def test_create_subscription_cross_org_vendor_id_is_400_not_500(api_env: A
     resp = await api_env.client.post(
         "/api/v1/subscriptions",
         json={
+            "client_id": str(org_id),
             "vendor_id": other_vendor["id"],
             "service_name": "CrossOrg",
             "billing_cycle": "monthly",
@@ -414,6 +419,7 @@ async def test_create_subscription_currency_too_long_is_422(api_env: ApiEnv) -> 
     resp = await api_env.client.post(
         "/api/v1/subscriptions",
         json={
+            "client_id": str(org_id),
             "service_name": "BadCurrency",
             "billing_cycle": "monthly",
             "cost_per_cycle": 10,
@@ -438,6 +444,7 @@ async def test_create_subscription_over_long_service_name_is_422(api_env: ApiEnv
     resp = await api_env.client.post(
         "/api/v1/subscriptions",
         json={
+            "client_id": str(org_id),
             "service_name": "x" * 300,  # column is varchar(255)
             "billing_cycle": "monthly",
             "cost_per_cycle": 10,
@@ -456,6 +463,7 @@ async def test_create_subscription_oversized_cost_is_422(api_env: ApiEnv) -> Non
     resp = await api_env.client.post(
         "/api/v1/subscriptions",
         json={
+            "client_id": str(org_id),
             "service_name": "HugeCost",
             "billing_cycle": "monthly",
             "cost_per_cycle": 1e13,  # column is numeric(14, 2)
@@ -474,6 +482,7 @@ async def test_create_subscription_negative_seats_is_422(api_env: ApiEnv) -> Non
     resp = await api_env.client.post(
         "/api/v1/subscriptions",
         json={
+            "client_id": str(org_id),
             "service_name": "NegativeSeats",
             "billing_cycle": "monthly",
             "cost_per_cycle": 10,

@@ -1324,7 +1324,13 @@ async def remediate_alert_route(
                 alert_id,
                 action_key=body.action_key,
                 actor_id=ctx.user_id,
-                permissions=await user_permission_codes(session, ctx.user_id),
+                # THE ALERT'S CLIENT'S grants (plan 2026-10-26 Task 14, T4-C2):
+                # the job lands on its machine, so the job type's own
+                # permission is asked about that client. Read off the row
+                # just SELECTed -- nothing has updated it yet.
+                permissions=await user_permission_codes(
+                    session, ctx.user_id, client_id=alert.client_id
+                ),
                 job_engine=request.app.state.job_engine,
             )
             envelope = (job_id, signed)
@@ -1370,7 +1376,10 @@ async def approve_action_route(
                 alert_id,
                 action_id,
                 actor_id=ctx.user_id,
-                permissions=await user_permission_codes(session, ctx.user_id),
+                # The alert's client's grants, as on the remediate route.
+                permissions=await user_permission_codes(
+                    session, ctx.user_id, client_id=alert.client_id
+                ),
                 job_engine=request.app.state.job_engine,
             )
             envelope = (job_id, signed)

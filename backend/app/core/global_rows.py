@@ -23,7 +23,8 @@ refuses those writes BEFORE any SQL is sent, unless the scope is all:
      "claim a global row into my client" -- or that leaves the row global;
   c. an INSERT of a row that will be global: no client, or a parent (the
      trigger `its_client_from_parent` copies the parent's client) that is
-     itself global. `domain_events` is the one exception (below).
+     itself global. No table is an exception: `domain_events`, the last one,
+     came under the rule with migration 0243 (plan 2026-10-26 Task 15).
 
 It raises `GlobalRowNotWritable`, so the transaction -- and the audit event in
 it -- rolls back, and `app/main.py` answers 403 with the every-client refusal
@@ -63,14 +64,6 @@ SECOND_PARENTS: dict[str, tuple[str, str]] = {
     "doc_versions": ("doc_records", "record_id"),
     "health_profile_assignment": ("device_groups", "device_group_id"),
 }
-
-#: O tables whose NULL rows any pinned scope may INSERT. `domain_events` only:
-#: `events.publish` cannot name a client yet (phase 2 derives it), so every
-#: route that publishes would fail for a narrowed technician -- migration 0231
-#: allows it for the same reason. `users` is NOT here: since Task 6b its
-#: `client_isolation_insert` policy reserves creating a staff row to scope
-#: all, and since Task 8 its `client_isolation_update` changing one.
-NULL_INSERTABLE_FROM_ANY_SCOPE = frozenset({"domain_events"})
 
 
 class GlobalRowNotWritable(Exception):
@@ -284,8 +277,7 @@ def _refusals(session: Session) -> Iterable[str]:
         if _original_client(session, state) is None:
             yield table
         elif (
-            table not in NULL_INSERTABLE_FROM_ANY_SCOPE
-            and table != "users"
+            table != "users"
             and _changes_client(table, state)
             and _resulting_client(session, table, state, pending=False) is None
         ):
@@ -295,11 +287,7 @@ def _refusals(session: Session) -> Iterable[str]:
     for obj in session.new:
         state = inspect(obj)
         table = _table_of(state)
-        if (
-            table is not None
-            and table not in NULL_INSERTABLE_FROM_ANY_SCOPE
-            and _resulting_client(session, table, state, pending=True) is None
-        ):
+        if table is not None and _resulting_client(session, table, state, pending=True) is None:
             yield table
 
 

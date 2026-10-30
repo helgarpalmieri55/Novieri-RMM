@@ -78,7 +78,7 @@ from app.core.ai.providers import (
 from app.core.ai.settings import get_settings
 from app.core.ai.store import create_session, load_session, persist_turn
 from app.core.i18n import tr
-from app.core.rbac import user_permission_codes
+from app.core.rbac import codes_held_anywhere, user_permission_codes
 from app.core.tenancy import org_session
 from app.models import AiAction, AiSession
 from app.modules.ai_copilot.profile import COPILOT_PROFILE
@@ -138,10 +138,21 @@ def _configured_key() -> str | None:
     return config.key if config is not None else None
 
 
-async def _require_ai_use(session: Any, ctx: AuthContext) -> set[str]:
-    """§12's second gate. Returns the caller's codes, which the turn needs
-    anyway for the tool prefilter -- so this is one query, not two."""
-    codes = set(await user_permission_codes(session, ctx.user_id))
+async def _require_ai_use(session: Any, ctx: AuthContext) -> None:
+    """§12's second gate, before the ticket is read: `ai.use` held on SOME
+    client, or the 403 -- whatever the ticket id, so the route is no
+    existence oracle over tickets."""
+    if "ai.use" not in await codes_held_anywhere(session, ctx.user_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, tr("requires ai.use"))
+
+
+async def _codes_on_ticket_client(session: Any, ctx: AuthContext, ticket: Ticket) -> set[str]:
+    """§12's second gate ON THE TICKET'S CLIENT (MSP clients plan 2026-10-26
+    Task 14, T4-C2 item 12): the copilot reads that ticket and its machine,
+    so `ai.use` -- and the tools the turn is offered -- are the grants held
+    there. Returns the codes, which the turn needs anyway for the tool
+    prefilter."""
+    codes = await user_permission_codes(session, ctx.user_id, client_id=ticket.client_id)
     if "ai.use" not in codes:
         raise HTTPException(status.HTTP_403_FORBIDDEN, tr("requires ai.use"))
     return codes
@@ -186,11 +197,12 @@ async def create_copilot_session(
     engine = request.app.state.app_engine
     mode = (body or CopilotSessionCreate()).mode
     async with org_session(ctx.org_id, engine=engine, clients=ctx.clients) as session:
-        codes = await _require_ai_use(session, ctx)
+        await _require_ai_use(session, ctx)
         try:
-            await _ticket_for(session, org_id=ctx.org_id, ticket_id=ticket_id)
+            ticket = await _ticket_for(session, org_id=ctx.org_id, ticket_id=ticket_id)
         except AiNotFoundError as exc:
             raise _http_error(exc) from exc
+        codes = await _codes_on_ticket_client(session, ctx, ticket)
 
     if not _provider_configured():
         raise _http_error(
@@ -244,11 +256,12 @@ async def create_copilot_turn(
     engine = request.app.state.app_engine
 
     async with org_session(ctx.org_id, engine=engine, clients=ctx.clients) as session:
-        codes = await _require_ai_use(session, ctx)
+        await _require_ai_use(session, ctx)
         effective = await get_settings(session, ctx.org_id)
         try:
             ticket = await _ticket_for(session, org_id=ctx.org_id, ticket_id=ticket_id)
             ticket_device_id = ticket.device_id
+            codes = await _codes_on_ticket_client(session, ctx, ticket)
             ai_session, messages = await load_session(
                 session, org_id=ctx.org_id, user_id=ctx.user_id, session_id=session_id
             )

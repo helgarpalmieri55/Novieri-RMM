@@ -35,6 +35,7 @@ async def test_subscriptions_models_roundtrip(
         # Test Subscription
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("9.99"),
@@ -61,6 +62,7 @@ async def test_subscriptions_models_roundtrip(
         # Test Subscription with more fields set
         sub2 = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme Pro",
             plan="pro",
             category="productivity",

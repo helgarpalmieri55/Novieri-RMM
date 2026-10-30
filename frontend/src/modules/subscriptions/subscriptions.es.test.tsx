@@ -74,6 +74,7 @@ const RECORDED = [
 
 const SUB: SubscriptionOut = {
   id: "s1",
+  client_id: "o1",
   vendor_id: "v1",
   service_name: "Acme SaaS",
   plan: "Business",
@@ -132,12 +133,12 @@ const FAR: RenewalRow = {
   action_required: false,
 };
 const SPEND: SpendSummary = {
-  by_currency: [{ currency: "USD", monthly_total: "99.00", annual_total: "1188.00", group_key: null, group_type: null, group_id: null }],
+  by_currency: [{ client_id: "o1", currency: "USD", monthly_total: "99.00", annual_total: "1188.00", group_key: null, group_type: null, group_id: null }],
   by_vendor: [
-    { currency: "USD", monthly_total: "99.00", annual_total: "1188.00", group_key: "Acme Software", group_type: "vendor", group_id: "v1" },
-    { currency: "USD", monthly_total: "5.00", annual_total: "60.00", group_key: null, group_type: "vendor", group_id: null },
+    { client_id: "o1", currency: "USD", monthly_total: "99.00", annual_total: "1188.00", group_key: "Acme Software", group_type: "vendor", group_id: "v1" },
+    { client_id: "o1", currency: "USD", monthly_total: "5.00", annual_total: "60.00", group_key: null, group_type: "vendor", group_id: null },
   ],
-  by_category: [{ currency: "USD", monthly_total: "99.00", annual_total: "1188.00", group_key: "productivity", group_type: "category", group_id: null }],
+  by_category: [{ client_id: "o1", currency: "USD", monthly_total: "99.00", annual_total: "1188.00", group_key: "productivity", group_type: "category", group_id: null }],
   by_owner: [],
 };
 const IDLE: IdleSeatRow[] = [
@@ -488,7 +489,7 @@ describe("the spend roll-ups in Spanish", () => {
     const { container } = mount(<SpendDashboard />);
     expect(await screen.findByText("Gasto en suscripciones", { selector: "h1" })).toBeInTheDocument();
     expect(await screen.findByText("Por moneda")).toBeInTheDocument();
-    expect(screen.getByText("Nunca se suma entre monedas.")).toBeInTheDocument();
+    expect(screen.getByText("Nunca se suma entre clientes ni entre monedas.")).toBeInTheDocument();
     expect(screen.getByText("Todas las suscripciones")).toBeInTheDocument();
     expect(screen.getByText("Sin resolver")).toBeInTheDocument();
     expect(screen.getByText("Por proveedor")).toBeInTheDocument();

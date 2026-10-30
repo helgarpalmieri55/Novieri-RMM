@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import (
+    Device,
     License,
     LicenseAllocation,
     LicenseComplianceSnapshot,
@@ -60,6 +61,7 @@ async def test_licenses_models_roundtrip(
         # Test License
         lic = License(
             org_id=org_id,
+            client_id=org_id,
             product_id=product.id,
             type="perpetual",
             entitlements=50,
@@ -83,6 +85,7 @@ async def test_licenses_models_roundtrip(
         # Test License with vendor and dates set
         lic2 = License(
             org_id=org_id,
+            client_id=org_id,
             product_id=product.id,
             vendor_id=vendor.id,
             type="subscription",
@@ -102,21 +105,30 @@ async def test_licenses_models_roundtrip(
         assert lic2.vendor_id == vendor.id
         assert lic2.key_sealed == "sealed-blob"
 
-        # Test LicenseAllocation
+        # Test LicenseAllocation. Its target is a device of the license's
+        # client: `its_license_allocation_target_guard` (migration 0236)
+        # refuses one that does not exist, or that is another client's.
+        device = Device(
+            org_id=org_id, client_id=org_id, site_id=org_id, hostname="h", os_family="windows"
+        )
+        s.add(device)
+        await s.flush()
         alloc = LicenseAllocation(
             org_id=org_id,
             license_id=lic.id,
             target_type="device",
-            target_id=uuid4(),
+            target_id=device.id,
             created_by=user_id,
         )
         s.add(alloc)
         await s.flush()
         assert alloc.released_at is None
+        assert alloc.client_id == org_id  # inherited from the license
 
         # Test LicenseComplianceSnapshot
         snap = LicenseComplianceSnapshot(
             org_id=org_id,
+            client_id=org_id,
             product_id=product.id,
             entitled=50,
             installed=40,

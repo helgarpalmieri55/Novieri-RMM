@@ -57,10 +57,14 @@ def _ids() -> tuple[UUID, UUID]:
 class _Subnet:
     """The two attributes `select_sweeper` reads off an `IpamSubnet`."""
 
-    def __init__(self, subnet_id: UUID, prefix: str) -> None:
+    def __init__(self, subnet_id: UUID, prefix: str, client_id: UUID) -> None:
         self.id = subnet_id
         self.prefix = prefix
         self.sweep_device_id: UUID | None = None
+        #: The org's internal client, whose id is the organisation's: every
+        #: device and VRF here is its (`select_sweeper` keeps to the
+        #: subnet's client, MSP clients plan 2026-10-26 Task 11).
+        self.client_id = client_id
 
 
 async def _observe(
@@ -141,7 +145,7 @@ async def _two_candidates(
             enabled=enabled,
         )
 
-    return org, ordinary, site_server, _Subnet(subnet_id, prefix)
+    return org, ordinary, site_server, _Subnet(subnet_id, prefix, org.org_id)
 
 
 async def _choose(engine: AsyncEngine, org_id: UUID, subnet: _Subnet) -> UUID | None:
@@ -284,7 +288,9 @@ async def test_refusal_cooldown_applies_to_site_servers_too(
         admin_engine, org.org_id, stale, NOW - timedelta(days=REFUSAL_COOLDOWN_DAYS + 2)
     )
 
-    chosen = await _choose(admin_engine, org.org_id, _Subnet(subnet_id, "10.20.7.0/24"))
+    chosen = await _choose(
+        admin_engine, org.org_id, _Subnet(subnet_id, "10.20.7.0/24", org.org_id)
+    )
     assert (chosen == stale, chosen == recent) == (True, False)
 
 
@@ -389,7 +395,8 @@ async def test_no_agent_still_occurs(admin_engine: AsyncEngine) -> None:
         admin_engine, org.org_id, device_id=device, segments=["10.20.7.0/24"]
     )
 
-    assert await _choose(admin_engine, org.org_id, _Subnet(subnet_id, "10.20.7.0/24")) is None
+    subnet = _Subnet(subnet_id, "10.20.7.0/24", org.org_id)
+    assert await _choose(admin_engine, org.org_id, subnet) is None
 
 
 # --------------------------------------------------------------------------- #

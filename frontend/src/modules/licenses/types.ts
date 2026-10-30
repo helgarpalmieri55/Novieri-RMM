@@ -61,6 +61,8 @@ export interface ProductUpdate {
 export type LicenseType = "perpetual" | "volume" | "oem" | "cal" | "per_device" | "per_user";
 
 export interface LicenseCreate {
+  /** The client the license is bought for; it never changes (MSP clients phase 2). */
+  client_id: string;
   product_id: string;
   vendor_id?: string | null;
   type: LicenseType;
@@ -97,6 +99,7 @@ export interface LicenseOut {
   // carry `has_key` only. Reveal is the separate, audited
   // `GET /licenses/{id}/key` endpoint, returning `LicenseKeyOut`.
   id: string;
+  client_id: string;
   product_id: string;
   vendor_id: string | null;
   // `str`, not `LicenseType`, in schema.py's LicenseOut -- the backend does
@@ -149,9 +152,23 @@ export interface ReviewMapRequest {
 
 export interface ReviewIgnoreRequest {
   name: string;
+  /**
+   * The client whose computers stop showing it. Without one the ignore is
+   * global -- every client's computers -- which needs every client.
+   */
+  client_id?: string | null;
 }
 
+export interface ReviewIgnoreOut {
+  id: string;
+  name: string;
+  client_id: string | null;
+}
+
+// One client's position on one product: compliance is never summed across
+// clients (MSP clients phase 2), so a product appears once per client.
 export interface ComplianceRow {
+  client_id: string;
   product_id: string;
   name: string;
   entitled: number;
@@ -162,6 +179,7 @@ export interface ComplianceRow {
 
 export interface RenewalRow {
   license_id: string;
+  client_id: string;
   product_id: string;
   trigger: "renewal" | "maintenance";
   due_date: string;
@@ -169,6 +187,7 @@ export interface RenewalRow {
 }
 
 export interface CostRow {
+  client_id: string;
   product_id: string;
   currency: string;
   // Decimal serializes as a string over the wire.

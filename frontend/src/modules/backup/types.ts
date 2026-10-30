@@ -20,6 +20,8 @@ export type RepositoryState = "active" | "disabled";
 
 export interface Repository {
   id: string;
+  /** The one client whose devices back up here (MSP clients phase 2, Task 13). */
+  client_id: string;
   name: string;
   storage_ref: string;
   state: string;
@@ -29,12 +31,20 @@ export interface Repository {
 }
 
 export interface RepositoryCreateRequest {
+  /** Required: a repository is one client's, and nothing else in the body says which. */
+  client_id: string;
   name: string;
   dedup_params?: Record<string, unknown> | null;
 }
 
 export interface BackupPolicy {
   id: string;
+  /**
+   * The group's client, or the client whose default this is (no group).
+   * `null` only on a row from before the server's rule that a policy names a
+   * repository of its own client.
+   */
+  client_id: string | null;
   device_group_id: string | null;
   repository_id: string;
   sources: Record<string, unknown>;
@@ -45,6 +55,8 @@ export interface BackupPolicy {
 
 export interface PolicyUpsertRequest {
   device_group_id?: string | null;
+  /** With no group, the client whose default policy this is; a group's is the group's. */
+  client_id?: string | null;
   repository_id: string;
   sources?: Record<string, unknown>;
   window_cron?: string | null;

@@ -314,6 +314,7 @@ function candidate(overrides: Partial<AssetCandidate> = {}): AssetCandidate {
     sightings: 12,
     confidence: "medium",
     subnet_id: null,
+    client_id: "org-1",
     ...overrides,
   };
 }
@@ -464,6 +465,7 @@ describe("the discovered page in Spanish", () => {
 function group(overrides: Partial<DeviceGroup> = {}): DeviceGroup {
   return {
     id: "g-1",
+    client_id: "o1",
     name: "servers",
     parent_group_id: null,
     description: "",

@@ -320,6 +320,38 @@ bandwidth-heavy work can stay local when the control plane moves to the cloud
 
 ## 2. Data model
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Tasks 10 and 12; final
+> review C): a site server is ONE CLIENT'S, and it is filed under `sites`.**
+> `site_server.client_id` is its device's client (H, written by
+> `its_client_from_parent`, migration 0231). Migration 0240 deleted
+> `ipam_site` (plan decision C3): the optional grouping column is now
+> **`site_id` → `sites.id`**, a site of the device's own client
+> (`fk_site_server_site_client`), and the API says `site_id` too — the promote
+> body (§3.3: a site this session cannot see is a 404, an archived one or one
+> of an archived client a 409, another client's a 422) and the list filter
+> (§11). Nothing in the registry, the dispatch path, the segment check or push
+> install's choice of originator reads it. Every choice of a site server is
+> made inside one client, by an explicit predicate and not by RLS (the worker
+> and an every-client technician see every client):
+>
+> - **IPAM's sweeper selection (§6.1)** keeps only the SUBNET'S CLIENT'S
+>   machines (`d.client_id = :client`, in `_designated` too) and the
+>   preference term only that client's site-server row
+>   (`s.client_id = :client`), so another client's site server declared for
+>   the same or a more specific segment is never this subnet's sweeper.
+> - **A provisioning wake (§6.4)** chooses only among the internal client's
+>   site servers (`list_site_servers(..., client_id=<the organisation's>)` in
+>   `provisioning.dispatch._resolve_wake`): provisioning is the internal
+>   client's, so a customer's site server never serves one, and its two
+>   refusals say so.
+> - **A push install's originator** is a site server of the push's client —
+>   its credential's (`agent_push.preflight._site_server_for`, whose
+>   `client_id` is required): the machine that receives the decrypted
+>   credential is a machine of that client.
+>
+> The sections below are corrected in place where they named `ipam_site_id`
+> or showed the sweeper's SQL "in full".
+
 One table in v1. Module-owned, in `backend/app/modules/site_server/models.py`,
 created by **migration `0050_site_server.py`** (`down_revision = "0049"`). This
 paragraph used to say "head is `0046` as this spec is written; do not assume
@@ -336,7 +368,8 @@ the build, which is exactly why it said not to assume.
 | `name` | varchar(200) NOT NULL | Display label; defaults to the device hostname at promotion |
 | `segments` | `cidr[]` NOT NULL | The LAN segments this server serves |
 | `roles` | `text[]` NOT NULL | Subset of `{'wake','cache','pxe'}`; v1 only `'wake'` is honoured — see below |
-| `ipam_site_id` | uuid FK → `ipam_site.id`, **nullable** | Optional grouping |
+| `client_id` | uuid FK → `clients.id`, NOT NULL | The device's client, by trigger (amendment above) |
+| `site_id` | uuid FK → `sites.id`, **nullable** | Optional grouping: a site of the device's client (`ipam_site_id` → `ipam_site.id` until migration 0240) |
 | `enabled` | bool NOT NULL default true | A demote-without-delete |
 | `notes` | text NOT NULL default `''` | |
 | `created_by` | uuid FK → `users.id`, nullable | |
@@ -377,9 +410,10 @@ Constraints:
 (`<<=`, `&&`) is the operation both this module and the sweeper preference need,
 and text comparison of prefixes is wrong in ways that pass small tests.
 
-**`ipam_site_id` is nullable and that is load-bearing.** IPAM is a pull-forward
-module (`docs/06-roadmap.md` Phase 15 note) and site servers must work in a
-deployment that never installs it. The FK is a convenience for grouping, never a
+**`site_id` is nullable and that is load-bearing.** It was `ipam_site_id`
+until migration 0240; IPAM is a pull-forward module (`docs/06-roadmap.md`
+Phase 15 note) and site servers must work in a deployment that never installs
+it. The FK is a convenience for grouping, never a
 dependency: nothing in §5 or §6 requires it to be set.
 
 **No `site_server_lease` table in v1.** Leases exist only to bound a listener's
@@ -434,7 +468,7 @@ already drops the live connection via `publish_revoke`.
 ### 3.3 Promotion
 
 `POST /api/v1/site-servers` with `{device_id, name?, segments[], roles[],
-ipam_site_id?}`, requiring `site.manage`. Validates:
+site_id?}`, requiring `site.manage`. Validates:
 
 - the device exists **in this org** (explicit `org_id` predicate as well as
   RLS, per IPAM's §11.1 precedent — through `org_session` RLS rejects first, so
@@ -655,6 +689,7 @@ existing ordering — **below liveness, not above it**:
 ORDER BY (a.status = 'online') DESC,
          (EXISTS (SELECT 1 FROM site_server s
                   WHERE s.org_id = :org AND s.device_id = d.id
+                    AND s.client_id = :client
                     AND s.enabled
                     AND EXISTS (SELECT 1 FROM unnest(s.segments) seg
                                 WHERE CAST(:prefix AS cidr) <<= seg))) DESC,
@@ -682,7 +717,10 @@ ORDER BY (a.status = 'online') DESC,
 > `backend/tests/test_ipam_site_server_preference.py::test_liveness_outranks_preference`
 > is red under the ordering this section originally specified.
 
-That is the entire change. Unchanged: the `EXISTS` inventory-observation
+That is the entire change to the ordering. (Since 2026-10-29 the candidate
+set is the subnet's client's machines, `d.client_id = :client`, and the
+preference term reads only that client's site-server row, as written above:
+the amendment at §2.) Unchanged: the `EXISTS` inventory-observation
 predicate that defines candidacy, the `NOT EXISTS` refusal-cooldown predicate,
 `_CANDIDATE_LIMIT`, `_advertises_net_sweep`, the `_designated` short-circuit,
 and the `no_agent` outcome. **No second selection function** (§0.7).
@@ -729,8 +767,9 @@ wake, while the packet lands on a different LAN.
 
 Two rules, and neither guesses:
 
-1. **`segment` absent is a refusal when the org has more than one enabled site
-   server.** Absent means no containment filter, so every enabled server
+1. **`segment` absent is a refusal when the internal client has more than one
+   enabled site server** (only the internal client's are candidates since
+   2026-10-29: the amendment at §2). Absent means no containment filter, so every enabled server
    matches. Defaulting to one of them is defaulting to "whichever row was
    promoted first", which is a fact about an operator's afternoon and not about
    the topology. It is defaulted only when there is nothing to choose between —
@@ -981,7 +1020,7 @@ All under `/api/v1/site-servers`. Request models `extra="forbid"`.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/` | `site.read` | List; filter by `enabled`, `ipam_site_id`, `segment` (containment) |
+| GET | `/` | `site.read` | List; filter by `enabled`, `site_id`, `segment` (containment) |
 | POST | `/` | `site.manage` | Promote (§3.3) |
 | GET | `/{id}` | `site.read` | Detail, including agent status and last seen |
 | PATCH | `/{id}` | `site.manage` | Segments, roles, name, notes, enabled |

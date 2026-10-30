@@ -34,6 +34,7 @@ async def test_bcp_models_roundtrip(
         # Test BcpPlan
         plan = BcpPlan(
             org_id=org_id,
+            client_id=org_id,
             name="Test Plan",
             description="A test BCP plan",
             created_by=user_id,

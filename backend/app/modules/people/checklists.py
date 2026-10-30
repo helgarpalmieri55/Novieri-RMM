@@ -11,7 +11,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import ColumnElement, and_, exists, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import N_, tr, tr_marked
@@ -19,12 +19,15 @@ from app.models import (
     Device,
     DevicePerson,
     LicenseAllocation,
+    Permission,
     Person,
     PersonChecklist,
     PersonChecklistStep,
+    RolePermission,
     SeatAssignment,
     Ticket,
     User,
+    UserRole,
 )
 from app.modules.people.errors import PeopleConflictError, PeopleError, PeopleNotFoundError
 from app.modules.people.service import _audit, load_person
@@ -301,7 +304,38 @@ def step_def(kind: str, key: str) -> StepDef:
     raise PeopleNotFoundError(tr("no such step"))
 
 
-async def gather_facts(session: AsyncSession, org_id: UUID, person: Person) -> PersonFacts:
+def tickets_the_viewer_reads(org_id: UUID, viewer_id: UUID) -> ColumnElement[bool]:
+    """`Ticket` rows of a client where `viewer_id` holds `ticket.read` -- on
+    every client or on the ticket's own: `has_permission(..., client_id=
+    ticket.client_id)` as a predicate correlated to `Ticket`, the shape of
+    `device_list._reads_people_there`. Read straight from the grants
+    (`user_roles`, G), and only ever ANDed with the session's own RLS, so it
+    narrows and never widens.
+
+    A person page is read in the `people.read` scope, and a person's tickets
+    are not filed under the person's client: a staff person is the internal
+    client's (C4) and raises tickets in any client. Without this, `ticket.read`
+    on the internal client and `people.read` on X showed X's ticket subjects
+    (and counted them) while the ticket itself is a 404 (final review B1)."""
+    return (
+        exists()
+        .where(
+            UserRole.org_id == org_id,
+            UserRole.user_id == viewer_id,
+            RolePermission.role_id == UserRole.role_id,
+            Permission.id == RolePermission.permission_id,
+            Permission.code == "ticket.read",
+            or_(UserRole.client_id.is_(None), UserRole.client_id == Ticket.client_id),
+        )
+        .correlate(Ticket)
+    )
+
+
+async def gather_facts(
+    session: AsyncSession, org_id: UUID, person: Person, *, viewer_id: UUID
+) -> PersonFacts:
+    """`viewer_id` is who the facts are for: the open-ticket count holds only
+    the tickets they may read (`tickets_the_viewer_reads`)."""
     account_status = None
     if person.user_id is not None:
         account_status = (
@@ -361,6 +395,7 @@ async def gather_facts(session: AsyncSession, org_id: UUID, person: Person) -> P
                     Ticket.org_id == org_id,
                     Ticket.requester_id == person.user_id,
                     Ticket.status.not_in(CLOSED_TICKET_STATUSES),
+                    tickets_the_viewer_reads(org_id, viewer_id),
                 )
             )
         ).scalar_one()
@@ -523,6 +558,7 @@ async def start_checklist(
         action="people.checklist_started",
         target_type="person",
         target_id=person.id,
+        client_id=person.client_id,
         metadata={"checklist_id": str(checklist.id), "kind": kind},
     )
     return checklist
@@ -546,7 +582,9 @@ async def update_step(
     note = note.strip()
     if state == "done":
         person = await load_person(session, org_id, person_id)
-        auto, evidence = definition.check(await gather_facts(session, org_id, person))
+        auto, evidence = definition.check(
+            await gather_facts(session, org_id, person, viewer_id=actor_id)
+        )
         if auto is False and not note:
             raise PeopleError(
                 tr(
@@ -572,6 +610,8 @@ async def update_step(
         action="people.checklist_step_updated",
         target_type="person",
         target_id=person_id,
+        # The checklist's client is its person's (H, migration 0235).
+        client_id=checklist.client_id,
         metadata={
             "checklist_id": str(checklist.id),
             "kind": checklist.kind,
@@ -599,7 +639,10 @@ async def close_checklist(
     person = await load_person(session, org_id, person_id)
     if outcome == "completed":
         view = await checklist_view(
-            session, org_id, checklist, await gather_facts(session, org_id, person)
+            session,
+            org_id,
+            checklist,
+            await gather_facts(session, org_id, person, viewer_id=actor_id),
         )
         pending = [s["title"] for s in view["steps"] if s["state"] == "pending"]
         if pending:
@@ -623,6 +666,7 @@ async def close_checklist(
         action=f"people.checklist_{outcome}",
         target_type="person",
         target_id=person.id,
+        client_id=person.client_id,
         metadata={"checklist_id": str(checklist.id), "kind": checklist.kind},
     )
     return checklist

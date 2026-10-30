@@ -15,10 +15,16 @@ Every ``LicenseValidationError`` raised by the service layer is translated to
 an HTTP 4xx here -- it must never surface as a 500, and the translation is by
 TYPE, not by matching exception-message text. ``LicenseNotFoundError`` (a
 ``LicenseValidationError`` subclass, raised for a missing vendor/product/
-license/allocation) becomes a 404; every other ``LicenseValidationError`` (an
-invalid match rule, a cross-org/nonexistent ``product_id``/``vendor_id``, an
-unknown allocation target, an exhausted license pool, an already-released
-allocation) becomes a 400.
+license/allocation, or a client the caller cannot see) becomes a 404;
+``LicenseConflictError`` (an archived client) a 409; ``LicenseClientError``
+(another client's allocation target, "Sin asignar" as a client) a 422; every
+other ``LicenseValidationError`` (an invalid match rule, a cross-org/
+nonexistent ``product_id``/``vendor_id``, an unknown allocation target, an
+exhausted license pool, an already-released allocation) becomes a 400.
+
+A license is one client's (plan 2026-10-26 Task 6): the reports return one
+row per client -- compliance per (client, product), costs per (client,
+product, currency) -- for the clients the caller's scope reaches.
 
 ``GET /licenses/{id}/key`` is the one deliberately sensitive route: it is
 gated by the distinct ``licenses.keys.read`` permission (least-privilege,
@@ -51,12 +57,18 @@ from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.models import License, LicenseAllocation, SoftwareProduct, Vendor
-from app.modules.licenses.errors import LicenseNotFoundError, LicenseValidationError
+from app.modules.licenses.errors import (
+    LicenseClientError,
+    LicenseConflictError,
+    LicenseNotFoundError,
+    LicenseValidationError,
+)
 from app.modules.licenses.reporting import (
-    compliance_summary,
+    compliance_by_client,
     cost_view,
     export_rows,
     renewal_calendar,
+    reported_clients,
 )
 from app.modules.licenses.schema import (
     AllocationCreate,
@@ -71,6 +83,7 @@ from app.modules.licenses.schema import (
     ProductOut,
     ProductUpdate,
     RenewalRow,
+    ReviewIgnoreOut,
     ReviewIgnoreRequest,
     ReviewMapRequest,
     ReviewQueueRow,
@@ -112,13 +125,20 @@ def _http_error(exc: LicenseValidationError) -> HTTPException:
     tweak in the service layer must never silently mis-route a status code).
     `LicenseNotFoundError` -- raised for "the resource named in the URL path
     doesn't exist under this org" (a vendor, a product, a license, an
-    allocation) -- becomes a 404. Every other `LicenseValidationError` is a
-    400 -- including an invalid match rule, a cross-org/nonexistent
-    `product_id`/`vendor_id`, an unknown allocation target, an exhausted
-    license pool, and an already-released allocation.
+    allocation), and for a client this caller cannot see -- becomes a 404.
+    `LicenseConflictError` (an archived client) is a 409, and
+    `LicenseClientError` (one client's row naming another's) a 422. Every
+    other `LicenseValidationError` is a 400 -- including an invalid match
+    rule, a cross-org/nonexistent `product_id`/`vendor_id`, an unknown
+    allocation target, an exhausted license pool, and an already-released
+    allocation.
     """
     if isinstance(exc, LicenseNotFoundError):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    if isinstance(exc, LicenseConflictError):
+        return HTTPException(status.HTTP_409_CONFLICT, str(exc))
+    if isinstance(exc, LicenseClientError):
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
     return HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
 
@@ -147,6 +167,7 @@ def _license_out(row: License) -> LicenseOut:
     # list/detail response (invariant #3, spec §5).
     return LicenseOut(
         id=row.id,
+        client_id=row.client_id,
         product_id=row.product_id,
         vendor_id=row.vendor_id,
         type=row.type,
@@ -304,10 +325,14 @@ async def compliance_route(
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.read")),
 ) -> list[ComplianceRow]:
+    """One row per (client, product), for every active client the caller's
+    scope reaches: a client's position is its own licenses against its own
+    computers, never summed with another's."""
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        rows = await compliance_summary(session, ctx.org_id)
+        clients = await reported_clients(session, ctx.org_id)
+        rows = await compliance_by_client(session, ctx.org_id, clients)
         return [ComplianceRow(**row) for row in rows]
 
 
@@ -345,22 +370,26 @@ async def review_queue_map_route(
         return _product_out(product)
 
 
-@router.post("/licenses/review-queue/ignore")
+@router.post("/licenses/review-queue/ignore", response_model=ReviewIgnoreOut)
 async def review_queue_ignore_route(
     body: ReviewIgnoreRequest,
     request: Request,
     ctx: AuthContext = Depends(require_permission("licenses.manage")),
-) -> dict[str, Any]:
+) -> ReviewIgnoreOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
         try:
             ignore = await ignore_software(
-                session, org_id=ctx.org_id, actor_id=ctx.user_id, name=body.name
+                session,
+                org_id=ctx.org_id,
+                actor_id=ctx.user_id,
+                name=body.name,
+                client_id=body.client_id,
             )
         except LicenseValidationError as exc:
             raise _http_error(exc) from None
-        return {"id": ignore.id, "name": ignore.name}
+        return ReviewIgnoreOut(id=ignore.id, name=ignore.name, client_id=ignore.client_id)
 
 
 @router.get("/licenses/renewals", response_model=list[RenewalRow])
@@ -491,6 +520,7 @@ async def create_license_route(
                 state.vault,
                 org_id=ctx.org_id,
                 actor_id=ctx.user_id,
+                client_id=body.client_id,
                 product_id=body.product_id,
                 vendor_id=body.vendor_id,
                 type_=body.type,

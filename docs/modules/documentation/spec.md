@@ -65,6 +65,20 @@ read-only get `docs.read`. The RBAC registry test updates accordingly.
   fields}`), `changed_by`, `ts`. Written on every create and update; archive
   does not delete versions (archival is soft — history and audit survive).
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Task 14): an article, a
+> record or a stored document belongs to one client, or to every client.**
+> `doc_articles`, `doc_records` and `doc_documents` are O tables (since MSP
+> clients phase 1): a row with no client is Novieri's own knowledge base,
+> read by every client's technicians and written only with every client.
+> Their creates now take an optional `client_id` (404 not visible, 409
+> archived, 422 Unassigned); without one the row is global. Versions and
+> links take their parent's client. A client's article or document links only
+> to that client's targets or to global ones; another client's is a 422. The
+> console files a new article, record or document under the internal client
+> unless the person ticks **"For every client"**. Every documentation audit
+> event carries the row's client. The plan is
+> `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 ## 5. Services & module layout
 
 ```

@@ -5,8 +5,10 @@ every mutation (invariant #4), an explicit `org_id` predicate on every query
 (invariant #5), and a typed `BudgetValidationError`/`BudgetNotFoundError`
 pre-check in place of letting a DB constraint surface as a 500.
 
-`put_lines` resolves EVERY `category_id` and `cost_center_id`, org-scoped via
-`refdata.resolve_category`/`resolve_cost_center`, and validates every
+`put_lines` resolves EVERY `category_id` and `cost_center_id`, org-scoped and
+held to the budget's client via `refdata.category_of_client`/
+`cost_center_of_client` (the same check an expense's references get), and
+validates every
 `period_index` against the parent budget's granularity (`periods.py`'s
 `period_count`, not reimplemented here) -- all of it BEFORE any row is added
 to the session. A cross-org reference or an out-of-range `period_index`
@@ -20,6 +22,14 @@ upserts rather than racing itself into the partial unique index.
 A closed budget rejects all line mutations (spec §4: a reported year must
 not shift under a reader) -- `put_lines` and `delete_line` both check
 `budget.status` first, before touching anything else.
+
+A budget belongs to ONE client (MSP clients plan 2026-10-26 Task 8), and its
+lines inherit it (H, by trigger). It is created for the client the caller
+names (`clients.client_for_new_budget_rows`); every other write loads it and
+calls `require_budget` with its client before anything else
+(`_budget_for_write`). A line's category and cost center are the budget's
+client's: another client's is a 422 (`BudgetClientError`), and the database
+holds the same rule (`fk_budget_line_*_client`).
 """
 
 from typing import Any
@@ -34,9 +44,10 @@ from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.wire_words import say
 from app.models import Budget, BudgetLine
+from app.modules.budget.clients import client_for_new_budget_rows, require_budget
 from app.modules.budget.errors import BudgetNotFoundError, BudgetValidationError
 from app.modules.budget.periods import period_count
-from app.modules.budget.refdata import resolve_category, resolve_cost_center
+from app.modules.budget.refdata import category_of_client, cost_center_of_client
 from app.modules.budget.schema import BudgetLineInput
 from app.modules.budget.words import GRANULARITY_WORDS
 
@@ -90,29 +101,33 @@ async def create_budget(
     org_id: UUID,
     actor_id: UUID,
     *,
+    client_id: UUID,
     fiscal_year: int,
     name: str,
     granularity: str,
 ) -> Budget:
-    """A duplicate `(fiscal_year, name)` within the org is rejected up front
-    as a typed `BudgetValidationError` rather than surfacing the
-    `uq_budget_org_fiscal_year_name` violation as a 500; the same pair in a
-    different org is unaffected (the constraint, and this check, are both
-    org-scoped).
+    """A budget of `client_id` (`client_for_new_budget_rows`). A duplicate
+    `(fiscal_year, name)` within the client is rejected up front as a typed
+    `BudgetValidationError` rather than surfacing the
+    `uq_budget_client_year_name` violation as a 500; the same pair in a
+    different client or org is unaffected (the constraint, and this check,
+    are both per client).
 
     The pre-check above is a fast path, not the sole guard: two concurrent
-    `create_budget` calls for the same `(org_id, fiscal_year, name)` can
-    both miss it before either has written. A plain `session.add` here
-    would let the loser surface a raw `IntegrityError` as a 500, so the
+    `create_budget` calls for the same `(org_id, client_id, fiscal_year,
+    name)` can both miss it before either has written. A plain `session.add`
+    here would let the loser surface a raw `IntegrityError` as a 500, so the
     actual insert instead goes through `ON CONFLICT DO NOTHING` against
-    `uq_budget_org_fiscal_year_name` (same shape as `rates.create_rate` /
+    `uq_budget_client_year_name` (same shape as `rates.create_rate` /
     `refdata.create_category`) -- the race loser gets the identical typed
     `BudgetValidationError` the pre-check raises, never someone else's
     row."""
+    await client_for_new_budget_rows(session, org_id, client_id)
     existing = (
         await session.execute(
             select(Budget.id).where(
                 Budget.org_id == org_id,
+                Budget.client_id == client_id,
                 Budget.fiscal_year == fiscal_year,
                 Budget.name == name,
             )
@@ -134,12 +149,15 @@ async def create_budget(
             .values(
                 id=budget_id,
                 org_id=org_id,
+                client_id=client_id,
                 fiscal_year=fiscal_year,
                 name=name,
                 granularity=granularity,
                 created_by=actor_id,
             )
-            .on_conflict_do_nothing(index_elements=["org_id", "fiscal_year", "name"])
+            .on_conflict_do_nothing(
+                index_elements=["org_id", "client_id", "fiscal_year", "name"]
+            )
             .returning(Budget.id)
         )
     ).scalar_one_or_none()
@@ -162,18 +180,21 @@ async def create_budget(
         action="budget.created",
         target_type="budget",
         target_id=str(budget.id),
+        client_id=client_id,
         metadata={"fiscal_year": fiscal_year, "name": name, "granularity": granularity},
     )
     await session.flush()
     return budget
 
 
-async def list_budgets(session: AsyncSession, org_id: UUID) -> list[Budget]:
-    stmt = (
-        select(Budget)
-        .where(Budget.org_id == org_id)
-        .order_by(Budget.fiscal_year.desc(), Budget.name)
-    )
+async def list_budgets(
+    session: AsyncSession, org_id: UUID, *, client_id: UUID | None = None
+) -> list[Budget]:
+    """Every visible client's budgets, or `client_id`'s alone."""
+    stmt = select(Budget).where(Budget.org_id == org_id)
+    if client_id is not None:
+        stmt = stmt.where(Budget.client_id == client_id)
+    stmt = stmt.order_by(Budget.fiscal_year.desc(), Budget.name)
     return list((await session.execute(stmt)).scalars().all())
 
 
@@ -188,6 +209,16 @@ async def get_budget(session: AsyncSession, org_id: UUID, budget_id: UUID) -> Bu
     ).scalar_one_or_none()
     if budget is None:
         raise BudgetNotFoundError(tr("budget {budget_id} not found", budget_id=budget_id))
+    return budget
+
+
+async def _budget_for_write(session: AsyncSession, org_id: UUID, budget_id: UUID) -> Budget:
+    """The budget a write is about, of a client that uses budget: a budget
+    this session cannot see is the 404 it always was, and one whose client
+    has the module off is `ModuleNotEnabled` (404) -- before anything is
+    written (the client is the write's first lock, Task 7)."""
+    budget = await get_budget(session, org_id, budget_id)
+    await require_budget(session, org_id, budget.client_id)
     return budget
 
 
@@ -211,7 +242,7 @@ async def update_budget(
     start succeeding again on lines that were supposed to be frozen.
     Reopening, if it is ever wanted, needs its own audited action rather
     than arriving as a side effect of a rename."""
-    budget = await get_budget(session, org_id, budget_id)
+    budget = await _budget_for_write(session, org_id, budget_id)
     if budget.status == "closed":
         raise BudgetValidationError(
             tr("budget {budget_id} is closed and cannot be edited", budget_id=budget_id)
@@ -235,6 +266,7 @@ async def update_budget(
         action="budget.updated",
         target_type="budget",
         target_id=str(budget.id),
+        client_id=budget.client_id,
         metadata={"changed_fields": sorted(changed_fields)},
     )
     await session.flush()
@@ -247,7 +279,7 @@ async def close_budget(
     """Spec §4: `draft -> active -> closed`. Closing is the only path that
     ever sets `status = "closed"` (the dedicated route/service call, not the
     generic `update_budget` PATCH surface), and it is audited."""
-    budget = await get_budget(session, org_id, budget_id)
+    budget = await _budget_for_write(session, org_id, budget_id)
     budget.status = "closed"
     await session.flush()
 
@@ -259,6 +291,7 @@ async def close_budget(
         action="budget.closed",
         target_type="budget",
         target_id=str(budget.id),
+        client_id=budget.client_id,
         metadata={},
     )
     await session.flush()
@@ -304,9 +337,10 @@ async def put_lines(
 
     Two passes, deliberately not interleaved:
 
-    1. Resolve every `category_id`/`cost_center_id` org-scoped and validate
-       every `period_index` against `budget.granularity`. Nothing is added
-       to the session in this pass -- a cross-org reference or an
+    1. Resolve every `category_id`/`cost_center_id` org-scoped, hold each to
+       the budget's client (another client's is a 422), and validate every
+       `period_index` against `budget.granularity`. Nothing is added to the
+       session in this pass -- a cross-org or cross-client reference or an
        out-of-range period anywhere in `lines` raises before any write, so
        there is no partial write to roll back.
     2. Upsert the resolved, deduplicated rows (by `(category_id,
@@ -318,7 +352,7 @@ async def put_lines(
     the line count in metadata -- one event per line would flood the hash
     chain for a large grid paste.
     """
-    budget = await get_budget(session, org_id, budget_id)
+    budget = await _budget_for_write(session, org_id, budget_id)
     if budget.status == "closed":
         raise BudgetValidationError(
             tr("budget {budget_id} is closed: line mutations are rejected", budget_id=budget_id)
@@ -328,10 +362,14 @@ async def put_lines(
     order: list[tuple[UUID, UUID | None, int]] = []
     amounts: dict[tuple[UUID, UUID | None, int], BudgetLineInput] = {}
     for line in lines:
-        category = await resolve_category(session, org_id, line.category_id)
+        category = await category_of_client(
+            session, org_id, budget.client_id, line.category_id
+        )
         cost_center_id: UUID | None = None
         if line.cost_center_id is not None:
-            cost_center = await resolve_cost_center(session, org_id, line.cost_center_id)
+            cost_center = await cost_center_of_client(
+                session, org_id, budget.client_id, line.cost_center_id
+            )
             cost_center_id = cost_center.id
         _validate_period_index(line.period_index, budget.granularity)
 
@@ -373,6 +411,7 @@ async def put_lines(
         action="budget.lines_updated",
         target_type="budget",
         target_id=str(budget_id),
+        client_id=budget.client_id,
         metadata={"line_count": len(results)},
     )
     await session.flush()
@@ -385,7 +424,7 @@ async def delete_line(
     """Org- and budget-scoped delete. A closed budget rejects this (spec
     §4), checked before the line lookup so a closed budget never leaks
     whether a given `line_id` exists via a different error shape."""
-    budget = await get_budget(session, org_id, budget_id)
+    budget = await _budget_for_write(session, org_id, budget_id)
     if budget.status == "closed":
         raise BudgetValidationError(
             tr("budget {budget_id} is closed: line mutations are rejected", budget_id=budget_id)
@@ -414,6 +453,7 @@ async def delete_line(
         action="budget.line_deleted",
         target_type="budget_line",
         target_id=str(line_id),
+        client_id=budget.client_id,
         metadata={},
     )
     await session.flush()

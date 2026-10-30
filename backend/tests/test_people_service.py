@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
@@ -50,7 +50,9 @@ async def _org(admin_engine: AsyncEngine) -> tuple[UUID, UUID]:
 
 async def _person(app_engine: AsyncEngine, org_id: UUID, name: str, email: str | None) -> UUID:
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        p = Person(org_id=org_id, display_name=name, email=email, source="operator")
+        p = Person(
+            org_id=org_id, client_id=org_id, display_name=name, email=email, source="operator"
+        )
         s.add(p)
         await s.flush()
         return p.id
@@ -120,14 +122,24 @@ async def test_sync_is_scoped_to_one_org(
 ) -> None:
     org_a, _ = await _org(admin_engine)
     org_b, _ = await _org(admin_engine)
+    # The sync skips an account whose person's client the session cannot see
+    # (`its_client_visible`, plan 2026-10-26 Task 5), and this BYPASSRLS
+    # session pins no scope: give it the one a request would, every client,
+    # so the org predicate is what this test still observes.
+    await bypassrls_session.execute(text("SELECT set_config('app.client_scope', 'all', true)"))
     await service.sync_accounts(bypassrls_session, org_a)
     await bypassrls_session.commit()
-    count_b = (
-        await bypassrls_session.execute(
-            select(func.count()).select_from(Person).where(Person.org_id == org_b)
-        )
-    ).scalar_one()
-    assert count_b == 0
+
+    async def people_of(org: UUID) -> int:
+        return (
+            await bypassrls_session.execute(
+                select(func.count()).select_from(Person).where(Person.org_id == org)
+            )
+        ).scalar_one()
+
+    # Not vacuous: org A's one account got its person.
+    assert await people_of(org_a) == 1
+    assert await people_of(org_b) == 0
 
 
 async def test_create_person_refuses_a_second_person_for_one_address(
@@ -136,12 +148,14 @@ async def test_create_person_refuses_a_second_person_for_one_address(
     org_id, actor = await _org(admin_engine)
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         await service.create_person(
-            s, org_id=org_id, actor_id=actor, display_name="Ann", email="ann@corp.example"
+            s, org_id=org_id, actor_id=actor, client_id=org_id, display_name="Ann",
+            email="ann@corp.example",
         )
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         with pytest.raises(PeopleConflictError):
             await service.create_person(
-                s, org_id=org_id, actor_id=actor, display_name="Ann 2", email=" ANN@corp.example"
+                s, org_id=org_id, actor_id=actor, client_id=org_id, display_name="Ann 2",
+                email=" ANN@corp.example",
             )
 
 
@@ -152,7 +166,8 @@ async def test_create_person_links_an_existing_account(
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         email = (await s.execute(select(User.email).where(User.id == actor))).scalar_one()
         person = await service.create_person(
-            s, org_id=org_id, actor_id=actor, display_name="IT", email=email.upper()
+            s, org_id=org_id, actor_id=actor, client_id=org_id, display_name="IT",
+            email=email.upper(),
         )
         assert person.user_id == actor
 
@@ -172,14 +187,24 @@ async def test_resolver_rules_in_order(admin_engine: AsyncEngine, app_engine: As
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         s.add(PersonLogin(org_id=org_id, person_id=kiosk, login="corp\\frontdesk"))
         await s.flush()
-        assert await service.resolve_login(s, org_id, "CORP\\FrontDesk") == kiosk
-        assert await service.resolve_login(s, org_id, "Maria.Garcia@corp.example") == maria
-        assert await service.resolve_login(s, org_id, "AzureAD\\MariaGarcia") == maria
-        assert await service.resolve_login(s, org_id, "CORP\\alice") == alice
+        # Every person here is the internal client's (`_person`).
+        internal = org_id
+        assert (
+            await service.resolve_login(s, org_id, "CORP\\FrontDesk", client_id=internal) == kiosk
+        )
+        assert (
+            await service.resolve_login(s, org_id, "Maria.Garcia@corp.example", client_id=internal)
+            == maria
+        )
+        assert (
+            await service.resolve_login(s, org_id, "AzureAD\\MariaGarcia", client_id=internal)
+            == maria
+        )
+        assert await service.resolve_login(s, org_id, "CORP\\alice", client_id=internal) == alice
         # Two people have the local part "sam": never guessed.
-        assert await service.resolve_login(s, org_id, "CORP\\sam") is None
-        assert await service.resolve_login(s, org_id, "CORP\\nobody") is None
-        assert await service.resolve_login(s, org_id, "  ") is None
+        assert await service.resolve_login(s, org_id, "CORP\\sam", client_id=internal) is None
+        assert await service.resolve_login(s, org_id, "CORP\\nobody", client_id=internal) is None
+        assert await service.resolve_login(s, org_id, "  ", client_id=internal) is None
 
 
 # --------------------------------------------------------------------------- #
@@ -250,7 +275,7 @@ async def test_inventory_sets_the_primary_user_and_an_override_survives(
         )
     # The override taught the resolver the sign-in name.
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        assert await service.resolve_login(s, org_id, "corp\\TEMP") == bob
+        assert await service.resolve_login(s, org_id, "corp\\TEMP", client_id=org_id) == bob
 
     await _collect(app_engine, org_id, device, tmp_path, {"console_user": "AzureAD\\MariaGarcia"})
     link = await _link(app_engine, org_id, device)
@@ -309,7 +334,7 @@ async def test_leaver_steps_tick_from_live_data_and_completion_waits_for_them(
             person = await service.load_person(s, org_id, person_id)
             row = await checklists.load_checklist(s, org_id, person_id, checklist_id)
             return await checklists.checklist_view(
-                s, org_id, row, await checklists.gather_facts(s, org_id, person)
+                s, org_id, row, await checklists.gather_facts(s, org_id, person, viewer_id=actor)
             )
 
     steps = {s["key"]: s for s in (await view())["steps"]}

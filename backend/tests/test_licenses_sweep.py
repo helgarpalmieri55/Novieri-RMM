@@ -107,6 +107,7 @@ async def _seed_license(
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         lic = License(
             org_id=org_id,
+            client_id=org_id,
             product_id=product_id,
             vendor_id=None,
             type="volume",

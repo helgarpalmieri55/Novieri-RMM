@@ -116,7 +116,7 @@ async def seed_dedup_org(
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
-            session, vault, org_id=org_id, actor_id=user_id, name=f"repo-{slug}"
+            session, vault, org_id=org_id, actor_id=user_id, client_id=org_id, name=f"repo-{slug}"
         )
         await session.flush()
         repository_id, storage_ref = repo.id, repo.storage_ref

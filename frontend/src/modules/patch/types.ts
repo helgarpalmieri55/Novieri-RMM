@@ -135,6 +135,9 @@ export interface ApprovalCreateRequest {
   /** An approved change this approval implements; required where a change
    *  gate covers the ring. */
   change_id?: string | null;
+  /** The client whose machines in the ring this clears. Absent: every
+   *  client's (a global approval), which needs access to every client. */
+  client_id?: string;
 }
 
 /**
@@ -150,6 +153,8 @@ export interface ApprovalCreateRequest {
  */
 export interface PatchApproval {
   id: string;
+  /** Whose machines it clears: a client's, or `null` for every client's. */
+  client_id: string | null;
   patch_id: string;
   /**
    * The update this approval clears, NAMED — `KB5031354`, `openssl-3.0.11`.
@@ -199,6 +204,8 @@ export interface BulkApprovalCreateRequest {
   patch_ids: string[];
   ring_name: string;
   change_id?: string | null;
+  /** As on `ApprovalCreateRequest`: absent is every client's. */
+  client_id?: string;
 }
 
 /**
@@ -216,15 +223,28 @@ export interface BulkApprovalResponse {
   already_in_force: number;
 }
 
+/** How many of one ring's machines are one client's. */
+export interface PatchRingClientCount {
+  client_id: string;
+  device_count: number;
+}
+
 /**
  * One deployment ring and the machines it reaches — the blast radius of an
- * approval, since clearing a patch for a ring clears it for every device that
- * resolves into that ring now and at every future scan.
+ * approval: a global approval clears a patch for every device that resolves
+ * into the ring now and at every future scan, a client's approval for that
+ * client's devices in it (`client_device_counts`).
  */
 export interface PatchRing {
   ring_name: string;
   ring_order: number;
   device_count: number;
+  /** Of `device_count`, how many are each client's, one row per client with a
+   *  machine in the ring; a client absent has none. A client's approval
+   *  reaches only its own, a global one all of them (MSP clients plan
+   *  2026-10-26 Task 14 review). Rows rather than a map: a response with an
+   *  open key space can never be an AI read tool. */
+  client_device_counts: PatchRingClientCount[];
 }
 
 /** The rings partition the fleet, so `sum(device_count) === device_total`. */
@@ -391,6 +411,9 @@ export interface PatchUpdateFilters {
  */
 export interface PatchDeviceRollup {
   device_id: string;
+  /** The machine's client: an approval made from its drill-down is filed
+   *  under it (the operator's rule of 2026-10-28). */
+  client_id: string;
   hostname: string;
   os_family: string;
   outstanding: number;

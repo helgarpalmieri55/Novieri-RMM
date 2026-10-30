@@ -134,7 +134,8 @@ export const agentPush = {
     chooseSubnet: "Choose an authorized subnet",
     addressesInOption: "{prefix} ({formatted} addresses)",
     choosePushCredential: "Choose a push credential",
-    noSubnet: "No subnet is authorized for push install yet. Someone who manages push ranges authorizes one under Push authorizations.",
+    noSubnet: "No subnet is authorized for push install for this credential's client yet. Someone who manages push ranges authorizes one under Push authorizations.",
+    credentialFirst: "Choose the credential first",
     listing: "Listing the machines in this subnet…",
     changed: "The machines in this subnet changed since the list was shown, so nothing was started. Read the list below again, then start the push.",
     warning: "One credential is presented to every ready machine on this list: to one machine first, then to at most {concurrency} at a time once a sign-in has succeeded. If the credential is refused by 3 machines the run stops itself, so a wrong domain password cannot lock the account out for everyone. Machines that are not ready are shown and will not be pushed to.",
@@ -152,6 +153,10 @@ export const agentPush = {
     awaitingReview: {
       one: "{count} machine in this subnet is not listed because it is waiting for review. Approve it under Devices to include it.",
       other: "{count} machines in this subnet are not listed because they are waiting for review. Approve them under Devices to include them.",
+    },
+    ambiguous: {
+      one: "{count} address in this subnet is not listed because it does not name one machine.",
+      other: "{count} addresses in this subnet are not listed because they do not name one machine.",
     },
     start: { one: "Start push to {count} machine", other: "Start push to {count} machines" },
   },
@@ -370,6 +375,7 @@ export const agentPush = {
   chip: {
     no_asset: "Nobody vouched for it",
     ambiguous_asset: "Address in more than one client",
+    credential_missing: "Credential of another client",
     no_authorization: "Address not authorized",
     credential_not_scoped: "Credential not allowed here",
     no_site_server: "No site server for its segment",
@@ -402,7 +408,7 @@ export const agentPush = {
   },
   runReason: {
     run_owner_not_permitted: "The person who started this run may no longer push install.",
-    credential_missing: "The run's credential was removed or changed.",
+    credential_missing: "The run's credential was removed or changed, or is not this machine's client's.",
     target_changed: "This address now belongs to a different machine record.",
     already_enrolled: "It is running the agent now.",
     not_installable: "Its operating system or processor is not set.",
@@ -412,7 +418,8 @@ export const agentPush = {
   },
   refusal: {
     no_asset: "Nobody has vouched for this machine: add it as an asset, or promote it from Discovered.",
-    ambiguous_asset: "Machines of more than one client have this address: choose the client in the client selector and try again.",
+    ambiguous_asset: "Machines of more than one client have this address: choose a push credential of the machine's client and try again.",
+    credential_missing: "This machine belongs to another client than the chosen credential: choose a push credential of its client.",
     no_authorization: "Its address is not in a range authorized for push install.",
     credential_not_scoped: "The chosen credential is not allowed on this address.",
     no_site_server: "No site server serves this machine's network segment.",

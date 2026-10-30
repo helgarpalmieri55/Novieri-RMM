@@ -62,6 +62,7 @@ const CHANGE_ID = "06a85c19-55e2-7f3c-8000-831c7bdba357";
 
 const DRAFT: ChangeRequest = {
   id: "change1",
+  client_id: "o1",
   type: "standard",
   title: "Actualizar firmware del conmutador",
   description: "Desplegar el firmware 2.1 en los conmutadores troncales.",
@@ -756,6 +757,7 @@ describe("label tables built outside React", () => {
   it("words the picker hints and the option sublabels", () => {
     const deployment = {
       id: "dep1",
+      client_id: "o1",
       package_id: "pkg1",
       action: "install",
       target_type: "device",

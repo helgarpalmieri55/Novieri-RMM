@@ -11,8 +11,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from uuid_extensions import uuid7
 
 from app.core.audit import audit_service
 from app.models import Device, DevicePatchStatus, Patch, PatchApproval
@@ -266,27 +268,50 @@ async def ingest_scan(
         for patch in newly_missing:
             if patch.severity not in AUTO_APPROVE_SEVERITIES:
                 continue
-            # The auto-approval is GLOBAL, as an operator's is (`approve.py`):
-            # a client's approval of the same (patch, ring) is another row
-            # (`uq_patch_approvals_client_patch_ring`, migration 0231, Task 8b).
-            existing_approval = (
+            # The auto-approval is the REPORTING DEVICE'S CLIENT'S (5a; final
+            # review D Important 1): the policy that asked for it is of a
+            # group of that client, and a global row would clear the patch
+            # for every client's ring -- a decision only a person with every
+            # client takes (`approve.py`).
+            #
+            # A PERSON'S REVOCATION WINS (controller decision on the final
+            # review): a revoked (patch, ring) approval, the global one or
+            # the client's own, stops it -- no row, the device not marked
+            # approved, nothing audited. A live one of either owner already
+            # covers the client's machines: nothing to insert. Another
+            # client's row, revoked or not, says nothing about this client.
+            owners = (
                 await session.execute(
-                    select(PatchApproval).where(
+                    select(PatchApproval.client_id, PatchApproval.revoked).where(
                         PatchApproval.org_id == org_id,
-                        PatchApproval.client_id.is_(None),
+                        or_(
+                            PatchApproval.client_id.is_(None),
+                            PatchApproval.client_id == device.client_id,
+                        ),
                         PatchApproval.patch_id == patch.id,
                         PatchApproval.ring_name == AUTO_APPROVE_RING,
                     )
                 )
-            ).scalar_one_or_none()
-            if existing_approval is None:
-                session.add(
-                    PatchApproval(
+            ).all()
+            if any(revoked for _, revoked in owners):
+                continue
+            if not owners:
+                # Two scans of the client's machines can both miss the
+                # look-up; the loser's insert is a no-op, not a unique
+                # violation that rolls back its whole scan.
+                await session.execute(
+                    pg_insert(PatchApproval)
+                    .values(
+                        id=uuid7(),
                         org_id=org_id,
+                        client_id=device.client_id,
                         patch_id=patch.id,
                         ring_name=AUTO_APPROVE_RING,
                         approved_by=None,
                         revoked=False,
+                    )
+                    .on_conflict_do_nothing(
+                        index_elements=["org_id", "client_id", "patch_id", "ring_name"]
                     )
                 )
             status = existing_status.get(patch.id)
@@ -302,6 +327,7 @@ async def ingest_scan(
                 action="patch.auto_approved",
                 target_type="patch",
                 target_id=str(patch.id),
+                client_id=device.client_id,
                 metadata={"device_id": str(device.id), "ring": AUTO_APPROVE_RING},
             )
 

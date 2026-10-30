@@ -32,7 +32,7 @@ function stubApi(hostKeys: HostKeyOut[], overrides: Partial<Record<Stubbed, Retu
 
 function renderPanel(
   targets: string[],
-  props: { windowsTargets?: string[]; credentialType?: string } = {},
+  props: { windowsTargets?: string[]; credentialType?: string; client?: string | null } = {},
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -40,7 +40,12 @@ function renderPanel(
       <PushPreflightPanel
         targets={targets}
         windowsTargets={props.windowsTargets}
-        credential={{ id: "c1", name: "push-svc", type: props.credentialType ?? "push_install" }}
+        credential={{
+          id: "c1",
+          name: "push-svc",
+          type: props.credentialType ?? "push_install",
+          client_id: props.client ?? null,
+        }}
       />
     </QueryClientProvider>,
   );
@@ -51,6 +56,7 @@ beforeEach(() => mockUseApi.mockReset());
 function hostKey(address: string, overrides: Partial<HostKeyOut> = {}): HostKeyOut {
   return {
     address,
+    client_id: null,
     transport: "ssh",
     observed_fingerprint: "SHA256:AAAA",
     observed_key_type: "ssh-ed25519",
@@ -102,6 +108,36 @@ describe("PushPreflightPanel", () => {
     const installBtn = await screen.findByRole("button", { name: /push install/i });
     expect(installBtn).toBeDisabled();
     expect(screen.getByText(/every target must be ready first/i)).toBeInTheDocument();
+  });
+
+  it("reads each address's key in the credential's client, never another client's", async () => {
+    // Two clients' machines may share one address (MSP clients phase 1), each
+    // with its own key. A push is made in its credential's client (phase 2,
+    // Task 12), so X's confirmed key does not make Y's machine installable;
+    // Y's own row speaks for it, and without one the global row would.
+    stubApi([
+      hostKey("10.0.4.1", { client_id: "x", confirmed_fingerprint: "SHA256:AAAA", installable: true }),
+      hostKey("10.0.4.1", { client_id: "y" }),
+    ]);
+    const y = renderPanel(["10.0.4.1"], { client: "y" });
+    expect((await screen.findAllByText("awaiting confirmation")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /push install/i })).toBeDisabled();
+    y.unmount();
+
+    renderPanel(["10.0.4.1"], { client: "x" });
+    const installBtn = await screen.findByRole("button", { name: /push install/i });
+    await waitFor(() => expect(installBtn).toBeEnabled());
+  });
+
+  it("falls back to the global key when the credential's client has none, and ignores another client's", async () => {
+    stubApi([
+      hostKey("10.0.4.1", { client_id: "x", confirmed_fingerprint: "SHA256:AAAA", installable: true }),
+      hostKey("10.0.4.2", { client_id: null, confirmed_fingerprint: "SHA256:BBBB", installable: true }),
+    ]);
+    renderPanel(["10.0.4.1", "10.0.4.2"], { client: "y" });
+    // 10.0.4.1 is X's key only: for Y it has none.
+    expect((await screen.findAllByText("no host key")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /push install/i })).toBeDisabled();
   });
 
   it("enables the install once all targets are installable", async () => {

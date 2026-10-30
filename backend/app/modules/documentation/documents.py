@@ -32,11 +32,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.storage import ObjectStore
-from app.core.wire_words import say
 from app.models import DocDocument, DocDocumentLink, DocDocumentVersion
 from app.modules.documentation.filetypes import UnsupportedFileType, sniff
-from app.modules.documentation.service import _LINK_TARGET_MODELS, LinkTargetNotFound
-from app.modules.documentation.words import LINK_TARGET_WORDS
+from app.modules.documentation.service import (
+    _LINK_TARGET_MODELS,
+    DocumentationClientError,
+    LinkTargetNotFound,
+    LinkTargetOfAnotherClient,
+    check_link_target,
+    client_for_documentation,
+)
 
 #: Per file (§4.2). Enforced by BOTH `app.core.http` guards in the route, in
 #: that order, plus this module's own check on a body already read.
@@ -53,7 +58,8 @@ from app.modules.documentation.words import LINK_TARGET_WORDS
 #: something does. §13 F5 says so too.)
 MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
 
-#: Per organisation (§0.10, §4.2). A module constant with no UI in v1.
+#: Per client (§0.10, §4.2; per client since 2026-10-29). A module constant
+#: with no UI in v1.
 #:
 #: THE BUCKET IS SHARED WITH BACKUP REPOSITORIES. Agent binaries, deployment
 #: packages, OS images, job artefacts, session recordings and backup chunks all
@@ -61,7 +67,13 @@ MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
 #: not a documentation problem: a `docs.manage` holder -- technician tier --
 #: filling the volume stops BACKUPS from writing. That is why a quota exists at
 #: all rather than being deferred with the rest of retention (§15.9).
-ORG_DOCUMENT_QUOTA_BYTES = 5 * 1024 * 1024 * 1024
+#:
+#: EACH CLIENT HAS ITS OWN, and so do the documents for every client (those
+#: with no client), as one bucket more (operator decision 2026-10-29). So the
+#: documents' share of the volume is bounded by this cap TIMES THE NUMBER OF
+#: CLIENTS PLUS ONE, and grows as clients are added: the volume has to be sized
+#: for that, beside the backups it is shared with.
+CLIENT_DOCUMENT_QUOTA_BYTES = 5 * 1024 * 1024 * 1024
 
 #: `target_type` values a document link accepts. Read off the SHIPPED
 #: dictionary rather than copied: §0.7 refuses a second vocabulary, and
@@ -88,7 +100,8 @@ class VersionPurged(Exception):
 
 
 class QuotaExceeded(Exception):
-    """The organisation is at or over `ORG_DOCUMENT_QUOTA_BYTES` (507)."""
+    """The document's owner -- its client, or the documents for every client --
+    is at or over `CLIENT_DOCUMENT_QUOTA_BYTES` (507)."""
 
 
 async def _audit(
@@ -98,7 +111,11 @@ async def _audit(
     action: str,
     document_id: UUID,
     metadata: dict[str, Any] | None = None,
+    *,
+    client_id: UUID | None,
 ) -> None:
+    """`client_id` is the document's (None: global), and has NO default:
+    every event decides (MSP clients plan 2026-10-26 Task 14)."""
     await audit_service.record(
         session,
         org_id=org_id,
@@ -108,6 +125,7 @@ async def _audit(
         target_type="doc_document",
         target_id=str(document_id),
         metadata=metadata or {},
+        client_id=client_id,
     )
 
 
@@ -124,9 +142,14 @@ async def create_document(
     title: str,
     description: str,
     category: str,
+    client_id: UUID | None,
 ) -> DocDocument:
+    """`client_id` is what the request named (None: global), checked by
+    `service.client_for_documentation` as the create's first lock."""
+    client_id = await client_for_documentation(session, org_id=org_id, client_id=client_id)
     document = DocDocument(
         org_id=org_id,
+        client_id=client_id,
         title=title,
         description=description,
         category=category,
@@ -142,6 +165,7 @@ async def create_document(
         "docs.document_created",
         document.id,
         {"title": title, "category": category},
+        client_id=client_id,
     )
     await session.flush()
     return document
@@ -263,6 +287,7 @@ async def update_document(
         "docs.document_updated",
         document.id,
         {"changed": changed},
+        client_id=document.client_id,
     )
     await session.flush()
     return True
@@ -274,7 +299,14 @@ async def archive_document(
     document.archived = True
     document.updated_by = actor_id
     session.add(document)
-    await _audit(session, document.org_id, actor_id, "docs.document_archived", document.id)
+    await _audit(
+        session,
+        document.org_id,
+        actor_id,
+        "docs.document_archived",
+        document.id,
+        client_id=document.client_id,
+    )
     await session.flush()
 
 
@@ -283,15 +315,37 @@ async def archive_document(
 # --------------------------------------------------------------------------- #
 
 
-async def org_usage_bytes(session: AsyncSession, org_id: UUID) -> int:
-    """Total live bytes for the org. Purged versions do not count: their
-    tombstone keeps the size for the audit record, but the storage is gone and
-    charging an org for bytes it no longer occupies would make the quota a
-    ratchet nobody could unwind."""
+async def client_usage_bytes(
+    session: AsyncSession, org_id: UUID, *, client_id: UUID | None
+) -> int:
+    """Live bytes of the documents of `client_id` -- the owner of the
+    document being written to -- or, `client_id` None, of the documents for
+    every client, which are a quota bucket of their own.
+
+    COUNTED FOR THE OWNER, NOT FOR THE SESSION. The versions are joined to
+    their document and kept to that document's client explicitly, so the
+    answer does not depend on what the caller's scope lets them see: before
+    (final review D), an every-client admin was measured against the
+    organisation's total and a technician of X against X's plus the documents
+    for every client, for the same upload. Whoever may write to a document
+    sees every document of its owner, so this is the same number for both.
+
+    Purged versions do not count: their tombstone keeps the size for the audit
+    record, but the storage is gone and charging a client for bytes it no
+    longer occupies would make the quota a ratchet nobody could unwind."""
+    owner = (
+        DocDocument.client_id.is_(None)
+        if client_id is None
+        else DocDocument.client_id == client_id
+    )
     total = (
         await session.execute(
-            select(func.coalesce(func.sum(DocDocumentVersion.byte_size), 0)).where(
+            select(func.coalesce(func.sum(DocDocumentVersion.byte_size), 0))
+            .join(DocDocument, DocDocument.id == DocDocumentVersion.document_id)
+            .where(
                 DocDocumentVersion.org_id == org_id,
+                DocDocument.org_id == org_id,
+                owner,
                 DocDocumentVersion.purged_at.is_(None),
             )
         )
@@ -299,36 +353,53 @@ async def org_usage_bytes(session: AsyncSession, org_id: UUID) -> int:
     return int(total)
 
 
-def _quota_message(usage: int) -> str:
+def _quota_message(usage: int, client_id: UUID | None) -> str:
+    """The 507, with the owner's usage: the document's client's (for an
+    every-client admin uploading to X's document, X's), or -- the documents
+    for every client, which only an every-client person can write to -- that
+    bucket's."""
+    if client_id is None:
+        return tr(
+            "the documents for every client have reached their storage quota ({usage} of "
+            "{quota} bytes used). Purge or archive documents to free space.",
+            usage=usage,
+            quota=CLIENT_DOCUMENT_QUOTA_BYTES,
+        )
     return tr(
-        "organization document storage quota reached ({usage} of {quota} bytes used). "
+        "this client's document storage quota is reached ({usage} of {quota} bytes used). "
         "Purge or archive documents to free space.",
         usage=usage,
-        quota=ORG_DOCUMENT_QUOTA_BYTES,
+        quota=CLIENT_DOCUMENT_QUOTA_BYTES,
     )
 
 
-async def assert_not_already_full(session: AsyncSession, org_id: UUID) -> None:
+async def assert_not_already_full(
+    session: AsyncSession, org_id: UUID, *, client_id: UUID | None
+) -> None:
     """QUOTA PASS ONE (§4.4 step 5), which runs BEFORE the body is read.
+    `client_id` is the document's owner (`client_usage_bytes`).
 
-    It asks one question -- "is this organisation already at the cap?" -- and
+    It asks one question -- "is this owner already at the cap?" -- and
     it CANNOT ask the other one, because nothing has been read yet and the
     incoming size does not exist. What it buys is that an org which is already
     full is told so without first buffering 25 MiB of its upload in API-process
     memory. That is the whole of its job, and it is not the guard that enforces
     the limit.
 
-    Note `>=`, not `>`: an org sitting exactly ON the cap is full, and the next
-    byte it sends would exceed it.
+    Note `>=`, not `>`: an owner sitting exactly ON the cap is full, and the
+    next byte would exceed it.
     """
-    usage = await org_usage_bytes(session, org_id)
-    if usage >= ORG_DOCUMENT_QUOTA_BYTES:
-        raise QuotaExceeded(_quota_message(usage))
+    usage = await client_usage_bytes(session, org_id, client_id=client_id)
+    if usage >= CLIENT_DOCUMENT_QUOTA_BYTES:
+        raise QuotaExceeded(_quota_message(usage, client_id))
 
 
-async def assert_room_for(session: AsyncSession, org_id: UUID, *, incoming: int) -> None:
+async def assert_room_for(
+    session: AsyncSession, org_id: UUID, *, client_id: UUID | None, incoming: int
+) -> None:
     """QUOTA PASS TWO (§4.4 step 8), which runs after the body is read and
-    before the object write. THIS is the pass that enforces the limit.
+    before the object write. THIS is the pass that enforces the limit, for
+    the document's owner `client_id` (`client_usage_bytes`).
 
     A DIFFERENT PREDICATE FROM PASS ONE, not the same one with a different
     argument, and that is why the two cannot be collapsed into a single call.
@@ -344,9 +415,9 @@ async def assert_room_for(session: AsyncSession, org_id: UUID, *, incoming: int)
     an advisory lock on a soft, operator-visible limit. Stated rather than
     fixed (§4.2).
     """
-    usage = await org_usage_bytes(session, org_id)
-    if usage + incoming > ORG_DOCUMENT_QUOTA_BYTES:
-        raise QuotaExceeded(_quota_message(usage))
+    usage = await client_usage_bytes(session, org_id, client_id=client_id)
+    if usage + incoming > CLIENT_DOCUMENT_QUOTA_BYTES:
+        raise QuotaExceeded(_quota_message(usage, client_id))
 
 
 # --------------------------------------------------------------------------- #
@@ -393,7 +464,9 @@ async def add_version(
         )
 
     content_type, viewer = sniff(data, filename)  # raises UnsupportedFileType -> 415
-    await assert_room_for(session, document.org_id, incoming=len(data))
+    await assert_room_for(
+        session, document.org_id, client_id=document.client_id, incoming=len(data)
+    )
 
     version_id = uuid4()
     digest = hashlib.sha256(data).hexdigest()
@@ -430,6 +503,7 @@ async def add_version(
             "content_type": content_type,
             "sha256": digest,
         },
+        client_id=document.client_id,
     )
     await session.flush()
     return version
@@ -523,6 +597,9 @@ async def record_download(
         "docs.document_downloaded",
         version.document_id,
         {"version": version.version, "filename": version.filename},
+        # The trigger's (its document's), loaded with the row: nothing has
+        # updated it in this session.
+        client_id=version.client_id,
     )
     await session.flush()
 
@@ -551,6 +628,12 @@ async def purge_version(
     """
     if version.purged_at is not None:
         return
+    # Read once, here, before anything is flushed: the column is the trigger's
+    # (`server_onupdate`), so after the UPDATE below is flushed it is expired
+    # and touching it would lazy-load (MissingGreenlet under asyncio). Nothing
+    # flushes before the audit call today, so this is defensive, not load-
+    # bearing -- it keeps a later edit that reads it post-flush from breaking.
+    client_id = version.client_id
     if version.object_key:
         await store.delete_doc_document(version.org_id, version.object_key)
     version.object_key = ""
@@ -569,6 +652,7 @@ async def purge_version(
             "byte_size": version.byte_size,
             "sha256": version.sha256,
         },
+        client_id=client_id,
     )
     await session.flush()
 
@@ -589,27 +673,17 @@ async def add_document_link(
     """The target is resolved INSIDE the tenant session, so a foreign-org
     target is indistinguishable from a nonexistent one -- 404 either way. That
     is the shipped module's own reasoning and it is not restated differently
-    here. The explicit `org_id` predicate is on the models that carry one; a
-    handful of link targets are org-scoped tables where the RLS policy is the
-    braces and this predicate is the belt."""
-    model = _LINK_TARGET_MODELS.get(target_type)
-    if model is None:
-        raise LinkTargetNotFound(
-            tr("unknown target type {target_type}", target_type=repr(target_type))
-        )
-    exists = (
-        await session.execute(
-            select(model.id).where(model.id == target_id, model.org_id == document.org_id)
-        )
-    ).scalar_one_or_none()
-    if exists is None:
-        raise LinkTargetNotFound(
-            tr(
-                "no {target_type} {target_id} in this organization",
-                target_type=say(LINK_TARGET_WORDS, target_type),
-                target_id=target_id,
-            )
-        )
+    here. The resolver and its rule are the article links' own
+    (`service.check_link_target`): the explicit `org_id` predicate is the
+    belt, the RLS policy the braces, and a client's document names only that
+    client's targets or global ones (MSP clients plan 2026-10-26 Task 14)."""
+    await check_link_target(
+        session,
+        org_id=document.org_id,
+        owner_client=document.client_id,
+        target_type=target_type,
+        target_id=target_id,
+    )
     link = DocDocumentLink(
         org_id=document.org_id,
         document_id=document.id,
@@ -625,6 +699,7 @@ async def add_document_link(
         "docs.document_link_added",
         document.id,
         {"target_type": target_type, "target_id": str(target_id)},
+        client_id=document.client_id,
     )
     await session.flush()
     return link
@@ -672,6 +747,7 @@ async def remove_document_link(
         "docs.document_link_removed",
         document.id,
         {"target_type": target_type, "target_id": str(target_id)},
+        client_id=document.client_id,
     )
     await session.flush()
     return True
@@ -754,12 +830,14 @@ async def search_documents(
 
 
 __all__ = [
+    "CLIENT_DOCUMENT_QUOTA_BYTES",
     "LINK_TARGET_TYPES",
     "MAX_DOCUMENT_BYTES",
-    "ORG_DOCUMENT_QUOTA_BYTES",
     "DocumentArchived",
     "DocumentNotFound",
+    "DocumentationClientError",
     "LinkTargetNotFound",
+    "LinkTargetOfAnotherClient",
     "QuotaExceeded",
     "UnsupportedFileType",
     "VersionPurged",
@@ -768,6 +846,7 @@ __all__ = [
     "archive_document",
     "assert_not_already_full",
     "assert_room_for",
+    "client_usage_bytes",
     "create_document",
     "current_version_row",
     "get_document",
@@ -775,7 +854,6 @@ __all__ = [
     "list_document_links",
     "list_document_versions",
     "list_documents",
-    "org_usage_bytes",
     "purge_version",
     "record_download",
     "remove_document_link",

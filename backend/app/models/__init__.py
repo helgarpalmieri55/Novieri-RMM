@@ -57,6 +57,8 @@ from app.models.vault import OrgVaultKey
 from app.modules.agent_push.models import (
     PushAuthorization,
     PushCredentialScope,
+    PushRun,
+    PushRunTarget,
 )
 from app.modules.agent_update.models import (
     AgentUpdateRing,
@@ -129,7 +131,6 @@ from app.modules.ipam.models import (
     IpamObservation,
     IpamRange,
     IpamScanAuthorization,
-    IpamSite,
     IpamSubnet,
     IpamSweepRun,
     IpamVlan,
@@ -250,6 +251,8 @@ __all__ = [
     "AgentUpdateRollout",
     "AgentUpdateTarget",
     "PushCredentialScope",
+    "PushRun",
+    "PushRunTarget",
     "Expense",
     "ExpenseCategory",
     "FxRate",
@@ -293,7 +296,6 @@ __all__ = [
     "IpamObservation",
     "IpamRange",
     "IpamScanAuthorization",
-    "IpamSite",
     "IpamSubnet",
     "IpamSweepRun",
     "IpamVlan",

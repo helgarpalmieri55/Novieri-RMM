@@ -30,17 +30,19 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.exc import NoResultFound
+from sqlalchemy.exc import IntegrityError, NoResultFound
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.audit import audit_service
 from app.core.http import read_bounded_body, reject_oversized_content_length
-from app.core.i18n import tr
+from app.core.i18n import N_, tr
+from app.core.schedule import InvalidWindow, checked_window
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job
 from app.jobs.review_gate import DeviceAwaitingReview, refused
-from app.models import Deployment, DeploymentResult, Device, Package, Script
+from app.models import Deployment, DeploymentResult, Device, DeviceGroup, Package, Script
 from app.modules.change_mgmt.gates import (
     authorizing_change,
     deployment_gate,
@@ -68,9 +70,15 @@ from app.modules.deploy.script_policies import (
     update_policy,
 )
 from app.modules.deploy.scripts import author_script, edit_script, run_script
+from app.services.client_sites import ClientRefusesNewRow, named_client_for_new_rows
 
 #: The job a deployment becomes, for the review gate's refusal at creation.
 DEPLOY_JOB_TYPE = "app.deploy"
+
+#: What `its_deployment_client` (migration 0239) raises with, as every check
+#: constraint does: a target it cannot resolve, or a client that is not the
+#: target's. `deployments` has no CHECK constraint of its own.
+_CHECK_VIOLATION = "23514"
 
 router = APIRouter(prefix="/deploy", tags=["deploy"])
 
@@ -112,6 +120,8 @@ class PackageCreateRequest(BaseModel):
 
 class DeploymentOut(BaseModel):
     id: UUID
+    #: The target's client, written by the database (migration 0239).
+    client_id: UUID
     package_id: UUID
     action: str
     target_type: str
@@ -147,6 +157,8 @@ class DeviceResultOut(BaseModel):
 
 class DeploymentDetailOut(BaseModel):
     deployment_id: UUID
+    #: The target's client, written by the database (migration 0239).
+    client_id: UUID
     state: str
     action: str
     package_id: UUID
@@ -156,6 +168,8 @@ class DeploymentDetailOut(BaseModel):
 
 class DeviceDeploymentHistoryOut(BaseModel):
     deployment_id: UUID
+    #: The deployment's client: the device's (migration 0239).
+    client_id: UUID
     package_id: UUID
     action: str
     state: str
@@ -261,6 +275,8 @@ class ScriptPolicyRunOut(BaseModel):
 
 class ExposedDeploymentOut(BaseModel):
     deployment_id: UUID
+    #: The target's client, written by the database (migration 0239).
+    client_id: UUID
     state: str
     action: str
     package_id: UUID
@@ -304,6 +320,7 @@ def _package_out(row: Package) -> PackageOut:
 def _deployment_out(row: Deployment) -> DeploymentOut:
     return DeploymentOut(
         id=row.id,
+        client_id=row.client_id,
         package_id=row.package_id,
         action=row.action,
         target_type=row.target_type,
@@ -423,7 +440,7 @@ async def create_package_route(
                 install_args=body.install_args,
             )
         except DeployValidationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         return _package_out(package)
 
 
@@ -520,12 +537,46 @@ async def list_deployments(
         return [_deployment_out(r) for r in rows]
 
 
+async def _deployment_target(
+    session: AsyncSession, org_id: UUID, target_type: str, target_id: UUID
+) -> tuple[UUID, str | None] | None:
+    """The target's client and, for a device, its review state -- read in the
+    request's own session, so a target of a client outside its scope is
+    absent, exactly like one that does not exist."""
+    if target_type == "device":
+        row = (
+            await session.execute(
+                select(Device.client_id, Device.review_state).where(
+                    Device.org_id == org_id, Device.id == target_id
+                )
+            )
+        ).one_or_none()
+        return None if row is None else (row[0], row[1])
+    client = (
+        await session.execute(
+            select(DeviceGroup.client_id).where(
+                DeviceGroup.org_id == org_id, DeviceGroup.id == target_id
+            )
+        )
+    ).scalar_one_or_none()
+    return None if client is None else (client, None)
+
+
 @router.post("/deployments", status_code=status.HTTP_201_CREATED, response_model=DeploymentOut)
 async def create_deployment(
     body: DeploymentCreateRequest,
     request: Request,
     ctx: AuthContext = Depends(require_permission("deploy.create")),
 ) -> DeploymentOut:
+    # The window is read first of all, with the sweep's own parser (final
+    # review B2): the window sweep runs one transaction per organisation, so a
+    # value it cannot read stopped every windowed deployment of every client
+    # in it -- and no route edits or deletes a deployment. Refused before any
+    # row is read, it holds nothing and writes nothing.
+    try:
+        window_cron = checked_window(body.window_cron)
+    except InvalidWindow as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
     refusal: str | None = None
     out: DeploymentOut | None = None
     async with org_session(
@@ -541,32 +592,55 @@ async def create_deployment(
         if package is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such package"))
 
-        if body.target_type == "device":
-            # A single named device waiting for review is refused NOW, with the
-            # review gate's own 409, rather than accepted as a deployment that
-            # can never dispatch (install-link spec §1.5).
-            review_state = (
-                await session.execute(
-                    select(Device.review_state).where(
-                        Device.org_id == ctx.org_id, Device.id == body.target_id
-                    )
-                )
-            ).scalar_one_or_none()
-            if refused(review_state, DEPLOY_JOB_TYPE):
-                raise DeviceAwaitingReview(body.target_id, DEPLOY_JOB_TYPE, review_state or "")
+        # The deployment is its target's client's (MSP clients plan 2026-10-26
+        # Task 9): the database writes it from the target, and the request
+        # resolves the target first, in its own scope. Another client's
+        # device or group is the 404 a missing one is -- it was not, and the
+        # window sweep later dispatched it under scope all (research-3 §E5).
+        target = await _deployment_target(session, ctx.org_id, body.target_type, body.target_id)
+        if target is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, tr("deployment target not found"))
+        target_client, review_state = target
+        # A deployment is a new row of that client, and an archived client
+        # takes none (a 409). Its row, read FOR SHARE and held to commit, is
+        # this create's FIRST lock (`client_sites`). Nor does Unassigned (a
+        # 422, plan C10): it can have no site, so no device, and its only
+        # possible target is a group that can never have members.
+        try:
+            await named_client_for_new_rows(
+                session,
+                org_id=ctx.org_id,
+                client_id=target_client,
+                unassigned=N_("a deployment cannot be filed under Unassigned"),
+                not_found=N_("deployment target not found"),
+            )
+        except ClientRefusesNewRow as exc:
+            raise HTTPException(exc.status_code, exc.detail) from None
+        # A single named device waiting for review is refused NOW, with the
+        # review gate's own 409, rather than accepted as a deployment that
+        # can never dispatch (install-link spec §1.5).
+        if body.target_type == "device" and refused(review_state, DEPLOY_JOB_TYPE):
+            raise DeviceAwaitingReview(body.target_id, DEPLOY_JOB_TYPE, review_state or "")
 
         try:
+            # The change must be the target's client's, which must use change
+            # management (`authorizing_change`); its module guard takes again
+            # the client lock this create already holds.
             change = (
-                await authorizing_change(session, ctx.org_id, body.change_id)
+                await authorizing_change(
+                    session, ctx.org_id, body.change_id, client_id=target_client
+                )
                 if body.change_id is not None
                 else None
             )
         except ChangeNotFoundError:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such change")) from None
         except ChangeValidationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         if change is None:
-            refusal = await deployment_gate(session, ctx.org_id, body.target_type, body.target_id)
+            refusal = await deployment_gate(
+                session, ctx.org_id, body.target_type, body.target_id, client_id=target_client
+            )
         if refusal is not None:
             await record_gate_refusal(
                 session,
@@ -576,20 +650,35 @@ async def create_deployment(
                 target_id=str(body.target_id),
                 reason=refusal,
                 metadata={"package_id": str(body.package_id), "action": body.action},
+                client_id=target_client,
             )
         else:
+            # No client_id: `its_deployment_client` writes it from the target
+            # and the INSERT reads it back.
             deployment = Deployment(
                 org_id=ctx.org_id,
                 package_id=body.package_id,
                 action=body.action,
                 target_type=body.target_type,
                 target_id=body.target_id,
-                window_cron=body.window_cron,
+                window_cron=window_cron,
                 requested_by=ctx.user_id,
                 state="pending",
             )
             session.add(deployment)
-            await session.flush()
+            try:
+                await session.flush()
+            except IntegrityError as exc:
+                # The trigger reads the target again and could not resolve it:
+                # it went between the read above and this insert. Nothing was
+                # written; the person may simply try again.
+                if getattr(exc.orig, "sqlstate", None) != _CHECK_VIOLATION:
+                    raise
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    tr("the deployment target changed while it was being created; try again"),
+                ) from None
+            client_id = deployment.client_id
 
             await audit_service.record(
                 session,
@@ -604,6 +693,7 @@ async def create_deployment(
                     "action": body.action,
                     "target_type": body.target_type,
                 },
+                client_id=client_id,
             )
             if change is not None:
                 await link_actions(
@@ -618,6 +708,7 @@ async def create_deployment(
                 await record_auto_change(
                     session,
                     org_id=ctx.org_id,
+                    client_id=client_id,
                     actor_id=ctx.user_id,
                     title=f"Deployment: {body.action} {package.name} {package.version}",
                     description=(
@@ -674,7 +765,7 @@ async def execute_deployment(
             # would refuse it anyway, but a 422 naming the missing upload is
             # an answer the operator can act on, where a fleet of `refused`
             # job rows is an answer they have to go looking for.
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
     if refusal is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, gate_said(refusal))
     # Transaction committed: safe to publish the signed jobs to the agents.
@@ -743,7 +834,7 @@ async def create_script(
                 body=body.body,
             )
         except DeployValidationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         return _script_out(script)
 
 
@@ -963,6 +1054,7 @@ async def device_deployment_history(
             await session.execute(
                 select(
                     DeploymentResult.deployment_id,
+                    Deployment.client_id,
                     Deployment.package_id,
                     Deployment.action,
                     DeploymentResult.state,
@@ -983,6 +1075,7 @@ async def device_deployment_history(
         return [
             DeviceDeploymentHistoryOut(
                 deployment_id=r.deployment_id,
+                client_id=r.client_id,
                 package_id=r.package_id,
                 action=r.action,
                 state=r.state,

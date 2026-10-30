@@ -16,6 +16,10 @@ from pydantic import BaseModel
 
 
 class PlanCreateRequest(BaseModel):
+    # The client the plan is for (MSP clients plan 2026-10-26 Task 7): it must
+    # use continuity, and the plan's scope, procedures and findings' changes
+    # are its. Fixed for the plan's life -- no update carries it.
+    client_id: UUID
     name: str
     description: str = ""
     scope: list[dict[str, Any]] = []
@@ -43,6 +47,7 @@ class PlanUpdateRequest(BaseModel):
 
 class PlanOut(BaseModel):
     id: UUID
+    client_id: UUID
     name: str
     description: str
     scope: list[dict[str, Any]]

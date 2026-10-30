@@ -20,30 +20,29 @@ and, for the 2026-07-28 single-exchange wire, by raw JSON-RPC.
 
 import hashlib
 import json
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID, uuid4
 
 import anyio
-import httpx2
 import pytest
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from mcp.client.session import ClientSession
-from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import MCPError
-from mcp.types import LATEST_PROTOCOL_VERSION, CallToolResult
+from mcp.types import LATEST_PROTOCOL_VERSION
 from mcp_types import CLIENT_CAPABILITIES_META_KEY, PROTOCOL_VERSION_META_KEY
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, require_permission
 from app.core.client_scope import ClientScope
-from app.models import AuditEvent, Organization, Permission, Role, RolePermission, User, UserRole
+from app.models import AuditEvent, Permission, Role, RolePermission, User, UserRole
+from tests.mcp_support import MCP_BASE as BASE
 from tests.mcp_support import mcp_client, mcp_token, running_mcp
+from tests.mcp_support import mcp_org as _org
+from tests.mcp_support import mcp_session as _session
+from tests.mcp_support import tool_error_text as _error_text
 
-BASE = "https://itms.example.com"
 EMPTY_ARGS_SHA = hashlib.sha256(
     json.dumps({}, sort_keys=True, separators=(",", ":")).encode()
 ).hexdigest()
@@ -168,18 +167,6 @@ async def mcp_env(api_env):
     return api_env
 
 
-async def _org(env: Any) -> tuple[UUID, str]:
-    org_id = await env.create_org("mcp")
-    async with AsyncSession(env.admin_engine) as session:
-        await session.execute(
-            update(Organization)
-            .where(Organization.id == org_id)
-            .values(settings={"mcp_enabled": True})
-        )
-        await session.commit()
-    return org_id, await env.org_slug(org_id)
-
-
 async def _user_id(env: Any, sub: str) -> UUID:
     async with AsyncSession(env.admin_engine) as session:
         return (
@@ -217,45 +204,10 @@ async def _events(env: Any, org_id: UUID, action: str) -> list[AuditEvent]:
         )
 
 
-@asynccontextmanager
-async def _session(
-    env: Any,
-    token: str,
-    *,
-    query: str = "",
-    language: str | None = None,
-    client: str | None = None,
-) -> AsyncIterator[ClientSession]:
-    """The SDK's own client, initialised, over an in-process transport.
-    `client` is sent as `X-Client-Id` on every MCP request."""
-    headers = {"Authorization": f"Bearer {token}"}
-    if language is not None:
-        headers["Accept-Language"] = language
-    if client is not None:
-        headers["X-Client-Id"] = client
-    http = httpx2.AsyncClient(
-        transport=httpx2.ASGITransport(app=env.app), base_url=BASE, headers=headers
-    )
-    async with (
-        http,
-        streamable_http_client(f"{BASE}/mcp{query}", http_client=http) as (read, write),
-        ClientSession(read, write) as session,
-    ):
-        await session.initialize()
-        yield session
-
-
 async def _admin(env: Any) -> tuple[UUID, str, str]:
     org_id, slug = await _org(env)
     sub = await env.create_user(org_id, "org-admin")
     return org_id, sub, mcp_token(env, slug, sub)
-
-
-def _error_text(result: CallToolResult) -> str:
-    assert result.is_error is True, result
-    assert result.structured_content is None
-    assert len(result.content) == 1
-    return result.content[0].text  # type: ignore[union-attr]
 
 
 async def _fresh_window(

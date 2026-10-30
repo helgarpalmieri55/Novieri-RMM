@@ -116,3 +116,82 @@ def test_next_window_start_is_none_for_a_window_that_does_not_open_soon() -> Non
     # 31 February never comes.
     now = _dt.datetime(2026, 9, 25, tzinfo=_dt.UTC)
     assert next_window_start("0 2 31 2 *", now) is None
+
+
+# ---------------------------------------------------------------------------
+# Bounds before expansion (re-review 2 of the Task 13 fix rounds): a range is
+# judged by its ends, never expanded first. The result for every expression
+# is what it was; only the cost of refusing an out-of-range one changes.
+# ---------------------------------------------------------------------------
+
+
+def _parse_before(field: str, lo: int, hi: int) -> set[int]:
+    """`_parse_cron_field` as it was before the change, kept to compare."""
+    values: set[int] = set()
+    for raw_part in field.split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+        step = 1
+        base = part
+        if "/" in part:
+            base, step_s = part.split("/", 1)
+            step = int(step_s)
+        if base == "*":
+            start, end = lo, hi
+        elif "-" in base:
+            start_s, end_s = base.split("-", 1)
+            start, end = int(start_s), int(end_s)
+        else:
+            start = end = int(base)
+        values.update(range(start, end + 1, step))
+    for value in values:
+        if value < lo or value > hi:
+            raise ValueError(value)
+    return values
+
+
+def _outcome(parse: object, field: str, lo: int, hi: int) -> object:
+    try:
+        return parse(field, lo, hi)  # type: ignore[operator]
+    except ValueError:
+        return ValueError
+
+
+def test_the_parser_reads_every_expression_as_it_did() -> None:
+    """Every field shape the grammar has -- and the ones `int()` happens to
+    take -- with ends on and off each bound, steps up, down and zero, alone
+    and in comma lists: the same set, or the same refusal, as before."""
+    from app.core.schedule import _parse_cron_field
+
+    ends = ["-1", "0", "1", "5", "7", "12", "23", "24", "31", "32", "59", "60", "99"]
+    steps = ["", "/1", "/2", "/5", "/7", "/15", "/59", "/60", "/100", "/0", "/-1", "/-5"]
+    parts = (
+        [f"*{s}" for s in steps]
+        + [f"{a}{s}" for a in ends for s in steps]
+        + [f"{a}-{b}{s}" for a in ends for b in ends for s in steps]
+    )
+    fields = parts + [f"{a},{b}" for a in parts[:40] for b in parts[-40:]] + ["", ",", "x", "1-"]
+    for lo, hi in ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7)):
+        for field in fields:
+            assert _outcome(_parse_cron_field, field, lo, hi) == _outcome(
+                _parse_before, field, lo, hi
+            ), (field, lo, hi)
+
+
+def test_an_out_of_range_range_is_refused_before_it_is_expanded() -> None:
+    """`0-2000000` in the minute field: refused with no set of two million
+    numbers ever built (it was built, then judged). A stored value of a
+    billion would have held the window sweep's process the same way."""
+    import tracemalloc
+
+    from app.core.schedule import _parse_cron_field
+
+    tracemalloc.start()
+    try:
+        with pytest.raises(ValueError):
+            _parse_cron_field("0-2000000", 0, 59)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1_000_000, peak

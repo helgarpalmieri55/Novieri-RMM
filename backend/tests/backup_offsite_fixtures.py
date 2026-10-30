@@ -105,6 +105,7 @@ async def seed_org(
         org_id, user_id, device_id = org.id, user.id, device.id
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(session, vault, org_id=org_id, actor_id=user_id,
+                                       client_id=org_id,
                                        name="primary")
         repo_id = repo.id
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:

@@ -40,6 +40,16 @@ claim earns sweep PREFERENCE; only evidence earns CANDIDACY, so an unverified
 claim cannot put a probe on a wire. The mismatch surfaces on the segment check
 (§11), where an operator can see it, rather than as a refusal here that would
 make a freshly imaged branch server unpromotable until inventory had run.
+
+**A SITE SERVER IS ITS DEVICE'S CLIENT'S** (`site_server` is H from `devices`,
+migration 0231), and the site it is filed under -- `site_id`, grouping only,
+which replaced the IPAM site in migration 0240 -- is one of that client's
+sites (422, and `fk_site_server_site_client` underneath). The site plays no
+part in what the server serves: push install chooses an originator by segment
+and by the push's client (`agent_push.preflight._site_server_for`), wake by
+segment and the internal client, whose provisioning it serves
+(`provisioning.dispatch._resolve_wake`, plan 2026-10-26 Task 12) -- never by
+site.
 """
 
 from collections.abc import Sequence
@@ -55,6 +65,7 @@ from app.core.i18n import tr
 from app.core.wire_words import say_list
 from app.models import Agent, Device
 from app.modules.site_server.errors import (
+    SiteServerClientError,
     SiteServerConflictError,
     SiteServerNotFoundError,
     SiteServerValidationError,
@@ -62,6 +73,13 @@ from app.modules.site_server.errors import (
 from app.modules.site_server.models import SiteServer
 from app.modules.site_server.net import parse_segment, segment_strings
 from app.modules.site_server.words import ROLE_WORDS
+from app.services.client_sites import (
+    NotAcceptingNewRows,
+    SiteNotFound,
+    SiteOfAnotherClient,
+    loaded_client,
+    site_of_client,
+)
 
 __all__ = [
     "MAX_SEGMENTS",
@@ -84,7 +102,7 @@ SUPPORTED_ROLES = ("wake",)
 #: constraint.
 MAX_SEGMENTS = 32
 
-UPDATABLE_FIELDS = ("name", "segments", "roles", "notes", "enabled", "ipam_site_id")
+UPDATABLE_FIELDS = ("name", "segments", "roles", "notes", "enabled", "site_id")
 
 
 def _utcnow() -> datetime:
@@ -156,6 +174,23 @@ async def _device_in_org(session: AsyncSession, org_id: UUID, device_id: UUID) -
     return device
 
 
+async def _site_for_site_server(
+    session: AsyncSession, org_id: UUID, site_id: UUID, client_id: UUID
+) -> None:
+    """`site_id` may hold a site server of `client_id`: a site this session
+    can see (404), not archived and of an active client (409, read FOR SHARE
+    until commit, as every new row's site is), and that client's (422).
+    `client_sites.site_of_client`, in this module's errors."""
+    try:
+        await site_of_client(session, org_id=org_id, site_id=site_id, client_id=client_id)
+    except SiteNotFound:
+        raise SiteServerNotFoundError(tr("site {site_id} not found", site_id=site_id)) from None
+    except NotAcceptingNewRows as exc:
+        raise SiteServerConflictError(exc.detail) from None
+    except SiteOfAnotherClient as exc:
+        raise SiteServerClientError(exc.detail) from None
+
+
 async def promote(
     session: AsyncSession,
     org_id: UUID,
@@ -164,7 +199,7 @@ async def promote(
     segments: Sequence[str],
     roles: Sequence[str] = ("wake",),
     name: str | None = None,
-    ipam_site_id: UUID | None = None,
+    site_id: UUID | None = None,
     notes: str = "",
     actor_id: UUID | None = None,
 ) -> SiteServer:
@@ -178,7 +213,8 @@ async def promote(
        so promoting one would create a site server that cannot wake anything);
     3. it is not already promoted;
     4. every segment parses as a network prefix with host bits zero;
-    5. `roles` names only what v1 honours.
+    5. `roles` names only what v1 honours;
+    6. the site, if any, is one of the device's client's.
     """
     device = await _device_in_org(session, org_id, device_id)
 
@@ -224,6 +260,8 @@ async def promote(
 
     checked_segments = _validated_segments(segments)
     checked_roles = _validated_roles(roles)
+    if site_id is not None:
+        await _site_for_site_server(session, org_id, site_id, device.client_id)
 
     row = SiteServer(
         org_id=org_id,
@@ -231,7 +269,7 @@ async def promote(
         name=(name or device.hostname or "")[:200] or str(device_id),
         segments=checked_segments,
         roles=checked_roles,
-        ipam_site_id=ipam_site_id,
+        site_id=site_id,
         notes=notes,
         created_by=actor_id,
         enabled=True,
@@ -247,6 +285,7 @@ async def promote(
         action="site.promoted",
         target_type="device",
         target_id=str(device_id),
+        client_id=device.client_id,
         metadata={
             "site_server_id": str(row.id),
             "device_id": str(device_id),
@@ -281,7 +320,7 @@ async def list_site_servers(
     org_id: UUID,
     *,
     enabled: bool | None = None,
-    ipam_site_id: UUID | None = None,
+    site_id: UUID | None = None,
     segment: str | None = None,
     client_id: UUID | None = None,
 ) -> list[SiteServer]:
@@ -291,8 +330,9 @@ async def list_site_servers(
     `client_id` keeps only the site servers whose device belongs to that
     client (`site_server.client_id`, inherited from the device). A push picks
     its originator with it (`agent_push.preflight._site_server_for`): the
-    machine that will hold a decrypted credential is one of the target's own
-    client, whatever the session's scope.
+    machine that will hold a decrypted credential is one of the push's own
+    client, whatever the session's scope. A provisioning wake picks the
+    internal client's (`provisioning.dispatch._resolve_wake`).
 
     `segment` filters by CONTAINMENT (`<<=`), not equality: asking "who serves
     10.20.7.0/24" must find the branch server declared for `10.20.0.0/16`,
@@ -319,8 +359,8 @@ async def list_site_servers(
     statement = select(SiteServer).where(SiteServer.org_id == org_id)
     if enabled is not None:
         statement = statement.where(SiteServer.enabled == enabled)
-    if ipam_site_id is not None:
-        statement = statement.where(SiteServer.ipam_site_id == ipam_site_id)
+    if site_id is not None:
+        statement = statement.where(SiteServer.site_id == site_id)
     if client_id is not None:
         statement = statement.where(SiteServer.client_id == client_id)
     if segment is not None:
@@ -349,7 +389,7 @@ async def update_site_server(
     changes: dict[str, Any],
     actor_id: UUID | None = None,
 ) -> SiteServer:
-    """Edit segments, roles, name, notes, enable state or IPAM site grouping.
+    """Edit segments, roles, name, notes, enable state or site grouping.
 
     `enabled=False` is the demote-WITHOUT-delete: the row keeps its history and
     its audit trail, and stops attracting sweep preference on the next dispatch
@@ -359,6 +399,10 @@ async def update_site_server(
     unknown = sorted(set(changes) - set(UPDATABLE_FIELDS))
     if unknown:
         raise SiteServerValidationError(tr("cannot update {unknown}", unknown=unknown))
+    # Read before the flush below: it expires the trigger-written client.
+    client_id = row.client_id
+    if changes.get("site_id") is not None:
+        await _site_for_site_server(session, org_id, changes["site_id"], client_id)
 
     before = {
         "segments": segment_strings(row.segments),
@@ -375,11 +419,12 @@ async def update_site_server(
         row.notes = str(changes["notes"])
     if "enabled" in changes:
         row.enabled = bool(changes["enabled"])
-    if "ipam_site_id" in changes:
-        row.ipam_site_id = changes["ipam_site_id"]
+    if "site_id" in changes:
+        row.site_id = changes["site_id"]
     row.updated_at = _utcnow()
     session.add(row)
     await session.flush()
+    await loaded_client(session, row)  # the response names it
 
     await audit_service.record(
         session,
@@ -389,6 +434,7 @@ async def update_site_server(
         action="site.updated",
         target_type="site_server",
         target_id=str(row.id),
+        client_id=client_id,
         metadata={
             "device_id": str(row.device_id),
             "changed": sorted(changes),
@@ -421,7 +467,7 @@ async def demote(
     the registry no longer describes.
     """
     row = await get_site_server(session, org_id, site_server_id)
-    device_id = row.device_id
+    device_id, client_id = row.device_id, row.client_id
     await session.delete(row)
     await session.flush()
 
@@ -433,6 +479,7 @@ async def demote(
         action="site.demoted",
         target_type="site_server",
         target_id=str(site_server_id),
+        client_id=client_id,
         metadata={"device_id": str(device_id), "reason": reason},
     )
     await session.flush()

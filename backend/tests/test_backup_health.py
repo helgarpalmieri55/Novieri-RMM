@@ -33,12 +33,13 @@ NOW = datetime.now(UTC)
 async def _protected_org(admin_engine: AsyncEngine, *, ticketing: bool = True) -> Any:
     org = await seed_org(admin_engine, "bkh")
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
-        repo = BackupRepository(org_id=org.org_id, name="r", storage_ref="x",
+        repo = BackupRepository(org_id=org.org_id, client_id=org.org_id, name="r", storage_ref="x",
                                 encryption_key_ref="x", dedup_params={}, state="active")
         s.add(repo)
         await s.flush()
-        policy = BackupPolicy(org_id=org.org_id, repository_id=repo.id, sources={"paths": ["/"]},
-                              window_cron="0 2 * * *", retention_gfs={}, enabled=True)
+        policy = BackupPolicy(org_id=org.org_id, client_id=org.org_id, repository_id=repo.id,
+                              sources={"paths": ["/"]}, window_cron="0 2 * * *",
+                              retention_gfs={}, enabled=True)
         s.add(policy)
         await s.commit()
         repo_id = repo.id

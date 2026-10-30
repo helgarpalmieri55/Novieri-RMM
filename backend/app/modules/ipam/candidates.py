@@ -34,17 +34,27 @@ that takes their asset type, lifecycle, owner and location.
 GROUPED IN SQL, following `observations.orphan_groups`, and for the same
 reason: the row set is "every observation this org holds", which is bounded by
 nothing the caller controls, while the answer is small.
+
+EVERYTHING HERE IS PER CLIENT (MSP clients, invariant 5a). Two clients can run
+the same 10.0.0.0/24 on two unrelated wires, so an address is a machine only
+within a client: a candidate is a `(client, address)` pair, "already known"
+means known to THAT client's inventory -- another client's machine at the same
+address or with the same MAC hides nothing -- and what a promotion or a sweep
+writes is filed under the client of the subnet it was seen on, at that
+subnet's site. A subnet without a site gives none to file under: its machines
+stay candidates (decision C7, plan 2026-10-26).
 """
 
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_extensions import uuid7
 
 from app.core.i18n import tr
+from app.modules.ipam.models import IpamSubnet
 from app.modules.ipam.net import parse_mac
 from app.modules.ipam.observations import _currency_cutoff
 from app.modules.ipam.oui import oui_prefix, vendor
@@ -80,6 +90,9 @@ class AssetCandidate:
     #: (something answered, and that is all it means).
     confidence: str
     subnet_id: UUID | None
+    #: Whose network saw it: its observations' client (their VRF's). The same
+    #: address in two clients is two candidates.
+    client_id: UUID
 
 
 @dataclass(frozen=True)
@@ -92,13 +105,21 @@ class CandidatePage:
 
 #: THE THREE EXCLUSIONS ARE THE WHOLE VALUE OF THIS QUERY.
 #:
-#:   1. no observation of this ADDRESS anywhere in the org carries a device id
-#:      -- without it, every managed machine that answers a ping is listed;
-#:   2. no observation of this MAC does either -- a laptop that took a new DHCP
-#:      lease is still known, and would otherwise reappear as something new;
-#:   3. no `devices` row already claims the address as its `primary_ip` -- an
-#:      asset an operator typed in by hand must not be offered back to them as
-#:      a discovery.
+#:   1. no observation of this ADDRESS in the candidate's client carries a
+#:      device id -- without it, every managed machine that answers a ping is
+#:      listed;
+#:   2. no observation of this MAC in that client does either -- a laptop that
+#:      took a new DHCP lease is still known, and would otherwise reappear as
+#:      something new;
+#:   3. no `devices` row of that client already claims the address as its
+#:      `primary_ip` -- an asset an operator typed in by hand must not be
+#:      offered back to them as a discovery.
+#:
+#: ALL THREE WITHIN THE CLIENT, and grouped by `(client, address)`: X's
+#: machine at 10.0.0.9 says nothing about what answered at Y's 10.0.0.9.
+#: Across clients the exclusions would also depend on who is looking -- RLS
+#: shows a technician of X only X's machines -- so one sighting would be a
+#: candidate to some people and not to others.
 #:
 #: Deliberately NOT excluded on hostname. A reverse-DNS name is the weakest
 #: signal there is and the spec refuses it even for LINKING (§4 rule 3); using
@@ -106,7 +127,8 @@ class CandidatePage:
 #: silently drop a real unknown machine that happens to share a name with
 #: something in the inventory.
 _CANDIDATES_SQL = """
-SELECT o.address                     AS address,
+SELECT o.client_id                   AS client_id,
+       o.address                     AS address,
        max(o.mac::text)              AS mac,
        max(o.hostname)               AS hostname,
        min(o.first_seen_at)          AS first_seen_at,
@@ -115,26 +137,44 @@ SELECT o.address                     AS address,
        max(o.confidence)             AS confidence,
        max(o.subnet_id::text)        AS subnet_id
   FROM ipam_observation o
- WHERE o.org_id = :org
+ WHERE o.org_id = :org{client_filter}
    AND o.last_seen_at >= :cutoff
    AND NOT EXISTS (SELECT 1 FROM ipam_observation k
                     WHERE k.org_id = o.org_id
+                      AND k.client_id = o.client_id
                       AND k.address = o.address
                       AND k.device_id IS NOT NULL)
    AND (o.mac IS NULL OR NOT EXISTS (
             SELECT 1 FROM ipam_observation k
              WHERE k.org_id = o.org_id
+               AND k.client_id = o.client_id
                AND k.mac = o.mac
                AND k.device_id IS NOT NULL))
    AND NOT EXISTS (SELECT 1 FROM devices d
                     WHERE d.org_id = o.org_id
+                      AND d.client_id = o.client_id
                       AND d.primary_ip = o.address)
- GROUP BY o.address
+ GROUP BY o.client_id, o.address
 """
 
-_COUNT_SQL = f"SELECT count(*) FROM ({_CANDIDATES_SQL}) AS c"
+#: One client's candidates -- what a promotion re-derives -- or every client's
+#: this session sees.
+_ONE_CLIENT = "\n   AND o.client_id = :client"
 
-_PAGE_SQL = f"{_CANDIDATES_SQL} ORDER BY max(o.last_seen_at) DESC, o.address LIMIT :limit"
+
+def _candidates_sql(*, one_client: bool) -> str:
+    return _CANDIDATES_SQL.format(client_filter=_ONE_CLIENT if one_client else "")
+
+
+def _count_sql(*, one_client: bool) -> str:
+    return f"SELECT count(*) FROM ({_candidates_sql(one_client=one_client)}) AS c"
+
+
+def _page_sql(*, one_client: bool) -> str:
+    return (
+        f"{_candidates_sql(one_client=one_client)}"
+        " ORDER BY max(o.last_seen_at) DESC, o.address, o.client_id LIMIT :limit"
+    )
 
 
 def _row_to_candidate(row: object) -> AssetCandidate:
@@ -153,13 +193,19 @@ def _row_to_candidate(row: object) -> AssetCandidate:
         sightings=int(row.sightings),  # type: ignore[attr-defined]
         confidence=row.confidence,  # type: ignore[attr-defined]
         subnet_id=UUID(subnet_id) if subnet_id else None,
+        client_id=row.client_id,  # type: ignore[attr-defined]
     )
 
 
 async def list_candidates(
-    session: AsyncSession, org_id: UUID, *, limit: int = DEFAULT_LIMIT
+    session: AsyncSession,
+    org_id: UUID,
+    *,
+    limit: int = DEFAULT_LIMIT,
+    client_id: UUID | None = None,
 ) -> CandidatePage:
-    """Candidates, newest sighting first, bounded.
+    """Candidates, newest sighting first, bounded: `client_id`'s alone, or
+    every client's this session can see.
 
     The count is a second query rather than a window function so the page query
     stays the one thing anybody has to read to understand what a candidate IS.
@@ -167,10 +213,15 @@ async def list_candidates(
     """
     limit = max(1, min(limit, MAX_LIMIT))
     cutoff = await _currency_cutoff(session, org_id)
-    params = {"org": str(org_id), "cutoff": cutoff}
+    params: dict[str, object] = {"org": str(org_id), "cutoff": cutoff}
+    one_client = client_id is not None
+    if one_client:
+        params["client"] = str(client_id)
 
-    total = (await session.execute(text(_COUNT_SQL), params)).scalar_one()
-    rows = (await session.execute(text(_PAGE_SQL), {**params, "limit": limit})).all()
+    total = (await session.execute(text(_count_sql(one_client=one_client)), params)).scalar_one()
+    rows = (
+        await session.execute(text(_page_sql(one_client=one_client)), {**params, "limit": limit})
+    ).all()
     return CandidatePage(
         items=[_row_to_candidate(row) for row in rows],
         total=int(total),
@@ -198,10 +249,12 @@ async def promote(
     org_id: UUID,
     *,
     actor_id: UUID | None,
+    client_id: UUID,
     addresses: list[str],
     overrides: dict[str, object] | None = None,
 ) -> list[PromotionResult]:
-    """Turn selected candidates into `devices` rows with `source='discovery'`.
+    """Turn `client_id`'s selected candidates into `devices` rows with
+    `source='discovery'`.
 
     THE CANDIDATE IS RE-DERIVED HERE, and the request body is never trusted for
     the address, MAC or hostname. A client can post any string; taking identity
@@ -210,20 +263,40 @@ async def promote(
     not currently a candidate is refused -- by name, in the result -- rather
     than created.
 
-    IDEMPOTENT ON `primary_ip`. Two operators looking at the same list, or one
-    double-click, must not produce two rows; and it must not 500 either,
-    because from the screen those two outcomes are indistinguishable.
+    **THE CLIENT IS NAMED, AND THE CANDIDATES ARE ITS OWN.** It is loaded like
+    every create's (`client_for_ipam_row`: 404 unseen, 409 archived, 422 "Sin
+    asignar"), and the candidates are re-derived within it, so Y's sighting is
+    "not a candidate" of X whoever asks -- RLS hides it from a technician of X
+    anyway, and an every-client one gets the same answer. Each machine is filed
+    under THAT client -- the validated, locked one, which its subnet's must
+    equal (a sighting naming another client's subnet is not this client's
+    candidate) -- AT ITS SUBNET'S SITE: a device needs a site, a client has no
+    marked default one, so a candidate whose subnet has no site is refused with
+    the sentence that says what to do (decision C7), one in no registered
+    subnet with its own, and one whose site is archived as a hand-typed asset
+    there would be.
+
+    IDEMPOTENT ON `primary_ip`, WITHIN THE CLIENT. Two operators looking at the
+    same list, or one double-click, must not produce two rows; and it must not
+    500 either, because from the screen those two outcomes are
+    indistinguishable. Another client's machine at the address is not this one.
+
+    NO FAN-OUT: the candidates' subnets are read in one statement and their
+    sites in another (FOR SHARE, held to commit, after the client -- see
+    `app.modules.ipam.clients` for the order), however many there are.
     """
     from app.core.audit import audit_service
-    from app.models import Device
+    from app.models import Device, Site
+    from app.modules.ipam.clients import client_for_ipam_row
 
+    client_id = await client_for_ipam_row(session, org_id, client_id)
     wanted = list(dict.fromkeys(addresses))
     if not wanted:
         return []
 
     # The candidate set, taken once. `MAX_LIMIT` also bounds a caller who posts
     # thousands of addresses in a single request.
-    page = await list_candidates(session, org_id, limit=MAX_LIMIT)
+    page = await list_candidates(session, org_id, limit=MAX_LIMIT, client_id=client_id)
     by_address = {candidate.address: candidate for candidate in page.items}
 
     existing = {
@@ -232,12 +305,49 @@ async def promote(
             await session.execute(
                 text(
                     "SELECT id, host(primary_ip) FROM devices"
-                    " WHERE org_id = :org AND primary_ip IS NOT NULL"
+                    " WHERE org_id = :org AND client_id = :client"
+                    "   AND primary_ip IS NOT NULL"
                 ),
-                {"org": str(org_id)},
+                {"org": str(org_id), "client": str(client_id)},
             )
         ).all()
     }
+
+    subnet_ids = {
+        candidate.subnet_id
+        for candidate in (by_address.get(address) for address in wanted if address not in existing)
+        if candidate is not None and candidate.subnet_id is not None
+    }
+    subnets = (
+        {
+            row.id: row
+            for row in (
+                await session.execute(
+                    select(IpamSubnet.id, IpamSubnet.client_id, IpamSubnet.site_id).where(
+                        IpamSubnet.org_id == org_id, IpamSubnet.id.in_(subnet_ids)
+                    )
+                )
+            ).all()
+        }
+        if subnet_ids
+        else {}
+    )
+    site_ids = {row.site_id for row in subnets.values() if row.site_id is not None}
+    sites = (
+        {
+            site.id: site
+            for site in (
+                await session.execute(
+                    select(Site)
+                    .where(Site.org_id == org_id, Site.id.in_(site_ids))
+                    .with_for_update(read=True)
+                    .execution_options(populate_existing=True)
+                )
+            ).scalars()
+        }
+        if site_ids
+        else {}
+    )
 
     results: list[PromotionResult] = []
     for address in wanted:
@@ -262,6 +372,58 @@ async def promote(
                 )
             )
             continue
+        subnet = subnets.get(candidate.subnet_id) if candidate.subnet_id else None
+        if subnet is None:
+            # AN ORPHAN: seen outside every registered subnet, so there is no
+            # subnet to give a site to -- C7's sentence would point at nothing.
+            results.append(
+                PromotionResult(
+                    address=address,
+                    created=False,
+                    device_id=None,
+                    reason=tr(
+                        "this address is in no registered subnet: register its subnet, at a "
+                        "site, before adding the machine"
+                    ),
+                )
+            )
+            continue
+        if subnet.client_id != client_id:
+            # NOTHING TIES AN OBSERVATION'S `subnet_id` TO ITS CLIENT, so a
+            # sighting of this client can name another client's subnet. Filed
+            # under that subnet it would be the other client's machine, at the
+            # other client's site, from a promotion that named this one: it is
+            # not this client's candidate.
+            results.append(
+                PromotionResult(
+                    address=address,
+                    created=False,
+                    device_id=None,
+                    reason=tr("not a candidate: no current observation for this address"),
+                )
+            )
+            continue
+        site = sites.get(subnet.site_id) if subnet.site_id else None
+        if site is None:
+            results.append(
+                PromotionResult(
+                    address=address,
+                    created=False,
+                    device_id=None,
+                    reason=tr("assign the subnet to a site before adding its machines"),
+                )
+            )
+            continue
+        if site.archived_at is not None:
+            results.append(
+                PromotionResult(
+                    address=address,
+                    created=False,
+                    device_id=None,
+                    reason=tr("that site is archived"),
+                )
+            )
+            continue
 
         device = Device(
             # STAMPED HERE RATHER THAN LEFT TO THE COLUMN DEFAULT, so the id is
@@ -270,11 +432,10 @@ async def promote(
             # moves is when it runs.
             id=uuid7(),
             org_id=org_id,
-            # PHASE 2: the subnet's client/site (plan "Fuera de esta fase").
-            # IPAM has no client yet, so the internal client and its Principal
-            # site, which carry the organisation's id (id convention).
-            client_id=org_id,
-            site_id=org_id,
+            # THE CLIENT THE PROMOTION NAMED -- validated and locked, and the
+            # subnet's, checked above -- AND THE SUBNET'S SITE (C7).
+            client_id=client_id,
+            site_id=site.id,
             source="discovery",
             # A PERSON PICKED THIS ONE. That is the whole difference between
             # this path and `auto_create_from_sweep`, and after 2026-08-26 it is
@@ -308,6 +469,7 @@ async def promote(
             action="asset.promoted",
             target_type="device",
             target_id=str(device.id),
+            client_id=client_id,
             # The EVIDENCE, not just the outcome: `confidence` says whether ARP
             # or only ICMP saw this, which is what an auditor needs to judge how
             # much the row is worth.
@@ -316,6 +478,7 @@ async def promote(
                 "mac": candidate.mac,
                 "confidence": candidate.confidence,
                 "sightings": candidate.sightings,
+                "subnet_id": str(subnet.id),
             },
         )
         results.append(
@@ -356,10 +519,17 @@ class AutoAssetResult:
     address: str
     device_id: UUID | None
     created: bool
-    #: `created | readdressed | already recorded`
+    #: `created | readdressed | already recorded | candidate` -- the last for a
+    #: new machine on a subnet with no active site to file it at (C7): it
+    #: stays on the Discovered list for a person to promote once there is one.
     action: str
 
 
+#: EVERY LOOKUP BELOW IS THE SWEPT SUBNET'S CLIENT'S (`:client`), as the
+#: candidate query's exclusions are: X's machine at 10.0.0.9 is no reason to
+#: leave Y's 10.0.0.9 unrecorded, and must never be the row Y's sighting is
+#: "already recorded" as.
+#:
 #: Addresses a MACHINE has claimed as its own.
 #:
 #: `ipam_observation.device_id` is set only on `source='inventory'` rows -- a
@@ -370,21 +540,22 @@ class AutoAssetResult:
 _CLAIMED_ADDRESSES_SQL = """
 SELECT DISTINCT host(o.address) AS address
   FROM ipam_observation o
- WHERE o.org_id = :org AND o.device_id IS NOT NULL
+ WHERE o.org_id = :org AND o.client_id = :client AND o.device_id IS NOT NULL
 """
 
 #: The same for MACs: a laptop that took a new DHCP lease is still known.
 _CLAIMED_MACS_SQL = """
 SELECT DISTINCT o.mac::text AS mac
   FROM ipam_observation o
- WHERE o.org_id = :org AND o.device_id IS NOT NULL AND o.mac IS NOT NULL
+ WHERE o.org_id = :org AND o.client_id = :client
+   AND o.device_id IS NOT NULL AND o.mac IS NOT NULL
 """
 
 #: Addresses the INVENTORY already holds, whoever put them there.
 _ASSET_ADDRESSES_SQL = """
 SELECT d.id AS id, host(d.primary_ip) AS address
   FROM devices d
- WHERE d.org_id = :org AND d.primary_ip IS NOT NULL
+ WHERE d.org_id = :org AND d.client_id = :client AND d.primary_ip IS NOT NULL
 """
 
 #: Every MAC on every asset row, with what the platform may do about it.
@@ -408,7 +579,7 @@ SELECT d.id                                        AS id,
       CASE WHEN jsonb_typeof(d.nics->'items') = 'array'
            THEN d.nics->'items'
            ELSE '[]'::jsonb END) AS n
- WHERE d.org_id = :org
+ WHERE d.org_id = :org AND d.client_id = :client
 """
 
 
@@ -420,8 +591,9 @@ class _Known:
     macs: dict[str, tuple[UUID | None, str, bool]]
 
 
-async def _known_inventory(session: AsyncSession, org_id: UUID) -> _Known:
-    params = {"org": str(org_id)}
+async def _known_inventory(session: AsyncSession, org_id: UUID, client_id: UUID) -> _Known:
+    """What `client_id`'s inventory already accounts for -- its alone."""
+    params = {"org": str(org_id), "client": str(client_id)}
     addresses: dict[str, UUID | None] = {}
     for row in (await session.execute(text(_CLAIMED_ADDRESSES_SQL), params)).all():
         addresses[str(row.address)] = None
@@ -441,15 +613,45 @@ async def _known_inventory(session: AsyncSession, org_id: UUID) -> _Known:
     return _Known(addresses=addresses, macs=macs)
 
 
+async def _site_taking_machines(
+    session: AsyncSession, org_id: UUID, subnet: IpamSubnet
+) -> UUID | None:
+    """The site a swept subnet's new machines are filed at: the subnet's,
+    while it and its client take new rows -- read FOR SHARE, site then client,
+    and held to commit (`client_sites.site_for_new_rows`). `None` for a subnet
+    without a site, or with an archived one: nothing to file under (C7)."""
+    from app.services.client_sites import (
+        NotAcceptingNewRows,
+        SiteNotFound,
+        site_for_new_rows,
+    )
+
+    if subnet.site_id is None:
+        return None
+    try:
+        site = await site_for_new_rows(session, org_id=org_id, site_id=subnet.site_id)
+    except (SiteNotFound, NotAcceptingNewRows):
+        return None
+    return site.id
+
+
 async def auto_create_from_sweep(
     session: AsyncSession,
     org_id: UUID,
     *,
+    subnet: IpamSubnet,
     sightings: list[SweepSighting],
     sweep_run_id: UUID | None = None,
-    subnet_id: UUID | None = None,
 ) -> list[AutoAssetResult]:
-    """Record every host a sweep found, exactly once.
+    """Record every host a sweep of `subnet` found, exactly once.
+
+    **IN THE SUBNET'S CLIENT, AT ITS SITE** (MSP clients, invariant 5a; C7).
+    What is "already known" is that client's inventory alone (`_known_inventory`),
+    and a new machine is filed under that client at the subnet's site. A subnet
+    with no site -- or an archived one -- has nowhere to file a machine: the
+    sighting is reported `candidate` and stays on the Discovered list, where a
+    person promotes it once the subnet has a site. Re-addressing a row the
+    sweep wrote before needs no site and still happens.
 
     **THE IDENTITY KEY IS THE MAC WHERE THERE IS ONE, AND THE ADDRESS
     OTHERWISE.** A sweep runs hourly; keyed on address alone, a laptop that
@@ -468,10 +670,11 @@ async def auto_create_from_sweep(
     somewhere else would be the platform rewriting a human's data on the
     weakest evidence it has.
 
-    **EVERY LOOKUP IS `org_id`-SCOPED IN THE PREDICATE** (invariant 5). RLS
-    says the same thing inside a tenant session, but this runs wherever the job
-    engine runs it, and a missing predicate here does not fail loudly -- it
-    concludes that another org's device already covers this address and writes
+    **EVERY LOOKUP IS `org_id`- AND CLIENT-SCOPED IN THE PREDICATE**
+    (invariants 5 and 5a). RLS says the same thing inside a tenant session, but
+    this runs wherever the job engine runs it -- under the every-client scope --
+    and a missing predicate here does not fail loudly: it concludes that another
+    org's or another client's device already covers this address and writes
     nothing, leaving a permanent hole in an inventory nobody is watching.
     """
     from app.core.audit import AuditEntry, audit_service
@@ -480,7 +683,11 @@ async def auto_create_from_sweep(
     if not sightings:
         return []
 
-    known = await _known_inventory(session, org_id)
+    # Read before anything is flushed: whose machines these are, and where.
+    client_id = subnet.client_id
+    subnet_id = subnet.id
+    site_id = await _site_taking_machines(session, org_id, subnet)
+    known = await _known_inventory(session, org_id, client_id)
     #: Rows created by THIS sweep. A document may legitimately report two
     #: addresses for one dual-homed MAC; the second must not "correct" the row
     #: the first just created back and forth.
@@ -538,6 +745,7 @@ async def auto_create_from_sweep(
                             action="asset.auto_readdressed",
                             target_type="device",
                             target_id=str(device_id),
+                            client_id=client_id,
                             metadata={
                                 "address": address,
                                 "previous_address": previous,
@@ -560,13 +768,25 @@ async def auto_create_from_sweep(
             )
             continue
 
+        if site_id is None:
+            # NOWHERE TO FILE IT (C7): no device, no audit -- a candidate.
+            results.append(
+                AutoAssetResult(
+                    address=address, device_id=None, created=False, action="candidate"
+                )
+            )
+            continue
+
         device = Device(
+            # STAMPED, as `promote` does: the audit event and the result below
+            # name the row before any flush. Left to the column default it was
+            # `None` here -- every `asset.auto_created` event said
+            # `target_id="None"` -- until the batch flushed.
+            id=uuid7(),
             org_id=org_id,
-            # PHASE 2: the subnet's client/site (plan "Fuera de esta fase").
-            # IPAM has no client yet, so the internal client and its Principal
-            # site, which carry the organisation's id (id convention).
-            client_id=org_id,
-            site_id=org_id,
+            # The swept subnet's client and site.
+            client_id=client_id,
+            site_id=site_id,
             # HOW it arrived is still discovery; WHO stood behind it is nobody.
             source="discovery",
             provenance="sweep",
@@ -597,6 +817,7 @@ async def auto_create_from_sweep(
                 action="asset.auto_created",
                 target_type="device",
                 target_id=str(device.id),
+                client_id=client_id,
                 # THE ACTOR IS THE SYSTEM, NOT THE USER WHO SCHEDULED THE SWEEP.
                 # Attributing this to a person would put a human's name against
                 # rows no human chose, which is the one thing an audit log must
@@ -609,7 +830,7 @@ async def auto_create_from_sweep(
                     "confidence": sighting.confidence,
                     "provenance": "sweep",
                     "sweep_run_id": str(sweep_run_id) if sweep_run_id else None,
-                    "subnet_id": str(subnet_id) if subnet_id else None,
+                    "subnet_id": str(subnet_id),
                 },
             )
         )

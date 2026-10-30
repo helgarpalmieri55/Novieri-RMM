@@ -145,7 +145,9 @@ async def seed_agent(
 
 
 async def seed_vrf(env_or_engine: Any, org_id: UUID, name: str = "global", **kw: Any) -> UUID:
-    """A VRF row, defaulting to `global` -- the one §0.7 creates lazily.
+    """A VRF row, defaulting to `global` -- the one §0.7 creates lazily -- of
+    the internal client (whose id is the organisation's) unless `client_id`
+    names another (migration 0240: a VRF is a client's).
 
     Seeded directly rather than through `registry.ensure_default_vrf`, so a test
     of that function is never set up by that function.
@@ -153,6 +155,7 @@ async def seed_vrf(env_or_engine: Any, org_id: UUID, name: str = "global", **kw:
     from app.models import IpamVrf
 
     engine = admin_engine_of(env_or_engine)
+    kw.setdefault("client_id", org_id)
     async with AsyncSession(engine, expire_on_commit=False) as session:
         vrf = IpamVrf(org_id=org_id, name=name, **kw)
         session.add(vrf)
@@ -161,22 +164,28 @@ async def seed_vrf(env_or_engine: Any, org_id: UUID, name: str = "global", **kw:
 
 
 async def seed_site(env_or_engine: Any, org_id: UUID, **kw: Any) -> UUID:
-    from app.models import IpamSite
+    """A `sites` row -- what a VLAN, a subnet or a site server names since
+    migration 0240 merged `ipam_site` into it -- of the internal client unless
+    `client_id` names another."""
+    from app.models import Site
 
     engine = admin_engine_of(env_or_engine)
-    values: dict[str, Any] = {"name": f"site-{uuid4().hex[:8]}"}
+    values: dict[str, Any] = {"name": f"site-{uuid4().hex[:8]}", "client_id": org_id}
     values.update(kw)
     async with AsyncSession(engine, expire_on_commit=False) as session:
-        site = IpamSite(org_id=org_id, **values)
+        site = Site(org_id=org_id, **values)
         session.add(site)
         await session.commit()
         return site.id
 
 
 async def seed_vlan(env_or_engine: Any, org_id: UUID, vid: int = 10, **kw: Any) -> UUID:
+    """A VLAN of the internal client unless `client_id` (or a `site_id` of
+    another client's, with that `client_id`) names another."""
     from app.models import IpamVlan
 
     engine = admin_engine_of(env_or_engine)
+    kw.setdefault("client_id", org_id)
     async with AsyncSession(engine, expire_on_commit=False) as session:
         vlan = IpamVlan(org_id=org_id, vid=vid, **kw)
         session.add(vlan)
@@ -422,7 +431,13 @@ async def dispatch_sweep(
     targets: list[str] | None = None,
     max_targets: int = 4096,
     subnet_id: UUID | None = None,
+    site_id: UUID | None = None,
 ) -> DispatchedSweep:
+    """A signed `net.sweep` for `subnet_id`, or for a subnet made here: at
+    `site_id`, by default the internal client's Principal site (id = org id).
+    A sweep files the machines it finds at its subnet's site, and a subnet
+    without one records none (MSP clients plan 2026-10-26 Task 11, C7) -- so
+    pass a subnet of your own for that case, or a site of `vrf_id`'s client."""
     from app.models import Job, JobStatus
     from app.modules.ipam.handler import register_job_types
     from app.modules.ipam.models import IpamSweepRun
@@ -434,7 +449,10 @@ async def dispatch_sweep(
     engine = admin_engine_of(env_or_engine)
     signed = targets if targets is not None else [prefix]
     if subnet_id is None:
-        subnet_id = await seed_subnet(engine, org_id, vrf_id=vrf_id, prefix=prefix)
+        subnet_id = await seed_subnet(
+            engine, org_id, vrf_id=vrf_id, prefix=prefix,
+            site_id=site_id if site_id is not None else org_id,
+        )
     now = utcnow()
     async with AsyncSession(engine, expire_on_commit=False) as session:
         run = IpamSweepRun(

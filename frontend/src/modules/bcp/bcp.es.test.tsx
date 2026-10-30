@@ -74,6 +74,7 @@ const ARTICLE_ID = "3c2b1a09-0000-4000-8000-000000000002";
 function plan(over: Partial<PlanOut> = {}): PlanOut {
   return {
     id: "plan1",
+    client_id: "o1",
     name: "Conmutación del centro de datos",
     description: "Pasar los servicios centrales al sitio de recuperación.",
     scope: [
@@ -137,6 +138,7 @@ const DEVICE_NO_AGENT = { ...DEVICE, id: "dev-3", hostname: "SW-CORE-1", os_fami
 
 const GROUP = {
   id: GROUP_ID,
+  client_id: "o1",
   name: "Centro de datos principal",
   parent_group_id: null,
   description: "",
@@ -149,6 +151,7 @@ const GROUP_ONE = { ...GROUP, id: "grp-2", name: "Un solo equipo", device_count:
 
 const ARTICLE = {
   id: ARTICLE_ID,
+  client_id: "o1",
   title: "Manual de conmutación",
   category: "manual",
   archived: false,

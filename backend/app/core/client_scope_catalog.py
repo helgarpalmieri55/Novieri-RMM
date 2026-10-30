@@ -10,10 +10,9 @@ G  no client scoping. A column named client_id there means something else:
    and `email_oauth_app`. On `audit_events` it is the informative client of
    the event's subject (hashed when set, read by no policy: phase 2 C6).
 
-`PENDING_PHASE_2` are C/H tables whose module code must start writing
-client_id before the column can be NOT NULL (plan "Fuera de esta fase"). The
-phase-2 plan's last task deletes that set; until then those tables are exempt
-from the policy check, and from nothing else.
+`SCOPED` is every C, H and O table: each one carries the restrictive
+`client_isolation` policy (migrations 0231 to 0243), and no family is pending
+since plan 2026-10-26 Task 15.
 """
 
 from dataclasses import dataclass
@@ -119,8 +118,9 @@ CATALOG: dict[str, Entry] = {
     "health_flap_state": H("devices", "device_id"),
     "device_health_policy_ack": H("devices", "device_id"),
     "health_alert_action": H("health_alert", "alert_id"),
-    # ipam (ipam_site is merged into sites in phase 2)
-    "ipam_site": C, "ipam_vrf": C, "ipam_vlan": C, "ipam_subnet": C,
+    # ipam (ipam_site was merged into sites by migration 0240). A subnet's
+    # client is its VRF's: the VRF is NOT NULL (Annex A, amended in Task 10).
+    "ipam_vrf": C, "ipam_vlan": C, "ipam_subnet": H("ipam_vrf", "vrf_id"),
     "ipam_scan_authorization": H("ipam_vrf", "vrf_id"),
     "ipam_range": H("ipam_subnet", "subnet_id"),
     "ipam_address": H("ipam_vrf", "vrf_id"),
@@ -164,21 +164,4 @@ CATALOG: dict[str, Entry] = {
     "site_server": H("devices", "device_id"),
 }
 
-PENDING_PHASE_2: frozenset[str] = frozenset(
-    {
-        "person", "person_login", "person_checklist", "person_checklist_step",
-        "license", "license_allocation", "license_compliance_snapshot",
-        "subscription", "seat_assignment", "subscription_event", "subscription_alert_sent",
-        "deployments",
-        "ipam_site", "ipam_vrf", "ipam_vlan", "ipam_subnet", "ipam_range", "ipam_address",
-        "ipam_observation", "ipam_drift", "ipam_scan_authorization", "ipam_sweep_run",
-        "push_authorization", "push_run", "push_run_target", "push_credential_scope",
-        "push_credential_realm",
-        "backup_repositories", "backup_chunks", "backup_chunk_copies",
-        "bcp_plan", "bcp_test", "bcp_test_step", "bcp_finding",
-        "budget_settings", "cost_center", "expense_category", "budget", "budget_line",
-        "expense", "change_request", "change_approval", "change_link", "change_external_ref",
-    }
-)
-
-PHASE_1 = {t: e for t, e in CATALOG.items() if e.kind != "G" and t not in PENDING_PHASE_2}
+SCOPED = {t: e for t, e in CATALOG.items() if e.kind != "G"}

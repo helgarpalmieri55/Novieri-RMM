@@ -121,7 +121,7 @@ async def _make_windowed_device(
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         repo = await create_repository(
-            session, vault, org_id=org_id, actor_id=user_id, name="primary"
+            session, vault, org_id=org_id, actor_id=user_id, client_id=org_id, name="primary"
         )
         session.add(
             BackupPolicy(
@@ -378,12 +378,12 @@ async def test_retention_gc_is_per_device_and_collects_orphan_chunks(
 
         async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             repo = await create_repository(
-                session, vault, org_id=org_id, actor_id=user_id, name="primary"
+                session, vault, org_id=org_id, actor_id=user_id, client_id=org_id, name="primary"
             )
             repo_id = repo.id
             session.add(
                 BackupPolicy(
-                    org_id=org_id,
+                    org_id=org_id, client_id=org_id,
                     repository_id=repo_id,
                     device_group_id=None,  # org-default: resolved by both devices
                     sources={"paths": ["/data"]},
@@ -514,7 +514,7 @@ async def test_verification_sweep_verifies_never_verified_points(
         object_store = ObjectStore(_settings(pg_cluster, tmp_path))
         async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
             repo = await create_repository(
-                session, vault, org_id=org_id, actor_id=user_id, name="primary"
+                session, vault, org_id=org_id, actor_id=user_id, client_id=org_id, name="primary"
             )
             repo_id = repo.id
             repo_key = await open_repo_key(

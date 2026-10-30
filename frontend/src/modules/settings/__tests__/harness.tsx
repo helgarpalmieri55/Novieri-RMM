@@ -220,6 +220,8 @@ export const MCP_CONNECTIONS_FIXTURE = {
 };
 
 export const BUDGET_SETTINGS_FIXTURE = {
+  // The internal client's (its id is the organisation's, `/me`'s `org_id`).
+  client_id: "org-1",
   base_currency: "USD",
   fiscal_year_start_month: 1,
   updated_by: "admin",

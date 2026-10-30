@@ -27,13 +27,16 @@ THE FOUR BOUNDS, and each is a different question:
      **AND WHOSE `provenance` IS NOT `sweep`**. The clause's words are "a
      promoted asset row", and since 2026-08-26 "a `devices` row exists" no
      longer means that -- see `VOUCHED_PROVENANCE` below, which is the most
-     important comment in this file. **`ambiguous_asset`** is its sibling:
-     vouched-for rows of MORE THAN ONE CLIENT hold the address (two customers
-     on the same private range), so the address does not name one machine
-     and the ladder refuses rather than choose by row id.
+     important comment in this file. **`credential_missing`** is its
+     sibling: the address IS a vouched machine, of another client than the
+     push's, so no credential of that machine's client was chosen.
+     **`ambiguous_asset`** stays as a guard the ladder cannot reach: it is
+     always asked for ONE client's machine (below), so the rows it reads are
+     of one client.
   2. **`no_authorization`** -- (d), second. An ACTIVE `push_authorization`
-     must cover the address. Deny by default, and NOT implied by an
-     `ipam_scan_authorization` over the same prefix (spec §3, D9).
+     of the push's client must cover the address. Deny by default, and NOT
+     implied by an `ipam_scan_authorization` over the same prefix (spec §3,
+     D9), nor by another client's authorization of the same prefix.
   3. **`credential_not_scoped`** -- (d), third. The chosen credential must
      carry a `push_credential_scope` covering the address. The credential
      itself carries where it may be presented.
@@ -53,6 +56,15 @@ THE FOUR BOUNDS, and each is a different question:
      decrypted credential, so a push to X's machine never goes through Y's
      site server -- not even for a technician who may act on every client,
      and not even when Y's declared segment is the more specific match.
+
+**THE CLIENT OF A PUSH IS ITS CREDENTIAL'S** (MSP clients, plan 2026-10-26
+Task 12: 2a(d) narrowed from the organisation to the client). A push
+credential has exactly one client, and every bound is read inside it: the
+machine, the authorization, the credential's scope and the originator are all
+that client's. Two customers on one private range therefore never make an
+address ambiguous: the credential says whose network the push is in. This
+narrows 2a(d), never widens it -- a bound that held for the organisation must
+now hold inside one client as well.
 
 **EVERY FAILING REASON IS COLLECTED, NOT THE FIRST.** Spec §9: "a refusal that
 does not say which is a refusal nobody can act on". An operator told only the
@@ -86,13 +98,15 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
-from app.core.i18n import N_, tr
-from app.core.rbac import has_permission
-from app.modules.agent_push.credential_scope import resolve_push_credential
+from app.core.i18n import N_, tr, tr_marked
+from app.modules.agent_push.checkout import require_checkout_in, require_checkout_somewhere
+from app.modules.agent_push.credential_scope import (
+    credential_client,
+    resolve_push_credential,
+)
 from app.modules.agent_push.errors import (
     PushAuthorizationError,
     PushError,
-    PushPermissionError,
     PushValidationError,
 )
 from app.modules.agent_push.net import IPAddress, parse_target_address
@@ -139,9 +153,16 @@ REFUSAL_REASONS: dict[str, str] = {
         N_(
             "device records of more than one client, each vouched for by a person, hold "
             "this address, so it does not name one machine and nothing is chosen for you. "
-            "Choose the client in the client selector and push again: inside one client "
-            "the address names that client's machine, and only that client's site server "
-            "may carry the credential to it"
+            "A push is made in the client of its credential: inside that client the "
+            "address names that client's machine, and only that client's site server may "
+            "carry the credential to it. Choose a push credential of the machine's client"
+        )
+    ),
+    "credential_missing": (
+        N_(
+            "the machine at this address belongs to another client than the chosen "
+            "credential, and a credential is presented only to machines of its own client. "
+            "Choose a push credential of the machine's client"
         )
     ),
     "no_authorization": (
@@ -236,6 +257,9 @@ class TargetDecision:
     """
 
     address: str
+    #: The push's client -- its credential's -- in which every bound was read.
+    #: Required: every audit and event of the address is filed under it.
+    client_id: UUID
     device_id: UUID | None = None
     authorization_id: UUID | None = None
     credential_scope_id: UUID | None = None
@@ -341,28 +365,43 @@ VOUCHED_PROVENANCE = ("agent", "operator", "promoted")
 
 @dataclass(frozen=True)
 class _Asset:
-    """The vouched-for machine an address names, and its client.
+    """The vouched-for machine an address names in one client.
 
     `ambiguous` is the `ambiguous_asset` refusal: rows of more than one client
-    hold the address, so `device_id` and `client_id` are both `None` -- no
-    machine is chosen, and so no client's site server either.
+    hold the address, so `device_id` is `None` -- no machine is chosen, and so
+    no site server either. Asked for one client's rows, as the ladder always
+    asks, it cannot happen; it is kept as a guard, so a lookup that lost its
+    client filter refuses instead of choosing by row id.
     """
 
     device_id: UUID | None = None
-    client_id: UUID | None = None
     ambiguous: bool = False
 
 
-async def _vouched_asset(session: AsyncSession, org_id: UUID, address: IPAddress) -> _Asset:
-    """The vouched-for `devices` row at this address (spec §3, cond. 1).
+#: A vouched-for, approved machine: the first bound's predicate, written once
+#: for the two lookups that read it.
+_VOUCHED = (
+    " WHERE org_id = :org AND primary_ip = CAST(:addr AS inet)"
+    "   AND provenance = ANY(CAST(:vouched AS text[]))"
+    "   AND review_state = 'approved'"
+)
 
-    **ONE CLIENT OR NONE.** Inside an MSP organization two customers can use
-    the same private range, so one address may be held by machines of two
-    clients. The session's scope decides which rows exist here (RLS): a
-    request narrowed to X sees X's machine only. When the rows this session
-    sees belong to MORE THAN ONE client, the address names no single machine
-    and the answer is `ambiguous` -- never "the lowest id", which would push
-    to whichever customer's machine happened to be recorded first.
+
+async def _vouched_asset(
+    session: AsyncSession, org_id: UUID, address: IPAddress, client_id: UUID
+) -> _Asset:
+    """The vouched-for `devices` row of `client_id` at this address (spec §3,
+    cond. 1).
+
+    **THE PUSH'S CLIENT, IN THE QUERY.** Inside an MSP organization two
+    customers can use the same private range, so one address may be held by
+    machines of two clients. The push is made in its credential's client, and
+    only that client's machine is a target -- by `client_id` here, not left to
+    RLS: an every-client technician sees every client's machines. (The pacer
+    runs each run in its own client's scope, `ClientScope.only([run.client_id])`
+    in `worker.py`, and asks the same question the same way.) Never
+    "the lowest id", which would push to whichever customer's machine
+    happened to be recorded first.
 
     Within one client the rows are ORDERED, so two records of one machine (a
     re-image) cannot make this return a different one between runs.
@@ -374,17 +413,13 @@ async def _vouched_asset(session: AsyncSession, org_id: UUID, address: IPAddress
     """
     rows = (
         await session.execute(
-            text(
-                "SELECT id, client_id FROM devices"
-                " WHERE org_id = :org AND primary_ip = CAST(:addr AS inet)"
-                "   AND provenance = ANY(CAST(:vouched AS text[]))"
-                "   AND review_state = 'approved'"
-                " ORDER BY id"
-            ),
+            text("SELECT id, client_id FROM devices" + _VOUCHED + " AND client_id = :client"
+                 " ORDER BY id"),
             {
                 "org": str(org_id),
                 "addr": str(address),
                 "vouched": list(VOUCHED_PROVENANCE),
+                "client": str(client_id),
             },
         )
     ).all()
@@ -392,24 +427,49 @@ async def _vouched_asset(session: AsyncSession, org_id: UUID, address: IPAddress
         return _Asset()
     if len({str(row.client_id) for row in rows}) > 1:
         return _Asset(ambiguous=True)
-    return _Asset(device_id=UUID(str(rows[0].id)), client_id=UUID(str(rows[0].client_id)))
+    return _Asset(device_id=UUID(str(rows[0].id)))
+
+
+async def _held_by_another_client(
+    session: AsyncSession, org_id: UUID, address: IPAddress, client_id: UUID
+) -> bool:
+    """Is the address a vouched machine of a client OTHER than the push's,
+    among those this session sees? It only NAMES the refusal
+    (`credential_missing` instead of `no_asset`); nothing is ever chosen from
+    it."""
+    row = (
+        await session.execute(
+            text("SELECT 1 FROM devices" + _VOUCHED + " AND client_id <> :client LIMIT 1"),
+            {
+                "org": str(org_id),
+                "addr": str(address),
+                "vouched": list(VOUCHED_PROVENANCE),
+                "client": str(client_id),
+            },
+        )
+    ).first()
+    return row is not None
 
 
 async def _asset_for(
-    session: AsyncSession, org_id: UUID, address: IPAddress
+    session: AsyncSession, org_id: UUID, address: IPAddress, client_id: UUID
 ) -> UUID | None:
-    """The vouched-for machine at this address, or `None` -- for no row, and
-    for rows of more than one client (`_vouched_asset`)."""
-    return (await _vouched_asset(session, org_id, address)).device_id
+    """The vouched-for machine of `client_id` at this address, or `None`
+    (`_vouched_asset`)."""
+    return (await _vouched_asset(session, org_id, address, client_id)).device_id
 
 
 async def _authorization_for(
-    session: AsyncSession, org_id: UUID, address: IPAddress, now: datetime
+    session: AsyncSession, org_id: UUID, address: IPAddress, now: datetime, client_id: UUID
 ) -> UUID | None:
-    """The most specific ACTIVE `push_authorization` covering this address.
+    """The most specific ACTIVE `push_authorization` OF `client_id` covering
+    this address.
 
-    FOUR PREDICATES, ALL LOAD-BEARING, and each has its own test:
+    FIVE PREDICATES, ALL LOAD-BEARING, and each has its own test:
 
+    * `client_id` -- the push's client (Task 12): a prefix means something
+      only inside one client's network, so another client's authorization of
+      the same prefix authorizes nothing here;
     * `org_id` -- RLS rejects a cross-org row through `org_session`, and this
       predicate is what rejects it on the admin engine and everywhere else;
     * `revoked_at IS NULL` -- a revoked grant authorizes nothing, and a test
@@ -426,14 +486,14 @@ async def _authorization_for(
         await session.execute(
             text(
                 "SELECT id FROM push_authorization"
-                " WHERE org_id = :org"
+                " WHERE org_id = :org AND client_id = :client"
                 "   AND revoked_at IS NULL"
                 "   AND (expires_at IS NULL OR expires_at > :now)"
                 "   AND prefix >>= CAST(:addr AS inet)"
                 " ORDER BY masklen(prefix) DESC, id"
                 " LIMIT 1"
             ),
-            {"org": str(org_id), "now": now, "addr": str(address)},
+            {"org": str(org_id), "client": str(client_id), "now": now, "addr": str(address)},
         )
     ).first()
     return None if row is None else UUID(str(row.id))
@@ -491,21 +551,20 @@ async def _site_server_for(
     address: IPAddress,
     *,
     transport: str | None,
-    client_id: UUID | None,
+    client_id: UUID,
 ) -> tuple[UUID, UUID] | None:
     """The enabled site server OF `client_id` whose declared segments contain
     this address, and -- for a `winrm` target -- whose agent advertises the
     WinRM push capability.
 
-    **THE CLIENT IS A FILTER, AND IT IS THE TARGET ASSET'S** (MSP clients,
-    invariant 5a). The originator receives the decrypted push credential, so
-    it must be a machine of the client whose machine is being pushed to.
-    Applied in the query, not left to RLS: the pacer works under the
-    every-client scope, and so does a technician who holds every client, and
-    for both a site server of another client declared for a MORE SPECIFIC
-    segment would otherwise come first. `client_id=None` means "any client
-    this session sees" and is used ONLY to name a refusal when the target has
-    no single asset (`evaluate_targets` never takes an originator from it).
+    **THE CLIENT IS A FILTER, AND IT IS THE PUSH'S** -- its credential's,
+    whose machine is being pushed to (MSP clients, invariant 5a; Task 12).
+    The originator receives the decrypted push credential, so it must be a
+    machine of that client. Applied in the query, not left to RLS: a
+    technician who holds every client sees every client's site servers, and
+    one of another client declared for a MORE SPECIFIC segment would
+    otherwise come first. `client_id` is REQUIRED, never "any client this
+    session sees": every caller (`evaluate_targets`) passes the push's client.
 
     **`list_site_servers` IS REUSED RATHER THAN RE-QUERIED**, and that matters
     for a reason the site-server module already wrote down: containment makes
@@ -576,9 +635,14 @@ async def evaluate_targets(
     *,
     addresses: list[IPAddress],
     credential_id: UUID,
+    client_id: UUID,
     now: datetime | None = None,
 ) -> list[TargetDecision]:
-    """Run all four bounds against every address. Reads only; writes nothing.
+    """Run all four bounds against every address, inside `client_id` -- the
+    push's client, its credential's. Reads only; writes nothing.
+
+    `client_id` is REQUIRED: a ladder that could be asked with no client would
+    have to choose a machine among clients, and it never chooses.
 
     Deliberately separate from `request_push_batch` so the ladder can be tested
     directly, and so cycle B2's dispatcher calls the SAME function rather than
@@ -590,13 +654,16 @@ async def evaluate_targets(
     decisions: list[TargetDecision] = []
     for address in addresses:
         refusals: list[str] = []
-        asset = await _vouched_asset(session, org_id, address)
+        asset = await _vouched_asset(session, org_id, address, client_id)
         device_id = asset.device_id
         if asset.ambiguous:
             refusals.append("ambiguous_asset")
         elif device_id is None:
-            refusals.append("no_asset")
-        authorization_id = await _authorization_for(session, org_id, address, stamp)
+            if await _held_by_another_client(session, org_id, address, client_id):
+                refusals.append("credential_missing")
+            else:
+                refusals.append("no_asset")
+        authorization_id = await _authorization_for(session, org_id, address, stamp, client_id)
         if authorization_id is None:
             refusals.append("no_authorization")
         scope_id = await _credential_scope_for(
@@ -605,13 +672,12 @@ async def evaluate_targets(
         if scope_id is None:
             refusals.append("credential_not_scoped")
         transport = await _asset_transport(session, org_id, device_id)
-        # THE TARGET'S CLIENT CHOOSES THE ORIGINATOR (invariant 5a). With no
-        # single asset there is no client: the site-server bound is still
-        # evaluated -- across the clients this session sees -- so the refusal
-        # names every missing bound as it always did, but no originator is
-        # ever taken from that answer: the address is already refused.
+        # THE PUSH'S CLIENT CHOOSES THE ORIGINATOR (invariant 5a): the site
+        # server is always looked for in it, so the refusal names every
+        # missing bound -- but no originator is taken for an address with no
+        # machine of that client: it is already refused.
         originator = await _site_server_for(
-            session, org_id, address, transport=transport, client_id=asset.client_id
+            session, org_id, address, transport=transport, client_id=client_id
         )
         if originator is None:
             # Named for its remedy: when the capability filter is what emptied
@@ -620,7 +686,7 @@ async def evaluate_targets(
             # as, `no_site_server`.
             if (
                 await _site_server_for(
-                    session, org_id, address, transport=None, client_id=asset.client_id
+                    session, org_id, address, transport=None, client_id=client_id
                 )
                 is None
             ):
@@ -629,11 +695,12 @@ async def evaluate_targets(
                 refusals.append("no_winrm_site_server")
             else:
                 refusals.append("site_server_too_old")
-        if asset.client_id is None:
+        if device_id is None:
             originator = None
         decisions.append(
             TargetDecision(
                 address=str(address),
+                client_id=client_id,
                 device_id=device_id,
                 authorization_id=authorization_id,
                 credential_scope_id=scope_id,
@@ -643,6 +710,15 @@ async def evaluate_targets(
             )
         )
     return decisions
+
+
+_CHECKOUT_REQUIRED = N_(
+    "a push install requires the `credentials.checkout` permission as well as "
+    "`agent.push.run`: a push presents a stored secret to a machine, and "
+    "decrypting a stored secret is what `credentials.checkout` governs. "
+    "Holding only `agent.push.run` would make this a side door around the "
+    "credential module's own gate"
+)
 
 
 @dataclass(frozen=True)
@@ -716,18 +792,24 @@ async def request_push_batch(
 ) -> PushBatchOutcome:
     """Ask for a push. **THE OUTCOME IS ALWAYS A REFUSAL.**
 
-    Raises, in this order and for these reasons -- these three write nothing,
-    so losing them to the rollback costs no record:
+    Raises, in this order and for these reasons -- these write nothing, so
+    losing them to the rollback costs no record:
 
     * `PushPermissionError` -- the caller holds `agent.push.run` and not
-      `credentials.checkout`. FIRST, before the batch is even parsed, because
-      it is a fact about the CALLER and not about the request, and because a
-      caller who may not use a stored secret should not be told which of their
-      addresses are authorized.
+      `credentials.checkout` in any client. FIRST, before the batch is even
+      parsed, because it is a fact about the CALLER and not about the
+      request, and because a caller who may not use a stored secret should
+      not be told which of their addresses are authorized.
     * `PushValidationError` -- the batch is empty, over the ceiling, duplicated
       or not a list of host addresses; or the credential is not of type
       `push_install`.
-    * `PushNotFoundError` -- the credential is not in this org. 404, never 403.
+    * `PushNotFoundError` -- the credential is not in this org, or not in a
+      client this caller sees. 404, never 403.
+    * `PushClientError` -- the credential has no client (a push credential
+      has exactly one).
+    * `PushPermissionError` -- the caller does not hold `credentials.checkout`
+      in THE CREDENTIAL'S CLIENT, the client this push is made in (Task 12:
+      a technician holding both codes on one client pushes there).
 
     Otherwise it records one `push.refused` per address and RETURNS a
     `PushBatchOutcome` whose `as_error()` the caller raises after committing.
@@ -741,23 +823,18 @@ async def request_push_batch(
     permission to see its name -- a side door around the credential module's
     own gate (spec §2.5, §8).
     """
-    if not await has_permission(session, actor_id, "credentials.checkout"):
-        raise PushPermissionError(
-            tr(
-                "a push install requires the `credentials.checkout` permission as well as "
-                "`agent.push.run`: a push presents a stored secret to a machine, and "
-                "decrypting a stored secret is what `credentials.checkout` governs. "
-                "Holding only `agent.push.run` would make this a side door around the "
-                "credential module's own gate"
-            )
-        )
+    refusal = tr_marked(_CHECKOUT_REQUIRED)
+    await require_checkout_somewhere(session, actor_id, refusal)
     addresses = _validated_batch(targets)
     credential = await resolve_push_credential(session, org_id, credential_id)
+    client_id = credential_client(credential)
+    await require_checkout_in(session, actor_id, client_id, refusal)
     decisions = await evaluate_targets(
         session,
         org_id,
         addresses=addresses,
         credential_id=credential_id,
+        client_id=client_id,
         now=now,
     )
 
@@ -828,5 +905,7 @@ async def _audit_refusal(
         action="push.refused",
         target_type="push_target",
         target_id=address,
+        # The push's client: the credential's (Task 12).
+        client_id=getattr(credential, "client_id", None),
         metadata=metadata,
     )

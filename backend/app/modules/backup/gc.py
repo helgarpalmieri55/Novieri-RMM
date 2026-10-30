@@ -39,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import audit_service
 from app.core.storage import ObjectStore
 from app.core.vault import VaultService
-from app.models import BackupPoint
+from app.models import BackupPoint, BackupRepository
 from app.modules.backup.dedup import reconcile_chunk_index
 from app.modules.backup.manifest import referenced_chunk_ids
 from app.modules.backup.repository import open_repo_key
@@ -105,6 +105,14 @@ async def gc_repository(
     event records counts only (invariant #3).
     """
     repo_key = await open_repo_key(session, vault, org_id=org_id, repository_id=repository_id)
+    # Its events are the repository's client's (plan 2026-10-26 Task 13).
+    client_id = (
+        await session.execute(
+            select(BackupRepository.client_id).where(
+                BackupRepository.org_id == org_id, BackupRepository.id == repository_id
+            )
+        )
+    ).scalar_one()
 
     points = (
         (
@@ -164,6 +172,7 @@ async def gc_repository(
             "referenced_chunks": len(referenced),
             "index_rows_dropped": forgotten,
         },
+        client_id=client_id,
     )
 
     return deleted

@@ -21,7 +21,9 @@ one line, from the file it is about to apply.
 
 Two consequences follow, and both are deliberate:
 
-1. **THE DIGEST COVERS THE MAPPING AS WELL AS THE FILE** (`preview_digest`).
+1. **THE DIGEST COVERS THE MAPPING AND THE VRF AS WELL AS THE FILE**
+   (`preview_digest`). The VRF since the MSP clients re-review (I-R1): the
+   same sheet into another client's network is another import.
    The mapping decides which spreadsheet column becomes `asset_label` and which
    becomes `hostname`, so "the same file with a different mapping" is a
    different import of the same bytes -- and a digest over the bytes alone
@@ -94,6 +96,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
 from app.core.csv_export import escape_formula
+from app.core.global_rows import session_scope
 from app.core.i18n import tr
 from app.models import DocRecord
 from app.modules.ipam.addresses import assign, reserve, update_address
@@ -102,7 +105,7 @@ from app.modules.ipam.errors import IpamValidationError
 from app.modules.ipam.models import IpamAddress, IpamDrift, IpamSubnet, IpamVlan
 from app.modules.ipam.net import parse_address, parse_mac
 from app.modules.ipam.reconcile import DRIFT_CLASSES
-from app.modules.ipam.registry import ensure_default_vrf
+from app.modules.ipam.registry import vrf_for_new_row
 from app.modules.ipam.subnets import create_subnet
 
 __all__ = [
@@ -159,8 +162,16 @@ def file_digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def preview_digest(content: bytes, mapping: dict[str, str]) -> str:
-    """What `preview` returns and `apply` must echo: the file AND the mapping.
+def preview_digest(content: bytes, mapping: dict[str, str], vrf_id: UUID) -> str:
+    """What `preview` returns and `apply` must echo: the file, the mapping AND
+    the VRF the import resolved to.
+
+    **THE VRF, BECAUSE IT IS WHERE THE SHEET GOES** (MSP clients plan 2026-10-26
+    Task 11 re-review, I-R1). Two clients' networks can both hold the sheet's
+    addresses, so the same file and mapping into two VRFs are two imports -- one
+    of them into a client the preview never showed. It is the RESOLVED VRF, so
+    a target named by client and the same target named by VRF are one import,
+    and a client's `global` VRF is pinned however the request reached it.
 
     **BOTH, BECAUSE THE MAPPING IS HALF THE IMPORT.** It decides which column
     becomes `asset_label` and which becomes `hostname`, so the same bytes under
@@ -177,7 +188,9 @@ def preview_digest(content: bytes, mapping: dict[str, str]) -> str:
     between the two inputs is explicit" is a property this function should hold
     on its own terms, not one inherited from the encoding somebody might change.
 
-    Still 64 hex characters, so the wire contract is unchanged.
+    The VRF is its 16 raw bytes, fixed-length, between the mapping and the
+    file. Still 64 hex characters, so the wire contract is unchanged: a client
+    only ever echoes the value a preview answered.
     """
     canonical = json.dumps(
         dict(sorted(mapping.items())), separators=(",", ":")
@@ -185,6 +198,7 @@ def preview_digest(content: bytes, mapping: dict[str, str]) -> str:
     hasher = hashlib.sha256()
     hasher.update(len(canonical).to_bytes(8, "big"))
     hasher.update(canonical)
+    hasher.update(vrf_id.bytes)
     hasher.update(content)
     return hasher.hexdigest()
 
@@ -335,18 +349,40 @@ def _classify(values: dict[str, str], row: IpamAddress | None) -> tuple[str, str
     return "update", ""
 
 
+async def _import_vrf(
+    session: AsyncSession, org_id: UUID, *, vrf_id: UUID | None, client_id: UUID | None
+) -> tuple[UUID, UUID]:
+    """`(vrf_id, client_id)` of what an import reads and writes, as every IPAM
+    create resolves it (`registry.vrf_for_new_row`): a named VRF decides the
+    client (404 when the caller cannot see it, 422 when a named client
+    contradicts it); with none, the named client's `global` VRF. Either way the
+    client may take new IPAM rows -- seen (404 otherwise), active (409) and not
+    "Sin asignar" (422), read FOR SHARE until commit -- and it is checked BEFORE
+    a `global` VRF is created, so a client the caller cannot reach is a refusal
+    rather than the RLS error a 500 would be, and a refused import writes
+    nothing at all. Naming the VRF is how a technician limited to some clients
+    imports into one of theirs: the VRFs they can list are exactly those."""
+    return await vrf_for_new_row(session, org_id, vrf_id=vrf_id, client_id=client_id)
+
+
 async def preview_import(
     session: AsyncSession,
     org_id: UUID,
     *,
+    client_id: UUID | None = None,
+    vrf_id: UUID | None = None,
     content: bytes,
     mapping: dict[str, str],
 ) -> ImportPreview:
     """§8.1 step one. **WRITES NOTHING** -- asserted by row counts before and
-    after, not by reading the code."""
+    after, not by reading the code.
+
+    Against `vrf_id`, or `client_id`'s `global` VRF (one per client since
+    migration 0240). The client is loaded first, as every IPAM create's is
+    (`_import_vrf`)."""
     mapping = _validate_mapping(mapping)
     raw = _decode(content)
-    vrf_id = await ensure_default_vrf(session, org_id)
+    vrf_id, _ = await _import_vrf(session, org_id, vrf_id=vrf_id, client_id=client_id)
     existing = await _existing(session, org_id, vrf_id)
 
     rows: list[ImportRow] = []
@@ -370,7 +406,7 @@ async def preview_import(
         counts[action] += 1
 
     return ImportPreview(
-        digest=preview_digest(content, mapping),
+        digest=preview_digest(content, mapping, vrf_id),
         total_rows=len(raw),
         creates=counts["create"],
         updates=counts["update"],
@@ -385,6 +421,8 @@ async def apply_import(
     org_id: UUID,
     *,
     actor_id: UUID | None,
+    client_id: UUID | None = None,
+    vrf_id: UUID | None = None,
     content: bytes,
     mapping: dict[str, str],
     digest: str,
@@ -415,19 +453,26 @@ async def apply_import(
     # reached by a path where an unvalidated value had already been folded into
     # a security-shaped comparison.
     mapping = _validate_mapping(mapping)
-    expected = preview_digest(content, mapping)
+    # THE TARGET IS RESOLVED BEFORE THE DIGEST IS COMPARED, because the digest
+    # covers it: a sheet previewed into one VRF and applied into another --
+    # another client's, by a default that moved under the page -- is refused
+    # here like a stale digest, and the transaction that escapes with the
+    # refusal takes a `global` VRF this resolution may have created with it.
+    vrf_id, client_id = await _import_vrf(session, org_id, vrf_id=vrf_id, client_id=client_id)
+    expected = preview_digest(content, mapping, vrf_id)
     if digest != expected:
         raise IpamValidationError(
             tr(
-                "the digest does not match this file and mapping: preview and apply must "
-                "be about the same file AND the same column mapping (§8.1)"
+                "the digest does not match this file, mapping and VRF: preview and apply "
+                "must be about the same file, the same column mapping AND the same VRF (§8.1)"
             )
         )
     actual = file_digest(content)
-    preview = await preview_import(session, org_id, content=content, mapping=mapping)
+    preview = await preview_import(
+        session, org_id, vrf_id=vrf_id, content=content, mapping=mapping
+    )
     raw = _decode(content)
 
-    vrf_id = await ensure_default_vrf(session, org_id)
     existing = await _existing(session, org_id, vrf_id)
 
     applied = 0
@@ -455,12 +500,18 @@ async def apply_import(
             session.add(current)
             applied += 1
             continue
+        # THE ROW THE TRANSITION WROTE, as it returns it -- in this import's
+        # VRF. Looked up again by address alone, it was ambiguous the moment
+        # another VRF, or another client, held the same address (research-3
+        # §I3): `scalar_one()` raised, or the wrong row was marked imported.
+        written: IpamAddress
         if label:
-            await assign(
+            written = await assign(
                 session,
                 org_id,
                 actor_id,
                 address=row.address,
+                vrf_id=vrf_id,
                 asset_label=label,
                 hostname=values.get("hostname", ""),
                 description=values.get("description", ""),
@@ -468,22 +519,15 @@ async def apply_import(
                 allocation_method=method,
             )
         else:
-            await reserve(
+            written = await reserve(
                 session,
                 org_id,
                 actor_id,
                 address=row.address,
+                vrf_id=vrf_id,
                 hostname=values.get("hostname", ""),
                 description=values.get("description", ""),
             )
-        written = (
-            await session.execute(
-                select(IpamAddress).where(
-                    IpamAddress.org_id == org_id,
-                    IpamAddress.address == row.address,
-                )
-            )
-        ).scalar_one()
         written.origin = "imported"
         session.add(written)
         applied += 1
@@ -497,6 +541,7 @@ async def apply_import(
         action="ipam.import_applied",
         target_type="organization",
         target_id=str(org_id),
+        client_id=client_id,
         metadata={
             # THE FILE, so an operator can re-hash the sheet they still have and
             # match it against this row. `preview_digest` is recorded beside it
@@ -505,6 +550,8 @@ async def apply_import(
             # which is on the next line anyway.
             "file_digest": actual,
             "preview_digest": expected,
+            # WHERE IT WENT: with the file and the mapping, the whole import.
+            "vrf_id": str(vrf_id),
             "total_rows": preview.total_rows,
             "applied": applied,
             "creates": preview.creates,
@@ -571,8 +618,17 @@ async def convert_doc_records(
 
     Rows that do not convert come back in `skipped` **with reasons**. Nothing is
     guessed: a gateway outside its prefix is dropped with a warning rather than
-    silently rewritten, and a VLAN id that names no VLAN in this org leaves
-    `vlan_id` null and is reported.
+    silently rewritten, and a VLAN id that names no VLAN of the record's client
+    leaves `vlan_id` null and is reported.
+
+    THE SUBNET IS THE RECORD'S CLIENT'S (migration 0240), in that client's
+    `global` VRF; a record with no client -- Novieri's own documentation -- is
+    the internal client's, whose id is the organisation's -- and only a person
+    with every client converts one, since that archives a global row: under a
+    narrower scope it is skipped, with that reason, in both runs. ONE AUDIT
+    EVENT PER CLIENT the run filed into or would have, each carrying that
+    client and its own counts; a run that found no record writes one for the
+    organisation.
     """
     records = (
         (
@@ -588,7 +644,7 @@ async def convert_doc_records(
         .all()
     )
     vlans = {
-        row.vid: row.id
+        (row.client_id, row.vid): row.id
         for row in (
             (await session.execute(select(IpamVlan).where(IpamVlan.org_id == org_id)))
             .scalars()
@@ -597,12 +653,36 @@ async def convert_doc_records(
     }
     converted: list[ConvertedRecord] = []
     skipped: list[SkippedRecord] = []
+    #: Per client the records are filed under: (converted, skipped).
+    tally: dict[UUID, list[int]] = {}
+
+    # A record with no client is for every client, and converting it archives
+    # it: a write to a global row, which only the every-client scope makes
+    # (`app.core.global_rows`). Under any other scope -- one that includes
+    # the internal client sees such a record -- both runs skip it with that
+    # reason, so the dry run says what the real run will do rather than
+    # promising a conversion that ends the request in a 403 (final review C).
+    scope = session_scope(session)
+    every_client = scope is None or scope.is_all
 
     for record in records:
+        client_id = record.client_id or org_id
+        counts = tally.setdefault(client_id, [0, 0])
+        if record.client_id is None and not every_client:
+            skipped.append(
+                SkippedRecord(
+                    record.id,
+                    record.name,
+                    tr("a record for every client is converted only by someone with every client"),
+                )
+            )
+            counts[1] += 1
+            continue
         fields = record.fields if isinstance(record.fields, dict) else {}
         raw_cidr = fields.get("cidr")
         if not raw_cidr:
             skipped.append(SkippedRecord(record.id, record.name, tr("no cidr field")))
+            counts[1] += 1
             continue
         try:
             prefix = ip_network(str(raw_cidr), strict=False)
@@ -612,6 +692,7 @@ async def convert_doc_records(
                     record.id, record.name, tr("unparseable cidr: {exc}", exc=exc)
                 )
             )
+            counts[1] += 1
             continue
 
         warnings: list[str] = []
@@ -619,13 +700,13 @@ async def convert_doc_records(
         raw_vlan = fields.get("vlan")
         if raw_vlan not in (None, ""):
             try:
-                vlan_id = vlans.get(int(raw_vlan))
+                vlan_id = vlans.get((client_id, int(raw_vlan)))
             except (TypeError, ValueError):
                 vlan_id = None
             if vlan_id is None:
                 warnings.append(
                     tr(
-                        "no VLAN with vid {raw_vlan} in this org; vlan_id left null",
+                        "no VLAN with vid {raw_vlan} in this client; vlan_id left null",
                         raw_vlan=raw_vlan,
                     )
                 )
@@ -655,6 +736,7 @@ async def convert_doc_records(
             converted.append(
                 ConvertedRecord(record.id, record.name, str(prefix), None, vlan_id, warnings)
             )
+            counts[0] += 1
             continue
         try:
             subnet = await create_subnet(
@@ -662,6 +744,7 @@ async def convert_doc_records(
                 org_id,
                 actor_id,
                 prefix=str(prefix),
+                client_id=client_id,
                 kind="assignable",
                 name=record.name,
                 vlan_id=vlan_id,
@@ -671,6 +754,7 @@ async def convert_doc_records(
             )
         except IpamValidationError as exc:
             skipped.append(SkippedRecord(record.id, record.name, str(exc)))
+            counts[1] += 1
             continue
         # ARCHIVED, NOT DELETED: `doc_versions.record_id` is a real FK and
         # `doc_links` point here.
@@ -679,23 +763,28 @@ async def convert_doc_records(
         converted.append(
             ConvertedRecord(record.id, record.name, str(prefix), subnet.id, vlan_id, warnings)
         )
+        counts[0] += 1
 
     await session.flush()
-    await audit_service.record(
-        session,
-        org_id=org_id,
-        actor_type="user",
-        actor_id=actor_id,
-        action="ipam.import_previewed" if dry_run else "ipam.import_applied",
-        target_type="organization",
-        target_id=str(org_id),
-        metadata={
-            "source": "doc_records",
-            "dry_run": dry_run,
-            "converted": len(converted),
-            "skipped": len(skipped),
-        },
-    )
+    for audited_client, (converted_here, skipped_here) in (
+        tally.items() if tally else [(None, [0, 0])]
+    ):
+        await audit_service.record(
+            session,
+            org_id=org_id,
+            actor_type="user",
+            actor_id=actor_id,
+            action="ipam.import_previewed" if dry_run else "ipam.import_applied",
+            target_type="organization",
+            target_id=str(org_id),
+            client_id=audited_client,
+            metadata={
+                "source": "doc_records",
+                "dry_run": dry_run,
+                "converted": converted_here,
+                "skipped": skipped_here,
+            },
+        )
     await session.flush()
     return DocRecordConversion(dry_run=dry_run, converted=converted, skipped=skipped)
 

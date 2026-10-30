@@ -231,8 +231,16 @@ async def test_the_verify_route_still_passes_over_a_batched_chain(api_env) -> No
     operator would see.
     """
     from app.modules.ipam.candidates import SweepSighting, auto_create_from_sweep
+    from app.modules.ipam.models import IpamSubnet
+    from tests.ipam_fixtures import seed_subnet, seed_vrf
 
     org_id = await api_env.create_org("audit-verify")
+    # A subnet at the internal client's Principal site (both carry the
+    # organisation's id): a sweep files its machines at its subnet's site.
+    vrf_id = await seed_vrf(api_env, org_id)
+    subnet_id = await seed_subnet(
+        api_env, org_id, vrf_id=vrf_id, prefix="10.91.0.0/22", site_id=org_id
+    )
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await AuditService().record(
             session, org_id=org_id, actor_type="user", actor_id=None,
@@ -241,6 +249,7 @@ async def test_the_verify_route_still_passes_over_a_batched_chain(api_env) -> No
         await auto_create_from_sweep(
             session,
             org_id,
+            subnet=await session.get(IpamSubnet, subnet_id),
             sightings=[
                 SweepSighting(
                     address=f"10.91.{n // 256}.{n % 256}",

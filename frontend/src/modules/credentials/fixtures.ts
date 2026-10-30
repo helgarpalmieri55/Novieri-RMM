@@ -13,7 +13,9 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
+import { ORG_ID } from "../../fixtures/core";
 import type { Credential } from "../../lib/api";
+import { PUSHABLE_CREDENTIAL_TYPES } from "../agent-push/types";
 import { ApiError } from "../../lib/api";
 
 const MINUTE = 60_000;
@@ -43,6 +45,10 @@ function credential(seed: Seed): Credential {
     name: seed.name,
     type: seed.type,
     device_group_id: seed.group,
+    // A group's credential is its group's client's -- here every group is the
+    // internal client's, whose id is the org's -- and a push credential always
+    // has one. Any other with no group serves every client.
+    client_id: seed.group !== null || PUSHABLE_CREDENTIAL_TYPES.includes(seed.type) ? ORG_ID : null,
     created_at: ago(seed.created),
     last_used_at: seed.used === null ? null : ago(seed.used),
     has_secret: true,

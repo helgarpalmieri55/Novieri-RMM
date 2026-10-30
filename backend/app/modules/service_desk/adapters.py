@@ -67,7 +67,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChangeExternalRef, ChangeRequest
-from app.modules.service_desk.errors import TicketValidationError
+from app.modules.change_mgmt.state import ChangeConflictError
+from app.modules.service_desk.errors import TicketConflictError, TicketValidationError
 from app.modules.service_desk.lifecycle import FINAL_STATUSES
 from app.modules.service_desk.refdata import ensure_default_categories
 from app.modules.service_desk.schema import TicketCreate
@@ -149,34 +150,43 @@ class ServiceDeskChangeTicketAdapter:
         `"other"` incident category's `default_queue_id`, seeded lazily by
         `ensure_default_categories` if this is the org's first-ever Service
         Desk touch) and record the link in `change_external_ref`. Returns
-        the created ticket's id, stringified, as the external ref."""
+        the created ticket's id, stringified, as the external ref.
+
+        The ticket is the CHANGE'S CLIENT'S (MSP clients plan 2026-10-26 Task
+        7): the client a technician who may submit the change can see. An
+        archived client takes no new ticket (`client_for_new_rows`); that is
+        the change module's 409, not a ticket error escaping as a 500."""
         categories = await ensure_default_categories(session, org_id, change.created_by)
         category = next(c for c in categories if c.key == "other")
 
-        ticket = await create_ticket(
-            session,
-            org_id,
-            change.created_by,
-            TicketCreate(
-                type="incident",
-                category_id=category.id,
-                subject=f"Change {change.type}: {change.title}"[:_MAX_SUBJECT],
-                description=change.description[:_MAX_DESCRIPTION],
-                priority=_RISK_TO_PRIORITY.get(change.risk, "normal"),
-                requester_id=change.created_by,
-            ),
-            # `origin="integration"` (whole-branch security review, finding
-            # A3), not `"technician"`: this ticket is opened by the system
-            # reacting to a LATER, possibly much-later, change transition --
-            # not by `change.created_by` sitting down and filing a helpdesk
-            # ticket. `requester_id`/`created_by` still carry that person's
-            # real id (a genuine requester); only `create_ticket`'s CREATE-
-            # action attribution (`ticket_status_history`/`ticket.created`'s
-            # `actor_type`) becomes `"system"` -- see `tickets.py`'s
-            # `_SYSTEM_ATTRIBUTED_ORIGINS`.
-            origin="integration",
-            client_id=org_id,  # plan 2026-10-26 Task 7 passes the change's client
-        )
+        try:
+            ticket = await create_ticket(
+                session,
+                org_id,
+                change.created_by,
+                TicketCreate(
+                    type="incident",
+                    category_id=category.id,
+                    subject=f"Change {change.type}: {change.title}"[:_MAX_SUBJECT],
+                    description=change.description[:_MAX_DESCRIPTION],
+                    priority=_RISK_TO_PRIORITY.get(change.risk, "normal"),
+                    requester_id=change.created_by,
+                ),
+                # `origin="integration"` (whole-branch security review,
+                # finding A3), not `"technician"`: this ticket is opened by the
+                # system reacting to a LATER, possibly much-later, change
+                # transition -- not by `change.created_by` sitting down and
+                # filing a helpdesk ticket. `requester_id`/`created_by` still
+                # carry that person's real id (a genuine requester); only
+                # `create_ticket`'s CREATE-action attribution
+                # (`ticket_status_history`/`ticket.created`'s `actor_type`)
+                # becomes `"system"` -- see `tickets.py`'s
+                # `_SYSTEM_ATTRIBUTED_ORIGINS`.
+                origin="integration",
+                client_id=change.client_id,
+            )
+        except TicketConflictError as exc:
+            raise ChangeConflictError(str(exc)) from None
 
         session.add(
             ChangeExternalRef(

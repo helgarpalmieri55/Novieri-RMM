@@ -89,6 +89,7 @@ async def _org_user_change(
         await s.flush()
         change = ChangeRequest(
             org_id=org.id,
+            client_id=org.id,
             type="normal",
             title="Patch the mail relay",
             description="Apply the vendor security patch to the relay host.",

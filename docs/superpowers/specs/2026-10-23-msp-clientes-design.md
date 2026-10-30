@@ -684,6 +684,95 @@ Las dos precisiones de §1.3 (el permiso de portal de un contacto) y de §2.3
      clientes tienen la misma dirección, se rechaza con `ambiguous_asset`
      en lugar de elegir uno.
 
+   **Cerrado por la fase 2 (plan 2026-10-26).** Este punto queda como
+   historia de la fase 1. Desde la migración 0243 ninguna familia queda
+   pendiente: el conjunto de las pendientes ya no existe, el de las tablas
+   aisladas es `client_scope_catalog.SCOPED` (toda tabla C, H u O) y
+   `domain_events` volvió a la regla O general, así que un evento sin cliente
+   solo se escribe con alcance `all`. Los puntos 10 a 16 recogen lo que
+   decidió la fase 2.
+
+Al construir la fase 2 (plan
+`docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`) el operador
+decidió D1 a D4 (2026-10-26), y el plan fijó C1 a C10 a la vista del código.
+Estos puntos recogen las decisiones que cambian una regla de este documento, y
+con cada una lo que la implementación precisó a su lado.
+
+10. **El correo de un desconocido sigue en cuarentena, con el cliente de su
+    dominio** (D1, Task 4). §3.3 queda así: un mensaje de un remitente que no
+    es usuario ni contacto no crea ticket (spec de correo entrante §0.2), pero
+    queda marcado con el cliente de su dominio, o con "Sin asignar" si no hay
+    exactamente un cliente activo con ese dominio. Un contacto crea el ticket en su
+    cliente, y una respuesta que llega a su ticket es del cliente del ticket.
+    Cada fila nueva de `inbound_message` tiene cliente. Las reglas están en la
+    enmienda A12 de `docs/modules/email-intake/spec.md`.
+
+11. **SLA: mandan las políticas del cliente** (D2, Task 3). Si el cliente del
+    ticket tiene alguna política activa propia, el SLA se resuelve solo entre
+    las suyas (la más específica); si no tiene ninguna, entre las globales. Los
+    dos conjuntos no se mezclan nivel a nivel. Mover un ticket a otro cliente
+    resuelve su SLA de nuevo, y lo anula (borra su `ticket_sla`) si en el
+    destino no resuelve ninguna política (`docs/modules/sla/spec.md` §3.3).
+
+12. **Instalación remota: dentro del cliente de la credencial, y una
+    ejecución activa por cliente** (D3, Task 12). Una credencial de instalación
+    remota es de un cliente, y ese es el cliente de la instalación: el activo
+    avalado, la autorización y el site server que la origina son de ese mismo
+    cliente. Una ejecución por subred es del cliente de su credencial; el
+    resumen de su lista confirmada cubre el cliente, la credencial y los pares
+    (equipo, dirección). Cada cliente tiene como mucho una ejecución activa a
+    la vez, con hasta 50 equipos en curso cada una; antes era una por
+    organización (diseño `2026-09-30-gpo-msi-and-subnet-push-design.md`
+    §1.2). `CLAUDE.md` 2a se estrecha y no se ensancha: los parámetros
+    firmados no cambian (`docs/modules/agent-distribution/spec-push-install.md`
+    §3 y §6.3).
+
+13. **Los módulos opcionales son por cliente** (D4, Tasks 7, 8 y 9).
+    `clients.enabled_modules` decide, cliente a cliente, si tiene presupuesto,
+    continuidad (BCP) y gestión de cambios; el cliente interno nace con los
+    tres (C2). Escribir en un módulo para un cliente que no lo tiene es un 404
+    con la frase del módulo (`backend/app/services/client_modules.py`). A un
+    cliente sin gestión de cambios no le aplican las compuertas globales ni
+    los cambios automáticos de despliegues y parches. Un despliegue es del
+    cliente de su objetivo: lo escribe un trigger (`its_deployment_client`,
+    migración 0239) desde el equipo o el grupo, y solo un cambio de ese
+    cliente lo autoriza. El presupuesto de cada cliente tiene su moneda base y
+    su mes de inicio del año fiscal (`budget_settings` es una fila por
+    cliente); las tasas de cambio siguen siendo de la organización, y un
+    cliente que apaga el módulo puede seguir exportando lo que registró.
+
+14. **Un repositorio de respaldo es de un solo cliente** (C1, Task 13). Su
+    clave maestra viaja en los parámetros firmados de cada equipo que lo usa,
+    y la deduplicación es por repositorio: compartido, un equipo de un cliente
+    tendría la clave de otro. Una política solo nombra un repositorio de su
+    cliente, y no hay política para todos los clientes: el repositorio es
+    obligatorio (0014) y la migración 0242 pasó las predeterminadas sin
+    cliente al cliente interno. El
+    equipo cuya política nombra un repositorio de otro cliente no se respalda,
+    y queda registrado (`backup.dispatch_refused`) una vez por equipo y
+    versión de la política. Los puntos de antes de la migración 0242 se quedan
+    en el repositorio del cliente interno (`docs/modules/backup/spec.md` §4).
+
+15. **IPAM por cliente; promover exige que la subred tenga sede** (C7, Tasks
+    10 y 11). `ipam_vrf` e `ipam_vlan` son C, e `ipam_subnet` es H desde
+    `ipam_vrf`, porque el VRF es obligatorio (el Anexo A se corrigió en la
+    Task 10). `ipam_site` se borró sin copiar filas (C3): una VLAN, una subred
+    y un site server nombran una sede de `sites` de su mismo cliente.
+    Barridos, candidatos y promoción no salen del cliente de la subred.
+    Promover una dirección a activo exige que la subred tenga sede, y el
+    equipo queda en el cliente y la sede de la subred. Una importación nombra
+    su VRF o su cliente (`docs/modules/ipam/spec.md` §2).
+
+16. **Un ticket es de un cliente, y con equipo no se mueve** (C9, Tasks 2
+    y 3). Un ticket nuevo toma el cliente de su equipo o el que nombra la
+    petición; solo el correo lo deja en "Sin asignar" (C10). Se mueve a otro
+    cliente activo con `POST /service-desk/tickets/{id}/move`, salvo si tiene
+    equipo (409): el cliente de un equipo es inmutable y el del ticket tiene
+    que coincidir con él, así que se quita el equipo y luego se mueve. Los
+    avisos de un ticket llegan solo a los contactos de su cliente y a los
+    técnicos con algún rol en él (`backend/app/modules/notification/routing.py`;
+    `docs/modules/service-desk/spec.md` §2).
+
 ---
 
 ## Anexo A — Clasificación de las tablas
@@ -759,8 +848,9 @@ en el mismo PR, con el motivo.
 | `health_profile_assignment` | O | Equipo o grupo |
 | `health_alert`, `device_health_check_state`, `health_flap_state`, `device_health_policy_ack` | H | `devices` |
 | `health_alert_action` | H | `health_alert` |
-| `ipam_site` | C (pendiente, fase 2) | Se elimina al fusionarse en `sites` (§1.2) |
-| `ipam_vrf`, `ipam_vlan`, `ipam_subnet` | C | La sede de una VLAN o subred es opcional (`ipam/models.py:173,234`); si existe, tiene que ser del mismo cliente |
+| `ipam_site` | — | Eliminada al fusionarse en `sites` (§1.2): la migración 0240 la borra sin copiar filas |
+| `ipam_vrf`, `ipam_vlan` | C | La sede de una VLAN es opcional; si existe, es del mismo cliente (`(site_id, client_id) → sites`), y el cliente de la VLAN es el de la sede |
+| `ipam_subnet` | H | `ipam_vrf`: su `vrf_id` es obligatorio, así que la subred es del cliente de su VRF (enmienda de la fase 2, Task 10). Su sede y su VLAN, opcionales, son de ese cliente |
 | `ipam_range`, `ipam_sweep_run` | H | `ipam_subnet` |
 | `ipam_scan_authorization`, `ipam_address`, `ipam_observation`, `ipam_drift` | H | `ipam_vrf`: su `vrf_id` es obligatorio; el `subnet_id`, donde existe, es opcional |
 | `vendor`, `software_product` | G | Catálogos compartidos |

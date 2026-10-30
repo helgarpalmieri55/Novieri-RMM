@@ -43,7 +43,7 @@ async def deployment_report(
     """Per-deployment snapshot: one row per device result (device_id, state,
     exit_code, log_ref, finished_at) ordered deterministically by device_id,
     a rollup of counts by state, and the deployment's own
-    state/action/package_id.
+    client/state/action/package_id.
     """
     deployment = (
         await session.execute(
@@ -85,6 +85,7 @@ async def deployment_report(
 
     return {
         "deployment_id": deployment_id,
+        "client_id": deployment.client_id if deployment else None,
         "state": deployment.state if deployment else None,
         "action": deployment.action if deployment else None,
         "package_id": deployment.package_id if deployment else None,
@@ -97,7 +98,7 @@ async def fleet_deploy_report(
     session: AsyncSession, org_id: UUID, limit: int = DEFAULT_RECENT_LIMIT
 ) -> dict[str, Any]:
     """Fleet-wide deployment activity: the most recent `limit` deployments
-    (each with its state/action/package_id and installed/total success
+    (each with its client/state/action/package_id and installed/total success
     rate), ordered by `created_at` desc, plus the most recent `limit`
     `ScriptRun` rows, also ordered by `created_at` desc. Both orderings
     tie-break on `id` desc for full determinism.
@@ -141,6 +142,7 @@ async def fleet_deploy_report(
         deployments.append(
             {
                 "deployment_id": deployment.id,
+                "client_id": deployment.client_id,
                 "state": deployment.state,
                 "action": deployment.action,
                 "package_id": deployment.package_id,

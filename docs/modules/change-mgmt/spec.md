@@ -87,6 +87,28 @@ medium, high}; `change_approval.decision` ∈ {approved, rejected};
 `change_link.action_type` ∈ {patch_run, deployment, provision_run,
 patch_approval}.
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Tasks 7, 9 and 14): a
+> change belongs to a client, and change management is a module each client
+> has or does not** (migration 0237). `change_request` is C (existing changes
+> went to the internal client); `change_approval`, `change_link` and
+> `change_external_ref` inherit it (H). All four carry the client policy of
+> `CLAUDE.md` invariant 5a. A change names its client on create (404 not
+> visible, 409 archived, 422 Unassigned), and a write for a client whose
+> `enabled_modules` lacks `change` is a 404 with the module's sentence
+> (`app/services/client_modules.py::require_module`), checked after RBAC and
+> before anything is written. A change links only actions of its own client,
+> or global ones; another client's answers as a missing one. A submitted
+> change's ticket is filed under the change's client. **For a client without
+> the module, no gate applies and no automatic change is recorded** (operator
+> decision D4, 2026-10-26; §14): gates are resolved per client, a client's
+> group-less gate gates that client alone, and a group's gate needs the
+> module in the group's client. Only a change of the work's own client
+> authorizes a deployment or a client's patch approval. A **global** patch
+> approval is authorized only by the internal client's change, and its
+> automatic change is the internal client's (plan decision C8). Every change
+> audit event carries the change's client. The plan is
+> `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 ---
 
 ## 3. Workflow (the state machine)

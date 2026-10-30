@@ -10,10 +10,11 @@ like a nonexistent id, because the existence check is always
 """
 
 import datetime as _dt
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.client_scope import ClientScope
@@ -37,6 +38,8 @@ from app.models import (
 )
 from app.modules.change_mgmt.links import add_link, list_links, remove_link
 from app.modules.change_mgmt.state import ChangeNotFoundError, ChangeValidationError
+from tests.client_scope_support import client_with_site, drop_client_keys
+from tests.conftest import ApiEnv
 
 
 async def _org_with_user_and_change(admin_engine: AsyncEngine) -> tuple[UUID, UUID, UUID]:
@@ -53,6 +56,7 @@ async def _org_with_user_and_change(admin_engine: AsyncEngine) -> tuple[UUID, UU
 
         change = ChangeRequest(
             org_id=org.id,
+            client_id=org.id,
             type="normal",
             title="T",
             description="D",
@@ -180,20 +184,25 @@ async def _seed_provision_run(admin_engine: AsyncEngine, org_id: UUID) -> UUID:
         return run.id
 
 
-async def _seed_patch_approval(admin_engine: AsyncEngine, org_id: UUID) -> UUID:
+async def _seed_patch_approval(
+    admin_engine: AsyncEngine, org_id: UUID, client_id: UUID | None = None
+) -> UUID:
+    """A patch approval of the ring "broad": global, or `client_id`'s."""
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         patch = Patch(
             org_id=org_id,
             os_family="windows",
             source="windows_update",
-            identifier="KB2",
+            identifier=f"KB2-{uuid4().hex[:6]}",
             title="Cum Update 2",
             severity="critical",
         )
         s.add(patch)
         await s.flush()
 
-        approval = PatchApproval(org_id=org_id, patch_id=patch.id, ring_name="broad")
+        approval = PatchApproval(
+            org_id=org_id, client_id=client_id, patch_id=patch.id, ring_name="broad"
+        )
         s.add(approval)
         await s.commit()
         return approval.id
@@ -740,15 +749,49 @@ async def test_the_link_org_predicates_hold_where_rls_is_not_doing_the_rejecting
     the entire defence, and a change record that claims to cover a neighbour's
     deployment is a false audit trail rather than a leak.
 
-    FALSIFIED: deleting `model.org_id == org_id` from `_validate_action_ref`
-    lets org A link org B's deployment; deleting `ChangeLink.org_id == org_id`
-    from `list_links` shows both orgs' links for the same change id.
+    FALSIFIED: deleting `model.org_id == org_id` from the resolvers'
+    `_client_column` lets org A link org B's global patch approval, and org
+    B's deployment filed under org A's client; deleting `ChangeLink.org_id ==
+    org_id` from `list_links` shows both orgs' links for the same change id.
+
+    WHY THOSE TWO TARGETS (MSP clients plan 2026-10-26 Task 7). The resolvers
+    also hold a target to the change's CLIENT, and org B's deployment of org
+    B's device is org B's client's -- refused without any org predicate. So
+    the org predicates are pinned by the two targets the client check lets
+    through: a global approval (no client, every client's) and an org-B
+    deployment whose client is org A's change's.
+
+    THAT DEPLOYMENT CAN NO LONGER EXIST (Task 9). It used to be built by
+    naming org A's device in its bare `target_id`. Since migration 0239 its
+    client is written from that target -- org A's client -- and
+    `fk_deployments_client_org` refuses a row of org B under a client of org
+    A. So it is planted with that key dropped, inside one transaction that is
+    rolled back (`drop_client_keys`, the Task 8 pattern), and the check runs
+    in that transaction: only the org predicate keeps it out, as before.
     """
     org_a, user_a, change_a = await _org_with_user_and_change(admin_engine)
     org_b, user_b, change_b = await _org_with_user_and_change(admin_engine)
     deployment_a = await _seed_deployment(admin_engine, org_a)
     deployment_b = await _seed_deployment(admin_engine, org_b)
+    approval_b = await _seed_patch_approval(admin_engine, org_b)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        device_a = (
+            await s.execute(select(Deployment.target_id).where(Deployment.id == deployment_a))
+        ).scalar_one()
+        package_b = (
+            await s.execute(select(Deployment.package_id).where(Deployment.id == deployment_b))
+        ).scalar_one()
 
+    # Org B's deployment under org A's client (docstring): planted and probed
+    # in ONE transaction, then rolled back with the key it needed gone.
+    await drop_client_keys(bypassrls_session, "deployments", "fk_deployments_client_org")
+    b_names_a = Deployment(
+        org_id=org_b, package_id=package_b, action="install", target_type="device",
+        target_id=device_a, state="pending",
+    )
+    bypassrls_session.add(b_names_a)
+    await bypassrls_session.flush()
+    assert b_names_a.client_id == org_a, "the planted deployment is not under org A's client"
     with pytest.raises(ChangeValidationError, match="linked action not found"):
         await add_link(
             bypassrls_session,
@@ -756,9 +799,24 @@ async def test_the_link_org_predicates_hold_where_rls_is_not_doing_the_rejecting
             actor_id=user_a,
             change_id=change_a,
             action_type="deployment",
-            action_id=deployment_b,
+            action_id=b_names_a.id,
         )
     await bypassrls_session.rollback()
+
+    for action_type, action_id in (
+        ("deployment", deployment_b),
+        ("patch_approval", approval_b),
+    ):
+        with pytest.raises(ChangeValidationError, match="linked action not found"):
+            await add_link(
+                bypassrls_session,
+                org_id=org_a,
+                actor_id=user_a,
+                change_id=change_a,
+                action_type=action_type,
+                action_id=action_id,
+            )
+        await bypassrls_session.rollback()
 
     for org_id, actor_id, change_id, action_id in (
         (org_a, user_a, change_a, deployment_a),
@@ -781,3 +839,77 @@ async def test_the_link_org_predicates_hold_where_rls_is_not_doing_the_rejecting
     assert await list_links(bypassrls_session, org_a, change_b) == [], (
         "org A read a neighbour's links by naming the neighbour's change id"
     )
+
+
+# ---------------------------------------------------------------------------
+# A GLOBAL patch approval links to the internal client's change only (C8;
+# plan 2026-10-26 Task 14 review, I2)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_global_patch_approval_links_only_to_the_internal_client_s_change(
+    api_env: ApiEnv,
+) -> None:
+    """C8: a global approval is authorized by the INTERNAL client's change,
+    whose id is the organisation's. Linked to customer X's change it would
+    authorize nothing -- the gate would withhold it in silence -- so the link
+    is refused with the body a missing action gets, word for word, and
+    nothing is written. Linked to the internal client's change it goes
+    through, and X's own approval still links to X's change."""
+    org = await api_env.create_org("chlink-c8")
+    x, _ = await client_with_site(api_env, org)
+    admin = await api_env.headers(org, await api_env.create_user(org, "org-admin"))
+    enabled = await api_env.client.patch(
+        f"/api/v1/clients/{x}", json={"enabled_modules": ["change"]}, headers=admin
+    )
+    assert enabled.status_code == 200, enabled.text
+
+    async def change_of(client: UUID) -> str:
+        r = await api_env.client.post(
+            "/api/v1/changes",
+            json={"type": "normal", "title": "Parches", "description": "d", "risk": "low",
+                  "affected": [], "rollback_plan": "r", "client_id": str(client)},
+            headers=admin,
+        )
+        assert r.status_code == 201, r.text
+        return str(r.json()["id"])
+
+    async def link(change: str, approval: UUID) -> Any:
+        return await api_env.client.post(
+            f"/api/v1/changes/{change}/links",
+            json={"action_type": "patch_approval", "action_id": str(approval)},
+            headers=admin,
+        )
+
+    async def written() -> tuple[int, int]:
+        async with AsyncSession(api_env.admin_engine) as s:
+            links = (
+                await s.execute(
+                    select(func.count()).select_from(ChangeLink).where(ChangeLink.org_id == org)
+                )
+            ).scalar_one()
+            linked = (
+                await s.execute(
+                    select(func.count()).select_from(AuditEvent).where(
+                        AuditEvent.org_id == org, AuditEvent.action == "change.linked"
+                    )
+                )
+            ).scalar_one()
+        return links, linked
+
+    x_change, internal_change = await change_of(x), await change_of(org)
+    global_approval = await _seed_patch_approval(api_env.admin_engine, org)
+    x_approval = await _seed_patch_approval(api_env.admin_engine, org, client_id=x)
+
+    missing = await link(x_change, uuid4())
+    assert missing.status_code == 400, missing.text
+    before = await written()
+    refused = await link(x_change, global_approval)
+    assert (refused.status_code, refused.json()) == (400, missing.json()), refused.text
+    assert await written() == before
+
+    ok = await link(internal_change, global_approval)
+    assert ok.status_code == 201, ok.text
+    ours = await link(x_change, x_approval)
+    assert ours.status_code == 201, ours.text
+    assert await written() == (before[0] + 2, before[1] + 2)

@@ -66,7 +66,7 @@ async def _seed_device(admin_engine: AsyncEngine, org_id: UUID, hostname: str) -
 async def _seed_repo(admin_engine: AsyncEngine, org_id: UUID) -> UUID:
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         repo = BackupRepository(
-            org_id=org_id,
+            org_id=org_id, client_id=org_id,
             name="repo-1",
             storage_ref="s3://bucket/repo-1",
             encryption_key_ref="vault://key-1",
@@ -124,6 +124,7 @@ async def _seed_plan_with_scope(
         plan = await create_plan(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             name="DR Plan",
             description="Recover the core stack",
@@ -615,3 +616,59 @@ async def test_another_orgs_test_is_hidden_by_rls(
                 outcome="pass",
                 notes=None,
             )
+
+
+# ---------------------------------------------------------------------------
+# A plan's evidence is of the plan's client's devices only (final review B2)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_plan_s_evidence_and_status_hold_only_its_client_s_devices(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Migration 0237 filed every plan from before it under the internal
+    client, and a plan's `scope` is never re-checked: one naming a customer's
+    device copied that device's hostname and backup coverage into an
+    internal-client test's frozen evidence, and into the plan's live
+    restore-proven coverage. Planted here the way history holds it: a scope
+    written straight to the table, past `_validate_scope`."""
+    from app.models import BcpPlan, Client, Site
+    from app.modules.bcp.reporting import bcp_plan_status
+
+    org_id, actor_id = await _org_with_user(admin_engine)
+    repo_id = await _seed_repo(admin_engine, org_id)
+    own = await _seed_device(admin_engine, org_id, "own-host")
+    await _seed_complete_point(admin_engine, org_id, own, repo_id, restore_tested=True)
+    async with AsyncSession(admin_engine, expire_on_commit=False) as s:
+        customer = Client(org_id=org_id, name=f"X {uuid4().hex[:6]}", kind="customer")
+        s.add(customer)
+        await s.flush()
+        site = Site(org_id=org_id, client_id=customer.id, name="Principal")
+        s.add(site)
+        await s.flush()
+        theirs = Device(org_id=org_id, client_id=customer.id, site_id=site.id,
+                        hostname="customer-host", os_family="linux")
+        s.add(theirs)
+        await s.commit()
+    plan_id = await _seed_plan_with_scope(app_engine, org_id, actor_id, [own])
+    async with AsyncSession(admin_engine) as s:
+        plan = (await s.execute(select(BcpPlan).where(BcpPlan.id == plan_id))).scalar_one()
+        plan.scope = [{"kind": "device", "id": str(own)}, {"kind": "device", "id": str(theirs.id)}]
+        await s.commit()
+
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
+        test = await bcp_create_test(
+            s, org_id=org_id, actor_id=actor_id, plan_id=plan_id, type_="tabletop",
+            scheduled_for=None, notes=None,
+        )
+        recorded = await record_test(
+            s, org_id=org_id, actor_id=actor_id, test_id=test.id, executed_at=None,
+            rto_met=None, rpo_met=None, outcome="pass", notes=None,
+        )
+        status = await bcp_plan_status(s, org_id, now=_dt.datetime.now(_dt.UTC))
+
+    assert [d["device_id"] for d in recorded.evidence["devices"]] == [str(own)]
+    assert "customer-host" not in str(recorded.evidence)
+    assert recorded.evidence["summary"]["total_n"] == 1
+    (row,) = [p for p in status if p["id"] == plan_id]
+    assert row["restore_proven_coverage"] == {"total": 1, "restore_proven": 1}

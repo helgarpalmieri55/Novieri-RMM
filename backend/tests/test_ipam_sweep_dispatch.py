@@ -939,26 +939,61 @@ async def test_a_device_in_another_org_is_never_selected_on_the_admin_engine(
 
     *If the `org_id` predicate were deleted* this observes another tenant's
     machine chosen to probe this tenant's segment.
+
+    AND ORG A'S CLIENT (MSP clients plan 2026-10-26 Task 11, lesson 2). The
+    selector keeps to the subnet's client too, so B's device under B's own
+    client would be excluded by that predicate alone and the org one would go
+    untested. A device of org B under org A's internal client is impossible
+    while `fk_devices_client_org` holds, so it is planted with that key
+    dropped, in a transaction that is rolled back, and selected inside it.
     """
+    from app.models import Agent, Device, IpamObservation
+    from tests.client_scope_support import drop_client_keys
+
     a = await _fixture(admin_engine, "sel-a")
     b = await seed_org(admin_engine, "sel-b")
-    foreign = await seed_device(admin_engine, b.org_id)
-    await seed_agent(admin_engine, b.org_id, foreign, status="online")
-    await upsert_observation_row(
-        admin_engine,
-        b.org_id,
-        vrf_id=a.vrf_id,  # org-blind FK: org B's row, org A's VRF
-        address="10.70.0.9",
-        source="inventory",
-        method="nic",
-        confidence="high",
-        device_id=foreign,
-        now=NOW - timedelta(hours=1),
-    )
-
     async with AsyncSession(admin_engine) as session:
+        await drop_client_keys(session, "devices", "fk_devices_client_org")
+        foreign = Device(
+            org_id=b.org_id,
+            client_id=a.org_id,  # org A's internal client, and its Principal site
+            site_id=a.org_id,
+            hostname="foreign",
+            os_family="linux",
+        )
+        session.add(foreign)
+        await session.flush()
+        session.add(
+            Agent(
+                org_id=b.org_id,
+                device_id=foreign.id,
+                cert_fingerprint=uuid4().hex,
+                cert_serial=uuid4().hex[:16],
+                cert_not_after=NOW + timedelta(days=365),
+                enrolled_at=NOW,
+                status="online",
+                last_seen_at=NOW - timedelta(minutes=1),
+            )
+        )
+        session.add(
+            IpamObservation(
+                org_id=b.org_id,
+                vrf_id=a.vrf_id,  # org-blind FK: org B's row, org A's VRF
+                address="10.70.0.9",
+                source="inventory",
+                method="nic",
+                confidence="high",
+                device_id=foreign.id,
+                first_seen_at=NOW - timedelta(hours=1),
+                last_seen_at=NOW - timedelta(hours=1),
+                sighting_count=1,
+            )
+        )
+        await session.flush()
         subnet = await get_subnet(session, a.org_id, a.subnet_id)
-        assert await select_sweeper(session, a.org_id, subnet, now=NOW) is None
+        chosen = await select_sweeper(session, a.org_id, subnet, now=NOW)
+        await session.rollback()
+    assert chosen is None
 
 
 async def test_an_aged_out_observation_does_not_make_a_device_a_candidate(

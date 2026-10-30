@@ -52,6 +52,7 @@ from app.modules.budget.reporting import (
 from app.modules.budget.schema import BudgetLineInput, ExpenseCreate
 from app.modules.licenses.models import Vendor
 from app.modules.subscriptions.models import Subscription
+from tests.client_scope_support import drop_client_keys
 
 
 async def _org_with_user(api_env) -> tuple[UUID, UUID]:
@@ -68,7 +69,8 @@ async def _org_with_user(api_env) -> tuple[UUID, UUID]:
 
 async def _make_budget(session, org_id, user_id, *, fiscal_year=2026, granularity="month"):
     return await create_budget(
-        session, org_id, user_id, fiscal_year=fiscal_year, name="IT Budget", granularity=granularity
+        session, org_id, user_id, client_id=org_id,
+        fiscal_year=fiscal_year, name="IT Budget", granularity=granularity
     )
 
 
@@ -96,7 +98,7 @@ async def _make_expense(
             category_id=category_id,
             cost_center_id=cost_center_id,
             vendor_id=vendor_id,
-            status=status,
+            status=status, client_id=org_id,
         ),
     )
 
@@ -124,7 +126,7 @@ async def test_variance_keeps_four_columns_separate(api_env) -> None:
     collapsing committed and projected is how a forecast double-counts."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
         await put_lines(
@@ -158,7 +160,7 @@ async def test_variance_keeps_four_columns_separate(api_env) -> None:
 async def test_actual_counts_only_confirmed_and_committed_only_expected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
 
@@ -189,12 +191,13 @@ async def test_projected_excludes_periods_that_already_have_a_materialized_row(a
     never both at once."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
 
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("20.00"),
@@ -212,7 +215,8 @@ async def test_projected_excludes_periods_that_already_have_a_materialized_row(a
         assert row_before["committed"] == Decimal("0.00")
 
         await materialize(
-            session, org_id, user_id, from_date=date(2026, 3, 1), to_date=date(2026, 3, 31)
+            session, org_id, user_id, client_id=org_id,
+            from_date=date(2026, 3, 1), to_date=date(2026, 3, 31)
         )
 
         after = await variance(session, org_id, budget.id, user_id)
@@ -232,12 +236,13 @@ async def test_materialized_then_confirmed_renewal_is_actual_not_projected(api_e
     renewal reappears as `projected` on top of its own `actual`."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
 
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("20.00"),
@@ -250,7 +255,8 @@ async def test_materialized_then_confirmed_renewal_is_actual_not_projected(api_e
         await session.flush()
 
         await materialize(
-            session, org_id, user_id, from_date=date(2026, 3, 1), to_date=date(2026, 3, 31)
+            session, org_id, user_id, client_id=org_id,
+            from_date=date(2026, 3, 1), to_date=date(2026, 3, 31)
         )
         materialized = (
             await session.execute(
@@ -282,12 +288,13 @@ async def test_editing_expense_date_does_not_resurrect_its_projection(api_env) -
     $12,000."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
 
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("12000.00"),
@@ -300,7 +307,8 @@ async def test_editing_expense_date_does_not_resurrect_its_projection(api_env) -
         await session.flush()
 
         await materialize(
-            session, org_id, user_id, from_date=date(2026, 3, 1), to_date=date(2026, 3, 31)
+            session, org_id, user_id, client_id=org_id,
+            from_date=date(2026, 3, 1), to_date=date(2026, 3, 31)
         )
         materialized = (
             await session.execute(
@@ -344,12 +352,13 @@ async def test_unmaterialized_renewal_still_projects_despite_a_sibling_materiali
     projection sharing its category and period, however large."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
 
         small = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Small SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("20.00"),
@@ -360,6 +369,7 @@ async def test_unmaterialized_renewal_still_projects_despite_a_sibling_materiali
         )
         big = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Big SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("5000.00"),
@@ -374,7 +384,8 @@ async def test_unmaterialized_renewal_still_projects_despite_a_sibling_materiali
         # Materialize ONLY the small renewal's occurrence (Mar 1-10) -- the
         # big renewal (Mar 20) is deliberately left un-materialized.
         await materialize(
-            session, org_id, user_id, from_date=date(2026, 3, 1), to_date=date(2026, 3, 10)
+            session, org_id, user_id, client_id=org_id,
+            from_date=date(2026, 3, 1), to_date=date(2026, 3, 10)
         )
 
         result = await variance(session, org_id, budget.id, user_id)
@@ -400,12 +411,13 @@ async def test_manual_prerecorded_renewal_is_committed_not_projected(api_env) ->
     literal `"manual"`, never `"subscription"`."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
 
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("20.00"),
@@ -428,7 +440,7 @@ async def test_manual_prerecorded_renewal_is_committed_not_projected(api_env) ->
                 category_id=saas.id,
                 link_type="subscription",
                 link_id=sub.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
 
@@ -447,12 +459,13 @@ async def test_manual_prerecorded_renewal_does_not_suppress_sibling_renewal(api_
     period_index)`."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
 
         small = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Small SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("20.00"),
@@ -463,6 +476,7 @@ async def test_manual_prerecorded_renewal_does_not_suppress_sibling_renewal(api_
         )
         big = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Big SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("5000.00"),
@@ -487,7 +501,7 @@ async def test_manual_prerecorded_renewal_does_not_suppress_sibling_renewal(api_
                 category_id=saas.id,
                 link_type="subscription",
                 link_id=small.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
 
@@ -506,12 +520,13 @@ async def test_manual_expense_without_link_id_does_not_suppress_projection(api_e
     projection sharing its category/period."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
 
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("20.00"),
@@ -534,7 +549,7 @@ async def test_manual_expense_without_link_id_does_not_suppress_projection(api_e
                 amount=Decimal("9.99"),
                 currency="USD",
                 category_id=saas.id,
-                status="expected",
+                status="expected", client_id=org_id,
             ),
         )
 
@@ -562,12 +577,13 @@ async def test_variance_voided_materialized_renewal_does_not_resurrect_as_projec
     it)."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
 
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("20.00"),
@@ -580,7 +596,8 @@ async def test_variance_voided_materialized_renewal_does_not_resurrect_as_projec
         await session.flush()
 
         await materialize(
-            session, org_id, user_id, from_date=date(2026, 3, 1), to_date=date(2026, 3, 31)
+            session, org_id, user_id, client_id=org_id,
+            from_date=date(2026, 3, 1), to_date=date(2026, 3, 31)
         )
         materialized = (
             await session.execute(
@@ -611,9 +628,10 @@ async def test_forecast_voided_materialized_renewal_does_not_resurrect(api_env) 
     org_id, user_id = await _org_with_user(api_env)
     today = date.today()
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("15.00"),
@@ -625,7 +643,8 @@ async def test_forecast_voided_materialized_renewal_does_not_resurrect(api_env) 
         session.add(sub)
         await session.flush()
 
-        await materialize(session, org_id, user_id, from_date=today, to_date=today)
+        await materialize(session, org_id, user_id, client_id=org_id,
+                          from_date=today, to_date=today)
         materialized = (
             await session.execute(
                 select(Expense).where(Expense.org_id == org_id, Expense.link_id == sub.id)
@@ -633,7 +652,7 @@ async def test_forecast_voided_materialized_renewal_does_not_resurrect(api_env) 
         ).scalar_one()
         await void_expense(session, org_id, user_id, materialized.id)
 
-        result = await forecast(session, org_id, user_id, months=1)
+        result = await forecast(session, org_id, user_id, client_id=org_id, months=1)
 
     period_key = f"{today.year:04d}-{today.month:02d}"
     rows = [r for r in result["rows"] if r["period_key"] == period_key]
@@ -653,7 +672,7 @@ async def test_voided_expenses_are_excluded_from_every_figure(api_env) -> None:
     weaker (and vacuously-passable) claim that no row exists at all."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
 
@@ -675,8 +694,8 @@ async def test_voided_expenses_are_excluded_from_every_figure(api_env) -> None:
 
         var_result = await variance(session, org_id, budget.id, user_id)
         pos_result = await position(session, org_id, budget.id, as_of=date(2026, 12, 31))
-        export = await export_rows(session, org_id)
-        odoo_export = await odoo_export_rows(session, org_id)
+        export = await export_rows(session, org_id, client_id=org_id)
+        odoo_export = await odoo_export_rows(session, org_id, client_id=org_id)
 
     row = _row_for(var_result["rows"], category_id=hardware.id, period_index=1)
     assert row["actual"] == Decimal("7.00")  # only the kept row, never the voided 100.00
@@ -700,7 +719,7 @@ async def test_unconvertible_rows_are_excluded_from_totals_and_disclosed(api_env
     `unconvertible_by_currency`, and must not corrupt `ytd_actual`."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
 
@@ -736,7 +755,7 @@ async def test_variance_discloses_unconvertible_confirmed_expense(api_env) -> No
     than the weaker claim that no row exists at all."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
         await _make_expense(
@@ -759,7 +778,7 @@ async def test_variance_discloses_unconvertible_confirmed_expense(api_env) -> No
 async def test_variance_discloses_unconvertible_expected_expense(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
         await _make_expense(
@@ -788,11 +807,12 @@ async def test_variance_discloses_unconvertible_projection(api_env) -> None:
     full-year window, not just the one period a naive read might expect."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         saas = next(c for c in cats if c.key == "saas_subscriptions")
         budget = await _make_budget(session, org_id, user_id)
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("500000.00"),
@@ -822,9 +842,10 @@ async def test_forecast_discloses_unconvertible_projection(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     today = date.today()
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("500000.00"),
@@ -836,7 +857,7 @@ async def test_forecast_discloses_unconvertible_projection(api_env) -> None:
         session.add(sub)
         await session.flush()
 
-        result = await forecast(session, org_id, user_id, months=1)
+        result = await forecast(session, org_id, user_id, client_id=org_id, months=1)
 
     assert result["unconvertible_count"] == 1
     assert result["unconvertible_by_currency"] == {"COP": "500000.00"}
@@ -851,7 +872,7 @@ async def test_forecast_discloses_unconvertible_projection(api_env) -> None:
 async def test_variance_pct_with_zero_plan_is_none_not_infinity(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
         # committed spend with NO budget_line at all -> planned == 0.
@@ -870,7 +891,7 @@ async def test_variance_pct_with_zero_plan_is_none_not_infinity(api_env) -> None
 async def test_position_pct_of_plan_is_none_on_zero_plan(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
         # No budget_line at all -> total plan is 0.
@@ -891,7 +912,7 @@ async def test_position_avg_burn_is_zero_before_any_period_has_elapsed(api_env) 
     `subscriptions.reporting.idle_seats`'s zero-seat guard)."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         budget = await _make_budget(session, org_id, user_id)
 
         result = await position(session, org_id, budget.id, as_of=date(2025, 12, 31))
@@ -913,13 +934,16 @@ async def test_position_uses_the_fiscal_calendar_not_wall_clock_months(api_env) 
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         # Set fiscal_year_start_month=7 before anything else touches settings.
-        from app.modules.budget import fx as fx_module
+        # `fx.get_settings` is pure since Task 8 (it hands back unsaved
+        # defaults until a row exists), so the row is made the way a write
+        # makes it.
+        from app.modules.budget.rates import settings_for_write
 
-        settings = await fx_module.get_settings(session, org_id)
+        settings = await settings_for_write(session, org_id, org_id)
         settings.fiscal_year_start_month = 7
         await session.flush()
 
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         budget = await _make_budget(session, org_id, user_id, fiscal_year=2025)
 
         result = await position(session, org_id, budget.id, as_of=date(2026, 1, 15))
@@ -937,7 +961,7 @@ async def test_position_avg_monthly_burn_on_quarterly_budget_is_truly_monthly(ap
     $1,800 either way."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id, granularity="quarter")
         await _make_expense(
@@ -964,7 +988,7 @@ async def test_position_projected_year_end_rounds_once_not_after_avg_burn(api_en
     hand-computes `ytd_actual / elapsed_months * 12` would get."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id, granularity="quarter")
         await _make_expense(
@@ -992,9 +1016,10 @@ async def test_forecast_separates_materialized_from_projected(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     today = date.today()
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("15.00"),
@@ -1006,15 +1031,16 @@ async def test_forecast_separates_materialized_from_projected(api_env) -> None:
         session.add(sub)
         await session.flush()
 
-        before = await forecast(session, org_id, user_id, months=1)
+        before = await forecast(session, org_id, user_id, client_id=org_id, months=1)
         period_key = f"{today.year:04d}-{today.month:02d}"
         before_rows = [r for r in before["rows"] if r["period_key"] == period_key]
         assert before_rows
         assert all(r["materialized"] is False for r in before_rows)
 
-        await materialize(session, org_id, user_id, from_date=today, to_date=today)
+        await materialize(session, org_id, user_id, client_id=org_id,
+                          from_date=today, to_date=today)
 
-        after = await forecast(session, org_id, user_id, months=1)
+        after = await forecast(session, org_id, user_id, client_id=org_id, months=1)
 
     after_rows = [r for r in after["rows"] if r["period_key"] == period_key]
     assert after_rows
@@ -1025,7 +1051,7 @@ async def test_forecast_rejects_non_positive_months(api_env) -> None:
     org_id, _user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         with pytest.raises(BudgetValidationError):
-            await forecast(session, org_id, _user_id, months=0)
+            await forecast(session, org_id, _user_id, client_id=org_id, months=0)
 
 
 async def test_forecast_months_spans_exactly_n_calendar_months_including_current(
@@ -1042,9 +1068,10 @@ async def test_forecast_months_spans_exactly_n_calendar_months_including_current
     org_id, user_id = await _org_with_user(api_env)
     today = date.today()
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await seed_default_categories(session, org_id, user_id)
+        await seed_default_categories(session, org_id, user_id, client_id=org_id)
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("10.00"),
@@ -1056,7 +1083,7 @@ async def test_forecast_months_spans_exactly_n_calendar_months_including_current
         session.add(sub)
         await session.flush()
 
-        result = await forecast(session, org_id, user_id, months=12)
+        result = await forecast(session, org_id, user_id, client_id=org_id, months=12)
 
     period_keys = sorted({r["period_key"] for r in result["rows"]})
     total = today.year * 12 + (today.month - 1) + 11
@@ -1075,14 +1102,14 @@ async def test_forecast_months_spans_exactly_n_calendar_months_including_current
 async def test_export_rows_money_is_a_string(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         await _make_expense(
             session, org_id, user_id, category_id=hardware.id, expense_date=date(2026, 1, 15),
             amount=Decimal("123.45"), status="confirmed",
         )
 
-        rows = await export_rows(session, org_id)
+        rows = await export_rows(session, org_id, client_id=org_id)
 
     assert len(rows) == 1
     assert isinstance(rows[0]["amount"], str)
@@ -1094,14 +1121,14 @@ async def test_export_rows_money_is_a_string(api_env) -> None:
 async def test_odoo_export_emits_the_pinned_column_contract(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         await _make_expense(
             session, org_id, user_id, category_id=hardware.id, expense_date=date(2026, 1, 15),
             amount=Decimal("100.00"), status="confirmed",
         )
 
-        rows = await odoo_export_rows(session, org_id)
+        rows = await odoo_export_rows(session, org_id, client_id=org_id)
 
     assert len(rows) == 1
     assert list(rows[0]) == [
@@ -1123,7 +1150,7 @@ async def test_odoo_export_defaults_to_confirmed_only(api_env) -> None:
     describing -- it carries `status` as a column) is unaffected."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         await _make_expense(
             session, org_id, user_id, category_id=hardware.id, expense_date=date(2026, 1, 15),
@@ -1134,9 +1161,10 @@ async def test_odoo_export_defaults_to_confirmed_only(api_env) -> None:
             amount=Decimal("40.00"), status="expected",
         )
 
-        general_export = await export_rows(session, org_id)
-        odoo_default = await odoo_export_rows(session, org_id)
-        odoo_opt_in = await odoo_export_rows(session, org_id, include_unconfirmed=True)
+        general_export = await export_rows(session, org_id, client_id=org_id)
+        odoo_default = await odoo_export_rows(session, org_id, client_id=org_id)
+        odoo_opt_in = await odoo_export_rows(session, org_id, client_id=org_id,
+                                             include_unconfirmed=True)
 
     # The general-purpose export is untouched -- both rows, `status`
     # self-describes which is which.
@@ -1155,7 +1183,7 @@ async def test_odoo_export_defaults_to_confirmed_only(api_env) -> None:
 async def test_export_date_range_filters(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         await _make_expense(
             session, org_id, user_id, category_id=hardware.id, expense_date=date(2026, 1, 5),
@@ -1167,7 +1195,7 @@ async def test_export_date_range_filters(api_env) -> None:
         )
 
         rows = await export_rows(
-            session, org_id, date_from=date(2026, 1, 1), date_to=date(2026, 1, 31)
+            session, org_id, client_id=org_id, date_from=date(2026, 1, 1), date_to=date(2026, 1, 31)
         )
 
     assert len(rows) == 1
@@ -1184,7 +1212,7 @@ async def test_reports_write_no_audit_event(api_env) -> None:
     writes nothing."""
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        cats = await seed_default_categories(session, org_id, user_id)
+        cats = await seed_default_categories(session, org_id, user_id, client_id=org_id)
         hardware = next(c for c in cats if c.key == "hardware")
         budget = await _make_budget(session, org_id, user_id)
         await _make_expense(
@@ -1204,9 +1232,9 @@ async def test_reports_write_no_audit_event(api_env) -> None:
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await variance(session, org_id, budget.id, user_id)
         await position(session, org_id, budget.id, as_of=date(2026, 6, 30))
-        await forecast(session, org_id, user_id, months=3)
-        await export_rows(session, org_id)
-        await odoo_export_rows(session, org_id)
+        await forecast(session, org_id, user_id, client_id=org_id, months=3)
+        await export_rows(session, org_id, client_id=org_id)
+        await odoo_export_rows(session, org_id, client_id=org_id)
     after = await _audit_count()
 
     assert after == before
@@ -1242,7 +1270,7 @@ async def test_reports_write_no_user_audit_event_on_a_fresh_unseeded_org(api_env
             )
 
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await forecast(session, org_id, user_id, months=3)
+        await forecast(session, org_id, user_id, client_id=org_id, months=3)
 
     assert await _events_of("budget.category_created") == []
     seeded = await _events_of("budget.categories_seeded")
@@ -1252,7 +1280,7 @@ async def test_reports_write_no_user_audit_event_on_a_fresh_unseeded_org(api_env
 
     # A second forecast call must not add anything -- the org is now seeded.
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
-        await forecast(session, org_id, user_id, months=3)
+        await forecast(session, org_id, user_id, client_id=org_id, months=3)
     assert await _events_of("budget.category_created") == []
     assert len(await _events_of("budget.categories_seeded")) == 1
 
@@ -1269,44 +1297,53 @@ async def test_tenancy_variance_excludes_other_orgs_expenses(
     even on a raw BYPASSRLS admin session where org B's rows are fully
     visible. `variance()`'s `Expense.org_id == org_id` predicate on its own
     expense scan is the SOLE guard here -- there is no RLS backstop on this
-    session. Org B's category/expense are seeded INSIDE this test (not
-    relying on residue from another test in the same file) so the guard is
-    mutation-verifiable IN ISOLATION."""
+    session, and org B's row is planted under org A's own client, so the
+    client predicate does not stop it either (`drop_client_keys`). Org B's
+    category/expense are seeded INSIDE this test (not relying on residue
+    from another test in the same file) so the guard is mutation-verifiable
+    IN ISOLATION."""
     org_a, user_a = await _org_with_user(api_env)
     org_b, user_b = await _org_with_user(api_env)
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        cat_b = ExpenseCategory(
-            org_id=org_b, key="hardware", name="Hardware", system_key="hardware", created_by=user_b
-        )
-        session.add(cat_b)
-        await session.flush()
-
-        expense_b = Expense(
-            org_id=org_b,
-            expense_date=date(2026, 1, 15),
-            amount=Decimal("9999.00"),
-            currency="USD",
-            fx_rate=Decimal("1"),
-            amount_base=Decimal("9999.00"),
-            category_id=cat_b.id,
-            description="org B hardware",
-            source="manual",
-            status="confirmed",
-            entered_by=user_b,
-        )
-        session.add(expense_b)
-        await session.commit()
-        cat_b_id = cat_b.id
-
-    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        await seed_default_categories(session, org_a, user_a)
+        await seed_default_categories(session, org_a, user_a, client_id=org_a)
         budget_a = await _make_budget(session, org_a, user_a)
         await session.commit()
         budget_a_id = budget_a.id
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
+        cat_b = ExpenseCategory(
+            org_id=org_b, client_id=org_b,
+            key="hardware", name="Hardware", system_key="hardware", created_by=user_b
+        )
+        session.add(cat_b)
+        await session.flush()
+        cat_b_id = cat_b.id
+        # Org B's row, under ORG A's client (plan 2026-10-26 Task 8, lesson
+        # 2): the client predicate lets it through, so only the org predicate
+        # keeps it out. The keys that make such a row impossible are dropped
+        # for this transaction alone, which is rolled back.
+        await drop_client_keys(
+            session, "expense", "fk_expense_client_org", "fk_expense_category_client"
+        )
+        session.add(
+            Expense(
+                org_id=org_b, client_id=org_a,
+                expense_date=date(2026, 1, 15),
+                amount=Decimal("9999.00"),
+                currency="USD",
+                fx_rate=Decimal("1"),
+                amount_base=Decimal("9999.00"),
+                category_id=cat_b_id,
+                description="org B hardware",
+                source="manual",
+                status="confirmed",
+                entered_by=user_b,
+            )
+        )
+        await session.flush()
         result = await variance(session, org_a, budget_a_id, user_a)
+        await session.rollback()
 
     seen_category_ids = {row["category_id"] for row in result["rows"]}
     assert cat_b_id not in seen_category_ids
@@ -1317,18 +1354,34 @@ async def test_tenancy_variance_excludes_other_orgs_expenses(
 async def test_tenancy_position_excludes_other_orgs_expenses(
     api_env, admin_engine: AsyncEngine
 ) -> None:
+    """`position()`'s `Expense.org_id == org_id` predicate is the sole guard:
+    org B's row is planted under org A's own client (`drop_client_keys`)."""
     org_a, user_a = await _org_with_user(api_env)
     org_b, user_b = await _org_with_user(api_env)
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
+        await seed_default_categories(session, org_a, user_a, client_id=org_a)
+        budget_a = await _make_budget(session, org_a, user_a)
+        await session.commit()
+        budget_a_id = budget_a.id
+
+    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         cat_b = ExpenseCategory(
-            org_id=org_b, key="hardware", name="Hardware", system_key="hardware", created_by=user_b
+            org_id=org_b, client_id=org_b,
+            key="hardware", name="Hardware", system_key="hardware", created_by=user_b
         )
         session.add(cat_b)
         await session.flush()
+        # Org B's row, under ORG A's client (plan 2026-10-26 Task 8, lesson
+        # 2): the client predicate lets it through, so only the org predicate
+        # keeps it out. The keys that make such a row impossible are dropped
+        # for this transaction alone, which is rolled back.
+        await drop_client_keys(
+            session, "expense", "fk_expense_client_org", "fk_expense_category_client"
+        )
         session.add(
             Expense(
-                org_id=org_b,
+                org_id=org_b, client_id=org_a,
                 expense_date=date(2026, 1, 15),
                 amount=Decimal("9999.00"),
                 currency="USD",
@@ -1341,16 +1394,9 @@ async def test_tenancy_position_excludes_other_orgs_expenses(
                 entered_by=user_b,
             )
         )
-        await session.commit()
-
-    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        await seed_default_categories(session, org_a, user_a)
-        budget_a = await _make_budget(session, org_a, user_a)
-        await session.commit()
-        budget_a_id = budget_a.id
-
-    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
+        await session.flush()
         result = await position(session, org_a, budget_a_id, as_of=date(2026, 12, 31))
+        await session.rollback()
 
     assert result["ytd_actual"] == Decimal("0.00")
 
@@ -1358,23 +1404,25 @@ async def test_tenancy_position_excludes_other_orgs_expenses(
 async def test_tenancy_forecast_excludes_other_orgs_materialized_row_from_the_guard(
     api_env, admin_engine: AsyncEngine
 ) -> None:
-    """L7: `forecast()` is org-wide, not budget-scoped -- its `materialized`
-    flag is the one figure this function computes that could be corrupted
-    by another org's data. Org B's row is planted directly (via a raw
-    BYPASSRLS admin session -- `materialize` itself would never let a
-    cross-org `link_id` in) keyed on ORG A's OWN subscription id, seeded
-    INSIDE this test, so `_materialized_keys`'s `Expense.org_id == org_id`
-    predicate is the SOLE guard standing between it and org A's report --
-    mutation-verified in isolation below."""
+    """L7: `forecast()` is not budget-scoped -- its `materialized` flag is the
+    one figure this function computes that could be corrupted by another
+    org's data. Org B's row is planted directly (via a raw BYPASSRLS admin
+    session -- `materialize` itself would never let a cross-org `link_id` in)
+    keyed on ORG A's OWN subscription id, seeded INSIDE this test, and under
+    org A's own client (`drop_client_keys`; plan 2026-10-26 Task 8, lesson
+    2), so `_materialized_keys`'s `Expense.org_id == org_id` predicate is the
+    SOLE guard standing between it and org A's report -- mutation-verified
+    in isolation below."""
     org_a, user_a = await _org_with_user(api_env)
     org_b, user_b = await _org_with_user(api_env)
     today = date.today()
     period_key = f"{today.year:04d}-{today.month:02d}"
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        await seed_default_categories(session, org_a, user_a)
+        await seed_default_categories(session, org_a, user_a, client_id=org_a)
         sub_a = Subscription(
             org_id=org_a,
+            client_id=org_a,
             service_name="Acme SaaS",
             billing_cycle="monthly",
             cost_per_cycle=Decimal("15.00"),
@@ -1389,10 +1437,21 @@ async def test_tenancy_forecast_excludes_other_orgs_materialized_row_from_the_gu
         await session.commit()
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        cat_b = await create_category(session, org_b, user_b, key="saas_subscriptions", name="SaaS")
+        cat_b = await create_category(session, org_b, user_b, client_id=org_b,
+                                      key="saas_subscriptions", name="SaaS")
+        await session.commit()
+
+    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
+        # Org B's row, under ORG A's client (plan 2026-10-26 Task 8, lesson
+        # 2): the client predicate lets it through, so only the org predicate
+        # keeps it out. The keys that make such a row impossible are dropped
+        # for this transaction alone, which is rolled back.
+        await drop_client_keys(
+            session, "expense", "fk_expense_client_org", "fk_expense_category_client"
+        )
         session.add(
             Expense(
-                org_id=org_b,
+                org_id=org_b, client_id=org_a,
                 expense_date=today,
                 amount=Decimal("15.00"),
                 currency="USD",
@@ -1408,10 +1467,9 @@ async def test_tenancy_forecast_excludes_other_orgs_materialized_row_from_the_gu
                 entered_by=user_b,
             )
         )
-        await session.commit()
-
-    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        result = await forecast(session, org_a, user_a, months=1)
+        await session.flush()
+        result = await forecast(session, org_a, user_a, client_id=org_a, months=1)
+        await session.rollback()
 
     rows = [r for r in result["rows"] if r["period_key"] == period_key]
     assert rows
@@ -1423,19 +1481,37 @@ async def test_tenancy_export_rows_excludes_other_orgs_expenses(
 ) -> None:
     """L7: `export_rows` is one of the two artifacts that "physically leave
     the building" -- org B's expense, seeded INSIDE this test, must never
-    appear in org A's export."""
+    appear in org A's export, even planted under org A's own client
+    (`drop_client_keys`), where only the org predicate keeps it out."""
     org_a, user_a = await _org_with_user(api_env)
     org_b, user_b = await _org_with_user(api_env)
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
+        cat_a = await create_category(session, org_a, user_a, client_id=org_a,
+                                      key="hardware", name="Hardware")
+        await _make_expense(
+            session, org_a, user_a, category_id=cat_a.id, expense_date=date(2026, 1, 15),
+            amount=Decimal("7.00"), status="confirmed",
+        )
+        await session.commit()
+
+    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         cat_b = ExpenseCategory(
-            org_id=org_b, key="hardware", name="Hardware", system_key="hardware", created_by=user_b
+            org_id=org_b, client_id=org_b,
+            key="hardware", name="Hardware", system_key="hardware", created_by=user_b
         )
         session.add(cat_b)
         await session.flush()
+        # Org B's row, under ORG A's client (plan 2026-10-26 Task 8, lesson
+        # 2): the client predicate lets it through, so only the org predicate
+        # keeps it out. The keys that make such a row impossible are dropped
+        # for this transaction alone, which is rolled back.
+        await drop_client_keys(
+            session, "expense", "fk_expense_client_org", "fk_expense_category_client"
+        )
         session.add(
             Expense(
-                org_id=org_b,
+                org_id=org_b, client_id=org_a,
                 expense_date=date(2026, 1, 15),
                 amount=Decimal("9999.00"),
                 currency="USD",
@@ -1448,18 +1524,9 @@ async def test_tenancy_export_rows_excludes_other_orgs_expenses(
                 entered_by=user_b,
             )
         )
-        await session.commit()
-
-    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        cat_a = await create_category(session, org_a, user_a, key="hardware", name="Hardware")
-        await _make_expense(
-            session, org_a, user_a, category_id=cat_a.id, expense_date=date(2026, 1, 15),
-            amount=Decimal("7.00"), status="confirmed",
-        )
-        await session.commit()
-
-    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        rows = await export_rows(session, org_a)
+        await session.flush()
+        rows = await export_rows(session, org_a, client_id=org_a)
+        await session.rollback()
 
     assert len(rows) == 1
     assert rows[0]["amount"] == "7.00"
@@ -1474,14 +1541,31 @@ async def test_tenancy_odoo_export_rows_excludes_other_orgs_expenses(
     org_b, user_b = await _org_with_user(api_env)
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
+        cat_a = await create_category(session, org_a, user_a, client_id=org_a,
+                                      key="hardware", name="Hardware")
+        await _make_expense(
+            session, org_a, user_a, category_id=cat_a.id, expense_date=date(2026, 1, 15),
+            amount=Decimal("7.00"), status="confirmed",
+        )
+        await session.commit()
+
+    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         cat_b = ExpenseCategory(
-            org_id=org_b, key="hardware", name="Hardware", system_key="hardware", created_by=user_b
+            org_id=org_b, client_id=org_b,
+            key="hardware", name="Hardware", system_key="hardware", created_by=user_b
         )
         session.add(cat_b)
         await session.flush()
+        # Org B's row, under ORG A's client (plan 2026-10-26 Task 8, lesson
+        # 2): the client predicate lets it through, so only the org predicate
+        # keeps it out. The keys that make such a row impossible are dropped
+        # for this transaction alone, which is rolled back.
+        await drop_client_keys(
+            session, "expense", "fk_expense_client_org", "fk_expense_category_client"
+        )
         session.add(
             Expense(
-                org_id=org_b,
+                org_id=org_b, client_id=org_a,
                 expense_date=date(2026, 1, 15),
                 amount=Decimal("9999.00"),
                 currency="USD",
@@ -1494,18 +1578,9 @@ async def test_tenancy_odoo_export_rows_excludes_other_orgs_expenses(
                 entered_by=user_b,
             )
         )
-        await session.commit()
-
-    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        cat_a = await create_category(session, org_a, user_a, key="hardware", name="Hardware")
-        await _make_expense(
-            session, org_a, user_a, category_id=cat_a.id, expense_date=date(2026, 1, 15),
-            amount=Decimal("7.00"), status="confirmed",
-        )
-        await session.commit()
-
-    async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        rows = await odoo_export_rows(session, org_a)
+        await session.flush()
+        rows = await odoo_export_rows(session, org_a, client_id=org_a)
+        await session.rollback()
 
     assert len(rows) == 1
     assert rows[0]["amount"] == "7.00"
@@ -1530,9 +1605,10 @@ async def test_export_suppresses_unresolvable_vendor_id_and_label(
         await session.flush()
         vendor_b_id = vendor_b.id
 
-        cat_a = await create_category(session, org_a, user_a, key="hardware", name="Hardware")
+        cat_a = await create_category(session, org_a, user_a, client_id=org_a,
+                                      key="hardware", name="Hardware")
         expense_a = Expense(
-            org_id=org_a,
+            org_id=org_a, client_id=org_a,
             expense_date=date(2026, 1, 15),
             amount=Decimal("100.00"),
             currency="USD",
@@ -1549,7 +1625,7 @@ async def test_export_suppresses_unresolvable_vendor_id_and_label(
         await session.commit()
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
-        rows = await export_rows(session, org_a)
+        rows = await export_rows(session, org_a, client_id=org_a)
 
     assert len(rows) == 1
     assert rows[0]["vendor_id"] is None

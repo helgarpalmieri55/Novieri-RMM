@@ -8,12 +8,15 @@ from sqlalchemy import select
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Person
+from tests.client_scope_support import internal_client
 from tests.conftest import ApiEnv
 
 
 async def _person(api_env: ApiEnv, org_id: UUID, name: str, email: str | None) -> UUID:
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as s:
-        person = Person(org_id=org_id, display_name=name, email=email, source="operator")
+        person = Person(
+            org_id=org_id, client_id=org_id, display_name=name, email=email, source="operator"
+        )
         s.add(person)
         await s.flush()
         return person.id
@@ -22,7 +25,8 @@ async def _person(api_env: ApiEnv, org_id: UUID, name: str, email: str | None) -
 async def _subscription(api_env: ApiEnv, headers: dict[str, str]) -> dict[str, Any]:
     resp = await api_env.client.post(
         "/api/v1/subscriptions",
-        json={"service_name": "Slack", "billing_cycle": "monthly", "cost_per_cycle": 5,
+        json={"client_id": await internal_client(api_env, headers), "service_name": "Slack",
+              "billing_cycle": "monthly", "cost_per_cycle": 5,
               "currency": "USD", "seats": 5},
         headers=headers,
     )
@@ -88,7 +92,8 @@ async def _licence(api_env: ApiEnv, headers: dict[str, str]) -> dict[str, Any]:
     assert product.status_code == 201, product.text
     licence = await api_env.client.post(
         "/api/v1/licenses",
-        json={"product_id": product.json()["id"], "type": "per_user", "entitlements": 5},
+        json={"client_id": await internal_client(api_env, headers),
+              "product_id": product.json()["id"], "type": "per_user", "entitlements": 5},
         headers=headers,
     )
     assert licence.status_code == 201, licence.text

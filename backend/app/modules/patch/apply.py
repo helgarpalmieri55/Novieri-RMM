@@ -10,11 +10,14 @@ The gate, precisely (see Task 6 review): a ``(device, patch)`` pair is
 dispatched only when ALL of:
 
 1. An UN-REVOKED ``patch_approvals`` row exists for
-   ``(org_id, patch_id, ring_name == device's resolved ring)``. This is
-   re-checked here, keyed off the approval table itself — never inferred
-   solely from the `device_patch_status` snapshot, which can go stale (a
-   device rescanned after its ring was approved may sit at `missing` while
-   still being legitimately dispatchable; see point 2).
+   ``(org_id, patch_id, ring_name == device's resolved ring)`` whose owner is
+   the device's client or every client (``client_id IS NULL``; MSP clients
+   plan 2026-10-26 Task 14). This is re-checked here, keyed off the approval
+   table itself — never inferred solely from the `device_patch_status`
+   snapshot, which can go stale (a device rescanned after its ring was
+   approved may sit at `missing` while still being legitimately dispatchable;
+   see point 2). THE CLIENT PREDICATE IS EXPLICIT because the window sweep
+   runs under scope "all", where RLS would let X's approval clear Y's machine.
 2. The device's `device_patch_status.state` for that patch is `"approved"` or
    `"missing"` — never `"installed"`, `"failed"`, or `"not_applicable"`.
 3. `in_window(resolved_policy.maintenance_window, now)` is true for the
@@ -29,7 +32,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
@@ -66,9 +69,22 @@ class _JobEngineLike(Protocol):
     async def signed_envelope(self, job: Any) -> dict[str, Any]: ...
 
 
+def _approves_client(client_id: UUID) -> ColumnElement[bool]:
+    """An approval that clears `client_id`'s machines: that client's own, or
+    a global one (every client's)."""
+    return or_(PatchApproval.client_id.is_(None), PatchApproval.client_id == client_id)
+
+
 async def _ring_approved_patch_ids(
-    session: AsyncSession, *, org_id: UUID, ring_name: str, patch_ids: set[UUID]
+    session: AsyncSession,
+    *,
+    org_id: UUID,
+    ring_name: str,
+    patch_ids: set[UUID],
+    client_id: UUID,
 ) -> set[UUID]:
+    """The patches cleared for `ring_name` FOR A MACHINE OF `client_id`: by
+    an approval of that client or a global one -- never another client's."""
     if not patch_ids:
         return set()
     rows = (
@@ -78,6 +94,7 @@ async def _ring_approved_patch_ids(
                 PatchApproval.ring_name == ring_name,
                 PatchApproval.revoked.is_(False),
                 PatchApproval.patch_id.in_(patch_ids),
+                _approves_client(client_id),
             )
         )
     ).scalars().all()
@@ -94,15 +111,21 @@ async def _change_gate(
     *,
     org_id: UUID,
     device_id: UUID,
+    client_id: UUID,
     ring_name: str,
     approved_ids: set[UUID],
     gates: Gates,
     actor_id: UUID | None,
 ) -> set[UUID]:
-    """The approved patches a change gate lets through to this device: all of
-    them when no gate covers its group, otherwise those whose approval is
-    linked to a change that is approved or being implemented. A withheld
-    patch is audited `change.gate_refused`."""
+    """The approved patches a change gate lets through to this device (of
+    `client_id`): all of them when no gate covers its group, otherwise those
+    one of whose approvals -- the client's own or a global one -- is linked
+    to a change that is approved or being implemented, OF THE APPROVAL'S
+    CLIENT (C8): X's approval by a change of X, a global approval by a change
+    of the internal client, whose id is the org's. A link to any other
+    client's change -- the legacy shape migration 0237 left, every change
+    filed under the internal client -- authorizes nothing. A withheld patch
+    is audited `change.gate_refused` under the device's client."""
     group_id = (
         await session.execute(
             select(Device.device_group_id).where(Device.org_id == org_id, Device.id == device_id)
@@ -112,18 +135,25 @@ async def _change_gate(
         return approved_ids
     approvals = (
         await session.execute(
-            select(PatchApproval.patch_id, PatchApproval.id).where(
+            select(PatchApproval.patch_id, PatchApproval.id, PatchApproval.client_id).where(
                 PatchApproval.org_id == org_id,
                 PatchApproval.ring_name == ring_name,
                 PatchApproval.revoked.is_(False),
                 PatchApproval.patch_id.in_(approved_ids),
+                _approves_client(client_id),
             )
         )
     ).all()
     allowed = {
         patch_id
-        for patch_id, approval_id in approvals
-        if await has_authorizing_change(session, org_id, "patch_approval", approval_id)
+        for patch_id, approval_id, owner in approvals
+        if await has_authorizing_change(
+            session,
+            org_id,
+            "patch_approval",
+            approval_id,
+            client_id=org_id if owner is None else owner,
+        )
     }
     withheld = approved_ids - allowed
     if withheld:
@@ -138,6 +168,8 @@ async def _change_gate(
                 "needs an approved change linked to the approval"
             ),
             metadata={"patch_ids": sorted(str(p) for p in withheld)},
+            # The refused act is this device's install: its client's.
+            client_id=client_id,
         )
     return allowed
 
@@ -186,22 +218,48 @@ async def dispatch_apply(
     for status, patch in rows:
         by_device.setdefault(status.device_id, []).append((status, patch))
 
-    gates = await gates_for(session, org_id, "patches")
+    # A device meets ITS CLIENT'S change gates (MSP clients plan 2026-10-26
+    # Task 7, D4): the clients are read once for the sweep, and each client's
+    # gates once, however many of its devices are due.
+    device_clients: dict[UUID, UUID] = dict(
+        (
+            await session.execute(
+                select(Device.id, Device.client_id).where(
+                    Device.org_id == org_id, Device.id.in_(list(by_device))
+                )
+            )
+        )
+        .tuples()
+        .all()
+    )
+    gates_by_client: dict[UUID, Gates] = {}
     pending: list[tuple[UUID, UUID, dict[str, Any]]] = []
     for device_id, status_patches in by_device.items():
         policy = await resolve_patch_policy(session, org_id, device_id)
         if not in_window(policy.maintenance_window, now):
             continue
+        client_id = device_clients.get(device_id)
+        if client_id is None:
+            continue  # gone, or invisible to this session: nothing to send it
+        gates = gates_by_client.get(client_id)
+        if gates is None:
+            gates = await gates_for(session, org_id, "patches", client_id=client_id)
+            gates_by_client[client_id] = gates
 
         candidate_patch_ids = {patch.id for _, patch in status_patches}
         approved_ids = await _ring_approved_patch_ids(
-            session, org_id=org_id, ring_name=policy.ring_name, patch_ids=candidate_patch_ids
+            session,
+            org_id=org_id,
+            ring_name=policy.ring_name,
+            patch_ids=candidate_patch_ids,
+            client_id=client_id,
         )
         if gates.any:
             approved_ids = await _change_gate(
                 session,
                 org_id=org_id,
                 device_id=device_id,
+                client_id=client_id,
                 ring_name=policy.ring_name,
                 approved_ids=approved_ids,
                 gates=gates,
@@ -243,6 +301,7 @@ async def dispatch_apply(
             target_type="device",
             target_id=str(device_id),
             metadata={"patch_count": len(eligible), "job_id": str(job.id)},
+            client_id=client_id,
         )
 
     await session.flush()

@@ -438,7 +438,13 @@ def test_the_sweep_actually_finds_log_calls() -> None:
     `modules/agent_update/reconcile.py`, where one org's rollout tick fails
     and every other org is still ticked. It names the org and nothing else.
 
-    NOW 106, MCP final review: one static ERROR in `app/mcp/server.py`, when
+    NOW 107, MSP clients phase 2 final review: one static WARNING in
+    `app/worker.py::deploy_window_sweep_all_orgs`, when one deployment's own
+    data (a stored window the parser cannot read) stops it and the sweep goes
+    on with the others. `extra` = the deployment id and the exception TYPE;
+    never the stored value, never `str(exc)`.
+
+    BEFORE THAT, 106, MCP final review: one static ERROR in `app/mcp/server.py`, when
     the shielded `mcp.tool_called` audit write is abandoned at its deadline
     (a database that never answers). `extra` carries the tool name as the
     audit log would record it, the status and the deadline -- never the
@@ -515,8 +521,8 @@ def test_the_sweep_actually_finds_log_calls() -> None:
         total += sum(
             1 for n in ast.walk(tree) if isinstance(n, ast.Call) and _is_log_call(n)
         )
-    assert total == 106, (
-        f"the AST sweep found {total} log call sites, expected 106 -- if a log "
+    assert total == 107, (
+        f"the AST sweep found {total} log call sites, expected 107 -- if a log "
         "call was legitimately added or removed, update this number AND the "
         "running count in §2.2 of docs/superpowers/specs/"
         "2026-08-14-logging-kernel-design.md, together. NOT line 13: that is "

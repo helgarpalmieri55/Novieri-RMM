@@ -77,7 +77,7 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import ColumnElement, Select, and_, case, exists, func, literal, select
+from sqlalchemy import ColumnElement, Select, and_, case, exists, func, literal, or_, select
 from sqlalchemy.orm import aliased
 
 from app.core.i18n import N_
@@ -317,12 +317,20 @@ def _stats(org_id: UUID, params: PatchComplianceParams) -> Any:
         _org_default(PatchPolicy.ring_name, org_id),
         literal(_DEFAULT_RING),
     )
+    # APPROVED FOR THIS MACHINE: by its own client's approval or a global one
+    # (MSP clients plan 2026-10-26 Task 14). `device_patch_status.client_id`
+    # is its device's (trigger, 0231). Explicit, because a report run under
+    # scope all would otherwise count X's approval for Y's machine.
     approved = exists(
         select(PatchApproval.id).where(
             PatchApproval.org_id == org_id,
             PatchApproval.patch_id == DevicePatchStatus.patch_id,
             PatchApproval.ring_name == device_ring,
             PatchApproval.revoked.is_(False),
+            or_(
+                PatchApproval.client_id.is_(None),
+                PatchApproval.client_id == DevicePatchStatus.client_id,
+            ),
         )
     )
     outstanding = DevicePatchStatus.state.in_(sorted(_OUTSTANDING_STATES))

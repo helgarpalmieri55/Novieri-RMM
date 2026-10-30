@@ -218,6 +218,12 @@ async def _designated(
     device whose agent is offline falls through to auto-selection rather than
     producing a job addressed to a machine that cannot receive it and a subnet
     page that shows a dispatch which never happened.
+
+    **AND A MACHINE OF THE SUBNET'S CLIENT** (MSP clients, invariant 5a). A
+    designation naming another client's machine -- written before
+    `set_sweep_settings` refused one, or straight into the table -- is ignored
+    exactly as one whose agent cannot sweep is: it falls through to
+    auto-selection, which stays inside the client too.
     """
     if subnet.sweep_device_id is None:
         return None
@@ -227,9 +233,14 @@ async def _designated(
                 "SELECT a.status AS status, a.capabilities AS capabilities"
                 " FROM agents a JOIN devices d ON d.id = a.device_id AND d.org_id = a.org_id"
                 " WHERE a.org_id = :org AND a.device_id = :device"
+                "   AND d.client_id = :client"
                 "   AND d.review_state = 'approved'"
             ),
-            {"org": str(org_id), "device": str(subnet.sweep_device_id)},
+            {
+                "org": str(org_id),
+                "device": str(subnet.sweep_device_id),
+                "client": str(subnet.client_id),
+            },
         )
     ).first()
     if row is None or row.status != "online":
@@ -256,6 +267,23 @@ async def select_sweeper(
     sweep it, and dispatching anyway emits somebody's probe from the wrong
     place. `no_agent` is a first-class outcome (§2.10) that the subnet page
     shows and §4.3's Gate E reads -- not an error swallowed in a log.
+
+    **AND NEVER ANOTHER CLIENT'S MACHINE** (MSP clients, invariant 5a). Two
+    clients can both run 10.0.0.0/24 on two unrelated wires, so an address
+    inside the prefix says nothing about which network a machine is on: the
+    candidate devices are the SUBNET'S CLIENT'S (`d.client_id = :client`) and
+    so is the site-server row that earns the preference (`s.client_id =
+    :client`). The signed `net.sweep` params carry that client's target list,
+    the probe leaves from its wire and the results are filed under it. Y's
+    machine on Y's 10.0.0.0/24 is `no_agent` for X's, not X's sweeper -- not
+    even for a technician who may act on every client, and not even when Y's
+    site server declares the more specific segment. The same rule as push
+    install's `_site_server_for` (`agent_push/preflight.py`), for the same
+    reason. Applied in the query, not left to RLS: the hourly worker runs
+    under the every-client scope, and so does a technician of every client.
+    A site server is H from its device, so its client is already the
+    candidate's; the predicate says so where the preference is decided, and
+    a test plants the row the trigger forbids to show it holds on its own.
 
     **SITE SERVERS ARE PREFERRED, AND THE PREFERENCE SITS BELOW LIVENESS.** A
     device declared in `site_server` for a segment CONTAINING this subnet, and
@@ -306,6 +334,7 @@ async def select_sweeper(
                 " FROM devices d"
                 " JOIN agents a ON a.device_id = d.id AND a.org_id = d.org_id"
                 " WHERE d.org_id = :org"
+                "   AND d.client_id = :client"
                 "   AND d.review_state = 'approved'"
                 "   AND EXISTS ("
                 "     SELECT 1 FROM ipam_observation o"
@@ -327,6 +356,7 @@ async def select_sweeper(
                 "          (EXISTS ("
                 "            SELECT 1 FROM site_server s"
                 "            WHERE s.org_id = :org AND s.device_id = d.id"
+                "              AND s.client_id = :client"
                 "              AND s.enabled"
                 "              AND EXISTS ("
                 "                SELECT 1 FROM unnest(s.segments) seg"
@@ -337,6 +367,7 @@ async def select_sweeper(
             ),
             {
                 "org": str(org_id),
+                "client": str(subnet.client_id),
                 "cutoff": cutoff,
                 "prefix": str(subnet.prefix),
                 "refused_since": await _refusal_cutoff(stamp),
@@ -428,6 +459,8 @@ async def create_sweep(
         )
     stamp = now or _utcnow()
     subnet = await get_subnet(session, org_id, subnet_id)
+    # The subnet's client: who sweeps it, and whose dispatch the audit records.
+    client_id = subnet.client_id
 
     # BOTH CHECKS PRECEDE `authorized_targets`, WHICH ANSWERS `[]` FOR BOTH.
     # That empty set is the right safe default and the wrong message: see the
@@ -546,6 +579,7 @@ async def create_sweep(
         action="ipam.sweep_dispatched",
         target_type="device",
         target_id=str(device_id),
+        client_id=client_id,
         metadata={
             "sweep_run_id": str(run.id),
             "job_id": str(job.id),

@@ -888,7 +888,9 @@ async def device_rollup(
             .join(Device, Device.id == DevicePatchStatus.device_id)
             .join(Patch, Patch.id == DevicePatchStatus.patch_id)
             .where(*where)
-            .group_by(DevicePatchStatus.device_id, Device.hostname, Device.os_family)
+            .group_by(
+                DevicePatchStatus.device_id, Device.client_id, Device.hostname, Device.os_family
+            )
         )
 
     total = (
@@ -908,6 +910,7 @@ async def device_rollup(
             grouped(
                 (
                     DevicePatchStatus.device_id,
+                    Device.client_id,
                     Device.hostname,
                     Device.os_family,
                     outstanding.label("outstanding"),
@@ -927,6 +930,7 @@ async def device_rollup(
     items = [
         {
             "device_id": row.device_id,
+            "client_id": row.client_id,
             "hostname": row.hostname,
             "os_family": row.os_family,
             "outstanding": row.outstanding,

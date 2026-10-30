@@ -365,11 +365,11 @@ const DYNAMIC: Dynamic[] = [
   {
     file: "modules/ipam/registry.py",
     how: "_audit() wrapper literals",
-    targets: ["ipam_site", "ipam_vlan", "ipam_vrf"],
+    // `ipam.site_*` / `ipam_site` are written no more (MSP clients phase 2:
+    // IPAM sites became the client's `sites`); their words stay in both
+    // vocabularies for the events the chain already holds.
+    targets: ["ipam_vlan", "ipam_vrf"],
     codes: [
-      "ipam.site_created",
-      "ipam.site_deleted",
-      "ipam.site_updated",
       "ipam.vlan_created",
       "ipam.vlan_deleted",
       "ipam.vlan_updated",

@@ -6,6 +6,8 @@ export type StepState = "pending" | "done" | "skipped";
 
 export interface PersonOut {
   id: string;
+  /** The one client the person works for (MSP clients phase 2). Never changes. */
+  client_id: string;
   display_name: string;
   email: string | null;
   user_id: string | null;
@@ -23,6 +25,8 @@ export interface PersonListRow extends PersonOut {
 }
 
 export interface PersonCreate {
+  /** Required: a person belongs to exactly one client. */
+  client_id: string;
   display_name: string;
   email?: string | null;
   department?: string | null;
@@ -30,7 +34,8 @@ export interface PersonCreate {
   start_date?: string | null;
 }
 
-export type PersonUpdate = Partial<PersonCreate> & { end_date?: string | null };
+/** A person's client never changes, so an edit cannot carry one. */
+export type PersonUpdate = Partial<Omit<PersonCreate, "client_id">> & { end_date?: string | null };
 
 export interface LoginOut {
   id: string;
@@ -40,6 +45,8 @@ export interface LoginOut {
 
 export interface AccountOut {
   user_id: string;
+  /** `staff` signs in to the console; a `contact` is a client's, switched off through Clients. */
+  kind: "staff" | "contact";
   email: string;
   status: string;
   last_login_at: string | null;

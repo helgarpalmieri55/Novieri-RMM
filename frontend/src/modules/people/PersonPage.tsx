@@ -19,6 +19,7 @@ import {
   useReleaseLicence,
   useReleaseSeat,
   useStartChecklist,
+  turnOffPermission,
   useTurnOffSignIn,
   useUpdatePerson,
 } from "./api";
@@ -31,13 +32,13 @@ import {
   lifecycleLabel,
   linkSourceLabel,
 } from "./labels";
-import type { ChecklistKind, PersonDetailOut, PersonOut } from "./types";
+import type { AccountOut, ChecklistKind, PersonDetailOut, PersonOut } from "./types";
 
 /** What a destructive button is about to do, for the confirmation. */
 type Pending =
   | { kind: "seat"; id: string; name: string }
   | { kind: "licence"; id: string; name: string }
-  | { kind: "sign-in"; id: string; name: string };
+  | { kind: "sign-in"; id: string; name: string; account: AccountOut["kind"] };
 
 export function PersonPage() {
   const t = useT();
@@ -185,7 +186,8 @@ export function PersonPage() {
 function Holdings({ data, zone }: { data: PersonDetailOut; zone: string | null | undefined }) {
   const t = useT();
   const personId = data.person.id;
-  const canUsers = useCan("users.manage");
+  // Staff are switched off in Settings, a client's contact as a contact.
+  const canTurnOff = useCan(data.account ? turnOffPermission(data.account) : "users.manage");
   const canLicences = useCan("licenses.manage");
   const canSeats = useCan("subscriptions.manage");
   const releaseSeat = useReleaseSeat(personId);
@@ -205,12 +207,17 @@ function Holdings({ data, zone }: { data: PersonDetailOut; zone: string | null |
       <Panel
         title={t("people.holdings.signIn.title")}
         actions={
-          canUsers && data.account?.status === "active" ? (
+          canTurnOff && data.account?.status === "active" ? (
             <Button
               variant="outline"
               onClick={() =>
                 data.account &&
-                setPending({ kind: "sign-in", id: data.account.user_id, name: data.account.email })
+                setPending({
+                  kind: "sign-in",
+                  id: data.account.user_id,
+                  name: data.account.email,
+                  account: data.account.kind,
+                })
               }
             >
               {t("people.holdings.signIn.turnOff")}
@@ -407,7 +414,11 @@ function Holdings({ data, zone }: { data: PersonDetailOut; zone: string | null |
         subject={pending ? `${data.person.display_name}: ${pending.name}` : ""}
         body={
           pending?.kind === "sign-in"
-            ? t("people.holdings.confirm.turnOffBody")
+            ? t(
+                pending.account === "contact"
+                  ? "people.holdings.confirm.turnOffBodyContact"
+                  : "people.holdings.confirm.turnOffBody",
+              )
             : t("people.holdings.confirm.releaseBody")
         }
         confirmLabel={
@@ -423,7 +434,7 @@ function Holdings({ data, zone }: { data: PersonDetailOut; zone: string | null |
           if (!act) return;
           if (act.kind === "seat") releaseSeat.mutate(act.id);
           else if (act.kind === "licence") releaseLicence.mutate(act.id);
-          else turnOff.mutate(act.id);
+          else turnOff.mutate({ user_id: act.id, kind: act.account });
         }}
       />
     </>

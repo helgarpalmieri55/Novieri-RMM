@@ -47,6 +47,7 @@ import { Button, Td } from "../../components/ui";
 import type { AssetCandidate, Me, PromoteResult } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
+import { useClientName } from "../settings/api";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { Trans } from "../../i18n/Trans";
@@ -116,11 +117,47 @@ function PromoteOutcome({ results }: { results: readonly PromoteResult[] }) {
 /** The permission the fleet list is read under; the sweep tile counts that list. */
 const DEVICES_READ = "devices.read";
 
+/**
+ * A row's identity: its client AND its address. Two clients can run the same
+ * 10.0.0.9 on unrelated networks, and each is its own candidate -- selected,
+ * keyed and promoted apart (MSP clients phase 2).
+ */
+function rowKey(candidate: AssetCandidate): string {
+  return `${candidate.client_id}/${candidate.address}`;
+}
+
+/** What one click did: every client's per-address results, and the requests that failed. */
+interface PromoteOutcomes {
+  results: PromoteResult[];
+  failures: unknown[];
+  /** The clients whose request failed: their rows stay selected for a retry. */
+  failedClients: ReadonlySet<string>;
+}
+
+/** A selected row, as it was when it was ticked: whose it is, and its address. */
+interface Picked {
+  client_id: string;
+  address: string;
+}
+
+/** Every request of one click failed: each one's reason, not only the first. */
+class PromoteFailed extends Error {
+  constructor(readonly failures: readonly unknown[]) {
+    super("every promote request failed");
+    this.name = "PromoteFailed";
+  }
+}
+
 export function CandidatesPage() {
   const t = useT();
   const api = useApi();
   const queryClient = useQueryClient();
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // THE SELECTION IS A SNAPSHOT of each ticked row (its client and address),
+  // keyed by `rowKey`, not a set of keys read back against the list: a row a
+  // refetch drops between the tick and the click is still sent, and the
+  // server answers it per address ("not a candidate") instead of the page
+  // silently dropping it.
+  const [selected, setSelected] = useState<Map<string, Picked>>(new Map());
   const [scanning, setScanning] = useState(false);
 
   const candidates = useQuery({
@@ -130,6 +167,9 @@ export function CandidatesPage() {
   // Same `["me"]` key the shell already holds, so this is a cache read. The
   // zone is the profile's, not the browser's (cycle 5).
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  // Whose a row is, where two clients show one address: the name for someone
+  // holding `clients.read`, the id otherwise.
+  const clientName = useClientName();
   const zone = me.data?.timezone;
   /**
    * HOW MANY ROWS THE SWEEP HAS WRITTEN ON ITS OWN EVIDENCE. v3's second
@@ -151,10 +191,42 @@ export function CandidatesPage() {
     enabled: canReadDevices,
   });
 
-  const promote = useMutation({
-    mutationFn: () => api.promoteAssetCandidates({ addresses: [...selected] }),
-    onSuccess: () => {
-      setSelected(new Set());
+  const promote = useMutation<PromoteOutcomes>({
+    // THE CLIENT COMES FROM THE ROW (operator decision 2026-10-28). A
+    // promotion names ONE client and each machine is filed under it, so the
+    // selection goes as one request per client the selected rows are of.
+    // Settled, not raced: one client's refusal must not hide the others'
+    // results -- the page reports both.
+    mutationFn: async () => {
+      const byClient = new Map<string, string[]>();
+      for (const picked of selected.values()) {
+        byClient.set(picked.client_id, [...(byClient.get(picked.client_id) ?? []), picked.address]);
+      }
+      const requests = [...byClient];
+      const settled = await Promise.allSettled(
+        requests.map(([client_id, addresses]) =>
+          api.promoteAssetCandidates({ client_id, addresses }),
+        ),
+      );
+      const results = settled.flatMap((s) => (s.status === "fulfilled" ? s.value.results : []));
+      const failures = settled.flatMap((s) => (s.status === "rejected" ? [s.reason] : []));
+      // `allSettled` keeps the order it was given: the i-th outcome is the
+      // i-th client's.
+      const failedClients = new Set(
+        requests.flatMap(([client_id], i) => (settled[i]?.status === "rejected" ? [client_id] : [])),
+      );
+      // Nothing came back at all: the selection stays, and the error lines
+      // say why -- every request's, not only the first.
+      if (results.length === 0 && failures.length > 0) throw new PromoteFailed(failures);
+      return { results, failures, failedClients };
+    },
+    onSuccess: ({ failedClients }) => {
+      // The rows of a client whose request FAILED stay selected, so the
+      // retry is one click; the rest were answered (final review E).
+      setSelected(
+        (current) =>
+          new Map([...current].filter(([, picked]) => failedClients.has(picked.client_id))),
+      );
       void queryClient.invalidateQueries({ queryKey: ["asset-candidates"] });
       void queryClient.invalidateQueries({ queryKey: ["devices"] });
     },
@@ -163,16 +235,23 @@ export function CandidatesPage() {
   const data = candidates.data;
   const items = data?.items ?? [];
   const unsweepable = data?.unsweepable_subnets ?? 0;
+  // An address more than one client's rows show: those rows say whose they are.
+  const seenAt = new Map<string, number>();
+  for (const candidate of items) {
+    seenAt.set(candidate.address, (seenAt.get(candidate.address) ?? 0) + 1);
+  }
+  const shared = (candidate: AssetCandidate) => (seenAt.get(candidate.address) ?? 0) > 1;
 
-  function toggle(address: string) {
+  function toggle(candidate: AssetCandidate) {
     // The outcome below describes ONE promote of ONE selection. Leaving it on
     // screen while the operator builds the next selection makes it read as a
     // report on rows it never saw.
     promote.reset();
+    const key = rowKey(candidate);
     setSelected((current) => {
-      const next = new Set(current);
-      if (next.has(address)) next.delete(address);
-      else next.add(address);
+      const next = new Map(current);
+      if (next.has(key)) next.delete(key);
+      else next.set(key, { client_id: candidate.client_id, address: candidate.address });
       return next;
     });
   }
@@ -336,13 +415,22 @@ export function CandidatesPage() {
                 {items.map((candidate) => {
                   const seen = evidence(candidate);
                   return (
-                    <tr key={candidate.address}>
+                    // Keyed by client AND address: two clients' 10.0.0.9
+                    // are two candidates (MSP clients phase 2).
+                    <tr key={rowKey(candidate)}>
                       <td>
                         <input
                           type="checkbox"
-                          aria-label={candidate.address}
-                          checked={selected.has(candidate.address)}
-                          onChange={() => toggle(candidate.address)}
+                          aria-label={
+                            shared(candidate)
+                              ? t("devices.candidates.selectOfClient", {
+                                  address: candidate.address,
+                                  client: clientName(candidate.client_id),
+                                })
+                              : candidate.address
+                          }
+                          checked={selected.has(rowKey(candidate))}
+                          onChange={() => toggle(candidate)}
                         />
                       </td>
                       {/* v3's row: a glyph leads, the address is the title,
@@ -357,6 +445,13 @@ export function CandidatesPage() {
                         <div className="cell-title mono">{candidate.address}</div>
                         {candidate.hostname ? (
                           <div className="cell-sub">{candidate.hostname}</div>
+                        ) : null}
+                        {shared(candidate) ? (
+                          <div className="cell-sub">
+                            {t("devices.candidates.ofClient", {
+                              client: clientName(candidate.client_id),
+                            })}
+                          </div>
                         ) : null}
                       </Td>
                       <td className="mono">
@@ -405,11 +500,14 @@ export function CandidatesPage() {
         />
       </p>
 
-      {promote.isError && (
-        <p role="alert" className="form-error mt-3">
-          {describeSubmitError(promote.error)}
-        </p>
-      )}
+      {promote.isError &&
+        (promote.error instanceof PromoteFailed ? [...promote.error.failures] : [promote.error]).map(
+          (failure, at) => (
+            <p key={at} role="alert" className="form-error mt-3">
+              {describeSubmitError(failure)}
+            </p>
+          ),
+        )}
 
       {/* THE 200 THAT PROMOTED NOTHING. `POST /candidates/promote` answers
           per-address on purpose -- "one stale entry in a selection must not
@@ -421,6 +519,13 @@ export function CandidatesPage() {
           rather than through a 503. Both halves are reported, and the
           incomplete case is an alert rather than a status. */}
       {promote.data && <PromoteOutcome results={promote.data.results} />}
+      {/* A client whose request failed while another's succeeded: its own
+          line, in the page's error form, beside the others' results. */}
+      {promote.data?.failures.map((failure, at) => (
+        <p key={at} role="alert" className="form-error mt-3">
+          {describeSubmitError(failure)}
+        </p>
+      ))}
     </>
   );
 }

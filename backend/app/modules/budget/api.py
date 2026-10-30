@@ -49,6 +49,13 @@ FX/settings writes -> ``budget.manage``; expense create/edit + materialize
 is explicitly ``budget.read``-gated per spec §5/§8. Technician holds none of
 the four permissions (spec §0.5) -- the module-defining assertion, tested by
 iterating every route in ``tests/test_budget_api.py``.
+
+**Per client (MSP clients plan 2026-10-26 Task 8).** Every create names its
+client in the body; settings, the forecast and both exports name one in the
+query (each client has its own base currency and fiscal year); the four lists
+take one as an optional filter. Budget is an optional module per client: a
+write for a client without it is the app's 404 (``ModuleNotEnabled``, mapped
+in ``app/main.py``), raised in the service after RBAC answered here.
 """
 
 import csv
@@ -88,10 +95,16 @@ from app.modules.budget.budgets import (
     put_lines,
     update_budget,
 )
-from app.modules.budget.errors import BudgetNotFoundError, BudgetValidationError
+from app.modules.budget.errors import (
+    BudgetClientError,
+    BudgetConflictError,
+    BudgetNotFoundError,
+    BudgetValidationError,
+)
 from app.modules.budget.expenses import (
     confirm_expense,
     create_expense,
+    expense_for_write,
     get_expense,
     list_expenses,
     reject_if_void,
@@ -99,13 +112,12 @@ from app.modules.budget.expenses import (
     void_expense,
 )
 from app.modules.budget.feeds import materialize
-from app.modules.budget.fx import get_settings
 from app.modules.budget.rates import (
+    client_settings,
     create_rate,
     list_rates,
-    set_base_currency,
-    set_fiscal_year_start,
     update_rate,
+    update_settings,
 )
 from app.modules.budget.refdata import (
     create_category,
@@ -158,9 +170,20 @@ def _http_error(exc: BudgetValidationError) -> HTTPException:
     cross-org/nonexistent reference, a closed-budget edit, an FX overflow, a
     missing `system_key` category, an over-long materialization/forecast
     window, and a currency-mismatched merge.
+
+    Per client (plan 2026-10-26 Task 8): a client this caller cannot see is a
+    404 too; `BudgetConflictError` (an archived client) is a 409, and
+    `BudgetClientError` (another client's category, cost center or linked
+    record, or "Sin asignar") a 422. A client without the budget module never
+    reaches here: its `ModuleNotEnabled` is the app's own 404 handler
+    (`app/main.py`).
     """
     if isinstance(exc, BudgetNotFoundError):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    if isinstance(exc, BudgetConflictError):
+        return HTTPException(status.HTTP_409_CONFLICT, str(exc))
+    if isinstance(exc, BudgetClientError):
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
     return HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
 
@@ -184,6 +207,7 @@ def _object_store(request: Request) -> ObjectStore:
 
 def _settings_out(row: BudgetSettings) -> SettingsOut:
     return SettingsOut(
+        client_id=row.client_id,
         base_currency=row.base_currency,
         fiscal_year_start_month=row.fiscal_year_start_month,
         updated_by=row.updated_by,
@@ -194,6 +218,7 @@ def _settings_out(row: BudgetSettings) -> SettingsOut:
 def _category_out(row: ExpenseCategory) -> CategoryOut:
     return CategoryOut(
         id=row.id,
+        client_id=row.client_id,
         key=row.key,
         name=row.name,
         system_key=row.system_key,
@@ -206,6 +231,7 @@ def _category_out(row: ExpenseCategory) -> CategoryOut:
 def _cost_center_out(row: CostCenter) -> CostCenterOut:
     return CostCenterOut(
         id=row.id,
+        client_id=row.client_id,
         code=row.code,
         name=row.name,
         external_ref=row.external_ref,
@@ -228,6 +254,7 @@ def _fx_rate_out(row: FxRate) -> FxRateOut:
 def _budget_out(row: Budget) -> BudgetOut:
     return BudgetOut(
         id=row.id,
+        client_id=row.client_id,
         fiscal_year=row.fiscal_year,
         name=row.name,
         granularity=row.granularity,
@@ -251,6 +278,7 @@ def _budget_line_out(row: BudgetLine) -> BudgetLineOut:
 def _expense_out(row: Expense) -> ExpenseOut:
     return ExpenseOut(
         id=row.id,
+        client_id=row.client_id,
         expense_date=row.expense_date,
         amount=row.amount,
         currency=row.currency,
@@ -378,6 +406,7 @@ def _csv_response(
 @router.get("/budget/forecast", response_model=ForecastOut)
 async def forecast_route(
     request: Request,
+    client_id: UUID = Query(),
     months: int = Query(default=12, ge=1, le=60),
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> dict[str, Any]:
@@ -385,7 +414,9 @@ async def forecast_route(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
         try:
-            return await forecast(session, ctx.org_id, ctx.user_id, months=months)
+            return await forecast(
+                session, ctx.org_id, ctx.user_id, client_id=client_id, months=months
+            )
         except BudgetValidationError as exc:
             raise _http_error(exc) from None
 
@@ -398,12 +429,16 @@ async def forecast_route(
 @router.get("/budget/settings", response_model=SettingsOut)
 async def get_settings_route(
     request: Request,
+    client_id: UUID = Query(),
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> SettingsOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        settings = await get_settings(session, ctx.org_id)
+        try:
+            settings = await client_settings(session, ctx.org_id, client_id)
+        except BudgetValidationError as exc:
+            raise _http_error(exc) from None
         return _settings_out(settings)
 
 
@@ -411,27 +446,24 @@ async def get_settings_route(
 async def update_settings_route(
     body: SettingsUpdate,
     request: Request,
+    client_id: UUID = Query(),
     ctx: AuthContext = Depends(require_permission("budget.manage")),
 ) -> SettingsOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
         try:
-            if body.base_currency is not None:
-                await set_base_currency(
-                    session,
-                    ctx.org_id,
-                    ctx.user_id,
-                    base_currency=body.base_currency,
-                    acknowledge_mixed_basis=body.acknowledge_mixed_basis,
-                )
-            if body.fiscal_year_start_month is not None:
-                await set_fiscal_year_start(
-                    session, ctx.org_id, ctx.user_id, start_month=body.fiscal_year_start_month
-                )
+            settings = await update_settings(
+                session,
+                ctx.org_id,
+                ctx.user_id,
+                client_id=client_id,
+                base_currency=body.base_currency,
+                fiscal_year_start_month=body.fiscal_year_start_month,
+                acknowledge_mixed_basis=body.acknowledge_mixed_basis,
+            )
         except BudgetValidationError as exc:
             raise _http_error(exc) from None
-        settings = await get_settings(session, ctx.org_id)
         return _settings_out(settings)
 
 
@@ -443,6 +475,7 @@ async def update_settings_route(
 @router.get("/budget/categories", response_model=list[CategoryOut])
 async def list_categories_route(
     request: Request,
+    client_id: UUID | None = Query(default=None),
     include_inactive: bool = Query(default=False),
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> list[CategoryOut]:
@@ -450,7 +483,11 @@ async def list_categories_route(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
         rows = await list_categories(
-            session, ctx.org_id, ctx.user_id, include_inactive=include_inactive
+            session,
+            ctx.org_id,
+            ctx.user_id,
+            client_id=client_id,
+            include_inactive=include_inactive,
         )
         return [_category_out(r) for r in rows]
 
@@ -468,7 +505,12 @@ async def create_category_route(
     ) as session:
         try:
             cat = await create_category(
-                session, ctx.org_id, ctx.user_id, key=body.key, name=body.name
+                session,
+                ctx.org_id,
+                ctx.user_id,
+                client_id=body.client_id,
+                key=body.key,
+                name=body.name,
             )
             # `create_category` has no `sort_order` parameter (only
             # `seed_default_categories` sets fields beyond key/name at
@@ -516,13 +558,16 @@ async def update_category_route(
 @router.get("/budget/cost-centers", response_model=list[CostCenterOut])
 async def list_cost_centers_route(
     request: Request,
+    client_id: UUID | None = Query(default=None),
     include_inactive: bool = Query(default=False),
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> list[CostCenterOut]:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        rows = await list_cost_centers(session, ctx.org_id, include_inactive=include_inactive)
+        rows = await list_cost_centers(
+            session, ctx.org_id, client_id=client_id, include_inactive=include_inactive
+        )
         return [_cost_center_out(r) for r in rows]
 
 
@@ -542,6 +587,7 @@ async def create_cost_center_route(
                 session,
                 ctx.org_id,
                 ctx.user_id,
+                client_id=body.client_id,
                 code=body.code,
                 name=body.name,
                 external_ref=body.external_ref,
@@ -609,6 +655,7 @@ async def create_fx_rate_route(
                 ctx.org_id,
                 ctx.user_id,
                 from_currency=body.from_currency,
+                to_currency=body.to_currency,
                 rate=body.rate,
                 effective_date=body.effective_date,
             )
@@ -645,12 +692,13 @@ async def update_fx_rate_route(
 @router.get("/budget/budgets", response_model=list[BudgetOut])
 async def list_budgets_route(
     request: Request,
+    client_id: UUID | None = Query(default=None),
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> list[BudgetOut]:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        rows = await list_budgets(session, ctx.org_id)
+        rows = await list_budgets(session, ctx.org_id, client_id=client_id)
         return [_budget_out(r) for r in rows]
 
 
@@ -668,6 +716,7 @@ async def create_budget_route(
                 session,
                 ctx.org_id,
                 ctx.user_id,
+                client_id=body.client_id,
                 fiscal_year=body.fiscal_year,
                 name=body.name,
                 granularity=body.granularity,
@@ -842,6 +891,7 @@ async def position_route(
 @router.get("/budget/expenses/export")
 async def export_expenses_route(
     request: Request,
+    client_id: UUID = Query(),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     ctx: AuthContext = Depends(require_permission("budget.read")),
@@ -849,7 +899,12 @@ async def export_expenses_route(
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        rows = await export_rows(session, ctx.org_id, date_from=date_from, date_to=date_to)
+        try:
+            rows = await export_rows(
+                session, ctx.org_id, client_id=client_id, date_from=date_from, date_to=date_to
+            )
+        except BudgetValidationError as exc:
+            raise _http_error(exc) from None
 
         # An explicit, audited export (invariant #4) -- one of this module's
         # two route-level audited reads; plain list/detail/variance/position/
@@ -863,6 +918,7 @@ async def export_expenses_route(
             action="budget.export",
             target_type="expense_export",
             target_id=str(ctx.org_id),
+            client_id=client_id,
             metadata={"row_count": len(rows), "format": "csv"},
         )
 
@@ -880,18 +936,23 @@ async def export_expenses_odoo_route(
     # would book into Odoo indistinguishable from a real, asserted cost.
     # Explicit opt-in for a caller that genuinely wants everything.
     include_unconfirmed: bool = Query(default=False),
+    client_id: UUID = Query(),
     ctx: AuthContext = Depends(require_permission("budget.read")),
 ) -> PlainTextResponse:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        rows = await odoo_export_rows(
-            session,
-            ctx.org_id,
-            date_from=date_from,
-            date_to=date_to,
-            include_unconfirmed=include_unconfirmed,
-        )
+        try:
+            rows = await odoo_export_rows(
+                session,
+                ctx.org_id,
+                client_id=client_id,
+                date_from=date_from,
+                date_to=date_to,
+                include_unconfirmed=include_unconfirmed,
+            )
+        except BudgetValidationError as exc:
+            raise _http_error(exc) from None
 
         await audit_service.record(
             session,
@@ -901,6 +962,7 @@ async def export_expenses_odoo_route(
             action="budget.export",
             target_type="expense_export",
             target_id=str(ctx.org_id),
+            client_id=client_id,
             metadata={"row_count": len(rows), "format": "odoo_csv"},
         )
 
@@ -918,7 +980,12 @@ async def materialize_route(
     ) as session:
         try:
             return await materialize(
-                session, ctx.org_id, ctx.user_id, from_date=body.from_date, to_date=body.to_date
+                session,
+                ctx.org_id,
+                ctx.user_id,
+                client_id=body.client_id,
+                from_date=body.from_date,
+                to_date=body.to_date,
             )
         except BudgetValidationError as exc:
             raise _http_error(exc) from None
@@ -933,6 +1000,7 @@ async def materialize_route(
 @router.get("/budget/expenses", response_model=list[ExpenseOut])
 async def list_expenses_route(
     request: Request,
+    client_id: UUID | None = Query(default=None),
     status_: str | None = Query(default=None, alias="status"),
     category_id: UUID | None = Query(default=None),
     cost_center_id: UUID | None = Query(default=None),
@@ -948,6 +1016,7 @@ async def list_expenses_route(
         rows = await list_expenses(
             session,
             ctx.org_id,
+            client_id=client_id,
             status=status_,
             category_id=category_id,
             cost_center_id=cost_center_id,
@@ -1127,7 +1196,8 @@ async def upload_attachment_route(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
         try:
-            expense = await get_expense(session, ctx.org_id, expense_id)
+            # Its client must use budget, before anything is written.
+            expense = await expense_for_write(session, ctx.org_id, expense_id)
         except BudgetValidationError as exc:
             raise _http_error(exc) from None
 
@@ -1167,6 +1237,7 @@ async def upload_attachment_route(
             action="expense.attachment_uploaded",
             target_type="expense",
             target_id=str(expense_id),
+            client_id=expense.client_id,
             metadata={"filename": invoice_filename},
         )
         await session.flush()
@@ -1204,6 +1275,7 @@ async def download_attachment_route(
             action="expense.attachment_downloaded",
             target_type="expense",
             target_id=str(expense_id),
+            client_id=expense.client_id,
             metadata={},
         )
 

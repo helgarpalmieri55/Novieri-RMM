@@ -562,9 +562,12 @@ async def list_messages_route(
     over the whole scope.
 
     EVERY CLIENT'S MAIL (MSP clients spec, invariant 5a): the log holds the
-    sender and the parsed body of every message any client's people sent,
-    including the quarantined ones that belong to no client yet. Reading it
-    needs `email_intake.read` on every client, not on one
+    sender and the parsed body of every message any client's people sent.
+    Each message is filed under a client -- its contact's, else the one
+    holding the sender's domain, else Unassigned, a quarantined one included
+    (plan decision D1); a reply that lands on a ticket takes the ticket's
+    (`intake.py`). Rows from before phase 2 Task 4 have none. Reading the log needs
+    `email_intake.read` on every client, not on one
     (`tests/test_global_writes.py::GLOBAL_READS`).
 
     `body_text` is in the response and that is deliberate (spec §10): it is

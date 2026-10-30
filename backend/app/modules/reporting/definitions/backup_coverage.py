@@ -8,12 +8,18 @@ aggregate. This report is the evidence for that gate, which is why
 
 **THE POLICY RESOLUTION IS THE BACKUP MODULE'S OWN, REPRODUCED (§1.3).**
 `backup.policy.resolve_backup_policy` resolves: **the device's group policy ->
-the org-default policy (`device_group_id IS NULL`) -> `None`, meaning nothing is
-scheduled for this device**, and it considers **only `enabled` policies at either
-scope**. `_effective_repository` below is exactly that, and the `enabled` filter
-is the load-bearing half: a device whose only policy is switched off has nothing
-scheduled, and reporting it as covered would be the same lie as reporting a
-device with no policy at all as covered.
+its client's default policy (`client_id = device.client_id`, `device_group_id
+IS NULL`) -> one for every client, which names no repository -> `None`,
+meaning nothing is scheduled for this device**, and it considers **only
+`enabled` policies at every scope** (MSP clients plan 2026-10-26 Task 13: a
+repository is one client's, migration 0242). `effective_repository_id` below is
+exactly that, and the `enabled` filter is the load-bearing half: a device whose
+only policy is switched off has nothing scheduled, and reporting it as covered
+would be the same lie as reporting a device with no policy at all as covered.
+So is the dispatcher's net: a policy from before 0242 can still name a
+repository of another client than the device's, which `dispatch` refuses to
+back up into, so the repository join requires the device's client and such a
+device reads `unprotected` too.
 
 **ONE DELIBERATE DIVERGENCE, AND IT IS A ROBUSTNESS ONE.** `backup_policies` has
 **no unique constraint on `(org_id, device_group_id)`** -- verified against
@@ -115,23 +121,27 @@ class BackupCoverageRow(BaseModel):
     hostname: str = Field(description="The device's hostname as last reported by its agent.")
     policy_present: bool = Field(
         description=(
-            "True when a backup policy row applies to this device at group or org scope, "
-            "whether or not it is enabled. False means nobody has ever configured one."
+            "True when a backup policy row applies to this device -- its group's, its "
+            "client's default, or one for every client -- whether or not it is enabled. "
+            "False means nobody has ever configured one."
         )
     )
     policy_enabled: bool = Field(
         description=(
-            "True when the policy that actually applies is enabled. Policy present and "
-            "not enabled means somebody switched backups off for this device, which is "
-            "reported as unprotected -- the same coverage as having no policy, with a "
-            "different cause."
+            "True when the policy that actually applies is enabled and names a repository "
+            "of the device's own client. Policy present and not enabled means somebody "
+            "switched backups off for this device, or its policy names no repository it "
+            "may write to (a policy for every client, or another client's repository), "
+            "which is reported as unprotected -- the same coverage as having no policy, "
+            "with a different cause."
         )
     )
     repository_name: str | None = Field(
         description=(
             "The repository the effective policy writes to, or null when no enabled "
-            "policy applies. The repository's storage target and encryption key "
-            "reference are deliberately never reported."
+            "policy applies or it names no repository of the device's client. The "
+            "repository's storage target and encryption key reference are deliberately "
+            "never reported."
         )
     )
     last_point_taken_at: datetime | None = Field(
@@ -201,7 +211,7 @@ def _group_policy(column: Any, org_id: UUID, *, enabled_only: bool) -> Any:
     """The device's group policy's `column`, or NULL.
 
     Correlated on `devices.device_group_id`, so an ungrouped device (NULL) never
-    matches and falls through to the org default -- which is exactly what
+    matches and falls through to its client's default -- which is exactly what
     `resolve_backup_policy` does when `Device.device_group_id` is None.
     `ORDER BY id LIMIT 1` because the table has no unique constraint at this
     scope; see the module docstring.
@@ -215,14 +225,36 @@ def _group_policy(column: Any, org_id: UUID, *, enabled_only: bool) -> Any:
     return stmt.order_by(BackupPolicy.id).limit(1).scalar_subquery()
 
 
-def _org_policy(column: Any, org_id: UUID, *, enabled_only: bool) -> Any:
-    """The org-default policy's `column`, or NULL. `device_group_id IS NULL`."""
+def _client_policy(column: Any, org_id: UUID, *, enabled_only: bool) -> Any:
+    """The device's client's default policy's `column`, or NULL:
+    `device_group_id IS NULL`, correlated on `devices.client_id`."""
     stmt = select(column).where(
-        BackupPolicy.org_id == org_id, BackupPolicy.device_group_id.is_(None)
+        BackupPolicy.org_id == org_id,
+        BackupPolicy.device_group_id.is_(None),
+        BackupPolicy.client_id == Device.client_id,
     )
     if enabled_only:
         stmt = stmt.where(BackupPolicy.enabled.is_(True))
     return stmt.order_by(BackupPolicy.id).limit(1).scalar_subquery()
+
+
+def _every_client_policy(org_id: UUID) -> Any:
+    """Whether a client-less, group-less policy exists. There is no policy for
+    every client (`backup/policy.py`: the repository is NOT NULL and the guard
+    refuses a client-less one naming it), so only a row planted around that
+    guard answers yes -- and since its repository is never used
+    (`resolve_backup_policy`), it can make a policy PRESENT and never a device
+    protected."""
+    return (
+        select(BackupPolicy.id)
+        .where(
+            BackupPolicy.org_id == org_id,
+            BackupPolicy.device_group_id.is_(None),
+            BackupPolicy.client_id.is_(None),
+        )
+        .limit(1)
+        .scalar_subquery()
+    )
 
 
 def _points(org_id: UUID) -> Any:
@@ -330,14 +362,18 @@ def _base(*, org_id: UUID, params: BackupCoverageParams) -> Select[Any]:
 
     effective_repository_id = func.coalesce(
         _group_policy(BackupPolicy.repository_id, org_id, enabled_only=True),
-        _org_policy(BackupPolicy.repository_id, org_id, enabled_only=True),
+        _client_policy(BackupPolicy.repository_id, org_id, enabled_only=True),
     )
-    # `repository_id` is NOT NULL, so a non-null coalesce IS "an enabled policy
-    # resolved" -- the module's `resolve_backup_policy(...) is not None`.
-    policy_enabled = effective_repository_id.is_not(None)
+    # `repository_id` is NOT NULL, so a non-null coalesce is "an enabled policy
+    # resolved with a repository"; the repository joined below exists only
+    # when it is the device's client's -- the dispatcher writes nowhere else.
+    policy_enabled = and_(
+        effective_repository_id.is_not(None), BackupRepository.id.is_not(None)
+    )
     policy_present = or_(
         _group_policy(BackupPolicy.id, org_id, enabled_only=False).is_not(None),
-        _org_policy(BackupPolicy.id, org_id, enabled_only=False).is_not(None),
+        _client_policy(BackupPolicy.id, org_id, enabled_only=False).is_not(None),
+        _every_client_policy(org_id).is_not(None),
     )
 
     offsite_current = and_(
@@ -405,6 +441,7 @@ def _base(*, org_id: UUID, params: BackupCoverageParams) -> Select[Any]:
             and_(
                 BackupRepository.id == effective_repository_id,
                 BackupRepository.org_id == org_id,
+                BackupRepository.client_id == Device.client_id,
             ),
         )
         # §6.4: explicit, IN ADDITION to RLS.

@@ -87,7 +87,7 @@ async def test_a_upn_account_is_saved_with_its_realm(api_env) -> None:
     org_id, headers = await _admin_headers(api_env, "wd-upn")
     response = await api_env.client.post(
         "/api/v1/credentials",
-        json={"name": "push-win", "type": "windows_domain",
+        json={"name": "push-win", "type": "windows_domain", "client_id": str(org_id),
               "secret": _wd("svc-push@Corp.Example.com", kdc="", ca_bundle="")},
         headers=headers,
     )
@@ -106,7 +106,8 @@ async def test_an_account_that_names_no_realm_is_refused_at_save(api_env, userna
     org_id, headers = await _admin_headers(api_env, "wd-bad")
     response = await api_env.client.post(
         "/api/v1/credentials",
-        json={"name": "push-win", "type": "windows_domain", "secret": _wd(username)},
+        json={"name": "push-win", "type": "windows_domain", "client_id": str(org_id),
+              "secret": _wd(username)},
         headers=headers,
     )
     assert response.status_code == 422
@@ -119,10 +120,11 @@ async def test_an_account_that_names_no_realm_is_refused_at_save(api_env, userna
 
 
 async def test_a_windows_domain_secret_that_is_not_the_json_blob_is_refused(api_env) -> None:
-    _org_id, headers = await _admin_headers(api_env, "wd-json")
+    org_id, headers = await _admin_headers(api_env, "wd-json")
     response = await api_env.client.post(
         "/api/v1/credentials",
-        json={"name": "push-win", "type": "windows_domain", "secret": "hunter2"},
+        json={"name": "push-win", "type": "windows_domain", "client_id": str(org_id),
+              "secret": "hunter2"},
         headers=headers,
     )
     assert response.status_code == 422
@@ -135,7 +137,8 @@ async def test_rotating_a_windows_domain_account_re_records_its_realm(api_env) -
         await api_env.client.post(
             "/api/v1/credentials",
             json={
-                "name": "push-win", "type": "windows_domain", "secret": _wd("a@corp.example.com"),
+                "name": "push-win", "type": "windows_domain", "client_id": str(org_id),
+                "secret": _wd("a@corp.example.com"),
             },
             headers=headers,
         )

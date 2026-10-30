@@ -17,6 +17,7 @@ status and opposite outcomes.
 
 __all__ = [
     "PushAuthorizationError",
+    "PushClientError",
     "PushConflictError",
     "PushDispatchUnavailableError",
     "PushError",
@@ -45,6 +46,14 @@ class PushNotFoundError(PushValidationError):
     404 and never 403 for another org's id: a 403 confirms the id exists,
     which is a cross-tenant existence oracle.
     """
+
+
+class PushClientError(PushError):
+    """The request names a client the row cannot take, or none where one is
+    required (MSP clients, plan 2026-10-26 Task 12): a push credential with no
+    client, an authorization filed under Unassigned, a credential of another
+    client than the one a run or a push is in. A 422 with the sentence --
+    neither malformed input (400) nor a missing row (404)."""
 
 
 class PushConflictError(PushError):

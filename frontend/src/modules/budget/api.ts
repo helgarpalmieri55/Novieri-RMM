@@ -7,7 +7,9 @@
 // no worker).
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { internalClientId, loadingUntilClient, requireKnown } from "../../lib/internalClient";
 import type {
   BudgetCreate,
   BudgetLineInput,
@@ -23,23 +25,58 @@ import type {
   FxRateCreate,
   FxRateUpdate,
   MaterializeRequest,
+  NewRow,
   SettingsUpdate,
 } from "./types";
 
 // --------------------------------------------------------------------------
-// Settings
+// The client these pages work on
+// --------------------------------------------------------------------------
+
+/**
+ * BUDGET IS ONE CLIENT'S (MSP clients phase 2, plan 2026-10-26 Task 8): its
+ * settings, categories, cost centres, budgets and expenses each belong to a
+ * client, and budget is a module a client may not use. Every hook below works
+ * on the client this returns: reads filter by it (and wait for it --
+ * `enabled`), and creates name it.
+ *
+ * `null` until `/me` has answered. A read is not sent before then; a create
+ * throws `InternalScopeUnknown` inside its mutation (`requireKnown`), so the
+ * form says why and NOTHING is sent -- a body without its client is a 422
+ * the person can do nothing about.
+ */
+export function useBudgetClient(): string | null {
+  const api = useApi();
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  // PHASE 3: the client/site selector. Until it exists that is the
+  // organisation's internal client, whose id is the organisation's --
+  // `/me`'s `org_id` (`lib/internalClient.ts`).
+  return internalClientId(me.data);
+}
+
+// --------------------------------------------------------------------------
+// Settings -- one client's: its base currency and fiscal year
 // --------------------------------------------------------------------------
 
 export function useBudgetSettings() {
   const api = useApi();
-  return useQuery({ queryKey: ["budget-settings"], queryFn: () => api.getBudgetSettings() });
+  const client = useBudgetClient();
+  return loadingUntilClient(
+    useQuery({
+      queryKey: ["budget-settings", client],
+      queryFn: () => api.getBudgetSettings(requireKnown(client)),
+      enabled: client != null,
+    }),
+    client,
+  );
 }
 
 export function useUpdateBudgetSettingsMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
+  const client = useBudgetClient();
   return useMutation({
-    mutationFn: (body: SettingsUpdate) => api.updateBudgetSettings(body),
+    mutationFn: (body: SettingsUpdate) => api.updateBudgetSettings(requireKnown(client), body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["budget-settings"] });
     },
@@ -52,17 +89,26 @@ export function useUpdateBudgetSettingsMutation() {
 
 export function useBudgetCategories(includeInactive = false) {
   const api = useApi();
-  return useQuery({
-    queryKey: ["budget-categories", includeInactive],
-    queryFn: () => api.listBudgetCategories(includeInactive),
-  });
+  const client = useBudgetClient();
+  return loadingUntilClient(
+    useQuery({
+      queryKey: ["budget-categories", client, includeInactive],
+      // Naming the client also seeds its default categories on first use.
+      queryFn: () => api.listBudgetCategories(includeInactive, requireKnown(client)),
+      enabled: client != null,
+    }),
+    client,
+  );
 }
 
 export function useCreateBudgetCategoryMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
+  const client = useBudgetClient();
   return useMutation({
-    mutationFn: (body: CategoryCreate) => api.createBudgetCategory(body),
+    mutationFn: (body: NewRow<CategoryCreate>) =>
+      // PHASE 3: the selected client; until then the internal one (`useBudgetClient`).
+      api.createBudgetCategory({ ...body, client_id: requireKnown(client) }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["budget-categories"] });
     },
@@ -87,17 +133,25 @@ export function useUpdateBudgetCategoryMutation() {
 
 export function useCostCenters(includeInactive = false) {
   const api = useApi();
-  return useQuery({
-    queryKey: ["budget-cost-centers", includeInactive],
-    queryFn: () => api.listCostCenters(includeInactive),
-  });
+  const client = useBudgetClient();
+  return loadingUntilClient(
+    useQuery({
+      queryKey: ["budget-cost-centers", client, includeInactive],
+      queryFn: () => api.listCostCenters(includeInactive, requireKnown(client)),
+      enabled: client != null,
+    }),
+    client,
+  );
 }
 
 export function useCreateCostCenterMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
+  const client = useBudgetClient();
   return useMutation({
-    mutationFn: (body: CostCenterCreate) => api.createCostCenter(body),
+    mutationFn: (body: NewRow<CostCenterCreate>) =>
+      // PHASE 3: the selected client; until then the internal one (`useBudgetClient`).
+      api.createCostCenter({ ...body, client_id: requireKnown(client) }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["budget-cost-centers"] });
     },
@@ -153,14 +207,25 @@ export function useUpdateFxRateMutation() {
 
 export function useBudgets() {
   const api = useApi();
-  return useQuery({ queryKey: ["budgets"], queryFn: () => api.listBudgets() });
+  const client = useBudgetClient();
+  return loadingUntilClient(
+    useQuery({
+      queryKey: ["budgets", client],
+      queryFn: () => api.listBudgets(requireKnown(client)),
+      enabled: client != null,
+    }),
+    client,
+  );
 }
 
 export function useCreateBudgetMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
+  const client = useBudgetClient();
   return useMutation({
-    mutationFn: (body: BudgetCreate) => api.createBudget(body),
+    mutationFn: (body: NewRow<BudgetCreate>) =>
+      // PHASE 3: the selected client; until then the internal one (`useBudgetClient`).
+      api.createBudget({ ...body, client_id: requireKnown(client) }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["budgets"] });
     },
@@ -269,17 +334,25 @@ export function useBudgetPosition(budgetId: string | undefined) {
 
 export function useExpenses(filters: ExpenseListFilters = {}) {
   const api = useApi();
-  return useQuery({
-    queryKey: ["budget-expenses", filters],
-    queryFn: () => api.listExpenses(filters),
-  });
+  const client = useBudgetClient();
+  return loadingUntilClient(
+    useQuery({
+      queryKey: ["budget-expenses", filters, client],
+      queryFn: () => api.listExpenses(filters, requireKnown(client)),
+      enabled: client != null,
+    }),
+    client,
+  );
 }
 
 export function useCreateExpenseMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
+  const client = useBudgetClient();
   return useMutation({
-    mutationFn: (body: ExpenseCreate) => api.createExpense(body),
+    mutationFn: (body: NewRow<ExpenseCreate>) =>
+      // PHASE 3: the selected client; until then the internal one (`useBudgetClient`).
+      api.createExpense({ ...body, client_id: requireKnown(client) }),
     onSuccess: () => {
       // Prefix invalidation: TanStack Query matches every query keyed
       // ["budget-expenses", ...] regardless of the filter object in the rest
@@ -345,8 +418,11 @@ export function useVoidExpenseMutation() {
 export function useMaterializeExpensesMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
+  const client = useBudgetClient();
   return useMutation({
-    mutationFn: (body: MaterializeRequest) => api.materializeExpenses(body),
+    mutationFn: (body: NewRow<MaterializeRequest>) =>
+      // PHASE 3: the selected client; until then the internal one (`useBudgetClient`).
+      api.materializeExpenses({ ...body, client_id: requireKnown(client) }),
     onSuccess: () => {
       // N2 fix: materialization moves money from projected to committed, the
       // same shape of change as confirm/void/update above -- it must

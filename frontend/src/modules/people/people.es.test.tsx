@@ -69,6 +69,7 @@ function me(...permissions: string[]): Me {
 
 const MARIA: PersonListRow = {
   id: "p1",
+  client_id: "o1",
   display_name: "Maria Garcia",
   email: "maria@corp.example",
   user_id: "u9",
@@ -163,6 +164,7 @@ function detail(overrides: Partial<PersonDetailOut> = {}): PersonDetailOut {
     logins: [{ id: "l1", login: "corp\\maria", created_at: "2026-09-01T09:00:00Z" }],
     account: {
       user_id: "u9",
+      kind: "staff",
       email: "maria@corp.example",
       status: "active",
       last_login_at: "2026-09-22T08:00:00Z",
@@ -482,6 +484,28 @@ describe("the person page in Spanish", () => {
     expectNoEnglish(dialog, RECORDED);
   });
 
+  it("tells how a client's contact is turned back on, and not Settings", async () => {
+    const user = userEvent.setup();
+    const account = detail().account;
+    if (account === null) throw new Error("the fixture has an account");
+    mockUseApi.mockReturnValue(
+      api(
+        { getPerson: vi.fn().mockResolvedValue(detail({ account: { ...account, kind: "contact" } })) },
+        ["people.read", "clients.manage"],
+      ),
+    );
+    mount(<PersonPage />, "/people/:personId", "/people/p1");
+    await user.click(await screen.findByRole("button", { name: "Desactivar el inicio de sesión" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(
+        "La persona ya no podrá usar el portal. Hasta que la consola pueda editar los contactos de un cliente, se vuelve a activar mediante la API o una conexión de IA (MCP).",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Configuración/)).toBeNull();
+    expectNoEnglish(dialog, RECORDED);
+  });
+
   it("words a failed release from the held error, and re-words it on a switch", async () => {
     const user = userEvent.setup();
     const releaseSeat = vi.fn().mockRejectedValue(new ApiError(503, ""));
@@ -604,14 +628,14 @@ describe("the pieces other pages use, in Spanish", () => {
         ["people.read", "people.manage"],
       ),
     );
-    const view = mount(<DeviceAssignedTo deviceId="d1" />, "/devices/:id", "/devices/d1");
+    const view = mount(<DeviceAssignedTo deviceId="d1" clientId="c-x" />, "/devices/:id", "/devices/d1");
     await user.click(await screen.findByRole("button", { name: "Cambiar" }));
     return { user, dialog: await screen.findByRole("dialog"), ...view };
   }
 
   it("reads the assigned holder as a field of the device", async () => {
     mockUseApi.mockReturnValue(api({ getDevicePerson: vi.fn().mockResolvedValue(devicePerson()) }, ["people.read", "people.manage"]));
-    const { container } = mount(<DeviceAssignedTo deviceId="d1" />, "/devices/:id", "/devices/d1");
+    const { container } = mount(<DeviceAssignedTo deviceId="d1" clientId="c-x" />, "/devices/:id", "/devices/d1");
     const field = await screen.findByTestId("device-assigned-to");
     expect(field).toHaveTextContent("Asignado a: Maria Garcia · indicado a mano");
     expect(screen.getByRole("button", { name: "Cambiar" })).toBeInTheDocument();
@@ -626,7 +650,7 @@ describe("the pieces other pages use, in Spanish", () => {
         ["people.read"],
       ),
     );
-    const { container } = mount(<DeviceAssignedTo deviceId="d1" />, "/devices/:id", "/devices/d1");
+    const { container } = mount(<DeviceAssignedTo deviceId="d1" clientId="c-x" />, "/devices/:id", "/devices/d1");
     expect(await screen.findByTestId("device-assigned-to")).toHaveTextContent(
       "Asignado a: nadie todavía · último inicio de sesión como TOESHEE\\aruiz",
     );

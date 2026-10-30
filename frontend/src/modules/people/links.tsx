@@ -213,8 +213,11 @@ function sameDraft(person: PersonOut, draft: NewPerson): boolean {
  * The holder is a person underneath -- set by hand, or taken from who signs in
  * at the machine -- so reading needs `people.read` and changing `people.manage`,
  * both enforced by the server; hiding here is a courtesy.
+ *
+ * `clientId` is the DEVICE'S client: a holder is a person of that client (the
+ * server holds the pair together), so "Someone new" files the person there.
  */
-export function DeviceAssignedTo({ deviceId }: { deviceId: string }) {
+export function DeviceAssignedTo({ deviceId, clientId }: { deviceId: string; clientId: string }) {
   const t = useT();
   const canRead = useCan("people.read");
   const canManage = useCan("people.manage");
@@ -247,9 +250,14 @@ export function DeviceAssignedTo({ deviceId }: { deviceId: string }) {
       return;
     }
     set.reset();
+    // A person belongs to one client (MSP clients phase 2), and the server
+    // holds a device's holder to the device's own: the new person is the
+    // device's client's (final review E). It used to be the internal
+    // client's, which a customer's machine refused -- leaving a stray person
+    // behind, and another on every retry.
     // A FAILED CREATE ASSIGNS NOTHING: the assignment is only reached from
     // the create's own success.
-    create.mutate(draft, {
+    create.mutate(() => ({ ...draft, client_id: clientId }), {
       onSuccess: (added) => {
         setCreated(added);
         assign(added.id);

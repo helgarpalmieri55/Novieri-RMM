@@ -6,6 +6,7 @@ import {
   useDispatchIpamSweepMutation,
   useIpamScanAuthorizations,
   useIpamSweepRuns,
+  useSweeperChoices,
   useUpdateIpamSweepSettingsMutation,
 } from "./api";
 import { ErrorLine } from "./ErrorLine";
@@ -43,6 +44,13 @@ import { Btn, Panel, StatusPill } from "../../shell/components";
 // THE INTERVAL FLOOR IS SHOWN, NOT JUST ENFORCED. A sub-hourly sweep interval
 // is the exact mechanism by which an address plan becomes a ping monitor, and
 // the API refuses anything shorter with a 400.
+//
+// THE DESIGNATED AGENT IS PICKED FROM THE SUBNET'S CLIENT'S MACHINES (MSP
+// clients phase 2): two clients can both run 10.0.0.0/24 on unrelated wires,
+// so the server refuses another client's machine and never borrows one to
+// sweep. The picker offers only those the server would accept that the fleet
+// list can show -- approved, with an agent -- and keeps a designation it cannot
+// list, so saving the interval never silently clears it.
 export function SweepPanel({
   subnet,
   canRun,
@@ -57,6 +65,7 @@ export function SweepPanel({
   const runs = useIpamSweepRuns(subnet.id);
   const dispatch = useDispatchIpamSweepMutation();
   const settings = useUpdateIpamSweepSettingsMutation();
+  const machines = useSweeperChoices(subnet.client_id, canManage);
 
   const [enabled, setEnabled] = useState(subnet.sweep_enabled);
   const [deviceId, setDeviceId] = useState(subnet.sweep_device_id ?? "");
@@ -171,13 +180,25 @@ export function SweepPanel({
         {canManage && (
           <div style={{ marginTop: 16 }}>
             <div className="form-grid">
-              <Field label={t("ipam.sweep.designatedAgentField")}>
-                <input
+              <Field
+                label={t("ipam.sweep.designatedAgentField")}
+                help={t("ipam.sweep.designatedAgentHelp")}
+              >
+                <select
                   className={inputClass}
-                  placeholder={t("ipam.sweep.designatedAgentPlaceholder")}
                   value={deviceId}
                   onChange={(e) => setDeviceId(e.target.value)}
-                />
+                >
+                  <option value="">{t("ipam.sweep.designatedAgentAuto")}</option>
+                  {deviceId !== "" && !(machines.data ?? []).some((d) => d.id === deviceId) && (
+                    <option value={deviceId}>{deviceId}</option>
+                  )}
+                  {machines.data?.map((machine) => (
+                    <option key={machine.id} value={machine.id}>
+                      {machine.hostname || machine.primary_ip || machine.id}
+                    </option>
+                  ))}
+                </select>
               </Field>
               <Field label={t("ipam.sweep.intervalField")}>
                 <input

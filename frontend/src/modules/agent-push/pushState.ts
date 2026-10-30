@@ -288,6 +288,7 @@ export function kdcNotFound(): string {
 export const REFUSAL_REASON_LABELS: Readonly<Record<string, string>> = lazyLabels({
   no_asset: "agentPush.refusal.no_asset",
   ambiguous_asset: "agentPush.refusal.ambiguous_asset",
+  credential_missing: "agentPush.refusal.credential_missing",
   no_authorization: "agentPush.refusal.no_authorization",
   credential_not_scoped: "agentPush.refusal.credential_not_scoped",
   no_site_server: "agentPush.refusal.no_site_server",
@@ -321,4 +322,29 @@ export function windowsProbeReadiness(rows: readonly HostKeyOut[]): WindowsProbe
     http: count((row) => row.winrm_http === true),
     kdc: count((row) => row.kdc_reachable === true),
   };
+}
+
+/**
+ * THE HOST KEYS BY (CLIENT, ADDRESS), NOT BY ADDRESS ALONE. Two clients'
+ * machines can share one address (MSP clients phase 1), and each has its own
+ * key. A push is made in its credential's client, so the row that speaks for
+ * an address is that client's, else the global one -- recorded before its
+ * machine was known -- exactly as the server picks the key an install is
+ * verified against (`host_key.confirmed_key_for`). Another client's row is
+ * never this push's.
+ */
+export function hostKeysForClient(
+  rows: readonly HostKeyOut[],
+  client: string | null,
+): Map<string, HostKeyOut> {
+  const keyed = new Map<string, HostKeyOut>();
+  for (const row of rows) keyed.set(`${row.client_id ?? ""}|${row.address}`, row);
+  const byAddress = new Map<string, HostKeyOut>();
+  for (const row of rows) {
+    const own = client === null ? undefined : keyed.get(`${client}|${row.address}`);
+    const global = keyed.get(`|${row.address}`);
+    const chosen = own ?? global;
+    if (chosen) byAddress.set(row.address, chosen);
+  }
+  return byAddress;
 }

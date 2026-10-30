@@ -21,10 +21,24 @@ from app.modules.documentation.schemas import RECORD_TYPES
 router = APIRouter(prefix="/docs", tags=["docs"])
 
 
-class ArticleCreate(BaseModel):
+#: The create bodies' client (MSP clients plan 2026-10-26 Task 14).
+CLIENT_FIELD_DESCRIPTION = (
+    "The client this belongs to. Omitted: it is every client's (global), which "
+    "needs access to every client."
+)
+
+
+class ArticleFields(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     body: str = ""
     category: str = Field(default="General", max_length=100)
+
+
+class ArticleCreate(ArticleFields):
+    """An article's client is set when it is created and never changes: the
+    edit body (`ArticleFields`) has no client."""
+
+    client_id: UUID | None = Field(default=None, description=CLIENT_FIELD_DESCRIPTION)
 
 
 class LinkOut(BaseModel):
@@ -35,6 +49,8 @@ class LinkOut(BaseModel):
 
 class ArticleListItem(BaseModel):
     id: UUID
+    #: None: global, every client's.
+    client_id: UUID | None
     title: str
     category: str
     archived: bool
@@ -50,6 +66,8 @@ class ArticleListPage(BaseModel):
 
 class ArticleOut(BaseModel):
     id: UUID
+    #: None: global, every client's.
+    client_id: UUID | None
     title: str
     body: str
     category: str
@@ -78,6 +96,7 @@ class RecordCreate(BaseModel):
     record_type: str = Field(pattern=f"^({'|'.join(RECORD_TYPES)})$")
     name: str = Field(min_length=1, max_length=300)
     fields: dict[str, Any] = Field(default_factory=dict)
+    client_id: UUID | None = Field(default=None, description=CLIENT_FIELD_DESCRIPTION)
 
 
 class RecordUpdate(BaseModel):
@@ -87,6 +106,8 @@ class RecordUpdate(BaseModel):
 
 class RecordOut(BaseModel):
     id: UUID
+    #: None: global, every client's.
+    client_id: UUID | None
     record_type: str
     name: str
     fields: dict[str, Any]
@@ -133,6 +154,7 @@ async def _get_article(session: AsyncSession, article_id: UUID) -> DocArticle:
 def _record_out(record: DocRecord) -> RecordOut:
     return RecordOut(
         id=record.id,
+        client_id=record.client_id,
         record_type=record.record_type,
         name=record.name,
         fields=record.fields,
@@ -150,17 +172,22 @@ async def create_article(
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        article = await svc.create_article(
-            session,
-            org_id=ctx.org_id,
-            actor_id=ctx.user_id,
-            title=body.title,
-            body=body.body,
-            category=body.category,
-        )
+        try:
+            article = await svc.create_article(
+                session,
+                org_id=ctx.org_id,
+                actor_id=ctx.user_id,
+                title=body.title,
+                body=body.body,
+                category=body.category,
+                client_id=body.client_id,
+            )
+        except svc.DocumentationClientError as exc:
+            raise HTTPException(exc.status_code, exc.detail) from None
         await session.refresh(article)
         return ArticleOut(
             id=article.id,
+            client_id=article.client_id,
             title=article.title,
             body=article.body,
             category=article.category,
@@ -216,6 +243,7 @@ async def list_articles(
             items=[
                 ArticleListItem(
                     id=a.id,
+                    client_id=a.client_id,
                     title=a.title,
                     category=a.category,
                     archived=a.archived,
@@ -250,6 +278,7 @@ async def get_article(
         )
         return ArticleOut(
             id=article.id,
+            client_id=article.client_id,
             title=article.title,
             body=article.body,
             category=article.category,
@@ -267,7 +296,7 @@ async def get_article(
 @router.put("/articles/{article_id}", response_model=ArticleOut)
 async def update_article(
     article_id: UUID,
-    body: ArticleCreate,
+    body: ArticleFields,
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> ArticleOut:
@@ -286,6 +315,7 @@ async def update_article(
         await session.refresh(article)
         return ArticleOut(
             id=article.id,
+            client_id=article.client_id,
             title=article.title,
             body=article.body,
             category=article.category,
@@ -372,6 +402,8 @@ async def add_link(
             )
         except svc.LinkTargetNotFound as exc:
             raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from None
+        except svc.LinkTargetOfAnotherClient as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         except IntegrityError:
             raise HTTPException(status.HTTP_409_CONFLICT, tr("already linked")) from None
         return LinkOut(id=link.id, target_type=link.target_type, target_id=link.target_id)
@@ -411,9 +443,12 @@ async def create_record(
                 record_type=body.record_type,
                 name=body.name,
                 fields=body.fields,
+                client_id=body.client_id,
             )
+        except svc.DocumentationClientError as exc:
+            raise HTTPException(exc.status_code, exc.detail) from None
         except ValueError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         return _record_out(record)
 
 
@@ -482,7 +517,7 @@ async def update_record(
                 session, record, actor_id=ctx.user_id, name=body.name, fields=body.fields
             )
         except ValueError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from None
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         return _record_out(record)
 
 

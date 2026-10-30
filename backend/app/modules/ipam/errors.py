@@ -41,6 +41,17 @@ class IpamConflictError(IpamValidationError):
     """
 
 
+class IpamClientError(IpamValidationError):
+    """A row's client cannot be what the request makes it (maps to HTTP 422).
+
+    A body `client_id` that contradicts the client derived from the row's
+    VRF or site, a create with no VRF or site that names no client, a site or
+    VLAN of another client, or "Sin asignar" (MSP clients plan 2026-10-26
+    Task 10, C10). A client the caller cannot see is `IpamNotFoundError`
+    instead: a 422 would confirm it exists.
+    """
+
+
 class IpamTooLargeError(IpamValidationError):
     """Enumeration was asked for above §0.4's ceiling, or for IPv6 (§0.5)
     (maps to HTTP 422, `subnet too large to enumerate`).

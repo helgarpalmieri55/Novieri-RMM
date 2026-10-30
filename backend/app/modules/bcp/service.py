@@ -13,6 +13,15 @@ bypassable by guessing or enumerating another org's ids).
 
 Every query in this module carries an explicit `org_id` predicate; a plan id
 from another org is never reachable through any function here.
+
+A plan belongs to ONE client (MSP clients plan 2026-10-26 Task 7), and so do
+its tests, steps and findings (inherited by trigger, migration 0237). What a
+plan points at is of that client too: `scope` devices and groups, `procedure_refs`
+articles (or global ones, every client's), a finding's `change_ref`. Another
+client's is a 422 (`BcpClientError`); a missing one stays the 400 it was.
+Continuity is an optional module per client, so every write calls
+`require_module` with the plan's client before it writes anything (a 404 when
+the client does not use it), and every audit event carries that client.
 """
 
 from datetime import UTC, datetime
@@ -34,8 +43,16 @@ from app.models import (
     DeviceGroup,
     DocArticle,
 )
+from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.backup.reporting import backup_evidence_rows
-from app.modules.bcp.errors import BcpNotFoundError, BcpValidationError
+from app.modules.bcp.errors import (
+    BcpClientError,
+    BcpConflictError,
+    BcpNotFoundError,
+    BcpValidationError,
+)
+from app.services.client_modules import require_module
+from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
 
 _VALID_PLAN_STATES = {"active", "archived"}
 _VALID_SEVERITIES = frozenset({"low", "medium", "high", "critical"})
@@ -73,13 +90,44 @@ async def _load_plan(session: AsyncSession, org_id: UUID, plan_id: UUID) -> BcpP
     return plan
 
 
-async def _validate_scope(session: AsyncSession, org_id: UUID, scope: list[dict[str, Any]]) -> None:
-    """Org-scoped resolution guard for `scope` entries.
+async def _plan_for_write(session: AsyncSession, org_id: UUID, plan_id: UUID) -> BcpPlan:
+    """The plan a write is about, of a client that uses continuity: a plan this
+    session cannot see is the 404 it always was, and one whose client has the
+    module off is `ModuleNotEnabled` (404) -- before anything is written."""
+    plan = await _load_plan(session, org_id, plan_id)
+    await require_module(session, org_id=org_id, client_id=plan.client_id, module="bcp")
+    return plan
+
+
+async def _client_for_new_plan(session: AsyncSession, org_id: UUID, client_id: UUID) -> None:
+    """The client a new plan is filed under, loaded as every new row's is
+    (`client_for_new_rows`, held FOR SHARE until commit): one this session
+    cannot see is a 404, never a 403 (spec §3.2's existence oracle), an
+    archived one a 409, "Sin asignar" a 422 (C10). Then the module: a client
+    without continuity is a 404 too."""
+    try:
+        client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
+    except ClientNotFound:
+        raise BcpNotFoundError(tr("no such client")) from None
+    except NotAcceptingNewRows as exc:
+        raise BcpConflictError(exc.detail) from None
+    if client.kind == CLIENT_KIND_UNASSIGNED:
+        raise BcpClientError(tr("a BCP plan cannot be filed under Unassigned"))
+    await require_module(session, org_id=org_id, client_id=client_id, module="bcp")
+
+
+async def _validate_scope(
+    session: AsyncSession, org_id: UUID, client_id: UUID, scope: list[dict[str, Any]]
+) -> None:
+    """Org-scoped resolution guard for `scope` entries, held to the plan's
+    client.
 
     Each entry is `{"kind": "device"|"group", "id": <uuid str>}`. An unknown
     `kind`, a malformed uuid, or an id that doesn't resolve under `org_id`
     (nonexistent OR belonging to another org -- indistinguishable by design)
-    raises `BcpValidationError`.
+    raises `BcpValidationError`. A device or group of another client of the
+    org raises `BcpClientError`: a test of X's plan would freeze Y's backup
+    evidence into X's DR pack.
     """
     for entry in scope:
         kind = entry.get("kind")
@@ -96,9 +144,9 @@ async def _validate_scope(session: AsyncSession, org_id: UUID, scope: list[dict[
 
         resolved = (
             await session.execute(
-                select(model.id).where(model.org_id == org_id, model.id == ref_id)  # type: ignore[attr-defined]
+                select(model.client_id).where(model.org_id == org_id, model.id == ref_id)  # type: ignore[attr-defined]
             )
-        ).scalar_one_or_none()
+        ).one_or_none()
         if resolved is None:
             raise BcpValidationError(
                 tr(
@@ -109,12 +157,18 @@ async def _validate_scope(session: AsyncSession, org_id: UUID, scope: list[dict[
                     ref_id=ref_id,
                 )
             )
+        if resolved[0] != client_id:
+            raise BcpClientError(
+                tr("scope ref belongs to another client: {kind}:{ref_id}", kind=kind, ref_id=ref_id)
+            )
 
 
 async def _validate_procedure_refs(
-    session: AsyncSession, org_id: UUID, procedure_refs: list[Any]
+    session: AsyncSession, org_id: UUID, client_id: UUID, procedure_refs: list[Any]
 ) -> None:
-    """Org-scoped resolution guard for `procedure_refs` (each a `doc_articles.id`)."""
+    """Org-scoped resolution guard for `procedure_refs` (each a `doc_articles.id`):
+    a global article (no client) is every client's procedure; one of another
+    client raises `BcpClientError`."""
     for ref in procedure_refs:
         try:
             ref_id = UUID(str(ref))
@@ -123,11 +177,17 @@ async def _validate_procedure_refs(
 
         resolved = (
             await session.execute(
-                select(DocArticle.id).where(DocArticle.org_id == org_id, DocArticle.id == ref_id)
+                select(DocArticle.client_id).where(
+                    DocArticle.org_id == org_id, DocArticle.id == ref_id
+                )
             )
-        ).scalar_one_or_none()
+        ).one_or_none()
         if resolved is None:
             raise BcpValidationError(tr("procedure_ref not found: {ref_id}", ref_id=ref_id))
+        if resolved[0] not in (None, client_id):
+            raise BcpClientError(
+                tr("procedure_ref belongs to another client: {ref_id}", ref_id=ref_id)
+            )
 
 
 async def create_plan(
@@ -135,6 +195,7 @@ async def create_plan(
     *,
     org_id: UUID,
     actor_id: UUID,
+    client_id: UUID,
     name: str,
     description: str,
     scope: list[dict[str, Any]],
@@ -144,12 +205,15 @@ async def create_plan(
     dependencies: list[Any],
     review_interval_days: int,
 ) -> BcpPlan:
-    """Create a new `active` BCP plan and audit `bcp.plan_created`."""
-    await _validate_scope(session, org_id, scope)
-    await _validate_procedure_refs(session, org_id, procedure_refs)
+    """Create a new `active` BCP plan for `client_id` (`_client_for_new_plan`)
+    and audit `bcp.plan_created`."""
+    await _client_for_new_plan(session, org_id, client_id)
+    await _validate_scope(session, org_id, client_id, scope)
+    await _validate_procedure_refs(session, org_id, client_id, procedure_refs)
 
     plan = BcpPlan(
         org_id=org_id,
+        client_id=client_id,
         name=name,
         description=description,
         scope=scope,
@@ -172,6 +236,7 @@ async def create_plan(
         action="bcp.plan_created",
         target_type="bcp_plan",
         target_id=str(plan.id),
+        client_id=plan.client_id,
         metadata={"name": name},
     )
     await session.flush()
@@ -189,14 +254,14 @@ async def update_plan(
     """Apply the given non-None fields to a plan, org-scoped-loaded.
 
     Re-validates `scope`/`procedure_refs` (if provided) org-scoped before
-    applying anything.
+    applying anything, held to the plan's client.
     """
-    plan = await _load_plan(session, org_id, plan_id)
+    plan = await _plan_for_write(session, org_id, plan_id)
 
     if fields.get("scope") is not None:
-        await _validate_scope(session, org_id, fields["scope"])
+        await _validate_scope(session, org_id, plan.client_id, fields["scope"])
     if fields.get("procedure_refs") is not None:
-        await _validate_procedure_refs(session, org_id, fields["procedure_refs"])
+        await _validate_procedure_refs(session, org_id, plan.client_id, fields["procedure_refs"])
 
     for field in _EDITABLE_FIELDS:
         if field not in fields:
@@ -218,6 +283,7 @@ async def update_plan(
         action="bcp.plan_updated",
         target_type="bcp_plan",
         target_id=str(plan.id),
+        client_id=plan.client_id,
         metadata={},
     )
     await session.flush()
@@ -233,7 +299,7 @@ async def review_plan(
 ) -> BcpPlan:
     """Record a manual review sign-off. No segregation-of-duties in v1 -- the
     plan's author MAY review their own plan."""
-    plan = await _load_plan(session, org_id, plan_id)
+    plan = await _plan_for_write(session, org_id, plan_id)
 
     plan.last_reviewed_at = datetime.now(UTC)
     plan.approved_by = actor_id
@@ -247,6 +313,7 @@ async def review_plan(
         action="bcp.plan_reviewed",
         target_type="bcp_plan",
         target_id=str(plan.id),
+        client_id=plan.client_id,
         metadata={},
     )
     await session.flush()
@@ -306,6 +373,32 @@ async def resolve_scope_devices(
     return device_ids
 
 
+async def plan_scope_devices(session: AsyncSession, org_id: UUID, plan: BcpPlan) -> set[UUID]:
+    """`plan`'s scope expanded (`resolve_scope_devices`), kept to the PLAN'S
+    CLIENT's devices -- what a plan's evidence and coverage count.
+
+    `_validate_scope` holds a new scope to the plan's client, but a plan from
+    before migration 0237 was filed under the internal client with whatever
+    it named, and a scope is never re-checked: without this, an internal
+    plan naming a customer's device copied that device's hostname and backup
+    coverage into its evidence (final review B2). The org predicate stays in
+    `resolve_scope_devices`, where its own tests show it is load-bearing."""
+    devices = await resolve_scope_devices(session, org_id, plan.scope)
+    if not devices:
+        return set()
+    return set(
+        (
+            await session.execute(
+                select(Device.id).where(
+                    Device.org_id == org_id,
+                    Device.client_id == plan.client_id,
+                    Device.id.in_(devices),
+                )
+            )
+        ).scalars()
+    )
+
+
 async def _load_test(session: AsyncSession, org_id: UUID, test_id: UUID) -> BcpTest:
     test = (
         await session.execute(
@@ -314,6 +407,15 @@ async def _load_test(session: AsyncSession, org_id: UUID, test_id: UUID) -> BcpT
     ).scalar_one_or_none()
     if test is None:
         raise BcpNotFoundError(tr("bcp test {test_id} not found", test_id=test_id))
+    return test
+
+
+async def _test_for_write(session: AsyncSession, org_id: UUID, test_id: UUID) -> BcpTest:
+    """The test a write is about, of a client that uses continuity (its
+    client is its plan's, by trigger). Read `client_id` off the result before
+    the write's flush: an UPDATE of the row expires it (`server_onupdate`)."""
+    test = await _load_test(session, org_id, test_id)
+    await require_module(session, org_id=org_id, client_id=test.client_id, module="bcp")
     return test
 
 
@@ -356,7 +458,7 @@ async def create_test(
 ) -> BcpTest:
     """Create a new `pending` DR test run against an org-scoped-verified plan
     and audit `bcp.test_created`."""
-    await _load_plan(session, org_id, plan_id)
+    plan = await _plan_for_write(session, org_id, plan_id)
 
     test = BcpTest(
         org_id=org_id,
@@ -378,6 +480,7 @@ async def create_test(
         action="bcp.test_created",
         target_type="bcp_test",
         target_id=str(test.id),
+        client_id=plan.client_id,
         metadata={"plan_id": str(plan_id), "type": type_},
     )
     await session.flush()
@@ -405,12 +508,12 @@ async def record_test(
     converted to plain str/None before storage since `evidence` is JSONB
     (see `_jsonable_evidence_row`).
     """
-    test = await _load_test(session, org_id, test_id)
+    test = await _test_for_write(session, org_id, test_id)
     plan = await _load_plan(session, org_id, test.plan_id)
 
     resolved_executed_at = executed_at if executed_at is not None else datetime.now(UTC)
 
-    devices = await resolve_scope_devices(session, org_id, plan.scope)
+    devices = await plan_scope_devices(session, org_id, plan)
     rows = await backup_evidence_rows(session, org_id)
     scoped_rows = [row for row in rows if row["device_id"] in devices]
 
@@ -445,6 +548,7 @@ async def record_test(
         action="bcp.test_recorded",
         target_type="bcp_test",
         target_id=str(test.id),
+        client_id=plan.client_id,
         metadata={
             "outcome": outcome,
             "total_n": total_n,
@@ -472,7 +576,7 @@ async def upsert_step(
     every privileged, RBAC-gated mutation is written to the hash-chained
     audit log). The step body itself is not secret; the metadata carries the
     step ordinal and result only."""
-    await _load_test(session, org_id, test_id)
+    client_id = (await _test_for_write(session, org_id, test_id)).client_id
 
     step = (
         await session.execute(
@@ -509,6 +613,7 @@ async def upsert_step(
         action="bcp.test_step_recorded",
         target_type="bcp_test",
         target_id=str(test_id),
+        client_id=client_id,
         metadata={"ordinal": ordinal, "result": result},
     )
     await session.flush()
@@ -560,7 +665,7 @@ async def create_finding(
     if severity not in _VALID_SEVERITIES:
         raise BcpValidationError(tr("invalid severity {severity}", severity=repr(severity)))
 
-    await _load_test(session, org_id, test_id)
+    client_id = (await _test_for_write(session, org_id, test_id)).client_id
 
     finding = BcpFinding(
         org_id=org_id,
@@ -581,6 +686,7 @@ async def create_finding(
         action="bcp.finding_created",
         target_type="bcp_finding",
         target_id=str(finding.id),
+        client_id=client_id,
         metadata={"test_id": str(test_id), "severity": severity},
     )
     await session.flush()
@@ -601,9 +707,10 @@ async def update_finding(
 
     `change_ref`, if provided, is validated org-scoped against
     `change_request` before being set -- a cross-org or nonexistent id
-    raises `BcpValidationError` (indistinguishable by design, invariant #5).
-    The link is advisory: the referenced ChangeRequest row is only SELECTed,
-    never mutated.
+    raises `BcpValidationError` (indistinguishable by design, invariant #5),
+    and a change of another client of the org `BcpClientError`. The link is
+    advisory: the referenced ChangeRequest row is only SELECTed, never
+    mutated.
 
     `remediation_state`, if provided, is validated against
     `_VALID_REMEDIATION_STATES`. Transitioning TO `"resolved"` stamps
@@ -611,20 +718,25 @@ async def update_finding(
     it.
     """
     finding = await _load_finding(session, org_id, finding_id)
+    # Read before the flush below: an UPDATE of the row expires it.
+    client_id = finding.client_id
+    await require_module(session, org_id=org_id, client_id=client_id, module="bcp")
 
     change_ref_set = change_ref is not None
     if change_ref is not None:
         resolved = (
             await session.execute(
-                select(ChangeRequest.id).where(
+                select(ChangeRequest.client_id).where(
                     ChangeRequest.org_id == org_id, ChangeRequest.id == change_ref
                 )
             )
-        ).scalar_one_or_none()
+        ).one_or_none()
         if resolved is None:
             raise BcpValidationError(
                 tr("change_ref not found: {change_ref}", change_ref=change_ref)
             )
+        if resolved[0] != client_id:
+            raise BcpClientError(tr("that change belongs to another client"))
         finding.change_ref = change_ref
 
     if remediation_state is not None:
@@ -654,6 +766,7 @@ async def update_finding(
         action="bcp.finding_updated",
         target_type="bcp_finding",
         target_id=str(finding.id),
+        client_id=client_id,
         metadata={
             "remediation_state": finding.remediation_state,
             "change_ref_set": change_ref_set,

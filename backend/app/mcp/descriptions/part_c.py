@@ -10,16 +10,16 @@ PART_C: dict[str, str] = {
     "PATCH /api/v1/bcp/findings/{finding_id}": (
         "Updates a DR test finding's remediation state (open, in_progress, resolved), "
         "description, or linked change request. Resolving stamps the resolution time and "
-        "reopening clears it; an unknown change reference is refused."
+        "reopening clears it; an unknown change, or one of another client, is refused."
     ),
     "GET /api/v1/bcp/plans": (
         "Lists the organization's business-continuity and disaster-recovery plans with scope, RTO "
         "and RPO targets, review interval, and state. Records no audit event."
     ),
     "POST /api/v1/bcp/plans": (
-        "Creates a BCP/DR plan with its scope, RTO and RPO targets in minutes, procedure "
-        "references, dependencies and review interval. Returns the new plan; an invalid scope or "
-        "procedure reference is refused."
+        "Creates a BCP/DR plan of the client given by client_id, with its scope, RTO and RPO "
+        "targets in minutes, procedures, dependencies and review interval. The client must use "
+        "continuity; scope and procedures of another client are refused."
     ),
     "GET /api/v1/bcp/plans/status": (
         "Returns a dashboard row per plan: whether its review is overdue, its last executed test "
@@ -33,7 +33,7 @@ PART_C: dict[str, str] = {
     "PATCH /api/v1/bcp/plans/{plan_id}": (
         "Edits a BCP/DR plan's name, scope, RTO and RPO, procedures, dependencies, review "
         "interval, or state (active or archived). Returns the updated plan; invalid scope or "
-        "procedure references are refused."
+        "procedure references, or ones of another client, are refused."
     ),
     "POST /api/v1/bcp/plans/{plan_id}/review": (
         "Records a review sign-off on a plan, stamping the review time and reviewer, which resets "
@@ -83,9 +83,9 @@ PART_C: dict[str, str] = {
         "window, and current state."
     ),
     "POST /api/v1/changes": (
-        "Creates a change request (standard, normal or emergency) in draft state, with risk, "
-        "affected scope, window and rollback plan. It is not submitted for approval until POST "
-        "/changes/{change_id}/submit."
+        "Creates a draft change request (standard, normal or emergency) of the client given by "
+        "client_id, which must use change management, with risk, affected scope, window and "
+        "rollback plan. It is not submitted until POST /changes/{change_id}/submit."
     ),
     "GET /api/v1/changes/calendar": (
         "Returns the changes whose maintenance window overlaps a from/to range, plus the pairs of "
@@ -100,9 +100,9 @@ PART_C: dict[str, str] = {
         "an approved change for one device group or for every device."
     ),
     "PUT /api/v1/changes/gates": (
-        "Creates or replaces the change gate for one device group, or for all devices when none "
-        "is given, choosing whether it covers patch approvals, deployments or both. At least one "
-        "must apply."
+        "Creates or replaces the change gate for one device group, whose client must use change "
+        "management, or for all devices when none is given, covering patch approvals, deployments "
+        "or both. Clients without change management meet no gate."
     ),
     "DELETE /api/v1/changes/gates/{gate_id}": (
         "Removes a change gate, so patch approvals and deployments on that scope no longer need "
@@ -135,7 +135,7 @@ PART_C: dict[str, str] = {
     ),
     "POST /api/v1/changes/{change_id}/links": (
         "Links a patch run, deployment, provision run or patch approval to a change. The target "
-        "must exist in this organization and a duplicate link is refused."
+        "must be of the change's client, or global; a duplicate link is refused."
     ),
     "DELETE /api/v1/changes/{change_id}/links/{link_id}": (
         "Removes a link between a change and the patch run, deployment or other action it was "
@@ -156,9 +156,9 @@ PART_C: dict[str, str] = {
     ),
     # --- devices ---
     "GET /api/v1/devices": (
-        "Lists the fleet one page at a time, filterable by OS, status, provenance, search text "
-        "and tab, with total, per-tab and fleet-wide counts. The assigned person appears only if "
-        "the caller also holds the people read permission."
+        "Lists the fleet one page at a time, filterable by OS, status, provenance, client, search "
+        "text and tab, with total, per-tab and fleet-wide counts. The assigned person appears only "
+        "on devices of clients where the caller also holds the people read permission."
     ),
     "POST /api/v1/devices": (
         "Records an asset by hand, such as warehouse stock or equipment that cannot run an agent. "
@@ -170,10 +170,10 @@ PART_C: dict[str, str] = {
         "findings. It is a read and creates no device rows."
     ),
     "POST /api/v1/devices/candidates/promote": (
-        "Turns selected candidate addresses into asset records, with per-address results. "
-        "Already-promoted addresses are not errors, and an address that is no longer a candidate "
-        "is refused individually. A promoted record counts as vouched for and may be a push "
-        "install target."
+        "Turns one named client's selected candidate addresses into asset records, each at its "
+        "subnet's client and site, with per-address results. A subnet without a site, a "
+        "non-candidate or an existing asset is answered per address. A promoted record counts "
+        "as vouched for and may be a push install target."
     ),
     "POST /api/v1/devices/review/approve-all": (
         "Approves every listed computer still waiting for review after joining through the "
@@ -194,9 +194,9 @@ PART_C: dict[str, str] = {
         "screen-share capability, and asset fields. A rejected device is not found."
     ),
     "PATCH /api/v1/devices/{device_id}": (
-        "Edits asset fields on a device; only the fields sent are written. Hostname, OS family, "
-        "serial, FQDN and architecture are refused on a device with an agent, as inventory would "
-        "overwrite them."
+        "Edits asset fields on a device; only the fields sent are written. site_id moves it to "
+        "another site of its own client. Hostname, OS family, serial, FQDN and architecture are "
+        "refused on a device with an agent, as inventory would overwrite them."
     ),
     "GET /api/v1/devices/{device_id}/health": (
         "Returns a device's effective health profile and the assignment that produced it, each "
@@ -236,18 +236,18 @@ PART_C: dict[str, str] = {
         "and maintenance dates, and whether a key is stored. The key itself is never returned."
     ),
     "POST /api/v1/licenses": (
-        "Creates a license for a software product with its entitlement count, cost, dates, vendor "
-        "and optional key. The key is sealed in the vault and never returned. Unknown product or "
-        "vendor is refused."
+        "Creates a license of the client given by client_id for a software product, with its "
+        "entitlement count, cost, dates, vendor and optional key. The key is sealed in the vault "
+        "and never returned. Unknown product or vendor is refused; Unassigned takes no licenses."
     ),
     "GET /api/v1/licenses/compliance": (
-        "Returns per-product compliance: licensed entitlements, devices found running the "
-        "product, the difference, and a breach flag when installs exceed entitlements. Computed "
-        "live."
+        "Returns compliance per client and product: that client's licensed entitlements, its "
+        "devices found running the product, the difference, and a breach flag when installs "
+        "exceed entitlements. Computed live; clients are never added together."
     ),
     "GET /api/v1/licenses/costs": (
-        "Returns total license cost grouped by product and currency. Licenses lacking a cost or "
-        "currency are skipped and currencies are never added together."
+        "Returns total license cost grouped by client, product and currency. Licenses lacking a "
+        "cost or currency are skipped; clients and currencies are never added together."
     ),
     "GET /api/v1/licenses/export": (
         "Returns flat license rows (product, entitlements, cost, dates) for true-up or reporting, "
@@ -278,8 +278,9 @@ PART_C: dict[str, str] = {
         "tools."
     ),
     "POST /api/v1/licenses/review-queue/ignore": (
-        "Marks a review-queue software name as ignored so it stops appearing there. Safe to "
-        "repeat for the same name."
+        "Marks a review-queue software name as ignored so it stops appearing there: on the "
+        "devices of the client given by client_id, or, without one, on every client's (which "
+        "needs access to every client). Safe to repeat for the same name."
     ),
     "POST /api/v1/licenses/review-queue/map": (
         "Resolves a review-queue software name by adding an exact-match rule for it to a chosen "
@@ -302,8 +303,9 @@ PART_C: dict[str, str] = {
         "with their release time."
     ),
     "POST /api/v1/licenses/{license_id}/allocations": (
-        "Allocates a seat of a license to a device, user or person in this organization. Refused "
-        "when all entitlements are in use; returns the allocation."
+        "Allocates a seat of a license to a device, user or person of the license's client (staff "
+        "hold only the internal client's licenses). Refused when all entitlements are in use; "
+        "returns the allocation."
     ),
     # --- notifications ---
     "GET /api/v1/notifications/allowlist": (
@@ -368,8 +370,9 @@ PART_C: dict[str, str] = {
         "lacks one."
     ),
     "POST /api/v1/people": (
-        "Creates a person record with name and optional email, department, job title and start "
-        "date. A duplicate email is refused."
+        "Creates a person of the client given by client_id, with name and optional email, "
+        "department, job title and start date. An email already held in that client is refused; "
+        "Unassigned takes no people."
     ),
     "GET /api/v1/people/by-user/{user_id}": (
         "Returns the person behind a console or portal account. First creates a person for any "
@@ -381,8 +384,8 @@ PART_C: dict[str, str] = {
     ),
     "PUT /api/v1/people/devices/{device_id}": (
         "Sets, or with a null person clears, who uses a device as an operator override that "
-        "inventory never replaces. It also teaches the resolver the device's last observed "
-        "sign-in name."
+        "inventory never replaces. The person must belong to the device's client. It also "
+        "teaches the resolver the device's last observed sign-in name."
     ),
     "DELETE /api/v1/people/devices/{device_id}/override": (
         "Removes an operator's override of who uses a device and returns to automatic assignment, "
@@ -393,8 +396,9 @@ PART_C: dict[str, str] = {
         "they can be matched up."
     ),
     "POST /api/v1/people/unmatched/seats/{seat_id}/link": (
-        "Links a subscription seat to a person. With no person given it reuses the person holding "
-        "the seat's email address or creates one from the seat's name and email."
+        "Links a subscription seat to a person of the subscription's client. With no person given "
+        "it reuses that client's person holding the seat's email address or creates one there "
+        "from the seat's name and email."
     ),
     "GET /api/v1/people/{person_id}": (
         "Returns everything one person holds: devices, licenses, subscriptions, open tickets, "
@@ -406,8 +410,9 @@ PART_C: dict[str, str] = {
         "cannot be blank and an email already held by someone else is refused."
     ),
     "PUT /api/v1/people/{person_id}/account": (
-        "Links a person to a console or portal account, or unlinks with a null user. An account "
-        "already belonging to another person is refused."
+        "Links a person to a console or portal account, or unlinks with a null user. A contact's "
+        "person is of its client and staff's of the internal client; an account already "
+        "belonging to another person is refused."
     ),
     "POST /api/v1/people/{person_id}/checklists": (
         "Starts a starter or leaver checklist for a person, setting their status to starting or "

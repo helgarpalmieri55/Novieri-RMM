@@ -41,6 +41,7 @@ from tests.backup_dedup_fixtures import (
     seed_dedup_org,
     seed_index_rows,
 )
+from tests.client_scope_support import drop_client_keys
 
 _NOW = SEED_NOW
 
@@ -615,29 +616,41 @@ async def test_a_repository_row_belonging_to_another_org_is_not_reachable(
     `'<org A>/backup/<org B repo>/'` — a prefix belonging to neither tenant's
     real layout — and the derived-vs-stored check catches it one layer in.
     Two layers, and the reason code is what distinguishes them.
+
+    Since migration 0242 the database refuses that row too: a run names a
+    repository of its own client (`fk_backup_runs_repository_client`), and B's
+    is B's. So it is planted with that key dropped, and the query answered and
+    its refusal read, inside one transaction that is rolled back (plan
+    2026-10-26, lesson 2): the org predicate is still what is under test.
     """
     a, _ = await seed_dedup_org(admin_engine, app_engine, vault, "ddt-l")
     b, _ = await seed_dedup_org(admin_engine, app_engine, vault, "ddt-m")
 
     async with AsyncSession(admin_engine) as session:
+        await drop_client_keys(session, "backup_runs", "fk_backup_runs_repository_client")
         await session.execute(
             text("UPDATE backup_runs SET repository_id = :repo WHERE job_id = :job"),
             {"repo": b.repository_id, "job": a.job_id},
         )
-        await session.commit()
-
-    async with AsyncSession(admin_engine) as session:
         reply = await answer_chunk_query(
             session, object_store,
             _query(a.job_id, check=[chunk_id(0x81)]),
             org_id=a.org_id, device_id=a.device_id, now=_NOW,
         )
-        await session.commit()
+        reasons = [
+            str(meta.get("reason"))
+            for meta in (
+                await session.execute(
+                    select(AuditEvent.meta).where(
+                        AuditEvent.org_id == a.org_id,
+                        AuditEvent.action == "backup.dedup_refused",
+                    )
+                )
+            ).scalars()
+        ]
+        await session.rollback()
 
-    assert (reply, await _refusal_reasons(admin_engine, a.org_id)) == (
-        None,
-        ["no_such_repository"],
-    )
+    assert (reply, reasons) == (None, ["no_such_repository"])
 
 
 async def test_a_queued_job_may_already_query(

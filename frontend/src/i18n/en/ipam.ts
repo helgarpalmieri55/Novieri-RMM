@@ -40,6 +40,8 @@ export const ipam = {
     end: "End",
     none: "None",
     defaultGlobal: "Default (global)",
+    // A VRF decides the client of what is filed in it, so a VRF says whose it is.
+    vrfOfClient: "{vrf} · {client}",
     loading: "Loading…",
     drift: "Drift",
     dormant: "Dormant",
@@ -627,8 +629,10 @@ export const ipam = {
     lastRun: "Last run",
     noAgentNotice:
       "The last sweep could not run: no enrolled agent is on this segment. A sweep runs from an agent inside the segment, never from this platform. Install the agent by hand on one machine here and it sweeps the rest.",
-    designatedAgentField: "Designated agent (device id)",
-    designatedAgentPlaceholder: "auto-select an online agent in this segment",
+    designatedAgentField: "Designated agent",
+    designatedAgentAuto: "Auto-select an online agent in this segment",
+    designatedAgentHelp:
+      "Only machines of this subnet's client that run the agent: another client's network is not this one, whatever its addresses.",
     intervalField: "Interval (hours)",
     scheduledEnabled: "Scheduled sweeps enabled",
     intervalTooShort: {
@@ -760,26 +764,26 @@ export const ipam = {
   },
   registry: {
     title: "Registry",
-    description: "VRFs, sites and VLANs: what subnets and addresses are scoped by.",
+    description: "VRFs, VLANs and the client's sites: what subnets and addresses are scoped by.",
     vrfsTitle: "VRFs",
-    vrfsSubtitle: "Every subnet carries one; one registered without a VRF lands in global.",
+    vrfsSubtitle: "Every subnet carries one; one registered without a VRF lands in the client's global.",
     vrfsEmpty: "No VRFs yet.",
     colRd: "RD",
     noRd: "No route distinguisher",
     routeDistinguisher: "Route distinguisher",
     addVrf: "Add VRF",
     sitesTitle: "Sites",
-    sitesEmpty: "No sites yet.",
-    noDocRecord: "No linked doc record",
-    siteName: "Site name",
-    addSite: "Add site",
+    // No console page manages a client's sites yet (phase 3) -- final review E.
+    sitesSubtitle:
+      "The client's offices. VLANs and subnets name them; until the console can manage a client, they are added and edited through the API or an AI connection (MCP).",
+    sitesEmpty: "This client has no sites yet.",
     vlansTitle: "VLANs",
-    vlansSubtitle: "A VLAN with no site is org-wide, not one whose site is missing.",
+    vlansSubtitle: "A VLAN with no site is the whole client's, not one whose site is missing.",
     vlansEmpty: "No VLANs yet.",
     colScope: "Scope",
-    orgWide: "Org-wide",
+    clientWide: "Whole client",
     vid: "VID",
-    orgWideNoSite: "Org-wide (no site)",
+    clientWideNoSite: "Whole client (no site)",
     addVlan: "Add VLAN",
   },
   importExport: {
@@ -791,6 +795,10 @@ export const ipam = {
     csvSubtitle: "Preview writes nothing; apply writes. Up to {megabytes} MB and {rows} rows.",
     csvNote:
       "There is no column for an address’s state: that only changes through the address’s own actions, so every change is in the audit log.",
+    vrf: "Into the VRF",
+    vrfHelp: "The import belongs to this VRF’s client. Every address must fall inside one of its subnets.",
+    vrfOption: "{vrf} · {client}",
+    targetMoved: "This file was previewed into another VRF. Preview it again into the one chosen before applying.",
     csvFile: "CSV file",
     drop: "Drop a CSV or click",
     columns: "Columns: {fields}. Anything else is ignored and reported.",

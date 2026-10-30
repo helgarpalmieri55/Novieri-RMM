@@ -29,7 +29,7 @@ async def seed_site_server(
     roles: Sequence[str] = ("wake",),
     enabled: bool = True,
     name: str | None = None,
-    ipam_site_id: UUID | None = None,
+    site_id: UUID | None = None,
     row_id: UUID | None = None,
     created_at: datetime | None = None,
 ) -> UUID:
@@ -55,7 +55,7 @@ async def seed_site_server(
         await session.execute(
             text(
                 "INSERT INTO site_server"
-                " (id, org_id, device_id, name, segments, roles, ipam_site_id,"
+                " (id, org_id, device_id, name, segments, roles, site_id,"
                 "  enabled, notes, created_at, updated_at)"
                 " VALUES (:id, :org, :device, :name, CAST(:segments AS cidr[]),"
                 "         CAST(:roles AS text[]), :site, :enabled, '',"
@@ -68,7 +68,7 @@ async def seed_site_server(
                 "name": name or f"site-{uuid4().hex[:8]}",
                 "segments": list(segments),
                 "roles": list(roles),
-                "site": ipam_site_id,
+                "site": site_id,
                 "enabled": enabled,
                 "created_at": created_at,
             },

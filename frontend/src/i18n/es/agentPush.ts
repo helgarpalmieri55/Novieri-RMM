@@ -137,7 +137,8 @@ export const agentPush: Shape<typeof en> = {
     chooseSubnet: "Elige una subred autorizada",
     addressesInOption: "{prefix} ({formatted} direcciones)",
     choosePushCredential: "Elige una credencial de instalación remota",
-    noSubnet: "Todavía no hay ninguna subred autorizada para la instalación remota. Quien administra los rangos de instalación remota autoriza una en Autorizaciones de instalación remota.",
+    noSubnet: "Todavía no hay ninguna subred autorizada para la instalación remota del cliente de esta credencial. Quien administra los rangos de instalación remota autoriza una en Autorizaciones de instalación remota.",
+    credentialFirst: "Elige primero la credencial",
     listing: "Listando los equipos de esta subred…",
     changed: "Los equipos de esta subred cambiaron desde que se mostró la lista, así que no se inició nada. Vuelve a leer la lista de abajo y luego inicia la instalación remota.",
     warning: "Se presenta una sola credencial a cada equipo listo de esta lista: primero a un equipo y, cuando un inicio de sesión tiene éxito, a un máximo de {concurrency} a la vez. Si 3 equipos rechazan la credencial, la ejecución se detiene sola, para que una contraseña de dominio incorrecta no bloquee la cuenta para todos. Los equipos que no están listos se muestran, pero no se les instalará nada.",
@@ -155,6 +156,10 @@ export const agentPush: Shape<typeof en> = {
     awaitingReview: {
       one: "{count} equipo de esta subred no aparece en la lista porque está pendiente de revisión. Apruébalo en Dispositivos para incluirlo.",
       other: "{count} equipos de esta subred no aparecen en la lista porque están pendientes de revisión. Apruébalos en Dispositivos para incluirlos.",
+    },
+    ambiguous: {
+      one: "{count} dirección de esta subred no aparece en la lista porque no nombra un solo equipo.",
+      other: "{count} direcciones de esta subred no aparecen en la lista porque no nombran un solo equipo.",
     },
     start: { one: "Iniciar la instalación remota en {count} equipo", other: "Iniciar la instalación remota en {count} equipos" },
   },
@@ -373,6 +378,7 @@ export const agentPush: Shape<typeof en> = {
   chip: {
     no_asset: "Nadie lo ha avalado",
     ambiguous_asset: "Dirección en más de un cliente",
+    credential_missing: "Credencial de otro cliente",
     no_authorization: "Dirección no autorizada",
     credential_not_scoped: "Credencial no permitida aquí",
     no_site_server: "Sin servidor de sitio en su segmento",
@@ -405,7 +411,7 @@ export const agentPush: Shape<typeof en> = {
   },
   runReason: {
     run_owner_not_permitted: "Quien inició esta ejecución ya no puede hacer instalaciones remotas.",
-    credential_missing: "Se eliminó o se cambió la credencial de la ejecución.",
+    credential_missing: "Se eliminó o se cambió la credencial de la ejecución, o no es del cliente de este equipo.",
     target_changed: "Esta dirección pertenece ahora a otro registro de equipo.",
     already_enrolled: "Ya está ejecutando el agente.",
     not_installable: "Su sistema operativo o su procesador no están definidos.",
@@ -415,7 +421,8 @@ export const agentPush: Shape<typeof en> = {
   },
   refusal: {
     no_asset: "Nadie ha avalado este equipo: agrégalo como activo o promuévelo desde Descubiertos.",
-    ambiguous_asset: "Equipos de más de un cliente tienen esta dirección: elige el cliente en el selector de clientes y vuelve a intentarlo.",
+    ambiguous_asset: "Equipos de más de un cliente tienen esta dirección: elige una credencial de instalación remota del cliente del equipo y vuelve a intentarlo.",
+    credential_missing: "Este equipo es de otro cliente que la credencial elegida: elige una credencial de instalación remota de su cliente.",
     no_authorization: "Su dirección no está en un rango autorizado para la instalación remota.",
     credential_not_scoped: "La credencial elegida no está permitida en esta dirección.",
     no_site_server: "Ningún servidor de sitio atiende el segmento de red de este equipo.",

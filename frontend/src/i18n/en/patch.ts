@@ -82,10 +82,27 @@ export const patch = {
       other: "The {ring} ring covers {count} devices.",
     },
     ringCoversOf: "The {ring} ring covers {count} of {total} devices.",
+    // A client's approval reaches only that client's machines in the ring
+    // (patchCopy.approvalReachMessage).
+    approvalCovers: "An approval here covers {reach}.",
+    ringEmptyClient:
+      "No device of {client} resolves into the {ring} ring yet, so approving here clears nothing today.",
     reachEvery: "every device in the {ring} ring",
     reachCount: {
       one: "the 1 device in the {ring} ring",
       other: "all {count} devices in the {ring} ring",
+    },
+    // An approval's reach by its owner (patchCopy.approvalReach): one client's
+    // machines in the ring, or every client's.
+    reachClientEvery: "every device of {client} in the {ring} ring",
+    reachClientCount: {
+      one: "the 1 device of {client} in the {ring} ring",
+      other: "the {count} devices of {client} in the {ring} ring",
+    },
+    reachEveryClient: "every device of every client in the {ring} ring",
+    reachEveryClientCount: {
+      one: "the 1 device of any client in the {ring} ring",
+      other: "all {count} devices of every client in the {ring} ring",
     },
     lens:
       "You are choosing these from {hostname}, but an approval covers {reach} — not {hostname} alone.",
@@ -206,6 +223,8 @@ export const patch = {
     empty: "No update is approved into a ring yet. Approve one from the Updates panel.",
     update: "Update",
     ring: "Ring",
+    client: "Client",
+    everyClient: "Every client",
     approved: "Approved",
     by: "By",
     status: "Status",
@@ -213,10 +232,13 @@ export const patch = {
     revoked: "Revoked",
     inForce: "In force",
     revoke: "Revoke",
-    subject: "{patch} → {ring} ring",
+    subject: "{patch} → {ring} ring, {client}",
+    subjectEvery: "{patch} → {ring} ring, every client",
     confirmTitle: "Revoke patch approval",
-    confirmBody:
-      "Devices in the \"{ring}\" ring will no longer install this update, and any apply job dispatched after this point will not carry it. Machines that have already installed it keep it. The approval stays listed as revoked, because it is the record that it was once made.",
+    confirmBodyClient:
+      "The devices of {client} in the \"{ring}\" ring will no longer install this update, unless an approval for every client still covers them, and any apply job dispatched after this point will not carry it to them. Machines that have already installed it keep it. The approval stays listed as revoked, because it is the record that it was once made.",
+    confirmBodyEvery:
+      "The devices of every client in the \"{ring}\" ring will no longer install this update, except the machines of a client whose own approval of it still stands, and any apply job dispatched after this point will not carry it to them. Machines that have already installed it keep it. The approval stays listed as revoked, because it is the record that it was once made.",
     confirmLabel: "Revoke approval",
   },
   apps: {
@@ -276,11 +298,23 @@ export const patch = {
       other:
         "These {count} updates become installable on {target} at their next maintenance window. Each one is recorded separately in the Approvals list, which is where any of them can be withdrawn again.",
     },
-    targetEvery: "every device in the \"{ring}\" ring",
+    // The confirmation's reach, by the approval's owner (patchCopy.approvalTarget).
+    targetEvery: "every device of every client in the \"{ring}\" ring",
     target: {
-      one: "the 1 device in the \"{ring}\" ring",
-      other: "the {count} devices in the \"{ring}\" ring",
+      one: "the 1 device of any client in the \"{ring}\" ring",
+      other: "the {count} devices of every client in the \"{ring}\" ring",
     },
+    targetClientEvery: "every device of {client} in the \"{ring}\" ring",
+    targetClient: {
+      one: "the 1 device of {client} in the \"{ring}\" ring",
+      other: "the {count} devices of {client} in the \"{ring}\" ring",
+    },
+    /** The internal client, as an approval's owner, until phase 3's selector. */
+    ownClient: "your organisation's own client",
+    // The "For every client" hint on an approval (components/forEveryClient.tsx):
+    // what ticking does is reach, not visibility (final review E).
+    forEveryClientHint:
+      "Ticked, these updates become installable on every client's machines in the {ring} ring. Unticked, only on the machines of {client}.",
     noChangeNote: "With no change request chosen, one is recorded for this approval automatically.",
     confirmLabel: "Approve",
     ringAria: "Ring to approve into — {scope}",

@@ -15,6 +15,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
+import { ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 import type { Deployment, DeviceDeploymentHistory, Package, Script, ScriptListItem } from "./types";
 
@@ -94,6 +95,9 @@ const DEPLOYMENT_SEEDS: DeploymentSeed[] = [
 function deployment(seed: DeploymentSeed): Deployment {
   return {
     id: seed.id,
+    // Every target of the worked fleet is the internal client's (`ORG_ID`,
+    // the id convention), and a deployment is its target's client's.
+    client_id: ORG_ID,
     package_id: seed.pkg,
     action: seed.action,
     target_type: seed.targetType,
@@ -173,6 +177,8 @@ const listDeployments: FixtureMap["listDeployments"] = () => deployments();
 
 const createDeployment: FixtureMap["createDeployment"] = (body) => ({
   id: `dep-${Date.now()}`,
+  // The server derives it from the target; the body never carries it.
+  client_id: ORG_ID,
   package_id: body.package_id,
   action: body.action,
   target_type: body.target_type,
@@ -195,6 +201,7 @@ const getDeviceDeployments: FixtureMap["getDeviceDeployments"] = (deviceId) => {
     .filter((d) => d.target_type === "device" && d.target_id === deviceId)
     .map((d) => ({
       deployment_id: d.id,
+      client_id: d.client_id,
       package_id: d.package_id,
       action: d.action,
       state: d.state === "complete" ? "installed" : d.state === "failed" ? "failed" : "pending",
@@ -206,6 +213,7 @@ const getDeviceDeployments: FixtureMap["getDeviceDeployments"] = (deviceId) => {
   if (deviceId === "dev-1") {
     rows.push({
       deployment_id: "dep-chrome-041-old",
+      client_id: ORG_ID,
       package_id: "pkg-chrome-128",
       action: "install",
       state: "installed",

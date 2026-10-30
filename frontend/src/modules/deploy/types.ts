@@ -53,6 +53,8 @@ export type DeployTargetType = "device" | "group";
 
 export interface Deployment {
   id: string;
+  /** The target's client, written by the server from the target; never sent. */
+  client_id: string;
   package_id: string;
   action: string;
   target_type: string;
@@ -79,6 +81,8 @@ export interface DeploymentExecuteResponse {
 
 export interface DeviceDeploymentHistory {
   deployment_id: string;
+  /** The deployment's client: the device's, written by the server. */
+  client_id: string;
   package_id: string;
   action: string;
   state: string;

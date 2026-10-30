@@ -98,7 +98,7 @@ from app.modules.ipam.net import (
     range_to_cidrs,
     subtract,
 )
-from app.modules.ipam.registry import get_vrf
+from app.modules.ipam.registry import vrf_for_new_row
 
 __all__ = [
     "DEFAULT_MAX_TARGETS",
@@ -150,12 +150,18 @@ async def create_authorization(
     org_id: UUID,
     *,
     actor_id: UUID | None,
-    vrf_id: UUID,
+    vrf_id: UUID | None = None,
+    client_id: UUID | None = None,
     prefix: str,
     note: str = "",
     expires_at: datetime | None = None,
 ) -> IpamScanAuthorization:
     """Authorize the fleet to probe `prefix` in `vrf_id`. HIGH PRIVILEGE.
+
+    The authorization is the VRF's client's (a `client_id` must agree); with
+    no VRF, `client_id`'s `global` one (`registry.vrf_for_new_row`). A sweep
+    reads only its own subnet's VRF's authorizations, so one client's scope
+    never authorizes another client's wire.
 
     Gated on `ipam.scope.manage` at the API (§11.2) -- deliberately separate
     from `ipam.sweep.run`, because running a sweep inside an already-authorized
@@ -178,7 +184,7 @@ async def create_authorization(
         )
     if expires_at is not None and expires_at.tzinfo is None:
         raise IpamValidationError(tr("expires_at must be timezone-aware"))
-    await get_vrf(session, org_id, vrf_id)
+    vrf_id, client = await vrf_for_new_row(session, org_id, vrf_id=vrf_id, client_id=client_id)
 
     now = _utcnow()
     inserted_id = (
@@ -231,6 +237,7 @@ async def create_authorization(
         action="ipam.scope_authorized",
         target_type="ipam_scan_authorization",
         target_id=str(row.id),
+        client_id=client,
         metadata={
             "prefix": str(network),
             "requested_prefix": str(prefix),
@@ -272,6 +279,7 @@ async def revoke_authorization(
                 authorization_id=authorization_id,
             )
         )
+    client_id = row.client_id  # before the flush that expires it
     row.revoked_at = _utcnow()
     row.revoked_by = actor_id
     await session.flush()
@@ -283,6 +291,7 @@ async def revoke_authorization(
         action="ipam.scope_revoked",
         target_type="ipam_scan_authorization",
         target_id=str(row.id),
+        client_id=client_id,
         metadata={
             "prefix": str(row.prefix),
             "vrf_id": str(row.vrf_id),

@@ -51,6 +51,8 @@ export const PUSHABLE_CREDENTIAL_TYPES: readonly string[] = [PUSH_CREDENTIAL_TYP
 
 export interface PushAuthorizationOut {
   id: string;
+  /** The client whose network the prefix is (MSP clients phase 2, Task 12). */
+  client_id: string;
   prefix: string;
   /** How many addresses the grant reaches. Server-computed, never derived here. */
   address_count: number;
@@ -64,6 +66,8 @@ export interface PushAuthorizationOut {
 }
 
 export interface PushAuthorizationCreate {
+  /** The client whose network the prefix is: a push is authorized there for that client's machines only. */
+  client_id: string;
   prefix: string;
   note: string;
   expires_at: string | null;
@@ -71,6 +75,8 @@ export interface PushAuthorizationCreate {
 
 export interface PushCredentialScopeOut {
   id: string;
+  /** The credential's client, which the scope is in (never sent: the server copies it). */
+  client_id: string;
   credential_id: string;
   credential_name: string;
   prefix: string;
@@ -123,6 +129,12 @@ export interface PushDispatchOut {
  * it. Public key material only — never a secret. */
 export interface HostKeyOut {
   address: string;
+  /**
+   * The client whose machine holds the address -- two clients' machines can
+   * share one (MSP clients phase 1). Null for a key recorded before its
+   * machine was known, which serves every client.
+   */
+  client_id: string | null;
   /** A wire value (`ssh` or `winrm`). Compared, never rendered. */
   transport: string;
   observed_fingerprint: string;
@@ -190,6 +202,8 @@ export const PUSH_RUN_CONCURRENCY = 50;
 
 export interface PushRunPrefixOut {
   prefix: string;
+  /** The client whose network it is: the chosen credential's. */
+  client_id: string;
   address_count: number;
   expires_at: string | null;
 }
@@ -206,6 +220,8 @@ export interface PushRunListRowOut {
 
 export interface PushRunPreviewOut {
   prefix: string;
+  /** The run's client: the credential's. */
+  client_id: string;
   credential_id: string;
   credential_name: string;
   /** Computed by the server; echoed back unchanged to confirm. */
@@ -216,6 +232,8 @@ export interface PushRunPreviewOut {
   unvouched_count: number;
   /** Vouched-for rows still waiting for review: not listed. */
   awaiting_review_count: number;
+  /** Addresses that name no single machine: not listed. Always 0 inside one client. */
+  ambiguous_count: number;
   run_max: number;
   concurrency: number;
   rows: PushRunListRowOut[];
@@ -236,6 +254,8 @@ export type PushRunCounts = Record<PushRunTargetState, number>;
 
 export interface PushRunOut {
   id: string;
+  /** The run's client: its credential's. */
+  client_id: string;
   prefix: string;
   credential_id: string | null;
   credential_name: string;

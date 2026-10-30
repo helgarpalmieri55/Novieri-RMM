@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import ForeignKeyConstraint, UniqueConstraint, text
+from sqlalchemy import Column, ForeignKeyConstraint, Index, UniqueConstraint, text
 
 from app.core.client_scope import ALL_SCOPE_ALLOWLIST
-from app.core.client_scope_catalog import CATALOG, PENDING_PHASE_2, PHASE_1
+from app.core.client_scope_catalog import CATALOG, SCOPED
 from app.core.global_rows import SECOND_PARENTS
 from app.models.base import Base
 from tests.client_scope_support import deparse_policies, expected_client_policies
@@ -207,11 +207,6 @@ def test_every_table_is_classified() -> None:
     assert set(CATALOG) - live == set(), "catalog names tables that do not exist"
 
 
-def test_pending_tables_are_in_the_catalog_and_not_global() -> None:
-    assert PENDING_PHASE_2 <= set(CATALOG)
-    assert all(CATALOG[t].kind in {"C", "H"} for t in PENDING_PHASE_2)
-
-
 # H children of an O parent. Their client_id is NOT NULL, so a parent row with
 # no client (Novieri's own credential) makes the insert fail -- which is the
 # point: Annex A, "`credentials`, que tiene que tener cliente". Any other H
@@ -257,8 +252,8 @@ OTHER_POLICIES: dict[str, set[str]] = {
 }
 
 
-async def test_phase_1_tables_carry_the_restrictive_policy(admin_engine) -> None:
-    tables = [*PHASE_1, "clients"]
+async def test_scoped_tables_carry_the_restrictive_policy(admin_engine) -> None:
+    tables = [*SCOPED, "clients"]
     expected = {t: expected_client_policies(t) for t in tables}
     async with admin_engine.connect() as conn:
         rows = (
@@ -295,7 +290,7 @@ async def test_phase_1_tables_carry_the_restrictive_policy(admin_engine) -> None
                 f"{table}.{name}: live\n  USING {row.qual}\n  CHECK {row.with_check}\n"
                 f"expected\n  USING {deparsed[shape][0]}\n  CHECK {deparsed[shape][1]}"
             )
-        if table in PHASE_1 and PHASE_1[table].kind == "O":
+        if table in SCOPED and SCOPED[table].kind == "O":
             assert "IS NULL" in have["client_isolation"].qual, f"{table}: O reads NULL rows"
 
 
@@ -320,7 +315,7 @@ def _edges() -> dict[tuple[str, str], tuple[str, str]]:
     device OR a group, its own trigger), plus the second parents."""
     edges = {
         (t, "its_client_from_parent"): (e.parent, e.fk)
-        for t, e in PHASE_1.items()
+        for t, e in SCOPED.items()
         if e.parent is not None and e.fk is not None and t != "jobs"
     }
     edges.update(EXTRA_PARENT_TRIGGERS)
@@ -417,8 +412,26 @@ async def test_a_parents_client_change_reaches_every_child(admin_engine) -> None
 # Migration 0231's constraints are declared on the models too.
 # --------------------------------------------------------------------------- #
 
-CLIENT_KEYS = {"uq_clients_id_org", "uq_sites_id_client"}
-CLIENT_FK = re.compile(r"fk_\w+_(client_org|site_client)")
+CLIENT_KEYS = {
+    "uq_clients_id_org",
+    "uq_sites_id_client",
+    "uq_person_id_client",
+    # A budget line's and an expense's category and cost center are of the
+    # row's client (plan 2026-10-26 Task 8): the keys those rows reference.
+    "uq_expense_category_id_client",
+    "uq_cost_center_id_client",
+    # A subnet's VLAN is of the subnet's client (plan 2026-10-26 Task 10
+    # review, M3): the key `fk_ipam_subnet_vlan_client` references.
+    "uq_ipam_vlan_id_client",
+    # A backup run's and point's repository is of the row's client (plan
+    # 2026-10-26 Task 13): the key `fk_backup_<runs|points>_repository_client`
+    # references.
+    "uq_backup_repositories_id_client",
+}
+CLIENT_FK = re.compile(
+    r"fk_\w+_(client_org|site_client|person_client|category_client|cost_center_client"
+    r"|vlan_client|repository_client)"
+)
 
 
 async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -> None:
@@ -444,10 +457,15 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
                     "FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid "
                     "LEFT JOIN pg_class r ON r.oid = c.confrelid "
                     "WHERE (c.contype = 'f' AND (c.conname LIKE 'fk\\_%\\_client\\_org' "
-                    "                       OR c.conname LIKE 'fk\\_%\\_site\\_client')) "
-                    "   OR (c.contype = 'u' AND c.conname IN ('uq_clients_id_org', "
-                    "                                         'uq_sites_id_client'))"
-                )
+                    "                       OR c.conname LIKE 'fk\\_%\\_site\\_client' "
+                    "                       OR c.conname LIKE 'fk\\_%\\_person\\_client' "
+                    "                       OR c.conname LIKE 'fk\\_%\\_category\\_client' "
+                    "                       OR c.conname LIKE 'fk\\_%\\_cost\\_center\\_client' "
+                    "                       OR c.conname LIKE 'fk\\_%\\_vlan\\_client' "
+                    "                       OR c.conname LIKE 'fk\\_%\\_repository\\_client')) "
+                    "   OR (c.contype = 'u' AND c.conname = ANY (:keys))"
+                ),
+                {"keys": sorted(CLIENT_KEYS)},
             )
         ).all()
     live = {
@@ -470,18 +488,47 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
 
     # Not vacuous: the set is what the catalog says it must be. Every table
     # whose client_id the application writes -- C but `sites`, every O, and
-    # the grants -- plus the three tables that name a site.
+    # the grants -- plus the six tables that name a site.
     expected = (
         {
             f"fk_{t}_client_org"
-            for t, e in PHASE_1.items()
+            for t, e in SCOPED.items()
             if e.kind == "O" or (e.kind == "C" and t != "sites")
         }
         | {"fk_user_roles_client_org"}
         # Informative client of an audit event (plan 2026-10-26 Task 1, C6):
         # G table, no client policy, but its client is its own org's.
         | {"fk_audit_events_client_org"}
-        | {f"fk_{t}_site_client" for t in ("devices", "enrollment_tokens", "install_links")}
+        # A VLAN's, a subnet's and a site server's site is of the row's
+        # client too (plan 2026-10-26 Task 10, migration 0240).
+        | {
+            f"fk_{t}_site_client"
+            for t in (
+                "devices", "enrollment_tokens", "install_links",
+                "ipam_vlan", "ipam_subnet", "site_server",
+            )
+        }
+        # A row naming a person is of that person's client (plan 2026-10-26
+        # Task 5): who uses a device is one of the device's client's people;
+        # who holds a license or a seat, of the license's or subscription's
+        # (Task 6).
+        | {
+            "fk_device_person_person_client",
+            "fk_license_allocation_person_client",
+            "fk_seat_assignment_person_client",
+        }
+        # A budget line's and an expense's category and cost center are of
+        # the row's client (plan 2026-10-26 Task 8).
+        | {
+            f"fk_{t}_{parent}_client"
+            for t in ("budget_line", "expense")
+            for parent in ("category", "cost_center")
+        }
+        # A subnet's VLAN is of the subnet's client (Task 10 review, M3).
+        | {"fk_ipam_subnet_vlan_client"}
+        # A backup run's and point's repository is of the row's client (plan
+        # 2026-10-26 Task 13; NOT VALID, so history is not re-judged).
+        | {"fk_backup_runs_repository_client", "fk_backup_points_repository_client"}
         | CLIENT_KEYS
     )
     assert set(live) == expected, f"live vs catalog: {sorted(set(live) ^ expected)}"
@@ -501,7 +548,7 @@ async def test_the_client_constraints_are_declared_on_the_models(admin_engine) -
 # INSERT dies on the index -- a 500 where an every-client admin gets a 409,
 # which tells X's technician Y's names one guess at a time (Task 7's
 # `device_groups`, Task 8's review). And two clients cannot both have
-# "Servers". So every unique key on a phase-1 table must be one of:
+# "Servers". So every unique key on a scoped table must be one of:
 #
 #   SAFE   it holds `client_id`; or a column that PINS the row's client -- the
 #          catalog's inheritance fk, a second parent's fk (`global_rows.
@@ -531,7 +578,7 @@ SURROGATE_COLUMNS: dict[tuple[str, str], str] = {
     ),
 }
 
-#: Unique keys on phase-1 tables that are deliberately organisation-wide.
+#: Unique keys on scoped tables that are deliberately organisation-wide.
 #: Each is LEAKY by the rules above, and kept on purpose; the reason says why
 #: no client namespace applies. A key that stops being LEAKY, or stops
 #: existing, fails `test_the_org_wide_keys_have_not_rotted`.
@@ -559,6 +606,11 @@ ORG_WIDE_KEYS: dict[str, str] = {
         "(`ticket_number_counter`, G): nobody types it, every client's tickets share the "
         "sequence, and a moved ticket keeps its number. Per client, INC-12 could name two "
         "tickets"
+    ),
+    "person_user_id_key": (
+        "an account is one person: one user, one person row, in the client the account "
+        "belongs to (`its_person_account_guard`). It is an identity, not a name -- a "
+        "`users.id` nobody types -- so a collision tells nobody another client's names"
     ),
 }
 
@@ -600,9 +652,9 @@ async def _unique_keys(admin_engine) -> tuple[list[UniqueKey], dict[str, frozens
 
 
 async def _unique_keys_on(conn) -> tuple[list[UniqueKey], dict[str, frozenset[str]]]:
-    """Every unique index (constraints' included) on a phase-1 table, and per
+    """Every unique index (constraints' included) on a scoped table, and per
     table the columns that pin a row's client."""
-    tables = list(PHASE_1)
+    tables = list(SCOPED)
     rows = (
         await conn.execute(
             text(
@@ -657,7 +709,7 @@ async def _unique_keys_on(conn) -> tuple[list[UniqueKey], dict[str, frozenset[st
         for r in rows
     ]
     pinning: dict[str, set[str]] = {}
-    for table, entry in PHASE_1.items():
+    for table, entry in SCOPED.items():
         pins = pinning.setdefault(table, set())
         if entry.fk is not None:
             pins.add(entry.fk)
@@ -675,7 +727,7 @@ async def _unique_keys_on(conn) -> tuple[list[UniqueKey], dict[str, frozenset[st
 
 async def test_natural_keys_on_per_client_tables_are_per_client(admin_engine) -> None:
     """THE GUARD (Task 8b). Introspects the live database, so a migration that
-    adds `UNIQUE (org_id, name)` to a phase-1 table goes red here, not in a
+    adds `UNIQUE (org_id, name)` to a scoped table goes red here, not in a
     narrowed technician's 500."""
     keys, pinning = await _unique_keys(admin_engine)
     leaky = {
@@ -722,7 +774,7 @@ async def test_the_unique_key_guard_is_not_vacuous(admin_engine) -> None:
     for name in safe:
         assert leaky_because(by_name[name], pinning[by_name[name].table]) is None, name
     assert "site_id" in pinning["install_links"] and "record_id" in pinning["doc_versions"]
-    assert len(keys) > 100, len(keys)  # every phase-1 primary key, at least
+    assert len(keys) > 100, len(keys)  # every scoped table's primary key, at least
 
     def old(table: str, *columns: str, nnd: bool = False) -> str | None:
         key = UniqueKey(table, "old", columns, frozenset({"org_id"}), nnd)
@@ -736,6 +788,32 @@ async def test_the_unique_key_guard_is_not_vacuous(admin_engine) -> None:
     assert old("change_gates", "org_id", "device_group_id", nnd=True) is not None
     # The same column with NULLs distinct pins the client wherever it is set.
     assert old("patch_policies", "org_id", "device_group_id") is None
+    # IPAM (plan 2026-10-26 Task 10): 0043's per-organisation VRF name and
+    # site-less VLAN number are LEAKY; a VLAN's site is pinned to its client
+    # by `fk_ipam_vlan_site_client`, so the per-site key needs no client; a
+    # subnet's VRF and an address's are their inheritance foreign key.
+    assert old("ipam_vrf", "org_id", "name") is not None
+    assert old("ipam_vlan", "org_id", "vid") is not None
+    assert "site_id" in pinning["ipam_vlan"] and "site_id" in pinning["ipam_subnet"]
+    for name in ("uq_ipam_vlan_site_vid", "uq_ipam_subnet_org_vrf_prefix",
+                 "uq_ipam_address_org_vrf_addr"):
+        assert leaky_because(by_name[name], pinning[by_name[name].table]) is None, name
+    # Push install (plan 2026-10-26 Task 12): 0077's per-organisation active
+    # authorization and 0200's one-active-run-per-organisation are LEAKY; a
+    # credential scope's key holds its credential, the inheritance foreign key.
+    assert old("push_authorization", "org_id", "prefix") is not None
+    assert old("push_run", "org_id") is not None
+    assert "credential_id" in pinning["push_credential_scope"]
+    assert leaky_because(
+        by_name["uq_push_credential_scope_active"], pinning["push_credential_scope"]
+    ) is None
+    # Backup repositories (plan 2026-10-26 Task 13): 0014's per-organisation
+    # repository name is LEAKY; a chunk's and a chunk copy's keys hold their
+    # repository, the inheritance foreign key.
+    assert old("backup_repositories", "org_id", "name") is not None
+    for name, table in (("uq_backup_chunks_repo_chunk", "backup_chunks"),
+                        ("uq_backup_chunk_copies_target_chunk", "backup_chunk_copies")):
+        assert leaky_because(by_name[name], pinning[table]) is None, name
 
 
 #: Migration 0231's per-client natural keys (Task 8b), with their columns and
@@ -774,6 +852,43 @@ PER_CLIENT_KEYS: dict[str, tuple[str, tuple[str, ...], bool]] = {
     "uq_change_gates_client_group": (
         "change_gates", ("org_id", "client_id", "device_group_id"), True,
     ),
+    # Plan 2026-10-26 Task 5 (migration 0235). An expression column reads as "".
+    "uq_person_login_client_login": ("person_login", ("org_id", "client_id", "login"), False),
+    "uq_person_client_lower_email": ("person", ("org_id", "client_id", ""), False),
+    # Plan 2026-10-26 Task 8 (migration 0238): each client its own settings
+    # row, category keys and seeded defaults, cost center codes, budget names
+    # and materialized slots.
+    "budget_settings_pkey": ("budget_settings", ("client_id",), False),
+    "uq_expense_category_client_key": (
+        "expense_category", ("org_id", "client_id", "key"), False,
+    ),
+    "uq_expense_category_client_system_key": (
+        "expense_category", ("org_id", "client_id", "system_key"), False,
+    ),
+    "uq_cost_center_client_code": ("cost_center", ("org_id", "client_id", "code"), False),
+    "uq_budget_client_year_name": (
+        "budget", ("org_id", "client_id", "fiscal_year", "name"), False,
+    ),
+    "uq_expense_client_autofeed": (
+        "expense", ("org_id", "client_id", "source", "link_id", "period_key"), False,
+    ),
+    # Plan 2026-10-26 Task 10 (migration 0240): a VRF's name and a site-less
+    # VLAN's number are per client; a VLAN with a site is unique per site,
+    # which `fk_ipam_vlan_site_client` pins to the client.
+    "uq_ipam_vrf_client_name": ("ipam_vrf", ("org_id", "client_id", "name"), False),
+    "uq_ipam_vlan_client_vid": ("ipam_vlan", ("org_id", "client_id", "vid"), False),
+    "uq_ipam_vlan_site_vid": ("ipam_vlan", ("org_id", "site_id", "vid"), False),
+    # Plan 2026-10-26 Task 12 (migration 0241): a prefix is authorized per
+    # client, and one run is active per client (operator decision D3).
+    "uq_push_authorization_client_active": (
+        "push_authorization", ("org_id", "client_id", "prefix"), False,
+    ),
+    "uq_push_run_active": ("push_run", ("org_id", "client_id"), False),
+    # Plan 2026-10-26 Task 13 (migration 0242): a repository's name is its
+    # client's.
+    "uq_backup_repositories_client_name": (
+        "backup_repositories", ("org_id", "client_id", "name"), False,
+    ),
 }
 
 
@@ -791,7 +906,14 @@ async def test_the_per_client_keys_are_in_the_database_and_on_the_models(admin_e
         for con in [*table.constraints, *table.indexes]:
             name = con.name if isinstance(con.name, str) else ""
             if name in PER_CLIENT_KEYS:
-                columns = tuple(c.name for c in con.columns)  # type: ignore[union-attr]
+                # An index's expression (`lower(email)`) is not one of its
+                # `columns`; `expressions` holds them all, in order, and the
+                # live side reads an expression as "" (`_unique_keys_on`).
+                columns = (
+                    tuple(e.name if isinstance(e, Column) else "" for e in con.expressions)
+                    if isinstance(con, Index)
+                    else tuple(c.name for c in con.columns)  # type: ignore[union-attr]
+                )
                 nnd = bool(con.dialect_options["postgresql"].get("nulls_not_distinct"))
                 declared[name] = (table.name, columns, nnd)
     assert declared == PER_CLIENT_KEYS, f"declared: {declared}"

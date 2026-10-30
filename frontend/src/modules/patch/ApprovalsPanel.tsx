@@ -9,6 +9,7 @@ import { useT } from "../../i18n/context";
 import { formatDateTime } from "../../lib/datetime";
 import { Panel, QueryState, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { useClientName } from "../settings/api";
 import { useApprovalActorDirectory, usePatchRevokeApprovalMutation } from "./api";
 import { approverName } from "./patchCopy";
 import type { ApprovalListResponse, PatchApproval } from "./types";
@@ -70,6 +71,14 @@ function ActorName({
  * approval; this panel used to be handed a lookup built from a 500-row
  * catalogue fetch that the page made on every visit and rendered nowhere.
  *
+ * WHOSE MACHINES EACH ONE CLEARS (MSP clients plan 2026-10-26 Task 14 and its
+ * review). An approval is one client's -- it clears that client's machines in
+ * the ring -- or global, every client's, and the two can stand side by side
+ * for the same update and ring. They read identically until the Client column
+ * named the owner: the client's name (its id without `clients.read`, as other
+ * pages fall back), or "Every client". The row menu and the revoke
+ * confirmation name it too, and the confirmation says whose machines stop.
+ *
  * "WHICH RINGS IS THIS UPDATE CLEARED FOR" IS NO LONGER ASKED HERE. That is a
  * column on the update row now, computed server-side; this panel had been
  * doing double duty as the source of that column while being capped itself,
@@ -105,8 +114,24 @@ export function ApprovalsPanel({
   );
   const users = directory.data?.users;
 
+  const clientName = useClientName();
+  const ownerOf = (approval: PatchApproval): string =>
+    approval.client_id == null ? t("patch.approvals.everyClient") : clientName(approval.client_id);
   const approvalSubject = (approval: PatchApproval): string =>
-    t("patch.approvals.subject", { patch: patchName(approval), ring: approval.ring_name });
+    approval.client_id == null
+      ? t("patch.approvals.subjectEvery", { patch: patchName(approval), ring: approval.ring_name })
+      : t("patch.approvals.subject", {
+          patch: patchName(approval),
+          ring: approval.ring_name,
+          client: clientName(approval.client_id),
+        });
+  const revokeBody = (approval: PatchApproval): string =>
+    approval.client_id == null
+      ? t("patch.approvals.confirmBodyEvery", { ring: approval.ring_name })
+      : t("patch.approvals.confirmBodyClient", {
+          ring: approval.ring_name,
+          client: clientName(approval.client_id),
+        });
 
   return (
     <>
@@ -155,6 +180,7 @@ export function ApprovalsPanel({
               <tr>
                 <Th>{t("patch.approvals.update")}</Th>
                 <Th>{t("patch.approvals.ring")}</Th>
+                <Th>{t("patch.approvals.client")}</Th>
                 <Th>{t("patch.approvals.approved")}</Th>
                 <Th>{t("patch.approvals.by")}</Th>
                 <Th>{t("patch.approvals.status")}</Th>
@@ -168,6 +194,7 @@ export function ApprovalsPanel({
                     <div className="cell-title mono">{patchName(approval)}</div>
                   </Td>
                   <Td>{approval.ring_name}</Td>
+                  <Td>{ownerOf(approval)}</Td>
                   <Td>
                     <RelTime iso={approval.approved_at} zone={zone} />
                   </Td>
@@ -236,11 +263,7 @@ export function ApprovalsPanel({
         open={pendingRevoke != null}
         title={t("patch.approvals.confirmTitle")}
         subject={pendingRevoke ? approvalSubject(pendingRevoke) : ""}
-        body={
-          pendingRevoke
-            ? t("patch.approvals.confirmBody", { ring: pendingRevoke.ring_name })
-            : ""
-        }
+        body={pendingRevoke ? revokeBody(pendingRevoke) : ""}
         confirmLabel={t("patch.approvals.confirmLabel")}
         destructive
         onCancel={() => setPendingRevoke(null)}

@@ -22,6 +22,8 @@ export type ChangeDecision = "approved" | "rejected";
 
 export interface ChangeRequest {
   id: string;
+  /** The client the change is for (MSP clients phase 2); fixed for its life. */
+  client_id: string;
   type: string;
   title: string;
   description: string;
@@ -39,6 +41,9 @@ export interface ChangeRequest {
 }
 
 export interface ChangeCreateRequest {
+  /** The client the change is for. It must use change management, or the
+   *  server answers 404 with the sentence that says so. */
+  client_id: string;
   type: string;
   title: string;
   description: string;

@@ -21,6 +21,7 @@ from app.api.deps import AuthContext, require_permission
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.tenancy import org_session
+from app.modules.backup.integrity import violated_constraint
 from app.modules.backup.models import (
     BackupOffsiteTarget,
     BackupPoint,
@@ -29,6 +30,7 @@ from app.modules.backup.models import (
 )
 from app.modules.backup.offsite import (
     TARGET_NAME_KEY,
+    OffsiteClientError,
     OffsiteError,
     OffsiteSecret,
     create_target,
@@ -217,9 +219,7 @@ def _name_exists() -> HTTPException:
 def _name_clash(exc: IntegrityError) -> bool:
     """A unique violation on the target-name key: two writes raced past the
     check (or a rename met a name), and the answer is the check's 409."""
-    return getattr(getattr(exc.orig, "__cause__", None), "constraint_name", None) == (
-        TARGET_NAME_KEY
-    )
+    return violated_constraint(exc) == TARGET_NAME_KEY
 
 
 # --------------------------------------------------------------------------- #
@@ -347,6 +347,8 @@ async def set_repository_offsite(
             )
         except LookupError as exc:
             raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+        except OffsiteClientError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
         except OffsiteError as exc:
             raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
         return RepositoryOffsiteOut(repository_id=repo.id, offsite_target_id=repo.offsite_target_id)

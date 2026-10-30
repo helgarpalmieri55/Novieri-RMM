@@ -368,6 +368,9 @@ describe("DocsPage new record dialog", () => {
         record_type: "service",
         name: "Core VLAN",
         fields: { vlan: 10 },
+        // The internal client -- `/me`'s `org_id` -- until the selector
+        // exists (MSP clients plan 2026-10-26 Task 14).
+        client_id: "o1",
       }),
     );
   });
@@ -401,6 +404,7 @@ describe("DocsPage new record dialog", () => {
 
 const ARTICLE: DocArticle = {
   id: "a1",
+  client_id: "o1",
   title: "Finance share recovery runbook",
   body: "# Runbook",
   category: "Runbook",

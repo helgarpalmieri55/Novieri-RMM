@@ -70,6 +70,17 @@ notification-channel config, which a pure parser cannot look up (see
 notification becomes a comment, which notifies again -- the mail loop §6
 exists to prevent.
 
+EVERY MESSAGE BELONGS TO A CLIENT (MSP clients spec §3.3, operator decision D1,
+plan 2026-10-26 Task 4). The poller runs under scope all, so the client is
+decided HERE, by `services/client_routing.py`, once per message: the contact's
+own client; else the client holding the sender's domain; else Unassigned. The
+same client files a new ticket and stamps the row, a reply that lands on a
+ticket takes the ticket's, and a sender who is no user stays quarantined (§0.2)
+but marked with the client its domain belongs to. `inbound_message.client_id`
+is never NULL on a row written here: NULL in that table means "every client",
+and the row keeps the mail's text. A message refused before its sender is looked
+up (a loop) has no sender to place and goes to Unassigned.
+
 EVERY ATTACKER-CONTROLLED STRING IS TRUNCATED TO ITS COLUMN'S WIDTH BEFORE
 INSERT. `parsing.py` bounds its own `refusal_reason`, but the reasons this
 module composes (unknown sender, ambiguous sender, wrong-sender token) embed
@@ -87,7 +98,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import use_locale
 from app.core.storage import ObjectStore
-from app.models import User
 from app.modules.email_intake.identity import (
     extract_reply_token,
     resolve_sender,
@@ -117,6 +127,7 @@ from app.modules.service_desk.schema import (
 from app.modules.service_desk.threads import add_attachment, add_comment
 from app.modules.service_desk.tickets import create_ticket
 from app.modules.service_desk.transitions import change_status
+from app.services.client_routing import client_for_sender, system_client_id
 
 # `inbound_message` column widths (models.py). Every one of these is a
 # `String(n)`; exceeding it is a database error on attacker-controlled input.
@@ -544,13 +555,16 @@ async def _finish_row(
     session: AsyncSession,
     row_id: UUID,
     *,
+    client_id: UUID,
     disposition: str,
     reason: str = "",
     ticket_id: UUID | None = None,
     sender_user_id: UUID | None = None,
 ) -> InboundMessage:
     """Record the real outcome on the row `_begin_row` inserted, in the same
-    transaction as the ticket or comment it describes."""
+    transaction as the ticket or comment it describes -- and the client the
+    message belongs to, which has no default so that no exit can leave the
+    row on `_begin_row`'s NULL ("every client")."""
     if disposition not in DISPOSITIONS:  # pragma: no cover -- defensive
         raise ValueError(  # i18n-exempt: defensive guard, the poller logs the class name
             f"unknown disposition: {disposition!r}"
@@ -564,6 +578,7 @@ async def _finish_row(
         update(InboundMessage)
         .where(InboundMessage.id == row_id)
         .values(
+            client_id=client_id,
             disposition=disposition,
             reason=_clamp(reason, _REASON_MAX),
             ticket_id=ticket_id,
@@ -640,6 +655,7 @@ async def process_message(
         return await _finish_row(
             session,
             row_id,
+            client_id=await system_client_id(session, org_id, "unassigned"),
             disposition="refused_loop",
             reason=parsed.refusal_reason,
         )
@@ -647,11 +663,24 @@ async def process_message(
     loop_reason = await _notification_sender_loop_reason(session, org_id, parsed.from_address)
     if loop_reason is not None:
         return await _finish_row(
-            session, row_id, disposition="refused_loop", reason=loop_reason
+            session,
+            row_id,
+            client_id=await system_client_id(session, org_id, "unassigned"),
+            disposition="refused_loop",
+            reason=loop_reason,
         )
 
     # --- §0.2 check 1: the sender must be a user in THIS org. -------------
     sender = await resolve_sender(session, org_id, parsed.from_address)
+
+    # --- Spec §3.3: the message's client, decided once, for every exit below.
+    message_client = await client_for_sender(
+        session,
+        org_id,
+        sender_kind=sender.kind,
+        sender_client_id=sender.client_id,
+        address=parsed.from_address,
+    )
     if sender.user_id is None:
         # A MESSAGE THAT DID NOT PARSE IS RECORDED AS THE PARSE FAILURE, NOT
         # AS A QUARANTINE. `parse_message` returns `refused_parse` for mail
@@ -666,9 +695,15 @@ async def process_message(
         # did not arrive intact", and they are what this records.
         if parsed.refusal is not None:
             disposition, reason = _refusal_outcome(parsed.refusal, parsed.refusal_reason)
-            return await _finish_row(session, row_id, disposition=disposition, reason=reason)
+            return await _finish_row(
+                session, row_id, client_id=message_client, disposition=disposition, reason=reason
+            )
         return await _finish_row(
-            session, row_id, disposition="quarantined", reason=sender.reason
+            session,
+            row_id,
+            client_id=message_client,
+            disposition="quarantined",
+            reason=sender.reason,
         )
     sender_user_id = sender.user_id
 
@@ -683,12 +718,17 @@ async def process_message(
         return await _finish_row(
             session,
             row_id,
+            client_id=message_client,
             disposition="refused_rate",
             reason=sender_rate_reason,
             sender_user_id=sender_user_id,
         )
 
     # --- §0.2 check 2: the token identifies a ticket, and only that. ------
+    # The client the row is filed under. A reply that lands on its ticket
+    # (commented, reopened, or refused for the ticket's own rate) is filed
+    # under THAT ticket's client below; everything else keeps the message's.
+    row_client = message_client
     outcome: str | None = None
     ticket_id: UUID | None = None
     cited_number: str | None = None
@@ -706,6 +746,11 @@ async def process_message(
                 return await _finish_row(
                     session,
                     row_id,
+                    # The SENDER's client, not the ticket's: the row holds a
+                    # message that is not the ticket's requester's, and the
+                    # ticket's client has no business reading it. `ticket_id`
+                    # below still names the target.
+                    client_id=message_client,
                     disposition="quarantined",
                     reason=_WRONG_SENDER_REASON,
                     # The TARGETED ticket, recorded so an operator asking
@@ -724,6 +769,7 @@ async def process_message(
 
             target = reopen_target(ticket.type, ticket.status)
             if target is None and ticket.status not in TERMINAL_STATUSES:
+                row_client = ticket.client_id
                 # --- §6: the per-ticket rate limit. -----------------------
                 # A steady trickle of replies from the legitimate requester
                 # -- never fast enough to trip the per-sender limit above --
@@ -733,6 +779,7 @@ async def process_message(
                     return await _finish_row(
                         session,
                         row_id,
+                        client_id=row_client,
                         disposition="refused_rate",
                         reason=ticket_rate_reason,
                         ticket_id=ticket.id,
@@ -751,12 +798,14 @@ async def process_message(
                 )
                 outcome, ticket_id = "commented", ticket.id
             elif target is not None and _within_reopen_window(ticket, mailbox):
+                row_client = ticket.client_id
                 # --- §6: the per-ticket rate limit, same reasoning as above.
                 ticket_rate_reason = await _ticket_rate_limited(session, org_id, ticket.id)
                 if ticket_rate_reason is not None:
                     return await _finish_row(
                         session,
                         row_id,
+                        client_id=row_client,
                         disposition="refused_rate",
                         reason=ticket_rate_reason,
                         ticket_id=ticket.id,
@@ -799,19 +848,6 @@ async def process_message(
                 f"Continues ticket {cited_number}, which is no longer open.\n\n{body}",
                 _MAX_BODY,
             )
-        # The sender's client when the sender is a contact, else the internal
-        # client (whose id is the organisation's).
-        # plan 2026-10-26 Task 4 decides by domain and Unassigned (spec §3.3)
-        sender_kind, sender_client = (
-            await session.execute(
-                select(User.kind, User.client_id).where(
-                    User.org_id == org_id, User.id == sender_user_id
-                )
-            )
-        ).one()
-        ticket_client = (
-            sender_client if sender_kind == "contact" and sender_client is not None else org_id
-        )
         try:
             # The refusal is stored in the row's `reason`: English, whatever the locale.
             with use_locale("en"):
@@ -827,7 +863,7 @@ async def process_message(
                         requester_id=sender_user_id,
                     ),
                     origin="email",
-                    client_id=ticket_client,
+                    client_id=message_client,
                 )
         except TicketValidationError as exc:
             # A MISCONFIGURED MAILBOX, NOT A BAD MESSAGE -- the commonest
@@ -850,6 +886,7 @@ async def process_message(
             return await _finish_row(
                 session,
                 row_id,
+                client_id=message_client,
                 disposition="quarantined",
                 reason=f"ticket creation refused: {exc}",
                 sender_user_id=sender_user_id,
@@ -897,6 +934,7 @@ async def process_message(
     return await _finish_row(
         session,
         row_id,
+        client_id=row_client,
         disposition=disposition,
         reason=reason,
         ticket_id=ticket_id,

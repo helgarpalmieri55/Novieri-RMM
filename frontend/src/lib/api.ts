@@ -137,6 +137,7 @@ import type {
   ProductOut,
   ProductUpdate,
   RenewalRow,
+  ReviewIgnoreOut,
   ReviewIgnoreRequest,
   ReviewMapRequest,
   ReviewQueueRow,
@@ -314,14 +315,13 @@ import type {
   HistoryEntryOut as IpamHistoryEntryOut,
   ImportPreviewOut as IpamImportPreviewOut,
   ImportResultOut as IpamImportResultOut,
+  ImportTarget as IpamImportTarget,
   OrphanOut as IpamOrphanOut,
   RangeCreate as IpamRangeCreate,
   RangeOut as IpamRangeOut,
   ScopeCreate as IpamScopeCreate,
   ScopeOut as IpamScopeOut,
   SearchOut as IpamSearchOut,
-  SiteCreate as IpamSiteCreate,
-  SiteOut as IpamSiteOut,
   SubnetCreate as IpamSubnetCreate,
   SubnetFilters as IpamSubnetFilters,
   SubnetOut as IpamSubnetOut,
@@ -402,6 +402,14 @@ export type DeviceReviewState = "approved" | "pending" | "rejected";
  */
 export interface Device {
   id: string;
+  /**
+   * The device's client and site (MSP clients spec §1.5). OPTIONAL because
+   * they are additive: an API deployed before they were served simply does
+   * not send them. `PATCH /devices/{id}` with `site_id` moves a device to
+   * another site of its own client.
+   */
+  client_id?: string;
+  site_id?: string;
   /** NULL for an asset that has none: a switch, or hardware still in a box. */
   hostname: string | null;
   fqdn: string | null;
@@ -516,6 +524,8 @@ export interface DeviceListParams {
   state?: DeviceState;
   provenance?: Device["provenance"] | "";
   osFamily?: Device["os_family"];
+  /** One client's machines (`?client_id=`): what IPAM's sweeper picker lists. */
+  clientId?: string;
   limit?: number;
   offset?: number;
 }
@@ -611,6 +621,8 @@ export interface AssetCandidate {
   /** `medium` = ARP saw it; `low` = only ICMP, i.e. something answered. */
   confidence: "high" | "medium" | "low";
   subnet_id: string | null;
+  /** Whose network saw it. The same address in two clients is two candidates. */
+  client_id: string;
 }
 
 export interface AssetCandidatePage {
@@ -831,6 +843,45 @@ export interface ClientOut {
   enabled_modules: string[];
   device_count: number;
   site_count: number;
+}
+
+/**
+ * One site of a client (`backend/app/api/v1/clients.py::SiteOut`): an office,
+ * one LAN. What a device, an enrollment token, an IPAM VLAN or subnet and a
+ * site server are filed under.
+ */
+export interface ClientSiteOut {
+  id: string;
+  client_id: string;
+  name: string;
+  address: string;
+  description: string;
+  egress_networks: string[];
+  archived_at: string | null;
+  device_count: number;
+}
+
+/**
+ * One person of a client (`backend/app/api/v1/clients.py::ContactOut`): a
+ * user of kind `contact`, who will use the portal and never the console.
+ */
+export interface ContactOut {
+  id: string;
+  client_id: string;
+  kind: string;
+  email: string;
+  display_name: string;
+  phone: string | null;
+  /** `active` or `disabled`. */
+  status: string;
+}
+
+/** A partial edit of a contact; `status` switches it off and on (`ContactUpdate`). */
+export interface ContactUpdate {
+  email?: string;
+  display_name?: string;
+  phone?: string | null;
+  status?: "active" | "disabled";
 }
 
 /**
@@ -1276,6 +1327,8 @@ export interface AgentDeploymentToken {
  */
 export interface DeviceGroup {
   id: string;
+  /** The client whose devices the group organises, fixed for the group's life. */
+  client_id: string;
   name: string;
   parent_group_id: string | null;
   description: string;
@@ -1588,6 +1641,11 @@ export class ApiClient {
     );
   }
 
+  /** A client's sites, archived ones left out (`clients.read`): IPAM's site pickers. */
+  listClientSites(clientId: string): Promise<ClientSiteOut[]> {
+    return this.request<ClientSiteOut[]>(`/clients/${encodeURIComponent(clientId)}/sites`);
+  }
+
   /**
    * Update the caller's own organization. Requires `orgs.manage` server-side;
    * the frontend never gates security, so hiding the form is presentation
@@ -1738,6 +1796,18 @@ export class ApiClient {
   }
 
   /**
+   * Edit a client's contact, or switch it off and on (`PATCH /contacts/{id}`,
+   * `clients.manage`). `/users` is staff-only: a contact's sign-in is turned
+   * off here.
+   */
+  updateContact(contactId: string, body: ContactUpdate): Promise<ContactOut> {
+    return this.request<ContactOut>(`/contacts/${contactId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
    * Ask Keycloak to email an `UPDATE_PASSWORD` link.
    *
    * NO PASSWORD TRANSITS ITMS (invariant 3, spec §2.2). There is no argument to
@@ -1778,6 +1848,7 @@ export class ApiClient {
     if (params.state && params.state !== "all") query.set("state", params.state);
     if (params.provenance) query.set("provenance", params.provenance);
     if (params.osFamily) query.set("os_family", params.osFamily);
+    if (params.clientId) query.set("client_id", params.clientId);
     if (params.limit != null) query.set("limit", String(params.limit));
     if (params.offset) query.set("offset", String(params.offset));
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
@@ -1823,8 +1894,12 @@ export class ApiClient {
     return this.request<AssetCandidatePage>("/devices/candidates");
   }
 
+  /**
+   * `client_id` names whose candidates these are; each machine is filed under
+   * its subnet's client and site, and a subnet without a site refuses it.
+   */
   promoteAssetCandidates(
-    body: { addresses: string[] } & AssetInput,
+    body: { client_id: string; addresses: string[] } & AssetInput,
   ): Promise<{ results: PromoteResult[] }> {
     return this.request<{ results: PromoteResult[] }>("/devices/candidates/promote", {
       method: "POST",
@@ -2023,7 +2098,7 @@ export class ApiClient {
     return this.request<DocArticle>(`/docs/articles/${id}`);
   }
 
-  createArticle(body: DocArticleInput): Promise<DocArticle> {
+  createArticle(body: DocArticleInput & NewDocClient): Promise<DocArticle> {
     return this.request<DocArticle>("/docs/articles", {
       method: "POST",
       body: JSON.stringify(body),
@@ -2072,11 +2147,13 @@ export class ApiClient {
     return this.request<Page<DocRecordOut>>(`/docs/records${suffix}`);
   }
 
-  createDocRecord(body: {
-    record_type: string;
-    name: string;
-    fields: Record<string, unknown>;
-  }): Promise<DocRecordOut> {
+  createDocRecord(
+    body: {
+      record_type: string;
+      name: string;
+      fields: Record<string, unknown>;
+    } & NewDocClient,
+  ): Promise<DocRecordOut> {
     return this.request<DocRecordOut>("/docs/records", {
       method: "POST",
       body: JSON.stringify(body),
@@ -2130,7 +2207,7 @@ export class ApiClient {
     return this.request<DocDocument>(`/docs/documents/${id}`);
   }
 
-  createDocument(body: DocDocumentInput): Promise<DocDocument> {
+  createDocument(body: DocDocumentInput & NewDocClient): Promise<DocDocument> {
     return this.request<DocDocument>("/docs/documents", {
       method: "POST",
       body: JSON.stringify(body),
@@ -2326,8 +2403,11 @@ export class ApiClient {
   // Push runs (design 2026-09-30). Every route is `agent.push.run`; preview,
   // create and resume also need `credentials.checkout`, server-side. None is
   // ever retried by the caller.
-  listPushRunPrefixes(): Promise<PushRunPrefixOut[]> {
-    return this.request<PushRunPrefixOut[]>("/agent-push/runs/prefixes");
+  // The subnets a run with `credentialId` may be built from: its client's
+  // active authorizations (MSP clients phase 2, Task 12).
+  listPushRunPrefixes(credentialId: string): Promise<PushRunPrefixOut[]> {
+    const query = new URLSearchParams({ credential_id: credentialId });
+    return this.request<PushRunPrefixOut[]>(`/agent-push/runs/prefixes?${query.toString()}`);
   }
 
   previewPushRun(prefix: string, credentialId: string): Promise<PushRunPreviewOut> {
@@ -2368,6 +2448,8 @@ export class ApiClient {
     name: string;
     type: string;
     secret: string;
+    /** Required for a push credential (`push_install`, `windows_domain`): it has exactly one client. */
+    client_id?: string;
   }): Promise<Credential> {
     return this.request<Credential>("/credentials", {
       method: "POST",
@@ -3539,8 +3621,8 @@ export class ApiClient {
     });
   }
 
-  ignoreSoftware(body: ReviewIgnoreRequest): Promise<{ id: string; name: string }> {
-    return this.request<{ id: string; name: string }>("/licenses/review-queue/ignore", {
+  ignoreSoftware(body: ReviewIgnoreRequest): Promise<ReviewIgnoreOut> {
+    return this.request<ReviewIgnoreOut>("/licenses/review-queue/ignore", {
       method: "POST",
       body: JSON.stringify(body),
     });
@@ -3726,19 +3808,26 @@ export class ApiClient {
     );
   }
 
-  getBudgetSettings(): Promise<SettingsOut> {
-    return this.request<SettingsOut>("/budget/settings");
+  // Budget settings are ONE CLIENT'S (each has its own base currency and
+  // fiscal year), named in the query; the lists take a client as a filter.
+  getBudgetSettings(clientId: string): Promise<SettingsOut> {
+    return this.request<SettingsOut>(
+      `/budget/settings?client_id=${encodeURIComponent(clientId)}`,
+    );
   }
 
-  updateBudgetSettings(body: SettingsUpdate): Promise<SettingsOut> {
-    return this.request<SettingsOut>("/budget/settings", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
+  updateBudgetSettings(clientId: string, body: SettingsUpdate): Promise<SettingsOut> {
+    return this.request<SettingsOut>(
+      `/budget/settings?client_id=${encodeURIComponent(clientId)}`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
   }
 
-  listBudgetCategories(includeInactive = false): Promise<CategoryOut[]> {
-    const suffix = includeInactive ? "?include_inactive=true" : "";
+  listBudgetCategories(includeInactive = false, clientId?: string): Promise<CategoryOut[]> {
+    const query = new URLSearchParams();
+    if (clientId) query.set("client_id", clientId);
+    if (includeInactive) query.set("include_inactive", "true");
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.request<CategoryOut[]>(`/budget/categories${suffix}`);
   }
 
@@ -3756,8 +3845,11 @@ export class ApiClient {
     });
   }
 
-  listCostCenters(includeInactive = false): Promise<CostCenterOut[]> {
-    const suffix = includeInactive ? "?include_inactive=true" : "";
+  listCostCenters(includeInactive = false, clientId?: string): Promise<CostCenterOut[]> {
+    const query = new URLSearchParams();
+    if (clientId) query.set("client_id", clientId);
+    if (includeInactive) query.set("include_inactive", "true");
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.request<CostCenterOut[]>(`/budget/cost-centers${suffix}`);
   }
 
@@ -3794,8 +3886,9 @@ export class ApiClient {
     });
   }
 
-  listBudgets(): Promise<BudgetOut[]> {
-    return this.request<BudgetOut[]>("/budget/budgets");
+  listBudgets(clientId?: string): Promise<BudgetOut[]> {
+    const suffix = clientId ? `?client_id=${encodeURIComponent(clientId)}` : "";
+    return this.request<BudgetOut[]>(`/budget/budgets${suffix}`);
   }
 
   createBudget(body: BudgetCreate): Promise<BudgetOut> {
@@ -3846,8 +3939,9 @@ export class ApiClient {
     return this.request<PositionOut>(`/budget/budgets/${budgetId}/position${suffix}`);
   }
 
-  listExpenses(filters: ExpenseListFilters = {}): Promise<ExpenseOut[]> {
+  listExpenses(filters: ExpenseListFilters = {}, clientId?: string): Promise<ExpenseOut[]> {
     const query = new URLSearchParams();
+    if (clientId) query.set("client_id", clientId);
     for (const [key, value] of Object.entries(filters)) {
       if (value != null && value !== "") query.set(key, String(value));
     }
@@ -4781,9 +4875,12 @@ export class ApiClient {
 
   // --- IPAM (backend/app/modules/ipam/api.py) ---------------------------
   //
-  // All FORTY routes of that router, derived from `api.py` itself rather than
-  // from spec §9's table — the router is pinned by an exact-count test
-  // (`tests/test_ipam_api.py::EXPECTED_ROUTE_COUNT = 40`) and is the contract.
+  // All THIRTY-EIGHT routes of that router, derived from `api.py` itself rather
+  // than from spec §9's table — the router is pinned by an exact-count test
+  // (`tests/test_ipam_api.py::EXPECTED_ROUTE_COUNT = 38`) and is the contract.
+  // `/ipam/sites` is gone (MSP clients phase 2): a VLAN's or a subnet's site is
+  // one of its client's sites, `listClientSites`. Every create's body names its
+  // client where nothing above it does (`modules/ipam/api.ts`).
   //
   // Three shapes here are NOT the obvious ones, and each is the API's choice:
   //   * `/drift` takes the class filter as `?class=`, aliased server-side away
@@ -4802,17 +4899,6 @@ export class ApiClient {
 
   createIpamVrf(body: IpamVrfCreate): Promise<IpamVrfOut> {
     return this.request<IpamVrfOut>("/ipam/vrfs", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  }
-
-  listIpamSites(): Promise<IpamSiteOut[]> {
-    return this.request<IpamSiteOut[]>("/ipam/sites");
-  }
-
-  createIpamSite(body: IpamSiteCreate): Promise<IpamSiteOut> {
-    return this.request<IpamSiteOut>("/ipam/sites", {
       method: "POST",
       body: JSON.stringify(body),
     });
@@ -5014,28 +5100,41 @@ export class ApiClient {
 
   // Step one of two. WRITES NOTHING; the digest it returns is what `apply` must
   // echo, which is the only thing binding the two steps to one file.
+  // `target` is where the sheet goes: a VRF, whose client is the import's, or
+  // a client's `global` VRF. The server refuses an import that names neither.
   async previewIpamImport(
     file: File,
     mapping: Record<string, string>,
+    target: IpamImportTarget,
   ): Promise<IpamImportPreviewOut> {
     return this.ipamImportRequest<IpamImportPreviewOut>(
-      `/ipam/import/preview?mapping=${encodeURIComponent(JSON.stringify(mapping))}`,
+      `/ipam/import/preview?mapping=${encodeURIComponent(JSON.stringify(mapping))}` +
+        this.ipamImportTargetQuery(target),
       file,
     );
   }
 
   // Step two. The digest is REQUIRED and must be the one preview returned for
-  // this exact file.
+  // this exact file -- into the same target.
   async applyIpamImport(
     file: File,
     mapping: Record<string, string>,
     digest: string,
+    target: IpamImportTarget,
   ): Promise<IpamImportResultOut> {
     return this.ipamImportRequest<IpamImportResultOut>(
       `/ipam/import/apply?mapping=${encodeURIComponent(JSON.stringify(mapping))}` +
-        `&digest=${encodeURIComponent(digest)}`,
+        `&digest=${encodeURIComponent(digest)}` +
+        this.ipamImportTargetQuery(target),
       file,
     );
+  }
+
+  // Where the import goes, as the query string names it: `vrf_id` or `client_id`.
+  private ipamImportTargetQuery(target: IpamImportTarget): string {
+    return "vrfId" in target
+      ? `&vrf_id=${encodeURIComponent(target.vrfId)}`
+      : `&client_id=${encodeURIComponent(target.clientId)}`;
   }
 
   // The CSV goes up as the RAW BODY (`_read_csv` -> `read_bounded_body`), not
@@ -5446,6 +5545,8 @@ export interface Credential {
   name: string;
   type: string;
   device_group_id: string | null;
+  /** The client the credential serves; null is every client's. A push credential always has one. */
+  client_id: string | null;
   created_at: string | null;
   last_used_at: string | null;
   has_secret: boolean;
@@ -5453,6 +5554,8 @@ export interface Credential {
 
 export interface DocArticleListItem {
   id: string;
+  /** The client it belongs to; `null` for every client's (global). */
+  client_id: string | null;
   title: string;
   category: string;
   archived: boolean;
@@ -5470,6 +5573,8 @@ export interface DocLink {
 
 export interface DocArticle {
   id: string;
+  /** The client it belongs to; `null` for every client's (global). */
+  client_id: string | null;
   title: string;
   body: string;
   category: string;
@@ -5487,6 +5592,15 @@ export interface DocArticleInput {
   category: string;
 }
 
+/**
+ * A new article, record or document names its client; without one it is
+ * every client's (global), which only someone with access to every client may
+ * create. Set once at creation: the edit bodies have no client.
+ */
+export interface NewDocClient {
+  client_id?: string;
+}
+
 export interface DocVersion {
   version: number;
   snapshot: Record<string, unknown>;
@@ -5496,6 +5610,8 @@ export interface DocVersion {
 
 export interface DocRecordOut {
   id: string;
+  /** The client it belongs to; `null` for every client's (global). */
+  client_id: string | null;
   record_type: string;
   name: string;
   fields: Record<string, unknown>;
@@ -5544,6 +5660,8 @@ export interface DocDocumentVersion {
 
 export interface DocDocumentListItem {
   id: string;
+  /** The client it belongs to; `null` for every client's (global). */
+  client_id: string | null;
   title: string;
   description: string;
   category: string;
@@ -5557,6 +5675,8 @@ export interface DocDocumentListItem {
 
 export interface DocDocument {
   id: string;
+  /** The client it belongs to; `null` for every client's (global). */
+  client_id: string | null;
   title: string;
   description: string;
   category: string;

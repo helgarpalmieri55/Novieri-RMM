@@ -271,6 +271,19 @@ def create_app(
 
     app.add_exception_handler(GlobalRowNotWritable, _global_row)
 
+    # A write in an optional module (budget, BCP, change management) for a
+    # client that does not use it: refused by `app.services.client_modules`
+    # in the service, once the row's client is known, before anything is
+    # written. A 404 with its sentence (spec §3.2: the module does not exist
+    # for that client), wherever it was raised, so no router has to remember.
+    from app.services.client_modules import ModuleNotEnabled
+
+    async def _module_off(_request: StarletteRequest, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, ModuleNotEnabled)
+        return JSONResponse(status_code=404, content={"detail": exc.detail})
+
+    app.add_exception_handler(ModuleNotEnabled, _module_off)
+
     from app.api.probes import build_registry
     from app.api.probes import router as probes_router
 

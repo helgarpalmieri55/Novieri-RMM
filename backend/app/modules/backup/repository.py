@@ -1,12 +1,16 @@
 """Backup repository provisioning (docs/modules/backup/spec.md §4/§7).
 
-A `BackupRepository` is the org-scoped, deduplicated, encrypted storage
-target that a device's backup runs write chunks/manifests into. Creation
-mints a random 32-byte repository master key, seals it through the vault
-(the app database only ever holds the sealed reference, never the raw key),
-and audits the creation. The master key is opened back out only at the
-point a signed `backup.run`/`backup.restore` job is dispatched (elsewhere) —
-never returned by any API, never logged, never placed in audit metadata.
+A `BackupRepository` is ONE client's deduplicated, encrypted storage target
+that its devices' backup runs write chunks/manifests into (MSP clients plan
+2026-10-26 Task 13, C1: the key travels to every device using it, so it is
+never shared between clients). Creation files it under the client the request
+names (`clients.client_for_new_repository`, the write's first lock), mints a
+random 32-byte repository master key, seals it through the vault (the app
+database only ever holds the sealed reference, never the raw key), and
+audits the creation in that client. The master key is opened back out only at
+the point a signed `backup.run`/`backup.restore` job is dispatched
+(elsewhere) — never returned by any API, never logged, never placed in audit
+metadata.
 """
 
 import os
@@ -18,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
 from app.core.vault import VaultService
+from app.modules.backup.clients import client_for_new_repository
 from app.modules.backup.models import BackupRepository
 
 DEFAULT_DEDUP = {
@@ -35,13 +40,21 @@ async def create_repository(
     *,
     org_id: UUID,
     actor_id: UUID,
+    client_id: UUID,
     name: str,
     dedup_params: dict[str, Any] | None = None,
 ) -> BackupRepository:
+    """`BackupClientError` for a client that cannot take one (404, 409, 422),
+    before anything is written. A name the client already uses is the
+    IntegrityError of `uq_backup_repositories_client_name` at the first
+    flush, which the route answers 409 (`api.REPOSITORY_NAME_KEY`): the key
+    is per client, so it says nothing about another client's names."""
+    await client_for_new_repository(session, org_id=org_id, client_id=client_id)
     master_key = os.urandom(32)
 
     repo = BackupRepository(
         org_id=org_id,
+        client_id=client_id,
         name=name,
         storage_ref="",
         encryption_key_ref="",
@@ -66,6 +79,7 @@ async def create_repository(
         target_type="backup_repository",
         target_id=str(repo.id),
         metadata={"name": name, "storage_ref": repo.storage_ref},
+        client_id=client_id,
     )
 
     return repo

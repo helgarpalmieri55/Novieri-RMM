@@ -1454,6 +1454,14 @@ export interface PreviewedFile {
   size: number;
   lastModified: number;
   digest: string;
+  /**
+   * The VRF the preview read -- `null` when it named the internal client's
+   * `global` VRF instead. Apply goes THERE, never to whatever the picker shows
+   * by then: the server's digest covers the VRF too and refuses any other.
+   * Required, not optional: an absent value would silently mean "the internal
+   * client".
+   */
+  vrfId: string | null;
 }
 
 /**

@@ -162,14 +162,16 @@ async def test_links_are_scoped(bypassrls_session: AsyncSession, two_orgs) -> No
     assert await svc.list_document_links(bypassrls_session, a.org_id, b.document_id) == []
 
 
-async def test_org_usage_counts_only_this_orgs_bytes(
+async def test_the_quota_usage_counts_only_this_orgs_bytes(
     bypassrls_session: AsyncSession, two_orgs
 ) -> None:
-    """The quota's `SUM`. Without the predicate org A would be charged for org
-    B's storage -- and would be refused uploads because of it, which is a
-    cross-tenant denial of service rather than a disclosure."""
+    """The quota's `SUM` (`client_usage_bytes`, per client since 2026-10-29:
+    both seeded documents are for every client, the same bucket). Without the
+    predicate org A would be charged for org B's storage -- and would be
+    refused uploads because of it, which is a cross-tenant denial of service
+    rather than a disclosure."""
     a, _ = two_orgs
-    assert await svc.org_usage_bytes(bypassrls_session, a.org_id) == 1024
+    assert await svc.client_usage_bytes(bypassrls_session, a.org_id, client_id=None) == 1024
 
 
 async def test_search_does_not_reach_across_orgs(

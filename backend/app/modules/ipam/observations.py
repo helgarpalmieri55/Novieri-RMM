@@ -273,10 +273,10 @@ async def record_inventory_observations(session: AsyncSession, device: Device) -
     the reported method onto the address row would be the same defect §0.6 exists
     to prevent, one column across.
 
-    The default VRF is created only when there is something to file in it. A
-    device with no documentable address is not a first use of §0.7's lazily
-    created `global` row, and creating it anyway would mean every
-    `inventory.collect` in the estate wrote an IPAM row.
+    The default VRF -- the device's client's -- is created only when there is
+    something to file in it. A device with no documentable address is not a
+    first use of §0.7's lazily created `global` row, and creating it anyway
+    would mean every `inventory.collect` in the estate wrote an IPAM row.
     """
     components = (
         (
@@ -295,7 +295,9 @@ async def record_inventory_observations(session: AsyncSession, device: Device) -
     if not parsed:
         return 0
 
-    vrf_id = await ensure_default_vrf(session, device.org_id)
+    # The device's client's `global` VRF (migration 0240): what a machine says
+    # about its own addresses is filed in its own client's network.
+    vrf_id = await ensure_default_vrf(session, device.org_id, device.client_id)
     now = _utcnow()
     for observation in parsed:
         await upsert_observation(

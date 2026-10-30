@@ -47,6 +47,11 @@ prefixes remain the database's job (`uq_ipam_subnet_org_vrf_prefix`).
 (invariant #5), and those predicates are pinned on the ADMIN engine by
 `tests/test_ipam_subnets.py` -- through `org_session` RLS rejects first and a
 test passes with the predicate deleted.
+
+**A SUBNET IS ITS VRF'S CLIENT'S** (migration 0240, Annex A amended): the
+trigger copies the client from the NOT NULL `vrf_id`. A create names a VRF, or
+a client whose `global` VRF it goes into (`registry.vrf_for_new_row`); its
+site and its VLAN are of that client, on create and on edit (422).
 """
 
 from datetime import UTC, datetime
@@ -62,7 +67,9 @@ from sqlalchemy.sql import text
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.models import Device, DocRecord
+from app.modules.ipam.clients import site_for_ipam_row
 from app.modules.ipam.errors import (
+    IpamClientError,
     IpamConflictError,
     IpamNotFoundError,
     IpamValidationError,
@@ -76,7 +83,8 @@ from app.modules.ipam.models import (
     IpamSweepRun,
 )
 from app.modules.ipam.net import IPNetwork, parse_address
-from app.modules.ipam.registry import counted, ensure_default_vrf, get_site, get_vlan, get_vrf
+from app.modules.ipam.registry import counted, get_vlan, vrf_for_new_row
+from app.services.client_sites import loaded_client
 
 __all__ = [
     "RANGE_KINDS",
@@ -132,6 +140,8 @@ async def _audit(
     target_type: str,
     target_id: UUID,
     metadata: dict[str, Any],
+    *,
+    client_id: UUID,
 ) -> None:
     await audit_service.record(
         session,
@@ -142,6 +152,7 @@ async def _audit(
         target_type=target_type,
         target_id=str(target_id),
         metadata=metadata,
+        client_id=client_id,
     )
     await session.flush()
 
@@ -223,18 +234,26 @@ def _validate_gateway(gateway: Any, prefix: IPNetwork) -> str | None:
 async def _validate_references(
     session: AsyncSession,
     org_id: UUID,
+    client_id: UUID,
     *,
     site_id: UUID | None,
     vlan_id: UUID | None,
     doc_record_id: UUID | None,
 ) -> None:
-    """Every reference resolves IN THIS ORG. The foreign keys are org-blind and
-    referential-integrity checks run as the referenced table's owner, so RLS
-    does not close this either."""
+    """Every reference resolves IN THIS ORG, and the site and the VLAN are the
+    subnet's client's (422; another client's the caller cannot see is a 404).
+    The foreign keys are org-blind and referential-integrity checks run as the
+    referenced table's owner, so RLS does not close this either; the site is
+    also pinned by `fk_ipam_subnet_site_client` and the VLAN by
+    `fk_ipam_subnet_vlan_client` (migration 0240), which this 422 comes before."""
     if site_id is not None:
-        await get_site(session, org_id, site_id)
+        await site_for_ipam_row(session, org_id, site_id, client_id)
     if vlan_id is not None:
-        await get_vlan(session, org_id, vlan_id)
+        vlan = await get_vlan(session, org_id, vlan_id)
+        if vlan.client_id != client_id:
+            raise IpamClientError(
+                tr("VLAN {vlan_id} belongs to another client", vlan_id=vlan_id)
+            )
     if doc_record_id is not None:
         found = (
             await session.execute(
@@ -460,6 +479,7 @@ async def create_subnet(
     *,
     prefix: str,
     vrf_id: UUID | None = None,
+    client_id: UUID | None = None,
     kind: str = "assignable",
     name: str = "",
     description: str = "",
@@ -469,7 +489,10 @@ async def create_subnet(
     dns_servers: list[str] | None = None,
     doc_record_id: UUID | None = None,
 ) -> IpamSubnet:
-    """Register a prefix. NO `parent_id` PARAMETER, deliberately (§0.2)."""
+    """Register a prefix. NO `parent_id` PARAMETER, deliberately (§0.2).
+
+    In `vrf_id`, whose client is the subnet's (a `client_id` must agree), or
+    without one in `client_id`'s `global` VRF (`registry.vrf_for_new_row`)."""
     network = _parse_prefix(prefix)
     if kind not in SUBNET_KINDS:
         raise IpamValidationError(
@@ -484,13 +507,10 @@ async def create_subnet(
             tr("name must be a string of at most {max_name} characters", max_name=_MAX_NAME)
         )
     gateway_text = _validate_gateway(gateway, network)
+    vrf_id, client = await vrf_for_new_row(session, org_id, vrf_id=vrf_id, client_id=client_id)
     await _validate_references(
-        session, org_id, site_id=site_id, vlan_id=vlan_id, doc_record_id=doc_record_id
+        session, org_id, client, site_id=site_id, vlan_id=vlan_id, doc_record_id=doc_record_id
     )
-    if vrf_id is None:
-        vrf_id = await ensure_default_vrf(session, org_id)
-    else:
-        await get_vrf(session, org_id, vrf_id)
 
     # THE CRITICAL SECTION. Lock, check, insert, re-derive -- in that order, in
     # one transaction. Splitting the check from the insert is the race §0.3
@@ -544,6 +564,7 @@ async def create_subnet(
             "name": name,
             "requested_prefix": prefix,
         },
+        client_id=client,
     )
     return subnet
 
@@ -570,6 +591,8 @@ async def update_subnet(
             )
         )
     subnet = await get_subnet(session, org_id, subnet_id)
+    # Read before the flush below: it expires the trigger-written client.
+    client_id = subnet.client_id
     merged = {field: getattr(subnet, field) for field in SUBNET_EDITABLE_FIELDS} | fields
     network = _parse_prefix(subnet.prefix)
 
@@ -585,6 +608,7 @@ async def update_subnet(
     await _validate_references(
         session,
         org_id,
+        client_id,
         site_id=merged["site_id"] if "site_id" in fields else None,
         vlan_id=merged["vlan_id"] if "vlan_id" in fields else None,
         doc_record_id=merged["doc_record_id"] if "doc_record_id" in fields else None,
@@ -624,7 +648,9 @@ async def update_subnet(
             "from": _jsonable(previous),
             "to": _jsonable(fields),
         },
+        client_id=client_id,
     )
+    await loaded_client(session, subnet)  # the response names it
     return subnet
 
 
@@ -672,7 +698,7 @@ async def delete_subnet(
             await session.execute(
                 delete(owned).where(owned.org_id == org_id, owned.subnet_id == subnet_id)
             )
-    prefix, vrf_id = subnet.prefix, subnet.vrf_id
+    prefix, vrf_id, client_id = subnet.prefix, subnet.vrf_id, subnet.client_id
     # DETACH THE CHILDREN FIRST. `parent_id` is a self-referencing foreign key,
     # so deleting a container while anything still points at it is a
     # `ForeignKeyViolationError` -- re-deriving afterwards is too late, because
@@ -696,6 +722,7 @@ async def delete_subnet(
         "ipam_subnet",
         subnet_id,
         {"prefix": str(prefix), "vrf_id": str(vrf_id), "cascade": cascade},
+        client_id=client_id,
     )
 
 
@@ -854,6 +881,7 @@ async def create_range(
             "start_address": str(start),
             "end_address": str(end),
         },
+        client_id=subnet.client_id,
     )
     return row
 
@@ -874,10 +902,12 @@ async def delete_range(
         "start_address": str(row.start_address),
         "end_address": str(row.end_address),
     }
+    client_id = row.client_id
     await session.delete(row)
     await session.flush()
     await _audit(
-        session, org_id, actor_id, "ipam.range_deleted", "ipam_range", range_id, metadata
+        session, org_id, actor_id, "ipam.range_deleted", "ipam_range", range_id, metadata,
+        client_id=client_id,
     )
 
 
@@ -915,6 +945,13 @@ async def set_sweep_settings(
     referential integrity runs as the referenced table's owner, so the foreign
     key alone would happily accept another tenant's machine as this segment's
     sweeper.
+
+    **AND BE A MACHINE OF THE SUBNET'S CLIENT** (MSP clients, invariant 5a):
+    another client's machine is not on this client's wire, whatever address it
+    reports. One the caller cannot see is "not found", as another org's is; one
+    they can see is a 422 that says why. `sweep.select_sweeper` ignores such a
+    designation anyway, so a row written before this check sweeps nothing of
+    another client's.
     """
     subnet = await get_subnet(session, org_id, subnet_id)
     if subnet.kind != "assignable":
@@ -937,18 +974,21 @@ async def set_sweep_settings(
                     "interval is how an address plan becomes a ping monitor)"
                 )
             )
+    client_id = subnet.client_id  # before the flush that expires it
     if sweep_device_id is not None:
-        found = (
+        machine_client = (
             await session.execute(
-                select(Device.id).where(
+                select(Device.client_id).where(
                     Device.org_id == org_id, Device.id == sweep_device_id
                 )
             )
         ).scalar_one_or_none()
-        if found is None:
+        if machine_client is None:
             raise IpamValidationError(
                 tr("device {sweep_device_id} not found", sweep_device_id=sweep_device_id)
             )
+        if machine_client != client_id:
+            raise IpamClientError(tr("that machine belongs to another client"))
 
     before = {
         "sweep_enabled": subnet.sweep_enabled,
@@ -976,5 +1016,7 @@ async def set_sweep_settings(
                 "sweep_interval_hours": sweep_interval_hours,
             },
         },
+        client_id=client_id,
     )
+    await loaded_client(session, subnet)  # the response names it
     return subnet

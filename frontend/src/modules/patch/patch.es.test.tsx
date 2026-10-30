@@ -27,6 +27,7 @@ import {
   applyOutcomeMessage,
   bulkApprovedMessage,
   deviceLensWarning,
+  EVERY_CLIENT,
   hiddenBySeverityMessage,
   hostLensWarning,
   hostSelectionSummary,
@@ -104,6 +105,7 @@ const UPDATES = [update(), update({ id: "p2", identifier: "KB5031355", title: "D
 
 const ROLLUP: PatchDeviceRollup = {
   device_id: "dev-1",
+  client_id: "o1",
   hostname: "sentinel",
   os_family: "windows",
   outstanding: 41,
@@ -115,9 +117,10 @@ const ROLLUP: PatchDeviceRollup = {
 
 const RINGS = {
   items: [
-    { ring_name: "test", ring_order: 0, device_count: 3 },
-    { ring_name: "pilot", ring_order: 50, device_count: 1 },
-    { ring_name: "broad", ring_order: 100, device_count: 220 },
+    // "o1" is the internal client (`ME.org_id`), "c-acme" a customer.
+    { ring_name: "test", ring_order: 0, device_count: 3, client_device_counts: [{ client_id: "o1", device_count: 2 }, { client_id: "c-acme", device_count: 1 }] },
+    { ring_name: "pilot", ring_order: 50, device_count: 1, client_device_counts: [{ client_id: "o1", device_count: 1 }] },
+    { ring_name: "broad", ring_order: 100, device_count: 220, client_device_counts: [{ client_id: "o1", device_count: 200 }, { client_id: "c-acme", device_count: 20 }] },
   ],
   total: 3,
   device_total: 240,
@@ -125,6 +128,7 @@ const RINGS = {
 
 const APPROVAL: PatchApproval = {
   id: "a1",
+  client_id: null,
   patch_id: "p1",
   patch_identifier: "KB5031354",
   ring_name: "pilot",
@@ -288,18 +292,24 @@ describe("the fleet patch page in Spanish", () => {
     renderPage(<FleetPatchPage />);
     await screen.findByText("Acumulativa de octubre");
     expect(screen.getByRole("button", { name: "Seleccionar las 2 actualizaciones — actualizaciones de Windows" })).toBeInTheDocument();
-    expect(screen.getByText("El anillo test abarca 3 de 240 dispositivos.")).toBeInTheDocument();
+    // The reach of THIS approval, the internal client's 2 of the ring's 3.
+    expect(screen.getByText("Una aprobación aquí abarca los 2 dispositivos del cliente propio de tu organización en el anillo test.")).toBeInTheDocument();
     const ring = screen.getByLabelText("Anillo en el que aprobar — actualizaciones de Windows");
     expect(within(ring).getByRole("option", { name: "pilot, 1 dispositivo" })).toBeInTheDocument();
     expect(within(ring).getByRole("option", { name: "broad, 220 dispositivos" })).toBeInTheDocument();
     await user.click(screen.getByLabelText("Seleccionar KB5031354"));
     expect(screen.getByText("1 actualización seleccionada de 2 coincidentes.")).toBeInTheDocument();
+    // What ticking does, and whose machines it is otherwise (final review E).
+    expect(screen.getByRole("checkbox", { name: /Para todos los clientes/ }).closest("label")).toHaveTextContent(
+      "Marcada, estas actualizaciones pasan a poder instalarse en los equipos de todos los clientes del anillo test. Sin marcar, solo en los del cliente propio de tu organización.",
+    );
     expect(screen.getByLabelText("Cambio que implementa esta aprobación — actualizaciones de Windows")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Sin solicitud de cambio" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Aprobar 1 actualización en el anillo test/ }));
     const dialog = await screen.findByRole("dialog", { name: "Aprobar actualizaciones en un anillo de despliegue" });
     expect(within(dialog).getByText("1 actualización → anillo test")).toBeInTheDocument();
-    expect(dialog).toHaveTextContent("Esta actualización pasa a poder instalarse en los 3 dispositivos del anillo «test» en su próxima ventana de mantenimiento.");
+    // The internal client's 2 of the ring's 3 machines: the approval is its.
+    expect(dialog).toHaveTextContent("Esta actualización pasa a poder instalarse en los 2 dispositivos del cliente propio de tu organización en el anillo «test» en su próxima ventana de mantenimiento.");
     expect(dialog).toHaveTextContent("Si no eliges ninguna solicitud de cambio, se registra una automáticamente para esta aprobación.");
     await user.click(within(dialog).getByRole("button", { name: "Aprobar" }));
     expect(await screen.findByText("2 actualizaciones aprobadas para el anillo test. 1 ya estaba en vigor.")).toBeInTheDocument();
@@ -414,7 +424,8 @@ describe("the fleet patch page in Spanish", () => {
     await user.click(screen.getByRole("button", { name: /KB5031354 → anillo pilot/ }));
     await user.click(await screen.findByRole("menuitem", { name: "Revocar" }));
     const dialog = await screen.findByRole("dialog", { name: "Revocar la aprobación del parche" });
-    expect(dialog).toHaveTextContent("Los dispositivos del anillo «pilot» dejarán de instalar esta actualización");
+    // A global approval: every client's machines stop, but a client's own.
+    expect(dialog).toHaveTextContent("Los dispositivos de todos los clientes del anillo «pilot» dejarán de instalar esta actualización, salvo los de un cliente cuya propia aprobación de ella siga en vigor");
     expect(within(dialog).getByRole("button", { name: "Revocar aprobación" })).toBeInTheDocument();
   });
 });
@@ -637,9 +648,13 @@ describe("the patch sentences built outside React, in Spanish", () => {
     expect(ringReachMessage("test", 0, 240)).toBe("Ningún dispositivo pertenece todavía al anillo test, así que aprobar aquí no autoriza nada hoy.");
     expect(ringReachMessage("test", 1, null)).toBe("El anillo test abarca 1 dispositivo.");
     expect(ringReachMessage("test", 3, null)).toBe("El anillo test abarca 3 dispositivos.");
-    expect(deviceLensWarning("srv", "test", 1)).toBe("Estás eligiendo estas actualizaciones desde srv, pero una aprobación abarca el único dispositivo del anillo test, no solo srv.");
-    expect(deviceLensWarning("srv", "test", 12)).toContain("abarca los 12 dispositivos del anillo test");
-    expect(deviceLensWarning("srv", "test", null)).toContain("abarca todos los dispositivos del anillo test");
+    const acme = { kind: "client", name: "Acme" } as const;
+    expect(deviceLensWarning("srv", "test", 1, acme)).toBe("Estás eligiendo estas actualizaciones desde srv, pero una aprobación abarca el único dispositivo del cliente Acme en el anillo test, no solo srv.");
+    expect(deviceLensWarning("srv", "test", 12, acme)).toContain("abarca los 12 dispositivos del cliente Acme en el anillo test");
+    expect(deviceLensWarning("srv", "test", null, acme)).toContain("abarca todos los dispositivos del cliente Acme en el anillo test");
+    expect(deviceLensWarning("srv", "test", 1, EVERY_CLIENT)).toContain("abarca el único dispositivo de cualquier cliente en el anillo test");
+    expect(deviceLensWarning("srv", "test", 12, EVERY_CLIENT)).toContain("abarca los 12 dispositivos de todos los clientes en el anillo test");
+    expect(deviceLensWarning("srv", "test", null, EVERY_CLIENT)).toContain("abarca todos los dispositivos de todos los clientes en el anillo test");
     expect(hostLensWarning(["a", "b"], "test", 5)).toBe("Estás eligiendo estas actualizaciones desde a y b, pero una aprobación abarca los 5 dispositivos del anillo test, no solo esos equipos.");
     expect(hostLensWarning(["a"], "test", 5)).toContain("no solo a.");
     expect(hostLensWarning(["a", "b", "c"], "test", 5)).toContain("desde 3 equipos seleccionados");
@@ -701,7 +716,7 @@ describe("a live language switch on the patch pages", () => {
     expect(screen.getByRole("heading", { name: "Patch management" })).toBeInTheDocument();
     expect(screen.getByText("Showing 1–2 of 2 updates.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Select all 2 updates — Windows updates" })).toBeInTheDocument();
-    expect(screen.getByText("The test ring covers 3 of 240 devices.")).toBeInTheDocument();
+    expect(screen.getByText("An approval here covers the 2 devices of your organisation's own client in the test ring.")).toBeInTheDocument();
     expect(screen.getByText("Policy auto-approval")).toBeInTheDocument();
     expect(screen.getByText("Restart booked")).toBeInTheDocument();
     expect(screen.getByText(/Severity here is Microsoft's MSRC rating/)).toBeInTheDocument();

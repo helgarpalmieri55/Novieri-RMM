@@ -2,7 +2,8 @@
 (`docs/modules/endpoint-health-alerting/spec.md` §3, §0.2, §0.6, §0.7).
 
 EXACTLY ONE PROFILE IS EVER EFFECTIVE FOR A DEVICE. First match wins, most
-specific first: device -> nearest assigned group ancestor -> org default. §0.2
+specific first: device -> nearest assigned group ancestor -> the default of the
+DEVICE'S CLIENT -> the global (org-wide) default. §0.2
 rejects the "union of every matching profile" alternative because union has no
 way to express REMOVAL -- a check an operator silenced for one troublesome
 device is resurrected by the org-wide profile, and the only fix is an
@@ -22,6 +23,15 @@ at ERROR with the device id, the same degrade-don't-fail posture
 `docs/modules/sla/spec.md` §3.1 takes for a broken calendar. The bound is NOT a
 cycle detector: a `visited` set would catch the cycle but not a legitimately
 1000-deep hierarchy, and the cost of the walk is what is actually being bounded.
+
+TWO DEFAULTS SINCE MIGRATION 0231: one global (`client_id IS NULL`) and one
+per client (`uq_health_assignment_client_org`, NULLS NOT DISTINCT). A client's
+default serves that client's machines only, and a machine of a client with
+none -- or whose default points at an inactive profile -- falls to the global
+one (MSP clients plan 2026-10-26 Task 14). The client predicate is EXPLICIT,
+because the health sweep resolves under scope "all", where RLS would hand a
+machine of Y the default of X. Both defaults are read in ONE statement, the
+device's client's first.
 
 AN INACTIVE PROFILE IS SKIPPED, NOT TREATED AS A MATCH. A device-level
 assignment pointing at a deactivated profile means "that rule is out of
@@ -44,7 +54,7 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Device, DeviceGroup
@@ -151,18 +161,32 @@ async def _assignment_for_group(
     ).scalar_one_or_none()
 
 
-async def _org_default_assignment(
-    session: AsyncSession, org_id: UUID
-) -> HealthProfileAssignment | None:
-    return (
-        await session.execute(
-            select(HealthProfileAssignment).where(
-                HealthProfileAssignment.org_id == org_id,
-                HealthProfileAssignment.device_id.is_(None),
-                HealthProfileAssignment.device_group_id.is_(None),
+async def _default_assignments(
+    session: AsyncSession, org_id: UUID, client_id: UUID
+) -> list[HealthProfileAssignment]:
+    """The defaults that may serve a machine of `client_id`, most specific
+    first: its client's own, then the global one -- at most one of each
+    (`uq_health_assignment_client_org`), in one statement."""
+    return list(
+        (
+            await session.execute(
+                select(HealthProfileAssignment)
+                .where(
+                    HealthProfileAssignment.org_id == org_id,
+                    HealthProfileAssignment.device_id.is_(None),
+                    HealthProfileAssignment.device_group_id.is_(None),
+                    or_(
+                        HealthProfileAssignment.client_id == client_id,
+                        HealthProfileAssignment.client_id.is_(None),
+                    ),
+                )
+                # The client's own first (`false` sorts before `true`).
+                .order_by(HealthProfileAssignment.client_id.is_(None))
             )
         )
-    ).scalar_one_or_none()
+        .scalars()
+        .all()
+    )
 
 
 async def _parent_group_id(
@@ -279,6 +303,8 @@ async def resolve_profile_for_device(
             group_id,
         )
 
-    return await _resolve_assignment(
-        session, org_id, device, await _org_default_assignment(session, org_id)
-    )
+    for default in await _default_assignments(session, org_id, device.client_id):
+        resolved = await _resolve_assignment(session, org_id, device, default)
+        if resolved is not None:
+            return resolved
+    return None

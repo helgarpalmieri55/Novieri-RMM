@@ -78,6 +78,7 @@ from app.core.approved_actions import (
 )
 from app.core.audit import audit_service
 from app.core.i18n import tr
+from app.core.rbac import has_permission
 from app.jobs.canonical import canonical_bytes, rfc3339
 from app.jobs.dispatch_permissions import dispatch_permission_for
 from app.models import Device, Job, Script
@@ -551,7 +552,8 @@ async def propose(
     4. resolve the dial; `off` and `suggest` MINT NO ROW, and the model is told
        WHICH, truthfully -- an empty result would read as "nothing to do", which
        is the worse failure because it reads as an answer;
-    5. verify the device is visible THROUGH THE LOOPBACK;
+    5. verify the device is visible THROUGH THE LOOPBACK, and that the person
+       holds `ai.act.propose` on ITS client;
     6. for a TICKET-BOUND persona, verify the ticket names a device AND that it
        is this one -- a ticket with no device proposes nothing, which is not the
        same as a persona with no ticket (§3.2);
@@ -616,6 +618,24 @@ async def propose(
     if not await _device_is_visible(ctx=ctx, executor=executor, device_id=device_id):
         raise ActRefused(  # i18n-exempt: model-facing, tool result read by the model
             "no such device, or you do not have permission to see it"
+        )
+    # 5b. `ai.act.propose` ON THE MACHINE'S CLIENT (MSP clients plan
+    # 2026-10-26 Task 14, T4-C2 item 11). The turn offers the act tool on the
+    # code held on ANY client -- ergonomics -- and the model chooses the
+    # machine; the proposal is that machine's client's row, so the person must
+    # hold the code there. A machine this session cannot read is refused like
+    # an invisible one.
+    device_client = (
+        await session.execute(
+            select(Device.client_id).where(Device.org_id == org_id, Device.id == device_id)
+        )
+    ).scalar_one_or_none()
+    if device_client is None or not await has_permission(
+        session, binding.actor_id, "ai.act.propose", client_id=device_client
+    ):
+        raise ActRefused(  # i18n-exempt: model-facing, tool result read by the model
+            "you may not prepare actions on this device: proposing one needs "
+            "ai.act.propose on the client it belongs to"
         )
 
     # 6.
@@ -946,6 +966,11 @@ async def confirm_action(
     THE DIAL AND THE RATE FUSES ARE BOTH RE-EVALUATED HERE. The preview's fuse
     read was informational (§6.1); this one is the gate. The dial is org state an
     admin may change at any moment, and a confirmation is a decision about *now*.
+
+    `permissions` ARE THE ONES HELD ON THE PROPOSAL'S CLIENT -- its machine's
+    (MSP clients plan 2026-10-26 Task 14): the job lands there, and a grant on
+    another client is no grant here. The route reads them so
+    (`ai_admin.api._codes_on_action_client`).
     """
     now = now or datetime.now(UTC)
     held = set(permissions)
@@ -1235,6 +1260,9 @@ async def reject_action(
     onto a durable row and then into whatever reads the row. §8.3 spends a
     paragraph refusing model-adjacent free text; this is the same refusal one
     field over.
+
+    `permissions` are the ones held on the proposal's client, as in
+    `confirm_action`.
     """
     now = now or datetime.now(UTC)
     if "ai.act.propose" not in set(permissions):

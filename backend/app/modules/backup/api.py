@@ -38,17 +38,21 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.exc import NoResultFound
+from sqlalchemy.exc import IntegrityError, NoResultFound
 
 from app.api.deps import AuthContext, require_permission
 from app.core.audit import audit_service
 from app.core.csv_export import escape_formula
 from app.core.i18n import tr
+from app.core.schedule import InvalidWindow
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job
 from app.models import BackupPoint, BackupPolicy, BackupRepository
+from app.modules.backup.clients import BackupClientError
 from app.modules.backup.dispatch import dispatch_backup
+from app.modules.backup.integrity import violated_constraint
+from app.modules.backup.policy import upsert_policy as upsert_backup_policy
 from app.modules.backup.reporting import (
     backup_evidence_rows,
     device_backup_status,
@@ -60,6 +64,9 @@ from app.modules.backup.schema import BackupManifest
 
 router = APIRouter(prefix="/backup", tags=["backup"])
 
+#: Migration 0242's per-client name key.
+REPOSITORY_NAME_KEY = "uq_backup_repositories_client_name"
+
 
 # --------------------------------------------------------------------------- #
 # Models — none carry a secret: repositories never expose
@@ -70,6 +77,8 @@ router = APIRouter(prefix="/backup", tags=["backup"])
 
 class RepositoryOut(BaseModel):
     id: UUID
+    # The one client whose devices back up here (plan 2026-10-26 Task 13).
+    client_id: UUID
     name: str
     storage_ref: str
     state: str
@@ -79,12 +88,20 @@ class RepositoryOut(BaseModel):
 
 
 class RepositoryCreateRequest(BaseModel):
+    # Required: a repository is one client's, and nothing else in the request
+    # can say which (`clients.client_for_new_repository`).
+    client_id: UUID
     name: str
     dedup_params: dict[str, Any] | None = None
 
 
 class PolicyOut(BaseModel):
     id: UUID
+    # The group's client, or the client whose default this is. There is no
+    # policy for every client (`backup/policy.py`): NULL only on a row planted
+    # around migration 0242's guard, whose repository the resolution never
+    # uses.
+    client_id: UUID | None
     device_group_id: UUID | None
     repository_id: UUID
     sources: dict[str, Any]
@@ -95,6 +112,10 @@ class PolicyOut(BaseModel):
 
 class PolicyUpsertRequest(BaseModel):
     device_group_id: UUID | None = None
+    # With no group, the client whose default policy this is. With a group it
+    # may be left out: the group's client is the policy's, and a different
+    # one is a 422.
+    client_id: UUID | None = None
     repository_id: UUID
     sources: dict[str, Any] = {}
     window_cron: str | None = None
@@ -176,6 +197,7 @@ class FleetBackupReportOut(BaseModel):
 def _repository_out(row: BackupRepository) -> RepositoryOut:
     return RepositoryOut(
         id=row.id,
+        client_id=row.client_id,
         name=row.name,
         storage_ref=row.storage_ref,
         state=row.state,
@@ -185,9 +207,13 @@ def _repository_out(row: BackupRepository) -> RepositoryOut:
     )
 
 
-def _policy_out(row: BackupPolicy) -> PolicyOut:
+def _policy_out(row: BackupPolicy, client_id: UUID | None = None) -> PolicyOut:
+    """`client_id`, when the caller has it: after an UPDATE flush the row's
+    own is expired (its trigger may write it), and an async session cannot
+    lazy-load it."""
     return PolicyOut(
         id=row.id,
+        client_id=client_id if client_id is not None else row.client_id,
         device_group_id=row.device_group_id,
         repository_id=row.repository_id,
         sources=row.sources,
@@ -263,14 +289,27 @@ async def create_repository_route(
 ) -> RepositoryOut:
     state = request.app.state
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
-        repo = await create_repository(
-            session,
-            state.vault,
-            org_id=ctx.org_id,
-            actor_id=ctx.user_id,
-            name=body.name,
-            dedup_params=body.dedup_params,
-        )
+        try:
+            repo = await create_repository(
+                session,
+                state.vault,
+                org_id=ctx.org_id,
+                actor_id=ctx.user_id,
+                client_id=body.client_id,
+                name=body.name,
+                dedup_params=body.dedup_params,
+            )
+        except BackupClientError as exc:
+            raise HTTPException(exc.status_code, exc.detail) from None
+        except IntegrityError as exc:
+            # The name is taken in this client: the key is per client, so the
+            # answer says nothing about another client's names.
+            if violated_constraint(exc) == REPOSITORY_NAME_KEY:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    tr("a repository with that name exists in this client"),
+                ) from None
+            raise
         return _repository_out(repo)
 
 
@@ -307,62 +346,30 @@ async def upsert_policy(
     request: Request,
     ctx: AuthContext = Depends(require_permission("backup.policy.manage")),
 ) -> PolicyOut:
+    """One group's policy, or one client's default (no group, `client_id`).
+    The repository must be the policy's client's, and the window one the
+    sweep can read (`policy.upsert_policy`)."""
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        repository = (
-            await session.execute(
-                select(BackupRepository.id).where(
-                    BackupRepository.org_id == ctx.org_id,
-                    BackupRepository.id == body.repository_id,
-                )
+        try:
+            row, client_id = await upsert_backup_policy(
+                session,
+                org_id=ctx.org_id,
+                actor_id=ctx.user_id,
+                device_group_id=body.device_group_id,
+                client_id=body.client_id,
+                repository_id=body.repository_id,
+                sources=body.sources,
+                window_cron=body.window_cron,
+                retention_gfs=body.retention_gfs,
+                enabled=body.enabled,
             )
-        ).scalar_one_or_none()
-        if repository is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such repository"))
-
-        # As in patch's upsert_policy: for the org-default (device_group_id IS
-        # NULL) there is no unique constraint preventing duplicate NULL rows
-        # (app.modules.backup.policy's resolve_backup_policy docstring), so we
-        # deterministically take the first existing default rather than risk
-        # inserting a second.
-        query = select(BackupPolicy).where(BackupPolicy.org_id == ctx.org_id)
-        if body.device_group_id is None:
-            query = query.where(BackupPolicy.device_group_id.is_(None))
-        else:
-            query = query.where(BackupPolicy.device_group_id == body.device_group_id)
-        row = (
-            await session.execute(query.order_by(BackupPolicy.id).limit(1))
-        ).scalar_one_or_none()
-
-        created = row is None
-        if row is None:
-            row = BackupPolicy(org_id=ctx.org_id, device_group_id=body.device_group_id)
-            session.add(row)
-        row.repository_id = body.repository_id
-        row.sources = body.sources
-        row.window_cron = body.window_cron
-        row.retention_gfs = body.retention_gfs
-        row.enabled = body.enabled
-        await session.flush()
-
-        await audit_service.record(
-            session,
-            org_id=ctx.org_id,
-            actor_type="user",
-            actor_id=ctx.user_id,
-            action="backup.policy_changed",
-            target_type="backup_policy",
-            target_id=str(row.id),
-            metadata={
-                "device_group_id": (
-                    str(body.device_group_id) if body.device_group_id else None
-                ),
-                "repository_id": str(body.repository_id),
-                "created": created,
-            },
-        )
-        return _policy_out(row)
+        except BackupClientError as exc:
+            raise HTTPException(exc.status_code, exc.detail) from None
+        except InvalidWindow as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
+        return _policy_out(row, client_id)
 
 
 # --------------------------------------------------------------------------- #

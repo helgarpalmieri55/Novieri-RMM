@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Device
+from tests.client_scope_support import internal_client
 from tests.conftest import ApiEnv
 
 
@@ -56,6 +57,7 @@ async def _create_license(
     resp = await api_env.client.post(
         "/api/v1/licenses",
         json={
+            "client_id": await internal_client(api_env, headers),
             "product_id": product_id,
             "type": "perpetual",
             "entitlements": entitlements,
@@ -124,7 +126,8 @@ async def test_create_vendor_product_license_ok_for_technician_forbidden_for_rea
 
     forbidden_license = await api_env.client.post(
         "/api/v1/licenses",
-        json={"product_id": product["id"], "type": "perpetual", "entitlements": 1},
+        json={"client_id": str(org_id), "product_id": product["id"], "type": "perpetual",
+              "entitlements": 1},
         headers=ro_headers,
     )
     assert forbidden_license.status_code == 403
@@ -273,6 +276,7 @@ async def test_create_license_cross_org_product_id_is_400_not_500(api_env: ApiEn
     resp = await api_env.client.post(
         "/api/v1/licenses",
         json={
+            "client_id": str(org_id),
             "product_id": other_product["id"],
             "type": "perpetual",
             "entitlements": 1,

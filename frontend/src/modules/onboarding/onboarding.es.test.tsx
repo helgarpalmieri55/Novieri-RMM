@@ -20,6 +20,7 @@ const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
 const subnet = (over: Partial<SubnetOut> = {}): SubnetOut => ({
+  client_id: "o1",
   id: "s1",
   vrf_id: "v1",
   prefix: "10.0.4.0/24",
@@ -39,6 +40,7 @@ const subnet = (over: Partial<SubnetOut> = {}): SubnetOut => ({
 });
 
 const scope = (): ScopeOut => ({
+  client_id: "o1",
   id: "sc1",
   vrf_id: "v1",
   prefix: "10.0.0.0/16",
@@ -50,6 +52,7 @@ const scope = (): ScopeOut => ({
 });
 
 const noAgentRun = (): SweepRunOut => ({
+  client_id: "o1",
   id: "r1",
   subnet_id: "s1",
   job_id: null,

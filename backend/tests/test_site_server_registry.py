@@ -87,7 +87,7 @@ async def test_promote_stores_the_declaration_and_audits_it(
             org.org_id,
             device_id=org.device_id,
             segments=["10.20.0.0/16", "10.30.7.0/24"],
-            ipam_site_id=site_id,
+            site_id=site_id,
             actor_id=org.user_id,
         )
         stored_id = row.id
@@ -380,7 +380,7 @@ async def test_list_filters_by_enabled_site_and_containment(
         org.org_id,
         device_id=branch,
         segments=["10.20.0.0/16"],
-        ipam_site_id=site_id,
+        site_id=site_id,
     )
     await seed_site_server(admin_engine, org.org_id, device_id=other, segments=["10.90.0.0/16"])
     await seed_site_server(
@@ -390,7 +390,7 @@ async def test_list_filters_by_enabled_site_and_containment(
     async with org_session(org.org_id, engine=app_engine, clients=ClientScope.all()) as session:
         by_segment = await registry.list_site_servers(session, org.org_id, segment="10.20.7.0/24")
         by_enabled = await registry.list_site_servers(session, org.org_id, enabled=True)
-        by_site = await registry.list_site_servers(session, org.org_id, ipam_site_id=site_id)
+        by_site = await registry.list_site_servers(session, org.org_id, site_id=site_id)
         everything = await registry.list_site_servers(session, org.org_id)
 
     assert sorted(r.device_id for r in by_segment) == sorted([branch, disabled])

@@ -27,6 +27,10 @@ out-of-range value that reaches Postgres surfaces as an unhandled
 constants below keep Create and Update models from drifting apart on their
 bounds, the drift Phase 12 hit where `currency` was guarded and four sibling
 strings were not.
+
+Client (MSP clients plan 2026-10-26 Task 8): every create names the client
+its row belongs to (`client_id`, required), and every C output carries it.
+Settings are one client's, named in the query (`?client_id=`), not the body.
 """
 
 from datetime import date, datetime
@@ -101,13 +105,17 @@ class SettingsUpdate(BaseModel):
 
 
 class SettingsOut(BaseModel):
+    client_id: UUID
     base_currency: str
     fiscal_year_start_month: int
     updated_by: UUID | None
-    updated_at: datetime
+    # `None` until somebody sets the client's settings: until then they are
+    # the documented defaults, and no row exists (`fx.get_settings`).
+    updated_at: datetime | None
 
 
 class CategoryCreate(BaseModel):
+    client_id: UUID
     key: str = Field(max_length=_MAX_KEY)
     name: str = Field(max_length=_MAX_TEXT)
     sort_order: int = Field(default=0, ge=0, le=_MAX_COUNT)
@@ -124,6 +132,7 @@ class CategoryUpdate(BaseModel):
 
 class CategoryOut(BaseModel):
     id: UUID
+    client_id: UUID
     key: str
     name: str
     system_key: str | None
@@ -133,6 +142,7 @@ class CategoryOut(BaseModel):
 
 
 class CostCenterCreate(BaseModel):
+    client_id: UUID
     code: str = Field(max_length=_MAX_CODE)
     name: str = Field(max_length=_MAX_TEXT)
     external_ref: str | None = _OptionalExternalRef
@@ -146,6 +156,7 @@ class CostCenterUpdate(BaseModel):
 
 class CostCenterOut(BaseModel):
     id: UUID
+    client_id: UUID
     code: str
     name: str
     external_ref: str | None
@@ -155,6 +166,10 @@ class CostCenterOut(BaseModel):
 
 class FxRateCreate(BaseModel):
     from_currency: str = _Currency
+    # Each client has its own base currency, and one rate table serves them
+    # all, so a rate names the currency it converts into. Omitted: the
+    # internal client's base currency, the organisation's own (`rates.py`).
+    to_currency: str | None = _OptionalCurrency
     rate: Decimal = _Rate
     effective_date: date
 
@@ -175,6 +190,7 @@ class FxRateOut(BaseModel):
 
 
 class BudgetCreate(BaseModel):
+    client_id: UUID
     fiscal_year: int = _FiscalYear
     name: str = Field(max_length=_MAX_TEXT)
     granularity: Granularity
@@ -194,6 +210,7 @@ class BudgetUpdate(BaseModel):
 
 class BudgetOut(BaseModel):
     id: UUID
+    client_id: UUID
     fiscal_year: int
     name: str
     granularity: str
@@ -223,6 +240,7 @@ class BudgetLineOut(BaseModel):
 
 
 class ExpenseCreate(BaseModel):
+    client_id: UUID
     expense_date: date
     amount: Decimal = _Money
     currency: str = _Currency
@@ -278,6 +296,8 @@ class ExpenseConfirm(BaseModel):
 
 
 class MaterializeRequest(BaseModel):
+    # One client's subscriptions and licenses, filed under that client.
+    client_id: UUID
     from_date: date
     to_date: date
 
@@ -285,6 +305,7 @@ class MaterializeRequest(BaseModel):
 class ExpenseOut(BaseModel):
     # No `org_id` field here -- security invariant #5.
     id: UUID
+    client_id: UUID
     expense_date: date
     amount: Decimal
     currency: str

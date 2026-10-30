@@ -27,6 +27,9 @@ from app.modules.bcp.schema import (
     TestReportOut,
 )
 
+#: Any client: these models do not look it up (MSP clients plan 2026-10-26 Task 7).
+CLIENT_ID = "0198c1f4-0000-7000-8000-0000000000c1"
+
 
 class TestErrors:
     def test_not_found_is_subclass_of_validation(self) -> None:
@@ -38,7 +41,7 @@ class TestErrors:
 
 class TestPlanCreateRequest:
     def test_construct_with_defaults(self) -> None:
-        req = PlanCreateRequest(name="p")
+        req = PlanCreateRequest(client_id=CLIENT_ID, name="p")
         assert req.description == ""
         assert req.scope == []
         assert req.rto_minutes is None
@@ -49,7 +52,12 @@ class TestPlanCreateRequest:
 
     def test_requires_name(self) -> None:
         with pytest.raises(ValidationError):
-            PlanCreateRequest()  # type: ignore[call-arg]
+            PlanCreateRequest(client_id=CLIENT_ID)  # type: ignore[call-arg]
+
+    def test_requires_client_id(self) -> None:
+        # A plan belongs to one client (MSP clients plan 2026-10-26 Task 7).
+        with pytest.raises(ValidationError, match="client_id"):
+            PlanCreateRequest(name="p")  # type: ignore[call-arg]
 
 
 class TestPlanUpdateRequest:
@@ -69,6 +77,7 @@ class TestPlanOut:
     def test_construct(self) -> None:
         out = PlanOut(
             id="0198c1f4-0000-7000-8000-000000000000",
+            client_id=CLIENT_ID,
             name="p",
             description="d",
             scope=[],

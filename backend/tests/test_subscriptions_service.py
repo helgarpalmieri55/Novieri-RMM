@@ -69,6 +69,7 @@ async def _license(admin_engine: AsyncEngine, org_id: UUID, actor_id: UUID) -> U
         await s.flush()
         license_ = License(
             org_id=org_id,
+            client_id=org_id,
             product_id=product.id,
             vendor_id=None,
             type="perpetual",
@@ -163,7 +164,7 @@ async def test_create_subscription_records_created_event_and_audits(
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
-            s, org_id=org_id, actor_id=actor_id, **_create_kwargs()
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs()
         )
         await s.commit()
         sub_id = sub.id
@@ -198,6 +199,7 @@ async def test_create_subscription_invalid_billing_cycle_raises_validation_error
             await create_subscription(
                 s,
                 org_id=org_id,
+                client_id=org_id,
                 actor_id=actor_id,
                 **_create_kwargs(billing_cycle="weekly"),
             )
@@ -213,6 +215,7 @@ async def test_create_subscription_invalid_status_raises_validation_error(
             await create_subscription(
                 s,
                 org_id=org_id,
+                client_id=org_id,
                 actor_id=actor_id,
                 **_create_kwargs(status="expired"),
             )
@@ -230,6 +233,7 @@ async def test_create_subscription_cross_org_vendor_raises_validation_error(
             await create_subscription(
                 s,
                 org_id=org_a,
+                client_id=org_a,
                 actor_id=actor_a,
                 **_create_kwargs(vendor_id=vendor_b),
             )
@@ -246,6 +250,7 @@ async def test_create_subscription_cross_org_owner_user_raises_validation_error(
             await create_subscription(
                 s,
                 org_id=org_a,
+                client_id=org_a,
                 actor_id=actor_a,
                 **_create_kwargs(owner_user_id=actor_b),
             )
@@ -263,6 +268,7 @@ async def test_create_subscription_cross_org_license_ref_raises_validation_error
             await create_subscription(
                 s,
                 org_id=org_a,
+                client_id=org_a,
                 actor_id=actor_a,
                 **_create_kwargs(license_ref=license_b),
             )
@@ -278,6 +284,7 @@ async def test_create_subscription_valid_license_ref_succeeds(
         sub = await create_subscription(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             **_create_kwargs(license_ref=license_id),
         )
@@ -309,6 +316,7 @@ async def test_create_subscription_cross_ref_org_filter_is_load_bearing(
             await create_subscription(
                 s,
                 org_id=org_a,
+                client_id=org_a,
                 actor_id=actor_a,
                 **_create_kwargs(vendor_id=vendor_b),
             )
@@ -342,6 +350,7 @@ async def test_create_subscription_owner_user_org_filter_is_load_bearing(
             await create_subscription(
                 s,
                 org_id=org_a,
+                client_id=org_a,
                 actor_id=actor_a,
                 **_create_kwargs(owner_user_id=actor_b),
             )
@@ -372,6 +381,7 @@ async def test_create_subscription_license_ref_org_filter_is_load_bearing(
             await create_subscription(
                 s,
                 org_id=org_a,
+                client_id=org_a,
                 actor_id=actor_a,
                 **_create_kwargs(license_ref=license_b),
             )
@@ -389,7 +399,11 @@ async def test_update_subscription_cost_change_records_price_change_event(
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
-            s, org_id=org_id, actor_id=actor_id, **_create_kwargs(cost_per_cycle=Decimal("100.00"))
+            s,
+            org_id=org_id,
+            client_id=org_id,
+            actor_id=actor_id,
+            **_create_kwargs(cost_per_cycle=Decimal("100.00")),
         )
         await s.commit()
         sub_id = sub.id
@@ -423,7 +437,11 @@ async def test_update_subscription_unchanged_field_records_no_extra_event(
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
-            s, org_id=org_id, actor_id=actor_id, **_create_kwargs(cost_per_cycle=Decimal("100.00"))
+            s,
+            org_id=org_id,
+            client_id=org_id,
+            actor_id=actor_id,
+            **_create_kwargs(cost_per_cycle=Decimal("100.00")),
         )
         await s.commit()
         sub_id = sub.id
@@ -452,7 +470,7 @@ async def test_update_subscription_seats_change_records_seat_change_event(
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
-            s, org_id=org_id, actor_id=actor_id, **_create_kwargs(seats=10)
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs(seats=10)
         )
         await s.commit()
         sub_id = sub.id
@@ -477,7 +495,7 @@ async def test_update_subscription_plan_change_records_plan_change_event(
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
-            s, org_id=org_id, actor_id=actor_id, **_create_kwargs(plan="Pro")
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs(plan="Pro")
         )
         await s.commit()
         sub_id = sub.id
@@ -513,7 +531,9 @@ async def test_update_subscription_invalid_billing_cycle_raises_validation_error
     org_id, actor_id = await _org_with_user(admin_engine)
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        sub = await create_subscription(s, org_id=org_id, actor_id=actor_id, **_create_kwargs())
+        sub = await create_subscription(
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs()
+        )
         await s.commit()
         sub_id = sub.id
 
@@ -530,7 +550,9 @@ async def test_update_subscription_invalid_status_raises_validation_error(
     org_id, actor_id = await _org_with_user(admin_engine)
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        sub = await create_subscription(s, org_id=org_id, actor_id=actor_id, **_create_kwargs())
+        sub = await create_subscription(
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs()
+        )
         await s.commit()
         sub_id = sub.id
 
@@ -549,7 +571,9 @@ async def test_update_subscription_cross_org_vendor_raises_validation_error(
     vendor_b = await _vendor(admin_engine, org_b, actor_b)
 
     async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
-        sub = await create_subscription(s, org_id=org_a, actor_id=actor_a, **_create_kwargs())
+        sub = await create_subscription(
+            s, org_id=org_a, client_id=org_a, actor_id=actor_a, **_create_kwargs()
+        )
         await s.commit()
         sub_id = sub.id
 
@@ -567,7 +591,9 @@ async def test_update_subscription_cross_org_owner_user_raises_validation_error(
     org_b, actor_b = await _org_with_user(admin_engine)
 
     async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
-        sub = await create_subscription(s, org_id=org_a, actor_id=actor_a, **_create_kwargs())
+        sub = await create_subscription(
+            s, org_id=org_a, client_id=org_a, actor_id=actor_a, **_create_kwargs()
+        )
         await s.commit()
         sub_id = sub.id
 
@@ -586,7 +612,9 @@ async def test_update_subscription_cross_org_license_ref_raises_validation_error
     license_b = await _license(admin_engine, org_b, actor_b)
 
     async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
-        sub = await create_subscription(s, org_id=org_a, actor_id=actor_a, **_create_kwargs())
+        sub = await create_subscription(
+            s, org_id=org_a, client_id=org_a, actor_id=actor_a, **_create_kwargs()
+        )
         await s.commit()
         sub_id = sub.id
 
@@ -614,6 +642,7 @@ async def test_update_subscription_explicit_null_clears_nullable_field(
         sub = await create_subscription(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             **_create_kwargs(renews_at=date(2026, 6, 1), payment_ref="INV-1"),
         )
@@ -648,6 +677,7 @@ async def test_update_subscription_explicit_null_clears_every_nullable_column(
         sub = await create_subscription(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             **_create_kwargs(
                 vendor_id=vendor_id,
@@ -710,7 +740,9 @@ async def test_update_subscription_explicit_null_on_non_nullable_raises_validati
     org_id, actor_id = await _org_with_user(admin_engine)
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        sub = await create_subscription(s, org_id=org_id, actor_id=actor_id, **_create_kwargs())
+        sub = await create_subscription(
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs()
+        )
         await s.commit()
         sub_id = sub.id
 
@@ -730,6 +762,7 @@ async def test_update_subscription_omitted_field_is_untouched(
         sub = await create_subscription(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             **_create_kwargs(service_name="Acme SaaS", plan="Pro", payment_ref="INV-9"),
         )
@@ -762,7 +795,9 @@ async def test_update_subscription_audit_metadata_lists_changed_field_names(
     org_id, actor_id = await _org_with_user(admin_engine)
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        sub = await create_subscription(s, org_id=org_id, actor_id=actor_id, **_create_kwargs())
+        sub = await create_subscription(
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs()
+        )
         await s.commit()
         sub_id = sub.id
 
@@ -794,7 +829,11 @@ async def test_update_subscription_audit_metadata_records_a_cleared_field(
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
-            s, org_id=org_id, actor_id=actor_id, **_create_kwargs(renews_at=date(2026, 6, 1))
+            s,
+            org_id=org_id,
+            client_id=org_id,
+            actor_id=actor_id,
+            **_create_kwargs(renews_at=date(2026, 6, 1)),
         )
         await s.commit()
         sub_id = sub.id
@@ -818,7 +857,7 @@ async def test_update_subscription_audit_metadata_empty_when_nothing_changed(
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
-            s, org_id=org_id, actor_id=actor_id, **_create_kwargs(plan="Pro")
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs(plan="Pro")
         )
         await s.commit()
         sub_id = sub.id
@@ -849,7 +888,7 @@ async def test_update_subscription_seats_below_active_count_raises_validation_er
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
-            s, org_id=org_id, actor_id=actor_id, **_create_kwargs(seats=7)
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs(seats=7)
         )
         await s.commit()
         sub_id = sub.id
@@ -886,7 +925,7 @@ async def test_update_subscription_seats_down_to_active_count_is_allowed(
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
-            s, org_id=org_id, actor_id=actor_id, **_create_kwargs(seats=5)
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs(seats=5)
         )
         await s.commit()
         sub_id = sub.id
@@ -919,7 +958,7 @@ async def test_update_subscription_seats_reduction_ignores_released_seats(
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         sub = await create_subscription(
-            s, org_id=org_id, actor_id=actor_id, **_create_kwargs(seats=5)
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs(seats=5)
         )
         await s.commit()
         sub_id = sub.id
@@ -959,7 +998,9 @@ async def test_get_list_events_write_no_audit(
     org_id, actor_id = await _org_with_user(admin_engine)
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        sub = await create_subscription(s, org_id=org_id, actor_id=actor_id, **_create_kwargs())
+        sub = await create_subscription(
+            s, org_id=org_id, client_id=org_id, actor_id=actor_id, **_create_kwargs()
+        )
         await s.commit()
         sub_id = sub.id
 
@@ -990,7 +1031,9 @@ async def test_another_orgs_subscription_is_hidden_by_rls(
     org_b, actor_b = await _org_with_user(admin_engine)
 
     async with org_session(org_a, engine=app_engine, clients=ClientScope.all()) as s:
-        sub = await create_subscription(s, org_id=org_a, actor_id=actor_a, **_create_kwargs())
+        sub = await create_subscription(
+            s, org_id=org_a, client_id=org_a, actor_id=actor_a, **_create_kwargs()
+        )
         await s.commit()
         sub_id = sub.id
 

@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import BcpFinding, BcpPlan, BcpTest, BcpTestStep
 from app.modules.backup.reporting import backup_evidence_rows
-from app.modules.bcp.service import resolve_scope_devices
+from app.modules.bcp.service import plan_scope_devices
 
 _OUTCOME_KEYS = ("pass", "partial", "fail", "pending")
 _SEVERITY_KEYS = ("low", "medium", "high", "critical")
@@ -73,6 +73,7 @@ def _plan_dict(plan: BcpPlan) -> dict[str, Any]:
     """Shape matching `schema.PlanOut` exactly."""
     return {
         "id": plan.id,
+        "client_id": plan.client_id,
         "name": plan.name,
         "description": plan.description,
         "scope": plan.scope,
@@ -325,7 +326,7 @@ async def bcp_plan_status(
             )
         ).scalar_one()
 
-        devices = await resolve_scope_devices(session, org_id, plan.scope)
+        devices = await plan_scope_devices(session, org_id, plan)
         rows = await backup_evidence_rows(session, org_id)
         scoped = [row for row in rows if row["device_id"] in devices]
         restore_proven_coverage = {

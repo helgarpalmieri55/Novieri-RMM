@@ -16,8 +16,24 @@ doesn't exist at all -- both resolve to `None` and raise
 `ChangeValidationError`. This is invariant #5 (tenant scoping): a change
 must never be able to link an action outside its own org, even if the
 caller can guess or enumerate another org's ids.
+
+THE SAME HOLDS FOR CLIENTS (MSP clients plan 2026-10-26 Task 7, research-5
+§E6). A change is one client's, so what it links is that client's too: the
+resolver reads the target's client and an action of another client answers
+exactly like a missing one ("linked action not found"), word for word -- a
+narrowed session cannot see it at all, and a wider one is told nothing
+more. A target with no client is every client's: a provisioning run with no
+device yet links to any client's change. A GLOBAL PATCH APPROVAL is the
+exception (decision C8, plan 2026-10-26 Task 14 review): Novieri decides
+it, so only the INTERNAL client's change -- whose id is the organisation's
+-- authorizes it (`gates.has_authorizing_change`). Linked to a customer's
+change it would authorize nothing and the gate would withhold it in
+silence, so that link is refused like a missing one too. Linking and
+unlinking are writes on the change, so they need change management in the
+change's client (`load_change_for_write`).
 """
 
+from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from sqlalchemy import select
@@ -27,29 +43,55 @@ from uuid_extensions import uuid7
 
 from app.core.audit import audit_service
 from app.core.i18n import tr
-from app.models import ChangeLink, ChangeRequest, Deployment, PatchApproval, PatchRun, ProvisionRun
+from app.models import ChangeLink, Deployment, PatchApproval, PatchRun, ProvisionRun
+from app.modules.change_mgmt.service import load_change_for_write
 from app.modules.change_mgmt.state import ChangeNotFoundError, ChangeValidationError
 
-# action_type -> the model to existence-check the target against. Every
-# entry here must be an org-scoped, UUID-`id`-keyed model.
-_LINK_RESOLVERS: dict[str, type] = {
-    "patch_run": PatchRun,
-    "deployment": Deployment,
-    "provision_run": ProvisionRun,
-    "patch_approval": PatchApproval,
+#: A target, as its resolver finds it: absent (`None`), or present with its
+#: client -- `(None,)` for a row with no client, which is every client's.
+Found = tuple[UUID | None] | None
+
+Resolver = Callable[[AsyncSession, UUID, UUID], Awaitable[Found]]
+
+
+def _client_column(model: type) -> Resolver:
+    """A target whose table carries its client: one org-scoped read of it."""
+
+    async def resolve(session: AsyncSession, org_id: UUID, action_id: UUID) -> Found:
+        row = (
+            await session.execute(
+                select(model.client_id).where(  # type: ignore[attr-defined]
+                    model.org_id == org_id,  # type: ignore[attr-defined]
+                    model.id == action_id,  # type: ignore[attr-defined]
+                )
+            )
+        ).one_or_none()
+        return None if row is None else (row[0],)
+
+    return resolve
+
+
+# action_type -> how to find the target and its client. Every entry here must
+# resolve org-scoped (`org_id ==` on every table it reads).
+_LINK_RESOLVERS: dict[str, Resolver] = {
+    "patch_run": _client_column(PatchRun),
+    # Its client is its target's, written by trigger (migration 0239).
+    "deployment": _client_column(Deployment),
+    "provision_run": _client_column(ProvisionRun),
+    "patch_approval": _client_column(PatchApproval),
 }
 
 
-async def _verify_change_exists(session: AsyncSession, org_id: UUID, change_id: UUID) -> None:
-    exists = (
-        await session.execute(
-            select(ChangeRequest.id).where(
-                ChangeRequest.org_id == org_id, ChangeRequest.id == change_id
-            )
-        )
-    ).scalar_one_or_none()
-    if exists is None:
-        raise ChangeNotFoundError(tr("change not found"))
+def _may_authorize(
+    action_type: str, target_client: UUID | None, *, change_client: UUID, org_id: UUID
+) -> bool:
+    """Whether a change of `change_client` may be linked to a target of
+    `target_client`: the same client, or a target with no client -- except a
+    global patch approval, which only the internal client's change (id = the
+    organisation's) authorizes (C8; module docstring)."""
+    if target_client is None:
+        return action_type != "patch_approval" or change_client == org_id
+    return target_client == change_client
 
 
 async def add_link(
@@ -72,22 +114,22 @@ async def add_link(
     indistinguishable by design, and this is a bad *request body* field, not
     a missing path resource), or a duplicate link.
     """
-    await _verify_change_exists(session, org_id, change_id)
+    change = await load_change_for_write(session, org_id, change_id)
 
-    model = _LINK_RESOLVERS.get(action_type)
-    if model is None:
+    resolve = _LINK_RESOLVERS.get(action_type)
+    if resolve is None:
         raise ChangeValidationError(
             tr("unknown action_type {action_type}", action_type=repr(action_type))
         )
 
     # Org-scoped resolution: an action_id from another org is invisible here,
-    # so it raises exactly like a nonexistent one (invariant #5).
-    target_exists = (
-        await session.execute(
-            select(model.id).where(model.org_id == org_id, model.id == action_id)  # type: ignore[attr-defined]
-        )
-    ).scalar_one_or_none()
-    if target_exists is None:
+    # so it raises exactly like a nonexistent one (invariant #5). One of
+    # another CLIENT raises exactly the same, and so does a global patch
+    # approval on any change but the internal client's (module docstring).
+    found = await resolve(session, org_id, action_id)
+    if found is None or not _may_authorize(
+        action_type, found[0], change_client=change.client_id, org_id=org_id
+    ):
         raise ChangeValidationError(tr("linked action not found"))
 
     # Pre-check for a duplicate rather than relying on the unique constraint,
@@ -149,6 +191,7 @@ async def add_link(
         action="change.linked",
         target_type="change",
         target_id=str(change_id),
+        client_id=change.client_id,
         metadata={"action_type": action_type, "action_id": str(action_id)},
     )
     await session.flush()
@@ -166,7 +209,9 @@ async def remove_link(
 ) -> None:
     """Remove an advisory link, org-scoped. Raises `ChangeNotFoundError` (a
     `ChangeValidationError` subclass, maps to HTTP 404) if the link doesn't
-    exist under `org_id`/`change_id` (nonexistent or cross-org)."""
+    exist under `org_id`/`change_id` (nonexistent or cross-org). The change
+    is loaded first: its client needs change management."""
+    change = await load_change_for_write(session, org_id, change_id)
     link = (
         await session.execute(
             select(ChangeLink).where(
@@ -190,6 +235,7 @@ async def remove_link(
         action="change.unlinked",
         target_type="change",
         target_id=str(change_id),
+        client_id=change.client_id,
         metadata={"link_id": str(link_id)},
     )
     await session.flush()

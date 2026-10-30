@@ -99,9 +99,14 @@ class PushAuthorization(Base):
 
     __tablename__ = "push_authorization"
     __table_args__ = (
+        client_org_fk("push_authorization"),
+        # PER CLIENT (migration 0241, plan 2026-10-26 Task 12): a prefix means
+        # something only inside one client's network -- two clients both own
+        # a 10.0.0.0/24 -- so each authorizes it on its own.
         Index(
-            "uq_push_authorization_active",
+            "uq_push_authorization_client_active",
             "org_id",
+            "client_id",
             "prefix",
             unique=True,
             postgresql_where=text("revoked_at IS NULL"),
@@ -116,6 +121,9 @@ class PushAuthorization(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C): the client whose network the prefix is.
+    # Written by `authorization.create_authorization` from the request.
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
     prefix: Mapped[str] = mapped_column(CIDR)
     note: Mapped[str] = mapped_column(String(500), server_default="", default="")
     #: NOT NULL: there is no system-authorized push scope (spec §3).
@@ -166,6 +174,17 @@ class PushCredentialScope(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the credential (migration 0241): never sent; the INSERT reads it back. A
+    # credential with no client cannot have a scope -- NOT NULL refuses it,
+    # and `credential_scope.bind_scope` says so first.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     credential_id: Mapped[UUID] = mapped_column(ForeignKey("credentials.id"))
     prefix: Mapped[str] = mapped_column(CIDR)
     note: Mapped[str] = mapped_column(String(500), server_default="", default="")
@@ -344,13 +363,22 @@ class PushCredentialRealm(Base):
         ForeignKey("credentials.id", ondelete="CASCADE"), primary_key=True
     )
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the credential (migration 0241): never sent.
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     realm: Mapped[str] = mapped_column(String(253))
     recorded_at: Mapped[datetime] = mapped_column(default=_utcnow)
 
 
 #: A run's lifecycle (design §1.4a, §1.5). `running`, `paused` and
-#: `stopped_credential` are ACTIVE; at most one active run per org
-#: (`uq_push_run_active`). `stopped_credential` is the pacer's safety stop after
+#: `stopped_credential` are ACTIVE; at most one active run per client
+#: (`uq_push_run_active`, D3). `stopped_credential` is the pacer's safety stop after
 #: repeated sign-in failures, and only a person's Resume leaves it. `cancelled`
 #: is final.
 PUSH_RUN_STATES = ("running", "paused", "stopped_credential", "cancelled", "completed")
@@ -365,8 +393,10 @@ class PushRun(Base):
     amended 2026-09-30).
 
     **THE LIST IS THE AUTHORITY, NOT THE SUBNET.** `prefix` records what built
-    the list; `list_digest` is the SHA-256 of the ready `(device_id, address)`
-    pairs the person was shown and confirmed (`run_list.compute_list_digest`).
+    the list; `list_digest` is the SHA-256 of the run's client and credential
+    and the ready `(device_id, address)` pairs the person was shown and
+    confirmed (`run_list.compute_list_digest`), so a confirmation binds all
+    three.
     The targets are written once, in the transaction that sets `sealed_at`, and
     the `push_run_target_fixed` trigger refuses any later insert.
 
@@ -384,9 +414,14 @@ class PushRun(Base):
             "state IN ('running', 'paused', 'stopped_credential', 'cancelled', 'completed')",
             name="ck_push_run_state",
         ),
+        client_org_fk("push_run"),
+        # ONE ACTIVE RUN PER CLIENT (operator decision D3, 2026-10-26;
+        # migration 0241), each holding at most `PUSH_RUN_CONCURRENCY` in
+        # flight.
         Index(
             "uq_push_run_active",
             "org_id",
+            "client_id",
             unique=True,
             postgresql_where=text("state IN ('running', 'paused', 'stopped_credential')"),
         ),
@@ -395,6 +430,10 @@ class PushRun(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (C). IT IS THE CREDENTIAL'S CLIENT, written by
+    # `runs.create_run` from it and held there by `its_push_run_client_guard`
+    # (migration 0241), which also refuses any change of it.
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), index=True)
     #: The person who confirmed the list. NOT NULL: no run starts without one.
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     credential_id: Mapped[UUID | None] = mapped_column(
@@ -444,6 +483,16 @@ class PushRunTarget(Base):
 
     id: Mapped[UUID] = uuid7_pk()
     org_id: Mapped[UUID] = mapped_column(ForeignKey("organizations.id"))
+    # MSP clients spec, Annex A (H). Set by trigger its_client_from_parent from
+    # the run (migration 0241): never sent. Its device is of that client
+    # (`its_push_run_target_device_guard`).
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("clients.id"),
+        index=True,
+        server_default=FetchedValue(),
+        # An UPDATE of the fk lets the trigger change it: expired, not stale.
+        server_onupdate=FetchedValue(),
+    )
     run_id: Mapped[UUID] = mapped_column(ForeignKey("push_run.id"))
     device_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("devices.id", ondelete="SET NULL"), default=None

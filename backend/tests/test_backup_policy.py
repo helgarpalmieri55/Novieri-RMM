@@ -26,7 +26,7 @@ async def _setup(admin_engine: AsyncEngine):
         )
         s.add(dev)
         repo = BackupRepository(
-            org_id=org.id, name="primary", storage_ref="x", encryption_key_ref="x"
+            org_id=org.id, client_id=org.id, name="primary", storage_ref="x", encryption_key_ref="x"
         )
         s.add(repo)
         await s.commit()
@@ -47,7 +47,7 @@ async def test_group_policy_wins_over_org_default(
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         s.add(
             BackupPolicy(
-                org_id=org_id,
+                org_id=org_id, client_id=org_id,
                 repository_id=repo_id,
                 device_group_id=None,
                 window_cron="0 3 * * *",
@@ -76,13 +76,13 @@ async def test_org_default_resolves_when_duplicate_null_rows_exist(
     org_id, _, device_id, repo_id = await _setup(admin_engine)
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
         first = BackupPolicy(
-            org_id=org_id, repository_id=repo_id, device_group_id=None,
+            org_id=org_id, client_id=org_id, repository_id=repo_id, device_group_id=None,
             window_cron="first", retention_gfs={"daily": 1},
         )
         s.add(first)
         await s.flush()
         second = BackupPolicy(
-            org_id=org_id, repository_id=repo_id, device_group_id=None,
+            org_id=org_id, client_id=org_id, repository_id=repo_id, device_group_id=None,
             window_cron="second", retention_gfs={"daily": 2},
         )
         s.add(second)

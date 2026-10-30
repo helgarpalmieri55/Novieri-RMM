@@ -54,7 +54,7 @@ from app.core.config import Settings, override_settings
 from app.core.tenancy import org_session
 from app.jobs.registry import UnknownJobType
 from app.models import LicenseComplianceSnapshot, Organization, User
-from app.modules.licenses.reporting import compliance_summary
+from app.modules.licenses.reporting import compliance_summary, reported_clients
 from app.modules.licenses.service import create_product
 from tests.conftest import PgCluster
 
@@ -335,8 +335,8 @@ async def test_licenses_compliance_one_orgs_failure_does_not_abort_the_cycle(
     admin_engine: AsyncEngine, app_engine: AsyncEngine, pg_cluster: PgCluster, tmp_path: Path
 ) -> None:
     """Shape C, with real rows: two orgs each holding one product, the first org
-    the sweep reaches has its `compliance_summary` blow up, and the other org's
-    snapshot must still be ON DISK afterwards.
+    whose position the sweep computes has its `compliance_summary` blow up, and
+    the other org's snapshot must still be ON DISK afterwards.
 
     A compliance series is `computed_at`-stamped, so a day an org was skipped is
     a permanent hole -- the next run does not backfill it. That makes the row
@@ -350,16 +350,29 @@ async def test_licenses_compliance_one_orgs_failure_does_not_abort_the_cycle(
     org_total = await _org_count(admin_engine)
 
     real_summary = compliance_summary
+    real_clients = reported_clients
     visited: list[UUID] = []
+    failed: list[UUID] = []
 
-    async def fake_summary(session: Any, org_id: UUID) -> Any:
+    # Per client since plan 2026-10-26 Task 6: the sweep asks each org for the
+    # clients it reports on (once per org -- that is the visit), then computes
+    # each client's position. An org with no active client has no position to
+    # record and is still visited. The first org whose position is computed
+    # fails there, at its first client.
+    async def fake_clients(session: Any, org_id: UUID) -> Any:
         visited.append(org_id)
-        if len(visited) == 1:
+        return await real_clients(session, org_id)
+
+    async def fake_summary(session: Any, org_id: UUID, *, client_id: UUID) -> Any:
+        if not failed:
+            failed.append(org_id)
+        if org_id == failed[0]:
             raise ConnectionError("asyncpg: server closed the connection unexpectedly")
-        return await real_summary(session, org_id)
+        return await real_summary(session, org_id, client_id=client_id)
 
     escaped: BaseException | None = None
     with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(worker, "reported_clients", fake_clients)
         mp.setattr(worker, "compliance_summary", fake_summary)
         with override_settings(_settings(pg_cluster, tmp_path)):
             try:
@@ -372,8 +385,9 @@ async def test_licenses_compliance_one_orgs_failure_does_not_abort_the_cycle(
         f"loop, so every org after it has no compliance position recorded for this day"
     )
     assert escaped is None, f"{escaped!r} escaped the org loop"
+    assert failed, "no org's position was computed, so no failure was injected"
 
-    doomed = visited[0]
+    doomed = failed[0]
     for org_id in seeded:
         written = await _snapshot_count(app_engine, org_id)
         if org_id == doomed:
@@ -638,6 +652,7 @@ _GUARDED_SHELLS = {
     # Push runs (design 2026-09-30 §1.4): the pacer's backstop signs install
     # jobs per org and decrypts a credential for each, so one org's failure
     # (an OpenBao hiccup, a signer outage) must not skip every other org's run.
+    # Contained per RUN since Task 12's review (`_NARROWER_UNIT`).
     "push_run_tick_all_orgs",
     # docs/modules/ai-automation.md §9.1 names this sweep specifically: "a
     # failure in one org must not abort the others -- the pattern the worker
@@ -666,8 +681,18 @@ _GUARDED_SHELLS = {
 }
 
 
+#: Shells whose unit of containment is NARROWER than an org, by the name of
+#: the loop variable that unit is iterated under. The push-run beat contains
+#: each RUN (MSP clients plan 2026-10-26, Task 12 review): with one active run
+#: per client, one client's failing run must not starve another client's run
+#: in the same org, so the guard sits inside the per-run loop and that is the
+#: loop checked below.
+_NARROWER_UNIT = {"push_run_tick_all_orgs": "run"}
+
+
 def _org_loops() -> dict[str, ast.For]:
-    """Every worker function with a `for org_id in ...` loop, by name."""
+    """Every worker function with a `for org_id in ...` loop -- or, for a
+    shell in `_NARROWER_UNIT`, its per-unit loop -- by name."""
     from app import worker
 
     source = textwrap.dedent(inspect.getsource(worker))
@@ -675,11 +700,12 @@ def _org_loops() -> dict[str, ast.For]:
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef):
             continue
+        unit = _NARROWER_UNIT.get(node.name, "org_id")
         for loop in ast.walk(node):
             if (
                 isinstance(loop, ast.For)
                 and isinstance(loop.target, ast.Name)
-                and loop.target.id == "org_id"
+                and loop.target.id == unit
             ):
                 found[node.name] = loop
     return found

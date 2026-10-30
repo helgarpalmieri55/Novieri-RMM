@@ -261,6 +261,33 @@ one client's scope, which the client-scope RLS of `CLAUDE.md` invariant 5a can
 now express; building it belongs to the MSP clients project (its spec §1.4
 lists reports as per-client), and §15 records it.
 
+> **AMENDED 2026-10-29 (MSP clients plan 2026-10-26, Task 14 and its review):
+> a report runs over the clients on which the person holds every code it
+> needs.** Everything above this note describes phase 1 and is superseded by
+> it. The two paragraphs' reason still holds -- an aggregate over part of the
+> fleet must not count devices the reader may not see -- and it now has the
+> answer it was waiting for: the database computes the aggregate over exactly
+> the part they are entitled to.
+>
+> - **The gate** (`require_report_sources`) counts a code held on ANY client
+>   (`app/core/rbac.py::codes_held_anywhere`). A code held on no client is
+>   still the `403` naming it.
+> - **The run** is narrowed to the clients holding `reporting.read` AND every
+>   code in `requires`, intersected with the request's own scope
+>   (`app/api/deps.py::narrowed_to_every`), and RLS does the rest. A
+>   technician holding every code on client X sees X's rows only; codes held
+>   on DIFFERENT clients intersect to no client, and the run is a `200` with
+>   no rows -- no widening, and no error either.
+> - **The catalogue** (`GET /reports`, §6.2) marks a report `entitled` only
+>   when that intersection is non-empty, so it never promises a report that
+>   runs empty. `missing_permissions` names the codes held on no client, or,
+>   when each is held but on no one client together, the ones missing from a
+>   client where the person holds `reporting.read`
+>   (`app/modules/reporting/service.py::_entitlement`). It is never empty
+>   beside `entitled: false`.
+> - **A grant on every client** is unchanged: the intersection is every
+>   client, and the report is the organisation's, as before.
+
 ### 0.7 Running a report is not audited; exporting one is
 
 Invariant #4 enumerates the privileged actions: job dispatch, credential access,
@@ -628,7 +655,9 @@ in the process can widen at runtime is not "compiled into the image".
 ```
 
 `granted` is `user_permission_codes(session, ctx.user_id)` — org-wide grants
-only (§0.6). The 403 body names the missing codes, because a report the operator
+only (§0.6; since 2026-10-29 a code held on any client counts, and the run is
+narrowed to the clients holding them all, per §0.6's amendment). The 403 body
+names the missing codes, because a report the operator
 cannot run is a permissions conversation and an opaque denial produces a support
 ticket instead.
 
@@ -941,7 +970,8 @@ query (§6.4).
 **RBAC (#6).** Server-side, before the handler, always: `reporting.read` through
 the kernel's `require_permission` (so `route_permission` sees it and every
 router-derived completeness test covers reporting), plus the source conjunction
-through `require_report_sources`. Org-wide grants only (§0.6). The frontend
+through `require_report_sources`. Org-wide grants only (§0.6; per-client since
+2026-10-29, as §0.6's amendment describes). The frontend
 gates nothing — it reads `entitled` from the catalogue to grey out a card, and a
 user who ignores that gets a 403.
 
@@ -1078,7 +1108,9 @@ Test-first, per `CLAUDE.md`. The security-relevant ones are 2–5.
    and every source code gets `200`; the same user missing exactly one source
    code gets `403` naming it — one parametrised case per code, so no report can
    accidentally under-require. Plus a client-scoped-grant case (§0.6) that must
-   also be `403`.
+   also be `403` (since 2026-10-29, §0.6's amendment: a `200` over that client's
+   rows only, `tests/test_reporting_runner.py` and
+   `tests/test_client_record_checks.py`).
 5. **Tenancy.** A report run as org A never returns an org B row, asserted on
    seeded two-org data for every report; and no report route's params model
    declares a field named `org_id`/`org`/`organization_id`.
@@ -1174,7 +1206,8 @@ today, and here is what would unblock it".
   attachment path. Unblocked by the link-only design in §0.11 *plus* a signed,
   expiring, single-use link credential — which is a kernel concern, not this
   module's to invent.
-- **Per-client reports.** §0.6: a grant scoped to one client does not run a
+- **Per-client reports.** *Built 2026-10-29 (§0.6's amendment); kept here as
+  the record of the gap.* §0.6: a grant scoped to one client does not run a
   report. The scoping mechanism now exists (per-client grants, and RLS keyed on
   the session's clients as well as the org, `CLAUDE.md` invariant 5a), so this
   is no longer blocked by the kernel; it waits on the MSP clients project

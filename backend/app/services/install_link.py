@@ -24,8 +24,8 @@ stay as they are -- and writes them to the site. The link's
 own `install_links.networks` column stays in the table and NOTHING READS IT any
 more: `save` still writes it, as a copy of what it wrote to the site, only
 because migration 0170's `ck_install_links_on_needs_code_and_network` refuses a
-switched-on link without one. Dropping the column and that check is on the
-phase-2 cleanup list.
+switched-on link without one. Dropping the column and that check is a cleanup
+for a later migration; MSP clients phase 2 did not take it.
 
 WHAT BOUNDS IT (§1.6): the network list, the hourly limit, the on/off switch,
 the optional automatic switch-off, regeneration -- and the review gate, which is

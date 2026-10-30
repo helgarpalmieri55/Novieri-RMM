@@ -189,6 +189,8 @@ export const devices = {
     emptySwept: "Nothing unaccounted for on the subnets that were swept.",
     emptyAll: "Nothing unaccounted for: every address belongs to a record.",
     select: "Select",
+    ofClient: "Client: {client}",
+    selectOfClient: "{address} of {client}",
     address: "Address",
     mac: "MAC",
     vendor: "Vendor",

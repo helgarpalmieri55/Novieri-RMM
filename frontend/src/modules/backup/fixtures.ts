@@ -17,7 +17,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
-import { devices } from "../../fixtures/core";
+import { devices, ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 import type {
   BackupManifest,
@@ -43,6 +43,7 @@ const notFound = (what: string) => new ApiError(404, JSON.stringify({ detail: `$
 const REPOSITORIES: Repository[] = [
   {
     id: "repo-minio-b4",
+    client_id: ORG_ID,
     name: "MinIO · rack B4",
     storage_ref: "s3://itms-backup/",
     state: "active",
@@ -51,6 +52,7 @@ const REPOSITORIES: Repository[] = [
   },
   {
     id: "repo-offsite",
+    client_id: ORG_ID,
     name: "Offsite · Porto",
     storage_ref: "s3://itms-backup-porto/",
     state: "active",
@@ -59,6 +61,7 @@ const REPOSITORIES: Repository[] = [
   },
   {
     id: "repo-legacy",
+    client_id: ORG_ID,
     name: "Legacy NAS",
     storage_ref: "s3://nas-archive/",
     state: "disabled",
@@ -72,6 +75,7 @@ const REPOSITORIES: Repository[] = [
 const POLICIES: BackupPolicy[] = [
   {
     id: "pol-org-nightly",
+    client_id: ORG_ID,
     device_group_id: null,
     repository_id: "repo-minio-b4",
     sources: { include: ["/home", "C:\\Users"], exclude: ["**/node_modules", "**/.cache"] },
@@ -81,6 +85,7 @@ const POLICIES: BackupPolicy[] = [
   },
   {
     id: "pol-servers",
+    client_id: ORG_ID,
     device_group_id: "grp-servers",
     repository_id: "repo-offsite",
     sources: { include: ["/etc", "/var/lib", "/srv"], snapshot: "lvm" },
@@ -90,6 +95,7 @@ const POLICIES: BackupPolicy[] = [
   },
   {
     id: "pol-pilot",
+    client_id: ORG_ID,
     device_group_id: "grp-pilot",
     repository_id: "repo-legacy",
     sources: {},
@@ -185,6 +191,7 @@ const listBackupRepositories: FixtureMap["listBackupRepositories"] = () => REPOS
 
 const createBackupRepository: FixtureMap["createBackupRepository"] = (body) => ({
   id: `repo-${Date.now()}`,
+  client_id: body.client_id,
   name: body.name,
   storage_ref: `s3://itms-backup-${body.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}/`,
   state: "active",
@@ -198,6 +205,8 @@ const upsertBackupPolicy: FixtureMap["upsertBackupPolicy"] = (body) => {
   const existing = POLICIES.find((p) => (p.device_group_id ?? null) === (body.device_group_id ?? null));
   return {
     id: existing?.id ?? `pol-${Date.now()}`,
+    // A group's is the group's client's; every worked group is the internal client's.
+    client_id: body.client_id ?? ORG_ID,
     device_group_id: body.device_group_id ?? null,
     repository_id: body.repository_id,
     sources: body.sources ?? {},

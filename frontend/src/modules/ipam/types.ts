@@ -1,11 +1,11 @@
 // Mirrors backend/app/modules/ipam/api.py's request/response models exactly
 // (snake_case keys, matching the JSON). THE SHIPPED API IS THE CONTRACT: these
-// types were written against `api.py`'s 40 routes and its Pydantic models
-// directly, not against spec §9's prose, and where the two disagree the API
-// wins.
+// types were written against `api.py`'s routes (38 since MSP clients phase 2)
+// and its Pydantic models directly, not against spec §9's prose, and where the
+// two disagree the API wins.
 //
 // Per invariant #5 nothing here carries `org_id`; per invariant #6 nothing here
-// is a permission — the server's `require_permission` on every one of those 40
+// is a permission — the server's `require_permission` on every one of those 38
 // routes is the only authority, and the permission strings this module reads
 // out of `/me` decide only what RENDERS.
 //
@@ -46,10 +46,18 @@ export const IPAM_SWEEP_MANAGE = "ipam.sweep.manage";
 export const IPAM_SCOPE_MANAGE = "ipam.scope.manage";
 
 // --------------------------------------------------------------------------
-// Registry — VRF, site, VLAN
+// Registry — VRF, VLAN
 // --------------------------------------------------------------------------
+//
+// EVERY ROW IS A CLIENT'S (MSP clients phase 2, migration 0240). A create takes
+// its client from its VRF, or a VLAN from its site; `client_id` is sent only
+// when there is neither (`api.ts` adds it), and every output names it. There
+// are no IPAM sites any more: a VLAN's or a subnet's site is one of its
+// client's sites (`ClientSiteOut`, `GET /clients/{id}/sites`).
 
 export interface VrfCreate {
+  /** The client the VRF belongs to: nothing above a VRF could say. */
+  client_id: string;
   name: string;
   rd?: string | null;
   description?: string;
@@ -57,36 +65,28 @@ export interface VrfCreate {
 
 export interface VrfOut {
   id: string;
+  client_id: string;
   name: string;
   rd: string | null;
   description: string;
 }
 
-export interface SiteCreate {
-  name: string;
-  doc_record_id?: string | null;
-  description?: string;
-}
-
-export interface SiteOut {
-  id: string;
-  name: string;
-  doc_record_id: string | null;
-  description: string;
-}
-
 export interface VlanCreate {
   vid: number;
+  /** One of the client's sites; its client is the VLAN's. */
   site_id?: string | null;
+  /** Only for a VLAN with no site. */
+  client_id?: string | null;
   name?: string;
   description?: string;
 }
 
 export interface VlanOut {
   id: string;
+  client_id: string;
   vid: number;
-  /** NULL is an ORG-WIDE VLAN, not a missing site: VLAN 10 legitimately exists
-   * at every site, and `(org_id, site_id, vid)` is the uniqueness key (§0.7). */
+  /** NULL is a VLAN of the WHOLE CLIENT, not a missing site: VLAN 10
+   * legitimately exists at every site, and once per client without one (§0.7). */
   site_id: string | null;
   name: string;
   description: string;
@@ -105,6 +105,8 @@ export const SUBNET_KINDS: readonly SubnetKind[] = ["container", "assignable"];
 export interface SubnetCreate {
   prefix: string;
   vrf_id?: string | null;
+  /** Only with no `vrf_id`: the subnet goes into this client's `global` VRF. */
+  client_id?: string | null;
   kind?: SubnetKind;
   name?: string;
   description?: string;
@@ -129,6 +131,8 @@ export interface SubnetUpdate {
 
 export interface SubnetOut {
   id: string;
+  /** Its VRF's client. */
+  client_id: string;
   vrf_id: string;
   prefix: string;
   kind: string;
@@ -163,6 +167,7 @@ export interface RangeCreate {
 
 export interface RangeOut {
   id: string;
+  client_id: string;
   subnet_id: string;
   kind: string;
   start_address: string;
@@ -300,6 +305,8 @@ export const ALLOCATION_METHODS: readonly AllocationMethod[] = [
 export interface AddressCreate {
   address: string;
   vrf_id?: string | null;
+  /** Only with no `vrf_id`: the address is looked up in this client's `global` VRF. */
+  client_id?: string | null;
   reserve?: boolean;
   device_id?: string | null;
   asset_label?: string;
@@ -318,6 +325,7 @@ export interface AddressUpdate {
 
 export interface AddressOut {
   id: string;
+  client_id: string;
   vrf_id: string;
   subnet_id: string | null;
   address: string;
@@ -414,6 +422,7 @@ export type DriftConfidence = "low" | "medium" | "high";
 
 export interface DriftOut {
   id: string;
+  client_id: string;
   vrf_id: string;
   subnet_id: string | null;
   address: string;
@@ -483,6 +492,8 @@ export interface OrphanOut {
 export interface ScopeCreate {
   prefix: string;
   vrf_id?: string | null;
+  /** Only with no `vrf_id`: the authorization is for this client's `global` VRF. */
+  client_id?: string | null;
   note?: string;
   expires_at?: string | null;
 }
@@ -494,6 +505,7 @@ export interface ScopeCreate {
  */
 export interface ScopeOut {
   id: string;
+  client_id: string;
   vrf_id: string;
   prefix: string;
   note: string;
@@ -534,6 +546,7 @@ export type SweepTrigger = "scheduled" | "manual";
 
 export interface SweepRunOut {
   id: string;
+  client_id: string;
   subnet_id: string;
   job_id: string | null;
   device_id: string | null;
@@ -583,6 +596,13 @@ export interface ImportRowOut {
   error: string;
   detail: Record<string, unknown>;
 }
+
+/**
+ * Where a CSV import goes: a VRF -- its client is the import's -- or, naming
+ * no VRF, a client's `global` VRF (MSP clients phase 2). Sent as `vrf_id` or
+ * `client_id`; the server's digest covers the VRF it resolves to.
+ */
+export type ImportTarget = { vrfId: string } | { clientId: string };
 
 export interface ImportPreviewOut {
   /** The sha256 an `apply` must ECHO to prove it is the file that was

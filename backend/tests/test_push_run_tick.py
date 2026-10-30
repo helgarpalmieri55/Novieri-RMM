@@ -90,6 +90,9 @@ async def test_a_cancelled_run_is_not_continued_by_the_beat(
 async def test_one_failing_org_does_not_stop_the_others(
     admin_engine, app_engine, pg_cluster: PgCluster, tmp_path: Path, published, monkeypatch
 ) -> None:
+    """The beat advances each run in its own transaction (plan 2026-10-26
+    Task 12: in its own client's scope), so the failure is injected where the
+    beat now calls in -- `advance_run` -- for the broken org's run."""
     from app import worker
     from app.modules.agent_push import runs
 
@@ -97,14 +100,14 @@ async def test_one_failing_org_does_not_stop_the_others(
     healthy = await run_world(admin_engine, "rt-good", octet=124, count=1)
     await start_run(app_engine, broken)
     await start_run(app_engine, healthy)
-    real_tick = runs.tick
+    real_advance = runs.advance_run
 
-    async def _flaky(session: Any, org_id: Any, **kw: Any) -> Any:
+    async def _flaky(session: Any, org_id: Any, run_id: Any, **kw: Any) -> Any:
         if org_id == broken.org.org_id:
             raise RuntimeError("this org's pass fails")
-        return await real_tick(session, org_id, **kw)
+        return await real_advance(session, org_id, run_id, **kw)
 
-    monkeypatch.setattr(runs, "tick", _flaky)
+    monkeypatch.setattr(runs, "advance_run", _flaky)
     with override_settings(_settings(pg_cluster, tmp_path)):
         await worker.push_run_tick_all_orgs()
     assert [d for d, _e in published if d == healthy.site_server_device_id] == [

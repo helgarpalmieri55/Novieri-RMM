@@ -24,6 +24,7 @@ def test_license_not_found_is_a_validation_error_subclass() -> None:
 def test_license_create_type_rejects_out_of_domain_value() -> None:
     with pytest.raises(ValidationError):
         LicenseCreate(
+            client_id="00000000-0000-0000-0000-0000000000c1",
             product_id="00000000-0000-0000-0000-000000000001",
             type="subscription",  # not in the allowed Literal
             entitlements=10,
@@ -32,6 +33,7 @@ def test_license_create_type_rejects_out_of_domain_value() -> None:
 
 def test_license_create_valid_with_cost_and_currency() -> None:
     lic = LicenseCreate(
+        client_id="00000000-0000-0000-0000-0000000000c1",
         product_id="00000000-0000-0000-0000-000000000001",
         type="perpetual",
         entitlements=10,
@@ -47,6 +49,7 @@ def test_license_currency_rejects_over_length_value() -> None:
     # 422 at the schema boundary, not a Postgres truncation 500 (spec §9).
     with pytest.raises(ValidationError):
         LicenseCreate(
+            client_id="00000000-0000-0000-0000-0000000000c1",
             product_id="00000000-0000-0000-0000-000000000001",
             type="perpetual",
             entitlements=10,

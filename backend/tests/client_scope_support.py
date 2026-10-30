@@ -1,13 +1,14 @@
 """Clients, sites and per-client technicians for the client-scope tests, and
 spec §2.2's client policies written once (not a test module)."""
 
+import asyncio
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.client_scope_catalog import PHASE_1
+from app.core.client_scope_catalog import SCOPED
 from app.models import Client, Permission, Role, RolePermission, Site, User, UserRole
 from tests.conftest import ApiEnv
 
@@ -93,16 +94,11 @@ _NULL_PINNED = (
     f"(client_id IS NULL AND ({_SCOPE} = 'all' OR ({_SCOPE} = 'list' AND "
     "nullif(current_setting('app.current_clients', true), '') IS NOT NULL)))"
 )
-# ... and written, changed or deleted only under scope all.
+# ... and written, changed or deleted only under scope all -- on EVERY O
+# table. There is no exception left: `users` left it in Task 8 (no narrowed
+# path writes a staff row) and `domain_events` in plan 2026-10-26 Task 15
+# (migration 0243: every publisher names its subject's client).
 _NULL_ALL = f"(client_id IS NULL AND {_SCOPE} = 'all')"
-
-#: THE EXCEPTION, NAMED: the one O table whose `client_isolation` WITH CHECK
-#: admits a NULL row under any pinned scope -- phase 1's client-less domain
-#: events. `users` left it in Task 8: no narrowed path writes a staff row
-#: (`PATCH /me` and the login bookkeeping run under scope all since Task 6b),
-#: so a staff row is created, changed and deleted only under scope all, like
-#: any other global row. Anything else here is a finding.
-NULL_WRITABLE_FROM_ANY_SCOPE = frozenset({"domain_events"})
 
 Shape = tuple[str, str | None, str | None]  # (cmd, USING, WITH CHECK) as written
 
@@ -119,14 +115,13 @@ def expected_client_policies(table: str) -> dict[str, Shape]:
                 f"{_SCOPE} = 'all' OR its_client_visible(id)",
             )
         }
-    entry = PHASE_1[table]
+    entry = SCOPED[table]
     if entry.kind in {"C", "H"}:
         return {"client_isolation": ("ALL", _VISIBLE, _VISIBLE)}
     read = f"{_NULL_PINNED} OR {_VISIBLE}"
     modify = f"{_NULL_ALL} OR {_VISIBLE}"
-    insert = read if table in NULL_WRITABLE_FROM_ANY_SCOPE else modify
     policies: dict[str, Shape] = {
-        "client_isolation": ("ALL", read, insert),
+        "client_isolation": ("ALL", read, modify),
         # `users` included since Task 8: a narrowed scope changes no column
         # of a staff row (`its_user_identity_guard` then holds a visible
         # contact's kind and external_subject; its status is its client's
@@ -170,3 +165,57 @@ async def deparse_policies(conn, shapes: set[Shape]) -> dict[Shape, tuple[str, s
         )
     ).all()
     return {names[r.policyname]: (r.qual, r.with_check) for r in rows}
+
+
+async def internal_client(env: ApiEnv, headers: dict[str, str]) -> str:
+    """The internal client of whoever `headers` sign in as: `/me`'s `org_id`,
+    the id convention -- what the console sends until phase 3's selector
+    (`frontend/src/lib/internalClient.ts`). For helpers that build a create
+    body from headers alone."""
+    me = await env.client.get("/api/v1/me", headers=headers)
+    assert me.status_code == 200, me.text
+    return str(me.json()["org_id"])
+
+
+async def drop_client_keys(session: AsyncSession, table: str, *constraints: str) -> None:
+    """Drop `constraints` of `table` INSIDE `session`'s transaction, which the
+    caller rolls back. For the org-predicate tests (plan 2026-10-26 Task 8,
+    lesson 2): a row of org B under org A's client is what a query's org
+    predicate alone must keep out, and the client keys (`fk_<table>_client_org`
+    and the like) make such a row impossible -- which is also why, once a
+    query filters by client, its org predicate can only be shown to bite with
+    them gone. DDL is transactional in Postgres: nothing outlives the
+    rollback."""
+    for name in constraints:
+        await session.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT {name}"))
+
+
+#: Some session other than the holder's (`:me`) is waiting for a `clients`
+#: row the holder locked. Postgres shows that wait in two rows: the waiter
+#: takes the row's TUPLE lock on `clients` (granted) and then waits for the
+#: holder's TRANSACTION (a `transactionid` lock, not granted) -- so a filter
+#: on `relation = 'clients' AND NOT granted` sees nothing. A second waiter
+#: would queue on the tuple lock itself, not granted; that counts too.
+WAITS_ON_A_CLIENT_ROW = text(
+    "SELECT count(*) FROM pg_locks t "
+    "WHERE t.locktype = 'tuple' AND t.relation = 'clients'::regclass AND t.pid <> :me "
+    "AND (NOT t.granted OR EXISTS ("
+    "  SELECT 1 FROM pg_locks w JOIN pg_locks h ON h.transactionid = w.transactionid "
+    "  WHERE w.pid = t.pid AND w.locktype = 'transactionid' AND NOT w.granted "
+    "  AND h.pid = :me AND h.locktype = 'transactionid' AND h.granted))"
+)
+
+
+async def wait_until_blocked(observer: AsyncSession, holder_pid: int) -> bool:
+    """Whether, within ten seconds, a session waits on a `clients` row the
+    holder (`holder_pid`) locked: for the lock-order tests (plan 2026-10-26
+    Tasks 9 and 14)."""
+    for _ in range(400):
+        await asyncio.sleep(0.025)
+        waiting = (
+            await observer.execute(WAITS_ON_A_CLIENT_ROW, {"me": holder_pid})
+        ).scalar_one()
+        await observer.rollback()
+        if waiting:
+            return True
+    return False

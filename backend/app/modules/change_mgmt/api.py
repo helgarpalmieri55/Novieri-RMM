@@ -72,7 +72,12 @@ from app.modules.change_mgmt.service import (
     transition_change,
     update_change,
 )
-from app.modules.change_mgmt.state import ChangeNotFoundError, ChangeValidationError
+from app.modules.change_mgmt.state import (
+    ChangeClientError,
+    ChangeConflictError,
+    ChangeNotFoundError,
+    ChangeValidationError,
+)
 from app.modules.change_mgmt.ticketing import get_ticket_adapter
 
 router = APIRouter(prefix="/changes", tags=["change-management"])
@@ -93,16 +98,25 @@ def _http_error(exc: ChangeValidationError) -> HTTPException:
     link target is rejected (invariant #5); the SoD guard (`approve cannot
     be the change requester`), an illegal transition, the draft-only edit
     guard, an unknown action_type, and a duplicate link all fall through to
-    400 as well.
+    400 as well. A client this caller cannot see is a 404 too;
+    `ChangeConflictError` (an archived client, for a new change or the
+    ticket a submit opens) is a 409, and `ChangeClientError` ("Sin asignar")
+    a 422. A client without change management never reaches here: its
+    `ModuleNotEnabled` is the app's own 404 handler (`app/main.py`).
     """
     if isinstance(exc, ChangeNotFoundError):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    if isinstance(exc, ChangeConflictError):
+        return HTTPException(status.HTTP_409_CONFLICT, str(exc))
+    if isinstance(exc, ChangeClientError):
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
     return HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
 
 def _change_out(row: ChangeRequest) -> ChangeOut:
     return ChangeOut(
         id=row.id,
+        client_id=row.client_id,
         type=row.type,
         title=row.title,
         description=row.description,
@@ -170,6 +184,7 @@ async def create_change_route(
                 session,
                 org_id=ctx.org_id,
                 actor_id=ctx.user_id,
+                client_id=body.client_id,
                 type_=body.type,
                 title=body.title,
                 description=body.description,
@@ -561,6 +576,7 @@ async def change_evidence_route(
             action="change.evidence_exported",
             target_type="change",
             target_id=str(change_id),
+            client_id=change.client_id,
             metadata={},
         )
 

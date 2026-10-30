@@ -77,6 +77,10 @@ class ProductOut(BaseModel):
 
 
 class LicenseCreate(BaseModel):
+    # The client the license is bought for (plan 2026-10-26 Task 6). A
+    # license is one client's: it holds that client's devices and people
+    # only, and never changes client -- `LicenseUpdate` has no such field.
+    client_id: UUID
     product_id: UUID
     vendor_id: UUID | None = None
     type: LicenseType
@@ -113,6 +117,7 @@ class LicenseOut(BaseModel):
     # carry `has_key` only. Reveal is a separate audited endpoint that
     # returns `LicenseKeyOut`.
     id: UUID
+    client_id: UUID
     product_id: UUID
     vendor_id: UUID | None
     type: str
@@ -163,9 +168,21 @@ class ReviewMapRequest(BaseModel):
 
 class ReviewIgnoreRequest(BaseModel):
     name: str
+    # The client whose computers stop showing it (plan 2026-10-26 Task 6).
+    # Without one the ignore is global -- every client's computers -- and,
+    # like every global row, written only with a scope of every client.
+    client_id: UUID | None = None
+
+
+class ReviewIgnoreOut(BaseModel):
+    id: UUID
+    name: str
+    client_id: UUID | None
 
 
 class ComplianceRow(BaseModel):
+    # One client's position on one product: never summed across clients.
+    client_id: UUID
     product_id: UUID
     name: str
     entitled: int
@@ -176,6 +193,7 @@ class ComplianceRow(BaseModel):
 
 class RenewalRow(BaseModel):
     license_id: UUID
+    client_id: UUID
     product_id: UUID
     trigger: Literal["renewal", "maintenance"]
     due_date: date
@@ -183,6 +201,7 @@ class RenewalRow(BaseModel):
 
 
 class CostRow(BaseModel):
+    client_id: UUID
     product_id: UUID
     currency: str
     total_cost: Decimal

@@ -58,7 +58,7 @@ def _row(table: str, org: PushOrg, credential_id: UUID, prefix: str = "10.9.0.0/
 
     if table == "push_authorization":
         return PushAuthorization(
-            org_id=org.org_id, prefix=prefix, authorized_by=org.user_id
+            org_id=org.org_id, client_id=org.org_id, prefix=prefix, authorized_by=org.user_id
         )
     return PushCredentialScope(
         org_id=org.org_id,
@@ -216,8 +216,8 @@ async def test_an_authorization_with_no_actor_is_refused_by_the_database(
             await session.execute(
                 sqltext(
                     "INSERT INTO push_authorization"
-                    " (id, org_id, prefix, note, authorized_by, authorized_at)"
-                    " VALUES (gen_random_uuid(), :org, '10.0.0.0/24', '', NULL, now())"
+                    " (id, org_id, client_id, prefix, note, authorized_by, authorized_at)"
+                    " VALUES (gen_random_uuid(), :org, :org, '10.0.0.0/24', '', NULL, now())"
                 ),
                 {"org": org.org_id},
             )
@@ -237,7 +237,8 @@ async def test_an_authorization_with_no_actor_is_refused_by_the_database(
 @pytest.mark.parametrize(
     ("index", "predicate"),
     [
-        ("uq_push_authorization_active", "revoked_at IS NULL"),
+        # Per client since migration 0241 (plan 2026-10-26 Task 12).
+        ("uq_push_authorization_client_active", "revoked_at IS NULL"),
         ("uq_push_credential_scope_active", "unbound_at IS NULL"),
     ],
 )
@@ -269,7 +270,8 @@ async def test_a_revoked_prefix_can_be_authorized_again(
     org = await seed_org(admin_engine, "push-regrant")
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         first = PushAuthorization(
-            org_id=org.org_id, prefix="10.11.0.0/24", authorized_by=org.user_id
+            org_id=org.org_id, client_id=org.org_id, prefix="10.11.0.0/24",
+            authorized_by=org.user_id,
         )
         session.add(first)
         await session.commit()
@@ -280,7 +282,8 @@ async def test_a_revoked_prefix_can_be_authorized_again(
         await session.commit()
         session.add(
             PushAuthorization(
-                org_id=org.org_id, prefix="10.11.0.0/24", authorized_by=org.user_id
+                org_id=org.org_id, client_id=org.org_id, prefix="10.11.0.0/24",
+                authorized_by=org.user_id,
             )
         )
         await session.commit()
@@ -310,12 +313,14 @@ async def test_two_active_grants_for_one_prefix_are_refused(
         async with AsyncSession(admin_engine, expire_on_commit=False) as session:
             session.add(
                 PushAuthorization(
-                    org_id=org.org_id, prefix="10.12.0.0/24", authorized_by=org.user_id
+                    org_id=org.org_id, client_id=org.org_id, prefix="10.12.0.0/24",
+                    authorized_by=org.user_id,
                 )
             )
             session.add(
                 PushAuthorization(
-                    org_id=org.org_id, prefix="10.12.0.0/24", authorized_by=org.user_id
+                    org_id=org.org_id, client_id=org.org_id, prefix="10.12.0.0/24",
+                    authorized_by=org.user_id,
                 )
             )
             await session.commit()

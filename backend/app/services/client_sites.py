@@ -16,6 +16,15 @@ the caller. Two refusals, the same everywhere:
 Reads are not refused here: an archived site's link settings and an archived
 client's devices stay readable.
 
+A row that already HAS a client and names a site -- a subnet, a VLAN, a site
+server -- loads it through `site_of_client`, which adds a third refusal,
+`SiteOfAnotherClient` (a 422: the site is visible, just not this row's). And a
+row whose client a trigger writes (an H table, MSP clients spec §2.4) reads
+it back after an UPDATE with `loaded_client`. Both serve every module that
+files rows under a client's site (IPAM and site servers, migration 0240), so
+neither is re-implemented per module; each module maps the exceptions to its
+own errors, as it does `SiteNotFound` and `NotAcceptingNewRows`.
+
 THE CHECK HOLDS UNTIL COMMIT (final review, T9R2 N1). The client is read FOR
 SHARE, and the site with it, so the "not archived" answer cannot go stale
 under a writer: an archive holds the client's row FOR NO KEY UPDATE (and
@@ -28,19 +37,28 @@ revokes, a contact it switches off).
 LOCK ORDER: these are the FIRST locks of the transaction that takes them --
 site, then client -- and archives take the client (`archive_client`) or the
 site then the client (`archive_site`) first too, before any token, link,
-contact or audit lock. A path that already holds the audit chain's lock when
-it gets here would invert that order; push install minting a token per target
-after the previous target's audit is the one such path (a cycle there needs an
-archive of a client with no active device, and resolves as one 40P01).
+contact or audit lock. IPAM is the documented exception: its creates lock the
+client, may insert the client's `global` VRF, and only then lock the site
+(`app.modules.ipam.clients` explains why that cannot deadlock with an
+archive). A path that already holds the audit chain's lock when
+it gets here would invert that order. Push install is the one path that mints
+a token per target after an audit event of the same transaction (the previous
+target's `push.dispatched`, the pacer's `push.refused`, a run's start or
+resume); it takes every target's site, then client, FOR SHARE and sorted
+before its first audit (`app.modules.agent_push.locks.lock_target_scope`,
+plan 2026-10-26 Task 12), so each mint finds its rows already held.
 """
 
+from typing import Any
 from uuid import UUID
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.i18n import tr
+from app.core.i18n import N_, tr, tr_marked
 from app.models import Client, Site
+from app.models.clients import CLIENT_KIND_UNASSIGNED
 
 CLIENT_ARCHIVED = "archived"
 
@@ -55,6 +73,15 @@ class ClientNotFound(LookupError):
 
 class NotAcceptingNewRows(Exception):
     """An archived site or client: a 409 whose `detail` is the sentence."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+class SiteOfAnotherClient(Exception):
+    """A site the caller can see, of another client than the row naming it:
+    a 422 whose `detail` is the sentence (`site_of_client`)."""
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
@@ -146,3 +173,78 @@ async def client_for_new_rows(
     if client.status == CLIENT_ARCHIVED:
         raise NotAcceptingNewRows(tr("that client is archived"))
     return client
+
+
+#: The 404 of a client a request cannot see, named in its body.
+NO_SUCH_CLIENT = N_("no such client")
+
+
+class ClientRefusesNewRow(Exception):
+    """The client a new row is to be filed under cannot take it
+    (`named_client_for_new_rows`): `status_code` 404 (not visible), 409
+    (archived) or 422 (Unassigned), and `detail` the sentence. Each caller
+    answers with both as they are -- a route as an `HTTPException`, a service
+    as its own error."""
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+async def named_client_for_new_rows(
+    session: AsyncSession,
+    *,
+    org_id: UUID,
+    client_id: UUID,
+    unassigned: str,
+    not_found: str = NO_SUCH_CLIENT,
+) -> Client:
+    """`client_for_new_rows` (FOR SHARE, held until commit: the create's FIRST
+    lock), for a row whose client is NAMED -- by the request's body, or by the
+    row's target -- with its three refusals as one `ClientRefusesNewRow`:
+
+    * 404 `not_found` (`no such client` unless the caller names its own:
+      deployments answer for their target);
+    * 409 "that client is archived";
+    * 422 `unassigned`, the module's own sentence: Unassigned is the inbox for
+      what has no owner (plan 2026-10-26 C10), not a client to file under.
+
+    Both sentences are `N_`-marked messages, translated here. One mapping,
+    shared by patch approvals, documentation and deployments (plan
+    2026-10-26 Task 14 review)."""
+    try:
+        client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
+    except ClientNotFound:
+        raise ClientRefusesNewRow(404, tr_marked(not_found)) from None
+    except NotAcceptingNewRows as exc:
+        raise ClientRefusesNewRow(409, exc.detail) from None
+    if client.kind == CLIENT_KIND_UNASSIGNED:
+        raise ClientRefusesNewRow(422, tr_marked(unassigned))
+    return client
+
+
+async def site_of_client(
+    session: AsyncSession, *, org_id: UUID, site_id: UUID, client_id: UUID | None
+) -> Site:
+    """`site_for_new_rows` (FOR SHARE, site then client, held until commit),
+    for a row that names a site: when the row already has a client,
+    `client_id`, a site of another client is `SiteOfAnotherClient`. With
+    `client_id` None the row takes the site's client (`site.client_id`)."""
+    site = await site_for_new_rows(session, org_id=org_id, site_id=site_id)
+    if client_id is not None and site.client_id != client_id:
+        raise SiteOfAnotherClient(
+            tr("site {site_id} belongs to another client", site_id=site_id)
+        )
+    return site
+
+
+async def loaded_client(session: AsyncSession, row: Any) -> UUID:
+    """`row.client_id`, read back if an UPDATE flush expired it. An H table's
+    client is `server_onupdate` (its trigger may change it), so after any
+    UPDATE of the row the attribute is unloaded -- and in an async session a
+    lazy load is a `MissingGreenlet`, not a query."""
+    if "client_id" in sa_inspect(row).unloaded:
+        await session.refresh(row, ["client_id"])
+    client_id: UUID = row.client_id
+    return client_id

@@ -1,9 +1,10 @@
 """People REST API (docs/modules/people/spec.md §3).
 
 Every route is gated server-side. Leaver checklists additionally need
-`people.offboard`, checked in the handler because the checklist's kind is
-only known once it is loaded. Static paths are declared before
-`/people/{person_id}` so they are never parsed as an id.
+`people.offboard` IN THE PERSON'S CLIENT, checked in the handler because the
+checklist's kind, and the person's client, are only known once loaded. Static
+paths are declared before `/people/{person_id}` so they are never parsed as an
+id.
 """
 
 from typing import Any
@@ -19,7 +20,12 @@ from app.core.tenancy import org_session
 from app.models import DevicePerson, Person
 from app.modules.people import checklists, service
 from app.modules.people.detail import person_detail
-from app.modules.people.errors import PeopleConflictError, PeopleError, PeopleNotFoundError
+from app.modules.people.errors import (
+    PeopleClientError,
+    PeopleConflictError,
+    PeopleError,
+    PeopleNotFoundError,
+)
 from app.modules.people.schema import (
     AccountLink,
     ChecklistOut,
@@ -47,6 +53,8 @@ def _http(exc: PeopleError) -> HTTPException:
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
     if isinstance(exc, PeopleConflictError):
         return HTTPException(status.HTTP_409_CONFLICT, str(exc))
+    if isinstance(exc, PeopleClientError):
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
     return HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
 
@@ -66,17 +74,20 @@ def _device_out(
     )
 
 
-async def _require_offboard(session: AsyncSession, ctx: AuthContext) -> None:
-    if not await has_permission(session, ctx.user_id, "people.offboard"):
+async def _require_offboard(session: AsyncSession, ctx: AuthContext, client_id: UUID) -> None:
+    """`people.offboard` on every client or on the person's own (T4-C2): a
+    technician of X offboards X's people without holding it anywhere else."""
+    if not await has_permission(session, ctx.user_id, "people.offboard", client_id=client_id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, tr("requires people.offboard"))
 
 
 async def _checklist_out(
-    session: AsyncSession, org_id: UUID, person_id: UUID, checklist_id: UUID
+    session: AsyncSession, ctx: AuthContext, person_id: UUID, checklist_id: UUID
 ) -> ChecklistOut:
+    org_id = ctx.org_id
     person = await service.load_person(session, org_id, person_id)
     row = await checklists.load_checklist(session, org_id, person_id, checklist_id)
-    facts = await checklists.gather_facts(session, org_id, person)
+    facts = await checklists.gather_facts(session, org_id, person, viewer_id=ctx.user_id)
     view: dict[str, Any] = await checklists.checklist_view(session, org_id, row, facts)
     return ChecklistOut.model_validate(view)
 
@@ -377,9 +388,10 @@ async def start_checklist(
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        if body.kind == "leaver":
-            await _require_offboard(session, ctx)
         try:
+            if body.kind == "leaver":
+                person = await service.load_person(session, ctx.org_id, person_id)
+                await _require_offboard(session, ctx, person.client_id)
             row = await checklists.start_checklist(
                 session,
                 org_id=ctx.org_id,
@@ -387,7 +399,7 @@ async def start_checklist(
                 person_id=person_id,
                 kind=body.kind,
             )
-            return await _checklist_out(session, ctx.org_id, person_id, row.id)
+            return await _checklist_out(session, ctx, person_id, row.id)
         except PeopleError as exc:
             raise _http(exc) from exc
 
@@ -407,7 +419,8 @@ async def update_step(
         try:
             row = await checklists.load_checklist(session, ctx.org_id, person_id, checklist_id)
             if row.kind == "leaver":
-                await _require_offboard(session, ctx)
+                # The checklist's client is its person's (H).
+                await _require_offboard(session, ctx, row.client_id)
             await checklists.update_step(
                 session,
                 org_id=ctx.org_id,
@@ -418,7 +431,7 @@ async def update_step(
                 state=body.state,
                 note=body.note,
             )
-            return await _checklist_out(session, ctx.org_id, person_id, checklist_id)
+            return await _checklist_out(session, ctx, person_id, checklist_id)
         except PeopleError as exc:
             raise _http(exc) from exc
 
@@ -432,7 +445,7 @@ async def _close(
         try:
             row = await checklists.load_checklist(session, ctx.org_id, person_id, checklist_id)
             if row.kind == "leaver":
-                await _require_offboard(session, ctx)
+                await _require_offboard(session, ctx, row.client_id)
             await checklists.close_checklist(
                 session,
                 org_id=ctx.org_id,
@@ -441,7 +454,7 @@ async def _close(
                 checklist_id=checklist_id,
                 outcome=outcome,
             )
-            return await _checklist_out(session, ctx.org_id, person_id, checklist_id)
+            return await _checklist_out(session, ctx, person_id, checklist_id)
         except PeopleError as exc:
             raise _http(exc) from exc
 

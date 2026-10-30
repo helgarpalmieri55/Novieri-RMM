@@ -74,11 +74,17 @@ export function usePushAuthorizations(includeRevoked: boolean) {
   });
 }
 
+/**
+ * The body is BUILT when the mutation runs, not when the button is wired: its
+ * `client_id` may not be known yet (`/me` in flight), and `requireKnown`
+ * throwing there is a refusal the form shows, not an exception in a click
+ * handler (`lib/internalClient.ts`).
+ */
 export function useCreatePushAuthorizationMutation() {
   const api = useApi();
   const client = useQueryClient();
-  return useMutation<PushAuthorizationOut, ApiError, PushAuthorizationCreate>({
-    mutationFn: (body) => api.createPushAuthorization(body),
+  return useMutation<PushAuthorizationOut, Error, () => PushAuthorizationCreate>({
+    mutationFn: (build) => api.createPushAuthorization(build()),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: [PUSH_AUTHORIZATIONS_KEY] });
     },
@@ -247,11 +253,18 @@ export function usePushRequestMutation() {
 
 export const PUSH_RUNS_KEY = "agent-push-runs";
 
-export function usePushRunPrefixes() {
+/**
+ * The subnets a run with `credentialId` may be built from: its CLIENT's active
+ * authorizations (MSP clients phase 2, Task 12). A run is made in its
+ * credential's client, so the credential is chosen first and only then are
+ * subnets offered; nothing is asked for before.
+ */
+export function usePushRunPrefixes(credentialId: string) {
   const api = useApi();
   return useQuery<PushRunPrefixOut[], ApiError>({
-    queryKey: [PUSH_RUNS_KEY, "prefixes"],
-    queryFn: () => api.listPushRunPrefixes(),
+    queryKey: [PUSH_RUNS_KEY, "prefixes", credentialId],
+    queryFn: () => api.listPushRunPrefixes(credentialId),
+    enabled: credentialId !== "",
     ...NO_RETRY,
   });
 }

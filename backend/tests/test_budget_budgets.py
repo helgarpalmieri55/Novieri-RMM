@@ -55,11 +55,13 @@ async def _org_with_user(api_env) -> tuple[UUID, UUID]:
 
 
 async def _seed_category(session: AsyncSession, org_id: UUID, user_id: UUID, key: str = "hardware"):
-    return await create_category(session, org_id, user_id, key=key, name=key.title())
+    return await create_category(session, org_id, user_id, client_id=org_id,
+                                 key=key, name=key.title())
 
 
 async def _seed_cost_center(session: AsyncSession, org_id: UUID, user_id: UUID, code: str = "ENG"):
-    return await create_cost_center(session, org_id, user_id, code=code, name=f"{code} team")
+    return await create_cost_center(session, org_id, user_id, client_id=org_id,
+                                    code=code, name=f"{code} team")
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +73,8 @@ async def test_create_budget_persists_fields_and_defaults_to_draft(api_env) -> N
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26 IT Budget", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26 IT Budget", granularity="month"
         )
     assert budget.org_id == org_id
     assert budget.fiscal_year == 2026
@@ -85,7 +88,8 @@ async def test_create_budget_audits(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="quarter"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="quarter"
         )
         event = (
             await session.execute(
@@ -107,11 +111,13 @@ async def test_duplicate_fiscal_year_and_name_in_one_org_is_rejected(api_env) ->
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         with pytest.raises(BudgetValidationError):
             await create_budget(
-                session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="quarter"
+                session, org_id, user_id, client_id=org_id,
+                fiscal_year=2026, name="FY26", granularity="quarter"
             )
 
 
@@ -146,7 +152,7 @@ async def test_create_budget_concurrent_duplicate_raises_typed_error_not_integri
                 precheck_seen = True
                 async with AsyncSession(admin_engine, expire_on_commit=False) as session_b:
                     winner = Budget(
-                        org_id=org_id,
+                        org_id=org_id, client_id=org_id,
                         fiscal_year=2026,
                         name="FY26",
                         granularity="quarter",
@@ -159,7 +165,8 @@ async def test_create_budget_concurrent_duplicate_raises_typed_error_not_integri
         session_a.execute = interleaving_execute  # type: ignore[method-assign]
         with pytest.raises(BudgetValidationError, match="budget already exists"):
             await create_budget(
-                session_a, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+                session_a, org_id, user_id, client_id=org_id,
+                fiscal_year=2026, name="FY26", granularity="month"
             )
         await session_a.commit()
 
@@ -187,11 +194,13 @@ async def test_same_fiscal_year_and_name_in_two_orgs_is_fine(api_env) -> None:
     org_b, user_b = await _org_with_user(api_env)
     async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget_a = await create_budget(
-            session, org_a, user_a, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_a, user_a, client_id=org_a,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
     async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget_b = await create_budget(
-            session, org_b, user_b, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_b, user_b, client_id=org_b,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
     assert budget_a.id != budget_b.id
     assert budget_a.org_id != budget_b.org_id
@@ -202,11 +211,13 @@ async def test_list_budgets_returns_only_this_orgs_budgets(api_env) -> None:
     org_b, user_b = await _org_with_user(api_env)
     async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_budget(
-            session, org_a, user_a, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_a, user_a, client_id=org_a,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
     async with org_session(org_b, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_budget(
-            session, org_b, user_b, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_b, user_b, client_id=org_b,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         budgets_b = await list_budgets(session, org_b)
     assert len(budgets_b) == 1
@@ -220,13 +231,16 @@ async def test_list_budgets_is_ordered_by_fiscal_year_desc_then_name(api_env) ->
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         await create_budget(
-            session, org_id, user_id, fiscal_year=2025, name="FY25", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2025, name="FY25", granularity="month"
         )
         await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="Zeta", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="Zeta", granularity="month"
         )
         await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="Alpha", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="Alpha", granularity="month"
         )
         budgets = await list_budgets(session, org_id)
     assert [(b.fiscal_year, b.name) for b in budgets] == [
@@ -252,7 +266,8 @@ async def test_update_budget_changes_name_and_status(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         updated = await update_budget(
             session, org_id, user_id, budget.id, {"name": "FY26 Renamed", "status": "active"}
@@ -267,7 +282,8 @@ async def test_update_budget_ignores_fiscal_year_and_granularity(api_env) -> Non
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         updated = await update_budget(
             session,
@@ -285,7 +301,8 @@ async def test_update_budget_rejects_null_name(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         with pytest.raises(BudgetValidationError):
             await update_budget(session, org_id, user_id, budget.id, {"name": None})
@@ -295,7 +312,8 @@ async def test_update_budget_audits_only_the_changed_field_names(api_env) -> Non
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         await update_budget(
             session, org_id, user_id, budget.id, {"name": "FY26", "status": "active"}
@@ -320,7 +338,8 @@ async def test_close_budget_sets_status_closed(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         closed = await close_budget(session, org_id, user_id, budget.id)
     assert closed.status == "closed"
@@ -330,7 +349,8 @@ async def test_closing_a_budget_is_audited(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         await close_budget(session, org_id, user_id, budget.id)
         event = (
@@ -355,7 +375,8 @@ async def test_put_lines_creates_lines_resolving_category_and_cost_center(api_en
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         cat = await _seed_category(session, org_id, user_id)
         cc = await _seed_cost_center(session, org_id, user_id)
@@ -387,7 +408,8 @@ async def test_put_lines_accepts_null_cost_center_for_an_org_wide_line(api_env) 
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         cat = await _seed_category(session, org_id, user_id)
         lines = await put_lines(
@@ -413,7 +435,8 @@ async def test_put_lines_upserts_rather_than_duplicating(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         cat = await _seed_category(session, org_id, user_id)
         cc = await _seed_cost_center(session, org_id, user_id)
@@ -469,7 +492,8 @@ async def test_put_lines_dedupes_a_repeated_key_within_one_call(api_env) -> None
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         cat = await _seed_category(session, org_id, user_id)
         lines = await put_lines(
@@ -501,7 +525,8 @@ async def test_duplicate_org_wide_line_is_rejected_by_the_partial_index(api_env)
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         cat = await _seed_category(session, org_id, user_id)
 
@@ -531,7 +556,8 @@ async def test_period_index_is_validated_against_granularity(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         monthly = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="Monthly", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="Monthly", granularity="month"
         )
         cat = await _seed_category(session, org_id, user_id)
         lines = await put_lines(
@@ -549,7 +575,8 @@ async def test_period_index_is_validated_against_granularity(api_env) -> None:
         assert lines[0].period_index == 5
 
         quarterly = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="Quarterly", granularity="quarter"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="Quarterly", granularity="quarter"
         )
         with pytest.raises(BudgetValidationError):
             await put_lines(
@@ -576,7 +603,8 @@ async def test_put_lines_rejects_a_cross_org_category_id_without_partial_write(a
 
     async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_a, user_a, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_a, user_a, client_id=org_a,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         own_cat = await _seed_category(session, org_a, user_a)
 
@@ -616,7 +644,8 @@ async def test_put_lines_rejects_a_cross_org_cost_center_id(api_env) -> None:
 
     async with org_session(org_a, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_a, user_a, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_a, user_a, client_id=org_a,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         own_cat = await _seed_category(session, org_a, user_a)
 
@@ -640,7 +669,8 @@ async def test_put_lines_audits_once_per_call_with_the_line_count(api_env) -> No
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         cat = await _seed_category(session, org_id, user_id)
         cc = await _seed_cost_center(session, org_id, user_id)
@@ -688,7 +718,8 @@ async def test_delete_line_removes_the_row_and_audits(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         cat = await _seed_category(session, org_id, user_id)
         lines = await put_lines(
@@ -728,7 +759,8 @@ async def test_delete_line_on_unknown_id_raises_not_found(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         with pytest.raises(BudgetNotFoundError):
             await delete_line(session, org_id, user_id, budget.id, uuid7())
@@ -752,7 +784,8 @@ async def test_update_budget_cannot_reopen_a_closed_budget(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         cat = await _seed_category(session, org_id, user_id)
         await close_budget(session, org_id, user_id, budget.id)
@@ -784,7 +817,8 @@ async def test_a_closed_budget_rejects_line_mutations(api_env) -> None:
     org_id, user_id = await _org_with_user(api_env)
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         budget = await create_budget(
-            session, org_id, user_id, fiscal_year=2026, name="FY26", granularity="month"
+            session, org_id, user_id, client_id=org_id,
+            fiscal_year=2026, name="FY26", granularity="month"
         )
         cat = await _seed_category(session, org_id, user_id)
         lines = await put_lines(
@@ -847,7 +881,7 @@ async def test_tenancy_get_budget_org_filter_is_load_bearing(
     org_b, user_b = await _org_with_user(api_env)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         budget_b = Budget(
-            org_id=org_b, fiscal_year=2026, name="FY26", granularity="month",
+            org_id=org_b, client_id=org_b, fiscal_year=2026, name="FY26", granularity="month",
             status="draft", created_by=user_b,
         )
         session.add(budget_b)
@@ -874,7 +908,7 @@ async def test_tenancy_put_lines_category_resolution_is_load_bearing(
     org_b, user_b = await _org_with_user(api_env)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         cat_b = ExpenseCategory(
-            org_id=org_b, key="widgets", name="Org B Widgets", created_by=user_b
+            org_id=org_b, client_id=org_b, key="widgets", name="Org B Widgets", created_by=user_b
         )
         session.add(cat_b)
         await session.commit()
@@ -882,7 +916,7 @@ async def test_tenancy_put_lines_category_resolution_is_load_bearing(
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         budget_a = Budget(
-            org_id=org_a, fiscal_year=2026, name="FY26", granularity="month",
+            org_id=org_a, client_id=org_a, fiscal_year=2026, name="FY26", granularity="month",
             status="draft", created_by=user_a,
         )
         session.add(budget_a)
@@ -914,7 +948,7 @@ async def test_tenancy_put_lines_cost_center_resolution_is_load_bearing(
     org_b, user_b = await _org_with_user(api_env)
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         cc_b = CostCenter(
-            org_id=org_b, code="ENG", name="Org B Engineering", created_by=user_b
+            org_id=org_b, client_id=org_b, code="ENG", name="Org B Engineering", created_by=user_b
         )
         session.add(cc_b)
         await session.commit()
@@ -922,11 +956,11 @@ async def test_tenancy_put_lines_cost_center_resolution_is_load_bearing(
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         cat_a = ExpenseCategory(
-            org_id=org_a, key="hardware", name="Hardware", created_by=user_a
+            org_id=org_a, client_id=org_a, key="hardware", name="Hardware", created_by=user_a
         )
         session.add(cat_a)
         budget_a = Budget(
-            org_id=org_a, fiscal_year=2026, name="FY26", granularity="month",
+            org_id=org_a, client_id=org_a, fiscal_year=2026, name="FY26", granularity="month",
             status="draft", created_by=user_a,
         )
         session.add(budget_a)

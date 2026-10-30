@@ -33,6 +33,7 @@ import type {
   OrgUpdateRequest,
 } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { loadingUntilClient, requireKnown } from "../../lib/internalClient";
 import type { AiProviderOut, AiSettingsOut, AiSettingsUpdate } from "../ai-admin/types";
 import type { SettingsOut as BudgetSettingsOut, SettingsUpdate as BudgetSettingsUpdate } from "../budget/types";
 import type { SettingsOut as HealthSettingsOut, SettingsUpdate as HealthSettingsUpdate } from "../health/types";
@@ -398,24 +399,32 @@ export function useUpdateHealthSettingsMutation() {
 }
 
 // --------------------------------------------------------------------------
-// Budget — GET/PUT /budget/settings
+// Budget — GET/PUT /budget/settings?client_id=
+//
+// ONE CLIENT'S SETTINGS (MSP clients phase 2, plan 2026-10-26 Task 8): each
+// client has its own base currency and fiscal year, so both calls name the
+// client. `clientId` is `null` until `/me` has answered: the read waits for
+// it, and a save throws `InternalScopeUnknown` (nothing is sent). Same query
+// key shape as the budget module's (`budget/api.ts`), so they share a cache.
 // --------------------------------------------------------------------------
 
-export function useBudgetSettings(enabled: boolean) {
+export function useBudgetSettings(clientId: string | null, enabled: boolean) {
   const api = useApi();
-  return useQuery<BudgetSettingsOut, ApiError>({
-    queryKey: [BUDGET_SETTINGS_KEY],
-    queryFn: () => api.getBudgetSettings(),
-    enabled,
+  const query = useQuery<BudgetSettingsOut, ApiError>({
+    queryKey: [BUDGET_SETTINGS_KEY, clientId],
+    queryFn: () => api.getBudgetSettings(requireKnown(clientId)),
+    enabled: enabled && clientId != null,
     ...NO_RETRY,
   });
+  // Waiting for the client is loading -- when the read is wanted at all.
+  return enabled ? loadingUntilClient(query, clientId) : query;
 }
 
-export function useUpdateBudgetSettingsMutation() {
+export function useUpdateBudgetSettingsMutation(clientId: string | null) {
   const api = useApi();
   const queryClient = useQueryClient();
   return useMutation<BudgetSettingsOut, ApiError, BudgetSettingsUpdate>({
-    mutationFn: (body) => api.updateBudgetSettings(body),
+    mutationFn: (body) => api.updateBudgetSettings(requireKnown(clientId), body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [BUDGET_SETTINGS_KEY] });
     },
@@ -601,6 +610,22 @@ export function useClients(enabled: boolean, params: { include_archived?: boolea
     enabled,
     ...NO_RETRY,
   });
+}
+
+/**
+ * A client's name by id, for a column that names each row's client (MSP
+ * clients phase 2: licence compliance and renewals, subscription spend --
+ * reports that are one row per client, never summed across clients). Reads
+ * `GET /clients`, archived ones included because a row may be an archived
+ * client's, and only for someone holding `clients.read`. Without it, or until
+ * it answers, the id stands in, as the ticket page's client panel does.
+ */
+export function useClientName(): (clientId: string) => string {
+  const me = useMe();
+  const canRead = (me.data?.permissions ?? []).includes("clients.read");
+  const clients = useClients(canRead, { include_archived: true });
+  const names = new Map((clients.data ?? []).map((client) => [client.id, client.name]));
+  return (clientId) => names.get(clientId) ?? clientId;
 }
 
 export function useEffectivePermissions(userId: string | null) {

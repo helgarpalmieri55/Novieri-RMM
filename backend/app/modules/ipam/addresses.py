@@ -75,8 +75,9 @@ from app.modules.ipam.errors import (
 )
 from app.modules.ipam.models import IpamAddress, IpamObservation, IpamSubnet
 from app.modules.ipam.net import parse_address, parse_mac
-from app.modules.ipam.registry import ensure_default_vrf, get_vrf
+from app.modules.ipam.registry import vrf_for_new_row
 from app.modules.ipam.subnets import containing_subnet
+from app.services.client_sites import loaded_client
 
 __all__ = [
     "ADDRESS_EDITABLE_FIELDS",
@@ -150,11 +151,19 @@ async def get_address(session: AsyncSession, org_id: UUID, address_id: UUID) -> 
 
 
 async def _resolve_target(
-    session: AsyncSession, org_id: UUID, address: str, vrf_id: UUID | None
+    session: AsyncSession,
+    org_id: UUID,
+    address: str,
+    vrf_id: UUID | None,
+    client_id: UUID | None,
 ) -> tuple[IpamSubnet, str, UUID]:
     """§3.2's shared preamble: the address parses, a subnet in-org holds it, that
     subnet is `assignable`, and the address is not one of the prefix's
     endpoints.
+
+    The VRF is the one named, whose client is the address's (a `client_id`
+    must agree), or without one `client_id`'s `global` VRF
+    (`registry.vrf_for_new_row`): two clients' 10.0.0.5 are two addresses.
 
     Returns `(subnet, canonical address, vrf_id)`. The subnet is DERIVED by
     containment rather than supplied: the caller names an address, and which
@@ -163,10 +172,7 @@ async def _resolve_target(
     parsed = parse_address(address)
     if parsed is None:
         raise IpamValidationError(tr("{address} is not a valid address", address=repr(address)))
-    if vrf_id is None:
-        vrf_id = await ensure_default_vrf(session, org_id)
-    else:
-        await get_vrf(session, org_id, vrf_id)
+    vrf_id, _ = await vrf_for_new_row(session, org_id, vrf_id=vrf_id, client_id=client_id)
 
     subnet = await containing_subnet(session, org_id, vrf_id, str(parsed))
     if subnet is None:
@@ -225,6 +231,10 @@ async def _audit_state_change(
     to_state: str,
     extra: dict[str, Any] | None = None,
 ) -> None:
+    """Called after the transition's flush, which expired the row's
+    trigger-written client: read back here, it names the audit event and
+    stays loaded for the response."""
+    client_id = await loaded_client(session, row)
     await audit_service.record(
         session,
         org_id=org_id,
@@ -235,6 +245,7 @@ async def _audit_state_change(
         action=action,
         target_type="ipam_address",
         target_id=str(row.id),
+        client_id=client_id,
         metadata={
             "address": str(row.address),
             "vrf_id": str(row.vrf_id),
@@ -254,6 +265,7 @@ async def create_address(
     *,
     address: str,
     vrf_id: UUID | None = None,
+    client_id: UUID | None = None,
     hostname: str = "",
     description: str = "",
     origin: str = "manual",
@@ -264,7 +276,7 @@ async def create_address(
     label and a description with no claimant. Reserving and assigning are
     separate calls with their own predicates and their own audit events.
     """
-    subnet, canonical, vrf = await _resolve_target(session, org_id, address, vrf_id)
+    subnet, canonical, vrf = await _resolve_target(session, org_id, address, vrf_id, client_id)
     row = await _existing(session, org_id, vrf, canonical)
     if row is not None:
         raise IpamConflictError(
@@ -342,6 +354,7 @@ async def update_address(
         action="ipam.address_updated",
         target_type="ipam_address",
         target_id=str(row.id),
+        client_id=await loaded_client(session, row),
         metadata={
             "address": str(row.address),
             "from": previous,
@@ -359,6 +372,7 @@ async def assign(
     *,
     address: str,
     vrf_id: UUID | None = None,
+    client_id: UUID | None = None,
     device_id: UUID | None = None,
     asset_label: str = "",
     hostname: str = "",
@@ -373,7 +387,7 @@ async def assign(
     also what `allocate` calls. ONE WRITER: two copies of §3.2's rules is how the
     allocator and the assignment page come to disagree about what is legal.
     """
-    subnet, canonical, vrf = await _resolve_target(session, org_id, address, vrf_id)
+    subnet, canonical, vrf = await _resolve_target(session, org_id, address, vrf_id, client_id)
     row = await _existing(session, org_id, vrf, canonical)
     if row is not None and row.state == "deprecated":
         raise IpamConflictError(
@@ -406,6 +420,7 @@ async def reserve(
     *,
     address: str,
     vrf_id: UUID | None = None,
+    client_id: UUID | None = None,
     hostname: str = "",
     description: str = "",
 ) -> IpamAddress:
@@ -416,7 +431,7 @@ async def reserve(
     different label, and §3.1 would render it `reserved` while the drift
     predicates still read `device_id`.
     """
-    subnet, canonical, vrf = await _resolve_target(session, org_id, address, vrf_id)
+    subnet, canonical, vrf = await _resolve_target(session, org_id, address, vrf_id, client_id)
     kinds = await covering_range_kinds(session, org_id, subnet.id, canonical)
     if "dhcp_pool" in kinds:
         raise IpamConflictError(

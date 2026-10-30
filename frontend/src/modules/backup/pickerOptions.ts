@@ -16,7 +16,7 @@
 import type { PickerOption } from "../../components/picker";
 import { translate } from "../../i18n/core";
 import type { Device, DeviceGroup } from "../../lib/api";
-import type { Repository } from "./types";
+import type { BackupPolicy, Repository } from "./types";
 
 /**
  * WHAT WOULD FILL THESE LISTS. Each names the console surface that populates
@@ -31,6 +31,15 @@ export const devicePickerEmptyHint = (): string => translate("backup.picker.devi
 export const repositoryPickerEmptyHint = (): string => translate("backup.picker.repositoryEmptyHint");
 
 /**
+ * The same empty list for a policy of a client the Repositories page cannot
+ * file a repository under: until the client selector exists it files under
+ * the internal client only (PHASE 3), so the hint names where that client's
+ * repository is made instead, and the editor offers no link.
+ */
+export const repositoryPickerEmptyHintElsewhere = (): string =>
+  translate("backup.picker.repositoryEmptyHintElsewhere");
+
+/**
  * The same two sentences as load-time snapshots, kept only because the
  * module's unit tests import the names. Components call the functions above,
  * which follow the language.
@@ -41,8 +50,8 @@ export const REPOSITORY_PICKER_EMPTY_HINT = repositoryPickerEmptyHint();
 /**
  * A device group, for a policy's scope. Archived groups are excluded -- see
  * `modules/deploy/pickerOptions.ts::groupPickerOptions` for why. This picker
- * always has one more entry than the fetched list: the caller prepends an
- * "All devices" option for the org-wide scope, which has no group id.
+ * always has one more entry than the fetched list: the caller prepends a
+ * "Client default" option for the policy with no group, which has no group id.
  */
 export function groupPickerOptions(groups: readonly DeviceGroup[]): PickerOption[] {
   return groups
@@ -122,4 +131,42 @@ export function nameForOption(
 ): string | null {
   if (!id) return null;
   return options.find((option) => option.id === id)?.label ?? id;
+}
+
+/**
+ * THE CLIENT A POLICY IS (MSP clients phase 2, Task 13), which is the client
+ * whose repositories it may name: a repository serves one client, because its
+ * key travels to every device that backs up into it.
+ *
+ * Taken from the row wherever there is one. With a group chosen, the group's
+ * client -- the stored policy's own when it is that group's; with none, the
+ * client default being edited is its own client's. A NEW client default has
+ * no row to take one from, and is `fallback`'s: the caller's internal client
+ * until the client selector exists (phase 3). `null` while the group's client
+ * is not known (the groups have not loaded), so nothing is offered.
+ */
+export function policyClient(
+  existing: Pick<BackupPolicy, "client_id" | "device_group_id"> | null,
+  deviceGroupId: string,
+  groups: readonly Pick<DeviceGroup, "id" | "client_id">[],
+  fallback: string | null,
+): string | null {
+  if (deviceGroupId !== "") {
+    if (existing?.device_group_id === deviceGroupId && existing.client_id) {
+      return existing.client_id;
+    }
+    return groups.find((group) => group.id === deviceGroupId)?.client_id ?? null;
+  }
+  if (existing && existing.device_group_id === null && existing.client_id) {
+    return existing.client_id;
+  }
+  return fallback;
+}
+
+/** The repositories a policy of `client` may name: that client's, and only those. */
+export function repositoriesOfClient(
+  repositories: readonly Repository[],
+  client: string | null,
+): Repository[] {
+  return client === null ? [] : repositories.filter((repository) => repository.client_id === client);
 }

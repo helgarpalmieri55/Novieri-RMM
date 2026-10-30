@@ -1,11 +1,14 @@
 """Maintenance-window matching: a pure-stdlib cron matcher shared by any
 module that gates dispatch on a maintenance window (patch — docs/modules/patch/
-spec.md — and deploy).
+spec.md — and deploy), and `checked_window`, the check a window passes before
+it is stored (backup policies and deployments).
 """
 
+import re
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
-from app.core.i18n import tr
+from app.core.i18n import N_, tr, tr_marked
 
 
 def _parse_cron_field(field: str, lo: int, hi: int) -> set[int]:
@@ -15,6 +18,13 @@ def _parse_cron_field(field: str, lo: int, hi: int) -> set[int]:
     Raises `ValueError` if any expanded value falls outside `[lo, hi]` — an
     out-of-range value would otherwise silently never match, which could
     disable a device's maintenance window forever with no error.
+
+    A range is judged by its two ends BEFORE it is expanded: the values of
+    `range(start, end + 1, step)` all lie between its first and last, so the
+    ends decide exactly what expanding then checking decided -- without first
+    building a set of every number in `0-999999999`, which held the process
+    (and its memory) for as long as that took. What an expression yields is
+    unchanged; which out-of-range value the refusal names may differ.
     """
     values: set[int] = set()
     for raw_part in field.split(","):
@@ -33,19 +43,60 @@ def _parse_cron_field(field: str, lo: int, hi: int) -> set[int]:
             start, end = int(start_s), int(end_s)
         else:
             start = end = int(base)
-        values.update(range(start, end + 1, step))
-    for value in values:
-        if value < lo or value > hi:
-            raise ValueError(
-                tr(
-                    "cron field value {value} out of range [{lo}, {hi}] in field {field}",
-                    value=value,
-                    lo=lo,
-                    hi=hi,
-                    field=repr(field),
+        span = range(start, end + 1, step)
+        if span:
+            low, high = min(span[0], span[-1]), max(span[0], span[-1])
+            if low < lo or high > hi:
+                raise ValueError(
+                    tr(
+                        "cron field value {value} out of range [{lo}, {hi}] in field {field}",
+                        value=low if low < lo else high,
+                        lo=lo,
+                        hi=hi,
+                        field=repr(field),
+                    )
                 )
-            )
+        values.update(span)
     return values
+
+
+@dataclass(frozen=True)
+class CronFields:
+    """A five-field expression, read: the matching values of each field, and
+    whether day-of-month and day-of-week are restricted (for the OR rule)."""
+
+    minutes: set[int]
+    hours: set[int]
+    doms: set[int]
+    months: set[int]
+    dows: set[int]
+    dom_restricted: bool
+    dow_restricted: bool
+
+
+def parse_cron(cron: str) -> CronFields:
+    """Read `cron` the way `last_fire` does, or raise `ValueError`. Day of
+    week 7 is Sunday, as 0 is."""
+    parts = cron.split()
+    if len(parts) != 5:
+        raise ValueError(tr("invalid cron expression (expected 5 fields): {cron}", cron=repr(cron)))
+    minute_f, hour_f, dom_f, month_f, dow_f = parts
+    minutes = _parse_cron_field(minute_f, 0, 59)
+    hours = _parse_cron_field(hour_f, 0, 23)
+    months = _parse_cron_field(month_f, 1, 12)
+    doms = _parse_cron_field(dom_f, 1, 31)
+    dows = _parse_cron_field(dow_f, 0, 7)
+    if 7 in dows:
+        dows.add(0)
+    return CronFields(
+        minutes=minutes,
+        hours=hours,
+        doms=doms,
+        months=months,
+        dows=dows,
+        dom_restricted=dom_f.strip() != "*",
+        dow_restricted=dow_f.strip() != "*",
+    )
 
 
 def window_open(cron: str | None, now: datetime) -> bool:
@@ -169,19 +220,14 @@ def last_fire(
     minute. Same field grammar and day-of-month/day-of-week OR rule as
     `window_open`, evaluated in `now`'s timezone.
     """
-    parts = cron.split()
-    if len(parts) != 5:
-        raise ValueError(tr("invalid cron expression (expected 5 fields): {cron}", cron=repr(cron)))
-    minute_f, hour_f, dom_f, month_f, dow_f = parts
-    minutes = sorted(_parse_cron_field(minute_f, 0, 59), reverse=True)
-    hours = sorted(_parse_cron_field(hour_f, 0, 23), reverse=True)
-    months = _parse_cron_field(month_f, 1, 12)
-    dom_restricted = dom_f.strip() != "*"
-    dow_restricted = dow_f.strip() != "*"
-    doms = _parse_cron_field(dom_f, 1, 31)
-    dows = _parse_cron_field(dow_f, 0, 7)
-    if 7 in dows:
-        dows.add(0)
+    fields = parse_cron(cron)
+    minutes = sorted(fields.minutes, reverse=True)
+    hours = sorted(fields.hours, reverse=True)
+    months = fields.months
+    dom_restricted = fields.dom_restricted
+    dow_restricted = fields.dow_restricted
+    doms = fields.doms
+    dows = fields.dows
 
     def day_matches(day: date) -> bool:
         if day.month not in months:
@@ -205,3 +251,70 @@ def last_fire(
                     return candidate if candidate >= floor else None
         day -= timedelta(days=1)
     return None
+
+
+#: `backup_policies.window_cron` and `deployments.window_cron` are `String(120)`.
+WINDOW_MAX = 120
+INVALID_WINDOW = N_(
+    "window_cron must be a cron expression of five fields (minute hour day-of-month month "
+    "day-of-week), or null for no window"
+)
+
+
+class InvalidWindow(ValueError):
+    """A `window_cron` a sweep could not read. Its text is the sentence the
+    API answers, in the person's language."""
+
+    def __init__(self) -> None:
+        super().__init__(tr_marked(INVALID_WINDOW))
+
+
+#: Every character the grammar has (`*`, `*/n`, `a-b`, `a-b/n`, numbers, comma
+#: lists), and the blanks between fields. ASCII only, on purpose: `int()`, which
+#: the parser reads each number with, also takes `_` (`9_9_9` is 999), a sign,
+#: and every script's digits (`int("٩٩")` is 99) -- all outside the grammar.
+_WINDOW_GRAMMAR = re.compile(r"[0-9*/,\- \t]+")
+
+
+def checked_window(cron: str | None) -> str | None:
+    """The `window_cron` a backup policy or a deployment may store (re-reviews
+    of b805432 and 421c806; final review B2 for deployments).
+
+    `None` is no window (a backup policy: on demand only; a deployment: always
+    open). An empty or blank string means the same and is stored as `None`,
+    so "send nothing" and "send an empty field" are one thing rather than a
+    value the sweep would choke on. What passes is stored stripped of
+    surrounding blanks.
+
+    Anything else must be what the sweeps can read, and more:
+
+    1. Only the grammar's own characters (`_WINDOW_GRAMMAR`), and no number of
+       more than two ASCII digits (no field reaches 100), and no longer than
+       the column (120). These run first, without the parser: it runs here on
+       a request, and these are the shapes that once made it expand a huge
+       range (`0-999999999`, or `0-9_9_9_9_9_9_9_9_9` through `int()`).
+    2. `parse_cron` -- what `last_fire` and `in_window` read every window with
+       at every sweep -- must read it.
+    3. No field may match nothing (`30-10`, `*/-1`): the sweep reads such a
+       window, and it never opens.
+
+    Any refusal is `InvalidWindow`. Each window sweep runs one transaction per
+    organisation; the backup and deploy sweeps contain a stored window they
+    cannot read to its own policy or deployment, but a window that is refused
+    here never gets that far."""
+    if cron is None or not cron.strip():
+        return None
+    value = cron.strip()
+    if (
+        len(value) > WINDOW_MAX
+        or not _WINDOW_GRAMMAR.fullmatch(value)
+        or any(len(n) > 2 for n in re.findall(r"[0-9]+", value))
+    ):
+        raise InvalidWindow()
+    try:
+        fields = parse_cron(value)
+    except ValueError:
+        raise InvalidWindow() from None
+    if not all((fields.minutes, fields.hours, fields.doms, fields.months, fields.dows)):
+        raise InvalidWindow()
+    return value

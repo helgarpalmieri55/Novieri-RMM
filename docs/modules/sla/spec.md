@@ -494,6 +494,28 @@ it is raised in pure Python before any statement is issued, so the caller's
 transaction is still intact; that is not true of a DBAPI error, which is the
 other half of why the catch may not be widened.
 
+### 3.3 Amendment (2026-10-29, MSP clients plan 2026-10-26, Task 3): a client's own policies replace the global ones
+
+`sla_policy` is an O table: a row with no client is every client's, and a row
+may belong to one client (`POST /sla/policies` takes an optional `client_id`;
+without one the row is global, and writing it needs every client).
+`policies.resolve_policy` takes the ticket's client. **If that client has any
+active policy of its own, §3's four levels are resolved among its policies
+only; if it has none, among the global ones** (operator decision D2,
+2026-10-26). The two sets are never mixed level by level, so a client that
+defines only `(queue, priority)` does not inherit the global wildcard rows.
+The client predicate is explicit, because the email poller and the sweeps run
+under the every-client scope, where RLS shows every client's policies.
+
+**Moving a ticket to another client** (`docs/modules/service-desk/spec.md`
+§2) resolves its SLA again for the new client (`tracking.recompute_for_move`).
+When a policy resolves, it is a re-triage. **When none does, the `ticket_sla`
+row is deleted in the same transaction**, so the ticket has no SLA in its new
+client — §3's "no policy matched → no row" — and the move's `ticket.moved`
+audit event records `"sla": "voided"`. An ordinary re-triage into an
+unpoliced level still leaves the promise intact, as before. The plan is
+`docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 ---
 
 ## 4. The clock

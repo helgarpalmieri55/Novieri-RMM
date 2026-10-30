@@ -19,7 +19,7 @@ function renderBar() {
           onSelectionChange={() => undefined}
           matchingTotal={1}
           resolveMatching={() => Promise.resolve({ ids: ["p1"], matching: 1, truncated: false })}
-          ringOptions={[{ name: "broad", deviceCount: 12 }]}
+          ringOptions={[{ name: "broad", deviceCount: 12, clientCounts: { o1: 12 } }]}
           fleetDeviceTotal={12}
           scopeName="Windows updates"
         />
@@ -27,6 +27,11 @@ function renderBar() {
     </QueryClientProvider>,
   );
 }
+
+/** `/me`: the approval is filed under its `org_id`, the internal client
+ *  (MSP clients plan 2026-10-26 Task 14). */
+const me = () =>
+  vi.fn().mockResolvedValue({ user_id: "u", org_id: "o1", email: "", display_name: "", permissions: [] });
 
 const APPROVED = {
   id: "c1",
@@ -50,6 +55,7 @@ describe("linking an approval to a change", () => {
       .fn()
       .mockResolvedValue({ items: [], total: 1, newly_approved: 1, already_in_force: 0 });
     mockUseApi.mockReturnValue({
+      me: me(),
       listChanges: vi.fn().mockResolvedValue([APPROVED, { ...APPROVED, id: "c2", title: "Draft", state: "draft" }]),
       bulkApprovePatches,
     });
@@ -64,6 +70,7 @@ describe("linking an approval to a change", () => {
       patch_ids: ["p1"],
       ring_name: "broad",
       change_id: "c1",
+      client_id: "o1",
     });
   });
 
@@ -72,6 +79,7 @@ describe("linking an approval to a change", () => {
     const refusal =
       "Approving updates for the broad ring reaches the Servers group, which needs an approved change. Choose an approved change to link, or have one approved first.";
     mockUseApi.mockReturnValue({
+      me: me(),
       listChanges: vi.fn().mockRejectedValue(new ApiError(403, "")),
       bulkApprovePatches: vi.fn().mockRejectedValue(new ApiError(409, refusal)),
     });
@@ -80,5 +88,22 @@ describe("linking an approval to a change", () => {
     await user.click(await screen.findByRole("button", { name: "Approve" }));
     expect(await screen.findByText(refusal)).toBeTruthy();
     expect(screen.queryByRole("combobox", { name: /Change this approval implements/ })).toBeNull();
+  });
+
+  it("sends nothing before /me has answered, and says why", async () => {
+    // The approval's client is `/me`'s `org_id`; without it the body would be
+    // a global approval nobody chose (MSP clients plan 2026-10-26 Task 14).
+    const user = userEvent.setup();
+    const bulkApprovePatches = vi.fn();
+    mockUseApi.mockReturnValue({
+      me: vi.fn().mockReturnValue(new Promise(() => undefined)),
+      listChanges: vi.fn().mockResolvedValue([]),
+      bulkApprovePatches,
+    });
+    renderBar();
+    await user.click(await screen.findByRole("button", { name: /^Approve 1 update/ }));
+    await user.click(await screen.findByRole("button", { name: "Approve" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Nothing was sent/);
+    expect(bulkApprovePatches).not.toHaveBeenCalled();
   });
 });

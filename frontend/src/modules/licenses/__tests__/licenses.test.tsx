@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
-import type { ApiClient, Me } from "../../../lib/api";
+import type { ApiClient, ClientOut, Me } from "../../../lib/api";
 import { complianceVariant, licenseTypeVariant } from "../licenseState";
 import {
   PRODUCT_PICKER_EMPTY_HINT,
@@ -88,6 +88,18 @@ const ME: Me = {
   timezone: "Asia/Tokyo",
 };
 
+/** A client as `GET /clients` returns it, for the per-client report columns. */
+function clientOut(id: string, name: string): ClientOut {
+  return {
+    id, name, kind: id === "o1" ? "internal" : "customer", status: "active", email_domains: [],
+    phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 0,
+    site_count: 0,
+  };
+}
+
+/** The operator, able to read clients too: report rows then name theirs. */
+const ME_READS_CLIENTS: Me = { ...ME, permissions: [...ME.permissions, "clients.read"] };
+
 // A bodyless 503 is what a proxy returns, and `ApiError` is built as
 // `new ApiError(status, await response.text())` -- so `message` is "". That
 // empty string is why `{error ? <span>{error.message}</span> : null}` rendered
@@ -155,6 +167,7 @@ const PRODUCTS: ProductOut[] = [
 const LICENSES: LicenseOut[] = [
   {
     id: "l1",
+    client_id: "o1",
     product_id: "p1",
     vendor_id: "v1",
     type: "perpetual",
@@ -272,6 +285,31 @@ describe("ProductsPage", () => {
   it("lists products from the mocked api", async () => {
     renderWithProviders(<ProductsPage />);
     expect(await screen.findByText("Acme Office Suite", { selector: ".cell-title" })).toBeInTheDocument();
+  });
+
+  // The compliance report is one row per (client, product) since MSP clients
+  // phase 2, and "Detected" is what inventory found across them: the sum,
+  // not whichever client's row came last.
+  it("detects a product's installs across every client's position", async () => {
+    const position: ComplianceRow = {
+      client_id: "o1",
+      product_id: "p1",
+      name: "Acme Office Suite",
+      entitled: 5,
+      installed: 3,
+      delta: 2,
+      breach: false,
+    };
+    api.licenseCompliance = vi.fn().mockResolvedValue([
+      position,
+      { ...position, client_id: "c2", installed: 4, delta: 1 },
+    ]);
+    renderWithProviders(<ProductsPage />);
+
+    const row = (await screen.findByText("Acme Office Suite", { selector: ".cell-title" })).closest(
+      "tr",
+    ) as HTMLElement;
+    expect(await within(row).findByText("7 installs")).toBeInTheDocument();
   });
 
   it("hides the New product control when the caller lacks licenses.manage", async () => {
@@ -468,6 +506,7 @@ describe("LicensesPage", () => {
   // may take the saturated fill -- and only while there is a breach to act on.
   it("weights the breach tile only when a breach was actually measured", async () => {
     const breach: ComplianceRow = {
+      client_id: "o1",
       product_id: "p1",
       name: "Acme Office Suite",
       entitled: 50,
@@ -487,6 +526,28 @@ describe("LicensesPage", () => {
     expect(tiles[0]?.querySelector(".stat-foot")).toHaveTextContent("Acme Office Suite");
   });
 
+  // Compliance is one row per (client, product) since MSP clients phase 2.
+  // The tile says PRODUCTS ("Productos excedidos"): two clients over on one
+  // product are one product over, and the foot line names it once.
+  it("counts an over-deployed product once however many clients are over", async () => {
+    const breach: ComplianceRow = {
+      client_id: "o1",
+      product_id: "p1",
+      name: "Acme Office Suite",
+      entitled: 50,
+      installed: 55,
+      delta: 5,
+      breach: true,
+    };
+    api.licenseCompliance = vi.fn().mockResolvedValue([breach, { ...breach, client_id: "c2" }]);
+    renderWithProviders(<LicensesPage />);
+    await screen.findAllByText("Acme Office Suite");
+
+    const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
+    expect(tiles[0]?.querySelector(".stat-value")).toHaveTextContent(/^1$/);
+    expect(tiles[0]?.querySelector(".stat-foot")?.textContent).toBe("Acme Office Suite");
+  });
+
   // ZERO IS A MEASUREMENT, NOT AN ABSENCE. "0 breaches" and "the compliance
   // query never answered" are the same shape on a dashboard unless the tile
   // says which it is -- the audit found nine tiles reading 0 on a page where
@@ -499,6 +560,34 @@ describe("LicensesPage", () => {
     expect(screen.getByText("nothing renews in this window")).toBeInTheDocument();
     const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
     expect(tiles.some((tile) => tile.classList.contains("urgent"))).toBe(false);
+  });
+
+  // The compliance report is one row per (client, product) since MSP clients
+  // phase 2. The Compliant tile and its foot say PRODUCTS ("of 2 products
+  // reconciled"), so both count distinct products, and a product is compliant
+  // only when every client's position on it is.
+  it("counts compliant products, not per-client positions", async () => {
+    const position: ComplianceRow = {
+      client_id: "o1",
+      product_id: "p1",
+      name: "Acme Office Suite",
+      entitled: 5,
+      installed: 3,
+      delta: 2,
+      breach: false,
+    };
+    api.licenseCompliance = vi.fn().mockResolvedValue([
+      position,
+      { ...position, client_id: "c2" },
+      { ...position, product_id: "p2", name: "Visio" },
+      { ...position, product_id: "p2", name: "Visio", client_id: "c2", installed: 9, delta: -4, breach: true },
+    ]);
+    renderWithProviders(<LicensesPage />);
+    await screen.findByText("of 2 products reconciled");
+
+    const tiles = [...document.querySelectorAll<HTMLElement>(".stat-card")];
+    expect(tiles[3]?.querySelector(".stat-value")).toHaveTextContent(/^1$/);
+    expect(tiles[3]?.querySelector(".stat-foot")?.textContent).toBe("of 2 products reconciled");
   });
 
   // The other half of the same rule: the failed query renders the em dash, so
@@ -622,7 +711,9 @@ describe("LicensesPage", () => {
     await user.type(screen.getByLabelText("Currency"), "eur");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
+    // The internal client (`/me`'s `org_id`) until phase 3's selector.
     expect(api.createLicense).toHaveBeenCalledWith({
+      client_id: "o1",
       product_id: "p1",
       vendor_id: "v1",
       type: "perpetual",
@@ -868,6 +959,7 @@ describe("ComplianceDashboard", () => {
   });
 
   const ROW: ComplianceRow = {
+    client_id: "o1",
     product_id: "p1",
     name: "Acme Office Suite",
     entitled: 50,
@@ -903,6 +995,38 @@ describe("ComplianceDashboard", () => {
     expect(screen.getByText("5 over")).toBeInTheDocument();
     expect(screen.getByText("55 / 50")).toBeInTheDocument();
   });
+
+  // MSP clients phase 2: a license is one client's, so compliance is one row
+  // per (client, product) and a client's breach is never hidden by another's
+  // spare seats. Each row says whose it is.
+  it("shows a product once per client, each row naming its client", async () => {
+    api.me = vi.fn().mockResolvedValue(ME_READS_CLIENTS);
+    api.listClients = vi.fn().mockResolvedValue([clientOut("o1", "Novieri"), clientOut("c2", "Globex")]);
+    api.licenseCompliance = vi.fn().mockResolvedValue([
+      ROW,
+      { ...ROW, client_id: "c2", installed: 10, delta: -40, breach: false },
+    ]);
+    renderWithProviders(<ComplianceDashboard />);
+
+    expect(await screen.findByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    const titles = await screen.findAllByText("Acme Office Suite");
+    expect(titles).toHaveLength(2);
+    const [mine, theirs] = titles.map((title) => title.closest("tr") as HTMLElement);
+    expect(await within(mine as HTMLElement).findByText("Novieri")).toBeInTheDocument();
+    expect(within(mine as HTMLElement).getByText("5 over")).toBeInTheDocument();
+    expect(within(theirs as HTMLElement).getByText("Globex")).toBeInTheDocument();
+    expect(within(theirs as HTMLElement).getByText("40 free")).toBeInTheDocument();
+    expect(api.listClients).toHaveBeenCalledWith({ include_archived: true });
+  });
+
+  it("names a row's client by its id for someone who cannot read clients", async () => {
+    api.listClients = vi.fn();
+    api.licenseCompliance = vi.fn().mockResolvedValue([ROW]);
+    renderWithProviders(<ComplianceDashboard />);
+    const row = (await screen.findByText("Acme Office Suite")).closest("tr") as HTMLElement;
+    expect(within(row).getByText("o1")).toBeInTheDocument();
+    expect(api.listClients).not.toHaveBeenCalled();
+  });
 });
 
 describe("RenewalCalendar (licenses)", () => {
@@ -915,6 +1039,7 @@ describe("RenewalCalendar (licenses)", () => {
 
   const ROW: RenewalRow = {
     license_id: "l1",
+    client_id: "o1",
     product_id: "p1",
     trigger: "renewal",
     due_date: "2026-09-18",
@@ -945,6 +1070,23 @@ describe("RenewalCalendar (licenses)", () => {
     renderWithProviders(<RenewalCalendar />);
     expect(await screen.findByText("Acme Office Suite")).toBeInTheDocument();
     expect(screen.getByText("5 days")).toBeInTheDocument();
+  });
+
+  it("names each renewal's client (MSP clients phase 2)", async () => {
+    api.me = vi.fn().mockResolvedValue(ME_READS_CLIENTS);
+    api.listClients = vi.fn().mockResolvedValue([clientOut("o1", "Novieri"), clientOut("c2", "Globex")]);
+    api.licenseRenewals = vi.fn().mockResolvedValue([ROW, { ...ROW, license_id: "l9", client_id: "c2" }]);
+    renderWithProviders(<RenewalCalendar />);
+
+    expect(await screen.findByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    const titles = await screen.findAllByText("Acme Office Suite");
+    const clients = await Promise.all(
+      titles.map(async (title) => {
+        const row = title.closest("tr") as HTMLElement;
+        return (await within(row).findByText(/Novieri|Globex/)).textContent;
+      }),
+    );
+    expect(clients.sort()).toEqual(["Globex", "Novieri"]);
   });
 
   // Cycle 5. `due_date` is a `date` in schema.py, and `due_in_days` beside it

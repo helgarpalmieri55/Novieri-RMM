@@ -307,4 +307,47 @@ describe("ApiClient", () => {
     expect([url, init.method]).toEqual(["/api/v1/service-desk/tickets/t1/move", "POST"]);
     expect(JSON.parse(init.body as string)).toEqual({ client_id: "c2" });
   });
+
+  // MSP clients phase 2, Task 12: a run is built in its credential's client,
+  // so the subnets it may be built from are asked for with that credential.
+  it("asks for a push run's subnets with the credential", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(new Response("[]", { status: 200 })));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient(() => "t", vi.fn());
+    await client.listPushRunPrefixes("c 1");
+    expect((fetchMock.mock.calls[0] as [string])[0]).toBe(
+      "/api/v1/agent-push/runs/prefixes?credential_id=c+1",
+    );
+  });
+
+  it("names the target in the query string: an IPAM import, and one client's fleet", async () => {
+    // MSP clients phase 2, Task 11: an import goes into the chosen VRF (its
+    // client is the import's) or a client's `global` VRF; the sweeper picker
+    // lists the subnet's client's machines.
+    const fetchMock = vi.fn().mockImplementation(
+      () => Promise.resolve(new Response(JSON.stringify({}), { status: 200 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient(() => "t", vi.fn());
+    const file = new File(["address\n"], "plan.csv", { type: "text/csv" });
+    await client.previewIpamImport(file, { IP: "address" }, { clientId: "c-x" });
+    await client.applyIpamImport(file, { IP: "address" }, "d".repeat(64), { vrfId: "v-x" });
+    await client.listDevices({ clientId: "c-x", limit: 500 });
+    const urls = (fetchMock.mock.calls as [string][]).map(([url]) => new URL(url, "http://x"));
+    expect(
+      urls.map((url) => [
+        url.pathname,
+        url.searchParams.get("client_id"),
+        url.searchParams.get("vrf_id"),
+      ]),
+    ).toEqual([
+      ["/api/v1/ipam/import/preview", "c-x", null],
+      ["/api/v1/ipam/import/apply", null, "v-x"],
+      ["/api/v1/devices", "c-x", null],
+    ]);
+    expect(urls[1]!.searchParams.get("digest")).toBe("d".repeat(64));
+    expect(urls[2]!.searchParams.get("limit")).toBe("500");
+  });
 });

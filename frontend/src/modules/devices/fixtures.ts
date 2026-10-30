@@ -9,7 +9,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
-import { devices } from "../../fixtures/core";
+import { devices, ORG_ID } from "../../fixtures/core";
 import type {
   AssetCandidate,
   Device,
@@ -88,6 +88,8 @@ const GROUP_SEEDS: GroupSeed[] = [
 function group(seed: GroupSeed): DeviceGroup {
   return {
     id: seed.id,
+    // Every worked group is the organisation's own IT's: the internal client.
+    client_id: ORG_ID,
     name: seed.name,
     parent_group_id: seed.parent,
     description: seed.description,
@@ -179,6 +181,7 @@ const CANDIDATES: AssetCandidate[] = [
     sightings: 14,
     confidence: "medium",
     subnet_id: "subnet-2",
+    client_id: ORG_ID,
   },
   {
     address: "10.20.11.57",
@@ -191,6 +194,7 @@ const CANDIDATES: AssetCandidate[] = [
     sightings: 2,
     confidence: "low",
     subnet_id: "subnet-3",
+    client_id: ORG_ID,
   },
 ];
 

@@ -44,6 +44,7 @@ from app.modules.budget.budgets import (
 )
 from app.modules.budget.errors import BudgetNotFoundError
 from app.modules.budget.refdata import DEFAULT_CATEGORIES
+from tests.client_scope_support import internal_client
 from tests.conftest import ApiEnv
 
 API = "/api/v1/budget"
@@ -93,7 +94,12 @@ async def _create_category(
 ) -> dict[str, Any]:
     resp = await api_env.client.post(
         f"{API}/categories",
-        json={"key": key, "name": name, "sort_order": sort_order},
+        json={
+            "client_id": await internal_client(api_env, headers),
+            "key": key,
+            "name": name,
+            "sort_order": sort_order,
+        },
         headers=headers,
     )
     assert resp.status_code == 201, resp.text
@@ -105,7 +111,9 @@ async def _create_cost_center(
     api_env: ApiEnv, headers: dict[str, str], *, code: str = "CC1", name: str = "Cost Center 1"
 ) -> dict[str, Any]:
     resp = await api_env.client.post(
-        f"{API}/cost-centers", json={"code": code, "name": name}, headers=headers
+        f"{API}/cost-centers",
+        json={"client_id": await internal_client(api_env, headers), "code": code, "name": name},
+        headers=headers,
     )
     assert resp.status_code == 201, resp.text
     body: dict[str, Any] = resp.json()
@@ -122,7 +130,12 @@ async def _create_budget(
 ) -> dict[str, Any]:
     resp = await api_env.client.post(
         f"{API}/budgets",
-        json={"fiscal_year": fiscal_year, "name": name, "granularity": granularity},
+        json={
+            "client_id": await internal_client(api_env, headers),
+            "fiscal_year": fiscal_year,
+            "name": name,
+            "granularity": granularity,
+        },
         headers=headers,
     )
     assert resp.status_code == 201, resp.text
@@ -134,6 +147,7 @@ async def _create_expense(
     api_env: ApiEnv, headers: dict[str, str], category_id: str, **overrides: Any
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
+        "client_id": await internal_client(api_env, headers),
         "expense_date": "2026-01-15",
         "amount": "100.00",
         "currency": "USD",
@@ -196,15 +210,23 @@ async def test_technician_is_denied_every_budget_route(api_env: ApiEnv) -> None:
     # concrete requests, is what makes a future 34th route fail this test
     # instead of silently shipping ungated -- a hand-maintained list alone
     # stays green even when it falls out of sync with the router.
+    # Every request names the internal client (plan 2026-10-26 Task 8), so
+    # each 403 below is RBAC's, not a missing client's.
+    client = {"client_id": str(org_id)}
     routes: list[tuple[str, str, str, dict[str, Any]]] = [
-        ("GET", "/budget/settings", f"{API}/settings", {}),
-        ("PUT", "/budget/settings", f"{API}/settings", {"json": {"base_currency": "EUR"}}),
+        ("GET", "/budget/settings", f"{API}/settings", {"params": client}),
+        (
+            "PUT",
+            "/budget/settings",
+            f"{API}/settings",
+            {"params": client, "json": {"base_currency": "EUR"}},
+        ),
         ("GET", "/budget/categories", f"{API}/categories", {}),
         (
             "POST",
             "/budget/categories",
             f"{API}/categories",
-            {"json": {"key": "svc2", "name": "Services 2"}},
+            {"json": {**client, "key": "svc2", "name": "Services 2"}},
         ),
         (
             "PATCH",
@@ -217,7 +239,7 @@ async def test_technician_is_denied_every_budget_route(api_env: ApiEnv) -> None:
             "POST",
             "/budget/cost-centers",
             f"{API}/cost-centers",
-            {"json": {"code": "CC2", "name": "Cost 2"}},
+            {"json": {**client, "code": "CC2", "name": "Cost 2"}},
         ),
         (
             "PATCH",
@@ -243,7 +265,7 @@ async def test_technician_is_denied_every_budget_route(api_env: ApiEnv) -> None:
             "POST",
             "/budget/budgets",
             f"{API}/budgets",
-            {"json": {"fiscal_year": 2028, "name": "FY28", "granularity": "month"}},
+            {"json": {**client, "fiscal_year": 2028, "name": "FY28", "granularity": "month"}},
         ),
         ("GET", "/budget/budgets/{budget_id}", f"{API}/budgets/{budget['id']}", {}),
         (
@@ -295,6 +317,7 @@ async def test_technician_is_denied_every_budget_route(api_env: ApiEnv) -> None:
             f"{API}/expenses",
             {
                 "json": {
+                    **client,
                     "expense_date": "2026-01-15",
                     "amount": "50.00",
                     "currency": "USD",
@@ -325,7 +348,7 @@ async def test_technician_is_denied_every_budget_route(api_env: ApiEnv) -> None:
             "POST",
             "/budget/expenses/materialize",
             f"{API}/expenses/materialize",
-            {"json": {"from_date": "2026-01-01", "to_date": "2026-01-31"}},
+            {"json": {**client, "from_date": "2026-01-01", "to_date": "2026-01-31"}},
         ),
         (
             "POST",
@@ -339,9 +362,14 @@ async def test_technician_is_denied_every_budget_route(api_env: ApiEnv) -> None:
             f"{API}/expenses/{expense['id']}/attachment",
             {},
         ),
-        ("GET", "/budget/forecast", f"{API}/forecast", {}),
-        ("GET", "/budget/expenses/export", f"{API}/expenses/export", {}),
-        ("GET", "/budget/expenses/export/odoo", f"{API}/expenses/export/odoo", {}),
+        ("GET", "/budget/forecast", f"{API}/forecast", {"params": client}),
+        ("GET", "/budget/expenses/export", f"{API}/expenses/export", {"params": client}),
+        (
+            "GET",
+            "/budget/expenses/export/odoo",
+            f"{API}/expenses/export/odoo",
+            {"params": client},
+        ),
     ]
 
     for method, _template, path, kwargs in routes:
@@ -394,6 +422,7 @@ async def test_expense_confirm_cannot_create(api_env: ApiEnv) -> None:
     create = await api_env.client.post(
         f"{API}/expenses",
         json={
+            "client_id": str(org_id),
             "expense_date": "2026-01-15",
             "amount": "10.00",
             "currency": "USD",
@@ -428,13 +457,19 @@ async def test_cross_org_budget_id_is_404_not_500(api_env: ApiEnv) -> None:
 
 
 async def test_invalid_granularity_is_422_not_500(api_env: ApiEnv) -> None:
-    _, headers = await _org_admin(api_env, "budget-gran")
+    org_id, headers = await _org_admin(api_env, "budget-gran")
     resp = await api_env.client.post(
         f"{API}/budgets",
-        json={"fiscal_year": 2026, "name": "FYBad", "granularity": "year"},
+        json={
+            "client_id": str(org_id),
+            "fiscal_year": 2026,
+            "name": "FYBad",
+            "granularity": "year",
+        },
         headers=headers,
     )
     assert resp.status_code == 422, resp.text
+    assert "granularity" in resp.text
 
 
 # --------------------------------------------------------------------------- #
@@ -455,11 +490,14 @@ async def test_export_is_audited_and_list_is_not(api_env: ApiEnv) -> None:
         "GET /budget/expenses must never write budget.export"
     )
 
-    export = await api_env.client.get(f"{API}/expenses/export", headers=headers)
+    client = {"client_id": str(org_id)}
+    export = await api_env.client.get(f"{API}/expenses/export", params=client, headers=headers)
     assert export.status_code == 200, export.text
     assert await _audit_count(api_env, org_id, "budget.export") == before + 1
 
-    odoo_export = await api_env.client.get(f"{API}/expenses/export/odoo", headers=headers)
+    odoo_export = await api_env.client.get(
+        f"{API}/expenses/export/odoo", params=client, headers=headers
+    )
     assert odoo_export.status_code == 200, odoo_export.text
     assert await _audit_count(api_env, org_id, "budget.export") == before + 2
 
@@ -510,7 +548,8 @@ async def test_exports_escape_free_text_columns_but_leave_amount_and_date_raw(
     )
     assert expense["amount"] == "-100.00"
 
-    export = await api_env.client.get(f"{API}/expenses/export", headers=headers)
+    client = {"client_id": str(org_id)}
+    export = await api_env.client.get(f"{API}/expenses/export", params=client, headers=headers)
     assert export.status_code == 200, export.text
     rows = list(csv.reader(io.StringIO(export.text)))
     header = rows[0]
@@ -533,7 +572,9 @@ async def test_exports_escape_free_text_columns_but_leave_amount_and_date_raw(
     assert _cell("expense_date") == "2026-01-15"
     assert _cell("status") == "confirmed"
 
-    odoo_export = await api_env.client.get(f"{API}/expenses/export/odoo", headers=headers)
+    odoo_export = await api_env.client.get(
+        f"{API}/expenses/export/odoo", params=client, headers=headers
+    )
     assert odoo_export.status_code == 200, odoo_export.text
     odoo_rows = list(csv.reader(io.StringIO(odoo_export.text)))
     odoo_header = odoo_rows[0]
@@ -577,7 +618,10 @@ async def test_read_only_user_seeding_categories_is_not_attributed_to_them(
     reader = await api_env.create_user(org_id, "auditor")
     reader_headers = await api_env.headers(org_id, reader)
 
-    first = await api_env.client.get(f"{API}/categories", headers=reader_headers)
+    # The seed is per client (plan 2026-10-26 Task 8): a read that names the
+    # internal client seeds its defaults.
+    client = {"client_id": str(org_id)}
+    first = await api_env.client.get(f"{API}/categories", params=client, headers=reader_headers)
     assert first.status_code == 200, first.text
     assert len(first.json()) == len(DEFAULT_CATEGORIES) == 7
 
@@ -604,7 +648,7 @@ async def test_read_only_user_seeding_categories_is_not_attributed_to_them(
     assert seeded[0].actor_type == "system"
     assert seeded[0].actor_id is None
 
-    second = await api_env.client.get(f"{API}/categories", headers=reader_headers)
+    second = await api_env.client.get(f"{API}/categories", params=client, headers=reader_headers)
     assert second.status_code == 200, second.text
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         seeded_after = (
@@ -619,18 +663,19 @@ async def test_read_only_user_seeding_categories_is_not_attributed_to_them(
 
 
 async def test_static_paths_resolve_before_the_id_route(api_env: ApiEnv) -> None:
-    _, headers = await _org_admin(api_env, "budget-ord")
+    org_id, headers = await _org_admin(api_env, "budget-ord")
+    client = {"client_id": str(org_id)}
 
-    export = await api_env.client.get(f"{API}/expenses/export", headers=headers)
+    export = await api_env.client.get(f"{API}/expenses/export", params=client, headers=headers)
     assert export.status_code == 200, export.text
     assert export.headers["content-type"].startswith("text/csv")
 
-    odoo = await api_env.client.get(f"{API}/expenses/export/odoo", headers=headers)
+    odoo = await api_env.client.get(f"{API}/expenses/export/odoo", params=client, headers=headers)
     assert odoo.status_code == 200, odoo.text
 
     materialize = await api_env.client.post(
         f"{API}/expenses/materialize",
-        json={"from_date": "2026-01-01", "to_date": "2026-01-31"},
+        json={**client, "from_date": "2026-01-01", "to_date": "2026-01-31"},
         headers=headers,
     )
     assert materialize.status_code == 200, materialize.text
@@ -638,17 +683,22 @@ async def test_static_paths_resolve_before_the_id_route(api_env: ApiEnv) -> None
 
 
 async def test_forecast_route_resolves(api_env: ApiEnv) -> None:
-    _, headers = await _org_admin(api_env, "budget-fc")
-    resp = await api_env.client.get(f"{API}/forecast", headers=headers)
+    org_id, headers = await _org_admin(api_env, "budget-fc")
+    resp = await api_env.client.get(
+        f"{API}/forecast", params={"client_id": str(org_id)}, headers=headers
+    )
     assert resp.status_code == 200, resp.text
     assert set(resp.json()) == {"rows", "unconvertible_count", "unconvertible_by_currency"}
 
 
 async def test_forecast_months_out_of_range_is_422(api_env: ApiEnv) -> None:
-    _, headers = await _org_admin(api_env, "budget-fcb")
+    org_id, headers = await _org_admin(api_env, "budget-fcb")
     for bad in ("0", "61", "-1", "abc"):
-        resp = await api_env.client.get(f"{API}/forecast?months={bad}", headers=headers)
+        resp = await api_env.client.get(
+            f"{API}/forecast?months={bad}&client_id={org_id}", headers=headers
+        )
         assert resp.status_code == 422, f"months={bad}: {resp.text}"
+        assert "months" in resp.text, resp.text
 
 
 # --------------------------------------------------------------------------- #
@@ -657,7 +707,7 @@ async def test_forecast_months_out_of_range_is_422(api_env: ApiEnv) -> None:
 
 
 async def test_materialize_is_idempotent_through_the_api(api_env: ApiEnv) -> None:
-    _, headers = await _org_admin(api_env, "budget-mat")
+    org_id, headers = await _org_admin(api_env, "budget-mat")
 
     # No manual `seed_default_categories` call: `materialize` lazily seeds
     # the org's default categories itself (C1 fix) -- see
@@ -667,6 +717,7 @@ async def test_materialize_is_idempotent_through_the_api(api_env: ApiEnv) -> Non
     sub = await api_env.client.post(
         "/api/v1/subscriptions",
         json={
+            "client_id": str(org_id),
             "service_name": "Materialized Co",
             "billing_cycle": "monthly",
             "cost_per_cycle": 42,
@@ -677,7 +728,7 @@ async def test_materialize_is_idempotent_through_the_api(api_env: ApiEnv) -> Non
     )
     assert sub.status_code == 201, sub.text
 
-    body = {"from_date": "2026-01-01", "to_date": "2026-01-31"}
+    body = {"client_id": str(org_id), "from_date": "2026-01-01", "to_date": "2026-01-31"}
     first = await api_env.client.post(f"{API}/expenses/materialize", json=body, headers=headers)
     assert first.status_code == 200, first.text
     assert first.json()["created"] == 1
@@ -707,6 +758,7 @@ async def test_brand_new_org_materializes_variance_and_forecast_without_manual_s
     sub = await api_env.client.post(
         "/api/v1/subscriptions",
         json={
+            "client_id": str(org_id),
             "service_name": "Lazy Seed Co",
             "billing_cycle": "monthly",
             "cost_per_cycle": 42,
@@ -719,7 +771,7 @@ async def test_brand_new_org_materializes_variance_and_forecast_without_manual_s
 
     materialize_resp = await api_env.client.post(
         f"{API}/expenses/materialize",
-        json={"from_date": "2026-01-01", "to_date": "2026-01-31"},
+        json={"client_id": str(org_id), "from_date": "2026-01-01", "to_date": "2026-01-31"},
         headers=headers,
     )
     assert materialize_resp.status_code == 200, materialize_resp.text
@@ -731,7 +783,9 @@ async def test_brand_new_org_materializes_variance_and_forecast_without_manual_s
     )
     assert variance_resp.status_code == 200, variance_resp.text
 
-    forecast_resp = await api_env.client.get(f"{API}/forecast?months=1", headers=headers)
+    forecast_resp = await api_env.client.get(
+        f"{API}/forecast?months=1&client_id={org_id}", headers=headers
+    )
     assert forecast_resp.status_code == 200, forecast_resp.text
 
     categories_resp = await api_env.client.get(f"{API}/categories", headers=headers)
@@ -748,9 +802,10 @@ async def test_brand_new_org_materializes_variance_and_forecast_without_manual_s
 
 
 async def test_settings_lifecycle_and_base_currency_mixed_basis_guard(api_env: ApiEnv) -> None:
-    _, headers = await _org_admin(api_env, "budget-settings")
+    org_id, headers = await _org_admin(api_env, "budget-settings")
+    client = {"client_id": str(org_id)}
 
-    initial = await api_env.client.get(f"{API}/settings", headers=headers)
+    initial = await api_env.client.get(f"{API}/settings", params=client, headers=headers)
     assert initial.status_code == 200, initial.text
     assert initial.json()["base_currency"] == "USD"
     assert initial.json()["fiscal_year_start_month"] == 1
@@ -764,12 +819,13 @@ async def test_settings_lifecycle_and_base_currency_mixed_basis_guard(api_env: A
     assert converted["amount_base"] == "100.00"
 
     blocked = await api_env.client.put(
-        f"{API}/settings", json={"base_currency": "EUR"}, headers=headers
+        f"{API}/settings", params=client, json={"base_currency": "EUR"}, headers=headers
     )
     assert blocked.status_code == 400, blocked.text
 
     allowed = await api_env.client.put(
         f"{API}/settings",
+        params=client,
         json={"base_currency": "EUR", "acknowledge_mixed_basis": True},
         headers=headers,
     )
@@ -784,7 +840,7 @@ async def test_settings_lifecycle_and_base_currency_mixed_basis_guard(api_env: A
     assert unchanged.json()["amount_base"] == "100.00"
 
     fiscal = await api_env.client.put(
-        f"{API}/settings", json={"fiscal_year_start_month": 4}, headers=headers
+        f"{API}/settings", params=client, json={"fiscal_year_start_month": 4}, headers=headers
     )
     assert fiscal.status_code == 200, fiscal.text
     assert fiscal.json()["fiscal_year_start_month"] == 4
@@ -1046,7 +1102,7 @@ async def test_unresolvable_rate_creates_expense_with_null_amount_base(
 
 
 async def test_fx_overflow_is_400_not_500(api_env: ApiEnv) -> None:
-    _, headers = await _org_admin(api_env, "budget-overflow")
+    org_id, headers = await _org_admin(api_env, "budget-overflow")
     category = await _create_category(api_env, headers)
 
     rate = await api_env.client.post(
@@ -1059,6 +1115,7 @@ async def test_fx_overflow_is_400_not_500(api_env: ApiEnv) -> None:
     resp = await api_env.client.post(
         f"{API}/expenses",
         json={
+            "client_id": str(org_id),
             "expense_date": "2026-01-15",
             "amount": "900000000000.00",
             "currency": "XXX",
@@ -1385,8 +1442,12 @@ async def test_the_budget_org_predicates_hold_where_rls_is_not_doing_the_rejecti
 
     FALSIFIED: deleting `Budget.org_id == org_id` from `get_budget` returns org
     B's budget to org A and lets `close_budget` close it; deleting it from
-    `list_budgets` returns both orgs' rows; deleting it from `create_budget`'s
-    duplicate pre-check refuses org B a name only org A has used.
+    `list_budgets` returns both orgs' rows -- and, asked for org B's internal
+    client (its id is org B's), org B's budget: the client filter alone does
+    not exclude it, so only the org predicate does (plan 2026-10-26 Task 8,
+    lesson 2). `create_budget`'s duplicate pre-check is per client since Task
+    8, and its client is loaded org-scoped first (`client_for_new_rows`), so
+    org A cannot reach org B's names through it at all.
     """
     org_a, _headers_a = await _org_admin(api_env, "budget-pred-a")
     org_b, _headers_b = await _org_admin(api_env, "budget-pred-b")
@@ -1403,7 +1464,7 @@ async def test_the_budget_org_predicates_hold_where_rls_is_not_doing_the_rejecti
         budget = await create_budget(
             bypassrls_session,
             org_id,
-            actor_id,
+            actor_id, client_id=org_id,
             fiscal_year=2026,
             name="Ops",
             granularity="annual",
@@ -1413,6 +1474,7 @@ async def test_the_budget_org_predicates_hold_where_rls_is_not_doing_the_rejecti
 
     assert [b.id for b in await list_budgets(bypassrls_session, org_a)] == [budgets["a"]]
     assert [b.id for b in await list_budgets(bypassrls_session, org_b)] == [budgets["b"]]
+    assert await list_budgets(bypassrls_session, org_a, client_id=org_b) == []
 
     with pytest.raises(BudgetNotFoundError):
         await get_budget(bypassrls_session, org_a, budgets["b"])

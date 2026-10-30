@@ -15,7 +15,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -40,6 +40,7 @@ function candidate(overrides: Partial<AssetCandidate> = {}): AssetCandidate {
     sightings: 12,
     confidence: "medium",
     subnet_id: null,
+    client_id: "o1",
     ...overrides,
   };
 }
@@ -97,7 +98,8 @@ function renderPage(listAssetCandidates: () => Promise<unknown>, me: Partial<Me>
       state_counts: { all: 0, online: 0, offline: 0, assets: 0, certs: 0 },
       fleet: { total: 0, managed: 0, online: 0, cert_attention: 0 },
     }),
-    me: vi.fn().mockResolvedValue({ permissions: [], ...me } as Me),
+    // `org_id` is the internal client's id, which a promotion names (phase 2).
+    me: vi.fn().mockResolvedValue({ org_id: "o1", permissions: [], ...me } as Me),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui: ReactElement = (
@@ -107,7 +109,8 @@ function renderPage(listAssetCandidates: () => Promise<unknown>, me: Partial<Me>
       </MemoryRouter>
     </QueryClientProvider>
   );
-  return render(ui);
+  // The client too, so a test can make the page read its list again.
+  return { ...render(ui), queryClient };
 }
 
 beforeEach(() => {
@@ -189,6 +192,215 @@ describe("CandidatesPage", () => {
     expect(promote.mock.calls[0]?.[0]).toMatchObject({
       addresses: ["172.22.104.56"],
     });
+  });
+
+  it("names the row's own client, not the internal one", async () => {
+    // Operator decision 2026-10-28, "use the row's client": a technician
+    // narrowed to X sees X's candidates, and `/me` is the organisation's (o1).
+    renderPage(() => Promise.resolve(page({ items: [candidate({ client_id: "c-x" })] })));
+    await screen.findByText("172.22.104.55");
+    await userEvent.click(screen.getByRole("checkbox", { name: /172\.22\.104\.55/ }));
+    await userEvent.click(screen.getByRole("button", { name: /promote/i }));
+
+    await waitFor(() => expect(promote).toHaveBeenCalledTimes(1));
+    expect(promote.mock.calls[0]?.[0]).toEqual({
+      client_id: "c-x",
+      addresses: ["172.22.104.55"],
+    });
+  });
+
+  it("sends one request per client the selected rows are of", async () => {
+    renderPage(() =>
+      Promise.resolve(
+        page({
+          items: [
+            candidate({ address: "10.0.0.1", client_id: "c-x" }),
+            candidate({ address: "10.0.0.2", client_id: "c-y" }),
+            candidate({ address: "10.0.0.3", client_id: "c-x" }),
+          ],
+          total: 3,
+        }),
+      ),
+    );
+    await screen.findByText("10.0.0.1");
+    for (const address of ["10.0.0.1", "10.0.0.2", "10.0.0.3"]) {
+      await userEvent.click(screen.getByRole("checkbox", { name: address }));
+    }
+    await userEvent.click(screen.getByRole("button", { name: /promote/i }));
+
+    await waitFor(() => expect(promote).toHaveBeenCalledTimes(2));
+    const bodies = promote.mock.calls.map((call) => call[0] as { client_id: string });
+    expect(bodies.sort((a, b) => a.client_id.localeCompare(b.client_id))).toEqual([
+      { client_id: "c-x", addresses: ["10.0.0.1", "10.0.0.3"] },
+      { client_id: "c-y", addresses: ["10.0.0.2"] },
+    ]);
+  });
+
+  it("reports every client's outcome together", async () => {
+    promote.mockImplementation((body: { client_id: string; addresses: string[] }) =>
+      Promise.resolve({
+        results: body.addresses.map((address) =>
+          body.client_id === "c-x"
+            ? { address, created: true, device_id: "d-1", reason: "created" }
+            : { address, created: false, device_id: null, reason: "already an asset" },
+        ),
+      }),
+    );
+    renderPage(() =>
+      Promise.resolve(
+        page({
+          items: [
+            candidate({ address: "10.0.0.1", client_id: "c-x" }),
+            candidate({ address: "10.0.0.2", client_id: "c-y" }),
+          ],
+          total: 2,
+        }),
+      ),
+    );
+    await screen.findByText("10.0.0.1");
+    await userEvent.click(screen.getByRole("checkbox", { name: "10.0.0.1" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "10.0.0.2" }));
+    await userEvent.click(screen.getByRole("button", { name: /promote/i }));
+
+    const outcome = await screen.findByRole("alert");
+    expect(outcome).toHaveTextContent("1 of 2 promoted. Not promoted: 10.0.0.2 (already an asset).");
+  });
+
+  it("still reports one client's results when another client's request fails", async () => {
+    promote.mockImplementation((body: { client_id: string; addresses: string[] }) =>
+      body.client_id === "c-x"
+        ? Promise.resolve({
+            results: [{ address: "10.0.0.1", created: true, device_id: "d-1", reason: "created" }],
+          })
+        : Promise.reject(new ApiError(404, JSON.stringify({ detail: "no such client" }))),
+    );
+    renderPage(() =>
+      Promise.resolve(
+        page({
+          items: [
+            candidate({ address: "10.0.0.1", client_id: "c-x" }),
+            candidate({ address: "10.0.0.2", client_id: "c-y" }),
+          ],
+          total: 2,
+        }),
+      ),
+    );
+    await screen.findByText("10.0.0.1");
+    await userEvent.click(screen.getByRole("checkbox", { name: "10.0.0.1" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "10.0.0.2" }));
+    await userEvent.click(screen.getByRole("button", { name: /promote/i }));
+
+    expect(await screen.findByText("1 candidate promoted to assets.")).toBeInTheDocument();
+    expect(await screen.findByText("no such client")).toBeInTheDocument();
+  });
+
+  it("keeps the rows of a client whose request failed selected, and only those", async () => {
+    // Final review E: a partial failure cleared the whole selection, so
+    // retrying the client that failed meant finding and ticking its rows
+    // again. The client that succeeded is done; the one that failed is not.
+    promote.mockImplementation((body: { client_id: string; addresses: string[] }) =>
+      body.client_id === "c-x"
+        ? Promise.resolve({
+            results: [{ address: "10.0.0.1", created: true, device_id: "d-1", reason: "created" }],
+          })
+        : Promise.reject(new ApiError(503, JSON.stringify({ detail: "try again" }))),
+    );
+    renderPage(() =>
+      Promise.resolve(
+        page({
+          items: [
+            candidate({ address: "10.0.0.1", client_id: "c-x" }),
+            candidate({ address: "10.0.0.2", client_id: "c-y" }),
+            candidate({ address: "10.0.0.3", client_id: "c-y" }),
+          ],
+          total: 3,
+        }),
+      ),
+    );
+    await screen.findByText("10.0.0.1");
+    for (const address of ["10.0.0.1", "10.0.0.2", "10.0.0.3"]) {
+      await userEvent.click(screen.getByRole("checkbox", { name: address }));
+    }
+    await userEvent.click(screen.getByRole("button", { name: /promote/i }));
+
+    expect(await screen.findByText("try again")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "10.0.0.1" })).not.toBeChecked());
+    expect(screen.getByRole("checkbox", { name: "10.0.0.2" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "10.0.0.3" })).toBeChecked();
+  });
+
+  it("still sends a selected row a re-read dropped, and the server answers it", async () => {
+    // Task 11 re-review, M-R2: the selection is a snapshot of each ticked row.
+    promote.mockResolvedValue({
+      results: [
+        {
+          address: "10.0.0.1",
+          created: false,
+          device_id: null,
+          reason: "not a candidate: no current observation for this address",
+        },
+      ],
+    });
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce(page({ items: [candidate({ address: "10.0.0.1", client_id: "c-x" })] }))
+      .mockResolvedValue(page({ items: [candidate({ address: "10.0.0.2", client_id: "c-x" })] }));
+    const { queryClient } = renderPage(list);
+    await userEvent.click(await screen.findByRole("checkbox", { name: "10.0.0.1" }));
+    await queryClient.invalidateQueries({ queryKey: ["asset-candidates"] });
+    await screen.findByText("10.0.0.2");
+    expect(screen.queryByText("10.0.0.1")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: /promote 1/i }));
+    await waitFor(() => expect(promote).toHaveBeenCalledTimes(1));
+    expect(promote.mock.calls[0]?.[0]).toEqual({ client_id: "c-x", addresses: ["10.0.0.1"] });
+    expect(await screen.findByText(/Not promoted: 10\.0\.0\.1 \(not a candidate/)).toBeInTheDocument();
+  });
+
+  it("names every failure when every client's request fails", async () => {
+    promote.mockImplementation((body: { client_id: string }) =>
+      Promise.reject(
+        new ApiError(409, JSON.stringify({ detail: `client ${body.client_id} is archived` })),
+      ),
+    );
+    renderPage(() =>
+      Promise.resolve(
+        page({
+          items: [
+            candidate({ address: "10.0.0.1", client_id: "c-x" }),
+            candidate({ address: "10.0.0.2", client_id: "c-y" }),
+          ],
+          total: 2,
+        }),
+      ),
+    );
+    await userEvent.click(await screen.findByRole("checkbox", { name: "10.0.0.1" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "10.0.0.2" }));
+    await userEvent.click(screen.getByRole("button", { name: /promote/i }));
+
+    expect(await screen.findByText("client c-x is archived")).toBeInTheDocument();
+    expect(screen.getByText("client c-y is archived")).toBeInTheDocument();
+    // Nothing went through, so the selection stays for a second try.
+    expect(screen.getByRole("checkbox", { name: "10.0.0.1" })).toBeChecked();
+  });
+
+  it("lists the same address of two clients as two rows, selected apart", async () => {
+    renderPage(() =>
+      Promise.resolve(
+        page({ items: [candidate(), candidate({ client_id: "c-y" })], total: 2 }),
+      ),
+    );
+    expect(await screen.findAllByText("172.22.104.55")).toHaveLength(2);
+    // Each row says whose it is -- the client's name for someone holding
+    // `clients.read`, its id otherwise -- so its checkbox is its own.
+    const own = screen.getByRole("checkbox", { name: "172.22.104.55 of o1" });
+    const theirs = screen.getByRole("checkbox", { name: "172.22.104.55 of c-y" });
+    await userEvent.click(theirs);
+    expect(theirs).toBeChecked();
+    expect(own).not.toBeChecked();
+    await userEvent.click(screen.getByRole("button", { name: /promote 1/i }));
+    await waitFor(() => expect(promote).toHaveBeenCalledTimes(1));
+    expect(promote.mock.calls[0]?.[0]).toEqual({ client_id: "c-y", addresses: ["172.22.104.55"] });
   });
 
   it("will not promote nothing", async () => {

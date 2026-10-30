@@ -125,6 +125,7 @@ const DEVICE_PAGE = { items: DEVICES, total: DEVICES.length };
 const DEVICE_GROUPS: DeviceGroup[] = [
   {
     id: "grp-build",
+    client_id: "o1",
     name: "Build runners",
     parent_group_id: null,
     description: "",
@@ -164,6 +165,7 @@ async function pickEntity(
 const DEPLOYMENTS: Deployment[] = [
   {
     id: "dep1",
+    client_id: "o1",
     package_id: "pkg1",
     action: "install",
     target_type: "device",
@@ -914,6 +916,7 @@ const ME_IN_NEW_YORK: Me = { ...ME, timezone: "America/New_York" };
 const DEVICE_HISTORY: DeviceDeploymentHistory[] = [
   {
     deployment_id: "dep1",
+    client_id: "o1",
     package_id: "pkg1",
     action: "install",
     state: "installed",
@@ -924,6 +927,7 @@ const DEVICE_HISTORY: DeviceDeploymentHistory[] = [
   },
   {
     deployment_id: "dep2",
+    client_id: "o1",
     package_id: "pkg1",
     action: "install",
     state: "running",

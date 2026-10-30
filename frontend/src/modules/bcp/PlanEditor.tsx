@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Form, FormActions, attemptProblems } from "../../components/form";
@@ -6,6 +7,9 @@ import { EntityPicker } from "../../components/picker";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
+import type { Me } from "../../lib/api";
+import { useApi } from "../../lib/ApiContext";
+import { internalClientId, requireKnown } from "../../lib/internalClient";
 import {
   useCreatePlanMutation,
   useProcedureArticles,
@@ -139,6 +143,8 @@ export function PlanEditor({
   onClose: () => void;
 }) {
   const t = useT();
+  const api = useApi();
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const create = useCreatePlanMutation();
   const update = useUpdatePlanMutation();
 
@@ -259,7 +265,14 @@ export function PlanEditor({
     if (existing) {
       update.mutate({ id: existing.id, body }, { onSuccess });
     } else {
-      create.mutate(body, { onSuccess });
+      // A plan is one client's (MSP clients phase 2), and that client must use
+      // continuity: the server's 404 says so in a sentence, which
+      // `FormActions` shows as it is.
+      // PHASE 3: the client/site selector. Until it exists that is the
+      // organisation's internal client, whose id is the organisation's --
+      // `/me`'s `org_id` (`lib/internalClient.ts`).
+      const internalClient = internalClientId(me.data);
+      create.mutate(() => ({ ...body, client_id: requireKnown(internalClient) }), { onSuccess });
     }
   }
 

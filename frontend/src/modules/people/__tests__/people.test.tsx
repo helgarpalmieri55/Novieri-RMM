@@ -48,6 +48,7 @@ function me(...permissions: string[]): Me {
 
 const MARIA: PersonListRow = {
   id: "p1",
+  client_id: "o1",
   display_name: "Maria Garcia",
   email: "maria@corp.example",
   user_id: "u9",
@@ -111,6 +112,7 @@ function detail(overrides: Partial<PersonDetailOut> = {}): PersonDetailOut {
     logins: [{ id: "l1", login: "corp\\maria", created_at: "2026-09-01T09:00:00Z" }],
     account: {
       user_id: "u9",
+      kind: "staff",
       email: "maria@corp.example",
       status: "active",
       last_login_at: "2026-09-22T08:00:00Z",
@@ -220,6 +222,65 @@ describe("PersonPage", () => {
     expect(releaseSeat).toHaveBeenCalledWith("s1");
   });
 
+  it("turns a staff sign-in off through Settings' user endpoint", async () => {
+    const user = userEvent.setup();
+    const setUserEnabled = vi.fn().mockResolvedValue({});
+    const updateContact = vi.fn();
+    const client = api(
+      { getPerson: vi.fn().mockResolvedValue(detail()), setUserEnabled, updateContact },
+      ["people.read", "users.manage"],
+    );
+    mockUseApi.mockReturnValue(client);
+    renderAt(<PersonPage />, "/people/:personId", "/people/p1");
+
+    await user.click(await screen.findByRole("button", { name: "Turn off sign-in" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/You can turn it back on in Settings\./)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Turn off sign-in" }));
+    await vi.waitFor(() => expect(setUserEnabled).toHaveBeenCalledWith("u9", false));
+    expect(updateContact).not.toHaveBeenCalled();
+  });
+
+  it("turns a client contact's sign-in off as a contact, with clients.manage", async () => {
+    const user = userEvent.setup();
+    const setUserEnabled = vi.fn();
+    const updateContact = vi.fn().mockResolvedValue({});
+    const account = detail().account;
+    if (account === null) throw new Error("the fixture has an account");
+    const contact = detail({ account: { ...account, kind: "contact" } });
+    // `users.manage` alone: `/users` is staff-only, so it offers nothing here.
+    const staffAdmin = api({ getPerson: vi.fn().mockResolvedValue(contact) }, [
+      "people.read",
+      "users.manage",
+    ]);
+    mockUseApi.mockReturnValue(staffAdmin);
+    const { unmount } = renderAt(<PersonPage />, "/people/:personId", "/people/p1");
+    expect(await screen.findByRole("heading", { name: "Maria Garcia" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Turn off sign-in" })).toBeNull();
+    unmount();
+
+    const client = api(
+      { getPerson: vi.fn().mockResolvedValue(contact), setUserEnabled, updateContact },
+      ["people.read", "clients.manage"],
+    );
+    mockUseApi.mockReturnValue(client);
+    renderAt(<PersonPage />, "/people/:personId", "/people/p1");
+    await user.click(await screen.findByRole("button", { name: "Turn off sign-in" }));
+    const dialog = await screen.findByRole("dialog");
+    // Not Settings: `/users` is staff-only, and a contact is turned back on as a contact.
+    expect(
+      within(dialog).getByText(
+        "They can no longer use the portal. Until the console can edit a client's contacts, turning it back on is done through the API or an AI connection (MCP).",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Settings/)).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Turn off sign-in" }));
+    await vi.waitFor(() =>
+      expect(updateContact).toHaveBeenCalledWith("u9", { status: "disabled" }),
+    );
+    expect(setUserEnabled).not.toHaveBeenCalled();
+  });
+
   it("asks why before marking a step done that the data disagrees with", async () => {
     const user = userEvent.setup();
     const updateChecklistStep = vi.fn().mockResolvedValue(leaverChecklist());
@@ -305,7 +366,7 @@ async function openPicker(overrides: Partial<Record<keyof ApiClient, unknown>>) 
     ["people.read", "people.manage"],
   );
   mockUseApi.mockReturnValue(client);
-  renderAt(<DeviceAssignedTo deviceId="d1" />, "/devices/:id", "/devices/d1");
+  renderAt(<DeviceAssignedTo deviceId="d1" clientId="c-x" />, "/devices/:id", "/devices/d1");
   await user.click(await screen.findByRole("button", { name: "Change" }));
   const dialog = await screen.findByRole("dialog");
   return { user, client, dialog };
@@ -316,7 +377,7 @@ describe("DeviceAssignedTo", () => {
     const getDevicePerson = vi.fn().mockResolvedValue(devicePerson());
     mockUseApi.mockReturnValue(api({ getDevicePerson }, ["people.read"]));
     const { unmount } = renderAt(
-      <DeviceAssignedTo deviceId="d1" />,
+      <DeviceAssignedTo deviceId="d1" clientId="c-x" />,
       "/devices/:id",
       "/devices/d1",
     );
@@ -333,7 +394,7 @@ describe("DeviceAssignedTo", () => {
     const client = api({ getDevicePerson: hidden }, ["devices.read"]);
     mockUseApi.mockReturnValue(client);
     const { container } = renderAt(
-      <DeviceAssignedTo deviceId="d1" />,
+      <DeviceAssignedTo deviceId="d1" clientId="c-x" />,
       "/devices/:id",
       "/devices/d1",
     );
@@ -347,7 +408,7 @@ describe("DeviceAssignedTo", () => {
       devicePerson({ person: null, source: "inventory", observed_login: "TOESHEE\\aruiz" }),
     );
     mockUseApi.mockReturnValue(api({ getDevicePerson }, ["people.read"]));
-    renderAt(<DeviceAssignedTo deviceId="d1" />, "/devices/:id", "/devices/d1");
+    renderAt(<DeviceAssignedTo deviceId="d1" clientId="c-x" />, "/devices/:id", "/devices/d1");
     expect(await screen.findByTestId("device-assigned-to")).toHaveTextContent(
       "Assigned to: nobody yet · last signed in as TOESHEE\\aruiz",
     );
@@ -356,7 +417,7 @@ describe("DeviceAssignedTo", () => {
   it("says where an automatic holder came from, and offers the way back only from a hand-set one", async () => {
     const getDevicePerson = vi.fn().mockResolvedValue(devicePerson({ source: "inventory" }));
     mockUseApi.mockReturnValue(api({ getDevicePerson }, ["people.read", "people.manage"]));
-    renderAt(<DeviceAssignedTo deviceId="d1" />, "/devices/:id", "/devices/d1");
+    renderAt(<DeviceAssignedTo deviceId="d1" clientId="c-x" />, "/devices/:id", "/devices/d1");
     expect(await screen.findByTestId("device-assigned-to")).toHaveTextContent(
       "Assigned to: Maria Garcia · from who signs in",
     );
@@ -387,7 +448,15 @@ describe("DeviceAssignedTo", () => {
     await user.type(within(dialog).getByLabelText("Email"), "ana@corp.example");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
-    expect(createPerson).toHaveBeenCalledWith({ display_name: "Ana Ruiz", email: "ana@corp.example" });
+    // In the DEVICE'S client (final review E Important 2): the server holds a
+    // device's holder to the device's own client, so a person filed under the
+    // internal client -- as this test used to expect -- could never be
+    // assigned to a customer's machine, and every retry made another.
+    expect(createPerson).toHaveBeenCalledWith({
+      display_name: "Ana Ruiz",
+      email: "ana@corp.example",
+      client_id: "c-x",
+    });
     await vi.waitFor(() => expect(setDevicePerson).toHaveBeenCalledWith("d1", "p7"));
     // Created first, assigned second.
     expect(createPerson.mock.invocationCallOrder[0]).toBeLessThan(
@@ -408,7 +477,7 @@ describe("DeviceAssignedTo", () => {
 
     await user.type(within(dialog).getByLabelText("Name"), "Pat");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
-    expect(createPerson).toHaveBeenCalledWith({ display_name: "Pat", email: null });
+    expect(createPerson).toHaveBeenCalledWith({ display_name: "Pat", email: null, client_id: "c-x" });
     await vi.waitFor(() => expect(setDevicePerson).toHaveBeenCalledWith("d1", "p8"));
   });
 

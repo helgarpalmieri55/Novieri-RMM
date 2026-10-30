@@ -87,12 +87,13 @@ PART_B: dict[str, str] = {
     ),
     # --- agent-push ---
     "GET /api/v1/agent-push/authorizations": (
-        "Lists the network prefixes this organization has authorized for credentialed agent "
-        "push installs, including expired ones. Revoked grants only if asked."
+        "Lists the network prefixes each client has authorized for credentialed agent push "
+        "installs, including expired ones. Revoked grants only if asked."
     ),
     "POST /api/v1/agent-push/authorizations": (
-        "Authorizes a network prefix as a place where a stored credential may be presented "
-        "to machines for a push install. High privilege; widens what pushes can reach."
+        "Authorizes a network prefix of one named client as a place where that client's "
+        "push credentials may be presented to its machines. High privilege; widens what "
+        "pushes can reach."
     ),
     "DELETE /api/v1/agent-push/authorizations/{authorization_id}": (
         "Revokes a push authorization so its prefix is no longer a valid push target. "
@@ -103,8 +104,8 @@ PART_B: dict[str, str] = {
         "Names the credentials but never returns a secret."
     ),
     "POST /api/v1/agent-push/credential-scopes": (
-        "Binds a dedicated push-install credential to an address prefix, allowing it to be "
-        "presented there. High privilege. Refuses any other credential type."
+        "Binds a dedicated push-install credential to an address prefix of its client, "
+        "allowing it to be presented there. High privilege. Refuses any other credential type."
     ),
     "DELETE /api/v1/agent-push/credential-scopes/{scope_id}": (
         "Unbinds a credential from a prefix so it can no longer be presented to addresses "
@@ -119,22 +120,21 @@ PART_B: dict[str, str] = {
         "later pushes to it. High consequence; must equal the last probe's fingerprint."
     ),
     "POST /api/v1/agent-push/requests": (
-        "Probes or installs the agent on explicitly named, unenrolled addresses through a "
-        "site server. An install presents a stored credential to each target. Refused whole "
-        "if any target fails any bound."
+        "Probes or installs the agent on explicitly named, unenrolled addresses of the "
+        "credential's client, through that client's site server. An install presents the "
+        "credential to each target. Refused whole if any target fails any bound."
     ),
     "GET /api/v1/agent-push/runs": (
-        "Lists this organization's push install runs with state and progress."
+        "Lists push install runs with their client, state and progress."
     ),
     "POST /api/v1/agent-push/runs": (
-        "Starts a push install run over the named machines of an authorized subnet, "
-        "confirmed by the list digest from the preview. The platform keeps dispatching the "
-        "remaining targets, up to 50 in flight, until the run is paused or cancelled. "
-        "Refused if the list changed."
+        "Starts a push run over the named machines of an authorized subnet of the "
+        "credential's client, confirmed by the preview's digest. Up to 50 in flight until "
+        "paused or cancelled; one active run per client. Refused if the list changed."
     ),
     "GET /api/v1/agent-push/runs/prefixes": (
-        "Lists the authorized subnets a push run may be built from, with address counts and "
-        "expiry. Read-only."
+        "Lists the authorized subnets a push run may be built from -- with credential_id, "
+        "that credential's client's -- with address counts and expiry. Read-only."
     ),
     "GET /api/v1/agent-push/runs/preview": (
         "Expands an authorized subnet into the named machines a push run would cover, with "
@@ -206,12 +206,14 @@ PART_B: dict[str, str] = {
         "location on its device and checksums it. Does not touch any real destination."
     ),
     "GET /api/v1/backup/policies": (
-        "Lists the backup policies (sources, window, retention, repository) for the "
-        "organization default and for device groups."
+        "Lists the backup policies the caller's clients can see (client, device group, "
+        "sources, window, retention, repository): each client's default and each group's."
     ),
     "PUT /api/v1/backup/policies": (
-        "Creates or replaces the backup policy for the organization default or one device "
-        "group. Governs scheduled backups on the devices it covers. Audited."
+        "Creates or replaces one device group's backup policy, or a client's default "
+        "(client_id, no group). The repository must be that client's, except to switch a "
+        "stored policy off (enabled false) naming the repository it already names. Governs "
+        "scheduled backups on the devices it covers. Audited."
     ),
     "GET /api/v1/backup/recovery-keys": (
         "Lists the backup recovery keys' public keys, fingerprints and proof status. "
@@ -222,27 +224,28 @@ PART_B: dict[str, str] = {
         "points needing verification and deduplication savings. Read-only."
     ),
     "GET /api/v1/backup/repositories": (
-        "Lists the backup repositories (name, dedup parameters, off-site target link). "
-        "Keys are never returned."
+        "Lists the backup repositories the caller's clients can see (client, name, dedup "
+        "parameters, off-site target link). Keys are never returned."
     ),
     "POST /api/v1/backup/repositories": (
-        "Creates an encrypted backup repository and generates its master key into the "
-        "vault. The key is not returned."
+        "Creates an encrypted backup repository for one client (client_id) and generates "
+        "its master key into the vault. Only that client's devices use it. The key is not "
+        "returned."
     ),
     "PUT /api/v1/backup/repositories/{repository_id}/offsite": (
-        "Links a repository to an off-site target so its recovery points get copied there, "
-        "or unlinks it with a null target. Audited."
+        "Links a repository to an off-site target, global or of the repository's client, so "
+        "its recovery points get copied there, or unlinks it with a null target. Audited."
     ),
     # --- deploy ---
     "GET /api/v1/deploy/deployments": (
-        "Lists this organization's software deployments (package, action, target, state), "
-        "newest first."
+        "Lists the software deployments the caller's clients can see (package, action, "
+        "target, client, state), newest first."
     ),
     "POST /api/v1/deploy/deployments": (
-        "Creates a pending software deployment of a package to a device or group. Without a "
-        "window it sends nothing until executed; with a maintenance window it is dispatched "
-        "automatically when the window opens. Refused when a change gate covers the target "
-        "and no approved change is given."
+        "Creates a pending software deployment of a package to a device or group; it belongs "
+        "to the target's client. Without a window it sends nothing until executed; with one it "
+        "is dispatched when the window opens. A change gate on the target needs an approved "
+        "change of that client."
     ),
     "GET /api/v1/deploy/deployments/{deployment_id}": (
         "Returns one deployment with its state and per-device results. Read-only."
@@ -416,14 +419,16 @@ PART_B: dict[str, str] = {
         "state, a page at a time."
     ),
     "POST /api/v1/patch/approvals": (
-        "Approves one patch for a deployment ring. Once approved, signed install jobs go to "
-        "that ring's devices automatically inside their maintenance windows, or sooner via "
-        "apply. Needs an approved change if a change gate covers the ring."
+        "Approves one patch for a ring: with client_id, for that client's devices in it; "
+        "without, for every client's. Signed install jobs then go to them inside their "
+        "maintenance windows. Where a change gate covers them it needs an approved change: "
+        "that client's, or the internal client's for every client."
     ),
     "POST /api/v1/patch/approvals/bulk": (
-        "Approves many patches for one ring in a single decision, all or nothing. Once "
-        "approved, signed install jobs go to that ring's devices automatically inside their "
-        "maintenance windows. Needs an approved change if a change gate covers the ring."
+        "Approves many patches for one ring in a single decision, all or nothing: with "
+        "client_id, for that client's devices in it; without, for every client's. Install "
+        "jobs then go to them inside their windows. A change gate needs an approved change: "
+        "that client's, or the internal client's for every client."
     ),
     "DELETE /api/v1/patch/approvals/{approval_id}": (
         "Revokes a patch approval so that patch is no longer eligible for that ring. "
@@ -479,11 +484,12 @@ PART_B: dict[str, str] = {
     # --- site-servers ---
     "GET /api/v1/site-servers": (
         "Lists site servers, devices declared to serve network segments, filterable by "
-        "enabled state, IPAM site and a segment they contain."
+        "enabled state, site and a segment they contain."
     ),
     "POST /api/v1/site-servers": (
-        "Promotes an enrolled device to site server for given network segments and roles. "
-        "It then acts as the originator for wake and push-install jobs there."
+        "Promotes an enrolled device to site server for given network segments and roles, "
+        "optionally filed under one of its client's sites. It then originates wake and "
+        "push-install jobs there."
     ),
     "DELETE /api/v1/site-servers/{site_server_id}": (
         "Demotes a site server so it is no longer used as an originator for its segments. "
@@ -493,8 +499,8 @@ PART_B: dict[str, str] = {
         "Returns one site server with its device, segments, roles and state."
     ),
     "PATCH /api/v1/site-servers/{site_server_id}": (
-        "Changes a site server's segments, roles, name, notes or enabled flag. Changing "
-        "segments changes where it originates wake and push jobs."
+        "Changes a site server's segments, roles, name, notes, site or enabled flag. "
+        "Changing segments changes where it originates wake and push jobs."
     ),
     "GET /api/v1/site-servers/{site_server_id}/segment-check": (
         "Compares a site server's declared segments with those observed by IPAM, listing "

@@ -231,7 +231,7 @@ async def test_product_installed_device_ids_matches_own_org_only(
     product = await _seed_product(app_engine, org_id, actor_id, match_rules)
 
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-        device_ids = await product_installed_device_ids(s, org_id, product)
+        device_ids = await product_installed_device_ids(s, org_id, product, client_id=org_id)
 
     assert device_ids == {device1, device2}
 
@@ -241,9 +241,18 @@ async def test_product_installed_device_ids_org_filter_is_load_bearing(
 ) -> None:
     """Run the query on an RLS-bypassing admin session (the `admin_engine`
     role bypasses RLS) with a foreign-org matching device present, so the
-    explicit `InstalledSoftware.org_id == org_id` predicate in
-    `product_installed_device_ids` is the SOLE guard against cross-tenant
-    leakage -- RLS is not backstopping it here.
+    explicit `InstalledSoftware.org_id == org_id` predicate (in
+    `matching.client_titles`, which `product_installed_device_ids` reads) is
+    the SOLE guard against cross-tenant leakage -- RLS is not backstopping it
+    here.
+
+    THE CLIENT ASKED FOR IS THE FOREIGN ORG'S (its internal client, whose id
+    is the org's). Since plan 2026-10-26 Task 6 the query also filters on the
+    client; asked for this org's own client, that predicate alone would drop
+    the foreign install and the org predicate would bear nothing (review
+    2026-10-27, I2). Asked for the foreign org's client, the only thing between
+    this org and that install is `org_id`, and the answer must be empty. The
+    own-client call first is the control: the query does find matches.
     """
     org_id, actor_id = await _org_with_user(admin_engine)
     other_org_id, _other_actor = await _org_with_user(admin_engine)
@@ -259,10 +268,16 @@ async def test_product_installed_device_ids_org_filter_is_load_bearing(
     product = await _seed_product(app_engine, org_id, actor_id, match_rules)
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
-        device_ids = await product_installed_device_ids(s, org_id, product)
+        own = await product_installed_device_ids(s, org_id, product, client_id=org_id)
+        foreign = await product_installed_device_ids(
+            s, org_id, product, client_id=other_org_id
+        )
 
-    assert device_ids == {device1}
-    assert foreign_device not in device_ids
+    assert own == {device1}
+    assert foreign == set(), (
+        f"org {org_id} read the foreign org's device {foreign_device}: only the org_id "
+        f"predicate stood between them"
+    )
 
 
 # ---------------------------------------------------------------------------

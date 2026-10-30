@@ -93,6 +93,20 @@ row with no client, unique among those rows, and a client may hold a default of
 its own beside it. A device's and a group's assignment already belong to their
 parent's client.
 
+**Amended 2026-10-29 (MSP clients plan 2026-10-26, Task 14): resolution reads
+the client's default before the organisation's.** The order is **device →
+nearest assigned group ancestor → the device's client's default → the
+organisation's default** (the row with no client). Both defaults are read in
+one statement, with an explicit `client_id = <the device's client> OR
+client_id IS NULL` ordered client first, so it holds under the every-client
+scope the sweeps run in; an inactive profile falls through to the next level,
+as before. No API writes a client's default yet (`POST
+/health/assignments` writes a device's, a group's or the organisation's
+assignment, never a client's default), so the new level is unused by existing
+data until the console can name a client (MSP clients phase 3). Remediating or approving an alert's action asks for its second
+permission in the alert's client. The plan is
+`docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 Rejected: **union of every matching profile** (the Atera-ish "all applicable
 profiles apply"). Union has no way to express *removal*: a check an operator
 silenced for one troublesome device is resurrected by the org-wide profile, and

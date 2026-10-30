@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.client_scope import ClientScope
 from app.core.tenancy import admin_session, org_session
@@ -29,6 +29,7 @@ from app.modules.reporting.definitions.backup_coverage import (
 )
 from app.modules.reporting.registry import _NEVER_A_COLUMN, REGISTRY
 from app.modules.reporting.service import execute_report
+from tests.client_scope_support import client_with_site
 from tests.reporting_fixtures import (
     reporting_user,
     seed_backup_point,
@@ -382,10 +383,12 @@ async def test_the_stale_window_is_a_parameter(api_env: Any) -> None:
 async def test_the_org_default_policy_applies_to_an_ungrouped_device(
     api_env: Any,
 ) -> None:
-    """`resolve_backup_policy` falls back to the org-default row
-    (`device_group_id IS NULL`) before giving up. A device with no group must
-    therefore be protected by it -- and the repository NAME is what proves the
-    fallback resolved rather than merely that something did."""
+    """`resolve_backup_policy` falls back to the device's client's default row
+    (`device_group_id IS NULL`, `client_id` the device's) before giving up --
+    the organisation default until plan 2026-10-26 Task 13, the internal
+    client's here, whose device this is. A device with no group must therefore
+    be protected by it -- and the repository NAME is what proves the fallback
+    resolved rather than merely that something did."""
     org_id = await api_env.create_org("rep-backup-orgdefault")
     repository = await seed_backup_repository(api_env.admin_engine, org_id, name="org-default")
     await seed_backup_policy(api_env.admin_engine, org_id, repository)
@@ -408,8 +411,8 @@ async def test_the_org_default_policy_applies_to_an_ungrouped_device(
 
 async def test_a_group_policy_wins_over_the_org_default(api_env: Any) -> None:
     """Resolution order, made observable by giving the two repositories
-    DIFFERENT names: with one repository, "the group policy won" and "the org
-    default won" produce the same output."""
+    DIFFERENT names: with one repository, "the group policy won" and "the
+    client's default won" produce the same output."""
     org_id = await api_env.create_org("rep-backup-order")
     org_repository = await seed_backup_repository(api_env.admin_engine, org_id, name="org")
     group_repository = await seed_backup_repository(api_env.admin_engine, org_id, name="group")
@@ -428,6 +431,118 @@ async def test_a_group_policy_wins_over_the_org_default(api_env: Any) -> None:
     by_id = {row.device_id: row for row in page.rows}
     assert by_id[grouped.device_id].repository_name == "group"
     assert by_id[ungrouped.device_id].repository_name == "org"
+
+
+async def _customer_device(
+    api_env: Any, org_id: UUID, client_id: UUID, site_id: UUID, hostname: str,
+    device_group_id: UUID | None = None,
+) -> UUID:
+    from app.models import Device
+
+    async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
+        device = Device(org_id=org_id, client_id=client_id, site_id=site_id, hostname=hostname,
+                        os_family="windows", device_group_id=device_group_id)
+        session.add(device)
+        await session.commit()
+        return device.id
+
+
+async def _forced_policy(
+    api_env: Any, org_id: UUID, repository_id: UUID, *, device_group_id: UUID | None = None
+) -> None:
+    """A policy the guard of migration 0242 refuses -- one naming another
+    client's repository, or one for every client naming any -- written with
+    the guard off inside one committed transaction: 0242 can leave the first
+    kind behind; the second only a hand could plant (there is no policy for
+    every client, `backup/policy.py`)."""
+    from sqlalchemy import text
+
+    from app.models import BackupPolicy
+
+    guard = "its_zz_backup_policy_repository_guard"
+    async with AsyncSession(api_env.admin_engine) as session:
+        await session.execute(text(f"ALTER TABLE backup_policies DISABLE TRIGGER {guard}"))
+        session.add(BackupPolicy(org_id=org_id, repository_id=repository_id,
+                                 device_group_id=device_group_id, enabled=True))
+        await session.flush()
+        await session.execute(text(f"ALTER TABLE backup_policies ENABLE TRIGGER {guard}"))
+        await session.commit()
+
+
+async def test_a_client_s_default_protects_only_that_client_s_devices(api_env: Any) -> None:
+    """Plan 2026-10-26 Task 13: the default policy is ONE CLIENT's. The
+    internal client's default does not protect a device of customer Y, which
+    reads unprotected with no policy at all -- until Y has a default of its
+    own, writing to its own repository."""
+    org_id = await api_env.create_org("rep-backup-client-default")
+    y, y_site = await client_with_site(api_env, org_id)
+    internal_repository = await seed_backup_repository(
+        api_env.admin_engine, org_id, name="internal"
+    )
+    await seed_backup_policy(api_env.admin_engine, org_id, internal_repository)
+    internal = await seed_device(api_env.admin_engine, org_id, hostname="a-internal")
+    customer = await _customer_device(api_env, org_id, y, y_site, "b-customer")
+
+    page = await _run(api_env, org_id)
+    by_id = {row.device_id: row for row in page.rows}
+    assert by_id[internal.device_id].repository_name == "internal"
+    assert (by_id[customer].policy_present, by_id[customer].coverage) == (False, "unprotected")
+    assert by_id[customer].repository_name is None
+
+    y_repository = await seed_backup_repository(
+        api_env.admin_engine, org_id, name="customer", client_id=y
+    )
+    await seed_backup_policy(api_env.admin_engine, org_id, y_repository, client_id=y)
+    page = await _run(api_env, org_id)
+    by_id = {row.device_id: row for row in page.rows}
+    assert by_id[customer].repository_name == "customer"
+    assert (by_id[customer].policy_present, by_id[customer].policy_enabled) == (True, True)
+    assert by_id[internal.device_id].repository_name == "internal"
+
+
+async def test_a_policy_naming_another_client_s_repository_protects_nothing(
+    api_env: Any,
+) -> None:
+    """A group policy from before migration 0242 can name a repository that
+    is now another client's; the dispatcher refuses to back up into it
+    (`backup.dispatch`), so the report reproduces that: present, not
+    protecting, no repository named -- however fresh the device's last point
+    is. And a policy for every client names no repository at all."""
+    org_id = await api_env.create_org("rep-backup-foreign")
+    y, y_site = await client_with_site(api_env, org_id)
+    internal_repository = await seed_backup_repository(
+        api_env.admin_engine, org_id, name="internal"
+    )
+    group_id = await _customer_group(api_env, org_id, y)
+    await _forced_policy(api_env, org_id, internal_repository, device_group_id=group_id)
+    grouped = await _customer_device(api_env, org_id, y, y_site, "a-grouped", group_id)
+    own = await seed_backup_repository(api_env.admin_engine, org_id, name="own", client_id=y)
+    run = await seed_backup_run(
+        api_env.admin_engine, org_id, grouped, own, state="success", started_days_ago=0.1
+    )
+    await seed_backup_point(api_env.admin_engine, org_id, grouped, own, run, taken_days_ago=0.1)
+    # The internal client's ungrouped device under a policy for every client.
+    await _forced_policy(api_env, org_id, internal_repository)
+    ungrouped = await seed_device(api_env.admin_engine, org_id, hostname="b-ungrouped")
+
+    page = await _run(api_env, org_id)
+    by_id = {row.device_id: row for row in page.rows}
+    for device_id in (grouped, ungrouped.device_id):
+        row = by_id[device_id]
+        assert (row.policy_present, row.policy_enabled, row.coverage) == (
+            True, False, "unprotected"
+        ), row
+        assert row.repository_name is None
+
+
+async def _customer_group(api_env: Any, org_id: UUID, client_id: UUID) -> UUID:
+    from app.models import DeviceGroup
+
+    async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
+        group = DeviceGroup(org_id=org_id, client_id=client_id, name="customer servers")
+        session.add(group)
+        await session.commit()
+        return group.id
 
 
 # --------------------------------------------------------------------------- #

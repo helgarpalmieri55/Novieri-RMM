@@ -51,6 +51,9 @@ async def _require_rollback(request: Request, ctx: AuthContext) -> None:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
+        # NO CLIENT, BY DESIGN (plan 2026-10-26 Task 14 keeps it): a rollout
+        # is the whole fleet's -- `agent_update_rollouts` is G, no client's row
+        # -- so rolling one back needs the grant on every client.
         allowed = await has_permission(session, ctx.user_id, _ROLLBACK)
     if not allowed:
         raise HTTPException(

@@ -64,7 +64,7 @@ function stubApi(overrides: Partial<ApiClient>, timezone: string | null = BOGOTA
       ],
     }),
     listIpamVrfs: vi.fn().mockResolvedValue([]),
-    listIpamSites: vi.fn().mockResolvedValue([]),
+    listClientSites: vi.fn().mockResolvedValue([]),
     listIpamVlans: vi.fn().mockResolvedValue([]),
     listIpamSubnets: vi.fn().mockResolvedValue([]),
     listIpamSubnetAddresses: vi.fn().mockResolvedValue([]),
@@ -87,6 +87,7 @@ async function openGrantForm(): Promise<void> {
 
 function subnet(overrides: Partial<SubnetOut> = {}): SubnetOut {
   return {
+    client_id: "o1",
     id: "s1",
     vrf_id: "v1",
     prefix: "10.4.7.0/24",
@@ -108,6 +109,7 @@ function subnet(overrides: Partial<SubnetOut> = {}): SubnetOut {
 
 function drift(overrides: Partial<DriftOut> = {}): DriftOut {
   return {
+    client_id: "o1",
     id: "d1",
     vrf_id: "v1",
     subnet_id: "s1",
@@ -130,6 +132,7 @@ function drift(overrides: Partial<DriftOut> = {}): DriftOut {
 
 function scope(overrides: Partial<ScopeOut> = {}): ScopeOut {
   return {
+    client_id: "o1",
     id: "sc1",
     vrf_id: "v1",
     prefix: "10.4.7.0/24",
@@ -304,6 +307,7 @@ describe("a failure the user must be told about is announced, and is a sentence"
       <AddressDialog
         entry={gridEntry()}
         subnetPrefix="10.4.7.0/24"
+        vrfId="v1"
         canAssign
         onClose={onClose}
       />,

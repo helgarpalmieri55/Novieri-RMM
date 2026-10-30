@@ -76,6 +76,7 @@ async def _license(
             s,
             vault,
             org_id=org_id,
+            client_id=org_id,
             actor_id=actor_id,
             product_id=product.id,
             vendor_id=None,

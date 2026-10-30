@@ -36,10 +36,9 @@ from fastapi import (
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from app.api.deps import AuthContext, bound_auth_context, require_permission
+from app.api.deps import AuthContext, bound_auth_context, narrowed_to_any, require_permission
 from app.core.audit import audit_service
 from app.core.i18n import tr
-from app.core.rbac import has_permission
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
 from app.core.ws_auth import AUTH_SUBPROTOCOL, token_from_subprotocols
@@ -60,24 +59,23 @@ _READ_PERMS = ("remote.control", "remote.recordings.read")
 def require_any_permission(*codes: str) -> Callable[..., Coroutine[Any, Any, AuthContext]]:
     """Allow the request if the caller holds ANY of ``codes``. Used for the
     read routes, which serve both operators (``remote.control``) and auditors
-    (``remote.recordings.read``)."""
+    (``remote.recordings.read``).
+
+    ON EACH SESSION'S OWN CLIENT (MSP clients plan 2026-10-26 Task 14, T4-C2
+    item 13): the request's scope is the clients where the caller holds one
+    of them (`narrowed_to_any`), so a session of another client does not
+    exist for it -- the list leaves it out and a read is the 404 a missing
+    one gets. Held on no client at all: the 403, as before."""
 
     async def dependency(
         request: Request, ctx: AuthContext = Depends(bound_auth_context)
     ) -> AuthContext:
-        async with org_session(
-            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
-        ) as session:
-            allowed = False
-            for code in codes:
-                if await has_permission(session, ctx.user_id, code):
-                    allowed = True
-                    break
-        if not allowed:
+        narrowed = await narrowed_to_any(request, ctx, codes)
+        if narrowed is None:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, tr("requires one of {items}", items=", ".join(codes))
             )
-        return ctx
+        return narrowed
 
     return dependency
 
@@ -324,7 +322,12 @@ async def stop_session(
         # Reuse the exact owner-or-admin predicate the tunnel WS gate uses so the
         # two paths cannot diverge.
         if not await owner_or_admin(
-            session, user_id=ctx.user_id, session_technician_id=row.technician_id
+            session,
+            user_id=ctx.user_id,
+            session_technician_id=row.technician_id,
+            # Its machine's client (plan 2026-10-26 Task 14), loaded with the
+            # row just SELECTed.
+            client_id=row.client_id,
         ):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, tr("requires session owner or org-admin")

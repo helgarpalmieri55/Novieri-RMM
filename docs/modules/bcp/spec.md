@@ -85,6 +85,22 @@ applied to all four tables (RLS `ENABLE + FORCE` + `tenant_isolation` policy
 `bcp_finding.severity` ∈ {low, medium, high, critical};
 `bcp_finding.remediation_state` ∈ {open, in_progress, resolved}.
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Task 7): a plan belongs
+> to a client, and BCP is a module each client has or does not** (migration
+> 0237). `bcp_plan` is C (existing plans went to the internal client);
+> `bcp_test`, `bcp_test_step` and `bcp_finding` inherit it (H). All four carry
+> the client policy of `CLAUDE.md` invariant 5a. A plan names its client on
+> create (404 not visible, 409 archived, 422 Unassigned), and a write for a
+> client whose `enabled_modules` lacks `bcp` is a 404 with the module's
+> sentence (`app/services/client_modules.py::require_module`), checked after
+> RBAC and before anything is written. What a plan or finding names is held
+> to the plan's client: the devices and groups of its `scope`, its
+> `procedure_refs` and a finding's `change_ref` (another client's is a 422);
+> existing rows keep what they named. Every BCP audit event carries the
+> plan's client. The internal client holds the module from birth (plan
+> decision C2). The plan is
+> `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 ---
 
 ## 3. Plans & review cadence

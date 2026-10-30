@@ -1,10 +1,14 @@
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { attemptProblems, Form, FormActions } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
+import type { Me } from "../../lib/api";
+import { useApi } from "../../lib/ApiContext";
 import { formatDateTime, toInstant } from "../../lib/datetime";
+import { internalClientId, requireKnown } from "../../lib/internalClient";
 import { useCreateChangeMutation, useUpdateChangeMutation, useUserTimezone } from "./api";
 import { riskLabel } from "./changeState";
 import type { ChangeRequest } from "./types";
@@ -91,6 +95,8 @@ export function ChangeRequestForm({
   onClose: () => void;
 }) {
   const t = useT();
+  const api = useApi();
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const create = useCreateChangeMutation();
   const update = useUpdateChangeMutation();
   const zone = useUserTimezone();
@@ -182,7 +188,14 @@ export function ChangeRequestForm({
     if (existing) {
       update.mutate({ id: existing.id, body }, { onSuccess });
     } else {
-      create.mutate(body, { onSuccess });
+      // A change is one client's (MSP clients phase 2), and that client must
+      // use change management: the server's 404 says so in a sentence, which
+      // `FormActions` shows as it is.
+      // PHASE 3: the client/site selector. Until it exists that is the
+      // organisation's internal client, whose id is the organisation's --
+      // `/me`'s `org_id` (`lib/internalClient.ts`).
+      const internalClient = internalClientId(me.data);
+      create.mutate(() => ({ ...body, client_id: requireKnown(internalClient) }), { onSuccess });
     }
   }
 

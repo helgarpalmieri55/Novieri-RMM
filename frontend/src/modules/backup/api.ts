@@ -58,11 +58,17 @@ export function useBackupRepositories() {
   });
 }
 
+/**
+ * Both writes below take a BODY BUILDER, not a body: each names a client
+ * (MSP clients phase 2, Task 13), and one that cannot be named yet
+ * (`requireKnown` before `/me` answers) then fails as this mutation's error,
+ * shown by the form, rather than as an exception in a click handler.
+ */
 export function useCreateBackupRepositoryMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: RepositoryCreateRequest) => api.createBackupRepository(body),
+    mutationFn: (build: () => RepositoryCreateRequest) => api.createBackupRepository(build()),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["backup-repositories"] });
     },
@@ -78,7 +84,7 @@ export function useUpsertBackupPolicyMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: PolicyUpsertRequest) => api.upsertBackupPolicy(body),
+    mutationFn: (build: () => PolicyUpsertRequest) => api.upsertBackupPolicy(build()),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["backup-policies"] });
     },

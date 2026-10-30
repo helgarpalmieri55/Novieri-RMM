@@ -32,14 +32,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ConfirmDialog } from "../../components/confirm";
+import { ForEveryClientToggle } from "../../components/forEveryClient";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
 import { Badge, Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
-import type { DocDocument, DocDocumentListItem, DocDocumentVersion } from "../../lib/api";
+import type { DocDocument, DocDocumentListItem, DocDocumentVersion, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
+import { newRowClient } from "../../lib/internalClient";
 import { formatBytes } from "../../lib/format";
 import { humaniseEnum } from "../../lib/labels";
 import { Panel, QueryState, StatusPill } from "../../shell/components";
@@ -867,7 +869,9 @@ export function UploadDocumentDialog({
   const [file, setFile] = useState<File | null>(null);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [createdWithoutFile, setCreatedWithoutFile] = useState<string | null>(null);
+  const [forEveryClient, setForEveryClient] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
 
   useEffect(() => {
     if (!open) return;
@@ -877,12 +881,21 @@ export function UploadDocumentDialog({
     setFile(null);
     setAttempt(null);
     setCreatedWithoutFile(null);
+    setForEveryClient(false);
     if (fileInput.current) fileInput.current.value = "";
   }, [open]);
 
   const create = useMutation({
     mutationFn: async () => {
-      const doc = await api.createDocument({ title, description, category });
+      const doc = await api.createDocument({
+        title,
+        description,
+        category,
+        // PHASE 3: the client/site selector. Until it exists a new document is
+        // the organisation's internal client's (`lib/internalClient.ts`), or,
+        // when asked, every client's.
+        ...newRowClient(me.data, forEveryClient),
+      });
       if (!file) return doc;
       try {
         await api.uploadDocumentVersion(doc.id, file);
@@ -965,6 +978,14 @@ export function UploadDocumentDialog({
             />
           </Field>
         </div>
+        <ForEveryClientToggle
+          code="docs.manage"
+          checked={forEveryClient}
+          onChange={(checked) => {
+            setForEveryClient(checked);
+            clearStale();
+          }}
+        />
         <AcceptedTypes />
         {createdWithoutFile && (
           <p role="status" className="notice gold mt-2">

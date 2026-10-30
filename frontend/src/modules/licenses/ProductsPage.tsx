@@ -49,11 +49,18 @@ export function ProductsPage() {
   // compliance report is the one read that carries that number, and it is
   // already cached from `/licenses`. A failed read draws nothing in the
   // column rather than a zero that reads as "nothing installed".
+  //
+  // The report is one row per (client, product) since MSP clients phase 2,
+  // each counting that client's own computers, so a product's installs are
+  // the SUM of its rows -- keyed alone, the last client's row would win.
   const compliance = useCompliance();
-  const installedByProduct = useMemo(
-    () => new Map((compliance.data ?? []).map((row) => [row.product_id, row.installed])),
-    [compliance.data],
-  );
+  const installedByProduct = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const row of compliance.data ?? []) {
+      totals.set(row.product_id, (totals.get(row.product_id) ?? 0) + row.installed);
+    }
+    return totals;
+  }, [compliance.data]);
   const items = products.data ?? [];
 
   return (

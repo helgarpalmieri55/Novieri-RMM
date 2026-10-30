@@ -442,7 +442,7 @@ async def test_an_org_at_quota_gets_507_and_stores_nothing(api_env, s3, monkeypa
     uploading 5 GiB, which is the only way to test a 5 GiB limit in under a
     day."""
     monkeypatch.setattr(
-        "app.modules.documentation.documents.ORG_DOCUMENT_QUOTA_BYTES", 32
+        "app.modules.documentation.documents.CLIENT_DOCUMENT_QUOTA_BYTES", 32
     )
     org_id, headers = await _org_with(api_env, "technician")
     document = await _document(api_env, headers)
@@ -484,7 +484,7 @@ async def test_the_first_quota_pass_refuses_before_the_body_is_read(
     """
     from app.modules.documentation.documents import MAX_DOCUMENT_BYTES
 
-    monkeypatch.setattr("app.modules.documentation.documents.ORG_DOCUMENT_QUOTA_BYTES", 32)
+    monkeypatch.setattr("app.modules.documentation.documents.CLIENT_DOCUMENT_QUOTA_BYTES", 32)
     _, headers = await _org_with(api_env, "technician")
     document = await _document(api_env, headers)
     # Fill the org to EXACTLY the cap. Pass two allows this (32 + 0 > 32 is

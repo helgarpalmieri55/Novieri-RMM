@@ -11,6 +11,33 @@ effective policy, decide whether a run is due (`schedule.py`), then open the tar
 repository's master key from the vault and hand it to the agent only inside
 the signed job params — the repository key must never appear anywhere else
 (not in the audit log, not in a log line, not in an API response).
+
+The repository is the DEVICE'S CLIENT'S, or nothing is dispatched (MSP
+clients plan 2026-10-26 Task 13, C1). The database already keeps a policy and
+its repository in one client (`its_backup_policy_repository_guard`, migration
+0242), and a run and its repository (`fk_backup_runs_repository_client`); this
+check is the net under them, for a policy from before that guard. The window
+sweep runs this under scope all, where RLS hides no client: the refusal is
+audited `backup.dispatch_refused` in the device's client, and the key is
+never opened.
+
+A window the parser cannot read (one stored before the API checked windows)
+is contained to its own policy: `dispatch_due_backup` skips the device and
+records the policy once per version, reason `unreadable_window`, instead of
+raising inside the organisation's one sweep transaction.
+
+The window records that refusal ONCE per device and policy version
+(`refusal_lookup`): a fire stays due for six hours and the sweep runs every
+15 minutes, so recording each one wrote up to 24 rows per fire per device
+into the hash-chained log, for every device of a customer client 0242 left on
+an organisation repository (review of 2240971, Important 1). Nothing else
+changes -- no job, no key, the health check and the coverage report still
+show the device unprotected -- and a person's Run now is recorded every time,
+because it is their act (invariant 4): every time the person can see the
+repository, that is. For a technician narrowed to the device's client, a
+repository of another client does not exist (RLS), so their Run now stops at
+`_dispatch_for_policy`'s repository look-up: nothing dispatched, no key
+opened, and no refusal recorded.
 """
 
 import base64
@@ -19,14 +46,14 @@ from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
 from app.core.storage import ObjectStore, _safe_object_suffix
 from app.core.stored_english import stored_in_english
 from app.core.vault import VaultService
-from app.models import BackupPoint, BackupRepository, BackupRun, Device, Job
+from app.models import AuditEvent, BackupPoint, BackupRepository, BackupRun, Device, Job
 from app.modules.backup.policy import ResolvedBackupPolicy, resolve_backup_policy
 from app.modules.backup.repository import open_repo_key
 from app.modules.backup.schedule import BACKUP_JOB_TTL, START_DEADLINE, decide, rfc3339
@@ -154,13 +181,23 @@ async def dispatch_due_backup(
         )
     ).scalar_one()
     since = [t for t in (policy.created_at, device.created_at) if t is not None]
-    decision = decide(
-        policy.window_cron,
-        now,
-        protected_since=max(since) if since else now,
-        last_started_at=last_started_at,
-        running=await _run_in_progress(session, org_id, device_id),
-    )
+    running = await _run_in_progress(session, org_id, device_id)
+    try:
+        decision = decide(
+            policy.window_cron,
+            now,
+            protected_since=max(since) if since else now,
+            last_started_at=last_started_at,
+            running=running,
+        )
+    except ValueError:
+        # A window the parser cannot read -- stored before the API checked
+        # windows (`app.core.schedule.checked_window`). Raised here it would roll back
+        # the whole organisation's sweep, which is ONE transaction, every 15
+        # minutes: so this device is skipped, the rest of the sweep goes on,
+        # and the policy is recorded once per version.
+        await _refuse_unreadable_window(session, org_id=org_id, policy=policy)
+        return []
     if decision.action == "dispatch":
         return await _dispatch_for_policy(
             session,
@@ -177,7 +214,7 @@ async def dispatch_due_backup(
         await _record_missed(
             session,
             org_id=org_id,
-            device_id=device_id,
+            device=device,
             repository_id=policy.repository_id,
             fire_at=decision.fire_at,
             now=now,
@@ -185,19 +222,40 @@ async def dispatch_due_backup(
     return []
 
 
+async def _repository_client(
+    session: AsyncSession, org_id: UUID, repository_id: UUID
+) -> UUID | None:
+    return (
+        await session.execute(
+            select(BackupRepository.client_id).where(
+                BackupRepository.org_id == org_id, BackupRepository.id == repository_id
+            )
+        )
+    ).scalar_one_or_none()
+
+
 async def _record_missed(
     session: AsyncSession,
     *,
     org_id: UUID,
-    device_id: UUID,
+    device: Device,
     repository_id: UUID | None,
     fire_at: datetime,
     now: datetime,
 ) -> None:
     """One `missed` row per fire. `started_at = fire_at` is what makes it count
-    as "acted on" for that fire, so it is never written twice or retried."""
+    as "acted on" for that fire, so it is never written twice or retried.
+
+    None when the repository is not the device's client's: such a row could
+    only name it, which `fk_backup_runs_repository_client` refuses -- an
+    error that would roll back the sweep for the whole organisation. Every
+    dispatch the window tried for that fire was refused and audited
+    (`_refuse_foreign_repository`); that is the fire's record."""
     if repository_id is None:
         return
+    if await _repository_client(session, org_id, repository_id) != device.client_id:
+        return
+    device_id = device.id
     session.add(
         BackupRun(
             org_id=org_id,
@@ -223,6 +281,142 @@ async def _record_missed(
         target_type="device",
         target_id=str(device_id),
         metadata={"device_id": str(device_id), "scheduled_for": rfc3339(fire_at)},
+        client_id=device.client_id,
+    )
+    await session.flush()
+
+
+FOREIGN_REPOSITORY = "repository_of_another_client"
+UNREADABLE_WINDOW = "unreadable_window"
+#: The action as an inline SQL literal, never a bound parameter: the partial
+#: index `ix_audit_backup_dispatch_refused` (migration 0242) is usable only
+#: when the planner can prove its predicate, and a generic plan comparing
+#: `action` with `$n` -- which asyncpg's prepared statements reach after a
+#: few runs -- never can (the 0220 precedent, `app/mcp/api.py`).
+_REFUSED_SQL = "'backup.dispatch_refused'"
+
+
+def _policy_version(policy: ResolvedBackupPolicy) -> str:
+    """Which save of the policy a refusal was made under: its `updated_at`,
+    to the microsecond. Compared for equality, never ordered against the
+    audit `ts` -- that is cut to the whole second, so "newer than" would miss
+    a refusal made in the policy's own second and record a second one. Every
+    resolved policy is a row and has one; the empty string is only typing's."""
+    return policy.updated_at.astimezone(UTC).isoformat() if policy.updated_at else ""
+
+
+def refusal_lookup(
+    *,
+    org_id: UUID,
+    target_type: str,
+    target_id: UUID,
+    client_id: UUID | None,
+    reason: str,
+    policy_id: UUID | None,
+    policy_version: str,
+    repository_id: UUID | None = None,
+) -> Select[Any]:
+    """Has this refusal already been recorded -- for this target (a device, or
+    a policy), in its client, for this reason (and repository) and this
+    version of the policy? One probe of `ix_audit_backup_dispatch_refused
+    (org_id, target_id)`, which holds only refusals; the rest of the predicate
+    filters the few rows of one target. A policy for every client has no
+    client, hence IS NOT DISTINCT FROM."""
+    conditions = [
+        AuditEvent.org_id == org_id,
+        AuditEvent.action == literal_column(_REFUSED_SQL),
+        AuditEvent.target_type == target_type,
+        AuditEvent.target_id == str(target_id),
+        AuditEvent.client_id.is_not_distinct_from(client_id),
+        AuditEvent.meta["reason"].astext == reason,
+        AuditEvent.meta["policy_id"].astext == str(policy_id),
+        AuditEvent.meta["policy_updated_at"].astext == policy_version,
+    ]
+    if repository_id is not None:
+        conditions.append(AuditEvent.meta["repository_id"].astext == str(repository_id))
+    return select(AuditEvent.id).where(*conditions).limit(1)
+
+
+async def _refuse_foreign_repository(
+    session: AsyncSession,
+    *,
+    org_id: UUID,
+    device: Device,
+    policy: ResolvedBackupPolicy,
+    repository_id: UUID,
+    actor_id: UUID | None,
+    actor_type: Literal["user", "agent", "system"],
+) -> None:
+    """The module docstring's net: audited, like every refusal of the module
+    (`backup.dedup_refused`, `backup.read_refused`), with a reason from a
+    fixed vocabulary and no key material (invariant 3) -- once per device
+    and policy version when the window asks (`refusal_lookup`), every time
+    a person does."""
+    version = _policy_version(policy)
+    if actor_type == "system" and (
+        await session.execute(
+            refusal_lookup(
+                org_id=org_id, target_type="device", target_id=device.id,
+                client_id=device.client_id, reason=FOREIGN_REPOSITORY,
+                repository_id=repository_id, policy_id=policy.id, policy_version=version,
+            )
+        )
+    ).first() is not None:
+        return
+    await audit_service.record(
+        session,
+        org_id=org_id,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        action="backup.dispatch_refused",
+        target_type="device",
+        target_id=str(device.id),
+        metadata={
+            "reason": FOREIGN_REPOSITORY,
+            "device_id": str(device.id),
+            "repository_id": str(repository_id),
+            "policy_id": str(policy.id),
+            "policy_updated_at": version,
+        },
+        client_id=device.client_id,
+    )
+    await session.flush()
+
+
+async def _refuse_unreadable_window(
+    session: AsyncSession, *, org_id: UUID, policy: ResolvedBackupPolicy
+) -> None:
+    """`dispatch_due_backup`'s containment, recorded on the POLICY (not per
+    device), once per policy version (`refusal_lookup`): the window
+    expression is what is wrong, and saving a valid one is the fix."""
+    if policy.id is None:
+        return
+    version = _policy_version(policy)
+    if (
+        await session.execute(
+            refusal_lookup(
+                org_id=org_id, target_type="backup_policy", target_id=policy.id,
+                client_id=policy.client_id, reason=UNREADABLE_WINDOW,
+                policy_id=policy.id, policy_version=version,
+            )
+        )
+    ).first() is not None:
+        return
+    await audit_service.record(
+        session,
+        org_id=org_id,
+        actor_type="system",
+        actor_id=None,
+        action="backup.dispatch_refused",
+        target_type="backup_policy",
+        target_id=str(policy.id),
+        metadata={
+            "reason": UNREADABLE_WINDOW,
+            "policy_id": str(policy.id),
+            "policy_updated_at": version,
+            "window_cron": policy.window_cron,
+        },
+        client_id=policy.client_id,
     )
     await session.flush()
 
@@ -260,6 +454,13 @@ async def _dispatch_for_policy(
     if device.os_family is None:
         # An asset row (a switch, hardware in its box): nothing to back up.
         return []
+    if repo.client_id != device.client_id:
+        await _refuse_foreign_repository(
+            session, org_id=org_id, device=device, policy=policy, repository_id=repo.id,
+            actor_id=actor_id, actor_type=actor_type,
+        )
+        return []
+    client_id = device.client_id
 
     key = await open_repo_key(session, vault, org_id=org_id, repository_id=repo.id)
 
@@ -310,6 +511,7 @@ async def _dispatch_for_policy(
             "device_id": str(device_id),
             "job_id": str(job.id),
         },
+        client_id=client_id,
     )
 
     await session.flush()
@@ -404,7 +606,10 @@ async def ingest_backup_result(
     or actively unsafe agent report must never crash or wedge this handler;
     it must always resolve to a terminal state (the Task-8-deploy coercion
     lesson, applied here to the success-without-manifest and unsafe-manifest
-    cases too).
+    cases too). So does a success for a run whose repository is not the
+    run's client's -- one dispatched before migration 0242 filed the
+    repository under the internal client: its point cannot be recorded (the
+    composite key refuses it), and the object store is never opened for it.
 
     Finishes with a single `backup.result` audit event, system-attributed
     since this runs in the kernel's result handler, not on behalf of any
@@ -427,6 +632,19 @@ async def ingest_backup_result(
     ).scalar_one_or_none()
     if run is None:
         return  # no matching row; the agent's report must never fail the job
+    # Read now: the state update below expires it (written by trigger).
+    client_id = run.client_id
+    # Asked BEFORE the run is touched, so its changes reach the database in
+    # ONE update. A run from before migration 0242 may not satisfy
+    # `fk_backup_runs_repository_client` (NOT VALID), and Postgres re-checks
+    # an unchanged key once the row has been written by the current
+    # transaction: a query here, between two batches of changes, would
+    # autoflush the first and make the second fail on that key.
+    foreign = (
+        result.state == "success"
+        and bool(result.manifest_ref)
+        and await _repository_client(session, org_id, run.repository_id) != client_id
+    )
 
     audit_metadata: dict[str, Any] = {"device_id": str(device_id)}
     # Format-2 agents report these on failure too.
@@ -434,7 +652,16 @@ async def ingest_backup_result(
     if result.consistency is not None:
         run.consistency = result.consistency.model_dump()
 
-    if result.state == "success" and result.manifest_ref:
+    if foreign:
+        # A run dispatched before migration 0242 into a repository that is
+        # now another client's: its point could name only that repository,
+        # which `fk_backup_points_repository_client` refuses. Landed failed,
+        # never recorded under the other client.
+        run.state = "failed"
+        run.error = "the run's repository belongs to another client"
+        audit_metadata["unexpected_result_state"] = "repository_of_another_client"
+        run.finished_at = now
+    elif result.state == "success" and result.manifest_ref:
         try:
             manifest_ref = _resolve_manifest_ref(
                 object_store_factory(), run.org_id, run.repository_id, result.manifest_ref
@@ -496,6 +723,7 @@ async def ingest_backup_result(
         target_type="device",
         target_id=str(device_id),
         metadata={**audit_metadata, "state": run.state},
+        client_id=client_id,
     )
 
     await session.flush()

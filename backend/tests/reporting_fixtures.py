@@ -33,9 +33,9 @@ async def reporting_user(
     """A user in `org_id` holding exactly `codes` and nothing else.
 
     `client_id` scopes the grant to one client -- the §0.6 case (MSP clients
-    spec §2.1): `user_permission_codes` counts such a row ONLY when asked
-    about that same client, and every reporting gate asks with no client, so a
-    client-scoped grant holds nothing on every client.
+    spec §2.1): since plan 2026-10-26 Task 14 a report runs over the clients
+    where the person holds every code it needs, so such a grant reports over
+    that client only.
     """
     from app.models import Permission, Role, RolePermission, User, UserRole
 
@@ -373,13 +373,15 @@ async def seed_patch_scan_job(
 
 
 async def seed_backup_repository(
-    admin_engine: AsyncEngine, org_id: UUID, *, name: str
+    admin_engine: AsyncEngine, org_id: UUID, *, name: str, client_id: UUID | None = None
 ) -> UUID:
     from app.models import BackupRepository
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
         repository = BackupRepository(
             org_id=org_id,
+            # One client's (migration 0242): the internal client's by default.
+            client_id=client_id or org_id,
             name=name,
             # Neither of these may ever appear in a report; they are on
             # `_NEVER_A_COLUMN`. Seeded with recognisable values so a test can
@@ -399,7 +401,11 @@ async def seed_backup_policy(
     *,
     device_group_id: UUID | None = None,
     enabled: bool = True,
+    client_id: UUID | None = None,
 ) -> UUID:
+    """A group's policy, or -- with no group -- a client's default: the
+    internal client's unless `client_id` names another (a policy names only a
+    repository of its own client, migration 0242)."""
     from app.models import BackupPolicy
 
     async with AsyncSession(admin_engine, expire_on_commit=False) as session:
@@ -409,6 +415,8 @@ async def seed_backup_policy(
             device_group_id=device_group_id,
             enabled=enabled,
         )
+        if device_group_id is None:
+            policy.client_id = client_id or org_id
         session.add(policy)
         await session.commit()
         return policy.id

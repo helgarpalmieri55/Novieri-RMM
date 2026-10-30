@@ -43,6 +43,7 @@ const ME: Me = {
 const PLANS: PlanOut[] = [
   {
     id: "plan1",
+    client_id: "o1",
     name: "Core datacenter failover",
     description: "Fail over core services to the DR site.",
     scope: [{ kind: "device_group", id: "core" }],
@@ -296,6 +297,8 @@ describe("PlanEditor form validation", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(api.createPlan).toHaveBeenCalledWith({
+      // The internal client, `/me`'s `org_id` (PHASE 3: the selector's).
+      client_id: "o1",
       name: "Core datacenter failover",
       description: "",
       scope: [],
@@ -304,6 +307,25 @@ describe("PlanEditor form validation", () => {
       procedure_refs: [],
       review_interval_days: 365,
     });
+  });
+
+  // MSP clients phase 2: continuity is a module a client may not use, and
+  // the server's 404 for that is a sentence, which is what the person reads.
+  it("says so when the client does not use continuity", async () => {
+    api.createPlan = vi
+      .fn()
+      .mockRejectedValue(
+        new ApiError(404, JSON.stringify({ detail: "this client does not use that module" })),
+      );
+    mockUseApi.mockReturnValue(api as ApiClient);
+    const user = renderEditor();
+
+    await user.type(screen.getByLabelText("Name *"), "Core datacenter failover");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "this client does not use that module",
+    );
   });
 
   // A button with no `type` inside a <form> is a submit button, so the scope
@@ -1243,6 +1265,7 @@ describe("bcp picker options", () => {
       [
         {
           id: "doc1",
+          client_id: "o1",
           title: "Failover",
           category: "runbook",
           archived: false,
@@ -1251,6 +1274,7 @@ describe("bcp picker options", () => {
         },
         {
           id: "doc2",
+          client_id: "o1",
           title: "Failover",
           category: "policy",
           archived: true,

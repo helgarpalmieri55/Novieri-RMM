@@ -25,8 +25,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from tests.ipam_fixtures import admin_engine_of, utcnow
 
 __all__ = [
+    "NO_CLIENT",
     "PUSH_CREDENTIAL_TYPE",
     "PushOrg",
+    "PushWorld",
+    "push_world",
     "seed_agent_release",
     "CURRENT_PUSH_CAPABILITIES",
     "seed_push_site_server",
@@ -34,6 +37,7 @@ __all__ = [
     "seed_client",
     "seed_confirmed_host_key",
     "seed_credential",
+    "seed_credential_in",
     "seed_org",
     "seed_push_authorization",
     "seed_push_credential_scope",
@@ -224,41 +228,78 @@ async def seed_confirmed_host_key(
         await session.commit()
 
 
+#: `seed_credential(..., client_id=NO_CLIENT)`: a credential of no client (a
+#: global one). A PUSH credential like that cannot be made through the API
+#: since plan 2026-10-26 Task 12; the seed plants one to prove every path
+#: refuses it.
+NO_CLIENT: Any = object()
+
+
 async def seed_credential(
     env_or_engine: Any,
-    org: PushOrg,
+    org: PushOrg | UUID,
     *,
     credential_type: str = PUSH_CREDENTIAL_TYPE,
     name: str | None = None,
     realm: str | None = "CORP.EXAMPLE.COM",
+    client_id: Any = None,
 ) -> UUID:
     """Credential METADATA only. See the module docstring on why no secret.
 
     A `windows_domain` credential also gets the realm its save would have
     recorded (review I1) unless `realm=None` -- one saved before realms were.
+
+    A push credential has exactly one client (plan 2026-10-26 Task 12):
+    `client_id` defaults to the internal client (id = org id), as
+    `seed_asset` does; `NO_CLIENT` plants a global one. `org` is a `PushOrg`
+    (its user creates the row) or a bare org id (nobody does).
     """
     from app.models import Credential
     from app.modules.agent_push.models import PushCredentialRealm
 
+    org_id = org.org_id if isinstance(org, PushOrg) else org
+    created_by = org.user_id if isinstance(org, PushOrg) else None
     engine = admin_engine_of(env_or_engine)
     async with AsyncSession(engine, expire_on_commit=False) as session:
         credential = Credential(
-            org_id=org.org_id,
+            org_id=org_id,
+            client_id=None if client_id is NO_CLIENT else (client_id or org_id),
             name=name or f"push-{uuid4().hex[:8]}",
             type=credential_type,
             vault_ref="",
-            created_by=org.user_id,
+            created_by=created_by,
         )
         session.add(credential)
         await session.flush()
         if credential_type == "windows_domain" and realm is not None:
             session.add(
-                PushCredentialRealm(
-                    org_id=org.org_id, credential_id=credential.id, realm=realm
-                )
+                PushCredentialRealm(org_id=org_id, credential_id=credential.id, realm=realm)
             )
         await session.commit()
         return credential.id
+
+
+async def seed_credential_in(
+    session: AsyncSession,
+    org_id: UUID,
+    *,
+    client_id: UUID,
+    credential_type: str = PUSH_CREDENTIAL_TYPE,
+) -> UUID:
+    """A push credential of `client_id`, written in the CALLER's session (a
+    test that needs it in the same transaction as what it builds on it)."""
+    from app.models import Credential
+
+    credential = Credential(
+        org_id=org_id,
+        client_id=client_id,
+        name=f"push-{uuid4().hex[:8]}",
+        type=credential_type,
+        vault_ref="",
+    )
+    session.add(credential)
+    await session.flush()
+    return credential.id
 
 
 async def seed_push_authorization(
@@ -268,6 +309,7 @@ async def seed_push_authorization(
     *,
     revoked: bool = False,
     expires_at: Any = None,
+    client_id: UUID | None = None,
 ) -> UUID:
     """One `push_authorization`, written straight through the admin engine.
 
@@ -281,6 +323,9 @@ async def seed_push_authorization(
     `uuid` and inside a `CASE ... ELSE NULL` deduces `text` and fails at
     execute time against a `uuid` column. Two literals here beat one clever
     statement.
+
+    `client_id` is the client whose network the prefix is (plan 2026-10-26
+    Task 12): the internal client unless named.
     """
     engine = admin_engine_of(env_or_engine)
     row_id = uuid4()
@@ -289,14 +334,15 @@ async def seed_push_authorization(
         await session.execute(
             text(
                 "INSERT INTO push_authorization"
-                " (id, org_id, prefix, note, authorized_by, authorized_at,"
+                " (id, org_id, client_id, prefix, note, authorized_by, authorized_at,"
                 "  expires_at, revoked_at, revoked_by)"
-                " VALUES (:id, :org, CAST(:prefix AS cidr), '', :actor, now(),"
+                " VALUES (:id, :org, :client, CAST(:prefix AS cidr), '', :actor, now(),"
                 "         :expires, :revoked_at, :revoked_by)"
             ),
             {
                 "id": row_id,
                 "org": org.org_id,
+                "client": client_id or org.org_id,
                 "prefix": prefix,
                 "actor": org.user_id,
                 "expires": expires_at,
@@ -317,7 +363,8 @@ async def seed_push_credential_scope(
     unbound: bool = False,
 ) -> UUID:
     """One `push_credential_scope`. See `seed_push_authorization` on the
-    stamps."""
+    stamps. Its client is the credential's: the trigger copies it (H,
+    migration 0241), so none is sent."""
     engine = admin_engine_of(env_or_engine)
     row_id = uuid4()
     stamp = utcnow() if unbound else None
@@ -375,3 +422,72 @@ async def seed_push_site_server(
         env_or_engine, org_id, device_id=device_id, segments=segments, enabled=enabled
     )
     return site_server_id, device_id
+
+
+@dataclass(frozen=True)
+class PushWorld:
+    """Every bound of a push held for ONE vouched machine of one client."""
+
+    org: PushOrg
+    client_id: UUID
+    credential: UUID
+    address: str
+    prefix: str
+    device: UUID
+    authorization: UUID
+    scope: UUID
+    site_server: UUID
+    site_server_device: UUID
+
+
+async def push_world(
+    env_or_engine: Any,
+    org_id: UUID,
+    *,
+    client_id: UUID,
+    site_id: UUID,
+    address: str = "10.70.0.17",
+    prefix: str = "10.70.0.0/24",
+    credential_type: str = PUSH_CREDENTIAL_TYPE,
+) -> PushWorld:
+    """A push credential of `client_id`, a vouched machine of that client at
+    `address` (at `site_id`), an authorization of that client over `prefix`,
+    the credential bound to it, and that client's site server on it -- on the
+    admin engine, never through the code under test. A person of the org
+    (with no role) authorizes and binds, because a row with nobody's name on
+    it is refused (spec §3)."""
+    from app.models import User
+
+    engine = admin_engine_of(env_or_engine)
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        user = User(
+            org_id=org_id,
+            external_subject=f"sub-{uuid4().hex[:10]}",
+            email=f"{uuid4().hex[:10]}@test.local",
+        )
+        session.add(user)
+        await session.commit()
+    org = PushOrg(org_id=org_id, user_id=user.id)
+    credential = await seed_credential(
+        engine, org, credential_type=credential_type, client_id=client_id
+    )
+    device = await seed_asset(
+        engine, org_id, primary_ip=address, client_id=client_id, site_id=site_id
+    )
+    authorization = await seed_push_authorization(engine, org, prefix, client_id=client_id)
+    scope = await seed_push_credential_scope(engine, org, credential, prefix)
+    site_server, site_server_device = await seed_push_site_server(
+        engine, org_id, segments=[prefix], client_id=client_id, site_id=site_id
+    )
+    return PushWorld(
+        org=org,
+        client_id=client_id,
+        credential=credential,
+        address=address,
+        prefix=prefix,
+        device=device,
+        authorization=authorization,
+        scope=scope,
+        site_server=site_server,
+        site_server_device=site_server_device,
+    )

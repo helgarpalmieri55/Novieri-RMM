@@ -391,20 +391,27 @@ async def test_a_caller_without_reporting_read_is_a_403(api_env: Any, key: str) 
 
 
 @pytest.mark.parametrize("key", sorted(REGISTRY))
-async def test_a_client_scoped_grant_is_a_403(api_env: Any, key: str) -> None:
-    """§0.6, §12.4. A fleet aggregate computed for someone entitled to part of
-    the fleet is either wrong (the denominator includes devices they may not
-    see) or a leak (it tells them how many there are).
+async def test_a_client_scoped_grant_reports_over_that_client_only(
+    api_env: Any, key: str
+) -> None:
+    """§0.6 as amended by MSP clients plan 2026-10-26 Task 14 (T4-C2 items
+    2-3). §0.6's worry -- "a fleet aggregate computed for someone entitled to
+    part of the fleet is either wrong (the denominator includes devices they
+    may not see) or a leak (it tells them how many there are)" -- is answered
+    by the database now: a client-scoped grant runs the report over THAT
+    client only, so the denominator is theirs and nothing else is counted.
+    This replaced `test_a_client_scoped_grant_is_a_403`, which pinned the
+    phase-1 answer (refuse every client-scoped grant) the plan retires.
 
     THE CONTROL USER HOLDS THE SAME CODES ON EVERY CLIENT, in the same org,
-    over the same data -- so the ONLY observable difference between the 200
-    and the 403 is the scoping. A test that only asserted the client-scoped 403
-    could not tell "client scoping is refused" from "these codes never work".
-
-    The scoped grant names the internal client (the org's own id), which is
-    where every device this org seeds lives: entitled to the very devices the
-    report counts, and still refused, because the grant is not every client.
+    over the same data -- so the ONLY observable difference is the scoping.
+    Scoped to the internal client (the org's own id), which is where every
+    row this org seeds lives, the report is the control's, row for row;
+    scoped to a client that holds nothing, it is empty -- the internal
+    client's rows are not counted for it.
     """
+    from tests.client_scope_support import client_with_site
+
     definition = REGISTRY[key]
     org_id = await _seeded_org(api_env)
     codes = ["reporting.read", *sorted(definition.requires)]
@@ -418,8 +425,15 @@ async def test_a_client_scoped_grant_is_a_403(api_env: Any, key: str) -> None:
     assert allowed.json()["rows"]
 
     _, scoped = await reporting_user(api_env, org_id, *codes, client_id=org_id)
-    refused = await api_env.client.get(path, headers=await api_env.headers(org_id, scoped))
-    assert refused.status_code == 403, refused.text
+    internal = await api_env.client.get(path, headers=await api_env.headers(org_id, scoped))
+    assert internal.status_code == 200, internal.text
+    assert internal.json()["rows"] == allowed.json()["rows"]
+
+    elsewhere, _ = await client_with_site(api_env, org_id)
+    _, other = await reporting_user(api_env, org_id, *codes, client_id=elsewhere)
+    empty = await api_env.client.get(path, headers=await api_env.headers(org_id, other))
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["rows"] == []
 
 
 # --------------------------------------------------------------------------- #

@@ -72,7 +72,7 @@ async def _setup_restore_job(
         await session.flush()
 
         repo = BackupRepository(
-            org_id=org.id,
+            org_id=org.id, client_id=org.id,
             name="repo-1",
             storage_ref="s3://bucket/repo-1",
             encryption_key_ref="vault://key-1",

@@ -53,14 +53,22 @@ const STATE_WORD: Readonly<Record<string, MessageKey>> = {
 // because they answer different questions: "what is happening here" versus
 // "what did a person write down". A dialog that showed one under the other's
 // name is how an operator concludes the plan changed when only reality did.
+//
+// AN ADDRESS IS FILED IN ITS SUBNET'S VRF, and that VRF's client is the
+// address's (final review E): the body names `vrfId` and no client. Naming none
+// and a client instead made the server look the address up in that client's
+// `global` VRF -- the internal client's, whatever subnet the grid showed.
 export function AddressDialog({
   entry,
   subnetPrefix,
+  vrfId,
   canAssign,
   onClose,
 }: {
   entry: GridEntryOut;
   subnetPrefix: string;
+  /** The VRF of the subnet this grid shows. */
+  vrfId: string;
   canAssign: boolean;
   onClose: () => void;
 }) {
@@ -193,6 +201,7 @@ export function AddressDialog({
                 create.mutate(
                   {
                     address: entry.address,
+                    vrf_id: vrfId,
                     device_id: deviceId || null,
                     asset_label: assetLabel,
                     hostname,
@@ -210,7 +219,7 @@ export function AddressDialog({
               disabled={create.isPending}
               onClick={() =>
                 create.mutate(
-                  { address: entry.address, reserve: true, hostname, description },
+                  { address: entry.address, vrf_id: vrfId, reserve: true, hostname, description },
                   { onSuccess: onClose },
                 )
               }

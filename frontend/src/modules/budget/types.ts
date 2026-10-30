@@ -12,6 +12,13 @@
 // The status/granularity/source vocabularies are sourced from the backend,
 // not invented -- see budgetState.ts for the exact citations backing each
 // vocabulary.
+//
+// CLIENT (MSP clients phase 2, plan 2026-10-26 Task 8): settings, categories,
+// cost centres, budgets and expenses each belong to ONE client. Every create
+// names it (`client_id`), every one of those outputs carries it, and the
+// settings are read and written for a named client (`?client_id=`). Until the
+// client selector exists (PHASE 3) these pages work on the internal client
+// (`api.ts`'s `useBudgetClient`).
 
 // schema.py: Granularity = Literal["month", "quarter"].
 export type Granularity = "month" | "quarter";
@@ -41,13 +48,18 @@ export interface SettingsUpdate {
 }
 
 export interface SettingsOut {
+  /** The client these settings are for: each has its own base currency and fiscal year. */
+  client_id: string;
   base_currency: string;
   fiscal_year_start_month: number;
   updated_by: string | null;
-  updated_at: string;
+  /** `null` until somebody sets the client's settings: until then they are the defaults. */
+  updated_at: string | null;
 }
 
 export interface CategoryCreate {
+  /** The client the category is for. It must use budget, or the server answers 404. */
+  client_id: string;
   key: string;
   name: string;
   sort_order?: number;
@@ -61,6 +73,7 @@ export interface CategoryUpdate {
 
 export interface CategoryOut {
   id: string;
+  client_id: string;
   key: string;
   name: string;
   system_key: string | null;
@@ -70,6 +83,8 @@ export interface CategoryOut {
 }
 
 export interface CostCenterCreate {
+  /** The client the cost centre is for. It must use budget. */
+  client_id: string;
   code: string;
   name: string;
   external_ref?: string | null;
@@ -83,6 +98,7 @@ export interface CostCenterUpdate {
 
 export interface CostCenterOut {
   id: string;
+  client_id: string;
   code: string;
   name: string;
   external_ref: string | null;
@@ -92,6 +108,9 @@ export interface CostCenterOut {
 
 export interface FxRateCreate {
   from_currency: string;
+  // The currency the rate converts into; omitted, the internal client's base
+  // currency (one rate table serves every client's base currency).
+  to_currency?: string | null;
   // Decimal on the wire; the request body sends a numeric-looking string.
   rate: string;
   effective_date: string;
@@ -111,6 +130,8 @@ export interface FxRateOut {
 }
 
 export interface BudgetCreate {
+  /** The client the budget is for. It must use budget. */
+  client_id: string;
   fiscal_year: number;
   name: string;
   granularity: Granularity;
@@ -123,6 +144,7 @@ export interface BudgetUpdate {
 
 export interface BudgetOut {
   id: string;
+  client_id: string;
   fiscal_year: number;
   name: string;
   // `str`, not `Granularity`/`BudgetStatus`, in schema.py's BudgetOut -- the
@@ -154,6 +176,9 @@ export interface BudgetLineOut {
 }
 
 export interface ExpenseCreate {
+  /** The client the expense is for. It must use budget, and its category,
+   *  cost centre and link must be that client's (else a 422). */
+  client_id: string;
   expense_date: string;
   amount: string;
   currency: string;
@@ -190,6 +215,8 @@ export interface ExpenseConfirm {
 }
 
 export interface MaterializeRequest {
+  /** Whose subscriptions and licenses to materialize, filed under that client. */
+  client_id: string;
   from_date: string;
   to_date: string;
 }
@@ -197,6 +224,7 @@ export interface MaterializeRequest {
 export interface ExpenseOut {
   // No `org_id` field here -- security invariant #5.
   id: string;
+  client_id: string;
   expense_date: string;
   amount: string;
   currency: string;
@@ -276,7 +304,8 @@ export interface MaterializeOut {
   skipped_unconvertible: number;
 }
 
-// GET /budget/expenses' query filters (api.py's list_expenses_route).
+// GET /budget/expenses' query filters (api.py's list_expenses_route). The
+// client filter is not here: the hooks add it (`api.ts`'s `useBudgetClient`).
 export interface ExpenseListFilters {
   status?: string;
   category_id?: string;
@@ -286,3 +315,6 @@ export interface ExpenseListFilters {
   date_from?: string;
   date_to?: string;
 }
+
+/** A create body before the client is named: the hooks name it (`api.ts`). */
+export type NewRow<T extends { client_id: string }> = Omit<T, "client_id">;

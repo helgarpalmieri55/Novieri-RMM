@@ -71,7 +71,21 @@ func TestUninstallLinux(t *testing.T) {
 		}
 		time.Sleep(2 * time.Second)
 	}
-	if out, _ := runQuiet("systemctl", "is-active", "its-agent-uninstall"); strings.TrimSpace(out) == "active" {
-		t.Fatal("the uninstall helper unit is still running after everything was removed")
+	// The helper's last acts are the daemon-reload that makes LoadState
+	// not-found, its "its-agent removed" line and its exit, so the loop above
+	// can see everything gone a few milliseconds before its process is (CI,
+	// 2026-10-29: is-active asked 1 ms after that line, and the unit
+	// deactivated in the same second). What is asserted is that the helper
+	// exits, not that it already has by the poll that saw the files go.
+	exitBy := time.Now().Add(30 * time.Second)
+	for {
+		out, _ := runQuiet("systemctl", "is-active", "its-agent-uninstall")
+		if strings.TrimSpace(out) != "active" {
+			break
+		}
+		if time.Now().After(exitBy) {
+			t.Fatal("the uninstall helper unit is still running 30 seconds after everything was removed")
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }

@@ -1,4 +1,4 @@
-"""Spec §5 tests 3-8, over every phase-1 table, through the real RLS.
+"""Spec §5 tests 3-8, over every scoped table, through the real RLS.
 
 Seeding is through the ADMIN engine (no RLS), asserting is through
 `org_session` (RLS on) as `app_user`. The fixture makes the client the ONLY
@@ -12,7 +12,7 @@ WHERE EACH SPEC §5 TEST LIVES. Names alone are in this file; `rls::` is
 the catalog's literal copy.
 
 3. Isolation over the whole catalog.
-   - EVERY phase-1 table, and `clients`, structurally:
+   - EVERY scoped table, and `clients`, structurally:
      `test_every_scoped_table_hides_other_clients_rows` -- RLS enabled and
      forced, not owned by `app_user`, and exactly spec §2.2's client policies,
      expression by expression; with `test_the_app_role_is_held_by_rls`.
@@ -60,10 +60,22 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.client_scope import ClientScope
-from app.core.client_scope_catalog import PHASE_1
+from app.core.client_scope_catalog import SCOPED
 from app.core.tenancy import org_session
 from app.models import (
+    BackupChunk,
+    BackupChunkCopy,
+    BackupOffsiteTarget,
+    BackupRepository,
+    BcpPlan,
+    BcpTest,
+    BcpTestStep,
+    Budget,
+    BudgetLine,
+    ChangeRequest,
     Client,
+    Credential,
+    Deployment,
     Device,
     DeviceGroup,
     DeviceTag,
@@ -71,17 +83,33 @@ from app.models import (
     DocRecord,
     DocVersion,
     EnrollmentToken,
+    ExpenseCategory,
     HealthAlert,
     HealthAlertAction,
     HealthProfileAssignment,
     InstallLink,
+    IpamRange,
+    IpamSubnet,
+    IpamVlan,
+    IpamVrf,
     Job,
     JobLog,
+    License,
     Organization,
+    Package,
+    Person,
+    PersonLogin,
     Policy,
+    PushAuthorization,
+    PushCredentialScope,
+    PushRun,
+    PushRunTarget,
     Script,
     ScriptPolicy,
     Site,
+    SoftwareProduct,
+    Subscription,
+    SubscriptionEvent,
     Ticket,
     TicketCategory,
     TicketComment,
@@ -103,13 +131,21 @@ from tests.health_fixtures import seed_check, seed_profile
 #: NULL client from its trigger and fails here too.
 REFUSED = "new row violates row-level security policy"
 
-#: Two C tables whose BEFORE guard refuses first. Each reads the row's site or
-#: client under the session's own RLS, finds nothing -- Y is invisible -- and
-#: raises before the policy is checked. Refused all the same. (`sites`'s
-#: message, from 0230, predates clients sharing an organisation.)
+#: C tables whose BEFORE guard refuses first. Each reads the row's site,
+#: client or target under the session's own RLS, finds nothing -- Y is
+#: invisible -- and raises before the policy is checked. Refused all the same.
+#: (`sites`'s message, from 0230, predates clients sharing an organisation;
+#: a deployment's client is its target's, 0239.)
 GUARDED = {
     "C-devices": "device site belongs to another client",
     "C-sites": "names a client of another organization",
+    "C-deployments": "deployment target is not visible",
+    # Plan 2026-10-26 Task 12 (0241): a run of a client the scope cannot see
+    # names a credential it cannot see either, so its guard refuses first; a
+    # target of such a run is refused by 0200's own guard, which cannot find
+    # the run.
+    "C-push_run": "push run belongs to its credential's client",
+    "H-push_run_target-via-push_run": "is not a run of this organization",
 }
 
 
@@ -125,6 +161,18 @@ class Side:
     alert: UUID
     record: UUID
     ticket: UUID
+    person: UUID
+    subscription: UUID
+    plan: UUID  # a BCP plan, and a test of it
+    test: UUID
+    budget: UUID  # a budget, and an expense category its lines can use
+    expense_category: UUID
+    vrf: UUID  # an IPAM VRF, and a subnet in it
+    subnet: UUID
+    credential: UUID  # a push credential, and an unsealed run with it
+    run: UUID
+    repository: UUID  # a backup repository (0242: one client's)
+    target: UUID  # an off-site target of the client's, for a chunk copy
 
 
 @dataclass(frozen=True)
@@ -136,6 +184,8 @@ class World:
     check: UUID
     queue: UUID  # G: ticket queues and categories too
     category: UUID
+    product: UUID  # G: the software catalogue too
+    package: UUID  # G: deployable packages too
     x: Side
     y: Side
 
@@ -150,6 +200,49 @@ def _job(org: UUID, device: UUID) -> Job:
         org_id=org, type="inventory.collect", target_type="device", target_id=device,
         params={}, nonce=uuid4().hex, issued_at=now, expires_at=now + timedelta(hours=1),
     )
+
+
+def _subscription(org: UUID, client: UUID, actor: UUID) -> Subscription:
+    return Subscription(
+        org_id=org, client_id=client, service_name="s", billing_cycle="monthly",
+        cost_per_cycle=1, currency="USD", created_by=actor,
+    )
+
+
+def _plan(org: UUID, client: UUID, actor: UUID) -> BcpPlan:
+    return BcpPlan(org_id=org, client_id=client, name="p", description="d", created_by=actor)
+
+
+def _budget(org: UUID, client: UUID, actor: UUID) -> Budget:
+    return Budget(
+        org_id=org, client_id=client, fiscal_year=2027, name=f"b-{uuid4().hex[:6]}",
+        granularity="month", created_by=actor,
+    )
+
+
+def _expense_category(org: UUID, client: UUID, actor: UUID) -> ExpenseCategory:
+    return ExpenseCategory(
+        org_id=org, client_id=client, key=f"k-{uuid4().hex[:6]}", name="n", created_by=actor
+    )
+
+
+def _run(org: UUID, client: UUID, credential: UUID, actor: UUID) -> PushRun:
+    """Unsealed, so its targets may be written; finished, so any number of
+    them fit beside the one active run per client (D3)."""
+    return PushRun(
+        org_id=org, client_id=client, credential_id=credential, created_by=actor,
+        prefix="10.0.0.0/24", list_digest="d" * 64, state="completed", target_count=0,
+    )
+
+
+def _repository(org: UUID, client: UUID, name: str) -> BackupRepository:
+    return BackupRepository(
+        org_id=org, client_id=client, name=name, storage_ref="s", encryption_key_ref="k"
+    )
+
+
+def _prefix() -> str:
+    return f"10.{uuid4().int % 250 + 1}.{uuid4().int % 256}.0/24"
 
 
 def _ticket(org: UUID, client: UUID, queue: UUID, category: UUID, actor: UUID) -> Ticket:
@@ -191,10 +284,36 @@ async def _side(
             check_type="cpu.busy_pct", severity="warning",
         )
         ticket = _ticket(org, client.id, queue, category, actor)
-        s.add_all([job, alert, ticket])
+        person = Person(org_id=org, client_id=client.id, display_name="Persona")
+        subscription = _subscription(org, client.id, actor)
+        plan = _plan(org, client.id, actor)
+        budget = _budget(org, client.id, actor)
+        expense_category = _expense_category(org, client.id, actor)
+        s.add_all([job, alert, ticket, person, subscription, plan, budget, expense_category])
+        await s.flush()
+        test = BcpTest(org_id=org, plan_id=plan.id, type="tabletop", created_by=actor)
+        # The same VRF name and prefix on both sides: per client since 0240.
+        vrf = IpamVrf(org_id=org, client_id=client.id, name="global")
+        s.add_all([test, vrf])
+        await s.flush()
+        subnet = IpamSubnet(org_id=org, vrf_id=vrf.id, prefix="10.0.0.0/24")
+        credential = Credential(
+            org_id=org, client_id=client.id, name="push", type="push_install", vault_ref=""
+        )
+        s.add_all([subnet, credential])
+        await s.flush()
+        run = _run(org, client.id, credential.id, actor)
+        # The same name on both sides: unique per client since 0242.
+        repository = _repository(org, client.id, "principal")
+        target = BackupOffsiteTarget(
+            org_id=org, client_id=client.id, name="fuera", bucket="b", credential_id=credential.id
+        )
+        s.add_all([run, repository, target])
         await s.commit()
     return Side(
-        client.id, site.id, device.id, group.id, job.id, alert.id, record.id, ticket.id
+        client.id, site.id, device.id, group.id, job.id, alert.id, record.id, ticket.id,
+        person.id, subscription.id, plan.id, test.id, budget.id, expense_category.id,
+        vrf.id, subnet.id, credential.id, run.id, repository.id, target.id,
     )
 
 
@@ -216,14 +335,21 @@ async def _two_clients(admin_engine: AsyncEngine) -> World:
             org_id=org.id, key="c", name="C", type="incident", default_queue_id=queue.id,
             created_by=actor.id,
         )
-        s.add(category)
+        product = SoftwareProduct(org_id=org.id, name="Office", created_by=actor.id)
+        package = Package(
+            org_id=org.id, name="htop", version="3", os_family="linux", installer_type="deb"
+        )
+        s.add_all([category, product, package])
         await s.commit()
     profile = await seed_profile(admin_engine, org.id)
     check = await seed_check(admin_engine, org.id, profile)
     tickets = {"actor": actor.id, "queue": queue.id, "category": category.id}
     x = await _side(admin_engine, org.id, profile, check, **tickets)
     y = await _side(admin_engine, org.id, profile, check, **tickets)
-    return World(org.id, actor.id, script.id, profile, check, queue.id, category.id, x, y)
+    return World(
+        org.id, actor.id, script.id, profile, check, queue.id, category.id, product.id,
+        package.id, x, y,
+    )
 
 
 async def _seed(admin_engine: AsyncEngine, *rows: Any) -> list[UUID]:
@@ -257,12 +383,12 @@ async def _unscoped(org: UUID, app_engine: AsyncEngine) -> AsyncIterator[AsyncSe
 
 
 # --------------------------------------------------------------------------- #
-# Spec §5 test 3, structurally: every phase-1 table.
+# Spec §5 test 3, structurally: every scoped table.
 # --------------------------------------------------------------------------- #
 
-#: Every phase-1 table (C, H and O), and `clients`, which is G in the catalog
+#: Every scoped table (C, H and O), and `clients`, which is G in the catalog
 #: but carries a client policy of its own (0231).
-SWEPT = [*sorted(PHASE_1), "clients"]
+SWEPT = [*sorted(SCOPED), "clients"]
 
 
 async def test_the_app_role_is_held_by_rls(app_engine: AsyncEngine) -> None:
@@ -380,6 +506,86 @@ PATHS: dict[str, tuple[str, Make]] = {
     "H-ticket_comment-via-ticket": ("ticket_comment", lambda w, s: TicketComment(
         org_id=w.org, ticket_id=s.ticket, author_id=w.actor, author_type="user", body="b",
         visibility="public",
+    )),
+    "C-person": ("person", lambda w, s: Person(
+        org_id=w.org, client_id=s.client, display_name="p"
+    )),
+    "H-person_login-via-person": ("person_login", lambda w, s: PersonLogin(
+        org_id=w.org, person_id=s.person, login=f"corp\\{uuid4().hex[:8]}"
+    )),
+    "C-license": ("license", lambda w, s: License(
+        org_id=w.org, client_id=s.client, product_id=w.product, type="perpetual",
+        entitlements=1, created_by=w.actor,
+    )),
+    "C-subscription": ("subscription", lambda w, s: _subscription(w.org, s.client, w.actor)),
+    "H-subscription_event-via-subscription": ("subscription_event", lambda w, s: (
+        SubscriptionEvent(
+            org_id=w.org, subscription_id=s.subscription, type="created", created_by=w.actor
+        )
+    )),
+    "C-change_request": ("change_request", lambda w, s: ChangeRequest(
+        org_id=w.org, client_id=s.client, type="normal", title="t", description="d",
+        risk="low", affected=[], created_by=w.actor,
+    )),
+    "C-bcp_plan": ("bcp_plan", lambda w, s: _plan(w.org, s.client, w.actor)),
+    "H-bcp_test_step-via-bcp_test": ("bcp_test_step", lambda w, s: BcpTestStep(
+        org_id=w.org, test_id=s.test, ordinal=1, description="d"
+    )),
+    "C-budget": ("budget", lambda w, s: _budget(w.org, s.client, w.actor)),
+    "C-expense_category": ("expense_category", lambda w, s: _expense_category(
+        w.org, s.client, w.actor
+    )),
+    "H-budget_line-via-budget": ("budget_line", lambda w, s: BudgetLine(
+        org_id=w.org, budget_id=s.budget, category_id=s.expense_category,
+        period_index=1, planned_amount=1, created_by=w.actor,
+    )),
+    # IPAM (0240). A subnet's client is its VRF's; a range's, its subnet's.
+    "C-ipam_vrf": ("ipam_vrf", lambda w, s: IpamVrf(
+        org_id=w.org, client_id=s.client, name=f"v-{uuid4().hex[:6]}"
+    )),
+    # Site-less: unique per client, so X's and Y's may share a number.
+    "C-ipam_vlan": ("ipam_vlan", lambda w, s: IpamVlan(
+        org_id=w.org, client_id=s.client, vid=uuid4().int % 4094 + 1
+    )),
+    "H-ipam_subnet-via-ipam_vrf": ("ipam_subnet", lambda w, s: IpamSubnet(
+        org_id=w.org, vrf_id=s.vrf, prefix=f"10.{uuid4().int % 250 + 1}.{uuid4().int % 256}.0/24"
+    )),
+    "H-ipam_range-via-ipam_subnet": ("ipam_range", lambda w, s: IpamRange(
+        org_id=w.org, subnet_id=s.subnet, kind="reserved", start_address="10.0.0.10",
+        end_address="10.0.0.20",
+    )),
+    # Push install (0241). A prefix is one client's network; a run is its
+    # credential's client's; a scope its credential's; a target its run's.
+    "C-push_authorization": ("push_authorization", lambda w, s: PushAuthorization(
+        org_id=w.org, client_id=s.client, prefix=_prefix(), authorized_by=w.actor
+    )),
+    "C-push_run": ("push_run", lambda w, s: _run(w.org, s.client, s.credential, w.actor)),
+    "H-push_credential_scope-via-credentials": ("push_credential_scope", lambda w, s: (
+        PushCredentialScope(
+            org_id=w.org, credential_id=s.credential, prefix=_prefix(), bound_by=w.actor
+        )
+    )),
+    "H-push_run_target-via-push_run": ("push_run_target", lambda w, s: PushRunTarget(
+        org_id=w.org, run_id=s.run, device_id=s.device, address=f"10.0.0.{uuid4().int % 250}",
+        position=uuid4().int % 100000, state="waiting",
+    )),
+    # Backup (0242). A repository is one client's; a chunk is its repository's.
+    "C-backup_repositories": ("backup_repositories", lambda w, s: _repository(
+        w.org, s.client, f"r-{uuid4().hex[:6]}"
+    )),
+    "H-backup_chunks-via-backup_repositories": ("backup_chunks", lambda w, s: BackupChunk(
+        org_id=w.org, repository_id=s.repository, chunk_id=uuid4().hex * 2
+    )),
+    "H-backup_chunk_copies-via-backup_repositories": (
+        "backup_chunk_copies", lambda w, s: BackupChunkCopy(
+            org_id=w.org, repository_id=s.repository, target_id=s.target,
+            chunk_id=uuid4().hex * 2, object_name="o",
+        )
+    ),
+    # The client is never sent: the trigger takes it from the target (0239).
+    "C-deployments": ("deployments", lambda w, s: Deployment(
+        org_id=w.org, package_id=w.package, action="install", target_type="device",
+        target_id=s.device, state="pending",
     )),
     "O-doc_articles-no-parent": ("doc_articles", lambda w, s: DocArticle(
         org_id=w.org, client_id=s.client, title="t"

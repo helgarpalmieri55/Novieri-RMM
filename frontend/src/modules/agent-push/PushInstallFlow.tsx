@@ -189,7 +189,7 @@ export function PushInstallFlow({
           key={`${chosen.id}:${targets.join(",")}`}
           targets={targets}
           windowsTargets={windows.map((m) => m.primary_ip as string)}
-          credential={{ id: chosen.id, name: chosen.name, type: chosen.type }}
+          credential={{ id: chosen.id, name: chosen.name, type: chosen.type, client_id: chosen.client_id }}
         />
       ) : null}
     </section>

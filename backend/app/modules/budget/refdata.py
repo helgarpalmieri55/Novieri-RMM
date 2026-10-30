@@ -13,6 +13,13 @@ editable-field set deliberately excludes both `key` and `system_key`, so
 renaming a category's display `name` can never change or clear it.
 Operator-created categories get `system_key = None` -- they are not
 resolvable by the auto-feeds, only by id/`key`.
+
+Categories and cost centers belong to ONE client (MSP clients plan 2026-10-26
+Task 8): created for the client the caller names
+(`clients.client_for_new_budget_rows`), unique per client by key or code, and
+each client has its own seeded defaults. Every edit calls `require_budget`
+with the row's client before anything is written, and every audit event
+carries that client.
 """
 
 from typing import Any
@@ -26,6 +33,12 @@ from uuid_extensions import uuid7
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.models import CostCenter, ExpenseCategory
+from app.modules.budget.clients import (
+    budget_in_use,
+    client_for_new_budget_rows,
+    require_budget,
+    same_client,
+)
 from app.modules.budget.errors import BudgetNotFoundError, BudgetValidationError
 
 DEFAULT_CATEGORIES: tuple[tuple[str, str], ...] = (
@@ -70,13 +83,20 @@ def _reject_null_for_non_nullable(
 
 
 async def seed_default_categories(
-    session: AsyncSession, org_id: UUID, actor_id: UUID
+    session: AsyncSession, org_id: UUID, actor_id: UUID, *, client_id: UUID
 ) -> list[ExpenseCategory]:
-    """Ensure the org has all of `DEFAULT_CATEGORIES`, inserting only the
-    ones it is missing. Idempotent BY CONSTRUCTION -- the org's existing
-    categories are selected first, so a second call for the same org
+    """Ensure the client has all of `DEFAULT_CATEGORIES`, inserting only the
+    ones it is missing. Idempotent BY CONSTRUCTION -- the client's existing
+    categories are selected first, so a second call for the same client
     inserts nothing, rather than being idempotent only because nothing
     happens to call it twice.
+
+    ONLY FOR A CLIENT THAT USES BUDGET AND IS NOT ARCHIVED (plan 2026-10-26
+    Task 8): the reads that reach this (`list_categories`,
+    `reporting.variance`, `reporting.forecast`) ask `budget_in_use` first,
+    and `feeds.materialize` has already taken the client like a create's
+    (`client_for_new_budget_rows`) -- a client without the module, or
+    archived, gets no rows from a read.
 
     This is a LAZY seed, called from every path that needs categories to
     exist (`list_categories`, `feeds.materialize`, `reporting.variance`,
@@ -89,7 +109,7 @@ async def seed_default_categories(
     property above, and the concurrency-safety below, both matter.
 
     The existence check covers `key`, not just `system_key`, because
-    `uq_expense_category_org_key` is on `key`. An operator who created a
+    `uq_expense_category_client_key` is on `key`. An operator who created a
     category named e.g. "hardware" by hand (leaving `system_key` NULL)
     before this ever ran would otherwise collide with the seed and surface
     an IntegrityError as a 500 -- exactly the shape spec §8 forbids.
@@ -101,13 +121,13 @@ async def seed_default_categories(
     created for their own purpose. Adopting it would be a silent decision
     about how someone else's money is categorized.
 
-    Concurrency-safe, mirroring `fx.get_settings` (Task-5 finding F2) and
+    Concurrency-safe, mirroring `rates.settings_for_write` (Task-5 finding F2) and
     `feeds.materialize`'s own conflict-safe write (K3 fix): the in-memory
     `existing_keys` pre-check above is a fast path, not the sole guard --
     two concurrent first-ever calls for the same org (e.g. two requests
     racing `list_categories` on a brand-new org) could both miss it before
     either has written. The insert is a single batched
-    `pg_insert(...).on_conflict_do_nothing()` against `uq_expense_category_org_key`
+    `pg_insert(...).on_conflict_do_nothing()` against `uq_expense_category_client_key`
     rather than per-row `session.add` calls (which would let the loser of
     that race surface a raw `IntegrityError` as a 500 on a financial path,
     exactly what spec §8 forbids); `RETURNING` reports which rows actually
@@ -135,6 +155,7 @@ async def seed_default_categories(
             await session.execute(
                 select(ExpenseCategory.key).where(
                     ExpenseCategory.org_id == org_id,
+                    ExpenseCategory.client_id == client_id,
                     ExpenseCategory.key.in_(_DEFAULT_KEYS),
                 )
             )
@@ -149,6 +170,7 @@ async def seed_default_categories(
             {
                 "id": uuid7(),
                 "org_id": org_id,
+                "client_id": client_id,
                 "key": key,
                 "name": name,
                 "system_key": key,
@@ -160,7 +182,7 @@ async def seed_default_categories(
             await session.execute(
                 pg_insert(ExpenseCategory)
                 .values(rows)
-                .on_conflict_do_nothing(index_elements=["org_id", "key"])
+                .on_conflict_do_nothing(index_elements=["org_id", "client_id", "key"])
                 .returning(ExpenseCategory.id, ExpenseCategory.key, ExpenseCategory.name)
             )
         ).all()
@@ -173,8 +195,9 @@ async def seed_default_categories(
                 actor_type="system",
                 actor_id=None,
                 action="budget.categories_seeded",
-                target_type="org",
-                target_id=str(org_id),
+                target_type="client",
+                target_id=str(client_id),
+                client_id=client_id,
                 metadata={"keys": [key for _cat_id, key, _name in inserted]},
             )
             await session.flush()
@@ -185,6 +208,7 @@ async def seed_default_categories(
                 select(ExpenseCategory)
                 .where(
                     ExpenseCategory.org_id == org_id,
+                    ExpenseCategory.client_id == client_id,
                     ExpenseCategory.system_key.in_(_DEFAULT_KEYS),
                 )
                 .order_by(ExpenseCategory.sort_order, ExpenseCategory.key)
@@ -196,15 +220,29 @@ async def seed_default_categories(
 
 
 async def list_categories(
-    session: AsyncSession, org_id: UUID, actor_id: UUID, *, include_inactive: bool = False
+    session: AsyncSession,
+    org_id: UUID,
+    actor_id: UUID,
+    *,
+    client_id: UUID | None = None,
+    include_inactive: bool = False,
 ) -> list[ExpenseCategory]:
-    """Lazily seeds the org's default categories first (C1 fix) -- this is
-    the first place a brand-new org's operator lands (`GET /budget/categories`
-    populates the category picker every other budget route depends on), so
-    it seeds from `actor_id` exactly like `feeds.materialize`/
-    `reporting.variance`/`reporting.forecast` do."""
-    await seed_default_categories(session, org_id, actor_id)
+    """Every visible client's categories, or `client_id`'s alone.
+
+    Lazily seeds that client's default categories first (C1 fix) -- this is
+    the first place a brand-new client's operator lands (`GET
+    /budget/categories` populates the category picker every other budget
+    route depends on), so it seeds from `actor_id` exactly like
+    `feeds.materialize`/`reporting.variance`/`reporting.forecast` do. Only
+    for a client that uses budget and is not archived (`budget_in_use`): any
+    other client is answered the rows it has, and reading them writes
+    nothing (plan 2026-10-26 Task 8; an archived client takes no new rows).
+    An unfiltered read seeds nothing -- there is no one client to seed."""
+    if client_id is not None and await budget_in_use(session, org_id, client_id):
+        await seed_default_categories(session, org_id, actor_id, client_id=client_id)
     stmt = select(ExpenseCategory).where(ExpenseCategory.org_id == org_id)
+    if client_id is not None:
+        stmt = stmt.where(ExpenseCategory.client_id == client_id)
     if not include_inactive:
         stmt = stmt.where(ExpenseCategory.active.is_(True))
     stmt = stmt.order_by(ExpenseCategory.sort_order, ExpenseCategory.name)
@@ -212,29 +250,40 @@ async def list_categories(
 
 
 async def create_category(
-    session: AsyncSession, org_id: UUID, actor_id: UUID, *, key: str, name: str
+    session: AsyncSession,
+    org_id: UUID,
+    actor_id: UUID,
+    *,
+    client_id: UUID,
+    key: str,
+    name: str,
 ) -> ExpenseCategory:
-    """Create an operator category. `system_key` is always `None` here --
-    only `seed_default_categories` ever sets it. A duplicate `key` within
-    the org is rejected up front as a typed `BudgetValidationError` rather
-    than surfacing the `uq_expense_category_org_key` violation as a 500;
-    the same `key` in a different org is unaffected (the constraint, and
-    this check, are both org-scoped).
+    """Create an operator category for `client_id` (a client the caller may
+    file under, that uses budget: `client_for_new_budget_rows`).
+    `system_key` is always `None` here -- only `seed_default_categories` ever
+    sets it. A duplicate `key` within the client is rejected up front as a
+    typed `BudgetValidationError` rather than surfacing the
+    `uq_expense_category_client_key` violation as a 500; the same `key` in a
+    different client or org is unaffected (the constraint, and this check,
+    are both per client).
 
     The pre-check above is a fast path, not the sole guard: two concurrent
-    `create_category` calls for the same `(org_id, key)` can both miss it
-    before either has written. A plain `session.add` here would let the
-    loser surface a raw `IntegrityError` as a 500, so the actual insert
+    `create_category` calls for the same `(org_id, client_id, key)` can both
+    miss it before either has written. A plain `session.add` here would let
+    the loser surface a raw `IntegrityError` as a 500, so the actual insert
     instead goes through `ON CONFLICT DO NOTHING` against
-    `uq_expense_category_org_key` (mirrors `seed_default_categories`'s own
+    `uq_expense_category_client_key` (mirrors `seed_default_categories`'s own
     conflict-safe write just above) -- but this is a single-caller CREATE,
     not a get-or-create: a race loser must get the identical typed
     `BudgetValidationError` the pre-check raises, never someone else's
     row."""
+    await client_for_new_budget_rows(session, org_id, client_id)
     existing = (
         await session.execute(
             select(ExpenseCategory.id).where(
-                ExpenseCategory.org_id == org_id, ExpenseCategory.key == key
+                ExpenseCategory.org_id == org_id,
+                ExpenseCategory.client_id == client_id,
+                ExpenseCategory.key == key,
             )
         )
     ).scalar_one_or_none()
@@ -248,12 +297,13 @@ async def create_category(
             .values(
                 id=cat_id,
                 org_id=org_id,
+                client_id=client_id,
                 key=key,
                 name=name,
                 system_key=None,
                 created_by=actor_id,
             )
-            .on_conflict_do_nothing(index_elements=["org_id", "key"])
+            .on_conflict_do_nothing(index_elements=["org_id", "client_id", "key"])
             .returning(ExpenseCategory.id)
         )
     ).scalar_one_or_none()
@@ -273,6 +323,7 @@ async def create_category(
         action="budget.category_created",
         target_type="expense_category",
         target_id=str(cat.id),
+        client_id=client_id,
         metadata={"key": key, "name": name, "system_key": None},
     )
     await session.flush()
@@ -299,10 +350,28 @@ async def resolve_category(
     return cat
 
 
+async def category_of_client(
+    session: AsyncSession, org_id: UUID, client_id: UUID, category_id: UUID
+) -> ExpenseCategory:
+    """A category a row of `client_id` points at -- an expense, a budget
+    line: found org-scoped (`resolve_category`'s 404 if not), and of that
+    client (a 422 if another client's)."""
+    cat = await resolve_category(session, org_id, category_id)
+    same_client(
+        cat.client_id,
+        client_id,
+        tr(
+            "expense category {category_id} belongs to another client",
+            category_id=cat.id,
+        ),
+    )
+    return cat
+
+
 async def category_by_system_key(
-    session: AsyncSession, org_id: UUID, system_key: str
+    session: AsyncSession, org_id: UUID, system_key: str, *, client_id: UUID
 ) -> ExpenseCategory | None:
-    """Resolve the org's ACTIVE category for a `system_key` (spec §6.1: "no
+    """Resolve the client's ACTIVE category for a `system_key` (spec §6.1: "no
     ACTIVE category with that system_key"). A category the operator has
     retired (`active=False`) is deliberately treated the same as one that
     was never seeded -- `None` -- so a caller like Task 10's `materialize`
@@ -318,6 +387,7 @@ async def category_by_system_key(
         await session.execute(
             select(ExpenseCategory).where(
                 ExpenseCategory.org_id == org_id,
+                ExpenseCategory.client_id == client_id,
                 ExpenseCategory.system_key == system_key,
                 ExpenseCategory.active.is_(True),
             )
@@ -336,9 +406,11 @@ async def update_category(
     `key`/`system_key` are never touched here even if present in `fields`
     (they are absent from `_CATEGORY_EDITABLE_FIELDS`) -- `system_key` is
     the stable identifier the Task-10 auto-feeds resolve against, and
-    renaming the display `name` must never change or clear it."""
+    renaming the display `name` must never change or clear it. Its client
+    must use budget (`require_budget`, before anything is written)."""
     _reject_null_for_non_nullable(fields, _CATEGORY_NON_NULLABLE_FIELDS)
     cat = await resolve_category(session, org_id, category_id)
+    await require_budget(session, org_id, cat.client_id)
 
     changed_fields = []
     for field in _CATEGORY_EDITABLE_FIELDS:
@@ -357,6 +429,7 @@ async def update_category(
         action="budget.category_updated",
         target_type="expense_category",
         target_id=str(cat.id),
+        client_id=cat.client_id,
         metadata={"changed_fields": sorted(changed_fields)},
     )
     await session.flush()
@@ -373,26 +446,33 @@ async def create_cost_center(
     org_id: UUID,
     actor_id: UUID,
     *,
+    client_id: UUID,
     code: str,
     name: str,
     external_ref: str | None = None,
 ) -> CostCenter:
-    """A duplicate `code` within the org is rejected up front as a typed
+    """A cost center of `client_id` (`client_for_new_budget_rows`). A
+    duplicate `code` within the client is rejected up front as a typed
     `BudgetValidationError` rather than surfacing the
-    `uq_cost_center_org_code` violation as a 500; the same `code` in a
-    different org is unaffected.
+    `uq_cost_center_client_code` violation as a 500; the same `code` in a
+    different client or org is unaffected.
 
     The pre-check above is a fast path, not the sole guard: two concurrent
-    `create_cost_center` calls for the same `(org_id, code)` can both miss
-    it before either has written. A plain `session.add` here would let the
-    loser surface a raw `IntegrityError` as a 500, so the actual insert
-    instead goes through `ON CONFLICT DO NOTHING` against
-    `uq_cost_center_org_code` (same shape as `create_category` above) --
+    `create_cost_center` calls for the same `(org_id, client_id, code)` can
+    both miss it before either has written. A plain `session.add` here would
+    let the loser surface a raw `IntegrityError` as a 500, so the actual
+    insert instead goes through `ON CONFLICT DO NOTHING` against
+    `uq_cost_center_client_code` (same shape as `create_category` above) --
     the race loser gets the identical typed `BudgetValidationError` the
     pre-check raises, never someone else's row."""
+    await client_for_new_budget_rows(session, org_id, client_id)
     existing = (
         await session.execute(
-            select(CostCenter.id).where(CostCenter.org_id == org_id, CostCenter.code == code)
+            select(CostCenter.id).where(
+                CostCenter.org_id == org_id,
+                CostCenter.client_id == client_id,
+                CostCenter.code == code,
+            )
         )
     ).scalar_one_or_none()
     if existing is not None:
@@ -405,12 +485,13 @@ async def create_cost_center(
             .values(
                 id=cc_id,
                 org_id=org_id,
+                client_id=client_id,
                 code=code,
                 name=name,
                 external_ref=external_ref,
                 created_by=actor_id,
             )
-            .on_conflict_do_nothing(index_elements=["org_id", "code"])
+            .on_conflict_do_nothing(index_elements=["org_id", "client_id", "code"])
             .returning(CostCenter.id)
         )
     ).scalar_one_or_none()
@@ -430,6 +511,7 @@ async def create_cost_center(
         action="budget.cost_center_created",
         target_type="cost_center",
         target_id=str(cc.id),
+        client_id=client_id,
         metadata={"code": code, "name": name},
     )
     await session.flush()
@@ -437,9 +519,16 @@ async def create_cost_center(
 
 
 async def list_cost_centers(
-    session: AsyncSession, org_id: UUID, *, include_inactive: bool = False
+    session: AsyncSession,
+    org_id: UUID,
+    *,
+    client_id: UUID | None = None,
+    include_inactive: bool = False,
 ) -> list[CostCenter]:
+    """Every visible client's cost centers, or `client_id`'s alone."""
     stmt = select(CostCenter).where(CostCenter.org_id == org_id)
+    if client_id is not None:
+        stmt = stmt.where(CostCenter.client_id == client_id)
     if not include_inactive:
         stmt = stmt.where(CostCenter.active.is_(True))
     stmt = stmt.order_by(CostCenter.code)
@@ -466,6 +555,23 @@ async def resolve_cost_center(
     return cc
 
 
+async def cost_center_of_client(
+    session: AsyncSession, org_id: UUID, client_id: UUID, cost_center_id: UUID
+) -> CostCenter:
+    """A cost center a row of `client_id` points at, held like
+    `category_of_client`."""
+    cc = await resolve_cost_center(session, org_id, cost_center_id)
+    same_client(
+        cc.client_id,
+        client_id,
+        tr(
+            "cost center {cost_center_id} belongs to another client",
+            cost_center_id=cc.id,
+        ),
+    )
+    return cc
+
+
 async def update_cost_center(
     session: AsyncSession,
     org_id: UUID,
@@ -474,9 +580,11 @@ async def update_cost_center(
     fields: dict[str, Any],
 ) -> CostCenter:
     """Apply the SUPPLIED fields to a cost center, org-scoped-loaded. `code`
-    is never touched here (absent from `_COST_CENTER_EDITABLE_FIELDS`)."""
+    is never touched here (absent from `_COST_CENTER_EDITABLE_FIELDS`). Its
+    client must use budget (`require_budget`, before anything is written)."""
     _reject_null_for_non_nullable(fields, _COST_CENTER_NON_NULLABLE_FIELDS)
     cc = await resolve_cost_center(session, org_id, cost_center_id)
+    await require_budget(session, org_id, cc.client_id)
 
     changed_fields = []
     for field in _COST_CENTER_EDITABLE_FIELDS:
@@ -495,6 +603,7 @@ async def update_cost_center(
         action="budget.cost_center_updated",
         target_type="cost_center",
         target_id=str(cc.id),
+        client_id=cc.client_id,
         metadata={"changed_fields": sorted(changed_fields)},
     )
     await session.flush()

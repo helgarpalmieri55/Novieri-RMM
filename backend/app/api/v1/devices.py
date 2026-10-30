@@ -7,19 +7,26 @@ from pydantic import BaseModel, ConfigDict, Field, IPvAnyAddress, field_validato
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_all_clients, require_permission
+from app.api.deps import AuthContext, require_permission
 from app.core.audit import audit_service
 from app.core.i18n import tr
-from app.core.rbac import has_permission
+from app.core.rbac import codes_held_anywhere
 from app.core.tenancy import org_session
 from app.gateway.dispatch import publish_job, publish_revoke
 from app.models import Agent, Device, SuggestedAssetMatch
 from app.modules.ipam import candidates as candidates_svc
+from app.modules.ipam.errors import IpamClientError, IpamConflictError, IpamNotFoundError
 from app.modules.remote.capability import can_share_screen
 from app.services import device_review as review_svc
 from app.services.cert_renewal import cert_state
-from app.services.client_sites import NotAcceptingNewRows, SiteNotFound, site_for_new_rows
-from app.services.device_list import DeviceHolder, device_page
+from app.services.client_sites import (
+    NotAcceptingNewRows,
+    SiteNotFound,
+    SiteOfAnotherClient,
+    site_for_new_rows,
+    site_of_client,
+)
+from app.services.device_list import HOLDER_PERMISSION, DeviceHolder, device_page
 from app.services.dns_name import MAX_DNS_NAME, InvalidDnsName, normalise_dns_name
 
 router = APIRouter(prefix="/devices", tags=["devices"])
@@ -96,8 +103,8 @@ class AssetCreateRequest(AssetFields):
 
     `site_id` IS REQUIRED (MSP clients spec §1.5): every device belongs to a
     site, and to the site's client -- which is derived from the site, never
-    sent. Not on `AssetUpdateRequest`: a device's client never changes, and
-    moving one between its client's sites is not this route's.
+    sent. A device's client never changes; `AssetUpdateRequest.site_id` moves
+    it between its client's sites.
     """
 
     site_id: UUID = Field(
@@ -115,6 +122,15 @@ class AssetUpdateRequest(AssetFields):
 
     asset_type: str | None = Field(default=None, pattern=f"^({'|'.join(_ASSET_TYPES)})$")  # type: ignore[assignment]
     lifecycle: str | None = Field(default=None, pattern=f"^({'|'.join(_LIFECYCLES)})$")  # type: ignore[assignment]
+    #: MOVES THE DEVICE TO ANOTHER SITE OF ITS OWN CLIENT (MSP clients spec
+    #: §1.5; plan 2026-10-26 Task 14). A site of another client is a 422 --
+    #: the device's client never changes, and the trigger
+    #: `its_device_client_guard` refuses it too. `null` is a 422: a device
+    #: always has a site.
+    site_id: UUID | None = Field(
+        default=None,
+        description="Move the device to this site of its own client",
+    )
 
 
 class AssignedToOut(BaseModel):
@@ -130,6 +146,9 @@ class AssignedToOut(BaseModel):
 
 class DeviceOut(BaseModel):
     id: UUID
+    #: The device's client and site (MSP clients spec §1.5). ADDITIVE.
+    client_id: UUID
+    site_id: UUID
     # NULLABLE SINCE 0061 (asset-inventory spec §2). A switch has a name but no
     # hostname in this sense and no OS family at all; a laptop still in its box
     # has told us neither yet.
@@ -304,6 +323,8 @@ def _row_to_out(
 ) -> DeviceOut:
     return DeviceOut(
         id=device.id,
+        client_id=device.client_id,
+        site_id=device.site_id,
         hostname=device.hostname,
         fqdn=device.fqdn,
         os_family=device.os_family,
@@ -365,6 +386,10 @@ async def list_devices(
     #: The console's search box, SERVER-SIDE. Hostname, FQDN, description,
     #: address, operating system and architecture -- the fields the box names.
     q: str | None = Query(default=None, max_length=128),
+    #: One client's machines -- what IPAM's sweeper picker lists for a subnet.
+    #: A filter like the others, never a widening: RLS still decides what the
+    #: caller may see, so another client's id answers an empty page.
+    client_id: UUID | None = Query(default=None),
     #: The tab strip: `all | online | offline | assets | certs | review`.
     #: `review` is the machines that joined through the install link and wait
     #: for a person. NOT the same
@@ -394,13 +419,16 @@ async def list_devices(
     `total` is not counted separately -- it IS `state_counts[state]`.
 
     `assigned_to` -- and the search reaching a holder's name -- is served only
-    to a caller who also holds `people.read`: this route is gated
-    `devices.read`, and who holds a machine is a fact about a person.
+    to a caller who also holds `people.read` IN THE DEVICE'S CLIENT: this route
+    is gated `devices.read`, and who holds a machine is a fact about a person
+    of that client (plan 2026-10-26 Task 5). Decided per row in SQL
+    (`device_list._reads_people_there`); a caller holding `people.read`
+    nowhere skips the holder join altogether.
     """
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        with_holder = await has_permission(session, ctx.user_id, "people.read")
+        with_holder = HOLDER_PERMISSION in await codes_held_anywhere(session, ctx.user_id)
         page = await device_page(
             session,
             ctx.org_id,
@@ -408,10 +436,12 @@ async def list_devices(
             device_status=device_status,
             provenance=provenance,
             q=q,
+            client_id=client_id,
             state=state,
             limit=limit,
             offset=offset,
             with_holder=with_holder,
+            holder_reader=ctx.user_id,
         )
         return DeviceListResponse(
             items=[
@@ -442,6 +472,8 @@ class CandidateOut(BaseModel):
     #: nothing else.
     confidence: str
     subnet_id: UUID | None
+    #: Whose network saw it. The same address in two clients is two candidates.
+    client_id: UUID
 
 
 class CandidateListResponse(BaseModel):
@@ -469,6 +501,12 @@ class CandidateListResponse(BaseModel):
 class PromoteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    #: Whose candidates these are. Each machine is filed under its subnet's
+    #: client -- this one -- at the subnet's site.
+    client_id: UUID = Field(
+        description="The client whose candidates are promoted; each machine is filed under "
+        "it, at its subnet's site"
+    )
     #: The addresses an OPERATOR selected. Bulk promote is allowed; bulk
     #: auto-promote is not, and the difference is that this list came from a
     #: human looking at the screen.
@@ -536,25 +574,32 @@ async def promote_asset_candidates(
     selection must not silently discard the rest, and "already an asset" is not
     an error -- two operators looking at the same list is the normal case.
 
-    EVERY CLIENT, IN PHASE 1. IPAM has no client yet, so a promoted machine is
-    filed under the internal client and its Principal site (`candidates.py`).
-    A technician limited to some clients is refused here, with the
-    every-client sentence, rather than by RLS at the INSERT with a 500.
-    PHASE 2: the subnet's client, and this gate goes (plan "Fuera de esta
-    fase").
+    THE BODY NAMES ITS CLIENT, and each machine is filed under its subnet's
+    client and site (`candidates.promote`; decision C7 refuses a candidate
+    whose subnet has no site). `assets.manage` is held in the request's scope:
+    a technician limited to X promotes X's candidates, and Y -- outside their
+    scope -- is the 404 a client that does not exist gets. The phase-1
+    every-client gate is gone with the internal-client fallback it guarded.
     """
-    require_all_clients(ctx)
-    overrides = body.model_dump(exclude_unset=True, exclude={"addresses"})
+    overrides = body.model_dump(exclude_unset=True, exclude={"addresses", "client_id"})
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        results = await candidates_svc.promote(
-            session,
-            ctx.org_id,
-            actor_id=ctx.user_id,
-            addresses=body.addresses,
-            overrides=overrides,
-        )
+        try:
+            results = await candidates_svc.promote(
+                session,
+                ctx.org_id,
+                actor_id=ctx.user_id,
+                client_id=body.client_id,
+                addresses=body.addresses,
+                overrides=overrides,
+            )
+        except IpamNotFoundError as exc:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from None
+        except IpamConflictError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
+        except IpamClientError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         return PromoteResponse(results=[PromoteResultOut(**vars(result)) for result in results])
 
 
@@ -1067,8 +1112,22 @@ async def update_asset(
     request: Request,
     ctx: AuthContext = Depends(require_permission("assets.manage")),
 ) -> DeviceOut:
-    """Edit an asset. Only the fields present in the body are written."""
+    """Edit an asset. Only the fields present in the body are written.
+
+    `site_id` moves the device to another site of ITS client (plan 2026-10-26
+    Task 14): loaded with `site_of_client` -- the site, then the client, FOR
+    SHARE and held until commit, before anything is written -- so a site the
+    request cannot see is a 404, an archived one (or one of an archived
+    client) a 409, and another client's a 422. The move is audited
+    `device.site_changed` with both sites; any other field `asset.updated`.
+    """
     changes = body.model_dump(exclude_unset=True)
+    new_site = changes.pop("site_id", None)
+    if "site_id" in body.model_fields_set and new_site is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            tr("a device always has a site: name the site it moves to"),
+        )
     if "primary_ip" in changes and changes["primary_ip"] is not None:
         changes["primary_ip"] = str(changes["primary_ip"])
     if "architecture" in changes and changes["architecture"] is None:
@@ -1112,6 +1171,23 @@ async def update_asset(
                 ),
             )
 
+        old_site = device.site_id
+        moved = new_site is not None and new_site != old_site
+        if moved:
+            try:
+                site = await site_of_client(
+                    session, org_id=ctx.org_id, site_id=new_site, client_id=device.client_id
+                )
+            except SiteNotFound:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such site")) from None
+            except NotAcceptingNewRows as exc:
+                raise HTTPException(status.HTTP_409_CONFLICT, exc.detail) from None
+            except SiteOfAnotherClient as exc:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT, exc.detail
+                ) from None
+            device.site_id = site.id
+
         old_fqdn = device.fqdn
         for field, value in changes.items():
             setattr(device, field, value)
@@ -1121,19 +1197,33 @@ async def update_asset(
         # decides which Kerberos service a Windows push presents a domain
         # account to, so its old and new values are evidence -- and a DNS
         # name is not personal data.
-        metadata: dict[str, object] = {"fields": sorted(changes)}
-        if "fqdn" in changes:
-            metadata["fqdn"] = {"old": old_fqdn, "new": device.fqdn}
-        await audit_service.record(
-            session,
-            org_id=ctx.org_id,
-            actor_type="user",
-            actor_id=ctx.user_id,
-            action="asset.updated",
-            target_type="device",
-            target_id=str(device.id),
-            metadata=metadata,
-        )
+        if moved:
+            await audit_service.record(
+                session,
+                org_id=ctx.org_id,
+                actor_type="user",
+                actor_id=ctx.user_id,
+                action="device.site_changed",
+                target_type="device",
+                target_id=str(device.id),
+                metadata={"from_site_id": str(old_site), "to_site_id": str(device.site_id)},
+                client_id=device.client_id,
+            )
+        if changes or not moved:
+            metadata: dict[str, object] = {"fields": sorted(changes)}
+            if "fqdn" in changes:
+                metadata["fqdn"] = {"old": old_fqdn, "new": device.fqdn}
+            await audit_service.record(
+                session,
+                org_id=ctx.org_id,
+                actor_type="user",
+                actor_id=ctx.user_id,
+                action="asset.updated",
+                target_type="device",
+                target_id=str(device.id),
+                metadata=metadata,
+                client_id=device.client_id,
+            )
         await session.flush()
         return _row_to_out(
             device,

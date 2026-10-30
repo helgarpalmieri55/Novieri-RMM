@@ -32,9 +32,10 @@ them, and finds out why a target was refused from the refusal itself, which
 names the failing bound and the permission needed to fix it.
 
 **ONE READ OF AUTHORIZATIONS IS A RUN ROUTE, AND IT CARRIES THE RUN
-CONJUNCTION.** `GET /runs/prefixes` (design 2026-09-30 §1.1) shows the org's
-ACTIVE authorized prefixes -- the only subnets a run may be built from --
-to a holder of `agent.push.run` who ALSO holds `credentials.checkout`,
+CONJUNCTION.** `GET /runs/prefixes` (design 2026-09-30 §1.1) shows the
+ACTIVE authorized prefixes -- the only subnets a run may be built from; with
+`?credential_id=`, that credential's client's (Task 12) -- to a holder of
+`agent.push.run` who ALSO holds `credentials.checkout` in that client,
 checked in `run_list.authorized_prefixes`. That is the same conjunction every
 use of that list requires (preview, start, resume), so it shows nothing to
 anyone who could not act on it. It shows only the prefix, its size and its
@@ -85,6 +86,7 @@ from app.modules.agent_push import run_list as run_list_service
 from app.modules.agent_push import runs as runs_service
 from app.modules.agent_push.errors import (
     PushAuthorizationError,
+    PushClientError,
     PushConflictError,
     PushDispatchUnavailableError,
     PushError,
@@ -157,7 +159,7 @@ def _http_error(exc: PushError) -> HTTPException:
         # failed for WHICH address is a refusal nobody can act on (spec §9),
         # and a flat string would make the console re-parse prose to render it.
         return HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             {
                 "message": str(exc),
                 "targets": [
@@ -170,6 +172,10 @@ def _http_error(exc: PushError) -> HTTPException:
                 ),
             },
         )
+    if isinstance(exc, PushClientError):
+        # A client the row cannot take, or none where one is required (Task
+        # 12): neither malformed input nor a missing row.
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
     if isinstance(exc, PushDispatchUnavailableError):
         # 501, and it is the honest code: the request was well-formed, fully
         # authorized, and this platform has not implemented the act. A 4xx
@@ -206,6 +212,7 @@ def _host_key_out(row: PushHostKey) -> HostKeyOut:
     readiness = row.readiness or {}
     return HostKeyOut(
         address=str(row.address),
+        client_id=row.client_id,
         transport=row.transport,
         observed_fingerprint=row.observed_fingerprint,
         observed_key_type=row.observed_key_type,
@@ -223,6 +230,7 @@ def _host_key_out(row: PushHostKey) -> HostKeyOut:
 def _authorization_out(row: PushAuthorization) -> AuthorizationOut:
     return AuthorizationOut(
         id=row.id,
+        client_id=row.client_id,
         prefix=str(row.prefix),
         address_count=prefix_size(parse_prefix(str(row.prefix))),
         note=row.note,
@@ -237,6 +245,7 @@ def _authorization_out(row: PushAuthorization) -> AuthorizationOut:
 def _scope_out(row: PushCredentialScope, name: str) -> CredentialScopeOut:
     return CredentialScopeOut(
         id=row.id,
+        client_id=row.client_id,
         credential_id=row.credential_id,
         credential_name=name,
         prefix=str(row.prefix),
@@ -321,6 +330,7 @@ async def create_push_authorization(
                 session,
                 ctx.org_id,
                 actor_id=ctx.user_id,
+                client_id=body.client_id,
                 prefix=body.prefix,
                 note=body.note,
                 expires_at=body.expires_at,
@@ -638,6 +648,7 @@ async def _run_out(session: AsyncSession, org_id: UUID, run: PushRun) -> RunOut:
     names = {credential.id: credential.name} if credential is not None else {}
     return RunOut(
         id=run.id,
+        client_id=run.client_id,
         prefix=str(run.prefix),
         credential_id=run.credential_id,
         credential_name=names.get(run.credential_id, "") if run.credential_id else "",
@@ -678,20 +689,28 @@ async def _publish_after_commit(request: Request, envelopes: list[Envelope]) -> 
 @router.get("/runs/prefixes", response_model=list[RunPrefixOut])
 async def list_push_run_prefixes(
     request: Request,
+    credential_id: UUID | None = Query(
+        default=None,
+        description="The push credential the run will present: only its client's "
+        "subnets are listed.",
+    ),
     ctx: AuthContext = Depends(require_permission("agent.push.run")),
 ) -> list[RunPrefixOut]:
-    """The subnets a run may be built from: this org's ACTIVE push
-    authorizations, and nothing else. None can be typed (design §1.1).
+    """The subnets a run may be built from: ACTIVE push authorizations, and
+    nothing else. None can be typed (design §1.1). With `credential_id`, that
+    credential's client's -- the only ones a run with it may use (Task 12).
     `credentials.checkout` is required too, checked in the service, as for
-    every use of this list."""
+    every use of this list: in the credential's client, or in every client
+    when no credential is named."""
     try:
         async with org_session(ctx.org_id, engine=_engine(request), clients=ctx.clients) as session:
             rows = await run_list_service.authorized_prefixes(
-                session, ctx.org_id, actor_id=ctx.user_id
+                session, ctx.org_id, actor_id=ctx.user_id, credential_id=credential_id
             )
             out = [
                 RunPrefixOut(
                     prefix=str(row.prefix),
+                    client_id=row.client_id,
                     address_count=prefix_size(parse_prefix(str(row.prefix))),
                     expires_at=row.expires_at,
                 )
@@ -726,6 +745,7 @@ async def preview_push_run(
     ready = len(listed.ready_rows)
     return RunPreviewOut(
         prefix=listed.prefix,
+        client_id=listed.client_id,
         credential_id=listed.credential_id,
         credential_name=listed.credential_name,
         list_digest=listed.list_digest,
@@ -733,6 +753,7 @@ async def preview_push_run(
         blocked_count=len(listed.rows) - ready,
         unvouched_count=listed.unvouched_count,
         awaiting_review_count=listed.awaiting_review_count,
+        ambiguous_count=listed.ambiguous_count,
         run_max=run_list_service.PUSH_RUN_MAX,
         concurrency=runs_service.PUSH_RUN_CONCURRENCY,
         rows=[

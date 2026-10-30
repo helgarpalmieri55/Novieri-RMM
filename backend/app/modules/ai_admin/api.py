@@ -79,10 +79,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from redis.exceptions import RedisError
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from uuid_extensions import uuid7
 
-from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
+from app.api.deps import (
+    AuthContext,
+    narrowed_to_every,
+    require_permission,
+    require_permission_on_every_client,
+)
 from app.core.ai.act import (
     ActConflict,
     ActExpired,
@@ -131,10 +136,10 @@ from app.core.ai.store import (
 )
 from app.core.ai.types import TurnContext
 from app.core.i18n import tr
-from app.core.rbac import user_permission_codes
+from app.core.rbac import codes_held_anywhere, user_permission_codes
 from app.core.tenancy import admin_session, org_session
 from app.gateway.dispatch import publish_job
-from app.models import AiInjectionFlag, AiMessage, AiSession
+from app.models import AiAction, AiInjectionFlag, AiMessage, AiSession
 from app.modules.ai_admin.profile import ADMIN_PROFILE
 from app.modules.ai_admin.schema import (
     ActionDispatchedOut,
@@ -486,7 +491,10 @@ async def create_ai_session(
     mode = (body or SessionCreate()).mode
 
     async with org_session(ctx.org_id, engine=engine, clients=ctx.clients) as session:
-        codes = await user_permission_codes(session, ctx.user_id)
+        # HELD ON ANY CLIENT (plan 2026-10-26 Task 14, T4-C2 item 11): a
+        # conversation names no machine yet, and every proposal it makes is
+        # checked again on its machine's client (`act.propose`).
+        codes = await codes_held_anywhere(session, ctx.user_id)
     reason = _availability()
     if reason:
         raise _http_error(AiDisabledError(reason))
@@ -634,7 +642,11 @@ async def create_turn(
             ai_session, messages = await load_session(
                 session, org_id=ctx.org_id, user_id=ctx.user_id, session_id=session_id
             )
-            codes = await user_permission_codes(session, ctx.user_id)
+            # HELD ON ANY CLIENT: what the turn OFFERS (the act tool, the read
+            # tools) is ergonomics, not authority -- each read is the loopback
+            # request's own gate on its record's client, and each proposal is
+            # checked on its machine's client (plan 2026-10-26 Task 14).
+            codes = await codes_held_anywhere(session, ctx.user_id)
             # ONE PASS PRODUCES BOTH, and the policy comes from the PROFILE AND
             # THE SESSION'S MODE together (§0.8): this persona's read sessions
             # replay verbatim, its act sessions replace flagged answers with the
@@ -1074,9 +1086,10 @@ def _turn_context(request: Request) -> TurnContext:
     )
 
 
-async def _require_device_read(session: Any, ctx: AuthContext) -> None:
+async def _device_readers(request: Request, ctx: AuthContext) -> AuthContext:
     """§12 as amended by §19.19: reading a PROPOSAL costs what reading a DEVICE
-    costs.
+    costs -- `ctx`, narrowed to the clients where the person holds
+    `devices.read` (403 when they hold it on none).
 
     `ActionOut` carries `target_device_id`, `job_type` and
     `approved_action_key`; `ActionPreviewOut` adds the target's HOSTNAME, the
@@ -1088,10 +1101,15 @@ async def _require_device_read(session: Any, ctx: AuthContext) -> None:
     **`devices.read` IS EXACTLY THE RIGHT SECOND GATE** because device
     visibility in this platform IS org membership plus that code -- it is what
     the confirm path's loopback probe re-runs (`act._device_is_visible`) and
-    what the `devices.health` read tool is gated on. When §11.1's device
-    ownership eventually lands, "the devices this principal may see" stops being
-    org-wide and this becomes a per-row filter; that is written down in §19.19
-    rather than left for somebody to notice.
+    what the `devices.health` read tool is gated on.
+
+    **ON THE PROPOSAL'S OWN CLIENT** (MSP clients plan 2026-10-26 Task 14,
+    T4-C2 item 11): a proposal is its machine's client's row, so the scope it
+    is read under is the clients holding `ai.use` (the route's gate) AND
+    `devices.read` -- another client's proposal does not exist for the
+    request, 404 like a missing one, and the list leaves it out. Held on no
+    client at all, the 403 comes BEFORE any row is loaded, as it always did,
+    so the route is no existence oracle over `ai_action.id`.
 
     **CHECKED IN THE HANDLER, NOT ON THE ROUTE**, for the reason
     `app/modules/ai_copilot/api.py` states at length: `require_permission`
@@ -1100,7 +1118,10 @@ async def _require_device_read(session: Any, ctx: AuthContext) -> None:
     the closure, which is what makes RBAC completeness derivable from the
     router. The route keeps the gate §12 names; this is the second.
     """
-    codes = await user_permission_codes(session, ctx.user_id)
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
+        codes = await codes_held_anywhere(session, ctx.user_id)
     if "devices.read" not in codes:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
@@ -1109,6 +1130,27 @@ async def _require_device_read(session: Any, ctx: AuthContext) -> None:
                 "its hostname and what would run on it"
             ),
         )
+    return await narrowed_to_every(request, ctx, ["devices.read"])
+
+
+async def _codes_on_action_client(
+    session: AsyncSession, ctx: AuthContext, ai_action_id: UUID
+) -> set[str]:
+    """The person's codes ON THE PROPOSAL'S CLIENT -- its machine's (plan
+    2026-10-26 Task 14, T4-C2 item 11): confirming or declining acts on that
+    machine. A proposal this request cannot see is `AiNotFoundError`, the 404
+    a missing one gets. The machine's client never changes, so it is read
+    here, before the confirm takes its row lock."""
+    client_id = (
+        await session.execute(
+            select(AiAction.client_id).where(
+                AiAction.org_id == ctx.org_id, AiAction.id == ai_action_id
+            )
+        )
+    ).scalar_one_or_none()
+    if client_id is None:
+        raise AiNotFoundError(tr("no ai action {ai_action_id}", ai_action_id=ai_action_id))
+    return await user_permission_codes(session, ctx.user_id, client_id=client_id)
 
 
 @router.get("/ai/actions", response_model=list[ActionOut])
@@ -1122,11 +1164,12 @@ async def list_ai_actions(
     `ActionOut`: a one-region list row cannot honour §6.3's separation.
 
     `ai.use` on the route, `devices.read` in the handler -- see
-    `_require_device_read` for why a proposal costs what a device costs."""
+    `_device_readers` for why a proposal costs what a device costs, on its
+    own client."""
+    readers = await _device_readers(request, ctx)
     async with org_session(
-        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+        ctx.org_id, engine=request.app.state.app_engine, clients=readers.clients
     ) as session:
-        await _require_device_read(session, ctx)
         rows = await list_actions(
             session, org_id=ctx.org_id, ai_session_id=session_id, limit=limit
         )
@@ -1145,11 +1188,11 @@ async def get_ai_action(
     `ai.use` on the route, `devices.read` in the handler, and the 403 comes
     BEFORE the row is loaded -- so a principal without it cannot use this route
     as an existence oracle over `ai_action.id` either."""
+    readers = await _device_readers(request, ctx)
     try:
         async with org_session(
-            ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+            ctx.org_id, engine=request.app.state.app_engine, clients=readers.clients
         ) as session:
-            await _require_device_read(session, ctx)
             preview = await load_preview(session, org_id=ctx.org_id, ai_action_id=ai_action_id)
     except AiNotFoundError as exc:
         raise _http_error(exc) from exc
@@ -1182,7 +1225,7 @@ async def confirm_ai_action(
     engine = request.app.state.app_engine
     try:
         async with org_session(ctx.org_id, engine=engine, clients=ctx.clients) as session:
-            codes = await user_permission_codes(session, ctx.user_id)
+            codes = await _codes_on_action_client(session, ctx, ai_action_id)
             outcome = await confirm_action(
                 session,
                 org_id=ctx.org_id,
@@ -1221,7 +1264,7 @@ async def reject_ai_action(
         async with org_session(
             ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
         ) as session:
-            codes = await user_permission_codes(session, ctx.user_id)
+            codes = await _codes_on_action_client(session, ctx, ai_action_id)
             row = await reject_action(
                 session,
                 org_id=ctx.org_id,

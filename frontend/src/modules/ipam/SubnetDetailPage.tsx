@@ -65,7 +65,8 @@ export function SubnetDetailPage() {
   const subnet = useIpamSubnet(subnetId);
   const assignable = subnet.data ? hasUtilization(subnet.data) : false;
   const utilization = useIpamSubnetUtilization(subnetId, assignable);
-  const sites = useIpamSites();
+  // The subnet's own client's sites: the one it names is one of them.
+  const sites = useIpamSites(subnet.data?.client_id ?? null);
   const vlans = useIpamVlans();
   const scopes = useIpamScanAuthorizations();
   const drift = useIpamDrift(subnetId ? { subnet: subnetId } : {});
@@ -238,6 +239,7 @@ export function SubnetDetailPage() {
               <AddressGrid
                 subnetId={subnetId}
                 subnetPrefix={row.prefix}
+                vrfId={row.vrf_id}
                 utilization={util}
                 canAssign={permissions.assign}
               />

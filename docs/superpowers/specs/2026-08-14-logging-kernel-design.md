@@ -175,7 +175,14 @@ there is, because a platform with zero users has no audit chain either. Static
 templates, variables in `extra`, and the install code never appears in any of
 them.
 
-**NOW 106, MCP final review.** One static ERROR in `app/mcp/server.py`, when
+**NOW 107, MSP clients phase 2 final review.** One static WARNING in
+`app/worker.py::deploy_window_sweep_all_orgs`, when a deployment's own data
+(any `DeployValidationError`: a stored window the parser cannot read, a
+package whose artifact was never uploaded) stops it and the sweep goes on with
+the organisation's others. `extra` = the deployment id and the exception type;
+never the stored value, never `str(exc)`.
+
+**BEFORE THAT, 106, MCP final review.** One static ERROR in `app/mcp/server.py`, when
 the shielded `mcp.tool_called` audit write is abandoned at its deadline (a
 database that never answers would otherwise hold the handler, and shutdown,
 for ever). `extra` = the tool name as the audit log records it, the status and

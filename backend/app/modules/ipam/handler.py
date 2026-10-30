@@ -124,8 +124,13 @@ async def _reject(
     _reject(...)` -- the raise is visible at the point of the failing check, and
     a future edit cannot add a check that records a rejection and then forgets
     to stop.
+
+    Every record of it is the JOB'S CLIENT'S -- its sweeper's, which is the
+    subnet's (`sweep.select_sweeper`): read from the job, because a rejection
+    may be about a run or a subnet that does not exist.
     """
     now = _utcnow()
+    client_id = await job_client(session, job.id)
     if run is not None:
         run.state = "failed"
         run.error = reason[:_MAX_ERROR]
@@ -150,6 +155,7 @@ async def _reject(
         action="ipam.sweep_rejected",
         target_type="device",
         target_id=str(job.target_id),
+        client_id=client_id,
         metadata={
             "job_id": str(job.id),
             "subnet_id": payload["subnet_id"],
@@ -170,6 +176,7 @@ async def _reject(
             action="ipam.sweep_out_of_scope",
             target_type="device",
             target_id=str(job.target_id),
+            client_id=client_id,
             metadata={
                 "job_id": str(job.id),
                 "subnet_id": payload["subnet_id"],
@@ -186,7 +193,7 @@ async def _reject(
         subject_id=subject_id,
         payload=payload,
         actor_user_id=None,
-        client_id=await job_client(session, job.id),
+        client_id=client_id,
     )
     await session.flush()
     return IpamSweepRejected(reason)
@@ -463,10 +470,12 @@ async def handle_sweep_result(
     #    lookups below read the same state a later `list_candidates` would.
     #
     #    `org_id` comes from the JOB here too. Property 1 at the top of this
-    #    file now governs a second table.
+    #    file now governs a second table. The machines are the SUBNET'S
+    #    client's, at its site -- or, with no site, stay candidates (C7).
     await auto_create_from_sweep(
         session,
         job.org_id,
+        subnet=subnet,
         sightings=[
             SweepSighting(
                 address=address_text, mac=mac, hostname=hostname, confidence=confidence
@@ -474,7 +483,6 @@ async def handle_sweep_result(
             for address_text, mac, _method, confidence, hostname in parsed
         ],
         sweep_run_id=run.id,
-        subnet_id=subnet.id,
     )
 
     run.state = "succeeded"

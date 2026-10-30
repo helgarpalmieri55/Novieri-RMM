@@ -44,6 +44,7 @@ report_timeout` would tell an operator to narrow their window while the real
 defect sat in the SQL.
 """
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -54,6 +55,7 @@ from sqlalchemy.engine import Result
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_scope import ClientScope
 from app.core.i18n import tr_marked
 from app.modules.reporting.errors import ReportTimeout
 from app.modules.reporting.registry import (
@@ -147,8 +149,52 @@ def _said_schema(schema: Any) -> Any:
     return schema
 
 
-def build_catalogue(granted: frozenset[str] | set[str]) -> ReportCatalogue:
-    """The whole catalogue, as it looks to a caller holding `granted` (§6.2).
+#: The code every report route is gated on, held with the report's own codes
+#: on the clients it runs over (`deps.require_report_sources`).
+REPORTING_READ = "reporting.read"
+
+_NOWHERE = ClientScope.only(())
+
+
+def _covers(scope: ClientScope, clients: ClientScope) -> bool:
+    """Whether `scope` holds every client of `clients`."""
+    if scope.is_all:
+        return True
+    return not clients.is_all and clients.ids <= scope.ids
+
+
+def _entitlement(
+    requires: frozenset[str], held: Mapping[str, ClientScope], within: ClientScope
+) -> tuple[bool, list[str]]:
+    """`(entitled, missing_permissions)` for a report needing `requires`.
+
+    The report runs over the clients holding `reporting.read` AND every code
+    in `requires`, inside the request's own scope `within`
+    (`deps.require_report_sources`, plan 2026-10-26 Task 14). Entitled is that
+    set being non-empty, so the catalogue never promises a report that runs
+    over no client. Missing is the codes held on no client -- what the run's
+    403 names -- or, when each is held but on no one client together, the
+    ones absent from some client where the caller holds `reporting.read`:
+    what to ask for, on which client the caller already reads reports. It is
+    never empty beside `entitled: false`."""
+    missing = sorted(requires - set(held))
+    base = within.intersect(held.get(REPORTING_READ, _NOWHERE))
+    runs_over = base
+    for code in sorted(requires):
+        runs_over = runs_over.intersect(held.get(code, _NOWHERE))
+    if not runs_over.is_empty:
+        return True, []
+    if not missing:
+        missing = sorted(code for code in requires if not _covers(held[code], base))
+    return False, missing or sorted(requires)
+
+
+def build_catalogue(
+    held: Mapping[str, ClientScope], *, within: ClientScope
+) -> ReportCatalogue:
+    """The whole catalogue, as it looks to a caller holding `held` (§6.2):
+    each code the caller holds, with the clients holding it
+    (`rbac.scopes_by_code`); `within` is the request's own client scope.
 
     NO SESSION, NO QUERY, NO ORG. `REGISTRY` is compiled into the image and
     `requires` is derived from it, so this function cannot read org data even by
@@ -171,20 +217,21 @@ def build_catalogue(granted: frozenset[str] | set[str]) -> ReportCatalogue:
     a permissions conversation, not a secret, and a params bar that renders
     disabled is a better answer than one the browser had to guess.
     """
-    return ReportCatalogue(
-        reports=[
+    entries = []
+    for key in sorted(REGISTRY):
+        entitled, missing = _entitlement(REGISTRY[key].requires, held, within)
+        entries.append(
             CatalogueEntry(
                 key=key,
                 summary=tr_marked(REGISTRY[key].summary),
                 description=tr_marked(REGISTRY[key].description),
                 params_schema=_said_schema(REGISTRY[key].params_json_schema()),
                 requires=sorted(REGISTRY[key].requires),
-                entitled=REGISTRY[key].requires <= set(granted),
-                missing_permissions=sorted(REGISTRY[key].requires - set(granted)),
+                entitled=entitled,
+                missing_permissions=missing,
             )
-            for key in sorted(REGISTRY)
-        ]
-    )
+        )
+    return ReportCatalogue(reports=entries)
 
 
 async def execute_report(

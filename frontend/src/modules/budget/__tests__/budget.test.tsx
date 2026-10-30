@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, renderHook, screen, within } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement, ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -13,8 +13,17 @@ import { BudgetPlannerPage } from "../BudgetPlannerPage";
 import { ConfirmationQueuePage } from "../ConfirmationQueuePage";
 import { ExpensesPage } from "../ExpensesPage";
 import {
+  useBudgetCategories,
+  useBudgetSettings,
+  useBudgets,
+  useCostCenters,
+  useCreateBudgetCategoryMutation,
+  useCreateBudgetMutation,
+  useCreateCostCenterMutation,
   useCreateExpenseMutation,
+  useExpenses,
   useMaterializeExpensesMutation,
+  useUpdateBudgetSettingsMutation,
   useUpdateExpenseMutation,
 } from "../api";
 import {
@@ -130,6 +139,7 @@ async function confirmWith(
 const CATEGORIES: CategoryOut[] = [
   {
     id: "cat1",
+    client_id: "o1",
     key: "software_licenses",
     name: "Software licenses",
     system_key: "software_licenses",
@@ -144,6 +154,7 @@ const COST_CENTERS: CostCenterOut[] = [];
 const BUDGETS: BudgetOut[] = [
   {
     id: "b1",
+    client_id: "o1",
     fiscal_year: 2026,
     name: "FY26 IT Budget",
     granularity: "month",
@@ -154,6 +165,7 @@ const BUDGETS: BudgetOut[] = [
 
 const EXPENSE_EXPECTED: ExpenseOut = {
   id: "e1",
+  client_id: "o1",
   expense_date: "2026-07-01",
   amount: "1234.56",
   currency: "USD",
@@ -204,6 +216,7 @@ const POSITION_CLEAN: PositionOut = {
 const COST_CENTER_ONE: CostCenterOut[] = [
   {
     id: "cc1",
+    client_id: "o1",
     code: "OPS",
     name: "Operations",
     external_ref: null,
@@ -499,7 +512,13 @@ describe("ExpensesPage", () => {
     await user.click(await screen.findByRole("button", { name: "Add expected expenses" }));
     await user.click(screen.getByRole("button", { name: "Run" }));
 
-    expect(api.materializeExpenses).toHaveBeenCalledWith({ from_date: today, to_date: today });
+    // The internal client's subscriptions and licenses (PHASE 3: the
+    // selector's client), `/me`'s `org_id`.
+    expect(api.materializeExpenses).toHaveBeenCalledWith({
+      client_id: "o1",
+      from_date: today,
+      to_date: today,
+    });
     expect(
       await screen.findByText("Added 3. Skipped 1 already recorded and 2 with no exchange rate."),
     ).toBeInTheDocument();
@@ -521,6 +540,8 @@ describe("useCreateExpenseMutation / useUpdateExpenseMutation invalidation", () 
 
   it("invalidates budget-expenses, budget-variance, and budget-position on create", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // `/me` already answered: the expense is the internal client's.
+    queryClient.setQueryData(["me"], ME_FULL);
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     const api = { createExpense: vi.fn().mockResolvedValue(EXPENSE_EXPECTED) };
     mockUseApi.mockReturnValue(api as unknown as ApiClient);
@@ -568,6 +589,8 @@ describe("useCreateExpenseMutation / useUpdateExpenseMutation invalidation", () 
   // manual refresh.
   it("invalidates budget-expenses, budget-variance, and budget-position on materialize", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // `/me` already answered: the materialization is the internal client's.
+    queryClient.setQueryData(["me"], ME_FULL);
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     const api = {
       materializeExpenses: vi
@@ -845,6 +868,7 @@ describe("BudgetPlannerPage form validation", () => {
       fiscal_year: 2026,
       name: "FY26 IT Budget",
       granularity: "month",
+      client_id: "o1",
     });
   });
 
@@ -891,7 +915,8 @@ describe("BudgetAdminPage wiring", () => {
     mockUseApi.mockReturnValue(baseApi() as ApiClient);
     renderWithProviders(<BudgetAdminPage />);
 
-    expect(await screen.findByText("1 January")).toBeInTheDocument();
+    // In the settings' key/value list, not the month picker's options.
+    expect(await screen.findByText("1 January", { selector: "dd" })).toBeInTheDocument();
     expect(screen.queryByText("Month 1")).not.toBeInTheDocument();
   });
 
@@ -901,7 +926,7 @@ describe("BudgetAdminPage wiring", () => {
     mockUseApi.mockReturnValue(baseApi() as ApiClient);
     renderWithProviders(<BudgetAdminPage />);
 
-    await screen.findByText("1 January");
+    await screen.findByText("1 January", { selector: "dd" });
     const anchor = document.getElementById("fx-rates");
     expect(anchor).not.toBeNull();
     expect(anchor).toHaveTextContent("FX rates");
@@ -1441,7 +1466,7 @@ describe("BudgetAdminPage: changing the base currency", () => {
     await user.click(screen.getByRole("button", { name: "Save settings" }));
     await confirmWith(user, "Change base currency");
 
-    expect(api.updateBudgetSettings).toHaveBeenCalledWith({
+    expect(api.updateBudgetSettings).toHaveBeenCalledWith("o1", {
       base_currency: "EUR",
       fiscal_year_start_month: undefined,
       // Without this the change is refused outright the moment any non-void
@@ -1464,7 +1489,7 @@ describe("BudgetAdminPage: changing the base currency", () => {
     await user.selectOptions(screen.getByLabelText("New fiscal year start month"), "4");
     await user.click(screen.getByRole("button", { name: "Save settings" }));
 
-    expect(api.updateBudgetSettings).toHaveBeenCalledWith({
+    expect(api.updateBudgetSettings).toHaveBeenCalledWith("o1", {
       base_currency: undefined,
       fiscal_year_start_month: 4,
     });
@@ -1505,6 +1530,7 @@ describe("budget picker options", () => {
   // undefined` under this project's index-access checking.
   const CATEGORY_ROW: CategoryOut = {
     id: "cat1",
+    client_id: "o1",
     key: "software_licenses",
     name: "Software licenses",
     system_key: "software_licenses",
@@ -1532,6 +1558,7 @@ describe("budget picker options", () => {
   it("distinguishes cost centers by code, and marks retired ones", () => {
     const costCenter: CostCenterOut = {
       id: "cc1",
+      client_id: "o1",
       code: "IT-OPS",
       name: "IT Operations",
       external_ref: null,
@@ -1609,6 +1636,7 @@ describe("BudgetAdminPage: the create forms say why instead of refusing to move"
     expect(api.createBudgetCategory).toHaveBeenCalledWith({
       key: "software_licenses",
       name: "Software licenses",
+      client_id: "o1",
     });
   });
 
@@ -1979,5 +2007,163 @@ describe("New budget: the bounds and the required markers are on the controls", 
 
     expect(screen.getByLabelText("Name")).toBeRequired();
     expect(screen.getByLabelText("Fiscal year")).toBeRequired();
+  });
+});
+
+/**
+ * BUDGET IS ONE CLIENT'S (MSP clients phase 2, plan 2026-10-26 Task 8). Until
+ * the client selector exists (PHASE 3) this console works on the internal
+ * client, whose id is `/me`'s `org_id` ("o1" here): every create names it,
+ * and every read -- the settings, and the four lists -- asks for it.
+ */
+describe("budget belongs to a client", () => {
+  function clientWrapper(queryClient: QueryClient) {
+    return function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+    };
+  }
+
+  function knownClient(): QueryClient {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(["me"], ME_FULL);
+    return queryClient;
+  }
+
+  it("files every new row under the internal client", async () => {
+    const api = {
+      createBudgetCategory: vi.fn().mockResolvedValue(CATEGORIES[0]),
+      createCostCenter: vi.fn().mockResolvedValue(COST_CENTER_ONE[0]),
+      createBudget: vi.fn().mockResolvedValue(BUDGETS[0]),
+      createExpense: vi.fn().mockResolvedValue(EXPENSE_EXPECTED),
+      materializeExpenses: vi
+        .fn()
+        .mockResolvedValue({ created: 0, skipped_existing: 0, skipped_unconvertible: 0 }),
+      updateBudgetSettings: vi.fn().mockResolvedValue({}),
+    };
+    mockUseApi.mockReturnValue(api as unknown as ApiClient);
+    const { result } = renderHook(
+      () => ({
+        category: useCreateBudgetCategoryMutation(),
+        costCenter: useCreateCostCenterMutation(),
+        budget: useCreateBudgetMutation(),
+        expense: useCreateExpenseMutation(),
+        materialize: useMaterializeExpensesMutation(),
+        settings: useUpdateBudgetSettingsMutation(),
+      }),
+      { wrapper: clientWrapper(knownClient()) },
+    );
+    await act(async () => {
+      await result.current.category.mutateAsync({ key: "hw", name: "Hardware" });
+      await result.current.costCenter.mutateAsync({ code: "OPS", name: "Operations" });
+      await result.current.budget.mutateAsync({ fiscal_year: 2026, name: "FY26", granularity: "month" });
+      await result.current.expense.mutateAsync({
+        expense_date: "2026-01-15", amount: "1.00", currency: "USD", category_id: "cat1",
+      });
+      await result.current.materialize.mutateAsync({ from_date: "2026-01-01", to_date: "2026-01-31" });
+      await result.current.settings.mutateAsync({ base_currency: "EUR" });
+    });
+
+    for (const create of [
+      api.createBudgetCategory,
+      api.createCostCenter,
+      api.createBudget,
+      api.createExpense,
+      api.materializeExpenses,
+    ]) {
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ client_id: "o1" }));
+    }
+    expect(api.updateBudgetSettings).toHaveBeenCalledWith("o1", { base_currency: "EUR" });
+  });
+
+  it("reads the internal client's settings and lists", async () => {
+    const api = {
+      getBudgetSettings: vi.fn().mockResolvedValue({}),
+      listBudgetCategories: vi.fn().mockResolvedValue([]),
+      listCostCenters: vi.fn().mockResolvedValue([]),
+      listBudgets: vi.fn().mockResolvedValue([]),
+      listExpenses: vi.fn().mockResolvedValue([]),
+    };
+    mockUseApi.mockReturnValue(api as unknown as ApiClient);
+    renderHook(
+      () => [
+        useBudgetSettings(),
+        useBudgetCategories(true),
+        useCostCenters(),
+        useBudgets(),
+        useExpenses({ status: "expected" }),
+      ],
+      { wrapper: clientWrapper(knownClient()) },
+    );
+
+    await waitFor(() => expect(api.listExpenses).toHaveBeenCalled());
+    expect(api.getBudgetSettings).toHaveBeenCalledWith("o1");
+    // Naming the client is also what seeds its default categories.
+    expect(api.listBudgetCategories).toHaveBeenCalledWith(true, "o1");
+    expect(api.listCostCenters).toHaveBeenCalledWith(false, "o1");
+    expect(api.listBudgets).toHaveBeenCalledWith("o1");
+    expect(api.listExpenses).toHaveBeenCalledWith({ status: "expected" }, "o1");
+  });
+
+  it("sends nothing while it cannot name the client, and reads as loading meanwhile", async () => {
+    const api = {
+      me: vi.fn(() => new Promise<Me>(() => {})),
+      listBudgetCategories: vi.fn().mockResolvedValue([]),
+      getBudgetSettings: vi.fn().mockResolvedValue({}),
+      createExpense: vi.fn().mockResolvedValue(EXPENSE_EXPECTED),
+    };
+    mockUseApi.mockReturnValue(api as unknown as ApiClient);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(
+      () => ({
+        categories: useBudgetCategories(),
+        settings: useBudgetSettings(),
+        create: useCreateExpenseMutation(),
+      }),
+      { wrapper: clientWrapper(queryClient) },
+    );
+
+    let refusal: unknown;
+    await act(async () => {
+      refusal = await result.current.create
+        .mutateAsync({ expense_date: "2026-01-15", amount: "1.00", currency: "USD", category_id: "cat1" })
+        .catch((error: unknown) => error);
+    });
+    expect(String(refusal)).toMatch(/Nothing was sent/);
+    expect(api.createExpense).not.toHaveBeenCalled();
+    expect(api.listBudgetCategories).not.toHaveBeenCalled();
+    expect(api.getBudgetSettings).not.toHaveBeenCalled();
+    // Waiting for the client is loading, not "no categories yet".
+    expect(result.current.categories.isLoading).toBe(true);
+    expect(result.current.settings.isLoading).toBe(true);
+  });
+
+  // Budget is a module a client may not use, and the server's 404 for that
+  // is a sentence, which is what the person reads.
+  it("says so when the client does not use budget", async () => {
+    const user = userEvent.setup();
+    const api = {
+      me: vi.fn().mockResolvedValue(ME_FULL),
+      listBudgetCategories: vi.fn().mockResolvedValue(CATEGORIES),
+      listCostCenters: vi.fn().mockResolvedValue(COST_CENTERS),
+      listExpenses: vi.fn().mockResolvedValue([]),
+      createExpense: vi
+        .fn()
+        .mockRejectedValue(
+          new ApiError(404, JSON.stringify({ detail: "this client does not use that module" })),
+        ),
+    };
+    mockUseApi.mockReturnValue(api as unknown as ApiClient);
+    renderWithProviders(<ExpensesPage />);
+
+    await user.click(await screen.findByRole("button", { name: "New expense" }));
+    await user.clear(screen.getByLabelText("Amount"));
+    await user.type(screen.getByLabelText("Amount"), "10.00");
+    await pick(user, "Category", /Software licenses/);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "this client does not use that module",
+    );
+    expect(api.createExpense).toHaveBeenCalledWith(expect.objectContaining({ client_id: "o1" }));
   });
 });

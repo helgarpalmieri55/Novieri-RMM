@@ -390,6 +390,35 @@ async def test_a_group_is_not_created_for_an_archived_client(api_env) -> None:
     assert response.json()["detail"] == "that client is archived"
 
 
+async def test_a_group_is_not_filed_under_unassigned(api_env) -> None:
+    """Final review A (plan C10): Unassigned is the inbox for what has no
+    owner -- mail and the tickets it opens -- and `docs/04-data-model.md`
+    says nothing else is filed under it. A group was: the create took any
+    visible, unarchived client. Now a 422 like every other family, and
+    nothing written."""
+    from sqlalchemy import func, text
+
+    org = await api_env.create_org("cdg")
+    headers = await _admin(api_env, org)
+    async with AsyncSession(api_env.admin_engine) as s:
+        unassigned = (await s.execute(text(
+            "SELECT id FROM clients WHERE org_id = :o AND kind = 'unassigned'"
+        ), {"o": org})).scalar_one()
+    for language, sentence in (
+        ("en", "a device group cannot be filed under Unassigned"),
+        ("es", "un grupo de equipos no puede pertenecer a «Sin asignar»"),
+    ):
+        response = await api_env.client.post(
+            GROUPS,
+            headers={**headers, "Accept-Language": language},
+            json={"name": "servers", "client_id": str(unassigned)},
+        )
+        assert (response.status_code, response.json()) == (422, {"detail": sentence})
+    async with AsyncSession(api_env.admin_engine) as s:
+        assert (await s.execute(select(func.count()).select_from(DeviceGroup).where(
+            DeviceGroup.org_id == org))).scalar_one() == 0
+
+
 async def test_an_asset_is_not_created_at_a_site_of_an_archived_client(api_env) -> None:
     org = await api_env.create_org("cdg")
     _, site_id = await client_with_site(api_env, org, client_archived=True)
@@ -407,22 +436,33 @@ async def test_an_asset_is_not_created_at_a_site_of_an_archived_client(api_env) 
 # --------------------------------------------------------------------------- #
 
 
-async def test_promoting_a_discovered_machine_needs_every_client(api_env) -> None:
-    """Phase 1 files a promoted machine under the internal client (IPAM has no
-    client yet), so a technician limited to one client is refused up front with
-    the every-client sentence -- not a 500 from the row RLS would refuse."""
+async def test_promoting_a_discovered_machine_stays_in_the_named_client(api_env) -> None:
+    """Phase 1 filed a promoted machine under the internal client (IPAM had no
+    client yet), so a technician limited to one client was refused up front
+    with the every-client sentence -- not a 500 from the row RLS would refuse.
+
+    Phase 2 (plan 2026-10-26 Task 11) replaced the fallback, and the gate went
+    with it: the body names its client and each machine takes its subnet's.
+    What this test was written for still holds -- a narrowed technician gets
+    an answer, never a 500: in their own client, the per-address result; for
+    a client outside their scope -- here the internal one -- the 404 of a
+    client that does not exist, written before anything is read. An
+    every-client admin promotes in either."""
     org = await api_env.create_org("cdg")
     x, _ = await _customer(api_env.admin_engine, org)
-    body = {"addresses": ["10.77.0.5"]}
     path = "/api/v1/devices/candidates/promote"
-    narrowed = await api_env.client.post(
-        path, headers=await everything_on(api_env, org, x), json=body
-    )
-    assert narrowed.status_code == 403, narrowed.text
-    assert narrowed.json()["detail"] == EVERY_CLIENT
-
-    everyone = await api_env.client.post(path, headers=await _admin(api_env, org), json=body)
-    assert everyone.status_code == 200, everyone.text
+    narrowed = await everything_on(api_env, org, x)
+    admin = await _admin(api_env, org)
+    for client, headers, status in (
+        (x, narrowed, 200), (org, narrowed, 404), (x, admin, 200), (org, admin, 200),
+    ):
+        r = await api_env.client.post(
+            path, headers=headers, json={"client_id": str(client), "addresses": ["10.77.0.5"]}
+        )
+        assert r.status_code == status, (client, r.text)
+        assert EVERY_CLIENT not in r.text
+        if status == 200:  # nothing observed: answered per address, not refused
+            assert r.json()["results"][0]["created"] is False, r.text
 
 
 async def test_starting_a_provisioning_run_needs_every_client(api_env) -> None:

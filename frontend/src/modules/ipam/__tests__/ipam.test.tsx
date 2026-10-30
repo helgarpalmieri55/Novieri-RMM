@@ -90,7 +90,7 @@ function stubApi(overrides: Partial<ApiClient>): ApiClient {
       permissions: ["ipam.read", "ipam.assign", "ipam.manage", "ipam.sweep.run"],
     }),
     listIpamVrfs: vi.fn().mockResolvedValue([]),
-    listIpamSites: vi.fn().mockResolvedValue([]),
+    listClientSites: vi.fn().mockResolvedValue([]),
     listIpamVlans: vi.fn().mockResolvedValue([]),
     listIpamSubnets: vi.fn().mockResolvedValue([]),
     getIpamSubnet: vi.fn(),
@@ -114,6 +114,7 @@ function stubApi(overrides: Partial<ApiClient>): ApiClient {
 
 function subnet(overrides: Partial<SubnetOut> = {}): SubnetOut {
   return {
+    client_id: "o1",
     id: "s1",
     vrf_id: "v1",
     prefix: "10.4.7.0/24",
@@ -175,6 +176,7 @@ function gridEntry(overrides: Partial<GridEntryOut> = {}): GridEntryOut {
 
 function drift(overrides: Partial<DriftOut> = {}): DriftOut {
   return {
+    client_id: "o1",
     id: "d1",
     vrf_id: "v1",
     subnet_id: "s1",
@@ -197,6 +199,7 @@ function drift(overrides: Partial<DriftOut> = {}): DriftOut {
 
 function scope(overrides: Partial<ScopeOut> = {}): ScopeOut {
   return {
+    client_id: "o1",
     id: "sc1",
     vrf_id: "v1",
     prefix: "10.4.7.0/24",
@@ -251,6 +254,7 @@ describe("utilization above the enumeration ceiling", () => {
       <AddressGrid
         subnetId="s1"
         subnetPrefix="10.0.0.0/12"
+        vrfId="v1"
         utilization={utilization({
           enumerable: false,
           capacity: null,
@@ -283,7 +287,7 @@ describe("the address grid", () => {
         .mockResolvedValue([gridEntry({ last_seen_at: "2026-07-30T09:42:07.000Z" })]),
     });
     renderWithProviders(
-      <AddressGrid subnetId="s1" subnetPrefix="10.4.7.0/24" utilization={undefined} canAssign />,
+      <AddressGrid subnetId="s1" subnetPrefix="10.4.7.0/24" vrfId="v1" utilization={undefined} canAssign />,
     );
     expect(await screen.findByText("3 days ago")).toBeInTheDocument();
     expect(screen.queryByText(/09:42/)).not.toBeInTheDocument();
@@ -301,7 +305,7 @@ describe("the address grid", () => {
         .mockResolvedValue([gridEntry({ status: "dormant", state: "assigned" })]),
     });
     renderWithProviders(
-      <AddressGrid subnetId="s1" subnetPrefix="10.4.7.0/24" utilization={undefined} canAssign />,
+      <AddressGrid subnetId="s1" subnetPrefix="10.4.7.0/24" vrfId="v1" utilization={undefined} canAssign />,
     );
     const row = (await screen.findByText("10.4.7.9")).closest("tr") as HTMLElement;
     expect(within(row).getByText("Dormant")).toBeInTheDocument();
@@ -322,7 +326,7 @@ describe("the address grid", () => {
       ]),
     });
     renderWithProviders(
-      <AddressGrid subnetId="s1" subnetPrefix="10.4.7.0/24" utilization={undefined} canAssign />,
+      <AddressGrid subnetId="s1" subnetPrefix="10.4.7.0/24" vrfId="v1" utilization={undefined} canAssign />,
     );
     const row = (await screen.findByText("10.4.7.50")).closest("tr") as HTMLElement;
     expect(within(row).getByText("Undocumented")).toBeInTheDocument();
@@ -351,7 +355,7 @@ describe("the address grid", () => {
       ]),
     });
     renderWithProviders(
-      <AddressGrid subnetId="s1" subnetPrefix="10.4.7.0/24" utilization={undefined} canAssign />,
+      <AddressGrid subnetId="s1" subnetPrefix="10.4.7.0/24" vrfId="v1" utilization={undefined} canAssign />,
     );
     const documented = (await screen.findByText("10.4.7.9")).closest("tr") as HTMLElement;
     const observed = (await screen.findByText("10.4.7.10")).closest("tr") as HTMLElement;
@@ -380,7 +384,7 @@ describe("the address grid", () => {
       ]),
     });
     renderWithProviders(
-      <AddressGrid subnetId="s1" subnetPrefix="10.4.7.0/24" utilization={undefined} canAssign />,
+      <AddressGrid subnetId="s1" subnetPrefix="10.4.7.0/24" vrfId="v1" utilization={undefined} canAssign />,
     );
     const row = (await screen.findByText("10.4.7.60")).closest("tr") as HTMLElement;
     expect(within(row).queryByText(/unknown/i)).not.toBeInTheDocument();
@@ -395,7 +399,7 @@ describe("the address grid", () => {
         .mockResolvedValue([gridEntry({ status: "dhcp", range_kinds: ["dhcp_pool"] })]),
     });
     renderWithProviders(
-      <AddressGrid subnetId="s1" subnetPrefix="10.4.7.0/24" utilization={undefined} canAssign />,
+      <AddressGrid subnetId="s1" subnetPrefix="10.4.7.0/24" vrfId="v1" utilization={undefined} canAssign />,
     );
     expect(await screen.findByText("DHCP pool")).toBeInTheDocument();
   });
@@ -442,6 +446,7 @@ function renderHistory(entries: HistoryEntryOut[]) {
       // a test that let the two share a string could not tell them apart.
       entry={gridEntry({ device_id: "dev-currently-holding-it" })}
       subnetPrefix="10.4.7.0/24"
+      vrfId="v1"
       canAssign={false}
       onClose={() => {}}
     />,
@@ -972,6 +977,7 @@ describe("the sweep panel", () => {
       [scope()],
       [
         {
+          client_id: "o1",
           id: "r1",
           subnet_id: "s1",
           job_id: null,

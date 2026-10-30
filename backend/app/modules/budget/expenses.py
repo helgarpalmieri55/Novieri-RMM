@@ -39,6 +39,16 @@ explicit `None` on a NON-NULLABLE column
 (`NON_NULLABLE_EXPENSE_FIELDS`) is rejected in a pass that runs BEFORE any
 `setattr`, so the ORM object is never left partially mutated when that
 rejection raises.
+
+**An expense belongs to ONE client (MSP clients plan 2026-10-26 Task 8).** It
+is created for the client the caller names
+(`clients.client_for_new_budget_rows`), converted into THAT client's base
+currency, and never changes client. Every other write loads it and calls
+`require_budget` with its client before anything else (`expense_for_write`).
+What it points at is its client's: a category or cost center of another
+client is a 422 (the database holds the same rule,
+`fk_expense_*_client`), and so is a linked subscription, license, device or
+change of another client (`_resolve_link`; `link_id` has no foreign key).
 """
 
 from datetime import UTC, date, datetime
@@ -52,10 +62,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.wire_words import say
-from app.models import ChangeRequest, Device, Expense, License, Subscription
+from app.models import (
+    ChangeRequest,
+    Device,
+    Expense,
+    License,
+    Subscription,
+)
+from app.modules.budget.clients import client_for_new_budget_rows, require_budget, same_client
 from app.modules.budget.errors import BudgetNotFoundError, BudgetValidationError
 from app.modules.budget.fx import convert_for
-from app.modules.budget.refdata import resolve_category, resolve_cost_center
+from app.modules.budget.refdata import category_of_client, cost_center_of_client
 from app.modules.budget.schema import ExpenseCreate
 from app.modules.budget.words import (
     EXPENSE_SOURCE_WORDS,
@@ -144,7 +161,8 @@ async def _resolve_vendor(session: AsyncSession, org_id: UUID, vendor_id: UUID) 
 # unrelated tables), so this dispatch table is the only backstop for it
 # (spec §8: "Every cross-reference ... including the advisory link_id -- is
 # resolved WHERE org_id AND id"). Every model here carries a bare `org_id`
-# column, matching `_resolve_vendor`/`refdata.resolve_category`.
+# column, matching `_resolve_vendor`/`refdata.resolve_category`, and a NOT
+# NULL `client_id` (plan 2026-10-26 Tasks 6 and 7, and phase 1's devices).
 _LINK_TYPE_MODELS: dict[str, type[Any]] = {
     "subscription": Subscription,
     "license": License,
@@ -154,16 +172,21 @@ _LINK_TYPE_MODELS: dict[str, type[Any]] = {
 
 
 async def _resolve_link(
-    session: AsyncSession, org_id: UUID, link_type: str, link_id: UUID
+    session: AsyncSession, org_id: UUID, client_id: UUID, link_type: str, link_id: UUID
 ) -> UUID:
-    """Org-scoped existence check for `link_id`, dispatched on `link_type`.
-    A cross-org or nonexistent id is indistinguishable -- both raise
-    `BudgetNotFoundError` (spec §8, invariant #5)."""
+    """Org-scoped existence check for `link_id`, dispatched on `link_type`,
+    held to the expense's client. A cross-org or nonexistent id is
+    indistinguishable -- both raise `BudgetNotFoundError` (spec §8, invariant
+    #5), and so is one of a client this session cannot see. One of another
+    client of the org is a `BudgetClientError` (422): X's expense paying for
+    Y's subscription would put Y's renewal in X's budget."""
     model = _LINK_TYPE_MODELS[link_type]
-    resolved_id: UUID | None = (
-        await session.execute(select(model.id).where(model.org_id == org_id, model.id == link_id))
-    ).scalar_one_or_none()
-    if resolved_id is None:
+    resolved = (
+        await session.execute(
+            select(model.id, model.client_id).where(model.org_id == org_id, model.id == link_id)
+        )
+    ).one_or_none()
+    if resolved is None:
         raise BudgetNotFoundError(
             tr(
                 "{link_type} {link_id} not found",
@@ -171,6 +194,16 @@ async def _resolve_link(
                 link_id=link_id,
             )
         )
+    same_client(
+        resolved.client_id,
+        client_id,
+        tr(
+            "{link_type} {link_id} belongs to another client",
+            link_type=say(LINK_TYPE_WORDS, link_type),
+            link_id=link_id,
+        ),
+    )
+    resolved_id: UUID = resolved.id
     return resolved_id
 
 
@@ -190,18 +223,24 @@ async def create_expense(
     `"confirmed"` result stamps `confirmed_by`/`confirmed_at` with this call's
     actor/time -- there is no path that confirms without a user (spec §0.3).
 
-    Resolves `category_id`/`cost_center_id`/`vendor_id`/`link_id` org-scoped
-    and runs the FX conversion BEFORE constructing the `Expense` -- never
+    The expense is `data.client_id`'s (`client_for_new_budget_rows`: a
+    client the caller may file under, that uses budget -- checked first,
+    before anything else). Resolves `category_id`/`cost_center_id`/
+    `vendor_id`/`link_id` org-scoped, holds each to that client, and runs the
+    FX conversion into that client's base currency BEFORE constructing the
+    `Expense` -- never
     `session.add` first -- so `convert_for`'s autoflush-triggering SELECT
     (`fx.get_settings`) never flushes a half-built row, and its overflow
     guard (`BudgetValidationError`) never has to unwind one either.
     `convert_for` returning `(None, None)` is not an error: the row is still
     created, with `amount_base = NULL` (spec §0.1 -- never guess a rate)."""
-    category = await resolve_category(session, org_id, data.category_id)
+    client_id = data.client_id
+    await client_for_new_budget_rows(session, org_id, client_id)
+    category = await category_of_client(session, org_id, client_id, data.category_id)
 
     cost_center_id: UUID | None = None
     if data.cost_center_id is not None:
-        cost_center = await resolve_cost_center(session, org_id, data.cost_center_id)
+        cost_center = await cost_center_of_client(session, org_id, client_id, data.cost_center_id)
         cost_center_id = cost_center.id
 
     vendor_id: UUID | None = None
@@ -216,11 +255,11 @@ async def create_expense(
     if data.link_id is not None:
         if data.link_type is None:
             raise BudgetValidationError(tr("link_id requires link_type"))
-        link_id = await _resolve_link(session, org_id, data.link_type, data.link_id)
+        link_id = await _resolve_link(session, org_id, client_id, data.link_type, data.link_id)
 
     # Conversion computed BEFORE the ORM object exists -- ordering rule #1.
     fx_rate, amount_base = await convert_for(
-        session, org_id, data.amount, data.currency, data.expense_date
+        session, org_id, data.amount, data.currency, data.expense_date, client_id=client_id
     )
 
     # spec §0.3/§5: "there is no path that confirms without a user." A POST
@@ -233,6 +272,7 @@ async def create_expense(
 
     expense = Expense(
         org_id=org_id,
+        client_id=client_id,
         expense_date=data.expense_date,
         amount=data.amount,
         currency=data.currency,
@@ -262,6 +302,7 @@ async def create_expense(
         action="expense.created",
         target_type="expense",
         target_id=str(expense.id),
+        client_id=client_id,
         metadata={
             "category_id": str(category.id),
             "cost_center_id": str(cost_center_id) if cost_center_id else None,
@@ -283,6 +324,7 @@ async def list_expenses(
     session: AsyncSession,
     org_id: UUID,
     *,
+    client_id: UUID | None = None,
     status: str | None = None,
     category_id: UUID | None = None,
     cost_center_id: UUID | None = None,
@@ -291,10 +333,13 @@ async def list_expenses(
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> list[Expense]:
-    """Filterable expense list (spec §7). Explicit ORDER BY -- newest first
-    -- so a caller asserting list equality depends on that, never on
-    incidental insertion/scan order."""
+    """Filterable expense list (spec §7): every visible client's, or
+    `client_id`'s alone. Explicit ORDER BY -- newest first -- so a caller
+    asserting list equality depends on that, never on incidental
+    insertion/scan order."""
     stmt = select(Expense).where(Expense.org_id == org_id)
+    if client_id is not None:
+        stmt = stmt.where(Expense.client_id == client_id)
     if status is not None:
         stmt = stmt.where(Expense.status == status)
     if category_id is not None:
@@ -327,6 +372,16 @@ async def get_expense(session: AsyncSession, org_id: UUID, expense_id: UUID) -> 
     return expense
 
 
+async def expense_for_write(session: AsyncSession, org_id: UUID, expense_id: UUID) -> Expense:
+    """The expense a write is about, of a client that uses budget: an expense
+    this session cannot see is the 404 it always was, and one whose client
+    has the module off is `ModuleNotEnabled` (404) -- before anything is
+    written. Also the attachment upload's door (`api.py`)."""
+    expense = await get_expense(session, org_id, expense_id)
+    await require_budget(session, org_id, expense.client_id)
+    return expense
+
+
 # ---------------------------------------------------------------------------
 # update_expense
 # ---------------------------------------------------------------------------
@@ -348,7 +403,7 @@ async def update_expense(
        up front -- before the row is even loaded.
     2. Load the row, then reject the edit outright if it is `void` (spec §5:
        void is terminal, reversible only by creating a new entry) or if it
-       touches `link_id`/`link_type` on a non-`manual` row (`uq_expense_autofeed`
+       touches `link_id`/`link_type` on a non-`manual` row (`uq_expense_client_autofeed`
        keys an auto-fed row's identity on `link_id`; only the materializer
        that owns `source` may move it).
     3. Resolve every supplied cross-reference (`category_id`,
@@ -366,7 +421,8 @@ async def update_expense(
        actually changed (for the audit event -- names only, never values).
     """
     _reject_null_for_non_nullable(fields, NON_NULLABLE_EXPENSE_FIELDS)
-    expense = await get_expense(session, org_id, expense_id)
+    expense = await expense_for_write(session, org_id, expense_id)
+    client_id = expense.client_id
 
     reject_if_void(expense)
 
@@ -381,16 +437,18 @@ async def update_expense(
         )
 
     # Pass 3a: resolve cross-references. `None` on a nullable ref clears it;
-    # a supplied id is resolved org-scoped.
+    # a supplied id is resolved org-scoped and held to the expense's client.
     resolved: dict[str, Any] = {}
     if "category_id" in fields:
-        category = await resolve_category(session, org_id, fields["category_id"])
+        category = await category_of_client(session, org_id, client_id, fields["category_id"])
         resolved["category_id"] = category.id
     if "cost_center_id" in fields:
         if fields["cost_center_id"] is None:
             resolved["cost_center_id"] = None
         else:
-            cost_center = await resolve_cost_center(session, org_id, fields["cost_center_id"])
+            cost_center = await cost_center_of_client(
+                session, org_id, client_id, fields["cost_center_id"]
+            )
             resolved["cost_center_id"] = cost_center.id
     if "vendor_id" in fields:
         if fields["vendor_id"] is None:
@@ -418,7 +476,7 @@ async def update_expense(
             if merged_link_type is None:
                 raise BudgetValidationError(tr("link_id requires a link_type"))
             resolved["link_id"] = await _resolve_link(
-                session, org_id, merged_link_type, merged_link_id
+                session, org_id, client_id, merged_link_type, merged_link_id
             )
         # Ensure the (re-)resolved link_id is actually applied in pass 4 even
         # when only `link_type` was supplied -- pass 4 only setattr's fields
@@ -439,7 +497,7 @@ async def update_expense(
         conv_currency = fields.get("currency", expense.currency)
         conv_date = fields.get("expense_date", expense.expense_date)
         new_fx_rate, new_amount_base = await convert_for(
-            session, org_id, conv_amount, conv_currency, conv_date
+            session, org_id, conv_amount, conv_currency, conv_date, client_id=client_id
         )
 
     # Pass 4: apply everything.
@@ -466,6 +524,7 @@ async def update_expense(
         action="expense.updated",
         target_type="expense",
         target_id=str(expense.id),
+        client_id=client_id,
         # Names only, never values -- spec §8: amounts are the sensitive
         # payload in this module.
         metadata={"changed_fields": sorted(changed_fields)},
@@ -503,7 +562,7 @@ async def confirm_expense(
     confirmed row would silently re-convert at whatever rate applies today
     and re-stamp `confirmed_by`/`confirmed_at` over the original asserter,
     even with `amount` omitted."""
-    expense = await get_expense(session, org_id, expense_id)
+    expense = await expense_for_write(session, org_id, expense_id)
     if expense.status != "expected":
         raise BudgetValidationError(
             tr(
@@ -517,7 +576,12 @@ async def confirm_expense(
 
     # Conversion computed BEFORE any setattr -- ordering rule #1.
     fx_rate, amount_base = await convert_for(
-        session, org_id, confirmed_amount, expense.currency, expense.expense_date
+        session,
+        org_id,
+        confirmed_amount,
+        expense.currency,
+        expense.expense_date,
+        client_id=expense.client_id,
     )
 
     expense.amount = confirmed_amount
@@ -536,6 +600,7 @@ async def confirm_expense(
         action="expense.confirmed",
         target_type="expense",
         target_id=str(expense.id),
+        client_id=expense.client_id,
         metadata={"amount_overridden": amount is not None},
     )
     await session.flush()
@@ -549,7 +614,7 @@ async def void_expense(
     creating a new entry -- void is terminal, so voiding an already-void
     expense is rejected rather than silently re-stamping over the original
     voiding actor/time."""
-    expense = await get_expense(session, org_id, expense_id)
+    expense = await expense_for_write(session, org_id, expense_id)
     if expense.status == "void":
         raise BudgetValidationError(
             tr("expense {expense_id} is already void", expense_id=expense_id)
@@ -568,6 +633,7 @@ async def void_expense(
         action="expense.voided",
         target_type="expense",
         target_id=str(expense.id),
+        client_id=expense.client_id,
         metadata={},
     )
     await session.flush()

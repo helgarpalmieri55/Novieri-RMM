@@ -28,6 +28,13 @@ lets a revoked prefix be authorized again -- and which means every upsert
 against it must INFER (`index_elements=` + `index_where=`); `ON CONFLICT ON
 CONSTRAINT` fails at runtime against a partial index.
 
+**ONE CLIENT'S NETWORK** (MSP clients, plan 2026-10-26 Task 12; migration
+0241). A prefix means something only inside one client's network -- two
+customers both own a `10.0.0.0/24` -- so an authorization is C: it names its
+client, loaded with `client_for_new_rows` (404 invisible, 409 archived, 422
+Unassigned), and authorizes pushes to THAT client's machines only
+(`preflight._authorization_for`). The active-uniqueness key is per client.
+
 **REVOCATION CANNOT RECALL A SIGNED JOB, WHICH IS WHY REFUSAL SITS ON THE NEAR
 SIDE OF THE SIGNING BOUNDARY** (`preflight.py`). What revocation does is stop
 the NEXT dispatch, immediately and permanently, and leave the record.
@@ -51,13 +58,16 @@ from sqlalchemy.sql import text
 
 from app.core.audit import audit_service
 from app.core.i18n import tr
+from app.models.clients import CLIENT_KIND_UNASSIGNED
 from app.modules.agent_push.errors import (
+    PushClientError,
     PushConflictError,
     PushNotFoundError,
     PushValidationError,
 )
 from app.modules.agent_push.models import PushAuthorization
 from app.modules.agent_push.net import parse_prefix, prefix_size
+from app.services.client_sites import ClientNotFound, NotAcceptingNewRows, client_for_new_rows
 
 __all__ = [
     "create_authorization",
@@ -77,11 +87,13 @@ async def create_authorization(
     org_id: UUID,
     *,
     actor_id: UUID | None,
+    client_id: UUID,
     prefix: str,
     note: str = "",
     expires_at: datetime | None = None,
 ) -> PushAuthorization:
-    """Authorize credentialed pushes inside `prefix`. HIGH PRIVILEGE.
+    """Authorize credentialed pushes inside `prefix`, in `client_id`'s
+    network. HIGH PRIVILEGE.
 
     Gated on `agent.push.scope.manage` at the API -- deliberately separate from
     `agent.push.run`, because pushing inside an already-authorized prefix and
@@ -104,6 +116,16 @@ async def create_authorization(
         )
     if expires_at is not None and expires_at.tzinfo is None:
         raise PushValidationError(tr("expires_at must be timezone-aware"))
+    # The client FOR SHARE, held until commit, as every new row's is -- the
+    # first lock this transaction takes, before the audit chain's.
+    try:
+        client = await client_for_new_rows(session, org_id=org_id, client_id=client_id)
+    except ClientNotFound:
+        raise PushNotFoundError(tr("no such client")) from None
+    except NotAcceptingNewRows as exc:
+        raise PushConflictError(exc.detail) from None
+    if client.kind == CLIENT_KIND_UNASSIGNED:
+        raise PushClientError(tr("a push authorization cannot be filed under Unassigned"))
 
     now = _utcnow()
     inserted_id = (
@@ -111,6 +133,7 @@ async def create_authorization(
             pg_insert(PushAuthorization)
             .values(
                 org_id=org_id,
+                client_id=client_id,
                 prefix=str(network),
                 note=note,
                 authorized_by=actor_id,
@@ -118,14 +141,14 @@ async def create_authorization(
                 expires_at=expires_at,
             )
             # INFERENCE, not `ON CONFLICT ON CONSTRAINT`:
-            # `uq_push_authorization_active` is a PARTIAL unique index
+            # `uq_push_authorization_client_active` is a PARTIAL unique index
             # (`WHERE revoked_at IS NULL`) and a partial index has no
-            # `pg_constraint` row to name. The predicate is written exactly as
-            # migration 0077 wrote it -- Postgres infers the matching index
-            # from the column list plus the predicate, and a
-            # differently-shaped-but-equivalent predicate infers nothing.
+            # `pg_constraint` row to name. The columns and the predicate are
+            # written exactly as migration 0241 wrote them -- Postgres infers
+            # the matching index from the column list plus the predicate, and
+            # a differently-shaped-but-equivalent predicate infers nothing.
             .on_conflict_do_nothing(
-                index_elements=["org_id", "prefix"],
+                index_elements=["org_id", "client_id", "prefix"],
                 index_where=text("revoked_at IS NULL"),
             )
             .returning(PushAuthorization.id)
@@ -134,7 +157,7 @@ async def create_authorization(
     if inserted_id is None:
         raise PushConflictError(
             tr(
-                "{network} is already authorized for push install in this organization; "
+                "{network} is already authorized for push install in this client; "
                 "revoke the existing authorization before creating another",
                 network=network,
             )
@@ -156,6 +179,7 @@ async def create_authorization(
         action="push.authorization_created",
         target_type="push_authorization",
         target_id=str(row.id),
+        client_id=client_id,
         metadata={
             "prefix": str(network),
             "requested_prefix": str(prefix),
@@ -216,6 +240,7 @@ async def revoke_authorization(
         action="push.authorization_revoked",
         target_type="push_authorization",
         target_id=str(row.id),
+        client_id=row.client_id,
         metadata={
             "prefix": str(row.prefix),
             "note": row.note,

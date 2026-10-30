@@ -5,6 +5,7 @@ import { RowMenu } from "../../components/rowmenu";
 import { Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
+import { useClientName } from "../settings/api";
 import {
   useCreateIpamScanAuthorizationMutation,
   useIpamPermissions,
@@ -303,6 +304,8 @@ function GrantForm({ subnets }: { subnets: SubnetOut[] }) {
   const create = useCreateIpamScanAuthorizationMutation();
   const zone = useUserTimezone();
   const vrfs = useIpamVrfs();
+  // The VRF decides the authorization's client, so a VRF says whose it is.
+  const clientName = useClientName();
   const [prefix, setPrefix] = useState("");
   const [vrfId, setVrfId] = useState("");
   const [note, setNote] = useState("");
@@ -384,7 +387,7 @@ function GrantForm({ subnets }: { subnets: SubnetOut[] }) {
             <option value="">{t("ipam.fields.defaultGlobal")}</option>
             {vrfs.data?.map((vrf) => (
               <option key={vrf.id} value={vrf.id}>
-                {vrf.name}
+                {t("ipam.fields.vrfOfClient", { vrf: vrf.name, client: clientName(vrf.client_id) })}
               </option>
             ))}
           </select>

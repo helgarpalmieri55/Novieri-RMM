@@ -55,7 +55,7 @@ def _object_store(request: Request) -> ObjectStore:
 # --------------------------------------------------------------------------- #
 
 
-class DocumentCreate(BaseModel):
+class DocumentFields(BaseModel):
     """Document metadata. The file is a separate request (§4.1): there is no
     multipart parser in this project, so metadata and bytes cannot share
     one."""
@@ -63,6 +63,20 @@ class DocumentCreate(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     description: str = ""
     category: str = Field(default="General", max_length=100)
+
+
+class DocumentCreate(DocumentFields):
+    """A document's client is set when it is created and never changes: the
+    edit body (`DocumentFields`) has no client (MSP clients plan 2026-10-26
+    Task 14)."""
+
+    client_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The client this document belongs to. Omitted: it is every client's "
+            "(global), which needs access to every client."
+        ),
+    )
 
 
 class DocumentLinkCreate(BaseModel):
@@ -106,9 +120,11 @@ class VersionOut(BaseModel):
 
 class DocumentListItem(BaseModel):
     """A document as it appears in the library list. `current_version` is 0
-    for a document that has no file uploaded yet, which is a legal state."""
+    for a document that has no file uploaded yet, which is a legal state.
+    `client_id` None: global, every client's."""
 
     id: UUID
+    client_id: UUID | None
     title: str
     description: str
     category: str
@@ -127,9 +143,10 @@ class DocumentListPage(BaseModel):
 
 class DocumentOut(BaseModel):
     """A document with its current version (or null, when nothing has been
-    uploaded yet) and its links."""
+    uploaded yet) and its links. `client_id` None: global, every client's."""
 
     id: UUID
+    client_id: UUID | None
     title: str
     description: str
     category: str
@@ -163,6 +180,7 @@ async def _document_out(session: Any, org_id: UUID, document: Any) -> DocumentOu
     links = await svc.list_document_links(session, org_id, document.id)
     return DocumentOut(
         id=document.id,
+        client_id=document.client_id,
         title=document.title,
         description=document.description,
         category=document.category,
@@ -191,14 +209,18 @@ async def create_document(
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        document = await svc.create_document(
-            session,
-            org_id=ctx.org_id,
-            actor_id=ctx.user_id,
-            title=body.title,
-            description=body.description,
-            category=body.category,
-        )
+        try:
+            document = await svc.create_document(
+                session,
+                org_id=ctx.org_id,
+                actor_id=ctx.user_id,
+                title=body.title,
+                description=body.description,
+                category=body.category,
+                client_id=body.client_id,
+            )
+        except svc.DocumentationClientError as exc:
+            raise HTTPException(exc.status_code, exc.detail) from None
         await session.refresh(document)
         return await _document_out(session, ctx.org_id, document)
 
@@ -234,6 +256,7 @@ async def list_documents(
             items=[
                 DocumentListItem(
                     id=d.id,
+                    client_id=d.client_id,
                     title=d.title,
                     description=d.description,
                     category=d.category,
@@ -269,7 +292,7 @@ async def get_document(
 @router.put("/documents/{document_id}", response_model=DocumentOut)
 async def update_document(
     document_id: UUID,
-    body: DocumentCreate,
+    body: DocumentFields,
     request: Request,
     ctx: AuthContext = Depends(require_permission("docs.manage")),
 ) -> DocumentOut:
@@ -398,7 +421,9 @@ async def upload_version(
                 ),
             )
         try:
-            await svc.assert_not_already_full(session, ctx.org_id)
+            await svc.assert_not_already_full(
+                session, ctx.org_id, client_id=document.client_id
+            )
         except svc.QuotaExceeded as exc:
             raise HTTPException(status.HTTP_507_INSUFFICIENT_STORAGE, str(exc)) from None
 
@@ -571,6 +596,8 @@ async def add_link(
             )
         except svc.LinkTargetNotFound as exc:
             raise _not_found(exc) from None
+        except svc.LinkTargetOfAnotherClient as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from None
         except IntegrityError:
             raise HTTPException(status.HTTP_409_CONFLICT, tr("already linked")) from None
         return DocumentLinkOut(id=link.id, target_type=link.target_type, target_id=link.target_id)

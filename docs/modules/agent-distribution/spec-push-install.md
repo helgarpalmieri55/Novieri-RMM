@@ -518,6 +518,30 @@ scan grant that way is putting words in their mouth.
 
 **3. A credential scoped to the address.** §6.3.
 
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Task 12): the three
+> conditions hold inside one client, the credential's.** A push credential
+> (`push_install`, `windows_domain`) belongs to exactly one client: one with
+> no client and no device group is refused (422), and the push's client is
+> the credential's. The address must be a vouched-for machine **of that
+> client** (condition 1), covered by an active authorization **of that
+> client** (condition 2: `push_authorization` carries `client_id`, and an
+> active prefix is unique per client), and inside the credential's scope
+> (condition 3). The site server that originates the push is of that client
+> too (2a(a)). An address that is another client's vouched-for machine is
+> refused as `credential_missing`, and nothing is ever chosen from it, so two
+> customers on one private range never make an address mean two machines.
+> A subnet run (`push_run`) is the credential's client's. Its list is
+> expanded inside that client, and the confirmed list's digest is SHA-256
+> over the client, the credential and the sorted `(device, address)` pairs,
+> so a confirmation binds both. **At most one run is active per client**
+> (operator decision D3, 2026-10-26), each with up to 50 machines in flight;
+> it was one per organisation. Wake-on-LAN before a provisioning run is
+> originated only by the internal client's site servers, because
+> provisioning is the internal client's. `CLAUDE.md` 2a is narrowed here,
+> never widened: the signed parameters, the envelope and what the agent runs
+> are unchanged. The plan is
+> `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
+
 **Refusal happens on the near side of the signing boundary.** For any target
 failing any of the three, the request row is recorded `refused` with a named
 reason and the call raises **before** `JobEngine.create` — so no job row exists,
@@ -774,6 +798,25 @@ Binding a new prefix is `agent.push.scope.manage` — admin tier, audited, and
 visible on the credential's own page as a list of prefixes with their address
 counts, following `ScanAuthorizationsPage.tsx`'s rule that every row states its
 reach in addresses rather than in mask lengths.
+
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Task 12): the scope is
+> the credential's client's.** `push_credential_scope` and
+> `push_credential_realm` inherit the credential's client (H), so a bound
+> prefix is one client's, and a push credential has a client by construction
+> (§3). The checkout half of a push's permission conjunction is asked **in the
+> credential's client** (`has_permission(..., client_id=<the credential's
+> client>)`), after a coarse check that the code is held in some client, so a
+> refusal is still the 403. The pacer continues a run only while the person
+> who confirmed it still holds `agent.push.run` and `credentials.checkout` in
+> the run's client. `GET /agent-push/runs/prefixes` takes an optional
+> `credential_id`: with it, only that credential's client's active
+> authorizations are listed, and `credentials.checkout` is asked in that
+> client; without it, every visible client's active authorizations are listed
+> (each row names its client), and `credentials.checkout` must be held in
+> every client (`agent_push/api.py::list_push_run_prefixes`,
+> `run_list.authorized_prefixes`). A run is still built only from its
+> credential's client's subnets: `expand_prefix` and `create_run` check the
+> prefix against that client.
 
 ### 6.4 The uncomfortable part: `jobs.params` is a database column
 

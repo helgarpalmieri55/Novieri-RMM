@@ -39,6 +39,7 @@ import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDate } from "../../lib/datetime";
+import { internalClientId, requireKnown } from "../../lib/internalClient";
 import { humaniseEnum } from "../../lib/labels";
 import {
   useCompliance,
@@ -181,9 +182,24 @@ export function LicensesPage() {
     );
   }, [items, productNameById, search, language]);
 
-  const breachCount = (compliance.data ?? []).filter((row) => row.breach).length;
-  const compliantCount = (compliance.data ?? []).filter((row) => !row.breach).length;
-  const reconciledCount = (compliance.data ?? []).length;
+  // The Over-deployed, Compliant and "of 3 products reconciled" figures all
+  // count PRODUCTS. The report is one row per (client, product) since MSP
+  // clients phase 2, so each counts distinct products: a product is over when
+  // any client's position on it is a breach, and compliant only when none is,
+  // so over + compliant = reconciled.
+  const { breachCount, compliantCount, reconciledCount } = useMemo(() => {
+    const breached = new Set<string>();
+    const reconciled = new Set<string>();
+    for (const row of compliance.data ?? []) {
+      reconciled.add(row.product_id);
+      if (row.breach) breached.add(row.product_id);
+    }
+    return {
+      breachCount: breached.size,
+      compliantCount: reconciled.size - breached.size,
+      reconciledCount: reconciled.size,
+    };
+  }, [compliance.data]);
 
   // EVERY TILE'S FOOT LINE IS READ OFF THE SAME QUERY ITS FIGURE IS. The row
   // read uneven because one tile carried its breakdown and three carried an
@@ -263,11 +279,14 @@ export function LicensesPage() {
           urgent={!compliance.error && breachCount > 0}
           zeroLabel={t("licenses.list.tileOverZero")}
           foot={
+            // One compliance row per (client, product): two clients over on
+            // one product are one product over and one name.
             !compliance.error && breachCount > 0
-              ? (compliance.data ?? [])
-                  .filter((row) => row.breach)
-                  .map((row) => row.name)
-                  .join(", ")
+              ? [
+                  ...new Set(
+                    (compliance.data ?? []).filter((row) => row.breach).map((row) => row.name),
+                  ),
+                ].join(", ")
               : undefined
           }
         />
@@ -404,6 +423,8 @@ export function LicensesPage() {
 
 function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useT();
+  const api = useApi();
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const products = useProducts();
   const vendors = useVendors();
   const create = useCreateLicenseMutation();
@@ -463,8 +484,15 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
 
+    // A license is one client's (MSP clients phase 2), and the server holds
+    // what may hold it to that client.
+    // PHASE 3: the client/site selector. Until it exists that is the
+    // organisation's internal client, whose id is the organisation's --
+    // `/me`'s `org_id` (`lib/internalClient.ts`).
+    const internalClient = internalClientId(me.data);
     create.mutate(
-      {
+      () => ({
+        client_id: requireKnown(internalClient),
         product_id: productId,
         vendor_id: vendorId || null,
         type,
@@ -478,7 +506,7 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
         // fact as zero and must not be sent as one.
         cost: cost.trim() || null,
         currency: currency.trim().toUpperCase() || null,
-      },
+      }),
       {
         onSuccess: () => {
           reset();

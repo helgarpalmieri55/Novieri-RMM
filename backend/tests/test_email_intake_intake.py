@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.core.client_scope import ClientScope
 from app.core.storage import ObjectStore
 from app.core.tenancy import admin_session, org_session
-from app.models import EmailMailbox
+from app.models import Client, EmailMailbox, User
 from app.modules.email_intake import intake as intake_module
 from app.modules.email_intake.identity import mint_email_token
 from app.modules.email_intake.intake import AlreadyProcessed, process_message, reopen_target
@@ -1788,10 +1788,11 @@ async def test_an_unknown_sender_that_parsed_fine_is_still_quarantined(email_env
 
 
 async def test_a_contact_s_mail_opens_its_ticket_in_the_contact_s_client(email_env: Any) -> None:
-    """MSP clients plan 2026-10-26 Task 2, until Task 4 decides by domain and
-    "Sin asignar" (spec §3.3): a contact's new ticket is filed under its own
-    client, a staff member's under the internal client -- whose id is the
-    organisation's. Two senders that differ only in what they are."""
+    """MSP clients plan 2026-10-26 Task 2, updated by Task 4 (spec §3.3): a
+    contact's new ticket is filed under its own client, a staff member's whose
+    domain no client holds under "Sin asignar" -- no longer under the internal
+    client, which the Task 2 stopgap used. Two senders that differ only in
+    what they are."""
     from app.models import User
     from tests.client_scope_support import client_with_site
 
@@ -1813,4 +1814,293 @@ async def test_a_contact_s_mail_opens_its_ticket_in_the_contact_s_client(email_e
 
     assert (contact_row.disposition, staff_row.disposition) == ("created", "created")
     assert (await email_env.ticket_for_row(contact_row)).client_id == x
-    assert (await email_env.ticket_for_row(staff_row)).client_id == email_env.org_id
+    assert (await email_env.ticket_for_row(staff_row)).client_id == await _unassigned(email_env)
+
+
+# --- MSP clients phase 2, Task 4: the client of each message (spec §3.3, D1).
+# Distinct senders, so each step is the only one that can decide (spec §5
+# test 9): the contact's own address sits in a domain that belongs to ANOTHER
+# client, so a domain match would pick the wrong one; the staff senders are no
+# contacts, so only the domain or Unassigned can place them.
+
+
+async def _client(
+    env: Any, name: str, *domains: str, status: str = "active", kind: str = "customer"
+) -> UUID:
+    async with AsyncSession(env.admin_engine, expire_on_commit=False) as session:
+        client = Client(
+            org_id=env.org_id, name=name, kind=kind, email_domains=list(domains), status=status
+        )
+        session.add(client)
+        await session.commit()
+        return client.id
+
+
+async def _sender(env: Any, email: str, *, kind: str = "staff", client: UUID | None = None) -> UUID:
+    async with AsyncSession(env.admin_engine, expire_on_commit=False) as session:
+        user = User(
+            org_id=env.org_id,
+            external_subject=uuid4().hex,
+            email=email,
+            kind=kind,
+            client_id=client,
+        )
+        session.add(user)
+        await session.commit()
+        return user.id
+
+
+async def _unassigned(env: Any) -> UUID:
+    async with AsyncSession(env.admin_engine) as session:
+        return (
+            await session.execute(
+                select(Client.id).where(
+                    Client.org_id == env.org_id, Client.kind == "unassigned"
+                )
+            )
+        ).scalar_one()
+
+
+async def _stored_row_client(env: Any, row: InboundMessage) -> UUID | None:
+    """The client the COMMITTED row carries (not the returned object's)."""
+    async with AsyncSession(env.admin_engine) as session:
+        return (
+            await session.execute(
+                select(InboundMessage.client_id).where(InboundMessage.id == row.id)
+            )
+        ).scalar_one()
+
+
+async def _ticket_client(env: Any, row: InboundMessage) -> UUID:
+    async with AsyncSession(env.admin_engine) as session:
+        return (
+            await session.execute(select(Ticket.client_id).where(Ticket.id == row.ticket_id))
+        ).scalar_one()
+
+
+async def test_a_contact_s_mail_opens_a_ticket_in_the_contact_s_client(email_env: Any) -> None:
+    x = await _client(email_env, "X")
+    await _client(email_env, "Y", "ydomain.test")
+    await _sender(email_env, "ana@ydomain.test", kind="contact", client=x)
+    row = await email_env.dispose(sender="ana@ydomain.test")
+    assert row.disposition == "created"
+    assert await _ticket_client(email_env, row) == x
+    assert await _stored_row_client(email_env, row) == x
+
+
+async def test_a_staff_sender_s_domain_decides_the_client(email_env: Any) -> None:
+    z = await _client(email_env, "Z", "zdomain.test")
+    await _sender(email_env, "tech@ZDOMAIN.test")
+    row = await email_env.dispose(sender="tech@ZDOMAIN.test")
+    assert row.disposition == "created"
+    assert await _ticket_client(email_env, row) == z
+    assert await _stored_row_client(email_env, row) == z
+
+
+async def test_an_unmatched_staff_sender_lands_in_unassigned(email_env: Any) -> None:
+    # alice@acme.test is staff (email_env) and no client holds acme.test.
+    row = await email_env.dispose(sender="alice@acme.test")
+    unassigned = await _unassigned(email_env)
+    assert row.disposition == "created"
+    assert await _ticket_client(email_env, row) == unassigned
+    assert await _stored_row_client(email_env, row) == unassigned
+
+
+async def test_an_unknown_sender_stays_quarantined_and_is_stamped_with_its_domain_s_client(
+    email_env: Any,
+) -> None:
+    """D1: no ticket for a stranger (email-intake spec §0.2), but the
+    quarantine can be read per client."""
+    w = await _client(email_env, "W", "wdomain.test")
+    row = await email_env.dispose(sender="stranger@wdomain.test")
+    assert row.disposition == "quarantined" and row.ticket_id is None
+    assert await _stored_row_client(email_env, row) == w
+    assert await email_env.tickets() == []
+
+
+async def test_an_unknown_unmatched_sender_is_stamped_unassigned(email_env: Any) -> None:
+    row = await email_env.dispose(sender="stranger@nowhere.test")
+    assert row.disposition == "quarantined" and row.ticket_id is None
+    assert await _stored_row_client(email_env, row) == await _unassigned(email_env)
+
+
+async def test_an_archived_client_s_domain_matches_nothing(email_env: Any) -> None:
+    await _client(email_env, "Old", "old.test", status="archived")
+    await _sender(email_env, "tech@old.test")
+    row = await email_env.dispose(sender="tech@old.test")
+    unassigned = await _unassigned(email_env)
+    assert row.disposition == "created"
+    assert await _ticket_client(email_env, row) == unassigned
+    assert await _stored_row_client(email_env, row) == unassigned
+
+
+async def test_a_domain_is_compared_exactly_and_without_case(email_env: Any) -> None:
+    """Spec §3.3 step 2: "comparación exacta, sin mayúsculas". A subdomain, a
+    longer name ending in the domain, and an address with no "@" at all (whose
+    last segment is the whole string) are not the client's domain; a domain
+    stored with capitals (written around the service, which lower-cases) is."""
+    held = await _client(email_env, "Held", "held.test")
+    mixed = await _client(email_env, "Mixed", "Mixed.TEST")
+    unassigned = await _unassigned(email_env)
+
+    for address in ("a@sub.held.test", "a@notheld.test", "a@held.test.evil", "held.test"):
+        row = await email_env.dispose(sender=address)
+        assert await _stored_row_client(email_env, row) == unassigned, address
+
+    for address, expected in (("A@HELD.test", held), ("b@mixed.test", mixed)):
+        row = await email_env.dispose(sender=address)
+        assert await _stored_row_client(email_env, row) == expected, address
+
+
+async def test_a_domain_two_clients_hold_matches_neither(email_env: Any) -> None:
+    """The service keeps a domain in one client (`its_client_domains_unique`,
+    0232), but only for equal text: "Dup.test" and "dup.test" written around it
+    are two clients holding one domain. Mail is never routed by guessing which:
+    a mailbox does not choose between two customers, it files the message where
+    a technician with every client will look."""
+    await _client(email_env, "Dup A", "Dup.test")
+    await _client(email_env, "Dup B", "dup.test")
+    row = await email_env.dispose(sender="who@dup.test")
+    assert await _stored_row_client(email_env, row) == await _unassigned(email_env)
+
+
+async def test_a_reply_files_under_its_ticket_s_client(email_env: Any) -> None:
+    """The ticket's client decides, not the sender's: alice's ticket is in the
+    internal client (`a_ticket_for`), while her address alone would say
+    Unassigned (no client holds acme.test)."""
+    ticket_id, token = await email_env.a_ticket_for("alice@acme.test")
+    row = await email_env.dispose(
+        sender="alice@acme.test", to=f"helpdesk+t-{token}@acme.test", body="still broken"
+    )
+    assert row.disposition == "commented" and row.ticket_id == ticket_id
+    assert await _unassigned(email_env) != email_env.org_id
+    assert await _stored_row_client(email_env, row) == email_env.org_id
+    async with AsyncSession(email_env.admin_engine) as session:
+        comment_client = (
+            await session.execute(
+                select(TicketComment.client_id).where(TicketComment.ticket_id == ticket_id)
+            )
+        ).scalar_one()
+    assert comment_client == email_env.org_id
+
+
+async def test_a_reply_that_reopens_files_under_its_ticket_s_client(email_env: Any) -> None:
+    ticket_id, token = await email_env.a_ticket_for("alice@acme.test", status="resolved")
+    row = await email_env.dispose(
+        sender="alice@acme.test", to=f"helpdesk+t-{token}@acme.test", body="it came back"
+    )
+    assert row.disposition == "reopened" and row.ticket_id == ticket_id
+    assert await _stored_row_client(email_env, row) == email_env.org_id
+
+
+async def test_a_reply_refused_for_the_ticket_s_rate_files_under_its_ticket_s_client(
+    email_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(intake_module, "TICKET_RATE_LIMIT", 1)
+    _, token = await email_env.a_ticket_for("alice@acme.test")
+    first = await email_env.dispose(sender="alice@acme.test", to=f"helpdesk+t-{token}@acme.test")
+    second = await email_env.dispose(sender="alice@acme.test", to=f"helpdesk+t-{token}@acme.test")
+    assert (first.disposition, second.disposition) == ("commented", "refused_rate")
+    assert await _stored_row_client(email_env, second) == email_env.org_id
+
+
+async def test_a_token_from_the_wrong_sender_files_under_the_sender_s_client(
+    email_env: Any,
+) -> None:
+    """The quarantined message is the SENDER's mail: its body belongs to the
+    sender's client, not to the ticket it tried to reach (whose client would
+    otherwise read a stranger's text). `ticket_id` still names the target."""
+    x = await _client(email_env, "Sx")
+    await _sender(email_env, "mallory@x.test", kind="contact", client=x)
+    ticket_id, token = await email_env.a_ticket_for("alice@acme.test")
+    row = await email_env.dispose(
+        sender="mallory@x.test", to=f"helpdesk+t-{token}@acme.test", body="let me in"
+    )
+    assert row.disposition == "quarantined" and row.ticket_id == ticket_id
+    assert await _stored_row_client(email_env, row) == x
+
+
+async def test_a_reply_beyond_the_window_opens_a_new_ticket_in_the_sender_s_client(
+    email_env: Any,
+) -> None:
+    """The cited ticket is only text (row 4): the NEW ticket is filed as any
+    new mail is, by §3.3, and the row follows the new ticket."""
+    _, token = await email_env.a_ticket_for("alice@acme.test", status="cancelled")
+    row = await email_env.dispose(sender="alice@acme.test", to=f"helpdesk+t-{token}@acme.test")
+    unassigned = await _unassigned(email_env)
+    assert row.disposition == "created"
+    assert await _ticket_client(email_env, row) == unassigned
+    assert await _stored_row_client(email_env, row) == unassigned
+
+
+async def test_a_flood_from_a_contact_files_under_the_contact_s_client(email_env: Any) -> None:
+    from app.modules.email_intake.intake import SENDER_RATE_LIMIT
+
+    x = await _client(email_env, "Fx")
+    await _client(email_env, "Fy", "flood.test")
+    await _sender(email_env, "fred@flood.test", kind="contact", client=x)
+    last = None
+    for _ in range(SENDER_RATE_LIMIT + 2):
+        last = await email_env.dispose(sender="fred@flood.test")
+    assert last is not None and last.disposition == "refused_rate"
+    assert await _stored_row_client(email_env, last) == x
+
+
+async def test_a_ticket_refused_at_creation_still_files_under_the_sender_s_client(
+    email_env: Any,
+) -> None:
+    z = await _client(email_env, "Qz", "qdomain.test")
+    await _sender(email_env, "q@qdomain.test")
+    email_env.mailbox.default_category_id = await _seed_queueless_category(
+        email_env.api_env, email_env.org_id
+    )
+    row = await email_env.dispose(sender="q@qdomain.test")
+    assert row.disposition == "quarantined" and row.ticket_id is None
+    assert await _stored_row_client(email_env, row) == z
+
+
+async def test_mail_refused_before_its_sender_is_known_is_stamped_unassigned_not_null(
+    email_env: Any,
+) -> None:
+    """NULL in an O table is "every client", and the row holds the mail's text:
+    a loop refusal, a message that did not parse and the org's own
+    notification sender all land in Unassigned."""
+    from app.models import NotificationChannel
+
+    unassigned = await _unassigned(email_env)
+    # Even a contact's address does not decide a refusal made before the
+    # sender is looked up (the parser's own loop refusal).
+    x = await _client(email_env, "Lx")
+    await _sender(email_env, "lena@x.test", kind="contact", client=x)
+
+    looped = await email_env.dispose(
+        sender="lena@x.test", refusal="refused_loop", refusal_reason="auto-submitted"
+    )
+    unparsed = await email_env.dispose(
+        sender="", refusal="refused_parse", refusal_reason="no From header"
+    )
+    async with org_session(
+        email_env.org_id, engine=email_env.engine, clients=ClientScope.all()
+    ) as session:
+        session.add(
+            NotificationChannel(
+                org_id=email_env.org_id,
+                kind="email",
+                name="outbound",
+                config={
+                    "host": "smtp.acme.test",
+                    "port": 587,
+                    "from_address": "no-reply@acme.test",
+                },
+                created_by=email_env.alice_id,
+            )
+        )
+    notifier = await email_env.dispose(sender="no-reply@acme.test")
+
+    assert [r.disposition for r in (looped, unparsed, notifier)] == [
+        "refused_loop",
+        "refused_parse",
+        "refused_loop",
+    ]
+    for row in (looped, unparsed, notifier):
+        assert await _stored_row_client(email_env, row) == unassigned, row.disposition

@@ -43,7 +43,12 @@ from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.models import BcpFinding, BcpPlan, BcpTest, BcpTestStep
-from app.modules.bcp.errors import BcpNotFoundError, BcpValidationError
+from app.modules.bcp.errors import (
+    BcpClientError,
+    BcpConflictError,
+    BcpNotFoundError,
+    BcpValidationError,
+)
 from app.modules.bcp.reporting import bcp_period_report, bcp_plan_status, bcp_test_report
 from app.modules.bcp.schema import (
     FindingCreateRequest,
@@ -91,16 +96,25 @@ def _http_error(exc: BcpValidationError) -> HTTPException:
     404. Every other `BcpValidationError` is a 400 -- including an invalid
     `scope`/`procedure_refs` entry, an invalid `severity`/
     `remediation_state`, and a cross-org/nonexistent `change_ref` on
-    `PATCH /findings/{id}`.
+    `PATCH /findings/{id}`. A client this caller cannot see is a 404 too;
+    `BcpConflictError` (an archived client) is a 409, and `BcpClientError`
+    (another client's device, group, article or change, or "Sin asignar") a
+    422. A client without continuity never reaches here: its
+    `ModuleNotEnabled` is the app's own 404 handler (`app/main.py`).
     """
     if isinstance(exc, BcpNotFoundError):
         return HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    if isinstance(exc, BcpConflictError):
+        return HTTPException(status.HTTP_409_CONFLICT, str(exc))
+    if isinstance(exc, BcpClientError):
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
     return HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
 
 def _plan_out(row: BcpPlan) -> PlanOut:
     return PlanOut(
         id=row.id,
+        client_id=row.client_id,
         name=row.name,
         description=row.description,
         scope=row.scope,
@@ -189,6 +203,7 @@ async def create_plan_route(
                 session,
                 org_id=ctx.org_id,
                 actor_id=ctx.user_id,
+                client_id=body.client_id,
                 name=body.name,
                 description=body.description,
                 scope=body.scope,
@@ -466,6 +481,8 @@ async def test_report_route(
             action="bcp.report_exported",
             target_type="bcp_test",
             target_id=str(test_id),
+            # The test's client, which is its plan's (migration 0237).
+            client_id=data["plan"]["client_id"] if data["plan"] is not None else None,
             metadata={},
         )
 

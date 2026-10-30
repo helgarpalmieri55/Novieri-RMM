@@ -76,6 +76,7 @@ function stubApi(overrides: Partial<ApiClient> & { permissions?: string[] } = {}
 function winrmProbe(overrides: Partial<HostKeyOut> = {}): HostKeyOut {
   return {
     address: "10.20.4.31",
+    client_id: null,
     transport: "winrm",
     observed_fingerprint: "winrm",
     observed_key_type: "",
@@ -103,6 +104,7 @@ function sshProbe(): HostKeyOut {
 function grant(overrides: Partial<PushAuthorizationOut> = {}): PushAuthorizationOut {
   return {
     id: "g1",
+    client_id: "o1",
     prefix: "10.0.0.0/8",
     address_count: 16777216,
     note: "onboarding",
@@ -118,6 +120,7 @@ function grant(overrides: Partial<PushAuthorizationOut> = {}): PushAuthorization
 function scope(overrides: Partial<PushCredentialScopeOut> = {}): PushCredentialScopeOut {
   return {
     id: "s1",
+    client_id: "o1",
     credential_id: "c1",
     credential_name: "branch-installer",
     prefix: "10.4.7.0/24",
@@ -258,6 +261,37 @@ describe("PushAuthorizationsPage", () => {
     // ...and it says so about a WIDE grant specifically, because /8 is four
     // characters and nothing narrows it afterwards except revoking it.
     expect(document.body.textContent).toMatch(/wide authorization/i);
+  });
+
+  it("authorizes the prefix in the internal client", async () => {
+    // A prefix is one client's network (MSP clients phase 2, Task 12). Until
+    // the client selector exists the grant is the internal client's, whose id
+    // is `/me`'s `org_id`.
+    const createPushAuthorization = vi.fn().mockResolvedValue(grant());
+    stubApi({ createPushAuthorization });
+    renderWithProviders(<PushAuthorizationsPage />);
+    const field = await screen.findByPlaceholderText("10.4.7.0/24");
+    await userEvent.type(field, "10.4.7.0/24");
+    await userEvent.click(screen.getByRole("button", { name: "Authorize" }));
+    await waitFor(() =>
+      expect(createPushAuthorization).toHaveBeenCalledExactlyOnceWith({
+        client_id: "o1",
+        prefix: "10.4.7.0/24",
+        note: "",
+        expires_at: null,
+      }),
+    );
+  });
+
+  it("sends no grant before its client is known", async () => {
+    const createPushAuthorization = vi.fn().mockResolvedValue(grant());
+    stubApi({ createPushAuthorization, me: vi.fn().mockResolvedValue({ permissions: [SCOPE_MANAGE] }) });
+    renderWithProviders(<PushAuthorizationsPage />);
+    const field = await screen.findByPlaceholderText("10.4.7.0/24");
+    await userEvent.type(field, "10.4.7.0/24");
+    await userEvent.click(screen.getByRole("button", { name: "Authorize" }));
+    expect(await screen.findByText(/cannot tell which client this is for\. Nothing was sent/)).toBeTruthy();
+    expect(createPushAuthorization).not.toHaveBeenCalled();
   });
 
   it("refuses to preview something that is not a prefix", async () => {
@@ -502,7 +536,8 @@ describe("Before a push can run: site server and agent package", () => {
     roles: [],
     enabled: true,
     notes: "",
-    ipam_site_id: null,
+    client_id: "o1",
+    site_id: null,
     agent_status: "online",
     agent_last_seen_at: null,
     ...overrides,

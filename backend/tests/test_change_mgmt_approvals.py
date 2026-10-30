@@ -102,6 +102,7 @@ async def _create_and_submit(
         change = await create_change(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=requester_id,
             type_=type_,
             title="T",
@@ -342,6 +343,7 @@ async def test_emergency_retrospective_approve_records_row_and_unblocks_complete
         change = await create_change(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=requester_id,
             type_="emergency",
             title="Emergency patch",
@@ -427,6 +429,7 @@ async def test_emergency_retrospective_approve_by_requester_raises(
         change = await create_change(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=requester_id,
             type_="emergency",
             title="Emergency patch",
@@ -484,6 +487,7 @@ async def test_decide_change_on_draft_raises_illegal(
         change = await create_change(
             s,
             org_id=org_id,
+            client_id=org_id,
             actor_id=requester_id,
             type_="normal",
             title="T",

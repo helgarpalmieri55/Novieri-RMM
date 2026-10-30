@@ -46,6 +46,7 @@ async def _sub(
     async with AsyncSession(admin_engine, expire_on_commit=False) as s:
         sub = Subscription(
             org_id=org_id,
+            client_id=org_id,
             service_name=name,
             billing_cycle="annual",
             cost_per_cycle=Decimal("100.00"),

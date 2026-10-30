@@ -50,6 +50,7 @@ const PDF: DocDocumentVersion = {
 
 const DOC: DocDocument = {
   id: "d1",
+  client_id: "o1",
   title: "Acme support contract",
   description: "Signed 2026-03-01, renews annually.",
   category: "Contracts",

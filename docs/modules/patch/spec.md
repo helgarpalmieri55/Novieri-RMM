@@ -165,8 +165,9 @@ reboot: "never|if_required|forced", deferral_hours: int }`.
 3. **Auto-approve rule (PD-02):** if the device's resolved policy
    `auto_approve_security` is true, for each newly-`missing` **security-severity**
    (`critical`/`important`) patch, create a `patch_approval` for the **test**
-   ring only and flip the device's status to `approved` — audited
-   `patch.auto_approved`.
+   ring only, of the device's client (§7, amended 2026-10-29), and flip the
+   device's status to `approved` — audited `patch.auto_approved`. A revoked
+   approval of that patch and ring, global or the client's, stops it (§7).
 4. Queue a UI event `patch_status_updated` (post-commit, via the kernel drain).
 
 ## 7. Approvals, rings & windows
@@ -185,6 +186,39 @@ reboot: "never|if_required|forced", deferral_hours: int }`.
   dispatched when the device's window is open (`now` matches the cron and, for a
   window with a duration, within it). Resolved to the agent's local scheduler so
   the agent also honors it if the control plane is unreachable at window time.
+
+> **Amended 2026-10-29 (MSP clients plan 2026-10-26, Task 14 and its review):
+> an approval belongs to one client, or to every client.** `patch_approvals`
+> is O: `POST /patch/approvals[/bulk]` takes an optional `client_id` (404 not
+> visible, 409 archived, 422 Unassigned). With one, the approval is that
+> client's and flips only that client's machines in the ring; without one it
+> is global, covers every client's machines in the ring, and writing it needs
+> every client. Every reader — the apply sweep, the ring's approved patches
+> and the compliance report — accepts an approval that is global or of the
+> device's own client, never another client's. Revoking a client's approval
+> flips only that client's machines no other live approval still covers, and
+> nothing while a global approval for the same patch and ring is live. The
+> console files an approval under the internal client unless the person ticks
+> **"For every client"**; one made from a machine's drill-down is filed under
+> that machine's client. A client's approval is authorized only by a change of
+> that client, **and a global one only by the internal client's change, whose
+> automatic change it also is** (plan decision C8); a client without change
+> management has no gate and gets no automatic change (decision D4,
+> `docs/modules/change-mgmt/spec.md` §14). **Automatic approval (PD-02) is
+> filed under the reporting device's client** (amended 2026-10-29, final
+> review): the policy that asks for it is a policy of that client's group,
+> and a global row would let one client's policy clear the patch for every
+> client's test ring — a decision for every client that only a person with
+> every client may take (invariant 5a). **A person's revocation wins:** a
+> revoked approval of that patch and ring — the global one or the client's
+> own — stops automatic approval for the client (no row, the device is not
+> marked approved, nothing is audited); a revoked row of another client does
+> not. A live approval of either owner already covers the client's machines,
+> so nothing is inserted. Otherwise the client's row is inserted
+> `ON CONFLICT DO NOTHING` on `uq_patch_approvals_client_patch_ring`, so two
+> scans of the client's machines make one row, and the `patch.auto_approved`
+> audit names the client. The plan is
+> `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
 
 ## 8. Apply flow (`apply.py`) — dispatch + result ingestion
 

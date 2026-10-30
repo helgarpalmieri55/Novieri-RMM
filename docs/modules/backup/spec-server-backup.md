@@ -746,6 +746,15 @@ complete point on the source device (or on the policy's
 from the result. Evidence and reports show the level; "sampled read" is never
 presented as "full restore".
 
+> **Amended 2026-10-29 (MSP clients phase 2, final review D, decision C1).**
+> The newest complete point *in a repository of the device's own client*:
+> a point from before migration 0242 can sit in a repository that is now the
+> internal client's, and restoring it would hand a customer's device that
+> repository's key and read grants over its whole prefix. The sweep passes
+> such a point over (an older point of the device's own client is picked if
+> there is one; otherwise nothing is dispatched). A person's manual restore is
+> an audited act of its own and is unchanged.
+
 ### 7.5 Integrity verification (D7)
 
 `backup_chunks` gains `verified_at`. The verification sweep reads a bounded

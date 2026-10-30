@@ -23,6 +23,7 @@ their asset type, lifecycle, owner and location.
 """
 
 from datetime import UTC, datetime, timedelta
+from ipaddress import ip_network
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -38,6 +39,7 @@ from tests.ipam_fixtures import (
     complete_sweep,
     dispatch_sweep,
     seed_device,
+    seed_subnet,
     seed_vrf,
     sweep_document,
     sweep_host,
@@ -46,12 +48,21 @@ from tests.ipam_fixtures import (
 
 
 async def _observe(api_env: ApiEnv, org_id: UUID, address: str, **kw: Any) -> None:
+    """A sweep's sighting of `address`, on a subnet of the internal client at
+    its Principal site (both carry the organisation's id): a promoted machine
+    takes its subnet's client and site, and a candidate on a subnet without
+    one is refused (MSP clients plan 2026-10-26 Task 11, C7)."""
     vrf_id = kw.pop("vrf_id", None) or await seed_vrf(api_env, org_id, name=f"v-{uuid4().hex[:6]}")
+    subnet_id = await seed_subnet(
+        api_env, org_id, vrf_id=vrf_id, prefix=str(ip_network(f"{address}/24", strict=False)),
+        site_id=org_id,
+    )
     await upsert_observation_row(
         api_env,
         org_id,
         vrf_id=vrf_id,
         address=address,
+        subnet_id=subnet_id,
         source=kw.pop("source", "sweep"),
         method=kw.pop("method", "arp"),
         confidence=kw.pop("confidence", "medium"),
@@ -153,7 +164,7 @@ async def test_promoting_requires_assets_manage(api_env: ApiEnv) -> None:
     await _observe(api_env, org_id, "172.22.104.21")
     resp = await api_env.client.post(
         "/api/v1/devices/candidates/promote",
-        json={"addresses": ["172.22.104.21"]},
+        json={"client_id": str(org_id), "addresses": ["172.22.104.21"]},
         headers=await api_env.headers(org_id, reader),
     )
     assert resp.status_code == 403, resp.text
@@ -170,7 +181,7 @@ async def test_a_promoted_candidate_is_marked_discovery(api_env: ApiEnv) -> None
 
     resp = await api_env.client.post(
         "/api/v1/devices/candidates/promote",
-        json={"addresses": ["172.22.104.22"]},
+        json={"client_id": str(org_id), "addresses": ["172.22.104.22"]},
         headers=await api_env.headers(org_id, admin),
     )
     assert resp.status_code == 200, resp.text
@@ -200,6 +211,7 @@ async def test_promotion_carries_what_the_operator_supplied_on_top(
     resp = await api_env.client.post(
         "/api/v1/devices/candidates/promote",
         json={
+            "client_id": str(org_id),
             "addresses": ["172.22.104.23"],
             "asset_type": "printer",
             "lifecycle": "unmanageable",
@@ -228,12 +240,12 @@ async def test_promoting_the_same_address_twice_does_not_duplicate(
 
     first = await api_env.client.post(
         "/api/v1/devices/candidates/promote",
-        json={"addresses": ["172.22.104.24"]},
+        json={"client_id": str(org_id), "addresses": ["172.22.104.24"]},
         headers=headers,
     )
     second = await api_env.client.post(
         "/api/v1/devices/candidates/promote",
-        json={"addresses": ["172.22.104.24"]},
+        json={"client_id": str(org_id), "addresses": ["172.22.104.24"]},
         headers=headers,
     )
     assert first.status_code == 200, first.text
@@ -260,7 +272,7 @@ async def test_an_address_nobody_observed_is_refused_per_address(
 
     resp = await api_env.client.post(
         "/api/v1/devices/candidates/promote",
-        json={"addresses": ["172.22.104.25", "10.99.99.99"]},
+        json={"client_id": str(org_id), "addresses": ["172.22.104.25", "10.99.99.99"]},
         headers=await api_env.headers(org_id, admin),
     )
     assert resp.status_code == 200, resp.text
@@ -280,7 +292,7 @@ async def test_promotion_is_audited_naming_the_address(api_env: ApiEnv) -> None:
 
     await api_env.client.post(
         "/api/v1/devices/candidates/promote",
-        json={"addresses": ["172.22.104.26"]},
+        json={"client_id": str(org_id), "addresses": ["172.22.104.26"]},
         headers=await api_env.headers(org_id, admin),
     )
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
@@ -315,7 +327,7 @@ async def test_an_address_observed_in_another_org_is_not_promotable_under_rls(
 
     resp = await api_env.client.post(
         "/api/v1/devices/candidates/promote",
-        json={"addresses": ["172.22.104.27"]},
+        json={"client_id": str(org_b), "addresses": ["172.22.104.27"]},
         headers=await api_env.headers(org_b, admin_b),
     )
     assert resp.status_code == 200, resp.text
@@ -455,7 +467,7 @@ async def test_a_promoted_row_carries_the_mac_that_identified_it(
 
     resp = await api_env.client.post(
         "/api/v1/devices/candidates/promote",
-        json={"addresses": ["172.22.104.31"]},
+        json={"client_id": str(org_id), "addresses": ["172.22.104.31"]},
         headers=await api_env.headers(org_id, admin),
     )
     assert resp.status_code == 200, resp.text
@@ -489,7 +501,7 @@ async def test_a_candidate_with_no_mac_promotes_without_inventing_one(
 
     resp = await api_env.client.post(
         "/api/v1/devices/candidates/promote",
-        json={"addresses": ["172.22.104.32"]},
+        json={"client_id": str(org_id), "addresses": ["172.22.104.32"]},
         headers=await api_env.headers(org_id, admin),
     )
     assert resp.status_code == 200, resp.text

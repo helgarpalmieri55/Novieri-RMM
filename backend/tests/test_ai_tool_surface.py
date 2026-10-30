@@ -581,7 +581,12 @@ from tests.tool_surface import (
 # waits in PENDING_TOOL_REVIEW: which clients exist and the email domains that
 # route their mail are the map of who Novieri serves, and whether an AI persona
 # should read it is the AI module's decision, not a byproduct of this one.
-EXPECTED_GET_ROUTES = 254
+# 254 -> 253 (2026-10-28): IPAM's own sites are merged into the clients' (MSP
+# clients phase 2, Task 10; migration 0240 drops `ipam_site`), so
+# `GET /ipam/sites` is gone. It answered a bare, undescribed list, so P4 93 ->
+# 92 and P5 177 -> 176; it passed neither five nor six, so neither set moves.
+# Its replacement for the console is `GET /clients/{client_id}/sites`, above.
+EXPECTED_GET_ROUTES = 253
 EXPECTED_PASSING_FIVE = 51
 
 # The registrable set, pinned by PATH rather than count: this is the number the
@@ -732,10 +737,12 @@ EXPECTED_FAILING_BY_PROPERTY = {
     # +2 (2026-09-30): `/agent-push/runs` and `/agent-push/runs/prefixes`.
     # +3 (2026-10-24): `/clients`, `/clients/{client_id}/sites` and
     # `/clients/{client_id}/contacts`.
-    "P4 bounded": 93,
+    # -1 (2026-10-28): `/ipam/sites`, removed (migration 0240).
+    "P4 bounded": 92,
     # +2 (2026-09-23): the two portal help routes.
     # +3 (2026-09-30): `/agent-push/runs`, `/runs/{run_id}`, `/runs/{run_id}/targets`.
-    "P5 self-describing": 177,
+    # -1 (2026-10-28): `/ipam/sites`, removed (migration 0240).
+    "P5 self-describing": 176,
 }
 
 # Genuinely gated, but invisible to `route_permission`: `remote/api.py` defines

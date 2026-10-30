@@ -151,6 +151,7 @@ const DEVICE_PAGE = { items: DEVICES, total: DEVICES.length };
 
 const GROUP: DeviceGroup = {
   id: "grp-build",
+  client_id: "o1",
   name: "Equipo de compilación",
   parent_group_id: null,
   description: "",
@@ -165,6 +166,7 @@ const GROUP_PAGE = { items: [GROUP, SOLO_GROUP], total: 2, ungrouped_device_coun
 function deployment(overrides: Partial<Deployment> = {}): Deployment {
   return {
     id: "dep1",
+    client_id: "o1",
     package_id: "pkg1",
     action: "install",
     target_type: "device",
@@ -658,9 +660,9 @@ describe("the schedules panel, in Spanish", () => {
 
 describe("a device's Deploy tab, in Spanish", () => {
   const HISTORY: DeviceDeploymentHistory[] = [
-    { deployment_id: "dep-a", package_id: "pkg1", action: "install", state: "installed", exit_code: 0, log_ref: null, finished_at: "2026-09-23T01:00:00Z", created_at: "2026-09-23T00:00:00Z" },
-    { deployment_id: "dep-b", package_id: "pkg1", action: "uninstall", state: "not_applicable", exit_code: null, log_ref: null, finished_at: null, created_at: "2026-09-22T00:00:00Z" },
-    { deployment_id: "dep-c", package_id: "pkg1", action: "update", state: "failed", exit_code: 1603, log_ref: null, finished_at: "2026-09-21T01:00:00Z", created_at: "2026-09-21T00:00:00Z" },
+    { deployment_id: "dep-a", client_id: "o1", package_id: "pkg1", action: "install", state: "installed", exit_code: 0, log_ref: null, finished_at: "2026-09-23T01:00:00Z", created_at: "2026-09-23T00:00:00Z" },
+    { deployment_id: "dep-b", client_id: "o1", package_id: "pkg1", action: "uninstall", state: "not_applicable", exit_code: null, log_ref: null, finished_at: null, created_at: "2026-09-22T00:00:00Z" },
+    { deployment_id: "dep-c", client_id: "o1", package_id: "pkg1", action: "update", state: "failed", exit_code: 1603, log_ref: null, finished_at: "2026-09-21T01:00:00Z", created_at: "2026-09-21T00:00:00Z" },
   ];
 
   it("words the history table", async () => {

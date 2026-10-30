@@ -169,6 +169,7 @@ async def _decide(
             world.org.org_id,
             addresses=[parse_target_address(address)],
             credential_id=world.credential_id,
+            client_id=world.org.org_id,
             now=now,
         )
     return decisions[0]
@@ -424,6 +425,9 @@ def test_every_named_reason_carries_a_remedy() -> None:
         # MSP clients (invariant 5a): vouched-for rows of more than one client
         # hold the address, so it names no single machine.
         "ambiguous_asset",
+        # Plan 2026-10-26 Task 12: the address is a vouched machine of another
+        # client than the push's credential.
+        "credential_missing",
     }
     for reason, help_text in REFUSAL_REASONS.items():
         assert len(help_text) > 80, reason
@@ -701,6 +705,7 @@ async def test_another_orgs_asset_authorization_scope_and_site_server_count_for_
         a.org_id,
         addresses=[parse_target_address(TARGET)],
         credential_id=a_credential,
+        client_id=a.org_id,
     )
     assert set(decisions[0].refusals) == {
         "no_asset",
@@ -733,6 +738,10 @@ def _guarded_calls(function_name: str) -> list[tuple[int, str]]:
         if name in (
             "evaluate_targets",
             "has_permission",
+            # The `credentials.checkout` conjunction, shared by every push
+            # path since the Task 12 review (`agent_push/checkout.py`).
+            "require_checkout_somewhere",
+            "require_checkout_in",
             "create",
             "signed_envelope",
             "publish_job",
@@ -757,8 +766,11 @@ def test_the_authorization_ladder_runs_before_anything_that_could_be_signed() ->
     """
     calls = _guarded_calls("request_push_batch")
     names = [name for _, name in calls]
-    assert names[0] == "has_permission", names
+    # The conjunction first, somewhere and then in the credential's client,
+    # and both before the ladder (plan 2026-10-26 Task 12).
+    assert names[0] == "require_checkout_somewhere", names
     assert "evaluate_targets" in names, names
+    assert names.index("require_checkout_in") < names.index("evaluate_targets"), names
     forbidden = {"create", "signed_envelope", "publish_job", "sign"} & set(names)
     assert forbidden == set(), (
         f"request_push_batch calls {sorted(forbidden)}: cycle B1 dispatches "

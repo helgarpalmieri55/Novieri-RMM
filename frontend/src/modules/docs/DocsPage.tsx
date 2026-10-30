@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { Badge, Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { ConfirmDialog } from "../../components/confirm";
+import { ForEveryClientToggle } from "../../components/forEveryClient";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
 import { useT } from "../../i18n/context";
@@ -12,6 +13,7 @@ import { Trans } from "../../i18n/Trans";
 import type { DocArticleInput, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDate, formatDateTime } from "../../lib/datetime";
+import { newRowClient } from "../../lib/internalClient";
 import { humaniseEnum, humaniseStatus } from "../../lib/labels";
 import { DocumentsSection, DocumentView, tooLong, UploadDocumentDialog } from "./documents";
 import { renderMarkdown } from "./markdown";
@@ -240,6 +242,10 @@ export function DocsPage() {
   );
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<DocArticleInput>({ title: "", body: "", category: "General" });
+  // A NEW article is the internal client's unless the person asks for it to
+  // be every client's (MSP clients plan 2026-10-26 Task 14). Set at creation
+  // only: an article's client never changes.
+  const [forEveryClient, setForEveryClient] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
   const [newRecordOpen, setNewRecordOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -302,7 +308,10 @@ export function DocsPage() {
       if (selectedId && editing && article.data) {
         return api.updateArticle(selectedId, draft);
       }
-      return api.createArticle(draft);
+      // PHASE 3: the client/site selector. Until it exists a new article is
+      // the organisation's internal client's -- `/me`'s `org_id`
+      // (`lib/internalClient.ts`) -- or, when asked, every client's.
+      return api.createArticle({ ...draft, ...newRowClient(me.data, forEveryClient) });
     },
     onSuccess: (saved) => {
       invalidate();
@@ -357,6 +366,7 @@ export function DocsPage() {
   const startNew = () => {
     setSelectedId(null);
     setDraft({ title: "", body: "", category: "General" });
+    setForEveryClient(false);
     setAttempt(null);
     save.reset();
     setEditing(true);
@@ -859,6 +869,18 @@ export function DocsPage() {
                     />
                   </div>
                 </div>
+                {selectedId == null ? (
+                  <div className="mt-3">
+                    <ForEveryClientToggle
+                      code="docs.manage"
+                      checked={forEveryClient}
+                      onChange={(checked) => {
+                        setForEveryClient(checked);
+                        if (save.isError) save.reset();
+                      }}
+                    />
+                  </div>
+                ) : null}
                 <div className="mt-3 flex justify-end gap-2">
                   {/* `type="button"` because `ui.tsx`'s Button sets no type, and
                    * inside a real <form> the default is "submit" — Cancel would
@@ -1032,12 +1054,22 @@ function NewRecordDialog({ open, onClose }: { open: boolean; onClose: () => void
   const [name, setName] = useState("");
   const [fieldsJson, setFieldsJson] = useState("{}");
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  const [forEveryClient, setForEveryClient] = useState(false);
+  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const create = useMutation({
     // The parsed object is the mutation's input, so no `JSON.parse` runs on
     // the dispatch path: a throw there surfaced as a raw `SyntaxError` (or as
     // nothing at all) instead of as a message about the field it came from.
     mutationFn: (fields: Record<string, unknown>) =>
-      api.createDocRecord({ record_type: recordType, name, fields }),
+      api.createDocRecord({
+        record_type: recordType,
+        name,
+        fields,
+        // PHASE 3: the client/site selector. Until it exists a new record is
+        // the organisation's internal client's (`lib/internalClient.ts`), or,
+        // when asked, every client's.
+        ...newRowClient(me.data, forEveryClient),
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["doc-records"] });
       onClose();
@@ -1107,6 +1139,14 @@ function NewRecordDialog({ open, onClose }: { open: boolean; onClose: () => void
             />
           </Field>
         </div>
+        <ForEveryClientToggle
+          code="docs.manage"
+          checked={forEveryClient}
+          onChange={(checked) => {
+            setForEveryClient(checked);
+            clearStaleFeedback();
+          }}
+        />
         <div className="flex justify-end gap-2">
           {/* See the article editor: an untyped Button inside a <form>
            * submits, and Cancel must not create the record. */}

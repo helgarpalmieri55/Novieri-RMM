@@ -31,6 +31,11 @@ export const components = {
   chart: {
     category: "Category",
   },
+  // A new row filed as every client's configuration (components/forEveryClient.tsx).
+  forEveryClient: {
+    label: "For every client",
+    hint: "Every client's technicians will see it. Unticked, it belongs to your organisation's own client.",
+  },
   prerequisites: {
     checking: "Checking…",
     cannotCheckNeeds: "This cannot be checked from this account: it needs {permissions}.",

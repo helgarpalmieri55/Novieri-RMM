@@ -85,10 +85,12 @@ async def test_register_prove_and_list(
             session, org_id=org.org_id, actor_id=org.user_id, public_key_text=public_text,
             now=NOW,
         )
-        assert await proven_recovery_keys(session, org.org_id) == []
+        # The keys a repository of the internal client may be wrapped to: a
+        # global one is (plan 2026-10-26 Task 13).
+        assert await proven_recovery_keys(session, org.org_id, client_id=org.org_id) == []
         answer = tool.prove(tool.load_private_key(private_text), challenge)
         await prove_recovery_key(session, row, answer=answer, actor_id=org.user_id, now=NOW)
-        proven = await proven_recovery_keys(session, org.org_id)
+        proven = await proven_recovery_keys(session, org.org_id, client_id=org.org_id)
     assert [k.id for k in proven] == [row.id]
     assert row.challenge_sha256 is None
     # The server stores the public key and nothing that is the private key.
