@@ -191,9 +191,13 @@ and the `backup.*` permission seed + role grants.
 > 409), except to switch a stored policy off as it stands. Its points stay
 > where they are, still occupying their space, and stay restorable: the read
 > exchange grants reads on `active` and `retired` repositories, and
-> verification, GC and the off-site copy go on as before. The `state`
-> vocabulary is therefore `active|retired` (no CHECK constraint holds it,
-> 0014).
+> verification and the off-site copy continue. Retention and GC do not visit
+> it: they visit only the repository of an enabled policy, which a retired
+> one never is, so its points are never pruned. A run already in flight when
+> the repository is retired can still land its point — it is the same client
+> and the same key — while the dedup exchange refuses its later chunk writes.
+> The `state` vocabulary is therefore `active|retired` (no CHECK constraint
+> holds it, 0014).
 >
 > **Every backup audit that has its record's client at hand names it** (same
 > date, §5.5): the restore and its result, the automatic test restore, the

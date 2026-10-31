@@ -237,9 +237,10 @@ PART_B: dict[str, str] = {
         "its recovery points get copied there, or unlinks it with a null target. Audited."
     ),
     "POST /api/v1/backup/repositories/{repository_id}/retire": (
-        "Retires one backup repository: it takes no new backups and no policy may name it "
-        "again, while its recovery points stay and can still be restored. Refused with 409 "
-        "while an enabled policy uses it. There is no way back. Audited."
+        "Retires one backup repository: it takes no new backups and no enabled policy may "
+        "name it, though a stored policy switched off may still. Its recovery points stay "
+        "and can still be restored. Refused with 409 while an enabled policy uses it. There "
+        "is no way back. Audited."
     ),
     # --- deploy ---
     "GET /api/v1/deploy/deployments": (

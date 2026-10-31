@@ -35,9 +35,9 @@ from app.models.base import Base, TimestampMixin, client_org_fk, uuid7_pk
 
 #: `backup_repositories.state`, which no CHECK constraint holds (0014). A new
 #: repository is `active`. A `retired` one (phase 3 design §5.5) takes no new
-#: backup -- the dispatch refuses it, `dedup.py` grants it no writes, no policy
-#: may name it -- and its points stay restorable (`read.py`). There is no way
-#: back to `active` in this phase.
+#: backup -- the dispatch refuses it, `dedup.py` grants it no writes, no enabled
+#: policy may name it -- and its points stay restorable (`read.py`). There is no
+#: way back to `active` in this phase.
 REPOSITORY_ACTIVE = "active"
 REPOSITORY_RETIRED = "retired"
 

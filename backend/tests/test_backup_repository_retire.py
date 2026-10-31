@@ -10,9 +10,14 @@ A retired repository takes no new backup:
   the `backup.dispatch_refused` shape it already uses -- once per device and
   policy version for the window, every time for a person;
 - the dedup exchange grants it no writes;
-- no policy may name it again.
+- no enabled policy may name it (a stored one switched off may keep naming
+  it).
 Its points stay, and stay restorable: the read exchange grants reads on
 `active` and `retired` repositories. There is no way back in this phase.
+
+A retire, a policy write and an off-site link each take the repository row
+first and the audit chain last, so any two of them on one repository
+serialise on the row and never deadlock.
 """
 
 import asyncio
@@ -23,10 +28,11 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import audit_service
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.core.vault import LocalVaultService
-from app.models import BackupRepository, BackupRun
+from app.models import BackupPolicy, BackupRepository, BackupRun
 from app.modules.backup.dedup import answer_chunk_query
 from app.modules.backup.dispatch import dispatch_due_backup
 from app.modules.backup.read import answer_read_query
@@ -45,8 +51,10 @@ from tests.test_client_scope_backup import (
     _device,
     _events,
     _group,
+    _offsite_world,
     _policy,
     _repo,
+    _target,
     _tomorrow,
     _written,
 )
@@ -69,6 +77,18 @@ WAITS_ON_A_REPOSITORY_ROW = text(
     "  SELECT 1 FROM pg_locks w JOIN pg_locks h ON h.transactionid = w.transactionid "
     "  WHERE w.pid = t.pid AND w.locktype = 'transactionid' AND NOT w.granted "
     "  AND h.pid = :me AND h.locktype = 'transactionid' AND h.granted))"
+)
+
+#: Some session other than the holder's (`:me`) holds the audit chain of
+#: `:org` in this database: the per-organisation advisory lock
+#: `audit_service.record` takes, keyed `hashtext('audit:' || org)` as a
+#: bigint, which `pg_locks` shows split into `classid` (the high half) and
+#: `objid` (the low half).
+HOLDS_THE_CHAIN = text(
+    "SELECT count(*) FROM pg_locks "
+    "WHERE locktype = 'advisory' AND granted AND pid <> :me AND objsubid = 1 "
+    "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) "
+    "AND ((classid::bigint << 32) | objid::bigint) = hashtext('audit:' || :org)::bigint"
 )
 
 
@@ -240,6 +260,118 @@ async def test_a_policy_write_waits_for_a_retire_in_flight(api_env: ApiEnv) -> N
         await holder.commit()
     r = await put
     assert (r.status_code, r.json()) == (409, {"detail": RETIRED}), r.text
+
+
+async def test_a_retire_waits_for_a_policy_write_in_flight(api_env: ApiEnv) -> None:
+    """The mirror of the test above, the retire's side. Here the holder is a
+    policy write in flight -- the repository read FOR SHARE, as
+    `policy_repository` reads it, and an enabled policy naming it inserted,
+    not committed. The retire waits on the row; once the write commits it
+    finds that policy and answers the 409, the repository still active and
+    nothing audited.
+    FALSIFIER: drop `.with_for_update(key_share=True)` from
+    `repository.py::retire_repository`: the retire reads the row unlocked,
+    finds no enabled policy (the holder's is not committed), and waits only at
+    its UPDATE -- after its check -- so it answers 200 and retires a
+    repository an enabled policy names."""
+    org = await api_env.create_org("bk-retire-lock-mirror")
+    x, _ = await client_with_site(api_env, org)
+    admin = await _admin(api_env, org)
+    x_repo = await _repo(api_env, admin, x, "x")
+    group = await _group(api_env, org, x)
+    async with AsyncSession(api_env.admin_engine) as holder, AsyncSession(
+        api_env.admin_engine
+    ) as observer:
+        await holder.execute(
+            select(BackupRepository.id)
+            .where(BackupRepository.id == UUID(x_repo))
+            .with_for_update(read=True)
+        )
+        holder.add(
+            BackupPolicy(org_id=org, repository_id=UUID(x_repo), device_group_id=group,
+                         sources={"paths": ["/srv"]}, retention_gfs={}, enabled=True)
+        )
+        await holder.flush()
+        me = (await holder.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+        retire = asyncio.create_task(_retire(api_env, admin, x_repo))
+        if not await _wait_until_blocked_on_a_repository(observer, me):
+            retire.cancel()
+            pytest.fail("the retire never waited on the repository row")
+        await holder.commit()
+    r = await retire
+    assert (r.status_code, r.json()) == (409, {"detail": IN_USE}), r.text
+    assert await _state(api_env, x_repo) == "active"
+    assert await _events(api_env, org, "backup.repository_retired") == []
+
+
+async def test_an_off_site_link_waits_for_a_retire_on_the_row_not_the_chain(
+    api_env: ApiEnv,
+) -> None:
+    """The off-site link (`offsite.py::set_repository_target`) and the retire
+    each write the repository row and append to the audit chain. The retire
+    takes the row first and the chain last, and so must the link: in the
+    other order the two form a cycle -- the link holding the chain and
+    waiting on the row, the retire holding the row and waiting on the chain
+    -- and Postgres kills one of them. Here the holder is a retire in
+    flight, its row locked and the state written. The link waits on the
+    ROW, holding no chain; the retire then takes the chain, audits and
+    commits; the link completes. Both acts land, the retire's event first.
+    FALSIFIER: read the repository without `.with_for_update(key_share=True)`
+    in `set_repository_target`. Its UPDATE then reaches the database only
+    when `audit_service.record` autoflushes, after the chain lock: the link
+    waits on the row holding the chain, and the retire's chain lock would be
+    the deadlock."""
+    org, x, _y, repo, actor = await _offsite_world(api_env, "bk-retire-offsite")
+    target = await _target(api_env, org, actor, repo, None)
+    admin = await _admin(api_env, org)
+    link_url = f"{BK}/repositories/{repo}/offsite"
+    async with AsyncSession(api_env.admin_engine) as holder, AsyncSession(
+        api_env.admin_engine
+    ) as observer:
+        # The retire's first lock and its write (`retire_repository`).
+        name = (
+            await holder.execute(
+                select(BackupRepository.name)
+                .where(BackupRepository.id == repo)
+                .with_for_update(key_share=True)
+            )
+        ).scalar_one()
+        await holder.execute(
+            text("UPDATE backup_repositories SET state = 'retired' WHERE id = :r"), {"r": repo}
+        )
+        me = (await holder.execute(text("SELECT pg_backend_pid()"))).scalar_one()
+        link = asyncio.create_task(
+            api_env.client.put(link_url, json={"target_id": str(target)}, headers=admin)
+        )
+        if not await _wait_until_blocked_on_a_repository(observer, me):
+            link.cancel()
+            pytest.fail("the off-site link never waited on the repository row")
+        chain = (
+            await observer.execute(HOLDS_THE_CHAIN, {"me": me, "org": str(org)})
+        ).scalar_one()
+        await observer.rollback()
+        if chain:
+            await holder.rollback()
+            await link
+            pytest.fail("the off-site link took the audit chain before the repository row")
+        # The retire's last lock, the chain: no cycle, so it is granted.
+        await audit_service.record(
+            holder, org_id=org, actor_type="user", actor_id=actor,
+            action="backup.repository_retired", target_type="backup_repository",
+            target_id=str(repo), metadata={"name": name}, client_id=x,
+        )
+        await holder.commit()
+    r = await link
+    assert (r.status_code, r.json()["offsite_target_id"]) == (200, str(target)), r.text
+    events = await _events(api_env, org, "backup.repository_retired", "backup.offsite_enabled")
+    assert [(e.action, e.client_id) for e in events] == [
+        ("backup.repository_retired", x), ("backup.offsite_enabled", x)
+    ]
+    async with AsyncSession(api_env.admin_engine) as s:
+        row = (
+            await s.execute(select(BackupRepository).where(BackupRepository.id == repo))
+        ).scalar_one()
+    assert (row.state, row.offsite_target_id) == ("retired", target)
 
 
 async def test_the_window_refuses_a_retired_repository_once_per_policy_version(

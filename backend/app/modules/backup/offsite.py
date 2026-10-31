@@ -387,12 +387,21 @@ async def set_repository_target(
     repository. On requires a target that is global or of the repository's
     client (`OffsiteClientError`, a 422), a proven recovery key its key can
     be wrapped to (global or of that client, as `prepare_repository` wraps),
-    and a passed test. Audited in the repository's client."""
+    and a passed test. Audited in the repository's client.
+
+    LOCKS. The repository row, FOR NO KEY UPDATE, is the first lock; the audit
+    chain's is the last -- the order a retire (`repository.retire_repository`)
+    and a policy write (`clients.policy_repository`) take them in. Read
+    without it, the row's UPDATE would reach the database only when
+    `audit_service.record` autoflushes, after its chain lock (a `text()`
+    statement, which does not flush): the chain first and the row second, a
+    cycle with a retire on the same repository, and a deadlock. NO KEY, as
+    the retire's: the foreign-key checks of a run or a point need not wait."""
     repo = (
         await session.execute(
-            select(BackupRepository).where(
-                BackupRepository.org_id == org_id, BackupRepository.id == repository_id
-            )
+            select(BackupRepository)
+            .where(BackupRepository.org_id == org_id, BackupRepository.id == repository_id)
+            .with_for_update(key_share=True)
         )
     ).scalar_one_or_none()
     if repo is None:

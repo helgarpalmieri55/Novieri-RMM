@@ -125,11 +125,16 @@ async def retire_repository(
     """Retire one repository (phase 3 design §5.5, operator decision Q5).
 
     It takes no new backup: the dispatch refuses it (`dispatch.py`), the
-    dedup exchange grants it no writes (`dedup.py`) and no policy may name it
-    (`clients.policy_repository`). Its points stay, still occupying their
-    space, and stay restorable (`read.py` grants reads on `retired`);
-    verification, GC and the off-site copy of its points go on. There is no
-    way back to `active` in this phase.
+    dedup exchange grants it no writes (`dedup.py`) and no enabled policy may
+    name it (`clients.policy_repository`; a stored policy switched off may
+    keep naming it). A run already in flight can still land its point: the
+    same client and the same key, its later chunk writes refused. Its points
+    stay, still occupying their space, and stay restorable (`read.py` grants
+    reads on `retired`). Verification and the off-site copy of its points
+    continue; retention and GC do not visit it -- they visit only the
+    repository of an enabled policy (`worker.backup_retention_gc_org`) -- so
+    its points are never pruned. There is no way back to `active` in this
+    phase.
 
     `backup.policy.manage` on the repository's client is the ROUTE's gate: it
     runs under the clients where the person holds that code, so another
