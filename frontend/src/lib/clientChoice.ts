@@ -25,13 +25,22 @@ export const CLIENT_STORAGE_KEY = "itms.client";
 const EVERY_CLIENT = "all";
 const CLIENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * A client id as the server reads one: a UUID, nothing around it. What the
+ * stored choice is read back as, and what `X-Client-Id` may carry
+ * (`./ApiContext`).
+ */
+export function isClientId(value: string | null): value is string {
+  return value !== null && CLIENT_ID.test(value);
+}
+
 /** The stored choice: a client id, or `null` for every client (and for anything unreadable). */
 export function readStoredClient(): string | null {
   // Storage throws in Safari private browsing and in a webview with site
   // data blocked (`shell/AppShell.tsx`'s `readCollapsed`): every client, then.
   try {
     const stored = window.localStorage.getItem(CLIENT_STORAGE_KEY);
-    return stored !== null && CLIENT_ID.test(stored) ? stored : null;
+    return isClientId(stored) ? stored : null;
   } catch {
     return null;
   }
