@@ -4,7 +4,9 @@ import { Badge, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { Panel } from "../../shell/components";
 import { useT } from "../../i18n/context";
 import { ApiError } from "../../lib/api";
+import { useClientScope } from "../../lib/clientScope";
 import { ticketPriorityLabel } from "../service-desk/serviceDeskState";
+import { useClientName } from "../settings/api";
 import { useSlaCalendars, useSlaPolicies, useSlaTicketQueues } from "./api";
 import { formatMinutes, resolutionPreview } from "./slaState";
 import { SLA_PRIORITIES } from "./types";
@@ -37,11 +39,15 @@ export function PolicyResolverPanel() {
 
   const forbidden = policies.error instanceof ApiError && policies.error.status === 403;
   const failed = policies.error != null && !forbidden;
-  // PHASE 3: the client selector names the client to preview; until then the
-  // panel previews the global policies, the ones a client without policies
-  // of its own resolves among (D2).
+  // The client to preview: the one chosen at the top, with phase 2's D2 rule
+  // (a client with active policies of its own resolves among those alone).
+  // With every client chosen there is no one client, so the panel previews
+  // the global policies -- the ones a client without policies of its own
+  // resolves among -- and says so (plan Task 11 D11.4).
+  const { selected } = useClientScope();
+  const clientName = useClientName();
   const preview =
-    queueId === "" ? null : resolutionPreview(policies.data ?? [], queueId, priority, null);
+    queueId === "" ? null : resolutionPreview(policies.data ?? [], queueId, priority, selected);
 
   function calendarName(id: string): string {
     return calendars.data?.find((calendar) => calendar.id === id)?.name ?? id;
@@ -66,6 +72,11 @@ export function PolicyResolverPanel() {
         </p>
       ) : (
         <>
+          <p className="note" style={{ marginBottom: 8 }}>
+            {selected === null
+              ? t("sla.resolver.everyClientNote")
+              : t("sla.resolver.clientNote", { client: clientName(selected) })}
+          </p>
           {/* TWO CONTROLS, ONE EDGE. These sat in a flex row with hardcoded
               widths (256 and 192), so in this panel's column they wrapped
               onto separate lines at two different widths and the panel's only

@@ -122,6 +122,9 @@ export const sla = {
     level4: "any queue + any priority",
     title: "Which policy applies?",
     subtitle: "Which active policy a ticket resolves to, and why.",
+    // Whose policies the preview resolves among (plan Task 11 D11.4).
+    everyClientNote: "With every client chosen, this previews the global policies.",
+    clientNote: "Previewing for {client}.",
     forbidden: "Policies not available (insufficient permissions).",
     failed: "Policies did not load. {reason}",
     queueId: "Queue ID",
