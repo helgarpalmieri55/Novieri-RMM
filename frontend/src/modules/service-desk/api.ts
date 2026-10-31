@@ -131,8 +131,8 @@ export function useCreateTicketMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     // The body is BUILT HERE, inside the mutation, not before it: a body that
-    // cannot name its client yet throws `InternalScopeUnknown`
-    // (`lib/internalClient.ts`), which then fails the mutation -- so the
+    // cannot name its client yet throws `ClientNotChosen`
+    // (`lib/clientSelection.ts`), which then fails the mutation -- so the
     // form's error surface says why and nothing is sent.
     mutationFn: (build: () => TicketCreate) => api.createTicket(build()),
     onSuccess: () => {
