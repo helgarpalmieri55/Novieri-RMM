@@ -138,6 +138,12 @@ def test_the_construction_guard_is_not_vacuous() -> None:
 # request's own scope (`deps.admit`, `require_permission`, the portal's
 # principal and gate, `read_door_identity`); anything else calling them could
 # hand a route a scope wider than the one its request asked for.
+#
+# `own_profile.py` is the one reader that is not a door (MSP clients phase 3
+# design §1.3): `/me`'s client map is the selector's list, which must not
+# follow the selection, so it reads the person's own `clients` rows under
+# their un-narrowed scope -- RLS deciding which -- and hands that scope to no
+# route. `permissions` is still narrowed, by `ctx.clients`.
 UNNARROWED_SCOPE_READERS = frozenset({"person_scope", "clients_holding"})
 UNNARROWED_SCOPE_DOORS = frozenset(
     {
@@ -145,6 +151,7 @@ UNNARROWED_SCOPE_DOORS = frozenset(
         "app/modules/portal/principal.py",
         "app/core/identity/door.py",
         "app/core/rbac.py",
+        "app/core/identity/own_profile.py",
     }
 )
 
