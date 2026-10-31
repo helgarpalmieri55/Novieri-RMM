@@ -167,6 +167,44 @@ describe("AppShell", () => {
     );
   });
 
+  it("draws the client selector in the drawer on a handset, where the bar has no room for it", () => {
+    // Measured at 390px: the cluster's other five controls take 256 of the
+    // 274px it has, so a select there got 8px and pushed the bar to 415px --
+    // a sideways page scroll on every route (harmony, both languages).
+    // `useHandset` reads `(max-width: 640px)`; jsdom has no `matchMedia`.
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(max-width: 640px)",
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    try {
+      render(
+        <MemoryRouter>
+          <AppShell
+            permissions={["devices.read", "health.read"]}
+            orgName="Operations"
+            title="Devices"
+            user={{ name: "A B", role: "Operator" }}
+            onSignOut={vi.fn()}
+            clientSelector={<span data-testid="client-selector" />}
+          >
+            <p>x</p>
+          </AppShell>
+        </MemoryRouter>,
+      );
+      const selector = screen.getByTestId("client-selector");
+      expect(document.querySelector(".top-actions")?.contains(selector)).toBe(false);
+      // In the drawer, before the navigation: the client is the context of every link in it.
+      const drawer = document.getElementById("sidebar");
+      expect(drawer?.contains(selector)).toBe(true);
+      expect(selector.compareDocumentPosition(sidebar_el()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.getAllByTestId("client-selector")).toHaveLength(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("shows an operator only the links their permissions reach", () => {
     renderShell(["devices.read", "patch.read"]);
     expect(sidebar().getByRole("link", { name: /Patching/ })).toBeInTheDocument();

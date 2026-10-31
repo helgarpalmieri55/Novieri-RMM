@@ -29,6 +29,7 @@ import {
   platformSignal,
   type HealthReading,
 } from "./healthSignal";
+import { useHandset } from "./handset";
 import { Icon } from "./icons";
 import { ADD_COMPUTER_TO } from "./nav";
 import { Sidebar } from "./Sidebar";
@@ -222,6 +223,8 @@ export function AppShell({
 }: AppShellProps) {
   const t = useT();
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  // Where the client selector goes: the bar, or on a handset the drawer (`./handset`).
+  const handset = useHandset();
 
   // THE DRAWER, for viewports below 1024px where the sidebar is off-canvas
   // (`shell.css`, cycle 10). Deliberately NOT persisted: a drawer is modal
@@ -412,6 +415,7 @@ export function AppShell({
 
       <Sidebar
         permissions={permissions}
+        clientSelector={handset ? clientSelector : undefined}
         collapsed={collapsed}
         onToggleCollapsed={() => setCollapsed((value) => !value)}
         badges={badges}
@@ -493,8 +497,9 @@ export function AppShell({
           <div className="top-actions">
             {/* THE CLIENT EVERYTHING IN THIS CLUSTER, AND ON THE PAGE, IS FOR
                 (phase 3 design §1.1): first, because it is the context of the
-                rest -- "Add a computer" included. */}
-            {clientSelector}
+                rest -- "Add a computer" included. On a handset it is in the
+                drawer instead: there is no room for it here (`./handset`). */}
+            {handset ? null : clientSelector}
             {/* THE FIRST THING ANYONE DOES WITH THIS PRODUCT, on every route.
 
                 ONE "ADD A COMPUTER" ENTRY. The review (2026-09-23) counted six
