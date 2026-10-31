@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, Device, DeviceInventory, Me, Page } from "../../../lib/api";
+import { setSelectedClient } from "../../../lib/clientChoice";
 import type { UserOut } from "../../settings/types";
 import type { DeviceStatus } from "../../patch/types";
 import { MyWorkPage } from "../MyWorkPage";
@@ -62,6 +63,12 @@ const ME_TECHNICIAN: Me = {
   email: "tech@example.com",
   display_name: "Technician",
   permissions: ["ticket.read", "ticket.write", "ticket.assign"],
+  // The person's clients (phase 3 design §1.3): their organisation's own and
+  // one customer's, with the same codes in each.
+  clients: [
+    { id: "o1", name: "Toeshee", kind: "internal", enabled_modules: [], permissions: ["ticket.read", "ticket.write", "ticket.assign"] },
+    { id: "c-acme", name: "Acme Dental", kind: "customer", enabled_modules: [], permissions: ["ticket.read", "ticket.write", "ticket.assign"] },
+  ],
 };
 
 const ME_FULL: Me = {
@@ -499,6 +506,9 @@ describe("TicketListPage wiring", () => {
       listDevices: vi.fn().mockResolvedValue({ items: DEVICES, total: DEVICES.length }),
     };
     mockUseApi.mockReturnValue(api as ApiClient);
+    // A client chosen in the top bar: a ticket without a device goes there,
+    // and the form asks nothing (phase 3 design §3.1).
+    setSelectedClient("c-acme");
   });
 
   it("hides New ticket without ticket.write", async () => {
@@ -533,10 +543,9 @@ describe("TicketListPage wiring", () => {
       requester_id: "req-1",
       assigned_to: null,
       device_id: null,
-      // No device, so the ticket names its client: the internal client,
-      // whose id is `/me`'s org_id until the phase-3 selector (MSP clients
-      // plan 2026-10-26 Task 2).
-      client_id: "o1",
+      // No device, so the ticket names its client: the one chosen in the top
+      // bar -- not the internal client, whose id is `/me`'s org_id (`o1`).
+      client_id: "c-acme",
     });
   });
 
@@ -559,8 +568,8 @@ describe("TicketListPage wiring", () => {
     expect(body).not.toHaveProperty("client_id");
   });
 
-  // Without `/me` the console cannot name the internal client: it sends
-  // nothing -- a body without a client is a 422 the person can do nothing
+  // Without `/me` the console cannot tell whether the chosen client is one of
+  // the person's: it sends nothing -- a body without a client is a 422 the person can do nothing
   // about -- and says why in the form's own error surface.
   it("sends nothing and says why when the client cannot be named yet", async () => {
     const user = userEvent.setup();
@@ -899,6 +908,105 @@ describe("TicketListPage wiring", () => {
     const priority = screen.getByLabelText("Priority");
     expect(within(priority).getByRole("option", { name: "Urgent" })).toBeInTheDocument();
     expect(within(priority).queryByRole("option", { name: "urgent" })).not.toBeInTheDocument();
+  });
+});
+
+// --------------------------------------------------------------------------
+// The client of a ticket with no device (phase 3 design §3.1, §4.5; Q1)
+// --------------------------------------------------------------------------
+
+describe("NewTicketDialog: the client of a ticket with no device", () => {
+  const ME_MSP: Me = {
+    ...ME_TECHNICIAN,
+    clients: [
+      { id: "o1", name: "Toeshee", kind: "internal", enabled_modules: [], permissions: ["ticket.read", "ticket.write"] },
+      { id: "c-acme", name: "Acme Dental", kind: "customer", enabled_modules: [], permissions: ["ticket.read", "ticket.write"] },
+      { id: "c-north", name: "Northwind", kind: "customer", enabled_modules: [], permissions: ["ticket.read"] },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ["ticket.read", "ticket.write"] },
+    ],
+  };
+  let api: Partial<ApiClient>;
+
+  beforeEach(() => {
+    api = {
+      me: vi.fn().mockResolvedValue(ME_MSP),
+      listTicketQueues: vi.fn().mockResolvedValue(QUEUES),
+      listTicketCategories: vi.fn().mockResolvedValue(CATEGORIES),
+      createTicket: vi.fn().mockResolvedValue(TICKET_OPEN),
+      listUsers: vi.fn().mockResolvedValue({ users: USERS }),
+      listDevices: vi.fn().mockResolvedValue({ items: DEVICES, total: DEVICES.length }),
+    };
+    mockUseApi.mockReturnValue(api as ApiClient);
+  });
+
+  async function fillTicket(user: ReturnType<typeof userEvent.setup>) {
+    await screen.findByRole("option", { name: "Hardware" });
+    await user.selectOptions(screen.getByLabelText("Category"), "cat1");
+    await user.type(screen.getByLabelText("Subject"), "Printer jammed");
+    await pickEntity(user, "Requester", /Rachel Requester/);
+  }
+
+  function sentBody() {
+    return vi.mocked(api.createTicket as ApiClient["createTicket"]).mock.calls[0]?.[0];
+  }
+
+  it("asks for the client with every client chosen, offering only where a ticket may be filed", async () => {
+    renderWithProviders(<NewTicketDialog open onClose={() => {}} />);
+    const field = await screen.findByLabelText("Client");
+    await within(field).findByRole("option", { name: "Acme Dental" });
+    expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Acme Dental",
+      "Toeshee",
+    ]);
+  });
+
+  it("files the ticket under the client chosen in the form", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<NewTicketDialog open onClose={() => {}} />);
+    await fillTicket(user);
+    await user.selectOptions(await screen.findByLabelText("Client"), "c-acme");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(api.createTicket).toHaveBeenCalledTimes(1));
+    expect(sentBody()).toMatchObject({ client_id: "c-acme", device_id: null });
+  });
+
+  it("never files it under the internal client unasked: with no choice, nothing is sent", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<NewTicketDialog open onClose={() => {}} />);
+    await fillTicket(user);
+    await screen.findByLabelText("Client");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(api.createTicket).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing once a device is chosen, and sends no client: the device's is the ticket's", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<NewTicketDialog open onClose={() => {}} />);
+    await fillTicket(user);
+    await screen.findByLabelText("Client");
+    await pickEntity(user, "Device (optional)", /BUILD-01/);
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(api.createTicket).toHaveBeenCalledTimes(1));
+    expect(sentBody()).toMatchObject({ device_id: "dev-2" });
+    expect(sentBody()).not.toHaveProperty("client_id");
+  });
+
+  it("asks nothing with a client chosen in the top bar, and files it there", async () => {
+    const user = userEvent.setup();
+    setSelectedClient("o1");
+    renderWithProviders(<NewTicketDialog open onClose={() => {}} />);
+    await fillTicket(user);
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(api.createTicket).toHaveBeenCalledTimes(1));
+    expect(sentBody()).toMatchObject({ client_id: "o1" });
   });
 });
 

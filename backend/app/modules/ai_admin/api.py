@@ -85,6 +85,7 @@ from uuid_extensions import uuid7
 from app.api.deps import (
     AuthContext,
     narrowed_to_every,
+    requested_client,
     require_permission,
     require_permission_on_every_client,
 )
@@ -747,6 +748,10 @@ async def create_turn(
             on_text=publish,
             outcome=outcome,
             act_tools=act_tools,
+            # THE SAME CLIENT NARROWING THIS REQUEST CARRIED (phase 3 design
+            # §5.2), forwarded on every loopback call of the turn. Already
+            # validated by `auth_context` (a malformed one was a 400).
+            requested_client=requested_client(request),
         )
     except ProviderRateLimitedError as exc:
         # Still a 429 with the provider's own hint (§10.4) -- but no longer a
@@ -1078,11 +1083,15 @@ def _turn_context(request: Request) -> TurnContext:
     argument, never put on `AuthContext` -- that dataclass reaches every module,
     and a token on it is one careless `logger.debug(ctx)` from living in a log
     file forever (§0.1).
+
+    The request's `X-Client-Id` goes with it, so the probe runs under the
+    confirm's own client scope (phase 3 design §5.2).
     """
     return TurnContext(
         app=request.app,
         bearer=request.headers.get("Authorization", ""),
         deadline=time.monotonic() + DEFAULTS.wall_clock_s,
+        requested_client=requested_client(request),
     )
 
 

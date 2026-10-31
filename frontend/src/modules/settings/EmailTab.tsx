@@ -58,11 +58,12 @@ import {
   useEmailSettings,
   useTestEmailMutation,
   useUpdateEmailSettingsMutation,
+  useGlobalWriteReason,
 } from "./api";
 import { FOLDING_FORM_GRID } from "./formGrid";
 import { LoadFailure } from "./LoadFailure";
 import { SaveBar } from "./SaveBar";
-import { isDirty, isForbidden, parseIntegerField, permissionReason } from "./settingsState";
+import { isDirty, isForbidden, parseIntegerField } from "./settingsState";
 import type { EmailEncryption, EmailSettingsOut, EmailSettingsUpdate } from "./types";
 
 /**
@@ -169,8 +170,10 @@ function seedFrom(data: EmailSettingsOut | undefined): EmailForm {
   };
 }
 
-export function EmailTab({ canManage }: { canManage: boolean }) {
+/** `canManage` reads the tab (its read is `orgs.manage` too); `canEdit` writes it: `orgs.manage` on every client (phase 3 design §2). */
+export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolean; canEdit?: boolean }) {
   const t = useT();
+  const reason = useGlobalWriteReason(EMAIL_MANAGE);
   const settings = useEmailSettings(canManage);
   const update = useUpdateEmailSettingsMutation();
   const test = useTestEmailMutation();
@@ -217,7 +220,7 @@ export function EmailTab({ canManage }: { canManage: boolean }) {
     !microsoftIncomplete;
   const passwordSaved = settings.data?.authenticated === true && !savedAsMicrosoft;
   const customTokenUrl = form.tokenUrl !== "" && tenantOf(form.tokenUrl) === "";
-  const editable = canManage && settings.data != null;
+  const editable = canEdit && settings.data != null;
 
   function set<K extends keyof EmailForm>(key: K, value: EmailForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -508,11 +511,11 @@ export function EmailTab({ canManage }: { canManage: boolean }) {
             label={t("common.actions.save")}
             canEdit={editable && complete}
             disabledReason={
-              canManage
+              canEdit
                 ? form.authType === "token"
                   ? t("settings.email.incompleteToken")
                   : t("settings.email.incompletePassword")
-                : permissionReason(EMAIL_MANAGE)
+                : reason
             }
             dirty={dirty}
             pending={update.isPending}
@@ -528,7 +531,7 @@ export function EmailTab({ canManage }: { canManage: boolean }) {
                   className={inputClass}
                   type="email"
                   value={recipient}
-                  disabled={!canManage || !settings.data?.configured}
+                  disabled={!canEdit || !settings.data?.configured}
                   onChange={(e) => setRecipient(e.target.value)}
                 />
               </Field>
@@ -540,7 +543,7 @@ export function EmailTab({ canManage }: { canManage: boolean }) {
               icon="mail"
               // Offered only once something is saved: a button that can only
               // fail teaches an operator to ignore its result.
-              disabled={!canManage || !settings.data?.configured || test.isPending}
+              disabled={!canEdit || !settings.data?.configured || test.isPending}
               onClick={() => test.mutate(recipient.trim() ? { recipient: recipient.trim() } : {})}
             />
             <span className="form-hint">

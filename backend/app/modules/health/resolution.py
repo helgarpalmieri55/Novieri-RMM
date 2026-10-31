@@ -61,7 +61,12 @@ from app.models import Device, DeviceGroup
 from app.modules.health.models import HealthCheck, HealthProfile, HealthProfileAssignment
 from app.modules.health.registry import CHECK_TYPES
 
-__all__ = ["MAX_GROUP_DEPTH", "ResolvedProfile", "resolve_profile_for_device"]
+__all__ = [
+    "MAX_GROUP_DEPTH",
+    "ResolvedProfile",
+    "assignment_level",
+    "resolve_profile_for_device",
+]
 
 logger = logging.getLogger("its.health.resolution")
 
@@ -70,7 +75,24 @@ logger = logging.getLogger("its.health.resolution")
 # deleting it makes the cycle test hang rather than fail.
 MAX_GROUP_DEPTH = 16
 
-ResolutionLevel = Literal["device", "group", "org"]
+ResolutionLevel = Literal["device", "group", "client", "org"]
+
+
+def assignment_level(assignment: HealthProfileAssignment) -> ResolutionLevel:
+    """§0.2's level of one assignment row, decided in ONE place for the
+    resolver and the API (`api._assignment_out`).
+
+    THE ORDER IS LOAD-BEARING. A device's and a group's row carry their
+    parent's `client_id` too (the 0231 triggers), so `client_id IS NOT NULL`
+    alone does not make a client default: only a row with no device and no
+    group does (phase 3 design §5.1)."""
+    if assignment.device_id is not None:
+        return "device"
+    if assignment.device_group_id is not None:
+        return "group"
+    if assignment.client_id is not None:
+        return "client"
+    return "org"
 
 
 @dataclass(frozen=True)
@@ -101,11 +123,7 @@ class ResolvedProfile:
 
     @property
     def level(self) -> ResolutionLevel:
-        if self.assignment.device_id is not None:
-            return "device"
-        if self.assignment.device_group_id is not None:
-            return "group"
-        return "org"
+        return assignment_level(self.assignment)
 
 
 def _check_applies(check: HealthCheck, device: Device) -> bool:

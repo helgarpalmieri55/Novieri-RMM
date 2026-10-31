@@ -22,6 +22,7 @@ import { ManagedDeploymentDialog } from "./ManagedDeploymentDialog";
 import { platformLabel, untestedCaveat } from "./platform";
 import { PublishReleaseDialog } from "./PublishReleaseDialog";
 import { ChannelPill, ReleaseChannels, compareVersions } from "./ReleaseChannels";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 /** The lifetime this page asks for, in hours. Stated in the confirmation
  *  because "how long is this credential alive" is the thing the operator is
@@ -188,7 +189,8 @@ export function AgentReleasesPage() {
   // under-privileged caller server-side whatever this says (invariant 6). It
   // decides whether the page offers "Publish a release…" and the channel
   // controls, and what the empty state tells the reader.
-  const canPublish = me.data?.permissions?.includes("agent.release.manage") ?? false;
+  // Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
+  const canPublish = useEverywherePermissions().has("agent.release.manage");
   const canReadUpdates = me.data?.permissions?.includes("agent.update.read") ?? false;
   // NOT A PERMISSION GATE (invariant 6): every install-link route checks
   // `enrollment.link.manage` itself. This decides whether the panel renders.

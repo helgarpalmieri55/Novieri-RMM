@@ -277,8 +277,9 @@ PART_D: dict[str, str] = {
     ),
     # --- me ---
     "GET /api/v1/me": (
-        "Returns the caller's own profile, role names and full list of permission codes, read from "
-        "the database."
+        "Returns the caller's own profile and role names; each client they hold a role in, with "
+        "the permission codes they hold there; the codes they hold in at least one client of the "
+        "request's scope; and the codes they hold on every client."
     ),
     "PATCH /api/v1/me": (
         "Updates only the caller's own display name, phone, timezone or locale. A new locale is "
@@ -383,8 +384,8 @@ PART_D: dict[str, str] = {
         "the user's consent. Refused if the agent is too old or a session is already live."
     ),
     "POST /api/v1/remote/sessions/{session_id}/stop": (
-        "Ends a remote session. Only the session's owner or an org-admin may do so; refused with "
-        "409 if it has already ended."
+        "Ends a remote session. Only the session's owner, or someone holding remote.supervise "
+        "on its client, may do so; refused with 409 if it has already ended."
     ),
     # --- reports ---
     "GET /api/v1/reports": (

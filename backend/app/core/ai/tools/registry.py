@@ -123,7 +123,7 @@ _TOOLS: tuple[ReadTool, ...] = (
                 "acknowledged_at", "acknowledged_by", "acknowledged_policy_version",
                 "active", "agent_last_seen_at", "agent_online", "assignment",
                 "assignment_count", "check_count", "check_id", "check_type", "checks",
-                "cleared_at", "cleared_by", "cleared_reason", "comparator",
+                "cleared_at", "cleared_by", "cleared_reason", "client_id", "comparator",
                 "created_at", "created_by", "description", "device_group_id",
                 "device_hostname", "device_id", "escalated_at", "evaluated_by",
                 "flap_count", "flapping", "for_seconds", "for_ticks", "has_profile",

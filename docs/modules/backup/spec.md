@@ -177,6 +177,36 @@ and the `backup.*` permission seed + role grants.
 > repository, retention no longer prunes them. The plan is
 > `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
 
+> **Amended 2026-10-31 (phase 3 design §5.5, operator decision Q5): a
+> repository can be retired.** `POST /backup/repositories/{id}/retire`
+> (`backup.policy.manage` on the repository's client; another client's
+> repository is a 404) sets `state = 'retired'` and is audited
+> `backup.repository_retired` in that client. It is a 409 while an enabled
+> policy names the repository, and a 409 on one already retired; there is no
+> way back to `active`. A retired repository takes no new backup: the dispatch
+> refuses it — no job, no key — and records `backup.dispatch_refused`, reason
+> `repository_retired` (once per device and policy version for the window,
+> every time for a person's Run now); the dedup exchange grants it no writes
+> (`repository_not_active`); and no policy write may name it (`PUT /policies`,
+> 409), except to switch a stored policy off as it stands. Its points stay
+> where they are, still occupying their space, and stay restorable: the read
+> exchange grants reads on `active` and `retired` repositories, and
+> verification and the off-site copy continue. Retention and GC do not visit
+> it: they visit only the repository of an enabled policy, which a retired
+> one never is, so its points are never pruned. A run already in flight when
+> the repository is retired can still land its point — it is the same client
+> and the same key — while the dedup exchange refuses its later chunk writes.
+> The `state` vocabulary is therefore `active|retired` (no CHECK constraint
+> holds it, 0014).
+>
+> **Every backup audit that has its record's client at hand names it** (same
+> date, §5.5): the restore and its result, the automatic test restore, the
+> verification, the off-site copy and its failure, and the two
+> reconciliations, each in its device's client. `backup.dedup_refused` and
+> `backup.read_refused` name the client when the agent named a job of its own
+> device, and none otherwise. `backup.offsite_gc` names none, deliberately: it
+> is one summary of every target, repository and client of the organisation.
+
 ## 5. Repository format (§5) — pinned now
 
 Engine-internal, produced by the agent, consumed on restore/verify. Specified
@@ -756,6 +786,8 @@ Routes under `/api/v1/backup`, each RBAC-gated server-side; Pydantic response
 models with **no secret fields** (never return `repo_key`/`encryption_key_ref`):
 - `GET/POST /repositories` (`read` / `policy.manage`), `GET/PUT /policies`
   (`read` / `policy.manage`).
+- `POST /repositories/{id}/retire` (`policy.manage` on the repository's client;
+  409 while an enabled policy names it; see the 2026-10-31 amendment in §4).
 - `POST /devices/{id}/run` (`backup.run`, computes `now` in-handler, `actor=user`).
 - `GET /points` + `GET /points/{id}/manifest` (`backup.read`; manifest listing is
   metadata only), `GET /devices/{id}/backup` (device status tab data).

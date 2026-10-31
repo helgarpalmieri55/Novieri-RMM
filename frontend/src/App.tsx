@@ -15,6 +15,8 @@ import { crumbFor, isPortalOnly, portalCrumbFor, searchDestinations } from "./sh
 import { AreaPage } from "./shell/AreaPage";
 import { searchPrompt, useRecordSearch } from "./shell/recordSearch";
 import { ApiProvider, useApi } from "./lib/ApiContext";
+import { ClientScopeProvider, useEnabledModules } from "./lib/clientScope";
+import { ClientSelector } from "./shell/ClientSelector";
 import { I18nProvider, readStoredLanguage, useLanguage, useT } from "./i18n/context";
 import { setActiveLanguage, subscribe, translate } from "./i18n/core";
 import { resolveLanguage } from "./i18n/resolve";
@@ -133,6 +135,10 @@ import { PortalTicketDetailPage } from "./modules/portal/PortalTicketDetailPage"
 // and wrong in a test file, where a cached answer from the previous case
 // (`setup/status`, held with `staleTime: Infinity`) would satisfy the next one
 // without a request ever being made.
+//
+// A change of the top bar's client empties it (`queryClient.clear()`, in
+// `lib/clientScope.tsx`'s provider, which reaches this same client through
+// `useQueryClient`): nothing read for one client is shown under another.
 export const queryClient = new QueryClient({
   // No retry in fixture mode: a `FixtureMissing` rejects the same way on the
   // second attempt, and the harmony walk should reach the page's error state
@@ -206,6 +212,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     staleTime: 300_000,
   });
   const permissions = me.data?.permissions ?? [];
+  const modules = useEnabledModules();
   const navigate = useNavigate();
 
   // The saved language arrives with `/me`, after the provider has rendered, so
@@ -294,7 +301,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         prefiltered: true,
         onSelect: () => navigate(hit.to),
       })),
-      ...searchDestinations(permissions).map((page) => ({
+      ...searchDestinations(permissions, modules).map((page) => ({
         id: page.to,
         label: page.label,
         sub: page.within,
@@ -303,7 +310,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         onSelect: () => navigate(page.to),
       })),
     ],
-    [records.hits, permissions, navigate, language, t],
+    [records.hits, permissions, modules, navigate, language, t],
   );
   const portalOnly = isPortalOnly(permissions);
   const prompt = searchPrompt(permissions, portalOnly);
@@ -320,6 +327,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
   return (
     <AppShell
       permissions={permissions}
+      modules={modules}
+      clientSelector={<ClientSelector />}
       searchItems={searchItems}
       onSearchQueryChange={setSearchQuery}
       searchPending={records.pending}
@@ -422,7 +431,16 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
     signIn().catch((err: unknown) => setError(String(err)));
   }, [authed]);
 
-  if (authed) return <Shell>{children}</Shell>;
+  // INSIDE THE GUARD, AROUND THE SHELL: the client selection needs `/me`, which
+  // only a signed-in session can ask, and a change of client starts the shell
+  // and the page again (`lib/clientScope.tsx`).
+  if (authed) {
+    return (
+      <ClientScopeProvider>
+        <Shell>{children}</Shell>
+      </ClientScopeProvider>
+    );
+  }
   if (error) {
     return (
       <div className="flex min-h-screen items-center justify-center p-8">

@@ -213,4 +213,9 @@ export const shell = {
     pageOfScope: "{label} page of {scope}",
   },
   toaster: { dismiss: "Dismiss" },
+  // The top bar's client selector (shell/ClientSelector.tsx, phase 3 design §1.1).
+  clientSelector: {
+    label: "Client",
+    all: "All my clients",
+  },
 } as const;

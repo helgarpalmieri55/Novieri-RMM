@@ -282,6 +282,12 @@
  * block sits inside it, so this gap plus `.profile-btn`'s own 6px padding is
  * what separates the person from the controls. */
 .top-actions { display: flex; align-items: center; gap: 10px; }
+/* THE CLIENT SELECTOR (phase 3 design §1.1). A select in a toolbar row, not a
+ * form field: `.select-field`'s `width: 100%` would claim the whole cluster,
+ * so it takes the geometry `.tb .select-field` already gives one in
+ * `components.css`, capped so a long client name cannot push the account menu
+ * off a narrow bar. */
+.top-client { width: auto; flex: 0 1 auto; min-width: 0; max-width: 220px; }
 /* v3 `.top .ib`: 36px, `--r-ctl`, `--surface`, `--ink-2` glyph. The boundary
  * is `--line-control` rather than v3's `--line` (see the file header). The
  * hover repaints the ground as well as the edge, because a border-only step
@@ -727,6 +733,9 @@ body.sidebar-collapsed .tenant-card { justify-content: center; padding: 8px; }
    * imported afterwards and therefore won. It now lives in that file
    * immediately after the rule it overrides, with the reasoning. */
   .topbar { gap: 8px; padding: 0 10px; }
+  /* On a handset the selector gives way first: the name truncates inside the
+   * box rather than the bar scrolling sideways. */
+  .top-client { max-width: 120px; }
   /* NO `.top-shortcut` RULE ANY MORE, and the reason is worth keeping.
    * Seven 44px targets did not fit in 390px -- measured, the bar ran 402px at
    * a 390px coarse-pointer viewport, a horizontal page scroll on every route

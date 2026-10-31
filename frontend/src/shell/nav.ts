@@ -57,7 +57,7 @@ function page(
   label: MessageKey,
   icon: string,
   permission: string | null,
-  extra: { badgeTone?: "gold" | "red"; hint?: MessageKey } = {},
+  extra: { badgeTone?: "gold" | "red"; hint?: MessageKey; module?: NavModule } = {},
 ): NavItem {
   const { hint, ...rest } = extra;
   const texts: Record<string, MessageKey> = { label };
@@ -72,6 +72,16 @@ function group(label: MessageKey, items: readonly RailEntry[]): NavGroup {
 function section(label: MessageKey, items: readonly NavItem[]): NavSection {
   return named({ items }, { label });
 }
+
+/** An optional module a client may have on (`clients.enabled_modules`, MSP clients spec §1.4). */
+export type NavModule = "budget" | "bcp" | "change";
+
+/**
+ * Every optional module: what a caller that knows of no client passes -- the
+ * shell's tests, `/__preview`. The console's own shell passes the modules of
+ * the current choice (`useEnabledModules`, `lib/clientScope.tsx`).
+ */
+export const OPTIONAL_MODULES: ReadonlySet<string> = new Set<NavModule>(["budget", "bcp", "change"]);
 
 export interface NavItem {
   /** Route path, matching a `<Route>` in `App.tsx`. */
@@ -89,6 +99,13 @@ export interface NavItem {
   readonly badgeTone?: "gold" | "red";
   /** One line on an area's landing page: what the page is for. */
   readonly hint?: string;
+  /**
+   * The optional module this page belongs to (phase 3 design §2). It shows
+   * only when the module is on -- in the chosen client, or in at least one of
+   * the person's clients with "All my clients" -- as well as the permission.
+   * The server answers 404 to a write for a client without the module.
+   */
+  readonly module?: NavModule;
 }
 
 /** A titled run of pages inside an area. */
@@ -136,14 +153,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   ]),
   group("shell.nav.group.governance", [
     page("/docs", "shell.nav.item.itDocumentation", "book", "docs.read", { hint: "shell.nav.hint.docs" }),
-    page("/changes", "shell.nav.item.changes", "changes", "change.read", { hint: "shell.nav.hint.changes" }),
-    page("/bcp", "shell.nav.item.continuityTests", "bcp", "bcp.read", { hint: "shell.nav.hint.bcp" }),
+    page("/changes", "shell.nav.item.changes", "changes", "change.read", { hint: "shell.nav.hint.changes", module: "change" }),
+    page("/bcp", "shell.nav.item.continuityTests", "bcp", "bcp.read", { hint: "shell.nav.hint.bcp", module: "bcp" }),
     page("/reports", "shell.nav.item.reports", "chart", "reporting.read", { hint: "shell.nav.hint.reports" }),
   ]),
   group("shell.nav.group.assetsSpend", [
     page("/licenses", "shell.nav.item.licenses", "license", "licenses.read", { hint: "shell.nav.hint.licenses" }),
     page("/subscriptions", "shell.nav.item.subscriptions", "subscription", "subscriptions.read", { hint: "shell.nav.hint.subscriptions" }),
-    page("/budget", "shell.nav.item.itBudget", "budget", "budget.read", { hint: "shell.nav.hint.budget" }),
+    page("/budget", "shell.nav.item.itBudget", "budget", "budget.read", { hint: "shell.nav.hint.budget", module: "budget" }),
     page("/ipam", "shell.nav.item.ipAddresses", "network", "ipam.read", { hint: "shell.nav.hint.ipam" }),
   ]),
   group("shell.nav.group.configure", [
@@ -166,7 +183,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
             page("/agent-push/authorizations", "shell.nav.item.pushInstall", "shield", "agent.push.scope.manage", { hint: "shell.nav.hint.pushInstall" }),
             page("/device-groups", "shell.nav.item.deviceGroups", "building", "devices.read", { hint: "shell.nav.hint.deviceGroups" }),
             page("/site-servers", "shell.nav.item.siteServers", "server", "site.read", { hint: "shell.nav.hint.siteServers" }),
-            page("/provisioning", "shell.nav.item.imaging", "image", "provisioning.read", { hint: "shell.nav.hint.imaging" }),
           ]),
           section("shell.nav.section.automation", [
             page("/assistant/autonomy", "shell.nav.item.aiAutomation", "automation", "ai.admin", { hint: "shell.nav.hint.aiAutomation" }),
@@ -232,6 +248,10 @@ export const NAV_UNLISTED: readonly NavUnlisted[] = [
   unlisted("/software", "shell.nav.page.installedSoftware", "/deploy"),
   unlisted("/discovered", "shell.nav.page.discovered", "/devices"),
   unlisted("/agent-push", "shell.nav.item.pushInstall", "/admin"),
+  // IMAGING LEFT THE RAIL AND THE SEARCH (phase 3 design §2, project decision
+  // P3: it depends on PXE, which is not built). Its pages stay reachable by a
+  // link -- a device's Imaging tab -- and keep their place under Admin.
+  unlisted("/provisioning", "shell.nav.item.imaging", "/admin"),
   // PEOPLE LEFT THE RAIL ON 2026-09-23: the operator read it as a second
   // Settings -> Users, and a device's holder is now set on the device. The
   // person page stays -- licences, seats and a device's "Assigned to" link to
@@ -310,16 +330,20 @@ export function crumbFor(pathname: string): Crumb {
 /**
  * The groups an operator may actually see. An area keeps only the pages the
  * operator may open; an empty section, area or group is dropped entirely,
- * because a heading over nothing reads as a broken render.
+ * because a heading over nothing reads as a broken render. A page of an
+ * optional module also needs the module in `modules` (phase 3 design §2).
  */
 export function visibleGroups(
   permissions: readonly string[],
+  modules: ReadonlySet<string>,
   groups: readonly NavGroup[] = NAV_GROUPS,
 ): NavGroup[] {
   // A requester is offered the portal's rail, never the operator groups.
   const source = groups === NAV_GROUPS && isPortalOnly(permissions) ? PORTAL_GROUPS : groups;
   const held = new Set(permissions);
-  const allowed = (item: NavItem) => item.permission === null || held.has(item.permission);
+  const allowed = (item: NavItem) =>
+    (item.permission === null || held.has(item.permission)) &&
+    (item.module === undefined || modules.has(item.module));
   return source
     .map((group) => ({
       label: group.label,
@@ -343,8 +367,8 @@ export interface SearchDestination {
   readonly within: string;
 }
 
-export function searchDestinations(permissions: readonly string[]): SearchDestination[] {
-  return visibleGroups(permissions).flatMap((group) =>
+export function searchDestinations(permissions: readonly string[], modules: ReadonlySet<string>): SearchDestination[] {
+  return visibleGroups(permissions, modules).flatMap((group) =>
     group.items.flatMap((entry): SearchDestination[] =>
       isArea(entry)
         ? [

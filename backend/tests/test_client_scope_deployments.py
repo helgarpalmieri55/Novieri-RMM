@@ -309,11 +309,25 @@ async def test_a_technician_of_x_sees_and_runs_only_x_s_deployments(api_env: Api
     assert (await api_env.client.get(f"{DEPLOYMENTS}/{y_dep}", headers=x_tech)).status_code == 404
     assert (await api_env.client.get(f"{DEPLOYMENTS}/{x_dep}", headers=x_tech)).status_code == 200
     run = await api_env.client.post(f"{DEPLOYMENTS}/{y_dep}/execute", headers=x_tech)
-    assert (run.status_code, run.json()) == (200, {"job_ids": []}), run.text
+    assert (run.status_code, run.json()) == (404, {"detail": "no such deployment"}), run.text
     async with AsyncSession(api_env.admin_engine) as s:
         assert (
             await s.execute(select(Deployment.state).where(Deployment.id == y_dep))
         ).scalar_one() == "pending"
+        assert (
+            await s.execute(select(func.count()).select_from(Job).where(Job.org_id == org))
+        ).scalar_one() == 0
+
+
+async def test_executing_a_deployment_that_does_not_exist_is_a_404(api_env: ApiEnv) -> None:
+    """Phase 3 design §5.4: the answer the GET gives, and no job -- not a
+    200 with an empty list, which read as "it ran on nothing".
+    FALSIFIER: the `deployment is None` raise in `execute_deployment`."""
+    org = await api_env.create_org("d-exec-missing")
+    admin = await _admin(api_env, org)
+    run = await api_env.client.post(f"{DEPLOYMENTS}/{uuid4()}/execute", headers=admin)
+    assert (run.status_code, run.json()) == (404, {"detail": "no such deployment"}), run.text
+    async with AsyncSession(api_env.admin_engine) as s:
         assert (
             await s.execute(select(func.count()).select_from(Job).where(Job.org_id == org))
         ).scalar_one() == 0

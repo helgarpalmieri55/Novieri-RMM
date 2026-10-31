@@ -36,7 +36,20 @@ export const components: Shape<typeof en> = {
   },
   forEveryClient: {
     label: "Para todos los clientes",
-    hint: "Lo verán los técnicos de todos los clientes. Sin marcar, es del cliente propio de tu organización.",
+    hint: "Lo verán los técnicos de todos los clientes. Sin marcar, es del cliente en el que este formulario lo archiva.",
+  },
+  clientField: {
+    label: "Cliente",
+    choose: "Elige un cliente",
+    none: "Ninguno de tus clientes te permite hacer esto.",
+  },
+  siteField: {
+    label: "Sede",
+    choose: "Elige una sede",
+    chooseClientFirst: "Elige primero el cliente.",
+    loading: "Cargando sedes…",
+    failed: "No se pudieron cargar las sedes.",
+    none: "Este cliente no tiene sedes. Añade una en la página Clientes.",
   },
   prerequisites: {
     checking: "Comprobando…",

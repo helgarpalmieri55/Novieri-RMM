@@ -21,16 +21,17 @@ import { useT } from "../../i18n/context";
 import { KIND_ICON, Panel } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { DEFAULT_AUTO_CLOSE_AFTER_DAYS, MAX_AUTO_CLOSE_AFTER_DAYS } from "../sla/types";
-import { useSlaSettings, useUpdateSlaSettingsMutation } from "./api";
+import { useSlaSettings, useUpdateSlaSettingsMutation, useGlobalWriteReason } from "./api";
 import { LoadFailure } from "./LoadFailure";
 import { SaveBar } from "./SaveBar";
-import { isForbidden, parseIntegerField, permissionReason } from "./settingsState";
+import { isForbidden, parseIntegerField } from "./settingsState";
 
 export const SLA_READ = "sla.read";
 export const SLA_ADMIN = "sla.admin";
 
 export function ServiceLevelsTab({ canRead, canAdmin }: { canRead: boolean; canAdmin: boolean }) {
   const t = useT();
+  const reason = useGlobalWriteReason(SLA_ADMIN);
   const settings = useSlaSettings(canRead);
   const update = useUpdateSlaSettingsMutation();
 
@@ -102,7 +103,7 @@ export function ServiceLevelsTab({ canRead, canAdmin }: { canRead: boolean; canA
             label={t("settings.sla.save")}
             canEdit={canAdmin && settings.data != null && valid}
             disabledReason={
-              canAdmin ? t("settings.sla.correct") : permissionReason(SLA_ADMIN)
+              canAdmin ? t("settings.sla.correct") : reason
             }
             dirty={dirty}
             pending={update.isPending}

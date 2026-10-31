@@ -387,12 +387,21 @@ async def set_repository_target(
     repository. On requires a target that is global or of the repository's
     client (`OffsiteClientError`, a 422), a proven recovery key its key can
     be wrapped to (global or of that client, as `prepare_repository` wraps),
-    and a passed test. Audited in the repository's client."""
+    and a passed test. Audited in the repository's client.
+
+    LOCKS. The repository row, FOR NO KEY UPDATE, is the first lock; the audit
+    chain's is the last -- the order a retire (`repository.retire_repository`)
+    and a policy write (`clients.policy_repository`) take them in. Read
+    without it, the row's UPDATE would reach the database only when
+    `audit_service.record` autoflushes, after its chain lock (a `text()`
+    statement, which does not flush): the chain first and the row second, a
+    cycle with a retire on the same repository, and a deadlock. NO KEY, as
+    the retire's: the foreign-key checks of a run or a point need not wait."""
     repo = (
         await session.execute(
-            select(BackupRepository).where(
-                BackupRepository.org_id == org_id, BackupRepository.id == repository_id
-            )
+            select(BackupRepository)
+            .where(BackupRepository.org_id == org_id, BackupRepository.id == repository_id)
+            .with_for_update(key_share=True)
         )
     ).scalar_one_or_none()
     if repo is None:
@@ -812,6 +821,7 @@ async def replicate_step(
             "chunks_total": len(chunk_ids),
             "bytes": copy.bytes,
         },
+        client_id=point.client_id,
     )
     await session.flush()
     return True
@@ -820,6 +830,16 @@ async def replicate_step(
 async def record_copy_failure(
     session: AsyncSession, *, org_id: UUID, point_id: UUID, target_id: UUID, error: BaseException
 ) -> None:
+    # The point's client (phase 3 design §5.5): one read, because a copy
+    # written here for the first time has not had its client from the trigger
+    # yet, and a point that is gone has none to give.
+    client_id = (
+        await session.execute(
+            select(BackupPoint.client_id).where(
+                BackupPoint.org_id == org_id, BackupPoint.id == point_id
+            )
+        )
+    ).scalar_one_or_none()
     copy = (
         await session.execute(
             select(BackupPointCopy).where(
@@ -843,6 +863,7 @@ async def record_copy_failure(
         target_type="backup_point",
         target_id=str(point_id),
         metadata={"target_id": str(target_id), "error": copy.last_error},
+        client_id=client_id,
     )
     await session.flush()
 
@@ -1028,6 +1049,9 @@ async def offsite_gc(
                 await session.delete(row)
                 deleted += 1
         await session.flush()
+    # NO CLIENT, deliberately (phase 3 design §5.5): one summary of every
+    # target, repository and client of the organisation. Whoever reads the
+    # audit log holds every client (plan 2026-10-26 C6).
     if expired or deleted:
         await audit_service.record(
             session,

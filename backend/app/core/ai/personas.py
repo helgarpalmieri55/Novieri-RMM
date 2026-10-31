@@ -26,6 +26,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
+from uuid import UUID
 
 from app.core.ai.types import ReadTool, ToolResult
 
@@ -60,6 +61,11 @@ class LoopbackExecutor(Protocol):
     principal has no `AuthContext` to build such a request from. A branch is how
     the staff path and the portal path end up sharing a code path only one of
     them was audited for.
+
+    `requested_client` is the turn's `TurnContext.requested_client`: the staff
+    executor forwards it as `X-Client-Id`, and the portal executor, whose
+    turns never carry one, refuses any other value than None (phase 3 design
+    §5.2). It never comes from the model.
     """
 
     async def __call__(
@@ -71,6 +77,7 @@ class LoopbackExecutor(Protocol):
         bearer: str,
         deadline: float,
         registry: Mapping[str, ReadTool],
+        requested_client: UUID | None = None,
     ) -> ToolResult | Any: ...
 
 

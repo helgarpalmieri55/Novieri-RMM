@@ -387,7 +387,9 @@ models, no secret fields:
   `DELETE /packages/{id}` (`deploy.package.manage`).
 - `GET /deployments` (`deploy.read`), `POST /deployments`
   (`deploy.create`), `POST /deployments/{id}/execute` (`deploy.execute`,
-  computes `now=datetime.now(UTC)` in the handler),
+  computes `now=datetime.now(UTC)` in the handler; a deployment that does not
+  exist or that the caller's clients cannot see is a 404 «no such
+  deployment», like the GET — amended 2026-10-31, phase 3 design §5.4),
   `GET /deployments/{id}` (`deploy.read`, includes per-device results).
 - `GET /scripts` (`deploy.read`), `POST /scripts` (`deploy.script.manage`),
   `GET /scripts/{id}` (`deploy.read`, returns full script including body),

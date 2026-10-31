@@ -20,7 +20,7 @@ import { AppShell } from "./AppShell";
 import { AreaPage } from "./AreaPage";
 import { Drawer } from "./Drawer";
 import { healthLabel, platformLabel } from "./healthSignal";
-import { crumbFor, portalCrumbFor, searchDestinations } from "./nav";
+import { crumbFor, OPTIONAL_MODULES, portalCrumbFor, searchDestinations } from "./nav";
 import { searchPrompt } from "./recordSearch";
 import { Pager, Progress, QueryState, StatCard } from "./components";
 import { Toaster } from "./Toaster";
@@ -60,7 +60,7 @@ function Page({ path, ...props }: { path: string } & Partial<React.ComponentProp
         user={{ name: "Alex Morgan", email: "alex@toeshee.com", role: "Administrator" }}
         onSignOut={vi.fn()}
         onAsk={vi.fn()}
-        searchItems={searchDestinations(EVERYTHING).map((page) => ({
+        searchItems={searchDestinations(EVERYTHING, OPTIONAL_MODULES).map((page) => ({
           id: page.to,
           label: page.label,
           sub: page.within,

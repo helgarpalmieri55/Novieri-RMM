@@ -43,9 +43,19 @@ describe("ForEveryClientToggle", () => {
     withMe(ME, <ForEveryClientToggle code="docs.manage" checked={false} onChange={onChange} />);
     const box = await screen.findByRole("checkbox", { name: /For every client/ });
     expect(box).not.toBeChecked();
-    expect(screen.getByText(/belongs to your organisation's own client/)).toBeInTheDocument();
+    expect(screen.getByText(/belongs to the client this form files it under/)).toBeInTheDocument();
     await userEvent.click(box);
     expect(onChange).toHaveBeenCalledWith(true);
+  });
+
+  it("says an unticked row belongs to the client the form files it under", async () => {
+    // The render of the holder case above: this file has no `renderToggle`.
+    withMe(ME, <ForEveryClientToggle code="docs.manage" checked={false} onChange={() => undefined} />);
+    expect(
+      await screen.findByText(
+        "Every client's technicians will see it. Unticked, it belongs to the client this form files it under.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("is absent for anyone else", async () => {
@@ -59,6 +69,19 @@ describe("ForEveryClientToggle", () => {
     await waitFor(() => expect(me).toHaveBeenCalled());
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
+  it("is absent for a holder of the code on some clients only (phase 3 design §2)", async () => {
+    const me = vi.fn().mockResolvedValue({ ...ME, permissions_everywhere: ["docs.read"] });
+    mockUseApi.mockReturnValue({ me } as unknown as ApiClient);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ForEveryClientToggle code="docs.manage" checked={false} onChange={() => undefined} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(me).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
 
   it("is absent while /me has not answered", () => {
@@ -77,6 +100,6 @@ describe("ForEveryClientToggle", () => {
     setActiveLanguage("es");
     withMe(ME, <ForEveryClientToggle code="docs.manage" checked onChange={() => undefined} />);
     expect(await screen.findByRole("checkbox", { name: /Para todos los clientes/ })).toBeChecked();
-    expect(screen.getByText(/es del cliente propio de tu organización/)).toBeInTheDocument();
+    expect(screen.getByText(/es del cliente en el que este formulario lo archiva/)).toBeInTheDocument();
   });
 });

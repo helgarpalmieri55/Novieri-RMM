@@ -147,6 +147,26 @@ describe("AppShell", () => {
     expect(document.title).toBe("Devices & Inventory · ITMS");
   });
 
+  it("draws the client selector first in the top bar's cluster (phase 3 design §1.1)", () => {
+    render(
+      <MemoryRouter>
+        <AppShell
+          permissions={["devices.read", "health.read"]}
+          orgName="Operations"
+          title="Devices"
+          user={{ name: "A B", role: "Operator" }}
+          onSignOut={vi.fn()}
+          clientSelector={<span data-testid="client-selector" />}
+        >
+          <p>x</p>
+        </AppShell>
+      </MemoryRouter>,
+    );
+    expect(document.querySelector(".top-actions")?.firstElementChild).toBe(
+      screen.getByTestId("client-selector"),
+    );
+  });
+
   it("shows an operator only the links their permissions reach", () => {
     renderShell(["devices.read", "patch.read"]);
     expect(sidebar().getByRole("link", { name: /Patching/ })).toBeInTheDocument();
@@ -169,6 +189,28 @@ describe("AppShell", () => {
     expect(sidebar().getByRole("link", { name: /IT documentation/ })).toBeInTheDocument();
     expect(sidebar().getByText("Governance")).toBeInTheDocument();
     expect(sidebar().getByText("Assets & Spend")).toBeInTheDocument();
+  });
+
+  it("hides a module's page when no client of the choice uses the module (phase 3 design §2)", () => {
+    const shell = (modules: ReadonlySet<string>) => (
+      <MemoryRouter>
+        <AppShell
+          permissions={["budget.read"]}
+          modules={modules}
+          orgName="Operations"
+          title="Dashboard"
+          user={{ name: "A B", role: "Operator" }}
+          onSignOut={vi.fn()}
+        >
+          <p>x</p>
+        </AppShell>
+      </MemoryRouter>
+    );
+    const { unmount } = render(shell(new Set()));
+    expect(sidebar().queryByRole("link", { name: /IT budget/ })).not.toBeInTheDocument();
+    unmount();
+    render(shell(new Set(["budget"])));
+    expect(sidebar().getByRole("link", { name: /IT budget/ })).toHaveAttribute("href", "/budget");
   });
 
   it("shows the operator who they are signed in as", () => {

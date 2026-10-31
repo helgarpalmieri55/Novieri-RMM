@@ -49,6 +49,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.deps import AuthContext, bound_auth_context
+from app.core.client_scope import ClientScope
 from app.core.i18n import tr
 from app.core.identity.own_profile import (
     OwnProfile,
@@ -73,6 +74,16 @@ _MIRROR_TIMEOUT_SECONDS = 5
 router = APIRouter(tags=["me"])
 
 
+class MeClient(BaseModel):
+    """A client the caller holds a role in (MSP clients phase 3 design §1.3)."""
+
+    id: UUID
+    name: str
+    kind: str = Field(description="customer, internal (Novieri's own IT) or unassigned")
+    enabled_modules: list[str] = Field(description="Optional modules on: budget, bcp, change")
+    permissions: list[str] = Field(description="The codes the caller holds in this client")
+
+
 class MeResponse(BaseModel):
     user_id: UUID
     org_id: UUID
@@ -81,7 +92,20 @@ class MeResponse(BaseModel):
     phone: str | None
     timezone: str | None
     locale: str | None
+    #: The codes the caller holds in AT LEAST ONE client of this request's
+    #: scope: `clients`, narrowed by `X-Client-Id` when it is sent. That is
+    #: `require_permission`'s rule, so it is what the console may offer for
+    #: the client chosen in its selector.
     permissions: list[str]
+    #: The codes the caller holds on EVERY client (an all-clients grant):
+    #: `require_permission_on_every_client`'s rule, for global configuration.
+    #: The header does not narrow it; the console never sends one there.
+    permissions_everywhere: list[str]
+    #: Every client the caller holds a role in, archived ones left out, by
+    #: name with `unassigned` last, and what they hold in each. Not narrowed
+    #: by `X-Client-Id`: it is the selector's list. Needs no `clients.read`:
+    #: these are the caller's own grants.
+    clients: list[MeClient]
     #: The names of the roles the caller holds. The console renders these in
     #: the account chip, which used to show the constant "Operator" for every
     #: user on every deployment.
@@ -119,7 +143,9 @@ def _reject(detail: str) -> HTTPException:
     return HTTPException(status.HTTP_400_BAD_REQUEST, detail)
 
 
-def _response(profile: OwnProfile) -> MeResponse:
+def _response(profile: OwnProfile, scope: ClientScope) -> MeResponse:
+    """`scope` is the request's (`ctx.clients`): the person's own, narrowed
+    by `X-Client-Id`. It narrows `permissions` and nothing else."""
     return MeResponse(
         user_id=profile.user_id,
         org_id=profile.org_id,
@@ -128,7 +154,18 @@ def _response(profile: OwnProfile) -> MeResponse:
         phone=profile.phone,
         timezone=profile.timezone,
         locale=profile.locale,
-        permissions=sorted(profile.permissions),
+        permissions=sorted(profile.codes_in(scope)),
+        permissions_everywhere=sorted(profile.codes_everywhere),
+        clients=[
+            MeClient(
+                id=client.id,
+                name=client.name,
+                kind=client.kind,
+                enabled_modules=list(client.enabled_modules),
+                permissions=sorted(profile.codes_by_client[client.id]),
+            )
+            for client in profile.clients
+        ],
         roles=profile.roles,
     )
 
@@ -150,7 +187,8 @@ async def me(request: Request, ctx: AuthContext = Depends(bound_auth_context)) -
 
     Under EVERY client, not `ctx.clients`: the profile is the person's, and a
     person with no grant has the empty scope, which sees no staff row
-    (`app.core.identity.own_profile`).
+    (`app.core.identity.own_profile`). Its client map is read under the
+    person's own scope there; `ctx.clients` narrows only `permissions`.
     """
     try:
         profile = await read_own_profile(
@@ -158,7 +196,7 @@ async def me(request: Request, ctx: AuthContext = Depends(bound_auth_context)) -
         )
     except OwnRowMissing:  # pragma: no cover -- admission created or found this row
         raise _no_such_user() from None
-    return _response(profile)
+    return _response(profile, ctx.clients)
 
 
 @router.patch("/me", response_model=MeResponse)
@@ -190,7 +228,7 @@ async def update_me(
         )
     except OwnRowMissing:  # pragma: no cover -- admission created or found this row
         raise _no_such_user() from None
-    response = _response(profile)
+    response = _response(profile, ctx.clients)
     subject = profile.external_subject
 
     # AFTER THE COMMIT (the call above has returned), so a Keycloak that is down

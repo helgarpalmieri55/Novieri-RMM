@@ -47,10 +47,11 @@ import {
   usePermissionCatalogue,
   useRoles,
   useSetRolePermissionsMutation,
+  useGlobalWriteReason,
 } from "./api";
 import { FOLDING_FORM_GRID } from "./formGrid";
 import { SaveBar } from "./SaveBar";
-import { isForbidden, permissionReason } from "./settingsState";
+import { isForbidden } from "./settingsState";
 import { assignableRoles, groupPermissionsByModule, roleDisplayName } from "./types";
 import type { RoleOut } from "./types";
 
@@ -90,7 +91,7 @@ export function RolesTab({ canRead, canManage }: { canRead: boolean; canManage: 
   const editing = listed.find((role) => role.id === editingId) ?? null;
   const forbidden = isForbidden(roles.error);
   const loading = roles.isLoading || catalogue.isLoading;
-  const reason = permissionReason(ROLES_MANAGE);
+  const reason = useGlobalWriteReason(ROLES_MANAGE);
 
   function openEditor(role: RoleOut) {
     setEditingId(role.id);

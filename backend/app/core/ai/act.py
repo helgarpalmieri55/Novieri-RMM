@@ -449,6 +449,10 @@ async def _device_is_visible(
         bearer=ctx.bearer,
         deadline=ctx.deadline,
         registry=_DEVICE_PROBE_REGISTRY,
+        # The turn's client selection, as every loopback call of the turn
+        # carries it (phase 3 design §5.2): the probe asks the route the
+        # turn's own question, under the turn's own scope.
+        requested_client=ctx.requested_client,
     )
     return getattr(outcome, "kind", None) == "blocked"
 

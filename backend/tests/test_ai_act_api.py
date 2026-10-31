@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import Headers
 
 from app.core.ai.providers import TextBlock, ToolCallBlock
 from app.models import AiAction, AiSettings, AuditEvent, Job
@@ -594,17 +595,25 @@ async def test_the_persona_profile_may_propose_and_its_tool_set_is_reads_only(
     assert "actions.propose" not in ADMIN_PROFILE.tools
 
 
-def test_the_turn_context_built_for_a_confirm_redacts_its_bearer() -> None:
+@pytest.mark.parametrize("narrowed", [False, True], ids=["unnarrowed", "narrowed"])
+def test_the_turn_context_built_for_a_confirm_redacts_its_bearer(narrowed: bool) -> None:
     """The confirm path builds a `TurnContext` for its one loopback read. Its
     repr must not carry the token: `TurnContext` is per-turn and module-private,
     but the accident §0.1 refuses -- a token in a log file forever -- is one
-    `logger.debug(ctx)` away."""
+    `logger.debug(ctx)` away. It carries the request's `X-Client-Id`, which is
+    no secret (phase 3 design §5.2)."""
+    client = uuid4() if narrowed else None
+    raw = {"Authorization": "Bearer secret-token-value"} | (
+        {} if client is None else {"X-Client-Id": str(client)}
+    )
 
     class _Request:
         app = None
-        headers = {"Authorization": "Bearer secret-token-value"}
+        # A real `Headers`: `requested_client` reads it with `getlist`.
+        headers = Headers(raw)
 
     ctx = api_module._turn_context(_Request())  # type: ignore[arg-type]
     assert ctx.bearer == "Bearer secret-token-value"
     assert "secret-token-value" not in repr(ctx)
     assert ctx.deadline > time.monotonic()
+    assert ctx.requested_client == client

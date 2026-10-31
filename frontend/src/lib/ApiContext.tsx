@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { FIXTURE_MODE } from "../fixtures/mode";
 import { ApiClient } from "./api";
 import { accessToken, signIn } from "./auth";
+import { selectedClient } from "./clientChoice";
 
 const ApiContext = createContext<ApiClient | null>(null);
 
@@ -40,9 +41,15 @@ export function ApiProvider({ children }: { children: ReactNode }) {
     () =>
       FIXTURE_MODE
         ? fixture
-        : new ApiClient(accessToken, () => {
-            void signIn();
-          }),
+        : new ApiClient(
+            accessToken,
+            () => {
+              void signIn();
+            },
+            "/api/v1",
+            // The top bar's choice, read on every request (`X-Client-Id`).
+            selectedClient,
+          ),
     [fixture],
   );
   // Nothing renders until the fixture client is here: a page mounted against

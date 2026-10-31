@@ -1014,7 +1014,7 @@ describe("SpendDashboard", () => {
       id, name, kind: "customer", status: "active", email_domains: [], phone: "", address: "",
       website: "", notes: "", enabled_modules: [], device_count: 0, site_count: 0,
     });
-    api.me = vi.fn().mockResolvedValue({ ...ME, permissions: [...ME.permissions, "clients.read"] });
+    api.me = vi.fn().mockResolvedValue({ ...ME, clients: [{ id: "o1", name: "Novieri", kind: "internal", enabled_modules: [], permissions: ME.permissions }, { id: "c2", name: "Globex", kind: "customer", enabled_modules: [], permissions: ME.permissions }] });
     api.listClients = vi.fn().mockResolvedValue([client("o1", "Novieri"), client("c2", "Globex")]);
     const total = { group_key: null, group_type: null, group_id: null, currency: "USD" };
     api.spend = vi.fn().mockResolvedValue({

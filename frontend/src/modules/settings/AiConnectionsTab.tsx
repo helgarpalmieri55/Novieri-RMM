@@ -51,10 +51,10 @@ import { formatDateTime } from "../../lib/datetime";
 import { KIND_ICON, Panel, QueryState, Toggle } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { KV } from "../../shell/viz";
-import { useCurrentOrg, useMcpConnections, useMe, useRevokeMcpConnection, useUpdateCurrentOrgMutation } from "./api";
+import { useCurrentOrg, useMcpConnections, useMe, useRevokeMcpConnection, useUpdateCurrentOrgMutation, useGlobalWriteReason } from "./api";
 import { LoadFailure } from "./LoadFailure";
 import { ORGS_MANAGE } from "./OrganizationTab";
-import { isForbidden, permissionReason } from "./settingsState";
+import { isForbidden } from "./settingsState";
 
 export const MCP_USE = "mcp.use";
 
@@ -74,8 +74,18 @@ const STEP: CSSProperties = { marginTop: 4 };
 /** A URL has no spaces to break at; on a phone it would run out of the panel. */
 const ADDRESS: CSSProperties = { overflowWrap: "anywhere" };
 
-export function AiConnectionsTab({ canUse, canManageOrg }: { canUse: boolean; canManageOrg: boolean }) {
+/** `canSwitch`: the MCP switch is an org setting (`PATCH /orgs/current`), so `orgs.manage` on every client; revoking for everyone is not a global route and keeps `canManageOrg`. */
+export function AiConnectionsTab({
+  canUse,
+  canManageOrg,
+  canSwitch = canManageOrg,
+}: {
+  canUse: boolean;
+  canManageOrg: boolean;
+  canSwitch?: boolean;
+}) {
   const t = useT();
+  const reason = useGlobalWriteReason(ORGS_MANAGE);
   const me = useMe();
   const org = useCurrentOrg();
   const update = useUpdateCurrentOrgMutation();
@@ -90,7 +100,7 @@ export function AiConnectionsTab({ canUse, canManageOrg }: { canUse: boolean; ca
   // What the server stored, and nothing else: `mcp_enabled` is off unless it
   // is literally `true`, which is how the MCP server reads it too.
   const enabled = org.data?.settings?.["mcp_enabled"] === true;
-  const switchEditable = canManageOrg && org.data != null && !update.isPending;
+  const switchEditable = canSwitch && org.data != null && !update.isPending;
   const connectionsForbidden = isForbidden(connections.error);
   const readOnly = t("settings.aiConnections.readOnly", { code: MCP_USE });
 
@@ -109,9 +119,9 @@ export function AiConnectionsTab({ canUse, canManageOrg }: { canUse: boolean; ca
           disabled={!switchEditable}
           onChange={(next) => (next ? setEnabling(true) : update.mutate({ settings: { mcp_enabled: false } }))}
         />
-        {!canManageOrg ? (
+        {!canSwitch ? (
           <p className="form-hint" style={{ marginTop: 6 }}>
-            {permissionReason(ORGS_MANAGE)}
+            {reason}
           </p>
         ) : null}
         {update.error ? (

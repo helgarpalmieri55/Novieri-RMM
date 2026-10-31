@@ -153,6 +153,7 @@ export const aiAutomation = {
     unsaved: "Unsaved. Stored: {level}",
     saving: "Saving…",
     save: "Save changes",
+    everyClientOnly: "Read-only: every client shares the autonomy dial, so changing it requires the ai.admin permission on every client.",
     discard: "Discard changes",
     unsavedChanges: {
       one: "{count} unsaved change: {changes}",
