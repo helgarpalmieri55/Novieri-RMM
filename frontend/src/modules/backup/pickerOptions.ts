@@ -31,10 +31,9 @@ export const devicePickerEmptyHint = (): string => translate("backup.picker.devi
 export const repositoryPickerEmptyHint = (): string => translate("backup.picker.repositoryEmptyHint");
 
 /**
- * The same empty list for a policy of a client the Repositories page cannot
- * file a repository under: until the client selector exists it files under
- * the internal client only (PHASE 3), so the hint names where that client's
- * repository is made instead, and the editor offers no link.
+ * The same empty list for a policy of a client this person cannot file a
+ * repository under (they may not manage that client's policies): the hint
+ * says so instead, and the editor offers no link.
  */
 export const repositoryPickerEmptyHintElsewhere = (): string =>
   translate("backup.picker.repositoryEmptyHintElsewhere");

@@ -61,8 +61,9 @@ export function useBackupRepositories() {
 /**
  * Both writes below take a BODY BUILDER, not a body: each names a client
  * (MSP clients phase 2, Task 13), and one that cannot be named yet
- * (`requireKnown` before `/me` answers) then fails as this mutation's error,
- * shown by the form, rather than as an exception in a click handler.
+ * (`requireKnown` while the client is not chosen, `lib/clientSelection.ts`)
+ * then fails as this mutation's error, shown by the form, rather than as an
+ * exception in a click handler.
  */
 export function useCreateBackupRepositoryMutation() {
   const api = useApi();
