@@ -191,6 +191,28 @@ describe("AppShell", () => {
     expect(sidebar().getByText("Assets & Spend")).toBeInTheDocument();
   });
 
+  it("hides a module's page when no client of the choice uses the module (phase 3 design §2)", () => {
+    const shell = (modules: ReadonlySet<string>) => (
+      <MemoryRouter>
+        <AppShell
+          permissions={["budget.read"]}
+          modules={modules}
+          orgName="Operations"
+          title="Dashboard"
+          user={{ name: "A B", role: "Operator" }}
+          onSignOut={vi.fn()}
+        >
+          <p>x</p>
+        </AppShell>
+      </MemoryRouter>
+    );
+    const { unmount } = render(shell(new Set()));
+    expect(sidebar().queryByRole("link", { name: /IT budget/ })).not.toBeInTheDocument();
+    unmount();
+    render(shell(new Set(["budget"])));
+    expect(sidebar().getByRole("link", { name: /IT budget/ })).toHaveAttribute("href", "/budget");
+  });
+
   it("shows the operator who they are signed in as", () => {
     renderShell(["devices.read"]);
     expect(screen.getByText("Alex Morgan")).toBeInTheDocument();

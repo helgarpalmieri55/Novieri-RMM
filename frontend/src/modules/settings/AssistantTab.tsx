@@ -48,11 +48,11 @@ import {
   serverAdminHeading,
 } from "../ai-admin/provider";
 import type { AiSettingsOut, AiSettingsUpdate } from "../ai-admin/types";
-import { useAiProviders, useAiSettings, useUpdateAiSettingsMutation } from "./api";
+import { useAiProviders, useAiSettings, useUpdateAiSettingsMutation, useGlobalWriteReason } from "./api";
 import { FOLDING_FORM_GRID } from "./formGrid";
 import { LoadFailure } from "./LoadFailure";
 import { SaveBar } from "./SaveBar";
-import { isDirty, isForbidden, parseIntegerField, permissionReason } from "./settingsState";
+import { isDirty, isForbidden, parseIntegerField } from "./settingsState";
 
 export const AI_ADMIN = "ai.admin";
 
@@ -95,8 +95,10 @@ function seedFrom(data: AiSettingsOut | undefined): AssistantForm {
   };
 }
 
-export function AssistantTab({ canAdmin }: { canAdmin: boolean }) {
+/** `canAdmin` reads the tab (its read is `ai.admin` too); `canEdit` writes it: `ai.admin` on every client (phase 3 design §2). */
+export function AssistantTab({ canAdmin, canEdit = canAdmin }: { canAdmin: boolean; canEdit?: boolean }) {
   const t = useT();
+  const reason = useGlobalWriteReason(AI_ADMIN);
   const settings = useAiSettings(canAdmin);
   const providers = useAiProviders(canAdmin);
   const update = useUpdateAiSettingsMutation();
@@ -113,7 +115,7 @@ export function AssistantTab({ canAdmin }: { canAdmin: boolean }) {
   const forbidden = isForbidden(settings.error) || isForbidden(providers.error);
   const failed = (settings.error != null || providers.error != null) && !forbidden;
   const dirty = isDirty(form, seed);
-  const editable = canAdmin && settings.data != null;
+  const editable = canEdit && settings.data != null;
 
   function submit() {
     const body: AiSettingsUpdate = {};
@@ -321,7 +323,7 @@ export function AssistantTab({ canAdmin }: { canAdmin: boolean }) {
           <SaveBar
             label={t("settings.assistant.save")}
             canEdit={editable}
-            disabledReason={permissionReason(AI_ADMIN)}
+            disabledReason={reason}
             dirty={dirty}
             pending={update.isPending}
             error={update.error}

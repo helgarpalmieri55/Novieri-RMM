@@ -13,6 +13,7 @@ import { useCreateVendorMutation, useLicenses, useVendors } from "./api";
 import { LicensePageNav } from "./licenseNav";
 import { PageHead, Panel, QueryState } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 export function VendorsPage() {
   const t = useT();
@@ -22,7 +23,8 @@ export function VendorsPage() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("licenses.read");
-  const canManage = permissions.includes("licenses.manage");
+  // Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
+  const canManage = useEverywherePermissions().has("licenses.manage");
 
   // The operator's own zone (cycle 5); `/me` is already fetched here for the
   // permission check, so reading `timezone` off it costs no extra request.

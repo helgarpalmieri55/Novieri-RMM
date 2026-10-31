@@ -69,6 +69,9 @@ function rollout(overrides: Partial<UpdateRollout> = {}): UpdateRollout {
 
 function renderSection(permissions: string[], api: Record<string, unknown>) {
   mockUseApi.mockReturnValue({
+    // The rollout controls read /me's permissions on every client (phase 3
+    // design §2) through the shared `["me"]` query, not the `me` prop.
+    me: () => Promise.resolve(me(permissions)),
     getFleetVersions: () => Promise.resolve(FLEET),
     listUpdateRollouts: () => Promise.resolve([]),
     listUpdateTargets: () => Promise.resolve([]),

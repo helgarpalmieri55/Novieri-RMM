@@ -19,6 +19,7 @@ import { formatDateTime, intlLocale } from "../../lib/datetime";
 import { describeSeconds } from "../../lib/format";
 import { humaniseEnum } from "../../lib/labels";
 import { Panel, QueryState, StatusPill, type Kind } from "../../shell/components";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 /**
  * Agent self-update (spec-self-update.md §8.6): fleet versions, the devices
@@ -82,8 +83,8 @@ function ringProgress(counts: Record<string, number>): string {
 export function AgentUpdatesSection({ me }: { me: Me | undefined }) {
   const t = useT();
   const api = useApi();
-  const perms = me?.permissions ?? [];
-  const canRollout = perms.includes("agent.update.rollout");
+  // Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
+  const canRollout = useEverywherePermissions().has("agent.update.rollout");
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 

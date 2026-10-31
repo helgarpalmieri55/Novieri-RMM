@@ -22,6 +22,7 @@ import { DeployPageNav } from "./deployNav";
 import { osFamilyLabel } from "./pickerOptions";
 import type { Package } from "./types";
 import { Btn, PageHead, Panel, QueryState } from "../../shell/components";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // The design's `P['deploy/packages']`: one bare panel of rows led by the
 // package glyph, the sha256 under the name in mono, a platform pill and the
@@ -54,7 +55,8 @@ export function PackagesPage() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("deploy.read");
-  const canManage = permissions.includes("deploy.package.manage");
+  // Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
+  const canManage = useEverywherePermissions().has("deploy.package.manage");
   const zone = me.data?.timezone;
 
   const packages = usePackages();

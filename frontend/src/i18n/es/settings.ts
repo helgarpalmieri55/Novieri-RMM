@@ -30,6 +30,7 @@ export const settings: Shape<typeof en> = {
   },
   loadFailure: "No se pudo cargar. {reason} Vuelve a intentarlo o consulta la página de estado de la plataforma.",
   readOnly: "Solo lectura: este cambio requiere el permiso {code}. Lo aplica el servidor; esta consola solo lo refleja.",
+  readOnlyEveryClient: "Solo lectura: este cambio requiere el permiso {code} en todos los clientes, porque todos los clientes comparten esta configuración. Lo aplica el servidor; esta consola solo lo refleja.",
   clientPicker: {
     emptyHint: "No hay clientes para elegir. Puede que no tengas permiso para listarlos.",
     devices: { one: "{count} dispositivo", other: "{count} dispositivos" },

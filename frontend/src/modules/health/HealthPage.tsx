@@ -23,6 +23,7 @@ import { ProfileList } from "./ProfileList";
 import { useHealthAlerts } from "./api";
 import { checkLabel } from "./healthState";
 import type { AlertOut, AlertSummary } from "./types";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // The endpoint-health console (spec §13): v3's four tiles over the alert
 // list, then the detail, the reporting panel, profiles and their checks, the
@@ -69,11 +70,13 @@ export function HealthPage() {
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
+  // Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
+  const everywhere = useEverywherePermissions();
   const canRead = permissions.includes("health.read");
-  const canAdmin = permissions.includes("health.admin");
+  const canAdmin = everywhere.has("health.admin");
   const canManageAlerts = permissions.includes("health.alert.manage");
   const canRemediate = permissions.includes("health.remediate");
-  const canActionAdmin = permissions.includes("health.action.admin");
+  const canActionAdmin = everywhere.has("health.action.admin");
 
   /* THE TILES READ THE SUMMARY, NOT THE LIST. `/health/alerts/summary` counts
      open alerts in SQL, by state and by severity; the list below is a page.

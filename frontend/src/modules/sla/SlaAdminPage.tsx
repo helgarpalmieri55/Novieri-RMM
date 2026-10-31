@@ -11,6 +11,7 @@ import { PolicyResolverPanel } from "./PolicyResolverPanel";
 import { SlaPrerequisites } from "./SlaPrerequisites";
 import { SlaSettingsPanel } from "./SlaSettingsPanel";
 import { PageHead, StatCard, StatsGrid } from "../../shell/components";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // Spec §9.1's admin surface: business calendars (with the weekly window grid
 // and holidays), SLA policies, the queue/priority resolution preview, and the
@@ -38,6 +39,8 @@ export function SlaAdminPage() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
   const canAdmin = permissions.includes("sla.admin");
+  // Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
+  const canConfigure = useEverywherePermissions().has("sla.admin");
 
   // One shared queue read for every panel that names a queue (TanStack dedupes
   // on the key). Gated on `ticket.read`, which an SLA admin is not guaranteed
@@ -181,16 +184,16 @@ export function SlaAdminPage() {
       </StatsGrid>
 
       <div className="grid grid-2" style={{ marginBottom: 16 }}>
-        <SlaSettingsPanel canAdmin={canAdmin} />
+        <SlaSettingsPanel canAdmin={canConfigure} />
         <PolicyResolverPanel />
       </div>
       <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
         <PoliciesPanel
           canAdmin={canAdmin}
           queueName={queueName}
-          onCreateCalendar={() => setCalendarCreateNonce((n) => n + 1)}
+          onCreateCalendar={canConfigure ? () => setCalendarCreateNonce((n) => n + 1) : undefined}
         />
-        <CalendarsPanel canAdmin={canAdmin} openCreateNonce={calendarCreateNonce} />
+        <CalendarsPanel canAdmin={canConfigure} openCreateNonce={calendarCreateNonce} />
       </div>
     </div>
   );

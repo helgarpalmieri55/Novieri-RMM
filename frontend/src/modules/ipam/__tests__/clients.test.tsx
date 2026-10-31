@@ -30,6 +30,11 @@ const ME = {
   email: "a@b.c",
   display_name: "A",
   permissions: ["ipam.read", "ipam.assign", "ipam.manage", "ipam.scope.manage"],
+  clients: [
+    { id: "o1", name: "Novieri", kind: "internal", enabled_modules: [], permissions: ["ipam.read", "ipam.assign", "ipam.manage", "ipam.scope.manage"] },
+    { id: "c-x", name: "Acme", kind: "customer", enabled_modules: [], permissions: ["ipam.read", "ipam.assign", "ipam.manage", "ipam.scope.manage"] },
+    { id: "c-y", name: "Yonder", kind: "customer", enabled_modules: [], permissions: ["ipam.read", "ipam.assign", "ipam.manage", "ipam.scope.manage"] },
+  ],
 };
 
 const SITE: ClientSiteOut = {
@@ -179,9 +184,8 @@ describe("a subnet, an address and a scan authorization", () => {
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
     if (vrf !== null) {
-      // `lab · o1`: the VRF names its client (its id here: this `/me` cannot
-      // read the clients' names).
-      await within(dialog).findByRole("option", { name: "lab · o1" });
+      // `lab · Novieri`: the VRF names its client, by the name /me gives it.
+      await within(dialog).findByRole("option", { name: "lab · Novieri" });
       await user.selectOptions(within(dialog).getByLabelText("VRF"), vrf);
     }
     await user.click(within(dialog).getByRole("button", { name: "Register" }));
@@ -563,7 +567,7 @@ describe("an apply goes where its preview read, whatever the list says by then",
 
     listIpamVrfs.mockResolvedValue([Y_GLOBAL, X_GLOBAL]);
     await queryClient.invalidateQueries({ queryKey: ["ipam-vrfs"] });
-    await screen.findByRole("option", { name: "global · c-y" });
+    await screen.findByRole("option", { name: "global · Yonder" });
 
     // The picker still shows what was previewed, and apply goes there.
     expect((screen.getByLabelText("Into the VRF") as HTMLSelectElement).value).toBe("vrf-x");

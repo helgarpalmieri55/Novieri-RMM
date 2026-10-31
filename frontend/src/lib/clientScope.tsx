@@ -40,6 +40,7 @@ import {
 } from "react";
 
 import { translate } from "../i18n/core";
+import { OPTIONAL_MODULES } from "../shell/nav";
 import { Toaster, type ToastItem } from "../shell/Toaster";
 import type { ApiError, Me, MeClient } from "./api";
 import { useApi } from "./ApiContext";
@@ -89,6 +90,28 @@ export function useClientScope(): ClientScope {
   const ready =
     me.data !== undefined && (selected === null || clients.some((client) => client.id === selected));
   return { selected, select: setSelectedClient, clients, ready };
+}
+
+/**
+ * The optional modules the menu may show for the current choice (phase 3
+ * design §2): the chosen client's, or, with every client, those on in at
+ * least one of the person's clients. An API older than phase 3 names no
+ * clients, and the menu then gated no module: every optional module, as
+ * before.
+ */
+export function enabledModules(
+  clients: readonly MeClient[] | undefined,
+  selected: string | null,
+): ReadonlySet<string> {
+  if (clients === undefined) return OPTIONAL_MODULES;
+  const chosen = selected === null ? clients : clients.filter((client) => client.id === selected);
+  return new Set(chosen.flatMap((client) => client.enabled_modules));
+}
+
+export function useEnabledModules(): ReadonlySet<string> {
+  const me = useMeQuery();
+  const selected = useSelected();
+  return useMemo(() => enabledModules(me.data?.clients, selected), [me.data, selected]);
 }
 
 let noticeSeq = 0;

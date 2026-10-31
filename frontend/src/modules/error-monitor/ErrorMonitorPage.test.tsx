@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -513,6 +513,20 @@ describe("ErrorMonitorPage reopen", () => {
     // And says so in words, not as a bare em dash a screen reader skips.
     expect(within(openRow).getByText(/needs permission to manage platform errors/)).toBeInTheDocument();
     expect(within(openRow).queryByText(/platform\.errors\.write/)).not.toBeInTheDocument();
+  });
+
+  it("draws neither triage control for platform.errors.write on some clients only (phase 3 design §2)", async () => {
+    (api.me as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...ME,
+      permissions_everywhere: ["platform.errors.read"],
+    });
+    renderWithProviders(<ErrorMonitorPage />);
+
+    const openRow = (await screen.findByText("ValueError")).closest("tr") as HTMLElement;
+    const resolvedRow = (await screen.findByText("TimeoutError")).closest("tr") as HTMLElement;
+    await waitFor(() => expect(api.me).toHaveBeenCalled());
+    expect(within(openRow).queryByRole("button", { name: /resolve/i })).not.toBeInTheDocument();
+    expect(within(resolvedRow).queryByRole("button", { name: /reopen/i })).not.toBeInTheDocument();
   });
 });
 

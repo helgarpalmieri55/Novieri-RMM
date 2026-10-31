@@ -61,6 +61,19 @@ describe("ForEveryClientToggle", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
+  it("is absent for a holder of the code on some clients only (phase 3 design §2)", async () => {
+    const me = vi.fn().mockResolvedValue({ ...ME, permissions_everywhere: ["docs.read"] });
+    mockUseApi.mockReturnValue({ me } as unknown as ApiClient);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ForEveryClientToggle code="docs.manage" checked={false} onChange={() => undefined} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(me).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
+
   it("is absent while /me has not answered", () => {
     mockUseApi.mockReturnValue({
       me: vi.fn().mockReturnValue(new Promise(() => undefined)),

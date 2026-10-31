@@ -36,6 +36,7 @@ export const settings = {
   },
   loadFailure: "That did not load. {reason} Retry, or check the platform status page.",
   readOnly: "Read-only: this change requires the {code} permission. The server enforces it; this console only reflects it.",
+  readOnlyEveryClient: "Read-only: this change requires the {code} permission on every client, because every client shares this configuration. The server enforces it; this console only reflects it.",
   // The clients a role grant can be limited to (Users tab).
   clientPicker: {
     emptyHint: "No clients to choose from. You may not have permission to list them.",

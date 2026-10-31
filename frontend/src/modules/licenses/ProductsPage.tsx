@@ -14,6 +14,7 @@ import { LicensePageNav } from "./licenseNav";
 import type { MatchRule, ProductOut } from "./types";
 import { PageHead, Panel, QueryState } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 const MATCH_RULE_TYPES: MatchRule["type"][] = ["exact", "prefix", "regex"];
 
@@ -42,7 +43,8 @@ export function ProductsPage() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("licenses.read");
-  const canManage = permissions.includes("licenses.manage");
+  // Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
+  const canManage = useEverywherePermissions().has("licenses.manage");
 
   const products = useProducts();
   // v3's "Detected" column: what inventory found installed, per product. The

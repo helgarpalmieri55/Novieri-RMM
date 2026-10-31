@@ -145,6 +145,7 @@ export const aiAutomation: Shape<typeof en> = {
     unsaved: "Sin guardar. Guardado: {level}",
     saving: "Guardando…",
     save: "Guardar cambios",
+    everyClientOnly: "Solo lectura: todos los clientes comparten el dial de autonomía, así que cambiarlo requiere el permiso ai.admin en todos los clientes.",
     discard: "Descartar cambios",
     unsavedChanges: {
       one: "{count} cambio sin guardar: {changes}",

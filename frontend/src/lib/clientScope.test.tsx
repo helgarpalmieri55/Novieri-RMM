@@ -15,7 +15,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient, Me, MeClient } from "./api";
 import { CLIENT_STORAGE_KEY, selectedClient, setSelectedClient } from "./clientChoice";
-import { ClientScopeProvider, useClientScope } from "./clientScope";
+import { ClientScopeProvider, enabledModules, useClientScope } from "./clientScope";
 
 const mockUseApi = vi.fn();
 vi.mock("./ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -149,5 +149,26 @@ describe("useClientScope", () => {
     const { result } = hookScope();
     await waitFor(() => expect(result.current.clients).toHaveLength(4));
     expect(result.current.ready).toBe(false);
+  });
+});
+
+describe("enabledModules (phase 3 design §2)", () => {
+  const withModules = (id: string, modules: string[]): MeClient => ({
+    ...client(id, id),
+    enabled_modules: modules,
+  });
+  const CLIENTS = [withModules(ACME, ["budget"]), withModules(ZETA, ["change"]), withModules(INTERNAL, [])];
+
+  it("is the chosen client's modules", () => {
+    expect([...enabledModules(CLIENTS, ACME)]).toEqual(["budget"]);
+    expect([...enabledModules(CLIENTS, INTERNAL)]).toEqual([]);
+  });
+
+  it("is every module some client uses, with every client chosen", () => {
+    expect([...enabledModules(CLIENTS, null)].sort()).toEqual(["budget", "change"]);
+  });
+
+  it("is every optional module from an API that names no clients", () => {
+    expect([...enabledModules(undefined, null)].sort()).toEqual(["bcp", "budget", "change"]);
   });
 });

@@ -15,7 +15,7 @@ import { crumbFor, isPortalOnly, portalCrumbFor, searchDestinations } from "./sh
 import { AreaPage } from "./shell/AreaPage";
 import { searchPrompt, useRecordSearch } from "./shell/recordSearch";
 import { ApiProvider, useApi } from "./lib/ApiContext";
-import { ClientScopeProvider } from "./lib/clientScope";
+import { ClientScopeProvider, useEnabledModules } from "./lib/clientScope";
 import { ClientSelector } from "./shell/ClientSelector";
 import { I18nProvider, readStoredLanguage, useLanguage, useT } from "./i18n/context";
 import { setActiveLanguage, subscribe, translate } from "./i18n/core";
@@ -212,6 +212,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     staleTime: 300_000,
   });
   const permissions = me.data?.permissions ?? [];
+  const modules = useEnabledModules();
   const navigate = useNavigate();
 
   // The saved language arrives with `/me`, after the provider has rendered, so
@@ -300,7 +301,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         prefiltered: true,
         onSelect: () => navigate(hit.to),
       })),
-      ...searchDestinations(permissions).map((page) => ({
+      ...searchDestinations(permissions, modules).map((page) => ({
         id: page.to,
         label: page.label,
         sub: page.within,
@@ -309,7 +310,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         onSelect: () => navigate(page.to),
       })),
     ],
-    [records.hits, permissions, navigate, language, t],
+    [records.hits, permissions, modules, navigate, language, t],
   );
   const portalOnly = isPortalOnly(permissions);
   const prompt = searchPrompt(permissions, portalOnly);
@@ -326,6 +327,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   return (
     <AppShell
       permissions={permissions}
+      modules={modules}
       clientSelector={<ClientSelector />}
       searchItems={searchItems}
       onSearchQueryChange={setSearchQuery}

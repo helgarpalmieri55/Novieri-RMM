@@ -36,6 +36,7 @@ import {
   StatsGrid,
   StatusPill,
 } from "../../shell/components";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 /** `sha256 7c1d…e0a2`: the first and last four hex digits, as the design prints them. */
 function shortSha(sha: string): string {
@@ -54,7 +55,8 @@ export function ImagesPage() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("provisioning.read");
-  const canManage = permissions.includes("provisioning.manage");
+  // Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
+  const canManage = useEverywherePermissions().has("provisioning.manage");
 
   // `me` is already fetched for the permission gates above, so the profile
   // timezone costs nothing extra (cycle 5).
