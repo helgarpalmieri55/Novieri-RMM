@@ -277,8 +277,9 @@ PART_D: dict[str, str] = {
     ),
     # --- me ---
     "GET /api/v1/me": (
-        "Returns the caller's own profile, role names and full list of permission codes, read from "
-        "the database."
+        "Returns the caller's own profile and role names; each client they hold a role in, with "
+        "the permission codes they hold there; the codes they hold in at least one client of the "
+        "request's scope; and the codes they hold on every client."
     ),
     "PATCH /api/v1/me": (
         "Updates only the caller's own display name, phone, timezone or locale. A new locale is "
