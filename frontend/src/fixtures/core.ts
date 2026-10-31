@@ -20,7 +20,7 @@
  * `preview.test.ts` asserts the production bundle carries none of it.
  */
 
-import type { CurrentOrg, Device, DeviceInventory, DeviceState, Me } from "../lib/api";
+import type { CurrentOrg, Device, DeviceInventory, DeviceState, Me, MeClient } from "../lib/api";
 import type { PlatformStatus } from "../modules/platform-status/types";
 import { ApiError } from "../lib/api";
 import { navItems } from "../shell/nav";
@@ -88,20 +88,36 @@ function allPermissions(): string[] {
  *  (MSP clients spec §7 point 2; `lib/internalClient.ts`). */
 export const ORG_ID = "org-toeshee";
 
-const me = (): Me => ({
-  user_id: "usr-helgar",
-  org_id: ORG_ID,
-  email: "helgar.palmieri@toeshee.example",
-  display_name: "Helgar Palmieri",
-  permissions: allPermissions(),
-  roles: ["org-admin"],
-  phone: "+351 21 000 0000",
-  timezone: "Europe/Lisbon",
-  // No saved language, so the console resolves it from this browser's choice
-  // (`itms.lang`), which is how the harmony gate walks every route in each
-  // language (`scripts/harmony.mjs --lang`).
-  locale: null,
-});
+/**
+ * The fixture session's clients (`/me`'s `clients`, phase 3 design §1.3): the
+ * three `modules/settings/fixtures.ts` lists for `GET /clients`, with every
+ * code in each -- this session holds every code on every client.
+ */
+const myClients = (codes: string[]): MeClient[] => [
+  { id: ORG_ID, name: "Toeshee", kind: "internal", enabled_modules: ["budget", "bcp", "change"], permissions: codes },
+  { id: "cli-logistics", name: "Andes Logistics", kind: "customer", enabled_modules: [], permissions: codes },
+  { id: "cli-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: codes },
+];
+
+const me = (): Me => {
+  const codes = allPermissions();
+  return {
+    user_id: "usr-helgar",
+    org_id: ORG_ID,
+    email: "helgar.palmieri@toeshee.example",
+    display_name: "Helgar Palmieri",
+    permissions: codes,
+    permissions_everywhere: codes,
+    clients: myClients(codes),
+    roles: ["org-admin"],
+    phone: "+351 21 000 0000",
+    timezone: "Europe/Lisbon",
+    // No saved language, so the console resolves it from this browser's choice
+    // (`itms.lang`), which is how the harmony gate walks every route in each
+    // language (`scripts/harmony.mjs --lang`).
+    locale: null,
+  };
+};
 
 const org = (): CurrentOrg => ({
   id: ORG_ID,

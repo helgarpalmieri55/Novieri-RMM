@@ -15,6 +15,8 @@ import { crumbFor, isPortalOnly, portalCrumbFor, searchDestinations } from "./sh
 import { AreaPage } from "./shell/AreaPage";
 import { searchPrompt, useRecordSearch } from "./shell/recordSearch";
 import { ApiProvider, useApi } from "./lib/ApiContext";
+import { ClientScopeProvider } from "./lib/clientScope";
+import { ClientSelector } from "./shell/ClientSelector";
 import { I18nProvider, readStoredLanguage, useLanguage, useT } from "./i18n/context";
 import { setActiveLanguage, subscribe, translate } from "./i18n/core";
 import { resolveLanguage } from "./i18n/resolve";
@@ -133,6 +135,10 @@ import { PortalTicketDetailPage } from "./modules/portal/PortalTicketDetailPage"
 // and wrong in a test file, where a cached answer from the previous case
 // (`setup/status`, held with `staleTime: Infinity`) would satisfy the next one
 // without a request ever being made.
+//
+// A change of the top bar's client empties it (`queryClient.clear()`, in
+// `lib/clientScope.tsx`'s provider, which reaches this same client through
+// `useQueryClient`): nothing read for one client is shown under another.
 export const queryClient = new QueryClient({
   // No retry in fixture mode: a `FixtureMissing` rejects the same way on the
   // second attempt, and the harmony walk should reach the page's error state
@@ -320,6 +326,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   return (
     <AppShell
       permissions={permissions}
+      clientSelector={<ClientSelector />}
       searchItems={searchItems}
       onSearchQueryChange={setSearchQuery}
       searchPending={records.pending}
@@ -422,7 +429,16 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
     signIn().catch((err: unknown) => setError(String(err)));
   }, [authed]);
 
-  if (authed) return <Shell>{children}</Shell>;
+  // INSIDE THE GUARD, AROUND THE SHELL: the client selection needs `/me`, which
+  // only a signed-in session can ask, and a change of client starts the shell
+  // and the page again (`lib/clientScope.tsx`).
+  if (authed) {
+    return (
+      <ClientScopeProvider>
+        <Shell>{children}</Shell>
+      </ClientScopeProvider>
+    );
+  }
   if (error) {
     return (
       <div className="flex min-h-screen items-center justify-center p-8">

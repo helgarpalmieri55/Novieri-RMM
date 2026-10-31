@@ -45,6 +45,14 @@ export const lib = {
   internalClient: {
     unknown: "Your account has not loaded yet, so this console cannot tell which client this is for. Nothing was sent. Reload the page and try again.",
   },
+  // The client selection (lib/clientScope.tsx, phase 3 design §1.1).
+  clientScope: {
+    gone: "The client you had chosen is no longer available to you, so the console is showing all your clients.",
+  },
+  // Clients as the console names them (shell/ClientSelector.tsx, phase 3 design §1.1).
+  clients: {
+    unassigned: "Unassigned",
+  },
   // Prerequisite detectors (lib/detectors.ts).
   detectors: {
     addComputer: "Add a computer",
