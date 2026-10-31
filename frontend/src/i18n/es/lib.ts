@@ -47,6 +47,9 @@ export const lib: Shape<typeof en> = {
   clientScope: {
     gone: "El cliente que habías elegido ya no está disponible para ti, así que la consola muestra todos tus clientes.",
   },
+  clientSelection: {
+    notChosen: "Tu cuenta aún no se ha cargado, o aún no se ha elegido el cliente al que pertenece, así que no se envió nada. Elige el cliente, o recarga la página e inténtalo de nuevo.",
+  },
   clients: {
     unassigned: "Sin asignar",
     everyClient: "Todos los clientes",
