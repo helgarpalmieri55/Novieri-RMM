@@ -15,11 +15,14 @@
  *   4. any other close still backs off.
  */
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { setSelectedClient } from "./clientChoice";
 import { RESYNC_KIND } from "./resync";
-import { SWAP_GRACE_MS, useLiveEvents } from "./ws";
+import { SWAP_GRACE_MS, liveUrl, useLiveEvents } from "./ws";
 
 const auth = vi.hoisted(() => ({
   token: "t1" as string | null,
@@ -73,6 +76,18 @@ function sockets(): FakeSocket[] {
   return FakeSocket.instances;
 }
 
+let queryClient: QueryClient;
+
+/** `useLiveEvents` asks `/me` again on a 4403, through the query client. */
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(QueryClientProvider, { client: queryClient }, children);
+}
+
+/** The `client` parameters a socket was opened with. */
+function clientOf(socket: FakeSocket): string[] {
+  return new URL(socket.url).searchParams.getAll("client");
+}
+
 function renew(token: string): void {
   auth.token = token;
   act(() => {
@@ -86,6 +101,7 @@ beforeEach(() => {
   auth.token = "t1";
   auth.listeners.clear();
   auth.renew.mockReset();
+  queryClient = new QueryClient();
   vi.stubGlobal("WebSocket", FakeSocket);
 });
 
@@ -97,7 +113,7 @@ afterEach(() => {
 describe("useLiveEvents", () => {
   it("opens a new socket on a renewed token, and closes the old one only once the new one is open", () => {
     const handler = vi.fn();
-    const { unmount } = renderHook(() => useLiveEvents(handler));
+    const { unmount } = renderHook(() => useLiveEvents(handler), { wrapper });
     const [first] = sockets();
     expect(first!.protocols).toEqual(["bearer", "t1"]);
     act(() => first!.open());
@@ -129,7 +145,7 @@ describe("useLiveEvents", () => {
 
   it("keeps the old socket when the replacement fails to open", () => {
     const handler = vi.fn();
-    renderHook(() => useLiveEvents(handler));
+    renderHook(() => useLiveEvents(handler), { wrapper });
     const [first] = sockets();
     act(() => first!.open());
 
@@ -144,7 +160,7 @@ describe("useLiveEvents", () => {
 
   it("delivers a resync on the reopen after an unplanned close, and not on the first open", () => {
     const handler = vi.fn();
-    renderHook(() => useLiveEvents(handler));
+    renderHook(() => useLiveEvents(handler), { wrapper });
     act(() => sockets()[0]!.open());
     expect(handler).not.toHaveBeenCalled();
 
@@ -157,7 +173,7 @@ describe("useLiveEvents", () => {
 
   it("reconnects at once on 4401, with the token already renewed", () => {
     const handler = vi.fn();
-    renderHook(() => useLiveEvents(handler));
+    renderHook(() => useLiveEvents(handler), { wrapper });
     act(() => sockets()[0]!.open());
     auth.token = "t2"; // renewed, but this socket kept the old one
 
@@ -170,7 +186,7 @@ describe("useLiveEvents", () => {
   });
 
   it("on 4401 with no newer token, renews one and reconnects without a backoff", async () => {
-    renderHook(() => useLiveEvents(vi.fn()));
+    renderHook(() => useLiveEvents(vi.fn()), { wrapper });
     act(() => sockets()[0]!.open());
     auth.renew.mockImplementation(() => {
       auth.token = "t3";
@@ -187,7 +203,7 @@ describe("useLiveEvents", () => {
   });
 
   it("on 4401 when renewal fails, backs off rather than looping", async () => {
-    renderHook(() => useLiveEvents(vi.fn()));
+    renderHook(() => useLiveEvents(vi.fn()), { wrapper });
     act(() => sockets()[0]!.open());
     auth.renew.mockResolvedValue(null);
 
@@ -201,7 +217,7 @@ describe("useLiveEvents", () => {
   });
 
   it("backs off on any other close, doubling", () => {
-    renderHook(() => useLiveEvents(vi.fn()));
+    renderHook(() => useLiveEvents(vi.fn()), { wrapper });
     act(() => sockets()[0]!.open());
 
     act(() => sockets()[0]!.ended(1011));
@@ -216,5 +232,70 @@ describe("useLiveEvents", () => {
     expect(sockets()).toHaveLength(2);
     act(() => vi.advanceTimersByTime(1));
     expect(sockets()).toHaveLength(3);
+  });
+});
+
+const ACME = "0b6a2c1e-6d2f-4a51-9c3e-2f4d1a7b8c01";
+const ZETA = "5c9e1d2f-3a4b-4c5d-8e6f-7a8b9c0d1e02";
+
+describe("useLiveEvents and the chosen client (phase 3 design §1.5)", () => {
+  it("names the chosen client in ?client=, and none for every client", () => {
+    expect(new URL(liveUrl(null)).pathname).toBe("/api/v1/ws");
+    expect(new URL(liveUrl(null)).search).toBe("");
+    expect(new URL(liveUrl(ACME)).searchParams.getAll("client")).toEqual([ACME]);
+
+    const { unmount } = renderHook(() => useLiveEvents(vi.fn()), { wrapper });
+    expect(clientOf(sockets()[0]!)).toEqual([]);
+    unmount();
+
+    setSelectedClient(ACME);
+    renderHook(() => useLiveEvents(vi.fn()), { wrapper });
+    expect(clientOf(sockets()[1]!)).toEqual([ACME]);
+  });
+
+  it("opens again for a new choice, and the old socket's close is planned", () => {
+    const handler = vi.fn();
+    renderHook(() => useLiveEvents(handler), { wrapper });
+    const [first] = sockets();
+    act(() => first!.open());
+
+    act(() => setSelectedClient(ZETA));
+    expect(sockets()).toHaveLength(2);
+    expect(first!.closed).toBe(true);
+    expect(clientOf(sockets()[1]!)).toEqual([ZETA]);
+
+    // The old socket's own close schedules nothing and is no gap.
+    act(() => first!.ended(1000));
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(sockets()).toHaveLength(2);
+    expect(handler).not.toHaveBeenCalledWith({ kind: RESYNC_KIND });
+  });
+
+  it("on a 4403 after the socket was open, asks /me again and reconnects at once", async () => {
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue(undefined);
+    renderHook(() => useLiveEvents(vi.fn()), { wrapper });
+    act(() => sockets()[0]!.open());
+
+    await act(async () => {
+      sockets()[0]!.ended(4403);
+      await Promise.resolve();
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["me"] });
+    // No backoff waited: the second socket is already there.
+    expect(sockets()).toHaveLength(2);
+  });
+
+  it("on a 4403 at the handshake, asks /me again and backs off, so a refused scope cannot spin", async () => {
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue(undefined);
+    renderHook(() => useLiveEvents(vi.fn()), { wrapper });
+
+    await act(async () => {
+      sockets()[0]!.ended(4403);
+      await Promise.resolve();
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["me"] });
+    expect(sockets()).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(sockets()).toHaveLength(2);
   });
 });

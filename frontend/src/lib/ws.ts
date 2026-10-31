@@ -23,9 +23,20 @@
 //    With no newer token to be had it backs off like any other close, so an
 //    ended session cannot spin.
 // 4. Any other unplanned close keeps the doubling backoff (2 s, 4 s ... 30 s).
+// 5. THE CHOSEN CLIENT (phase 3 design §1.5) travels as `?client=<id>` -- a
+//    UUID, not a credential, so the query string is the right place for it --
+//    and the socket opens again when the choice changes. A 4403 says the
+//    scope is empty or is no longer the one subscribed: access to that client
+//    went, or a grant changed. The console asks `/me` again, which moves the
+//    top bar back to every client when the client is gone
+//    (`lib/clientScope.tsx`), and reconnects AT ONCE when the refused socket
+//    had been open. One refused at the handshake backs off instead:
+//    reconnecting at once to a scope the server has just refused would loop.
 
-import { useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { accessToken, onTokenRenewed, renewAccessToken } from "./auth";
+import { selectedClient, subscribeClient } from "./clientChoice";
 import { RESYNC_KIND } from "./resync";
 
 export interface UiEvent {
@@ -39,17 +50,23 @@ export interface UiEvent {
 export const SWAP_GRACE_MS = 1000;
 /** The server's close code for a token that is not (or no longer) valid. */
 export const CLOSE_TOKEN_EXPIRED = 4401;
+/** The server's close code for a scope that is empty, or no longer the one subscribed. */
+export const CLOSE_SCOPE_REFUSED = 4403;
 const INITIAL_RETRY_MS = 1000;
 const MAX_RETRY_MS = 30_000;
 
-function liveUrl(): string {
+/** The socket's address: `?client=` names the chosen client, and is absent for every client. */
+export function liveUrl(client: string | null): string {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${scheme}://${window.location.host}/api/v1/ws`;
+  const query = client === null ? "" : `?client=${encodeURIComponent(client)}`;
+  return `${scheme}://${window.location.host}/api/v1/ws${query}`;
 }
 
 export function useLiveEvents(onEvent: (event: UiEvent) => void): void {
   const handler = useRef(onEvent);
   handler.current = onEvent;
+  const queryClient = useQueryClient();
+  const client = useSyncExternalStore(subscribeClient, selectedClient, selectedClient);
 
   useEffect(() => {
     let disposed = false;
@@ -59,6 +76,9 @@ export function useLiveEvents(onEvent: (event: UiEvent) => void): void {
     let pending: WebSocket | null = null;
     // Replaced or abandoned on purpose: their close is planned.
     const retired = new Set<WebSocket>();
+    // Sockets the server accepted: a 4403 on one of these is a scope that
+    // changed under it, not one refused at the handshake.
+    const accepted = new WeakSet<WebSocket>();
     const graceTimers = new Set<ReturnType<typeof setTimeout>>();
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let retryMs = INITIAL_RETRY_MS;
@@ -80,7 +100,7 @@ export function useLiveEvents(onEvent: (event: UiEvent) => void): void {
     // logging-side redaction can reach it. The server requires exactly
     // ["bearer", token] and echoes back "bearer".
     const socketWith = (token: string): WebSocket => {
-      const socket = new WebSocket(liveUrl(), ["bearer", token]);
+      const socket = new WebSocket(liveUrl(client), ["bearer", token]);
       socket.onmessage = (message) => {
         if (socket !== current && !retired.has(socket)) return;
         try {
@@ -105,6 +125,16 @@ export function useLiveEvents(onEvent: (event: UiEvent) => void): void {
       else backoff();
     };
 
+    // A 4403 (point 5): `/me` first. When the chosen client is gone the top
+    // bar falls back to every client and this effect starts over with that
+    // choice, so `disposed` is set by the time the refetch has answered.
+    const rescope = async (wasOpen: boolean) => {
+      await queryClient.invalidateQueries({ queryKey: ["me"] });
+      if (disposed) return;
+      if (wasOpen) connect();
+      else backoff();
+    };
+
     const lost = (socket: WebSocket, token: string, code: number) => {
       // A retired socket's close was planned: forget it, schedule nothing.
       if (retired.delete(socket)) return;
@@ -112,6 +142,7 @@ export function useLiveEvents(onEvent: (event: UiEvent) => void): void {
       current = null;
       gap = true;
       if (code === CLOSE_TOKEN_EXPIRED) void reauthenticate(token);
+      else if (code === CLOSE_SCOPE_REFUSED) void rescope(accepted.has(socket));
       else backoff();
     };
 
@@ -121,7 +152,10 @@ export function useLiveEvents(onEvent: (event: UiEvent) => void): void {
       if (!token || disposed) return;
       const socket = socketWith(token);
       current = socket;
-      socket.onopen = opened;
+      socket.onopen = () => {
+        accepted.add(socket);
+        opened();
+      };
       socket.onclose = (event) => lost(socket, token, event.code);
     };
 
@@ -136,6 +170,7 @@ export function useLiveEvents(onEvent: (event: UiEvent) => void): void {
       pending = next;
       next.onopen = () => {
         if (disposed || pending !== next) return;
+        accepted.add(next);
         pending = null;
         const old = current;
         current = next;
@@ -175,5 +210,7 @@ export function useLiveEvents(onEvent: (event: UiEvent) => void): void {
       pending?.close();
       for (const socket of retired) socket.close();
     };
-  }, []);
+    // A new choice is a new socket: the old one is closed by this cleanup,
+    // with `disposed` set, so its close schedules nothing.
+  }, [client, queryClient]);
 }
