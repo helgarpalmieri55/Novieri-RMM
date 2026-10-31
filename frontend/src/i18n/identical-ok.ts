@@ -30,6 +30,7 @@ export const IDENTICAL_OK: Record<string, string> = {
   "devices.candidates.mac": "\"MAC\" is an acronym (media access control), written the same in Spanish.",
   "devices.suggestions.ip": "\"IP\" is an acronym, written the same in Spanish.",
   "devices.groups.editor.no": "\"No\" is the same word in Spanish.",
+  "devices.groups.editor.parentOfClient": "Only placeholders (the group's name and its client's) and a separator, the same in Spanish.",
   "agentReleases.platform.darwinArm64": "\"Apple silicon\" is Apple's name for its processors, written the same in Spanish.",
   "agentReleases.platform.darwinAmd64": "\"Intel\" is a company name, written the same in Spanish.",
   "agentReleases.managed.intune": "\"Intune\" is a Microsoft product name, written the same in Spanish.",

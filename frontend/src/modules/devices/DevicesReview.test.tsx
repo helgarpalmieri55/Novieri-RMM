@@ -15,12 +15,31 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
-import type { ApiClient, Device, DeviceListParams, DevicePage, Me } from "../../lib/api";
+import type { ApiClient, Device, DeviceListParams, DevicePage, Me, MeClient } from "../../lib/api";
 import { DevicesPage } from "./DevicesPage";
 import { joinedThroughLink, manualRemovalStatus, recordedByLabel } from "./reviewLabels";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 vi.mock("../../lib/ws", () => ({ useLiveEvents: () => undefined }));
 
 function device(overrides: Partial<Device>): Device {

@@ -139,7 +139,9 @@ export const devices: Shape<typeof en> = {
   },
   addAsset: {
     title: "Añadir activo",
-    note: "Un registro sin agente. Todo lo de aquí es opcional.",
+    note: "Un registro sin agente. Solo la sede es obligatoria.",
+    client: "Cliente",
+    site: "Sede",
     name: "Nombre",
     namePlaceholder: "core-sw-01",
     description: "Descripción",
@@ -269,6 +271,7 @@ export const devices: Shape<typeof en> = {
     panelSubtitle: "Una precedencia menor reclama antes un dispositivo.",
     showArchived: "Mostrar archivados",
     colGroup: "Grupo",
+    colClient: "Cliente",
     colPrecedence: "Precedencia",
     colDevices: "Dispositivos",
     colMembership: "Pertenencia",
@@ -357,6 +360,7 @@ export const devices: Shape<typeof en> = {
       precedenceNote: "Gana la menor cuando dos grupos por reglas coinciden con un dispositivo. El nombre solo desempata, así que cambiar el nombre de un grupo no mueve nada.",
       parent: "Grupo superior (opcional)",
       parentEmpty: "Aún no hay otro grupo activo bajo el que anidar este.",
+      parentOfClient: "{group} · {client}",
       parentSub: {
         one: "precedencia {precedence} · {count} dispositivo",
         other: "precedencia {precedence} · {count} dispositivos",
