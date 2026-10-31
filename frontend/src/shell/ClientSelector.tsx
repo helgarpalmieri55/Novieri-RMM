@@ -9,15 +9,25 @@
  * and starts the page again (`lib/clientScope.tsx`).
  *
  * NOT DRAWN when `/me` lists no client: there is nothing to choose between,
- * and a select with one option is furniture.
+ * and a select with one option is furniture. While `/me` is asked again after
+ * a change it stays drawn from the list it had (`useClientScope`).
+ *
+ * FOCUS COMES BACK TO IT after a change it made: starting the page again
+ * unmounts the select that fired `change`, and the one drawn in its place
+ * takes focus once (`./selectorChange`). A change from another tab does not.
+ *
+ * On a handset it heads the drawer instead of the bar (`./handset`).
  *
  * A NATIVE `<select>` in the kit's `.select-field`, the control the filter
  * bars already use: this phase adds the selector, it does not restyle the
  * chrome (project 3 does).
  */
 
+import { useEffect, useRef } from "react";
+
 import { useT } from "../i18n/context";
 import { useClientScope } from "../lib/clientScope";
+import { markSelectorChange, takeSelectorChange } from "./selectorChange";
 
 /** The option standing for every client, the choice `null`. Never a client id. */
 const EVERY_CLIENT = "all";
@@ -25,15 +35,27 @@ const EVERY_CLIENT = "all";
 export function ClientSelector() {
   const t = useT();
   const { selected, select, clients } = useClientScope();
-  if (clients.length === 0) return null;
+  const box = useRef<HTMLSelectElement>(null);
+  const drawn = clients.length > 0;
+  // On the render that first draws it: the mark is taken by a select that
+  // exists, never by a mount that rendered nothing.
+  useEffect(() => {
+    if (drawn && takeSelectorChange()) box.current?.focus();
+  }, [drawn]);
+  if (!drawn) return null;
   const value =
     selected !== null && clients.some((client) => client.id === selected) ? selected : EVERY_CLIENT;
   return (
     <select
+      ref={box}
       className="select-field top-client"
       aria-label={t("shell.clientSelector.label")}
       value={value}
-      onChange={(event) => select(event.target.value === EVERY_CLIENT ? null : event.target.value)}
+      onChange={(event) => {
+        const choice = event.target.value === EVERY_CLIENT ? null : event.target.value;
+        markSelectorChange(choice);
+        select(choice);
+      }}
     >
       <option value={EVERY_CLIENT}>{t("shell.clientSelector.all")}</option>
       {clients.map((client) => (

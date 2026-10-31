@@ -136,9 +136,10 @@ import { PortalTicketDetailPage } from "./modules/portal/PortalTicketDetailPage"
 // (`setup/status`, held with `staleTime: Infinity`) would satisfy the next one
 // without a request ever being made.
 //
-// A change of the top bar's client empties it (`queryClient.clear()`, in
+// A change of the top bar's client empties it (`emptyForNewClient`, in
 // `lib/clientScope.tsx`'s provider, which reaches this same client through
 // `useQueryClient`): nothing read for one client is shown under another.
+// `SetupGate`'s query is the one kept: it names no client.
 export const queryClient = new QueryClient({
   // No retry in fixture mode: a `FixtureMissing` rejects the same way on the
   // second attempt, and the harmony walk should reach the page's error state

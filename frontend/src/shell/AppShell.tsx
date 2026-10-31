@@ -11,7 +11,7 @@
  * application mid-change, not like two applications stapled together.
  */
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 import { useT } from "../i18n/context";
@@ -32,6 +32,7 @@ import {
 import { useHandset } from "./handset";
 import { Icon } from "./icons";
 import { ADD_COMPUTER_TO } from "./nav";
+import { selectorChangePending } from "./selectorChange";
 import { Sidebar } from "./Sidebar";
 import "./shell.css";
 
@@ -233,7 +234,12 @@ export function AppShell({
   // rail IS persisted, because that is a standing preference about density
   // rather than a transient state -- the audit filed the missing persistence
   // against the collapse button, not against this.
-  const [navOpen, setNavOpen] = useState(false);
+  //
+  // ONE EXCEPTION: a client chosen in the drawer starts the shell again
+  // (`lib/clientScope.tsx`), and this new shell opens with it still open, the
+  // new selector focused in it (`./selectorChange`). Shutting a menu because
+  // a setting in it changed is a change of context (SC 3.2.2).
+  const [navOpen, setNavOpen] = useState(() => handset && selectorChangePending());
   const [paletteOpen, setPaletteOpen] = useState(false);
   /**
    * WHAT `/` INTERRUPTED, so Escape can put the operator back on it.
@@ -314,7 +320,11 @@ export function AppShell({
   }, [title]);
 
   // A navigation is the drawer's whole purpose, so completing one closes it.
+  // A navigation, not a mount: the drawer a change of client reopens stays open.
+  const drawerPath = useRef(location.pathname);
   useEffect(() => {
+    if (drawerPath.current === location.pathname) return;
+    drawerPath.current = location.pathname;
     setNavOpen(false);
   }, [location.pathname]);
 
@@ -374,7 +384,11 @@ export function AppShell({
 
   // `body.nav-open` is what the stylesheet keys the slide-in and the scroll
   // lock off, matching how the design already drives `body.sidebar-collapsed`.
-  useEffect(() => {
+  // A LAYOUT EFFECT, so the class is on before any passive effect runs: the
+  // selector's (a child's, so first) focuses a select inside this drawer, and
+  // focus does not land in `visibility: hidden`. It also means a shell started
+  // again with the drawer open never paints it shut in between.
+  useLayoutEffect(() => {
     document.body.classList.toggle("nav-open", navOpen);
     return () => document.body.classList.remove("nav-open");
   }, [navOpen]);
