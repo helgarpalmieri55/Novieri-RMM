@@ -2,10 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ApiClient } from "../../../lib/api";
+import type { ApiClient, MeClient } from "../../../lib/api";
 import { ApiError } from "../../../lib/api";
+import { ClientNotChosen } from "../../../lib/clientSelection";
 import { PushAuthorizationsPage } from "../PushAuthorizationsPage";
 import { PushCredentialScopesPage } from "../PushCredentialScopesPage";
 import { PUSH_PLATFORMS } from "../PushReadiness";
@@ -25,6 +26,25 @@ import type { HostKeyOut, PushAuthorizationOut, PushCredentialScopeOut } from ".
 
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 const SCOPE_MANAGE = "agent.push.scope.manage";
 const CREDENTIALS_READ = "credentials.read";
@@ -263,10 +283,9 @@ describe("PushAuthorizationsPage", () => {
     expect(document.body.textContent).toMatch(/wide authorization/i);
   });
 
-  it("authorizes the prefix in the internal client", async () => {
-    // A prefix is one client's network (MSP clients phase 2, Task 12). Until
-    // the client selector exists the grant is the internal client's, whose id
-    // is `/me`'s `org_id`.
+  it("authorizes the prefix in the client chosen at the top", async () => {
+    // A prefix is one client's network (MSP clients phase 2, Task 12). The
+    // grant is the client chosen at the top's: here the internal one, `o1`.
     const createPushAuthorization = vi.fn().mockResolvedValue(grant());
     stubApi({ createPushAuthorization });
     renderWithProviders(<PushAuthorizationsPage />);
@@ -285,12 +304,14 @@ describe("PushAuthorizationsPage", () => {
 
   it("sends no grant before its client is known", async () => {
     const createPushAuthorization = vi.fn().mockResolvedValue(grant());
-    stubApi({ createPushAuthorization, me: vi.fn().mockResolvedValue({ permissions: [SCOPE_MANAGE] }) });
+    // `/me` has not answered: the selector cannot say whose the grant is yet.
+    mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
+    stubApi({ createPushAuthorization });
     renderWithProviders(<PushAuthorizationsPage />);
     const field = await screen.findByPlaceholderText("10.4.7.0/24");
     await userEvent.type(field, "10.4.7.0/24");
     await userEvent.click(screen.getByRole("button", { name: "Authorize" }));
-    expect(await screen.findByText(/cannot tell which client this is for\. Nothing was sent/)).toBeTruthy();
+    expect(await screen.findByText(new ClientNotChosen().message)).toBeTruthy();
     expect(createPushAuthorization).not.toHaveBeenCalled();
   });
 
