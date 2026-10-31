@@ -1,6 +1,7 @@
 // Typed API client mirroring backend/app/api/v1 response models.
 
 import { getLanguage } from "../i18n/core";
+import { isGlobalRoute } from "./globalRoutes";
 import type {
   DashboardLayoutResponse,
   WidgetPlacement,
@@ -764,12 +765,55 @@ export interface Job {
   logs?: JobLogEntry[] | null;
 }
 
+/**
+ * One client the signed-in person holds any role in (`GET /me`'s `clients`,
+ * phase 3 design §1.3), archived ones left out. Mirrors
+ * `backend/app/api/v1/me.py::MeClient`. Not narrowed by `X-Client-Id`: it is
+ * what the top bar's selector offers and what a new row's Client field
+ * filters (`lib/clientSelection.ts`). It is the person's own data, so it needs
+ * no `clients.read`.
+ */
+export interface MeClient {
+  id: string;
+  name: string;
+  kind: "customer" | "internal" | "unassigned";
+  /** Optional modules on for this client: `budget`, `bcp`, `change`. */
+  enabled_modules: string[];
+  /** The codes the person holds IN THIS CLIENT, sorted. */
+  permissions: string[];
+}
+
 export interface Me {
   user_id: string;
   org_id: string;
   email: string;
   display_name: string;
+  /**
+   * The codes the person holds in AT LEAST ONE client of the request's scope
+   * -- their clients, narrowed by `X-Client-Id` when one is chosen (phase 3
+   * design §1.3, `require_permission`'s rule). What the menu and the pages
+   * render from.
+   */
   permissions: string[];
+  /**
+   * The person's clients, archived ones left out, each with the codes held
+   * there (phase 3 design §1.3). Not narrowed by `X-Client-Id`.
+   *
+   * OPTIONAL for the reason the profile fields below are: an API older than
+   * phase 3 does not send it, and ~90 `Me` literals in the tests would
+   * otherwise need it. Read as `?? []`.
+   */
+  clients?: MeClient[];
+  /**
+   * The codes held on EVERY client (`require_permission_on_every_client`'s
+   * rule), not narrowed by `X-Client-Id`: what a screen of configuration every
+   * client shares offers its writes on (phase 3 design §2).
+   *
+   * OPTIONAL like `clients`. Absent, `permissions` IS this set -- before phase
+   * 3, `/me` returned only the codes held on every client -- and
+   * `useEverywherePermissions` reads it so.
+   */
+  permissions_everywhere?: string[];
   /**
    * The role names the caller holds, sorted (`GET /me`).
    *
@@ -1485,17 +1529,57 @@ export interface DeviceGroupMemberResult {
 }
 
 /**
- * The one place request headers are built: bearer and language.
+ * Where a request goes, for the one thing `requestHeaders` decides beyond the
+ * bearer and the language: whether it carries `X-Client-Id`.
+ */
+export interface RequestRoute {
+  /** `GET`, `POST`, … */
+  method: string;
+  /** Relative to `/api/v1`. A query string is ignored. */
+  path: string;
+  /** The client chosen in the top bar, or `null` for every client. */
+  client: string | null;
+  /**
+   * Global BY ITS BODY, which `globalRoutes.json` cannot see: it lists methods
+   * and paths, never bodies. `POST /mcp/connections/{client_id}/revoke` is the
+   * person's own with `scope: "me"`, and withdraws the app from the whole
+   * organization with `scope: "everyone"` -- refused narrowed (403
+   * ALL_CLIENTS_REQUIRED, `backend/tests/test_global_writes.py`). `true` never
+   * carries `X-Client-Id`; set only by the `ApiClient` method that knows what
+   * its body says (`request()`'s `global`).
+   */
+  global?: boolean;
+}
+
+/**
+ * The one place request headers are built: bearer, language and client.
  *
  * EVERY fetch in the console goes through this, including the raw ones that
  * bypass `request()` for binary bodies. A path that builds its own `Headers`
  * sends no `Accept-Language`, so the server answers it in English whatever the
  * person chose; `api.language.test.ts` fails the build on such a path.
+ *
+ * `X-Client-Id` (phase 3 design §1.2) names the client chosen in the top bar,
+ * EXCEPT on a route of global configuration (`globalRoutes.json`, generated
+ * from `backend/tests/test_global_writes.py`): narrowed, those answer 403.
+ * Decided here or nowhere: whatever a caller put in `extra` is dropped first,
+ * because a second copy is a 400 and one on a global route a 403.
+ * `api.clientScope.test.ts` fails the build on an `ApiClient` call that does
+ * not say where it goes.
  */
-export function requestHeaders(token: string | null | undefined, extra?: HeadersInit): Headers {
+export function requestHeaders(
+  token: string | null | undefined,
+  extra?: HeadersInit,
+  route?: RequestRoute,
+): Headers {
   const headers = new Headers(extra);
   if (token) headers.set("Authorization", `Bearer ${token}`);
   headers.set("Accept-Language", getLanguage());
+  headers.delete("X-Client-Id");
+  if (route?.client && route.global !== true) {
+    const path = route.path.split("?")[0] ?? route.path;
+    if (!isGlobalRoute(route.method, path)) headers.set("X-Client-Id", route.client);
+  }
   return headers;
 }
 
@@ -1504,10 +1588,30 @@ export class ApiClient {
     private readonly getToken: () => string | null,
     private readonly onUnauthorized: () => void,
     private readonly base: string = "/api/v1",
+    /**
+     * The client chosen in the top bar (`lib/clientChoice.ts`), read on EVERY
+     * request: a choice made after this client was built still reaches the
+     * next request. `null` is every client. The default sends no header,
+     * which is what a test or a caller with no selector wants.
+     */
+    private readonly getClient: () => string | null = () => null,
   ) {}
 
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const headers = requestHeaders(this.getToken(), init.headers);
+  /**
+   * What `requestHeaders` needs to know about one request to this API.
+   * `global` is a request global by its body (`RequestRoute.global`); a
+   * request global by its path needs nothing here, `globalRoutes.json` says so.
+   */
+  private route(method: string | undefined, path: string, global = false): RequestRoute {
+    return { method: (method ?? "GET").toUpperCase(), path, client: this.getClient(), global };
+  }
+
+  private async request<T>(
+    path: string,
+    init: RequestInit = {},
+    { global = false }: { global?: boolean } = {},
+  ): Promise<T> {
+    const headers = requestHeaders(this.getToken(), init.headers, this.route(init.method, path, global));
     headers.set("Content-Type", "application/json");
     const response = await fetch(`${this.base}${path}`, { ...init, headers });
     if (response.status === 401) {
@@ -2055,7 +2159,7 @@ export class ApiClient {
    * which is precisely what the anchors this replaces produced.
    */
   private async fetchFile(path: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", path));
     const response = await fetch(`${this.base}${path}`, { headers });
     if (response.status === 401) {
       this.onUnauthorized();
@@ -2244,7 +2348,7 @@ export class ApiClient {
   // a sentence that cannot be formed against this route (§0.5). It is set
   // only so proxies do not attempt a transformation on the body.
   async uploadDocumentVersion(id: string, file: File): Promise<DocDocumentVersion> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/docs/documents/${id}/versions`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(
       `${this.base}/docs/documents/${id}/versions?filename=${encodeURIComponent(file.name)}`,
@@ -2274,7 +2378,7 @@ export class ApiClient {
   // opening the viewer writes `docs.document_downloaded` exactly as saving the
   // file does. Nothing in this console may imply otherwise.
   async downloadDocumentVersion(id: string, version: number): Promise<Blob> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/docs/documents/${id}/versions/${version}/content`));
     const response = await fetch(
       `${this.base}/docs/documents/${id}/versions/${version}/content`,
       { headers },
@@ -2496,7 +2600,7 @@ export class ApiClient {
   // Streams the raw recording bytes; not routed through `request` since the
   // body is binary, not JSON. Never cached in query state as text.
   async getRemoteRecording(id: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/remote/sessions/${id}/recording`));
     const response = await fetch(`${this.base}/remote/sessions/${id}/recording`, { headers });
     if (response.status === 401) {
       this.onUnauthorized();
@@ -2749,7 +2853,7 @@ export class ApiClient {
   // Streams the CSV export; not routed through `request` since the body is
   // text/csv, not JSON. Mirrors getRemoteRecording's binary-download pattern.
   async exportPatchReport(): Promise<Blob> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", "/patch/report/export"));
     const response = await fetch(`${this.base}/patch/report/export`, { headers });
     if (response.status === 401) {
       this.onUnauthorized();
@@ -2778,7 +2882,7 @@ export class ApiClient {
   // Content-Type handling, mirroring getRemoteRecording's binary pattern but
   // for an upload instead of a download.
   async uploadPackageArtifact(packageId: string, file: File): Promise<Package> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/deploy/packages/${packageId}/artifact`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(`${this.base}/deploy/packages/${packageId}/artifact`, {
       method: "POST",
@@ -3166,7 +3270,7 @@ export class ApiClient {
   // digest of what it stored, which is what a release signature is compared
   // against before it is sent.
   async uploadAgentReleaseArtifact(releaseId: string, file: Blob): Promise<AgentRelease> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/agent/releases/${releaseId}/artifact`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(`${this.base}/agent/releases/${releaseId}/artifact`, {
       method: "POST",
@@ -3326,7 +3430,7 @@ export class ApiClient {
     siteId: string,
     body: { code: string; arch: MsiArch },
   ): Promise<InstallLinkMsi> {
-    const headers = requestHeaders(this.getToken(), { "Content-Type": "application/json" });
+    const headers = requestHeaders(this.getToken(), { "Content-Type": "application/json" }, this.route("POST", `/sites/${siteId}/install-link/msi`));
     const response = await fetch(`${this.base}/sites/${siteId}/install-link/msi`, {
       method: "POST",
       headers,
@@ -3991,7 +4095,7 @@ export class ApiClient {
   // uploadPackageArtifact's binary-upload pattern. `filename` is a query
   // parameter, sanitized server-side before it ever reaches the object key.
   async uploadExpenseAttachment(id: string, file: File): Promise<ExpenseOut> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/budget/expenses/${id}/attachment`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(
       `${this.base}/budget/expenses/${id}/attachment?filename=${encodeURIComponent(file.name)}`,
@@ -4011,7 +4115,7 @@ export class ApiClient {
   // body is binary, not JSON. Mirrors getRemoteRecording's binary-download
   // pattern.
   async downloadExpenseAttachment(id: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/budget/expenses/${id}/attachment`));
     const response = await fetch(`${this.base}/budget/expenses/${id}/attachment`, { headers });
     if (response.status === 401) {
       this.onUnauthorized();
@@ -4208,7 +4312,7 @@ export class ApiClient {
   // `uploadExpenseAttachment`'s binary-upload pattern. `filename` is a query
   // parameter, sanitized server-side before it ever reaches the object key.
   async uploadTicketAttachment(id: string, file: File): Promise<AttachmentOut> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/service-desk/tickets/${id}/attachments`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(
       `${this.base}/service-desk/tickets/${id}/attachments?filename=${encodeURIComponent(file.name)}`,
@@ -4229,7 +4333,7 @@ export class ApiClient {
   // Note the route is keyed by ATTACHMENT id, not ticket id (api.py's
   // `GET /service-desk/attachments/{attachment_id}`).
   async downloadTicketAttachment(attachmentId: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/service-desk/attachments/${attachmentId}`));
     const response = await fetch(`${this.base}/service-desk/attachments/${attachmentId}`, {
       headers,
     });
@@ -4497,7 +4601,7 @@ export class ApiClient {
   // is a query parameter, sanitized server-side before it ever reaches the
   // object key.
   async uploadPortalAttachment(id: string, file: File): Promise<PortalAttachmentOut> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/portal/tickets/${id}/attachments`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(
       `${this.base}/portal/tickets/${id}/attachments?filename=${encodeURIComponent(file.name)}`,
@@ -4521,7 +4625,7 @@ export class ApiClient {
   // ownership check is scoped through the ticket (module docstring:
   // `_load_my_ticket_row`).
   async downloadPortalAttachment(ticketId: string, attachmentId: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/portal/tickets/${ticketId}/attachments/${attachmentId}`));
     const response = await fetch(
       `${this.base}/portal/tickets/${ticketId}/attachments/${attachmentId}`,
       { headers },
@@ -5141,7 +5245,7 @@ export class ApiClient {
   // as multipart: this codebase has no multipart parser and the shipped route
   // takes raw bytes, mirroring uploadExpenseAttachment's pattern.
   private async ipamImportRequest<T>(path: string, file: File): Promise<T> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", path));
     headers.set("Content-Type", "text/csv");
     const response = await fetch(`${this.base}${path}`, { method: "POST", headers, body: file });
     if (response.status === 401) {
@@ -5182,7 +5286,7 @@ export class ApiClient {
   // text/csv, not JSON — bypasses `request<T>` for the same reason the binary
   // downloads above do.
   private async ipamCsv(path: string): Promise<string> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", path));
     const response = await fetch(`${this.base}${path}`, { headers });
     if (response.status === 401) {
       this.onUnauthorized();
@@ -5240,12 +5344,18 @@ export class ApiClient {
    * Revoke an AI app for the caller or for the whole organization. The client
    * id is whatever the app registered, so it is encoded as ONE path segment:
    * a `/` or `?` in it must never become path or query.
+   *
+   * FOR EVERYONE IT IS GLOBAL, BY ITS BODY (phase 3 design §1.2): the server
+   * refuses `scope: "everyone"` narrowed by `X-Client-Id` (403
+   * ALL_CLIENTS_REQUIRED), and `globalRoutes.json` cannot tell the two scopes
+   * apart, so this request says it. `scope: "me"` is narrowed like any other.
    */
   revokeMcpConnection(clientId: string, scope: McpRevokeScope): Promise<McpRevokeOut> {
-    return this.request<McpRevokeOut>(`/mcp/connections/${encodeURIComponent(clientId)}/revoke`, {
-      method: "POST",
-      body: JSON.stringify({ scope }),
-    });
+    return this.request<McpRevokeOut>(
+      `/mcp/connections/${encodeURIComponent(clientId)}/revoke`,
+      { method: "POST", body: JSON.stringify({ scope }) },
+      { global: scope === "everyone" },
+    );
   }
 
   getAiSettings(): Promise<AiSettingsOut> {
@@ -5367,7 +5477,7 @@ export class ApiClient {
   // bare `<a href>` to the export path would send no bearer token at all and
   // land on a 401, which is why this is a fetch and not a link.
   async exportReport(key: string, params: ReportParams = {}): Promise<Blob> {
-    const headers = requestHeaders(this.getToken());
+    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/reports/${key}/export.csv`));
     const query = new URLSearchParams(params).toString();
     const response = await fetch(
       `${this.base}/reports/${key}/export.csv${query ? `?${query}` : ""}`,
