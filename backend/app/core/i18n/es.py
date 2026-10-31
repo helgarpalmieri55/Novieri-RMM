@@ -1877,9 +1877,13 @@ CATALOG: dict[str, str] = {
         "un perfil de estado puede contener como máximo {max_checks_per_profile} "
         "comprobaciones (especificación 0.11); se recibieron {count}"
     ),
-    "an assignment names a device OR a group OR neither (the org default), never both": (
-        "una asignación nombra un dispositivo O un grupo O ninguno (el valor predeterminado de "
-        "la organización), nunca ambos"
+    "an assignment names a device, a group, a client or none of them (the org default), "
+    "never more than one": (
+        "una asignación nombra un dispositivo, un grupo, un cliente o ninguno (el valor "
+        "predeterminado de la organización), nunca más de uno"
+    ),
+    "a health profile cannot be assigned to Unassigned": (
+        "un perfil de estado no se puede asignar a «Sin asignar»"
     ),
     "a {level}-level health profile assignment already exists here: assignment "
     "{existing_id} points at profile {existing_profile_id}": (

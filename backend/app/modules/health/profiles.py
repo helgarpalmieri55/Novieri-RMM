@@ -76,11 +76,12 @@ from sqlalchemy.sql import text
 from app.core.approved_actions import ApprovedAction
 from app.core.audit import audit_service
 from app.core.global_rows import refuse_if_still_readable, refuse_unless_every_client
-from app.core.i18n import tr
+from app.core.i18n import N_, tr
 from app.modules.health.alerts import clear_alert
 from app.modules.health.errors import (
     HealthConflictError,
     HealthNotFoundError,
+    HealthUnprocessableError,
     HealthValidationError,
 )
 from app.modules.health.models import (
@@ -101,6 +102,7 @@ from app.modules.health.registry import (
 )
 from app.modules.health.resolution import resolve_profile_for_device
 from app.modules.health.settings import get_settings
+from app.services.client_sites import ClientRefusesNewRow, named_client_for_new_rows
 
 __all__ = [
     "PROFILE_EDITABLE_FIELDS",
@@ -156,7 +158,13 @@ _ASSIGNMENT_INDEX_BY_LEVEL: dict[str, tuple[str, list[str], str]] = {
         "device_group_id IS NOT NULL",
     ),
     # The default: global (the org's), and per client under NULLS NOT DISTINCT
-    # (migration 0231, Task 8b) -- the org's default conflicts with the org's.
+    # (migration 0231, Task 8b) -- the org's default conflicts with the org's,
+    # a client's with that client's. ONE index serves both levels.
+    "client": (
+        "uq_health_assignment_client_org",
+        ["org_id", "client_id"],
+        "device_id IS NULL AND device_group_id IS NULL",
+    ),
     "org": (
         "uq_health_assignment_client_org",
         ["org_id", "client_id"],
@@ -1348,6 +1356,30 @@ async def _reject_cross_org_target(
             )
 
 
+async def _client_for_default(session: AsyncSession, org_id: UUID, client_id: UUID) -> None:
+    """The client a default is filed under, read FOR SHARE as the write's
+    FIRST lock, before the audit chain's (`app.services.client_sites`).
+
+    THIS IS THE RECORD CHECK (phase 3 design §5.1): the session is the one
+    `require_permission("health.admin")` narrowed to the clients where the
+    person holds that code, intersected with X-Client-Id -- so a client where
+    they do not hold it is not visible here, and is the 404 an unknown one
+    gets. Archived is a 409 and Unassigned a 422, as for every module."""
+    try:
+        await named_client_for_new_rows(
+            session,
+            org_id=org_id,
+            client_id=client_id,
+            unassigned=N_("a health profile cannot be assigned to Unassigned"),
+        )
+    except ClientRefusesNewRow as exc:
+        if exc.status_code == 404:
+            raise HealthNotFoundError(exc.detail) from None
+        if exc.status_code == 409:
+            raise HealthConflictError(exc.detail) from None
+        raise HealthUnprocessableError(exc.detail) from None
+
+
 async def create_assignment(
     session: AsyncSession,
     org_id: UUID,
@@ -1356,6 +1388,7 @@ async def create_assignment(
     profile_id: UUID,
     device_id: UUID | None = None,
     device_group_id: UUID | None = None,
+    client_id: UUID | None = None,
 ) -> HealthProfileAssignment:
     """`ON CONFLICT DO NOTHING` + `RETURNING id` against the ONE partial index
     matching this assignment's resolution level -- not check-then-insert. The
@@ -1365,12 +1398,22 @@ async def create_assignment(
     `index_elements=` + `index_where=`, never `ON CONFLICT ON CONSTRAINT`: these
     are plain partial unique INDEXES with no `pg_constraint` row, so naming them
     as a constraint fails at runtime with `InvalidObjectDefinition`.
+
+    `client_id` alone is THAT CLIENT'S DEFAULT (phase 3 design §5.1): served to
+    its machines before the org's, after their device's and group's. It names
+    nothing else -- a device's or a group's row takes its parent's client from
+    the 0231 triggers.
     """
-    if device_id is not None and device_group_id is not None:
+    if sum(target is not None for target in (device_id, device_group_id, client_id)) > 1:
         raise HealthValidationError(
-            tr("an assignment names a device OR a group OR neither (the org default), never both")
+            tr(
+                "an assignment names a device, a group, a client or none of them (the org "
+                "default), never more than one"
+            )
         )
-    if device_id is None and device_group_id is None:
+    if client_id is not None:
+        await _client_for_default(session, org_id, client_id)
+    elif device_id is None and device_group_id is None:
         # The org default has no parent, so no client: a global row, written by
         # the bulk INSERT below that `app.core.global_rows`'s flush guard never
         # sees. Refused before anything is read, as `require_all_clients` is.
@@ -1380,7 +1423,12 @@ async def create_assignment(
         session, org_id, device_id=device_id, device_group_id=device_group_id
     )
 
-    level = "device" if device_id else ("group" if device_group_id else "org")
+    if device_id is not None:
+        level = "device"
+    elif device_group_id is not None:
+        level = "group"
+    else:
+        level = "client" if client_id is not None else "org"
     _, index_elements, index_where = _ASSIGNMENT_INDEX_BY_LEVEL[level]
 
     inserted_id = (
@@ -1391,6 +1439,7 @@ async def create_assignment(
                 profile_id=profile_id,
                 device_id=device_id,
                 device_group_id=device_group_id,
+                client_id=client_id,
                 created_by=actor_id,
                 created_at=_utcnow(),
             )
@@ -1403,7 +1452,11 @@ async def create_assignment(
 
     if inserted_id is None:
         existing = await _assignment_at_level(
-            session, org_id, device_id=device_id, device_group_id=device_group_id
+            session,
+            org_id,
+            device_id=device_id,
+            device_group_id=device_group_id,
+            client_id=client_id,
         )
         raise HealthValidationError(
             tr(
@@ -1443,14 +1496,21 @@ async def create_assignment(
             "profile_id": str(profile_id),
             "device_id": str(device_id) if device_id else None,
             "device_group_id": str(device_group_id) if device_group_id else None,
+            "client_id": str(row.client_id) if row.client_id else None,
             "level": level,
         },
+        client_id=row.client_id,
     )
     return row
 
 
 async def _assignment_at_level(
-    session: AsyncSession, org_id: UUID, *, device_id: UUID | None, device_group_id: UUID | None
+    session: AsyncSession,
+    org_id: UUID,
+    *,
+    device_id: UUID | None,
+    device_group_id: UUID | None,
+    client_id: UUID | None = None,
 ) -> HealthProfileAssignment | None:
     query = select(HealthProfileAssignment).where(HealthProfileAssignment.org_id == org_id)
     if device_id is not None:
@@ -1458,11 +1518,17 @@ async def _assignment_at_level(
     elif device_group_id is not None:
         query = query.where(HealthProfileAssignment.device_group_id == device_group_id)
     else:
-        # The org's default, the global row (a client's has its own key).
+        # A default: the client's own (`client_id`), or the org's -- the
+        # global row, with no client.
+        same_client = (
+            HealthProfileAssignment.client_id.is_(None)
+            if client_id is None
+            else HealthProfileAssignment.client_id == client_id
+        )
         query = query.where(
             HealthProfileAssignment.device_id.is_(None),
             HealthProfileAssignment.device_group_id.is_(None),
-            HealthProfileAssignment.client_id.is_(None),
+            same_client,
         )
     return (await session.execute(query)).scalar_one_or_none()
 
@@ -1484,6 +1550,7 @@ async def delete_assignment(
                 HealthProfileAssignment.profile_id,
                 HealthProfileAssignment.device_id,
                 HealthProfileAssignment.device_group_id,
+                HealthProfileAssignment.client_id,
             )
         )
     ).one_or_none()
@@ -1520,7 +1587,9 @@ async def delete_assignment(
             "device_group_id": (
                 str(deleted.device_group_id) if deleted.device_group_id else None
             ),
+            "client_id": str(deleted.client_id) if deleted.client_id else None,
         },
+        client_id=deleted.client_id,
     )
 
 
@@ -1553,7 +1622,11 @@ async def _audit(
     target_type: str,
     target_id: UUID,
     metadata: dict[str, Any],
+    *,
+    client_id: UUID | None = None,
 ) -> None:
+    """`client_id` is the row's client when it has one -- an assignment's --
+    and None for a profile or a check, which belong to every client."""
     await audit_service.record(
         session,
         org_id=org_id,
@@ -1563,5 +1636,6 @@ async def _audit(
         target_type=target_type,
         target_id=str(target_id),
         metadata=metadata,
+        client_id=client_id,
     )
     await session.flush()

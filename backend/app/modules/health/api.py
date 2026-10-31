@@ -180,6 +180,7 @@ from app.modules.health.errors import (
     HealthConflictError,
     HealthForbiddenError,
     HealthNotFoundError,
+    HealthUnprocessableError,
     HealthValidationError,
 )
 from app.modules.health.jobtypes import CHECK_NOW_JOB_TYPE
@@ -209,7 +210,7 @@ from app.modules.health.profiles import (
     update_profile,
 )
 from app.modules.health.registry import CHECK_TYPES, render_threshold
-from app.modules.health.resolution import resolve_profile_for_device
+from app.modules.health.resolution import assignment_level, resolve_profile_for_device
 from app.modules.health.schema import (
     AlertActionOut,
     AlertDetailOut,
@@ -260,6 +261,10 @@ def _http_error(exc: HealthValidationError) -> HTTPException:
     IntegrityError"). Both are subclasses of `HealthValidationError`, so the
     order of these two checks is load-bearing.
 
+    `HealthUnprocessableError` is 422: the request names a client that exists
+    and is visible but takes no default (Unassigned), the answer every module
+    gives through `client_sites.named_client_for_new_rows`.
+
     `HealthForbiddenError` is 403, and it is the one deliberate exception to
     "NOT-MINE IS 404" above -- because it is not about not-mine. It is raised
     only after the alert AND the approved action have both resolved in the
@@ -273,6 +278,8 @@ def _http_error(exc: HealthValidationError) -> HTTPException:
         return HTTPException(status.HTTP_403_FORBIDDEN, str(exc))
     if isinstance(exc, HealthConflictError):
         return HTTPException(status.HTTP_409_CONFLICT, str(exc))
+    if isinstance(exc, HealthUnprocessableError):
+        return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
     return HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
 
@@ -379,14 +386,14 @@ def _check_out(check: HealthCheck, profile: HealthProfile) -> CheckOut:
 
 
 def _assignment_out(row: HealthProfileAssignment, profile_name: str) -> AssignmentOut:
-    level = "device" if row.device_id else ("group" if row.device_group_id else "org")
     return AssignmentOut(
         id=row.id,
         profile_id=row.profile_id,
         profile_name=profile_name,
         device_id=row.device_id,
         device_group_id=row.device_group_id,
-        level=level,
+        client_id=row.client_id,
+        level=assignment_level(row),
         created_by=row.created_by,
         created_at=row.created_at,
     )
@@ -850,7 +857,13 @@ async def create_assignment_route(
     """One assignment per resolution level, enforced by three PARTIAL unique
     indexes (§0.2) -- NULLs do not collide in a plain unique constraint, so
     without them "which of these two applies" would be a tiebreak nobody
-    chose."""
+    chose.
+
+    A CLIENT'S DEFAULT (`client_id`, phase 3 design §5.1) needs `health.admin`
+    IN THAT CLIENT. The gate above already narrowed `ctx.clients` to the
+    clients where the person holds it (and to X-Client-Id), and
+    `create_assignment` reads the client in that session: any other client is
+    the 404 an unknown one gets."""
     envelopes: list[Envelope] = []
     try:
         async with org_session(
@@ -863,6 +876,7 @@ async def create_assignment_route(
                 profile_id=body.profile_id,
                 device_id=body.device_id,
                 device_group_id=body.device_group_id,
+                client_id=body.client_id,
             )
             profile = await get_profile(session, ctx.org_id, row.profile_id)
             out = _assignment_out(row, profile.name)
