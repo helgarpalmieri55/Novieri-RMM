@@ -232,3 +232,32 @@ describe("where the root lands", () => {
     expect(await screen.findByTestId("where")).toHaveTextContent("/portal");
   });
 });
+
+describe("the top bar's client selector (phase 3 design §1.1)", () => {
+  it("is drawn from /me's clients", async () => {
+    const api = fakeApi(OPERATOR);
+    api.me = vi.fn().mockResolvedValue({
+      user_id: "u1",
+      display_name: "Ada",
+      email: "ada@example.test",
+      org_id: "org-1",
+      roles: [],
+      permissions: OPERATOR,
+      clients: [
+        { id: "org-1", name: "Toeshee", kind: "internal", enabled_modules: [], permissions: OPERATOR },
+      ],
+    });
+    apiRef.current = api;
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={["/devices"]}>
+          <Shell>
+            <Where />
+          </Shell>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const selector = await screen.findByRole("combobox", { name: "Client" });
+    expect(within(selector).getByRole("option", { name: "Toeshee" })).toBeInTheDocument();
+  });
+});

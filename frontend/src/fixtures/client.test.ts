@@ -87,6 +87,16 @@ describe("fixtureRegistry", () => {
     expect(held).toContain("ai.use");
     expect(held).toContain("platform.status.read");
   });
+
+  it("signs the fixture session in on every client, listing the clients the settings fixtures list", async () => {
+    const me = await fixtureClient().me();
+    expect(me.permissions_everywhere).toEqual(me.permissions);
+    expect((me.clients ?? []).map((client) => [client.id, client.kind])).toEqual([
+      ["org-toeshee", "internal"],
+      ["cli-logistics", "customer"],
+      ["cli-unassigned", "unassigned"],
+    ]);
+  });
 });
 
 describe("FIXTURE_MODE", () => {

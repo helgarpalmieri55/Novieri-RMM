@@ -147,6 +147,26 @@ describe("AppShell", () => {
     expect(document.title).toBe("Devices & Inventory · ITMS");
   });
 
+  it("draws the client selector first in the top bar's cluster (phase 3 design §1.1)", () => {
+    render(
+      <MemoryRouter>
+        <AppShell
+          permissions={["devices.read", "health.read"]}
+          orgName="Operations"
+          title="Devices"
+          user={{ name: "A B", role: "Operator" }}
+          onSignOut={vi.fn()}
+          clientSelector={<span data-testid="client-selector" />}
+        >
+          <p>x</p>
+        </AppShell>
+      </MemoryRouter>,
+    );
+    expect(document.querySelector(".top-actions")?.firstElementChild).toBe(
+      screen.getByTestId("client-selector"),
+    );
+  });
+
   it("shows an operator only the links their permissions reach", () => {
     renderShell(["devices.read", "patch.read"]);
     expect(sidebar().getByRole("link", { name: /Patching/ })).toBeInTheDocument();

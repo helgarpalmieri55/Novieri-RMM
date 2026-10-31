@@ -71,6 +71,13 @@ export interface AppShellProps {
   searchHint?: string;
   /** Omitted when the operator lacks `ai.use`; the ask row then never renders. */
   onAsk?: (question: string) => void;
+  /**
+   * The top bar's client selector (phase 3 design §1.1), drawn first in the
+   * cluster. A SLOT, NOT A COMPONENT THE SHELL RENDERS ITSELF: the selector
+   * reads `/me` through the query client, and this shell also renders where
+   * there is none -- its own tests and `/__preview`.
+   */
+  clientSelector?: ReactNode;
   children: ReactNode;
 }
 
@@ -210,6 +217,7 @@ export function AppShell({
   searchPlaceholder,
   searchHint,
   onAsk,
+  clientSelector,
   children,
 }: AppShellProps) {
   const t = useT();
@@ -483,6 +491,10 @@ export function AppShell({
               Each is gated on the permission its destination requires, so the
               cluster never offers a technician a 403. */}
           <div className="top-actions">
+            {/* THE CLIENT EVERYTHING IN THIS CLUSTER, AND ON THE PAGE, IS FOR
+                (phase 3 design §1.1): first, because it is the context of the
+                rest -- "Add a computer" included. */}
+            {clientSelector}
             {/* THE FIRST THING ANYONE DOES WITH THIS PRODUCT, on every route.
 
                 ONE "ADD A COMPUTER" ENTRY. The review (2026-09-23) counted six
