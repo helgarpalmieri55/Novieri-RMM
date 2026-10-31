@@ -79,6 +79,7 @@ export const licenses: Shape<typeof en> = {
   },
   list: {
     title: "Licencias",
+    colClient: "Cliente",
     description: "El registro de licencias: derechos de uso, costo y renovación.",
     newLicense: "Nueva licencia",
     tileOver: "Productos excedidos",
@@ -106,6 +107,7 @@ export const licenses: Shape<typeof en> = {
   },
   new: {
     title: "Nueva licencia",
+    client: "Cliente",
     product: "Producto",
     vendor: "Proveedor (opcional)",
     searchVendors: "Busca proveedores…",

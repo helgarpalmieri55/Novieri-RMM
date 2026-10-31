@@ -1,15 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { ClientField } from "../../components/ClientField";
 import { Form, FormActions, attemptProblems } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
 import { EntityPicker } from "../../components/picker";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
-import type { Me } from "../../lib/api";
-import { useApi } from "../../lib/ApiContext";
-import { internalClientId, requireKnown } from "../../lib/internalClient";
+import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
 import {
   useCreatePlanMutation,
   useProcedureArticles,
@@ -143,12 +141,17 @@ export function PlanEditor({
   onClose: () => void;
 }) {
   const t = useT();
-  const api = useApi();
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  // A plan is one client's (MSP clients phase 2), and that client must use
+  // continuity. An edit keeps its own; a new one is the client chosen at the
+  // top, or with every client the form's Client field (design §3.1).
+  const target = useNewRowClient("bcp.manage");
+  // The Client field's value, `""` until chosen: read only when it is shown.
+  const [pickedClient, setPickedClient] = useState("");
   const create = useCreatePlanMutation();
   const update = useUpdatePlanMutation();
 
   const existing = plan === "new" || plan == null ? null : plan;
+  const planClient = existing ? existing.client_id : target.needsField ? pickedClient || null : target.clientId;
 
   const [name, setName] = useState(existing?.name ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
@@ -180,9 +183,22 @@ export function PlanEditor({
   const groups = useScopeGroups(open);
   const articles = useProcedureArticles(open);
   // Built at render, never memoised: the sublabels hold translated words.
-  const deviceOptions = scopeDevicePickerOptions(devices.data ?? []);
-  const groupOptions = scopeGroupPickerOptions(groups.data ?? []);
-  const articleOptions = procedurePickerOptions(articles.data ?? [], zone);
+  // Only the plan's client's devices, groups and articles may be named
+  // (§3.3); an article for every client may too, and says so.
+  const deviceOptions = scopeDevicePickerOptions(
+    (devices.data ?? []).filter((device) => device.client_id === planClient),
+  );
+  const groupOptions = scopeGroupPickerOptions(
+    (groups.data ?? []).filter((group) => group.client_id === planClient),
+  );
+  const articleOptions = procedurePickerOptions(
+    (articles.data ?? []).filter((article) => article.client_id === planClient || article.client_id === null),
+    zone,
+  ).map((option) =>
+    (articles.data ?? []).find((article) => article.id === option.id)?.client_id === null
+      ? { ...option, sublabel: [t("lib.clients.everyClient"), option.sublabel].filter(Boolean).join(" · ") }
+      : option,
+  );
   const noArticles = articles.data != null && articles.data.length === 0;
   // The same "the list answered and is empty" test for the two scope lists,
   // shown only for a kind a scope row is actually using: the link is the way
@@ -213,6 +229,7 @@ export function PlanEditor({
     setProcedureRefs([]);
     setProcedurePick("");
     setReviewIntervalDays("365");
+    setPickedClient("");
     setAttempt(null);
   }
 
@@ -231,14 +248,21 @@ export function PlanEditor({
     const rto = rtoMinutes;
     const rpo = rpoMinutes;
     const scopeSnapshot = scope;
+    // Only a new plan asks for its client: an edit keeps its own.
+    const askClient = !existing && target.needsField;
     const next: Attempt = {
-      rules: () => [...planRules(rto, rpo), ...scopeRules(scopeSnapshot)],
+      rules: () => [
+        ...planRules(rto, rpo),
+        ...scopeRules(scopeSnapshot),
+        ...(askClient ? [{ name: "client", label: translate("bcp.editor.client") }] : []),
+      ],
       values: {
         name,
         rto_minutes: rtoMinutes,
         rpo_minutes: rpoMinutes,
         review_interval_days: reviewIntervalDays,
         ...scopeValues(scope),
+        client: planClient,
       },
     };
     setAttempt(next);
@@ -265,14 +289,9 @@ export function PlanEditor({
     if (existing) {
       update.mutate({ id: existing.id, body }, { onSuccess });
     } else {
-      // A plan is one client's (MSP clients phase 2), and that client must use
-      // continuity: the server's 404 says so in a sentence, which
-      // `FormActions` shows as it is.
-      // PHASE 3: the client/site selector. Until it exists that is the
-      // organisation's internal client, whose id is the organisation's --
-      // `/me`'s `org_id` (`lib/internalClient.ts`).
-      const internalClient = internalClientId(me.data);
-      create.mutate(() => ({ ...body, client_id: requireKnown(internalClient) }), { onSuccess });
+      // The server's 404 for a client without continuity says so in a
+      // sentence, which `FormActions` shows as it is.
+      create.mutate(() => ({ ...body, client_id: requireKnown(planClient) }), { onSuccess });
     }
   }
 
@@ -308,6 +327,19 @@ export function PlanEditor({
             convention once has learned it everywhere. */}
         <p className="note mb-3">{t("bcp.editor.requiredNote")}</p>
         <div className="form-grid">
+          {!existing && target.needsField ? (
+            <ClientField
+              code="bcp.manage"
+              value={pickedClient}
+              onChange={(id) => {
+                setPickedClient(id);
+                // Another client's devices, groups and articles: the scope and
+                // the procedures chosen so far were this one's.
+                setScope([]);
+                setProcedureRefs([]);
+              }}
+            />
+          ) : null}
           <Field label={t("bcp.editor.nameRequired")} full>
             {/* `required` states the same fact for assistive tech. It blocks
                 nothing: <Form> is `noValidate`, because a native bubble that

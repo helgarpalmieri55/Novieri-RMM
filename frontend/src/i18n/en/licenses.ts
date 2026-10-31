@@ -83,6 +83,8 @@ export const licenses = {
   },
   list: {
     title: "Licenses",
+    // Shown with every client chosen at the top (design §3.4).
+    colClient: "Client",
     description: "The license register: entitlements, cost and renewal.",
     newLicense: "New license",
     tileOver: "Over-deployed",
@@ -110,6 +112,7 @@ export const licenses = {
   },
   new: {
     title: "New license",
+    client: "Client",
     product: "Product",
     vendor: "Vendor (optional)",
     searchVendors: "Search vendors…",

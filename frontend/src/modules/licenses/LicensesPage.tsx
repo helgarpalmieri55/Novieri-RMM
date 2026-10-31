@@ -39,7 +39,10 @@ import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDate } from "../../lib/datetime";
-import { internalClientId, requireKnown } from "../../lib/internalClient";
+import { ClientField } from "../../components/ClientField";
+import { useClientScope } from "../../lib/clientScope";
+import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { useClientName } from "../settings/api";
 import { humaniseEnum } from "../../lib/labels";
 import {
   useCompliance,
@@ -159,6 +162,11 @@ export function LicensesPage() {
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("licenses.read");
   const canManage = permissions.includes("licenses.manage");
+  // WHOSE EACH ROW IS, with every client chosen (design §3.4); with one
+  // chosen every row is that client's, and the column would only repeat it.
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const showClient = selected === null;
 
   const licenses = useLicenses();
   const products = useProducts();
@@ -354,6 +362,7 @@ export function LicensesPage() {
             <thead>
               <tr>
                 <Th>{t("licenses.list.colProduct")}</Th>
+                {showClient ? <Th>{t("licenses.list.colClient")}</Th> : null}
                 <Th>{t("licenses.list.colType")}</Th>
                 <Th>{t("licenses.list.colEntitlements")}</Th>
                 <Th>{t("licenses.list.colKey")}</Th>
@@ -384,6 +393,7 @@ export function LicensesPage() {
                       </div>
                     ) : null}
                   </Td>
+                  {showClient ? <Td>{clientName(license.client_id)}</Td> : null}
                   <Td>
                     <StatusPill
                       value={license.type}
@@ -423,11 +433,15 @@ export function LicensesPage() {
 
 function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useT();
-  const api = useApi();
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const products = useProducts();
   const vendors = useVendors();
   const create = useCreateLicenseMutation();
+  // A license is one client's (MSP clients phase 2): the client chosen at the
+  // top, or with every client the dialog's Client field (design §3.1).
+  const target = useNewRowClient("licenses.manage");
+  // The Client field's value, `""` until chosen: read only when it is shown.
+  const [pickedClient, setPickedClient] = useState("");
+  const licenseClient = target.needsField ? pickedClient || null : target.clientId;
 
   // Not memoised: the sublabels are worded, and a held list would keep the
   // language it was built in.
@@ -466,6 +480,7 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
     setKeyVisible(false);
     setCost("");
     setCurrency("");
+    setPickedClient("");
     setAttempt(null);
   }
 
@@ -479,20 +494,22 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
   }
 
   function submit() {
-    const values = { product_id: productId, entitlements, cost, currency };
-    const next: Attempt = { rules: () => licenseRules(values.cost), values };
+    const askClient = target.needsField;
+    const values = { product_id: productId, entitlements, cost, currency, client: licenseClient };
+    const next: Attempt = {
+      rules: () => [
+        ...licenseRules(values.cost),
+        ...(askClient ? [{ name: "client", label: translate("licenses.new.client") }] : []),
+      ],
+      values,
+    };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
 
-    // A license is one client's (MSP clients phase 2), and the server holds
-    // what may hold it to that client.
-    // PHASE 3: the client/site selector. Until it exists that is the
-    // organisation's internal client, whose id is the organisation's --
-    // `/me`'s `org_id` (`lib/internalClient.ts`).
-    const internalClient = internalClientId(me.data);
+    // The server holds what may hold a license to its client.
     create.mutate(
       () => ({
-        client_id: requireKnown(internalClient),
+        client_id: requireKnown(licenseClient),
         product_id: productId,
         vendor_id: vendorId || null,
         type,
@@ -520,6 +537,11 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
     <Dialog open={open} onClose={close} title={t("licenses.new.title")}>
       <Form onSubmit={submit}>
         <div className="form-grid">
+          {/* With every client chosen, the person says whose license this is
+              (design §3.1): never the internal client by default. */}
+          {target.needsField ? (
+            <ClientField code="licenses.manage" value={pickedClient} onChange={setPickedClient} />
+          ) : null}
           {/* THE BLOCKED FLOW. Auditor B, [HIGH]: the Product select held exactly
               one option -- "Select a product…" -- on a fresh install, so no
               license could ever be created, and "the modal neither says so nor

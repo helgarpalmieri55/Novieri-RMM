@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
-import type { ApiClient, ClientOut, Me } from "../../../lib/api";
+import type { ApiClient, ClientOut, Me, MeClient } from "../../../lib/api";
 import { RenewalCalendar } from "../RenewalCalendar";
 import { SpendDashboard } from "../SpendDashboard";
 import { SubscriptionDetail } from "../SubscriptionDetail";
@@ -33,6 +33,25 @@ import type {
 // real fetch -- mirrors modules/licenses/__tests__/licenses.test.tsx.
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 function renderWithProviders(ui: ReactElement, initialEntries: string[] = ["/"]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -477,7 +496,7 @@ describe("SubscriptionsPage", () => {
     await user.type(screen.getByLabelText("Seats"), "25");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    // The internal client (`/me`'s `org_id`) until phase 3's selector.
+    // The client chosen at the top: here the internal one, `o1`.
     expect(api.createSubscription).toHaveBeenCalledWith({
       client_id: "o1",
       service_name: "Globex CRM",
@@ -499,6 +518,26 @@ describe("SubscriptionsPage", () => {
       notice_days: 0,
       auto_renew: false,
     });
+  });
+
+  it("with every client chosen, asks for the subscription's client and files it there", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ["subscriptions.read", "subscriptions.manage"] },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ["subscriptions.read", "subscriptions.manage"] },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<SubscriptionsPage />);
+    await screen.findByText("Acme SaaS", { selector: ".cell-title a" });
+    expect(screen.getByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New subscription" }));
+    await user.type(screen.getByLabelText("Service name"), "Globex CRM");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/Client is required/)).toBeInTheDocument();
+    expect(api.createSubscription).not.toHaveBeenCalled();
+
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.createSubscription).toHaveBeenCalledWith(expect.objectContaining({ client_id: "c-acme", service_name: "Globex CRM" })));
   });
 
   // The form-kernel findings on this route. Each of these fails against the

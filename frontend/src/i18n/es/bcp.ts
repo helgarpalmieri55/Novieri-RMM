@@ -48,6 +48,7 @@ export const bcp: Shape<typeof en> = {
   },
   plans: {
     title: "Pruebas de continuidad y recuperación (BCP / DR)",
+    colClient: "Cliente",
     description: "Planes de continuidad y recuperación, sus objetivos y sus pruebas.",
     newPlan: "Nuevo plan",
     tileActive: "Planes activos",
@@ -85,6 +86,7 @@ export const bcp: Shape<typeof en> = {
   },
   editor: {
     titleNew: "Nuevo plan",
+    client: "Cliente",
     titleEdit: "Editar plan",
     requiredNote: "Los campos marcados con * son obligatorios.",
     name: "Nombre",
