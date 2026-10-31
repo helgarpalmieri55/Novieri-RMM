@@ -76,7 +76,7 @@ async def test_authorize_tunnel_org_admin_non_owner_ok(api_env) -> None:
     owner_id = await _user_id_of(api_env, owner)
     admin = await api_env.create_user(org_id, "org-admin")
     sid = await _session_row(api_env, org_id, owner_id)
-    # org-admin holds orgs.manage, so may drive a session it does not own
+    # org-admin holds remote.supervise (migration 0244), so may drive a session it does not own
     got_org, _, _ = await _authorize(api_env, await _token(api_env, admin, org_id), sid)
     assert got_org == org_id
 

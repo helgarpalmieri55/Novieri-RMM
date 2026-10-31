@@ -4277,8 +4277,8 @@ CATALOG: dict[str, str] = {
     ),
     "requires one of {items}": "requiere uno de {items}",
     "no such session": "no existe esa sesión",
-    "requires session owner or org-admin": (
-        "requiere ser el propietario de la sesión o administrador de la organización"
+    "requires the session owner or remote.supervise": (
+        "requiere ser el propietario de la sesión o tener remote.supervise"
     ),
     "no recording for session": "la sesión no tiene grabación",
     "remote session state: awaiting_consent": "esperando consentimiento",

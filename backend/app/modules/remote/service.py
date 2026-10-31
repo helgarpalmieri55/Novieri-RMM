@@ -666,8 +666,14 @@ class RemoteSessionService:
         actor_id: UUID | None = None,
     ) -> None:
         """End a live session. The actor defaults to the session's technician;
-        the gateway names the agent when the endpoint side ended it."""
+        the stop route names whoever stopped it (phase 3 design §5.3), and the
+        gateway names the agent when the endpoint side ended it. Audited in
+        the session's client."""
         row = await self._load(session, session_id)
+        # Read before anything is written: a flush expires it
+        # (`server_onupdate`, written by trigger), and an async session cannot
+        # lazy-load it.
+        client_id = row.client_id
         self._transition(row, "ended")
         ended_at = datetime.now(UTC)
         row.ended_at = ended_at
@@ -693,6 +699,7 @@ class RemoteSessionService:
                 "reason": reason,
                 "duration_s": duration_s,
             },
+            client_id=client_id,
         )
         await session.flush()
         await self._terminate(row)
@@ -724,6 +731,9 @@ async def end_session_from_result(
     ).scalar_one_or_none()
     if row is None or row.state == "ended":
         return
+    # Read before the writes below (phase 3 design §5.3: the same action, the
+    # same client, whichever writer records it).
+    client_id = row.client_id
     row.state = "ended"
     row.ended_at = datetime.now(UTC)
     row.end_reason = reason
@@ -736,5 +746,6 @@ async def end_session_from_result(
         target_type="session",
         target_id=str(row.id),
         metadata={"device_id": str(row.device_id), "reason": reason, "source": "job_result"},
+        client_id=client_id,
     )
     await session.flush()

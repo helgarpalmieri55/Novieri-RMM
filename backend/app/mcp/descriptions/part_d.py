@@ -384,8 +384,8 @@ PART_D: dict[str, str] = {
         "the user's consent. Refused if the agent is too old or a session is already live."
     ),
     "POST /api/v1/remote/sessions/{session_id}/stop": (
-        "Ends a remote session. Only the session's owner or an org-admin may do so; refused with "
-        "409 if it has already ended."
+        "Ends a remote session. Only the session's owner, or someone holding remote.supervise "
+        "on its client, may do so; refused with 409 if it has already ended."
     ),
     # --- reports ---
     "GET /api/v1/reports": (
