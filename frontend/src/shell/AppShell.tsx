@@ -429,11 +429,11 @@ export function AppShell({
 
       <Sidebar
         permissions={permissions}
-        clientSelector={handset ? clientSelector : undefined}
         collapsed={collapsed}
         onToggleCollapsed={() => setCollapsed((value) => !value)}
         badges={badges}
         orgName={orgName}
+        clientSelector={handset ? clientSelector : undefined}
       />
 
       <div className="app-shell">

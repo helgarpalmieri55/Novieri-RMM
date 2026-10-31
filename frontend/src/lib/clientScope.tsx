@@ -92,6 +92,24 @@ export function orderClients<T extends ClientChoice>(clients: readonly T[]): T[]
   );
 }
 
+/**
+ * WHAT A CHANGE OF CLIENT EMPTIES: every query but the setup gate's, and
+ * every mutation, the way `clear()` does -- in-flight requests are cancelled
+ * and whatever they answer lands nowhere.
+ *
+ * `["setup", ...]` IS KEPT because it is `App.tsx`'s `SetupGate`, which sits
+ * ABOVE this provider and is not started again with the page. Its request
+ * bypasses `ApiClient`, so it never carried `X-Client-Id`, and it asks the
+ * one thing about the platform no client changes: whether it has been
+ * claimed. Emptied with the rest, the gate's next re-render found no query,
+ * drew "Starting..." in place of the whole routes tree, and asked again.
+ * Nothing read under the previous client survives this.
+ */
+function emptyForNewClient(queryClient: QueryClient): void {
+  queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "setup" });
+  queryClient.getMutationCache().clear();
+}
+
 function useMeQuery() {
   const api = useApi();
   return useQuery<Me, ApiError>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
@@ -109,24 +127,6 @@ export function useClientScope(): ClientScope {
   const ready =
     me.data !== undefined && (selected === null || clients.some((client) => client.id === selected));
   return { selected, select: setSelectedClient, clients, ready };
-}
-
-/**
- * WHAT A CHANGE OF CLIENT EMPTIES: every query but the setup gate's, and
- * every mutation, the way `clear()` does -- in-flight requests are cancelled
- * and whatever they answer lands nowhere.
- *
- * `["setup", ...]` IS KEPT because it is `App.tsx`'s `SetupGate`, which sits
- * ABOVE this provider and is not started again with the page. Its request
- * bypasses `ApiClient`, so it never carried `X-Client-Id`, and it asks the
- * one thing about the platform no client changes: whether it has been
- * claimed. Emptied with the rest, the gate's next re-render found no query,
- * drew "Starting..." in place of the whole routes tree, and asked again.
- * Nothing read under the previous client survives this.
- */
-function emptyForNewClient(queryClient: QueryClient): void {
-  queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "setup" });
-  queryClient.getMutationCache().clear();
 }
 
 let noticeSeq = 0;
