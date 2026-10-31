@@ -88,6 +88,7 @@ import {
   useSetUserEnabledMutation,
   useRoles,
   useUsers,
+  useGlobalWriteReason,
 } from "./api";
 import {
   EVERY_CLIENT_CHOICE,
@@ -95,7 +96,7 @@ import {
   grantClientIdFor,
   grantScopeOptions,
 } from "./pickerOptions";
-import { isForbidden, permissionReason } from "./settingsState";
+import { isForbidden } from "./settingsState";
 import {
   annotateDuplicateGrants,
   assignableRoles,
@@ -216,7 +217,7 @@ export function UsersTab({
   const permissionsTarget = listed.find((user) => user.id === permissionsForId) ?? null;
 
   const forbidden = isForbidden(users.error);
-  const reason = permissionReason(USERS_MANAGE);
+  const reason = useGlobalWriteReason(USERS_MANAGE);
   const created = createUser.data;
 
   if (forbidden) {

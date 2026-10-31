@@ -34,6 +34,7 @@ import type {
 } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { loadingUntilClient, requireKnown } from "../../lib/internalClient";
+import { everyClientReason, permissionReason } from "./settingsState";
 import type { AiProviderOut, AiSettingsOut, AiSettingsUpdate } from "../ai-admin/types";
 import type { SettingsOut as BudgetSettingsOut, SettingsUpdate as BudgetSettingsUpdate } from "../budget/types";
 import type { SettingsOut as HealthSettingsOut, SettingsUpdate as HealthSettingsUpdate } from "../health/types";
@@ -148,6 +149,16 @@ export function useMe() {
     staleTime: 60_000,
     ...NO_RETRY,
   });
+}
+
+/**
+ * Why a write to configuration every client shares is not offered (phase 3
+ * design §2): the code on every client, for someone who holds it on some;
+ * the code itself, for someone who holds it nowhere.
+ */
+export function useGlobalWriteReason(code: string): string {
+  const me = useMe();
+  return (me.data?.permissions ?? []).includes(code) ? everyClientReason(code) : permissionReason(code);
 }
 
 // --------------------------------------------------------------------------

@@ -22,6 +22,7 @@ import { productPickerEmptyHint, productPickerOptions } from "./pickerOptions";
 import type { ReviewQueueRow } from "./types";
 import { PageHead, Panel, QueryState } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 export function ReviewQueue() {
   const t = useT();
@@ -30,6 +31,9 @@ export function ReviewQueue() {
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("licenses.read");
   const canManage = permissions.includes("licenses.manage");
+  // Mapping writes the product catalogue, configuration every client shares
+  // (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2). Ignoring is not global.
+  const canMap = useEverywherePermissions().has("licenses.manage");
 
   const queue = useReviewQueue();
   const ignore = useIgnoreSoftwareMutation();
@@ -103,9 +107,11 @@ export function ReviewQueue() {
                           is a control and carries an edge. Both mutate, both
                           are `<button>`, both are drawn the same. */}
                       <div className="flex gap-2">
-                        <Button variant="outline" onClick={() => setMapping(row)}>
-                          {t("licenses.review.map")}
-                        </Button>
+                        {canMap ? (
+                          <Button variant="outline" onClick={() => setMapping(row)}>
+                            {t("licenses.review.map")}
+                          </Button>
+                        ) : null}
                         <Button
                           variant="outline"
                           disabled={ignore.isPending}

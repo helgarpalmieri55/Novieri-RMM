@@ -48,11 +48,11 @@ import { Field, inputClass } from "../../components/ui";
 import { KIND_ICON, Panel, Toggle } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { ChipsField } from "../../shell/viz";
-import { useCurrentOrg, useUpdateCurrentOrgMutation } from "./api";
+import { useCurrentOrg, useUpdateCurrentOrgMutation, useGlobalWriteReason } from "./api";
 import { FOLDING_FORM_GRID } from "./formGrid";
 import { LoadFailure } from "./LoadFailure";
 import { SaveBar } from "./SaveBar";
-import { isDirty, isForbidden, isMissingRoute, permissionReason, refusal } from "./settingsState";
+import { isDirty, isForbidden, isMissingRoute, refusal } from "./settingsState";
 import { orgSettingFields, orgSettingLabel, unrenderableOrgSettingKeys } from "./types";
 import type { CurrentOrgUpdate, OrgSettingValue } from "./types";
 
@@ -105,6 +105,7 @@ function seedFrom(name: string, fields: ReturnType<typeof orgSettingFields>): Or
 
 export function OrganizationTab({ canManage }: { canManage: boolean }) {
   const t = useT();
+  const reason = useGlobalWriteReason(ORGS_MANAGE);
   const org = useCurrentOrg();
   const update = useUpdateCurrentOrgMutation();
 
@@ -159,7 +160,7 @@ export function OrganizationTab({ canManage }: { canManage: boolean }) {
   const blockedReason = missing
     ? t("settings.organization.blockedMissing")
     : !canManage
-      ? permissionReason(ORGS_MANAGE)
+      ? reason
       : org.data == null
         ? t("settings.organization.blockedWaiting")
         : undefined;

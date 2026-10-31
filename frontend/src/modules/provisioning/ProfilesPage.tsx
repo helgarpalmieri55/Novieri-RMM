@@ -34,6 +34,7 @@ import {
   StatsGrid,
   StatusPill,
 } from "../../shell/components";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 export function ProfilesPage() {
   const t = useT();
@@ -46,7 +47,8 @@ export function ProfilesPage() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("provisioning.read");
-  const canManage = permissions.includes("provisioning.manage");
+  // Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
+  const canManage = useEverywherePermissions().has("provisioning.manage");
 
   const profiles = useProvisionProfiles();
   // The image a profile lays down is the fact that tells two profiles apart,

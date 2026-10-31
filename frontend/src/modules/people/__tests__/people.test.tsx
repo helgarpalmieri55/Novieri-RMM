@@ -241,6 +241,25 @@ describe("PersonPage", () => {
     expect(updateContact).not.toHaveBeenCalled();
   });
 
+  it("offers a staff sign-in's switch only to users.manage on every client (phase 3 design §2)", async () => {
+    const client = api(
+      {
+        getPerson: vi.fn().mockResolvedValue(detail()),
+        me: vi.fn().mockResolvedValue({
+          ...me("people.read", "users.manage"),
+          permissions_everywhere: ["people.read"],
+        }),
+      },
+      ["people.read", "users.manage"],
+    );
+    mockUseApi.mockReturnValue(client);
+    renderAt(<PersonPage />, "/people/:personId", "/people/p1");
+
+    expect(await screen.findByRole("heading", { name: "Maria Garcia" })).toBeInTheDocument();
+    await vi.waitFor(() => expect(client.me).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Turn off sign-in" })).toBeNull();
+  });
+
   it("turns a client contact's sign-in off as a contact, with clients.manage", async () => {
     const user = userEvent.setup();
     const setUserEnabled = vi.fn();

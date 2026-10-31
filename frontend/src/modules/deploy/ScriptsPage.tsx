@@ -33,6 +33,7 @@ import {
 } from "./pickerOptions";
 import type { DeployTargetType, ScriptListItem } from "./types";
 import { Btn, PageHead, Panel, QueryState } from "../../shell/components";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // The design's `P['deploy/scripts']`: one bare panel of rows led by the
 // terminal glyph, the interpreter beside the name, a version in mono. The
@@ -67,7 +68,8 @@ export function ScriptsPage() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("deploy.read");
-  const canManage = permissions.includes("deploy.script.manage");
+  // Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
+  const canManage = useEverywherePermissions().has("deploy.script.manage");
   const canRun = permissions.includes("deploy.script.run");
   const canSchedule = permissions.includes("deploy.script.schedule");
 
