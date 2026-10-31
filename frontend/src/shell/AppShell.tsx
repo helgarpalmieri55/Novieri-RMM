@@ -36,6 +36,11 @@ import "./shell.css";
 
 export interface AppShellProps {
   permissions: readonly string[];
+  /**
+   * Optional modules on for the current choice (`useEnabledModules`, phase 3
+   * design §2). Absent -- the shell's own tests, `/__preview` -- every one.
+   */
+  modules?: ReadonlySet<string>;
   orgName: string;
   /**
    * Breadcrumb tail, supplied by the page. OPTIONAL, and its absence is a
@@ -201,6 +206,7 @@ function writeCollapsed(collapsed: boolean): void {
 
 export function AppShell({
   permissions,
+  modules,
   orgName,
   section,
   sectionTo,
@@ -412,6 +418,7 @@ export function AppShell({
 
       <Sidebar
         permissions={permissions}
+        modules={modules}
         collapsed={collapsed}
         onToggleCollapsed={() => setCollapsed((value) => !value)}
         badges={badges}

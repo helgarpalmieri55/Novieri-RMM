@@ -21,10 +21,12 @@ import { Link, useLocation } from "react-router-dom";
 
 import { useT } from "../i18n/context";
 import { Icon } from "./icons";
-import { activeNavTo, isArea, visibleGroups } from "./nav";
+import { activeNavTo, isArea, OPTIONAL_MODULES, visibleGroups } from "./nav";
 
 export interface SidebarProps {
   permissions: readonly string[];
+  /** Optional modules on for the current choice (phase 3 design §2). Absent: every one. */
+  modules?: ReadonlySet<string>;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   /** Live counts, keyed by route. Absent = no badge, which is not the same as zero. */
@@ -34,13 +36,14 @@ export interface SidebarProps {
 
 export function Sidebar({
   permissions,
+  modules,
   collapsed,
   onToggleCollapsed,
   badges = {},
   orgName,
 }: SidebarProps) {
   const t = useT();
-  const groups = visibleGroups(permissions);
+  const groups = visibleGroups(permissions, modules ?? OPTIONAL_MODULES);
   const pathname = useLocation().pathname;
   const activeTo = activeNavTo(pathname, groups);
 

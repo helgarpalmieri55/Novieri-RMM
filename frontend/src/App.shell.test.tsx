@@ -260,4 +260,41 @@ describe("the top bar's client selector (phase 3 design §1.1)", () => {
     const selector = await screen.findByRole("combobox", { name: "Client" });
     expect(within(selector).getByRole("option", { name: "Toeshee" })).toBeInTheDocument();
   });
+
+  it("shows IT budget only when a client of the choice uses the budget module (phase 3 design §2)", async () => {
+    const renderWith = (modules: string[]) => {
+      const api = fakeApi(["budget.read"]);
+      api.me = vi.fn().mockResolvedValue({
+        user_id: "u1",
+        display_name: "Ada",
+        email: "ada@example.test",
+        org_id: "org-1",
+        roles: [],
+        permissions: ["budget.read"],
+        clients: [
+          { id: "org-1", name: "Toeshee", kind: "internal", enabled_modules: modules, permissions: ["budget.read"] },
+        ],
+      });
+      apiRef.current = api;
+      return render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <MemoryRouter initialEntries={["/dashboard"]}>
+            <Shell>
+              <Where />
+            </Shell>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    };
+    const rail = () => within(screen.getByRole("navigation", { name: "Main" }));
+
+    const { unmount } = renderWith([]);
+    await screen.findByText("Ada");
+    expect(rail().queryByRole("link", { name: /IT budget/ })).not.toBeInTheDocument();
+    unmount();
+
+    renderWith(["budget"]);
+    await screen.findByText("Ada");
+    expect(await rail().findByRole("link", { name: /IT budget/ })).toHaveAttribute("href", "/budget");
+  });
 });
