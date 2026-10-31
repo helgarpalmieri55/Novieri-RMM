@@ -1361,8 +1361,8 @@ async def _client_for_default(session: AsyncSession, org_id: UUID, client_id: UU
     FIRST lock, before the audit chain's (`app.services.client_sites`).
 
     THIS IS THE RECORD CHECK (phase 3 design §5.1): the session is the one
-    `require_permission("health.admin")` narrowed to the clients where the
-    person holds that code, intersected with X-Client-Id -- so a client where
+    the route's `require_permission` on health.admin narrowed to the clients
+    where the person holds that code, intersected with X-Client-Id -- so a client where
     they do not hold it is not visible here, and is the 404 an unknown one
     gets. Archived is a 409 and Unassigned a 422, as for every module."""
     try:
