@@ -199,13 +199,15 @@ async def test_stop_session(api_env) -> None:
 
 
 async def test_stop_session_requires_owner_or_admin(api_env) -> None:
-    """Spec §11: stop is allowed only for the session OWNER or an org-admin.
-    A second technician who holds ``remote.control`` but neither owns the session
-    nor holds ``orgs.manage`` gets 403; the owner and an org-admin succeed."""
+    """Spec §11 (phase 3 design §5.3): stop is allowed only for the session
+    OWNER or a holder of ``remote.supervise`` on its client. A second
+    technician who holds ``remote.control`` but neither owns the session nor
+    holds ``remote.supervise`` gets 403; the owner and an org-admin
+    (``remote.supervise`` by migration 0244) succeed."""
     org_id = await api_env.create_org("rc")
     owner = await api_env.create_user(org_id, "technician")
     other = await api_env.create_user(org_id, "technician")  # remote.control, not owner
-    admin = await api_env.create_user(org_id, "org-admin")  # orgs.manage
+    admin = await api_env.create_user(org_id, "org-admin")  # remote.supervise (migration 0244)
     device_id = await _device(api_env, org_id)
 
     owner_headers = await api_env.headers(org_id, owner)
@@ -219,7 +221,7 @@ async def test_stop_session_requires_owner_or_admin(api_env) -> None:
             )
         ).json()["session_id"]
 
-    # A non-owner technician (no orgs.manage) may not stop another's session.
+    # A non-owner technician (no remote.supervise) may not stop another's session.
     sid_a = await _new_session()
     forbidden = await api_env.client.post(
         f"/api/v1/remote/sessions/{sid_a}/stop",
@@ -239,7 +241,7 @@ async def test_stop_session_requires_owner_or_admin(api_env) -> None:
     assert owned.status_code == 200, owned.text
     assert owned.json()["state"] == "ended"
 
-    # An org-admin (orgs.manage) can stop someone else's session.
+    # An org-admin (remote.supervise, by migration 0244) can stop someone else's session.
     sid_b = await _new_session()
     by_admin = await api_env.client.post(
         f"/api/v1/remote/sessions/{sid_b}/stop",

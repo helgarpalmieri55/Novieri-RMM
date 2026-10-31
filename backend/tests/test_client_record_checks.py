@@ -652,12 +652,13 @@ async def test_remote_sessions_are_read_on_their_machine_s_client(api_env: ApiEn
     assert (await api_env.client.get(REMOTE, headers=nobody)).status_code == 403
 
 
-async def test_stopping_someone_else_s_session_needs_orgs_manage_on_its_client(
+async def test_stopping_someone_else_s_session_needs_remote_supervise_on_its_client(
     api_env: ApiEnv,
 ) -> None:
-    """The owner-or-admin rail: `orgs.manage` held on X stops another
-    technician's session on X's machine; held on Y only, the old 403, and
-    the session is unchanged."""
+    """The owner-or-supervisor rail (phase 3 design §5.3; it asked for
+    `orgs.manage` until migration 0244): `remote.supervise` held on X stops
+    another technician's session on X's machine; held on Y only, the old
+    403, and the session is unchanged."""
     org = await api_env.create_org("cfg-remote-stop")
     x, x_site = await client_with_site(api_env, org)
     y, _ = await client_with_site(api_env, org)
@@ -666,20 +667,23 @@ async def test_stopping_someone_else_s_session_needs_orgs_manage_on_its_client(
     first = await _remote_session(api_env, org, device, owner)
     second = await _remote_session(api_env, org, device, owner)
 
-    _, elsewhere = await _holder(api_env, org, {x: ("remote.control",), y: ("orgs.manage",)})
+    _, elsewhere = await _holder(
+        api_env, org, {x: ("remote.control",), y: ("remote.supervise",)}
+    )
     r = await api_env.client.post(f"{REMOTE}/{first}/stop", headers=elsewhere)
     assert r.status_code == 403, r.text
     async with AsyncSession(api_env.admin_engine) as s:
         assert (await s.get(RemoteSession, first)).state == "awaiting_consent"  # type: ignore[union-attr]
 
-    _, x_admin = await _holder(api_env, org, {x: ("remote.control", "orgs.manage")})
-    r = await api_env.client.post(f"{REMOTE}/{second}/stop", headers=x_admin)
+    _, x_supervisor = await _holder(api_env, org, {x: ("remote.control", "remote.supervise")})
+    r = await api_env.client.post(f"{REMOTE}/{second}/stop", headers=x_supervisor)
     assert r.status_code == 200, r.text
 
 
 async def test_the_screen_tunnel_s_rail_asks_the_session_s_client(api_env: ApiEnv) -> None:
     """`owner_or_admin`, shared by the stop route and the tunnel door: the
-    person's `orgs.manage` on the session's client."""
+    person's `remote.supervise` on the session's client. `orgs.manage` there
+    no longer counts (phase 3 design §5.3)."""
     from app.modules.remote.tunnel import owner_or_admin
 
     org = await api_env.create_org("cfg-remote-rail")
@@ -687,14 +691,18 @@ async def test_the_screen_tunnel_s_rail_asks_the_session_s_client(api_env: ApiEn
     y, _ = await client_with_site(api_env, org)
     owner = await _user(api_env, org)
     device = await _device(api_env, org, x, x_site)
-    on_x, _ = await _holder(api_env, org, {x: ("orgs.manage",)})
-    on_y, _ = await _holder(api_env, org, {y: ("orgs.manage",)})
+    on_x, _ = await _holder(api_env, org, {x: ("remote.supervise",)})
+    on_y, _ = await _holder(api_env, org, {y: ("remote.supervise",)})
+    admin_of_x, _ = await _holder(api_env, org, {x: ("orgs.manage",)})
     async with org_session(org, clients=ClientScope.all(), engine=api_env.app_engine) as s:
         assert await owner_or_admin(
             s, user_id=on_x, session_technician_id=owner, client_id=x
         )
         assert not await owner_or_admin(
             s, user_id=on_y, session_technician_id=owner, client_id=x
+        )
+        assert not await owner_or_admin(
+            s, user_id=admin_of_x, session_technician_id=owner, client_id=x
         )
         assert await owner_or_admin(s, user_id=owner, session_technician_id=owner, client_id=x)
     del device

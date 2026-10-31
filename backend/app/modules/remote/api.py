@@ -317,10 +317,11 @@ async def stop_session(
         ).scalar_one_or_none()
         if row is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such session"))
-        # Spec §11: stop is allowed only for the session OWNER or an org-admin —
-        # the ``remote.control`` permission alone (enforced above) is not enough.
-        # Reuse the exact owner-or-admin predicate the tunnel WS gate uses so the
-        # two paths cannot diverge.
+        # Spec §11, phase 3 design §5.3: stop is allowed only for the session
+        # OWNER or someone holding ``remote.supervise`` on its client — the
+        # ``remote.control`` permission alone (enforced above) is not enough.
+        # Reuse the exact predicate the tunnel WS gate uses so the two paths
+        # cannot diverge.
         if not await owner_or_admin(
             session,
             user_id=ctx.user_id,
@@ -330,10 +331,15 @@ async def stop_session(
             client_id=row.client_id,
         ):
             raise HTTPException(
-                status.HTTP_403_FORBIDDEN, tr("requires session owner or org-admin")
+                status.HTTP_403_FORBIDDEN, tr("requires the session owner or remote.supervise")
             )
         try:
-            await service.end_session(session, session_id=session_id, reason="completed")
+            # The person who stopped it is the actor (phase 3 design §5.3).
+            # Left to its default, `end_session` names the session's owner,
+            # which is right only when the owner is the one stopping it.
+            await service.end_session(
+                session, session_id=session_id, reason="completed", actor_id=ctx.user_id
+            )
         except InvalidSessionState as exc:
             raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
         await session.refresh(row)

@@ -67,7 +67,7 @@ const CATALOGUE = [
   "platform.errors.read", "platform.errors.write", "platform.status.read", "policies.manage",
   "portal.ticket.read", "portal.ticket.write",
   "provisioning.manage", "provisioning.read", "provisioning.run",
-  "remote.control", "remote.policy.manage", "remote.recordings.read", "reporting.read",
+  "remote.control", "remote.policy.manage", "remote.recordings.read", "remote.supervise", "reporting.read",
   "roles.manage", "roles.read", "site.manage", "site.read", "site.wake", "sla.admin", "sla.read",
   "subscriptions.manage", "subscriptions.read",
   "ticket.admin", "ticket.approve", "ticket.assign", "ticket.read", "ticket.write",

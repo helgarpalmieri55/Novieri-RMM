@@ -948,8 +948,8 @@ async def test_a_caller_cannot_remove_their_own_roles_manage(rbac_env: Any) -> N
 
 async def test_a_caller_cannot_remove_their_own_orgs_manage(rbac_env: Any) -> None:
     """The second guarded code. `orgs.manage` is what gates the org-settings
-    write and remote-tunnel authorization; losing it is as unrecoverable as
-    losing `roles.manage`."""
+    write (and gated remote-tunnel authorization until migration 0244);
+    losing it is as unrecoverable as losing `roles.manage`."""
     org = await rbac_env.create_org("lockout-orgs")
     role_id = await _seed_role(
         rbac_env.admin_engine, org, "self-admin", ["roles.manage", "orgs.manage"]
