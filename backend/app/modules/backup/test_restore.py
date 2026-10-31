@@ -167,6 +167,7 @@ async def dispatch_due_test_restores(
                     "files": len(selection),
                     "scope": "sampled",
                 },
+                client_id=client_id,
             )
         pending.extend(dispatched)
     await session.flush()

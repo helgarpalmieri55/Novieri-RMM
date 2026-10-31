@@ -812,6 +812,7 @@ async def replicate_step(
             "chunks_total": len(chunk_ids),
             "bytes": copy.bytes,
         },
+        client_id=point.client_id,
     )
     await session.flush()
     return True
@@ -820,6 +821,16 @@ async def replicate_step(
 async def record_copy_failure(
     session: AsyncSession, *, org_id: UUID, point_id: UUID, target_id: UUID, error: BaseException
 ) -> None:
+    # The point's client (phase 3 design §5.5): one read, because a copy
+    # written here for the first time has not had its client from the trigger
+    # yet, and a point that is gone has none to give.
+    client_id = (
+        await session.execute(
+            select(BackupPoint.client_id).where(
+                BackupPoint.org_id == org_id, BackupPoint.id == point_id
+            )
+        )
+    ).scalar_one_or_none()
     copy = (
         await session.execute(
             select(BackupPointCopy).where(
@@ -843,6 +854,7 @@ async def record_copy_failure(
         target_type="backup_point",
         target_id=str(point_id),
         metadata={"target_id": str(target_id), "error": copy.last_error},
+        client_id=client_id,
     )
     await session.flush()
 
@@ -1028,6 +1040,9 @@ async def offsite_gc(
                 await session.delete(row)
                 deleted += 1
         await session.flush()
+    # NO CLIENT, deliberately (phase 3 design §5.5): one summary of every
+    # target, repository and client of the organisation. Whoever reads the
+    # audit log holds every client (plan 2026-10-26 C6).
     if expired or deleted:
         await audit_service.record(
             session,

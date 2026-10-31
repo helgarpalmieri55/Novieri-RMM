@@ -90,6 +90,7 @@ export const auditActions = {
   backup_replicated: "Backup replicated",
   backup_replication_failed: "Backup replication failed",
   backup_repository_created: "Backup repository created",
+  backup_repository_retired: "Backup repository retired",
   backup_restore_dispatched: "Backup restore dispatched",
   backup_restore_reconciled: "Backup restore reconciled",
   backup_restore_result: "Backup restore result",

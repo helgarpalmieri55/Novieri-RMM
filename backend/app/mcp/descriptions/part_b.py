@@ -211,9 +211,9 @@ PART_B: dict[str, str] = {
     ),
     "PUT /api/v1/backup/policies": (
         "Creates or replaces one device group's backup policy, or a client's default "
-        "(client_id, no group). The repository must be that client's, except to switch a "
-        "stored policy off (enabled false) naming the repository it already names. Governs "
-        "scheduled backups on the devices it covers. Audited."
+        "(client_id, no group). The repository must be that client's and not retired, except "
+        "to switch a stored policy off naming the repository it already names. Governs "
+        "scheduled backups on its devices. Audited."
     ),
     "GET /api/v1/backup/recovery-keys": (
         "Lists the backup recovery keys' public keys, fingerprints and proof status. "
@@ -224,8 +224,8 @@ PART_B: dict[str, str] = {
         "points needing verification and deduplication savings. Read-only."
     ),
     "GET /api/v1/backup/repositories": (
-        "Lists the backup repositories the caller's clients can see (client, name, dedup "
-        "parameters, off-site target link). Keys are never returned."
+        "Lists the backup repositories the caller's clients can see (client, name, state, "
+        "dedup parameters, off-site target link). Keys are never returned."
     ),
     "POST /api/v1/backup/repositories": (
         "Creates an encrypted backup repository for one client (client_id) and generates "
@@ -235,6 +235,11 @@ PART_B: dict[str, str] = {
     "PUT /api/v1/backup/repositories/{repository_id}/offsite": (
         "Links a repository to an off-site target, global or of the repository's client, so "
         "its recovery points get copied there, or unlinks it with a null target. Audited."
+    ),
+    "POST /api/v1/backup/repositories/{repository_id}/retire": (
+        "Retires one backup repository: it takes no new backups and no policy may name it "
+        "again, while its recovery points stay and can still be restored. Refused with 409 "
+        "while an enabled policy uses it. There is no way back. Audited."
     ),
     # --- deploy ---
     "GET /api/v1/deploy/deployments": (
@@ -251,8 +256,9 @@ PART_B: dict[str, str] = {
         "Returns one deployment with its state and per-device results. Read-only."
     ),
     "POST /api/v1/deploy/deployments/{deployment_id}/execute": (
-        "Dispatches signed install, update or uninstall jobs to every device the "
-        "deployment targets. Changes software on those endpoints. Returns the job ids."
+        "Dispatches signed install, update or uninstall jobs to every device the deployment "
+        "targets. Changes software on those endpoints. Returns the job ids. A deployment that "
+        "does not exist or is not visible is a 404."
     ),
     "GET /api/v1/deploy/devices/{device_id}/deployments": (
         "Lists the deployment results for one device: package, action, state, exit code "
