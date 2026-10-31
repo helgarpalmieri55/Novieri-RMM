@@ -140,9 +140,10 @@ export function nameForOption(
  * Taken from the row wherever there is one. With a group chosen, the group's
  * client -- the stored policy's own when it is that group's; with none, the
  * client default being edited is its own client's. A NEW client default has
- * no row to take one from, and is `fallback`'s: the caller's internal client
- * until the client selector exists (phase 3). `null` while the group's client
- * is not known (the groups have not loaded), so nothing is offered.
+ * no row to take one from, and is `fallback`'s: the client chosen at the top,
+ * or the editor's Client field (phase 3, `lib/clientSelection.ts`). `null`
+ * while the group's client is not known (the groups have not loaded), or the
+ * Client field is empty, so nothing is offered.
  */
 export function policyClient(
   existing: Pick<BackupPolicy, "client_id" | "device_group_id"> | null,

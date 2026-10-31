@@ -52,6 +52,9 @@ vi.mock("../../lib/ws", () => ({ useLiveEvents: () => undefined }));
 function machine(n: number, overrides: Partial<Device> = {}): Device {
   return {
     id: `dev-${n}`,
+    // The credentials below are this client's: a push install offers only the
+    // machines' client's (MSP clients phase 3, design §3.3).
+    client_id: "o1",
     hostname: `pc${n}`,
     fqdn: `pc${n}.corp.example.com`,
     os_family: "windows",
@@ -92,8 +95,8 @@ function renderPage(items: Device[], permissions: string[] = [PUSH_RUN], extra: 
     listDevices: vi.fn().mockResolvedValue(page(items)),
     me: vi.fn().mockResolvedValue({ permissions } as Me),
     listCredentials: vi.fn().mockResolvedValue([
-      { id: "c-win", name: "corp-push", type: "windows_domain", has_secret: true },
-      { id: "c-ssh", name: "branch-installer", type: "push_install", has_secret: true },
+      { id: "c-win", name: "corp-push", type: "windows_domain", client_id: "o1", has_secret: true },
+      { id: "c-ssh", name: "branch-installer", type: "push_install", client_id: "o1", has_secret: true },
     ]),
     listPushHostKeys: vi.fn().mockResolvedValue([]),
     requestPush: vi.fn(),
