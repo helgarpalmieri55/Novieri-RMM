@@ -52,6 +52,7 @@ export const lib = {
   // Clients as the console names them (shell/ClientSelector.tsx, phase 3 design §1.1).
   clients: {
     unassigned: "Unassigned",
+    everyClient: "All clients",
   },
   // Prerequisite detectors (lib/detectors.ts).
   detectors: {

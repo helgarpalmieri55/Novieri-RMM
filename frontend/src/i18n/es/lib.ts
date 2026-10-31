@@ -49,6 +49,7 @@ export const lib: Shape<typeof en> = {
   },
   clients: {
     unassigned: "Sin asignar",
+    everyClient: "Todos los clientes",
   },
   detectors: {
     addComputer: "Añadir un equipo",

@@ -99,7 +99,7 @@ function renderPage(listAssetCandidates: () => Promise<unknown>, me: Partial<Me>
       fleet: { total: 0, managed: 0, online: 0, cert_attention: 0 },
     }),
     // `org_id` is the internal client's id, which a promotion names (phase 2).
-    me: vi.fn().mockResolvedValue({ org_id: "o1", permissions: [], ...me } as Me),
+    me: vi.fn().mockResolvedValue({ org_id: "o1", permissions: [], clients: [{ id: "o1", name: "Novieri", kind: "internal", enabled_modules: [], permissions: [] }, { id: "c-y", name: "Yonder", kind: "customer", enabled_modules: [], permissions: [] }], ...me } as Me),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui: ReactElement = (
@@ -391,10 +391,10 @@ describe("CandidatesPage", () => {
       ),
     );
     expect(await screen.findAllByText("172.22.104.55")).toHaveLength(2);
-    // Each row says whose it is -- the client's name for someone holding
-    // `clients.read`, its id otherwise -- so its checkbox is its own.
-    const own = screen.getByRole("checkbox", { name: "172.22.104.55 of o1" });
-    const theirs = screen.getByRole("checkbox", { name: "172.22.104.55 of c-y" });
+    // Each row says whose it is -- the client's name, from /me -- so its
+    // checkbox is its own.
+    const own = screen.getByRole("checkbox", { name: "172.22.104.55 of Novieri" });
+    const theirs = screen.getByRole("checkbox", { name: "172.22.104.55 of Yonder" });
     await userEvent.click(theirs);
     expect(theirs).toBeChecked();
     expect(own).not.toBeChecked();
