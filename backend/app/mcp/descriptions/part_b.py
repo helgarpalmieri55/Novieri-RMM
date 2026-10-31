@@ -351,12 +351,13 @@ PART_B: dict[str, str] = {
         "that endpoint. Rate fuses and the job type's own permission still apply."
     ),
     "GET /api/v1/health/assignments": (
-        "Lists which health profile applies to the organization, device groups or single "
-        "devices, optionally for one profile."
+        "Lists which health profile applies to the organization, each client, device groups "
+        "or single devices, optionally for one profile."
     ),
     "POST /api/v1/health/assignments": (
-        "Assigns a health profile to a device or group, then pushes the changed policy as "
-        "signed jobs to the affected agents. One assignment per level."
+        "Assigns a health profile to a device, a group, a client (that client's default, which "
+        "needs health.admin in that client) or the whole organization, then pushes the changed "
+        "policy as signed jobs to the affected agents. One assignment per level."
     ),
     "DELETE /api/v1/health/assignments/{assignment_id}": (
         "Removes a profile assignment. Affected devices fall back to the next level or to "

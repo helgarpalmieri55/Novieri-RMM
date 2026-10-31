@@ -107,6 +107,23 @@ data until the console can name a client (MSP clients phase 3). Remediating or a
 permission in the alert's client. The plan is
 `docs/superpowers/plans/2026-10-26-msp-clientes-fase2-modulos.md`.
 
+**Amended 2026-10-31 (MSP clients phase 3, design
+`docs/superpowers/specs/2026-10-31-msp-clientes-fase3-consola-design.md` §5.1):
+the API writes a client's default.** The paragraph above said none did; from
+this phase `POST /health/assignments` takes `client_id`, and an assignment names
+a device, a group, a client or nothing — never more than one (400). A client's
+default needs `health.admin` **in that client**: the route's gate narrows the
+request to the clients where the person holds it, and the client is read in
+that session, so any other client is a 404, as an unknown one is. An archived
+client is a 409 and Unassigned a 422: Unassigned is the inbox for what has no
+owner, not a client to configure. "Nothing" is still the organisation's
+default, and still needs a scope of every client. `AssignmentOut` carries the
+row's `client_id` and the level `client`, and the device view
+(`GET /devices/{id}/health`) reports `resolution_level: "client"` when the
+client's default produced the profile. The key is
+`uq_health_assignment_client_org`, unchanged: no migration. Creating or
+deleting an assignment is audited with the row's client.
+
 Rejected: **union of every matching profile** (the Atera-ish "all applicable
 profiles apply"). Union has no way to express *removal*: a check an operator
 silenced for one troublesome device is resurrected by the org-wide profile, and

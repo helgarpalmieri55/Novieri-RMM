@@ -116,7 +116,7 @@ MaxTargetScope = Literal["device"]
 ValueKind = Literal["numeric", "boolean", "enum"]
 Cadence = Literal["tick", "posture"]
 EvaluatedBy = Literal["agent", "server"]
-ResolutionLevel = Literal["device", "group", "org"]
+ResolutionLevel = Literal["device", "group", "client", "org"]
 
 # `device_health_check_state.state` is `ok|breaching|unavailable`. `unknown` is
 # NOT a stored state: it is what `api.py` reports for a check the device has
@@ -346,17 +346,23 @@ class CheckTypeOut(BaseModel):
 
 
 class AssignmentCreate(_StrictIn):
-    """A device OR a group OR neither (the org default) -- never both.
+    """A device, a group, a client (that client's default) or none of them
+    (the org default) -- never more than one.
 
-    Typed as two independent optionals rather than as a discriminated union
+    Typed as independent optionals rather than as a discriminated union
     because `profiles.create_assignment` owns the refusal and its message names
-    all three levels; a Pydantic union would produce a 422 that says only that
+    all four shapes; a Pydantic union would produce a 422 that says only that
     the body matched no branch.
+
+    `client_id` is a client's DEFAULT (phase 3 design §5.1). A device's and a
+    group's assignment take their parent's client from the database trigger,
+    so it is never sent beside either.
     """
 
     profile_id: UUID
     device_id: UUID | None = None
     device_group_id: UUID | None = None
+    client_id: UUID | None = None
 
 
 class AssignmentOut(BaseModel):
@@ -365,8 +371,11 @@ class AssignmentOut(BaseModel):
     profile_name: str
     device_id: UUID | None
     device_group_id: UUID | None
-    # `device`/`group`/`org` -- §0.2's resolution level, named server-side so
-    # the console never has to infer it from which id is NULL.
+    # The row's client: a client default's own, a device's or a group's
+    # parent's (trigger-filled), or None for the org default.
+    client_id: UUID | None
+    # `device`/`group`/`client`/`org` -- §0.2's resolution level, named
+    # server-side so the console never has to infer it from which id is NULL.
     level: ResolutionLevel
     created_by: UUID | None
     created_at: datetime
