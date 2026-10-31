@@ -207,6 +207,7 @@ async def dispatch_restore(
             "job_id": str(job.id),
             "mode": mode,
         },
+        client_id=point.client_id,
     )
 
     await session.flush()
@@ -271,6 +272,9 @@ async def ingest_restore_result(
     ).scalar_one_or_none()
     if restore_job is None:
         return  # no matching row; the agent's report must never fail the job
+    # Read now: the state update below expires it (`server_onupdate`, written
+    # by trigger), and an async session cannot lazy-load it.
+    client_id = restore_job.client_id
 
     audit_metadata: dict[str, Any] = {}
 
@@ -324,6 +328,7 @@ async def ingest_restore_result(
             "verified": result.verified,
             "mismatch_count": len(result.mismatch or []),
         },
+        client_id=client_id,
     )
 
     await session.flush()

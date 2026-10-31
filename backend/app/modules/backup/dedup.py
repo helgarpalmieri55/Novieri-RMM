@@ -125,6 +125,33 @@ def _max_object_bytes(dedup_params: dict[str, Any]) -> int:
     return max(chunk_max + _GRANT_SLACK_BYTES, _GRANT_FLOOR_BYTES)
 
 
+async def refusal_client(
+    session: AsyncSession, *, org_id: UUID, device_id: UUID, job_id: str
+) -> UUID | None:
+    """The client a refused exchange is filed under (phase 3 design §5.5).
+
+    The job's, when the agent named a job of this organisation whose target is
+    this very device -- a job's client is its target's (migration 0231), so it
+    is the device's own. Otherwise none: a malformed id, an unknown job, or
+    another device's job names no client this refusal can honestly carry.
+    Shared with `read.py`, whose refusals follow the same rule. Runs only on
+    a refusal, never on a granted exchange."""
+    try:
+        parsed = UUID(job_id)
+    except ValueError:
+        return None
+    return (
+        await session.execute(
+            select(Job.client_id).where(
+                Job.org_id == org_id,
+                Job.id == parsed,
+                Job.target_type == "device",
+                Job.target_id == device_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
 async def _audit_refusal(
     session: AsyncSession,
     *,
@@ -133,6 +160,9 @@ async def _audit_refusal(
     job_id: str,
     reason: str,
 ) -> None:
+    client_id = await refusal_client(
+        session, org_id=org_id, device_id=device_id, job_id=job_id
+    )
     await audit_service.record(
         session,
         org_id=org_id,
@@ -144,6 +174,7 @@ async def _audit_refusal(
         # `job_id` is agent-supplied and may be anything the wire model allowed;
         # it is bounded here so a hostile value cannot bloat an audit row.
         metadata={"reason": reason, "job_id": job_id[:64]},
+        client_id=client_id,
     )
 
 

@@ -4171,6 +4171,14 @@ CATALOG: dict[str, str] = {
         "ya existe un repositorio con ese nombre en este cliente"
     ),
     "that repository belongs to another client": "ese repositorio es de otro cliente",
+    # A retired backup repository (phase 3 design §5.5).
+    "that repository is retired": "ese repositorio está retirado",
+    "this repository is already retired": "este repositorio ya está retirado",
+    "an enabled backup policy still uses this repository; switch it off or point it at "
+    "another repository first": (
+        "una política de copias activa todavía usa este repositorio; desactívala o apúntala "
+        "a otro repositorio antes"
+    ),
     "a policy for every client cannot name a repository; give each client its own": (
         "una política para todos los clientes no puede nombrar un repositorio; dale a cada "
         "cliente el suyo"
