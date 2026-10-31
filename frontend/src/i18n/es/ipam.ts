@@ -38,6 +38,8 @@ export const ipam: Shape<typeof en> = {
     none: "Ninguno",
     defaultGlobal: "Predeterminada (global)",
     vrfOfClient: "{vrf} · {client}",
+    client: "Cliente",
+    siteOfClient: "{site} · {client}",
     loading: "Cargando…",
     drift: "Deriva",
     dormant: "En reposo",

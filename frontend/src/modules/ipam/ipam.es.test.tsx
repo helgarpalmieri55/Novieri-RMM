@@ -18,7 +18,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setActiveLanguage } from "../../i18n/core";
 import { expectNoEnglish, renderInSpanish } from "../../i18n/test-utils";
-import { ApiError } from "../../lib/api";
+import { ApiError, type MeClient } from "../../lib/api";
 import { AddressDialog } from "./AddressDialog";
 import { DriftPage } from "./DriftPage";
 import fixtures from "./fixtures";
@@ -64,6 +64,25 @@ import type { GridEntryOut, ScopeOut, SubnetOut, SweepRunOut, UtilizationOut } f
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 const PERMISSIONS = [
   "ipam.read",
@@ -1216,7 +1235,7 @@ describe("the registry page in Spanish", () => {
     await user.type(screen.getAllByLabelText("Nombre")[0]!, "lab2");
     await user.click(screen.getByRole("button", { name: "Añadir VRF" }));
     await waitFor(() => expect(api.createIpamVrf).toHaveBeenCalled());
-    // PHASE 3: the internal client, `/me`'s `org_id`, until the selector exists.
+    // El cliente elegido arriba: aquí el interno, `o1` (`selectClient` del arnés).
     expect(api.createIpamVrf).toHaveBeenCalledWith(expect.objectContaining({ name: "lab2", client_id: "o1" }));
     // "build" is a recorded VRF / site name in the registry fixture.
     expectNoEnglish(body(), [...REGISTRY_RECORDED, "build"]);
@@ -1810,7 +1829,7 @@ describe("the state helpers' sentences in Spanish", () => {
 
   it("says why an import cannot be applied", () => {
     const file = (name: string, size = 10) => ({ name, size, lastModified: 1 });
-    const previewed = { ...file("a.csv"), digest: "d", vrfId: null };
+    const previewed = { ...file("a.csv"), digest: "d", vrfId: null, clientId: null };
     setActiveLanguage("es");
     expect(importApplyBlockReason(null, null)).toBe("Elige un archivo CSV.");
     expect(importApplyBlockReason(file("a.csv"), null)).toMatch(/^Previsualiza primero este archivo\./);

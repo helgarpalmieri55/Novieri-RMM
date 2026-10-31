@@ -1,14 +1,16 @@
 import { useRef, useState } from "react";
+import { ClientField } from "../../components/ClientField";
 import { describeSubmitError } from "../../components/form";
 import { Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
 import { useApi } from "../../lib/ApiContext";
+import { useClientScope } from "../../lib/clientScope";
+import { useNewRowClient } from "../../lib/clientSelection";
 import { useClientName } from "../settings/api";
 import {
   useApplyIpamImportMutation,
   useConvertIpamDocRecordsMutation,
-  useIpamClient,
   useIpamPermissions,
   useIpamVrfs,
   usePreviewIpamImportMutation,
@@ -25,7 +27,7 @@ import {
 } from "./ipamState";
 import { variantKind } from "./kinds";
 import type { ImportRowOut, VrfOut } from "./types";
-import { IMPORT_FIELDS, MAX_IMPORT_BYTES, MAX_IMPORT_ROWS } from "./types";
+import { IMPORT_FIELDS, IPAM_MANAGE, MAX_IMPORT_BYTES, MAX_IMPORT_ROWS } from "./types";
 import { Icon } from "../../shell/icons";
 import { Btn, PageHead, Panel, StatusPill } from "../../shell/components";
 
@@ -78,15 +80,16 @@ export function ImportPage() {
 }
 
 /**
- * The VRF an import goes into until the operator picks another: the internal
- * client's `global` one when it is listed, else the first listed -- the VRFs
- * listed are exactly those of the clients the operator can see, so a
- * technician limited to one client starts on theirs. `null` with none listed:
- * the import then names the internal client (`ipam/api.ts`, PHASE 3).
+ * The VRF an import goes into until the operator picks another: the `global`
+ * VRF of the client chosen at the top when it is listed, else the first
+ * listed -- the VRFs listed are exactly those of the clients the operator can
+ * see, and each names its client in the picker. `null` with none listed: the
+ * import then names a client (`ipam/api.ts`), the one chosen at the top or
+ * the one the Client field names.
  */
-function defaultImportVrf(vrfs: readonly VrfOut[], client: string | null): string | null {
-  const internalGlobal = vrfs.find((vrf) => vrf.client_id === client && vrf.name === "global");
-  return internalGlobal?.id ?? vrfs[0]?.id ?? null;
+function defaultImportVrf(vrfs: readonly VrfOut[], selected: string | null): string | null {
+  const selectedGlobal = vrfs.find((vrf) => vrf.client_id === selected && vrf.name === "global");
+  return selectedGlobal?.id ?? vrfs[0]?.id ?? null;
 }
 
 function CsvImportPanel() {
@@ -97,10 +100,15 @@ function CsvImportPanel() {
   // decision 2026-10-28: "use the row's client"), named by the client's name
   // for someone holding `clients.read`, its id otherwise.
   const vrfs = useIpamVrfs();
-  const client = useIpamClient();
+  const { selected } = useClientScope();
+  // With no VRF listed, the import names a client: the one chosen at the top,
+  // or with every client the Client field's (design §3.1).
+  const newRow = useNewRowClient(IPAM_MANAGE);
+  const [pickedClient, setPickedClient] = useState("");
+  const client = newRow.needsField ? pickedClient || null : newRow.clientId;
   const clientName = useClientName();
   const [vrfChoice, setVrfChoice] = useState<string | null>(null);
-  const vrfId = vrfChoice ?? defaultImportVrf(vrfs.data ?? [], client);
+  const vrfId = vrfChoice ?? defaultImportVrf(vrfs.data ?? [], selected);
   const [file, setFile] = useState<File | null>(null);
   const [columns, setColumns] = useState<string[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
@@ -130,10 +138,14 @@ function CsvImportPanel() {
         : { name: file.name, size: file.size, lastModified: file.lastModified },
       previewed,
     ) ??
-    // The picker no longer shows the VRF the preview read -- a choice made
-    // since, or a list that first appeared after a preview into the internal
-    // client. Apply would still go where the preview read; say so instead.
-    (previewed !== null && previewed.vrfId !== vrfId ? t("ipam.importExport.targetMoved") : null);
+    // The picker no longer shows the target the preview read -- a choice made
+    // since, a list that first appeared after a preview into a client's
+    // `global` VRF, or another client named since. Apply would still go where
+    // the preview read; say so instead.
+    (previewed !== null &&
+    (previewed.vrfId !== vrfId || (vrfId === null && previewed.clientId !== client))
+      ? t("ipam.importExport.targetMoved")
+      : null);
   const mappingNamesAddress = Object.values(mapping).includes("address");
 
   return (
@@ -170,6 +182,21 @@ function CsvImportPanel() {
           </select>
         </Field>
       )}
+      {/* Once the VRF read has settled, not while it loads: the list may yet
+          name a VRF, which decides. */}
+      {!vrfs.isPending && (vrfs.data?.length ?? 0) === 0 && newRow.needsField ? (
+        <ClientField
+          code={IPAM_MANAGE}
+          value={pickedClient}
+          onChange={(id) => {
+            setPickedClient(id);
+            // Another client is another import: the verdict was not about it.
+            setPreviewed(null);
+            apply.reset();
+            preview.reset();
+          }}
+        />
+      ) : null}
 
       <Field label={t("ipam.importExport.csvFile")}>
         {/* THE NATIVE CONTROL STAYS -- it is what the browser's picker and the
@@ -272,8 +299,9 @@ function CsvImportPanel() {
             // when the VRF list is read again; what was previewed is what is
             // applied, and the picker is pinned to it so it says so.
             const target = vrfId;
+            const targetClient = client;
             preview.mutate(
-              { file, mapping, vrfId: target },
+              { file, mapping, vrfId: target, clientId: targetClient },
               {
                 onSuccess: (result) => {
                   setVrfChoice(target);
@@ -283,6 +311,7 @@ function CsvImportPanel() {
                     lastModified: file.lastModified,
                     digest: result.digest,
                     vrfId: target,
+                    clientId: targetClient,
                   });
                 },
               },
@@ -295,7 +324,13 @@ function CsvImportPanel() {
           disabled={apply.isPending || blockReason !== null}
           onClick={() => {
             if (file === null || previewed === null) return;
-            apply.mutate({ file, mapping, digest: previewed.digest, vrfId: previewed.vrfId });
+            apply.mutate({
+              file,
+              mapping,
+              digest: previewed.digest,
+              vrfId: previewed.vrfId,
+              clientId: previewed.clientId,
+            });
           }}
         />
         {blockReason !== null && <span className="form-hint">{blockReason}</span>}
