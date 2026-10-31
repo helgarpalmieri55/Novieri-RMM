@@ -31,6 +31,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { ClientField } from "../../components/ClientField";
 import { ConfirmDialog } from "../../components/confirm";
 import { ForEveryClientToggle } from "../../components/forEveryClient";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
@@ -40,9 +41,8 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import type { DocDocument, DocDocumentListItem, DocDocumentVersion } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { formatDateTime } from "../../lib/datetime";
-import { ClientField } from "../../components/ClientField";
 import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { formatDateTime } from "../../lib/datetime";
 import { formatBytes } from "../../lib/format";
 import { humaniseEnum } from "../../lib/labels";
 import { Panel, QueryState, StatusPill } from "../../shell/components";
