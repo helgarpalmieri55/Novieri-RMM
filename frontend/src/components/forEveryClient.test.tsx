@@ -43,9 +43,19 @@ describe("ForEveryClientToggle", () => {
     withMe(ME, <ForEveryClientToggle code="docs.manage" checked={false} onChange={onChange} />);
     const box = await screen.findByRole("checkbox", { name: /For every client/ });
     expect(box).not.toBeChecked();
-    expect(screen.getByText(/belongs to your organisation's own client/)).toBeInTheDocument();
+    expect(screen.getByText(/belongs to the client this form files it under/)).toBeInTheDocument();
     await userEvent.click(box);
     expect(onChange).toHaveBeenCalledWith(true);
+  });
+
+  it("says an unticked row belongs to the client the form files it under", async () => {
+    // The render of the holder case above: this file has no `renderToggle`.
+    withMe(ME, <ForEveryClientToggle code="docs.manage" checked={false} onChange={() => undefined} />);
+    expect(
+      await screen.findByText(
+        "Every client's technicians will see it. Unticked, it belongs to the client this form files it under.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("is absent for anyone else", async () => {
@@ -90,6 +100,6 @@ describe("ForEveryClientToggle", () => {
     setActiveLanguage("es");
     withMe(ME, <ForEveryClientToggle code="docs.manage" checked onChange={() => undefined} />);
     expect(await screen.findByRole("checkbox", { name: /Para todos los clientes/ })).toBeChecked();
-    expect(screen.getByText(/es del cliente propio de tu organización/)).toBeInTheDocument();
+    expect(screen.getByText(/es del cliente en el que este formulario lo archiva/)).toBeInTheDocument();
   });
 });

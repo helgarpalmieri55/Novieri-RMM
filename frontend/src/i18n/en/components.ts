@@ -34,7 +34,7 @@ export const components = {
   // A new row filed as every client's configuration (components/forEveryClient.tsx).
   forEveryClient: {
     label: "For every client",
-    hint: "Every client's technicians will see it. Unticked, it belongs to your organisation's own client.",
+    hint: "Every client's technicians will see it. Unticked, it belongs to the client this form files it under.",
   },
   // A new row's client, with "All my clients" (components/ClientField.tsx).
   clientField: {

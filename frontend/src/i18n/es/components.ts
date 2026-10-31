@@ -36,7 +36,7 @@ export const components: Shape<typeof en> = {
   },
   forEveryClient: {
     label: "Para todos los clientes",
-    hint: "Lo verán los técnicos de todos los clientes. Sin marcar, es del cliente propio de tu organización.",
+    hint: "Lo verán los técnicos de todos los clientes. Sin marcar, es del cliente en el que este formulario lo archiva.",
   },
   clientField: {
     label: "Cliente",
