@@ -34,7 +34,7 @@ import {
   useBudgets,
 } from "./api";
 import { BudgetReadiness } from "./BudgetReadiness";
-import { BudgetPageNav } from "./budgetState";
+import { BudgetPageNav, BudgetPickClient, useBudgetNeedsClient } from "./budgetState";
 import { chartFigure, compactMoney, exactMoney } from "./money";
 import { PageHead, Panel, Progress, QueryState, StatsGrid } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -108,6 +108,7 @@ export function BudgetDashboard() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("budget.read");
+  const needsClient = useBudgetNeedsClient();
 
   const budgets = useBudgets();
   const [budgetIdOverride, setBudgetIdOverride] = useState<string | undefined>(undefined);
@@ -190,6 +191,18 @@ export function BudgetDashboard() {
     variance.data.unconvertible_count === positionUnconvertible &&
     JSON.stringify(Object.entries(variance.data.unconvertible_by_currency).sort()) ===
       JSON.stringify(Object.entries(position.data.unconvertible_by_currency).sort());
+
+  // ONE CLIENT AT A TIME (plan Task 11 D11.1): with every client chosen there
+  // is no base currency to add these figures in, so the page asks for one.
+  if (needsClient) {
+    return (
+      <div>
+        <PageHead title={t("budget.dashboard.title")} description={t("budget.dashboard.description")} />
+        <BudgetPageNav canRead={canRead} />
+        <BudgetPickClient />
+      </div>
+    );
+  }
 
   return (
     <div>

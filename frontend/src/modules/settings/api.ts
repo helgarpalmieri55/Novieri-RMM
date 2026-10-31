@@ -34,7 +34,7 @@ import type {
 } from "../../lib/api";
 import { translate } from "../../i18n/core";
 import { useApi } from "../../lib/ApiContext";
-import { loadingUntilClient, requireKnown } from "../../lib/internalClient";
+import { loadingUntilClient, requireKnown } from "../../lib/clientSelection";
 import { everyClientReason, permissionReason } from "./settingsState";
 import type { AiProviderOut, AiSettingsOut, AiSettingsUpdate } from "../ai-admin/types";
 import type { SettingsOut as BudgetSettingsOut, SettingsUpdate as BudgetSettingsUpdate } from "../budget/types";
@@ -415,8 +415,9 @@ export function useUpdateHealthSettingsMutation() {
 //
 // ONE CLIENT'S SETTINGS (MSP clients phase 2, plan 2026-10-26 Task 8): each
 // client has its own base currency and fiscal year, so both calls name the
-// client. `clientId` is `null` until `/me` has answered: the read waits for
-// it, and a save throws `InternalScopeUnknown` (nothing is sent). Same query
+// client. `clientId` is the client chosen at the top, `null` with every
+// client: the read waits for one, and a save throws `ClientNotChosen`
+// (nothing is sent). Same query
 // key shape as the budget module's (`budget/api.ts`), so they share a cache.
 // --------------------------------------------------------------------------
 

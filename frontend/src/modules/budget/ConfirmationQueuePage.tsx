@@ -14,7 +14,13 @@ import {
   useExpenses,
   useVoidExpenseMutation,
 } from "./api";
-import { BudgetPageNav, expenseStatusKind, sourceNote } from "./budgetState";
+import {
+  BudgetPageNav,
+  BudgetPickClient,
+  expenseStatusKind,
+  sourceNote,
+  useBudgetNeedsClient,
+} from "./budgetState";
 import type { ExpenseOut } from "./types";
 import { PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -29,6 +35,7 @@ export function ConfirmationQueuePage() {
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("budget.read");
   const canConfirm = permissions.includes("expense.confirm");
+  const needsClient = useBudgetNeedsClient();
 
   const categories = useBudgetCategories();
   const categoryName = (id: string) => categories.data?.find((c) => c.id === id)?.name ?? id;
@@ -50,6 +57,18 @@ export function ConfirmationQueuePage() {
   // a different half of it.
   const [confirming, setConfirming] = useState<{ expense: ExpenseOut; amount: string; title: string } | null>(null);
   const [voiding, setVoiding] = useState<{ expense: ExpenseOut; title: string } | null>(null);
+
+  // ONE CLIENT AT A TIME (plan Task 11 D11.1): with every client chosen there
+  // is no base currency to add these figures in, so the page asks for one.
+  if (needsClient) {
+    return (
+      <div>
+        <PageHead title={t("budget.confirm.title")} description={t("budget.confirm.description")} />
+        <BudgetPageNav canRead={canRead} />
+        <BudgetPickClient />
+      </div>
+    );
+  }
 
   return (
     <div>

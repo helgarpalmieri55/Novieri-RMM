@@ -16,9 +16,9 @@
 // CLIENT (MSP clients phase 2, plan 2026-10-26 Task 8): settings, categories,
 // cost centres, budgets and expenses each belong to ONE client. Every create
 // names it (`client_id`), every one of those outputs carries it, and the
-// settings are read and written for a named client (`?client_id=`). Until the
-// client selector exists (PHASE 3) these pages work on the internal client
-// (`api.ts`'s `useBudgetClient`).
+// settings are read and written for a named client (`?client_id=`). These
+// pages work on the client chosen at the top (`api.ts`'s `useBudgetClient`),
+// and ask for one with every client chosen.
 
 // schema.py: Granularity = Literal["month", "quarter"].
 export type Granularity = "month" | "quarter";
