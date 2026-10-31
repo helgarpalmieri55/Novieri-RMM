@@ -46,6 +46,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import quote
+from uuid import UUID
 
 import httpx
 from fastapi import FastAPI
@@ -227,8 +228,13 @@ async def invoke_tool(
     bearer: str,
     deadline: float,
     registry: Mapping[str, ReadTool],
+    requested_client: UUID | None = None,
 ) -> ToolResult | ToolError:
     """Resolve -> validate -> build -> clamp -> GET -> map. In that order.
+
+    `requested_client` is the client the turn's own request named in
+    `X-Client-Id`, from `TurnContext` -- never from the model -- and is
+    forwarded unchanged (step 5).
 
     **THIS FUNCTION RETURNS; IT DOES NOT RAISE.** Every failure a tool call can
     have -- an unknown name, arguments the model got wrong, a denial, a timeout,
@@ -278,10 +284,17 @@ async def invoke_tool(
             tool=tool_name, kind="timeout", message="The turn ran out of time before this call."
         )
     timeout = min(MAX_TOOL_CALL_SECONDS, remaining)
+    headers = {"Authorization": bearer}
+    if requested_client is not None:
+        headers["X-Client-Id"] = str(requested_client)
 
-    # 5. Issue it. EXACTLY ONE header is set by this module, and it carries the
-    #    caller's own token unmodified, so `auth_context` and
-    #    `require_permission` re-run exactly as they would for the human.
+    # 5. Issue it. The caller's own token, unmodified, so `auth_context` and
+    #    `require_permission` re-run exactly as they would for the human --
+    #    and, when the turn's request was narrowed by the console's selector,
+    #    its `X-Client-Id`, so the route sees the clients the turn saw and no
+    #    other (phase 3 design §5.2; `app.mcp.invoke` forwards it the same
+    #    way). Never wider: the route narrows by it, it does not grant. Those
+    #    two headers and nothing else; the model sets neither.
     #
     #    **THE BROAD `except Exception` IS LOAD-BEARING, NOT LAZY.** The loopback
     #    is an `ASGITransport`, which calls the app object directly and therefore
@@ -301,7 +314,7 @@ async def invoke_tool(
         async with httpx.AsyncClient(
             transport=_transport(app), base_url=LOOPBACK_BASE_URL, timeout=timeout
         ) as client:
-            response = await client.get(url, params=query, headers={"Authorization": bearer})
+            response = await client.get(url, params=query, headers=headers)
     except httpx.TimeoutException:
         return ToolError(  # i18n-exempt: model-facing, tool result read by the model
             tool=tool_name,

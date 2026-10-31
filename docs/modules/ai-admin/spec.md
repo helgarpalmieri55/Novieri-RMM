@@ -907,6 +907,19 @@ returned to the model, not an HTTP request.
 The `Authorization` header is attached by the executor from the turn's token.
 No other header is settable.
 
+**Amended 2026-10-31 (MSP clients phase 3, design
+`docs/superpowers/specs/2026-10-31-msp-clientes-fase3-consola-design.md`
+§5.2).** When the request that started the turn carried `X-Client-Id` — the
+console's client selector — the staff executor sends that header too,
+unchanged, on every loopback call of the turn: the read tools, the act tool's
+device probe, and the confirm's probe. The inner route then runs under the
+scope the turn ran under. The header narrows and never grants, and the route
+passes the same door with the same token. The value comes from
+`TurnContext.requested_client`, which only the staff routes fill; the model
+still sets no header (§13 test 4 has a case for it). The portal executor takes
+no selection and refuses one, so a contact's turn still carries exactly one
+header. This is what the MCP path already did (`app/mcp/invoke.py`).
+
 ---
 
 ## 5. The turn loop
