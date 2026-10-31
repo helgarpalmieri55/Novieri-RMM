@@ -304,6 +304,8 @@ export const patch: Shape<typeof en> = {
       other: "los {count} dispositivos del cliente {client} en el anillo «{ring}»",
     },
     ownClient: "propio de tu organización",
+    // Read after "del cliente", like `ownClient`: "del cliente que elijas".
+    chosenClient: "que elijas",
     forEveryClientHint:
       "Marcada, estas actualizaciones pasan a poder instalarse en los equipos de todos los clientes del anillo {ring}. Sin marcar, solo en los del cliente {client}.",
     noChangeNote: "Si no eliges ninguna solicitud de cambio, se registra una automáticamente para esta aprobación.",

@@ -103,6 +103,25 @@ vi.mock("../../../lib/ApiContext", () => ({
   },
 }));
 
+const mockClientScope = vi.fn();
+vi.mock("../../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
+
 function renderWithProviders(ui: ReactElement, path = "/patch") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -597,8 +616,7 @@ describe("FleetPatchPage — the fleet view is one row per update, not per pair"
     await user.click(within(confirm).getByRole("button", { name: "Approve" }));
 
     expect(bulkApprovePatches).toHaveBeenCalledTimes(1);
-    // The approval is the internal client's -- `/me`'s `org_id` -- until the
-    // client selector exists (MSP clients plan 2026-10-26 Task 14).
+    // The approval is the client chosen at the top's: here the internal one.
     expect(bulkApprovePatches).toHaveBeenCalledWith({
       patch_ids: ["p1", "p3"],
       ring_name: "test",
@@ -641,7 +659,7 @@ describe("FleetPatchPage — the fleet view is one row per update, not per pair"
     );
 
     // On the page, beside the control, before anything is clicked -- and the
-    // reach of THIS approval, the internal client's (final review E: it used
+    // reach of THIS approval, the selected client's (final review E: it used
     // to say the ring's whole population whoever the approval was for).
     expect(
       await screen.findByText(
@@ -3226,7 +3244,7 @@ describe("the compliance panel speaks the page's own vocabulary", () => {
 // review). A client's approval clears that client's machines in the ring and
 // no other client's; a global one -- "For every client" -- clears every
 // client's. The screen states the reach of the approval actually being made:
-// the internal client's by default (phase 3 brings the selector), the ROW's
+// the client chosen at the top's (here the internal one), the ROW's
 // own client on a machine's drill-down (the operator's rule of 2026-10-28),
 // and every client's only when asked. And the Approvals list tells a global
 // row from a client's row of the same update and ring.
@@ -3280,7 +3298,26 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     return screen.findByRole("dialog", { name: "Approve updates into a deployment ring" });
   }
 
-  it("states the internal client's machines by default, and every client's when asked", async () => {
+  it("with every client chosen, asks the bar for the client and files the approval there", async () => {
+    selectClient(null, [
+      { id: "o1", name: "Novieri", kind: "internal", enabled_modules: [], permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ME.permissions },
+    ]);
+    const user = userEvent.setup();
+    const bulkApprovePatches = vi.fn().mockResolvedValue(bulkResult(["p1"], "test"));
+    api = { bulkApprovePatches };
+    renderWithProviders(<FleetPatchPage />);
+    await screen.findByText("2023-10 Cumulative Update");
+    await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
+
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    const confirm = await openApproval(user);
+    await user.click(within(confirm).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(bulkApprovePatches).toHaveBeenCalled());
+    expect(bulkApprovePatches.mock.calls[0]?.[0]).toMatchObject({ client_id: "c-acme" });
+  });
+
+  it("states the selected client's machines by default, and every client's when asked", async () => {
     const user = userEvent.setup();
     const bulkApprovePatches = vi.fn().mockResolvedValue(bulkResult(["p1"], "test"));
     api = { bulkApprovePatches };
@@ -3289,7 +3326,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     await screen.findByText("2023-10 Cumulative Update");
     await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
 
-    // Unticked: the internal client's 2 of the ring's 3 machines.
+    // Unticked: the selected (internal) client's 2 of the ring's 3 machines.
     let confirm = await openApproval(user);
     expect(confirm).toHaveTextContent(
       'This update becomes installable on the 2 devices of your organisation\'s own client in the "test" ring at their next maintenance window.',
