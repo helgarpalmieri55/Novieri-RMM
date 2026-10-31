@@ -11,7 +11,9 @@ import { Button, Dialog, Table, Td, Th } from "../../components/ui";
 import type { AgentInstallCommand, AgentRelease, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDateTime, intlLocale } from "../../lib/datetime";
-import { internalSiteId, requireKnown } from "../../lib/internalClient";
+import { ClientField } from "../../components/ClientField";
+import { SiteField } from "../../components/SiteField";
+import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
 import { PageHead, Panel, QueryState, StatCard, StatsGrid, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { OsIcon } from "../../shell/viz";
@@ -28,6 +30,10 @@ import { useEverywherePermissions } from "../../lib/mePermissions";
  *  because "how long is this credential alive" is the thing the operator is
  *  actually agreeing to. */
 const TOKEN_TTL_HOURS = 4;
+
+/** The code the token-minting routes check: an install command's, a managed
+ *  deployment's, and so the client a new machine may be enrolled into. */
+const ENROLLMENT_MANAGE = "enrollment.manage";
 
 /**
  * Copying without swallowing the failure.
@@ -195,13 +201,15 @@ export function AgentReleasesPage() {
   // NOT A PERMISSION GATE (invariant 6): every install-link route checks
   // `enrollment.link.manage` itself. This decides whether the panel renders.
   const canManageLink = me.data?.permissions?.includes(LINK_MANAGE) ?? false;
-  // PHASE 3: the client/site selector. The install command's token, the
-  // managed deployment's token and the install link each belong to ONE SITE
-  // now (MSP clients spec §1.5, §3.2). Until the selector exists this page
-  // works on the organisation's internal client, whose "Principal" site has
-  // the organisation's id -- `/me`'s `org_id`, from the query above
-  // (`lib/internalClient.ts`). `null` until `/me` has answered.
-  const internalSite = internalSiteId(me.data);
+  // WHERE NEW MACHINES GO (MSP clients spec §1.5, design §3.2). The install
+  // command's token, the managed deployment's token and the install link each
+  // belong to ONE SITE: the one chosen on this page, among the sites of the
+  // client chosen at the top -- or, with every client, of the page's Client
+  // field. Empty until chosen: nothing that needs it is sent before.
+  const target = useNewRowClient(ENROLLMENT_MANAGE);
+  const [pickedClient, setPickedClient] = useState("");
+  const siteClient = target.needsField ? pickedClient || null : target.clientId;
+  const [siteId, setSiteId] = useState("");
 
   const releases = useQuery({
     queryKey: ["agent-releases"],
@@ -210,8 +218,7 @@ export function AgentReleasesPage() {
 
   const generate = useMutation({
     mutationFn: (release: AgentRelease) =>
-      // PHASE 3: the client/site selector -- the internal site, above.
-      api.generateAgentInstallCommand(release.id, TOKEN_TTL_HOURS, requireKnown(internalSite)),
+      api.generateAgentInstallCommand(release.id, TOKEN_TTL_HOURS, requireKnown(siteId || null)),
     onSuccess: (result) => {
       setCopied("idle");
       setCommand(result);
@@ -310,14 +317,28 @@ export function AgentReleasesPage() {
         />
       </StatsGrid>
 
-      {/* The install link (spec 2026-09-28 §1.1): one shared link, off by
-          default, for technicians setting up machines by hand. */}
-      {/* PHASE 3: the client/site selector. One link per site; this is the
-          internal client's "Principal" site's, and it renders once `/me` has
-          said which that is -- the same answer `canManageLink` waits on. */}
-      {canManageLink && internalSite !== null && (
-        <InstallLinkPanel zone={zone} siteId={internalSite} />
-      )}
+      {/* WHERE NEW MACHINES GO: the site the install command, the install
+          link and a managed deployment are for (design §3.2). */}
+      <Panel title={t("agentReleases.where.title")} subtitle={t("agentReleases.where.subtitle")}>
+        <div className="form-grid">
+          {target.needsField ? (
+            <ClientField
+              code={ENROLLMENT_MANAGE}
+              value={pickedClient}
+              onChange={(id) => {
+                setPickedClient(id);
+                // Another client is another set of sites.
+                setSiteId("");
+              }}
+            />
+          ) : null}
+          <SiteField clientId={siteClient} value={siteId} onChange={setSiteId} />
+        </div>
+      </Panel>
+
+      {/* The install link (spec 2026-09-28 §1.1): one shared link per site,
+          off by default, for technicians setting up machines by hand. */}
+      {canManageLink && siteId !== "" && <InstallLinkPanel zone={zone} siteId={siteId} />}
 
       {/* THE FRAGMENT TARGET IS A REAL ELEMENT. `Panel` takes no id, so the
           anchor is the wrapper; `#releases` pointing at nothing scrolls
@@ -615,8 +636,7 @@ export function AgentReleasesPage() {
         release={managedRelease}
         onClose={() => setManagedRelease(null)}
         timezone={zone}
-        // PHASE 3: the client/site selector -- the internal site, above.
-        siteId={internalSite}
+        siteId={siteId || null}
       />
 
       <ConfirmDialog

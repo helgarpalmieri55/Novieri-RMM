@@ -121,7 +121,9 @@ import { EmptyState, NoValue } from "../../components/emptystate";
 import { Field, Td, inputClass } from "../../components/ui";
 import type { Device, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { internalSiteId, requireKnown } from "../../lib/internalClient";
+import { ClientField } from "../../components/ClientField";
+import { SiteField } from "../../components/SiteField";
+import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
 import { formatDate, formatDateTime } from "../../lib/datetime";
 import { humaniseEnum } from "../../lib/labels";
 import { useT } from "../../i18n/context";
@@ -399,16 +401,19 @@ export function EnrollmentPage() {
   /** The validated request, waiting on the confirmation. Nothing is sent while
    *  this is set — it is the state of "asked, not yet answered". */
   const [pendingIssue, setPendingIssue] = useState<TokenDraft | null>(null);
+  // A token enrols machines into ONE SITE (MSP clients spec §1.5, design §3.2):
+  // the one the form names, among the sites of the client chosen at the top
+  // -- or, with every client, of the form's Client field.
+  const target = useNewRowClient("enrollment.manage");
+  const [pickedClient, setPickedClient] = useState("");
+  const tokenClient = target.needsField ? pickedClient || null : target.clientId;
+  const [siteId, setSiteId] = useState("");
 
   const create = useMutation({
     mutationFn: (body: TokenDraft) =>
       createEnrollmentToken(api, {
         ...body,
-        // PHASE 3: the client/site selector. Until it exists the console
-        // issues tokens for the organisation's internal client, whose
-        // "Principal" site has the organisation's id -- `/me`'s `org_id`
-        // (`lib/internalClient.ts`). The route requires the site.
-        site_id: requireKnown(internalSiteId(me.data)),
+        site_id: requireKnown(siteId || null),
       }),
     onSuccess: (created: EnrollmentTokenCreated) => {
       setIssued(created);
@@ -464,7 +469,15 @@ export function EnrollmentPage() {
     // rule set when "unlimited" was ticked, which is what made an unbounded
     // credential expressible from this form at all.
     // Held as rules + values, not as sentences, so a language switch rewords them.
-    const next: Attempt = { rules: () => [...nameAndLifetime(), maxUsesRule()], values: form };
+    const next: Attempt = {
+      rules: () => [
+        ...nameAndLifetime(),
+        maxUsesRule(),
+        ...(target.needsField ? [{ name: "client", label: translate("enrollment.form.client") }] : []),
+        { name: "site", label: translate("enrollment.form.site") },
+      ],
+      values: { ...form, client: tokenClient, site: siteId },
+    };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
     setPendingIssue({
@@ -750,6 +763,17 @@ export function EnrollmentPage() {
           >
             {formOpen ? (
               <Form onSubmit={submitIssue}>
+                {target.needsField ? (
+                  <ClientField
+                    code="enrollment.manage"
+                    value={pickedClient}
+                    onChange={(id) => {
+                      setPickedClient(id);
+                      setSiteId("");
+                    }}
+                  />
+                ) : null}
+                <SiteField clientId={tokenClient} value={siteId} onChange={setSiteId} />
                 <Field label={t("enrollment.form.name")}>
                   <input
                     className={inputClass}

@@ -37,6 +37,8 @@ export const enrollment = {
   form: {
     title: "Issue an enrollment token",
     subtitle: "A short-lived pass that lets new computers join this organization",
+    client: "Client",
+    site: "Site",
     name: "Token name",
     namePlaceholder: "e.g. Bogota HQ workstations",
     hours: "Lifetime in hours",
