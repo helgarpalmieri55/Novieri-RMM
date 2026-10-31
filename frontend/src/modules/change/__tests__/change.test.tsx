@@ -113,6 +113,20 @@ describe("ChangesPage", () => {
     expect(screen.queryByText("draft")).not.toBeInTheDocument();
   });
 
+  // Design §3.4: the Client column with every client chosen; with one, every
+  // row is that client's and the column is hidden.
+  it("shows the Client column with every client, and hides it with one chosen", async () => {
+    selectClient(null);
+    const { unmount } = renderWithProviders(<ChangesPage />);
+    expect(await screen.findByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    unmount();
+
+    selectClient("c-x");
+    renderWithProviders(<ChangesPage />);
+    await screen.findByText("Upgrade switch firmware");
+    expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
+  });
+
   // The approval queue is a real route (App.tsx: /changes/approvals) that no
   // shell nav entry points at, which is the mechanism behind Auditor B's
   // BLOCKER: "the approval workflow — the entire reason a change-management

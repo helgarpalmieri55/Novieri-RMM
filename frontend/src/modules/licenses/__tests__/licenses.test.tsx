@@ -668,6 +668,14 @@ describe("LicensesPage", () => {
     await waitFor(() => expect(api.createLicense).toHaveBeenCalledWith(expect.objectContaining({ client_id: "c-acme" })));
   });
 
+  // Design §3.4: with one client chosen every row is that client's.
+  it("hides the Client column while one client is chosen at the top", async () => {
+    selectClient("c-x");
+    renderWithProviders(<LicensesPage />);
+    await screen.findByText("Acme Office Suite");
+    expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
+  });
+
   // Audit: "Empty submit in the license modal is a silent no-op". The click
   // used to land on a disabled control -- nothing moved and no field was
   // named. The control must now be live, and the click must produce the
@@ -1033,10 +1041,30 @@ describe("ComplianceDashboard", () => {
     expect(screen.getByText("55 / 50")).toBeInTheDocument();
   });
 
+  // Design §3.4 (coordinator's addendum to plan Task 11): the Client column
+  // is shown with every client chosen, and hidden with one -- every row is
+  // then that client's. Waits for the row, so the table is there to look in.
+  it("hides the Client column while one client is chosen at the top", async () => {
+    selectClient("c-x");
+    api.licenseCompliance = vi.fn().mockResolvedValue([ROW]);
+    renderWithProviders(<ComplianceDashboard />);
+    await screen.findByText("Acme Office Suite");
+    expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
+  });
+
+  it("shows the Client column with every client", async () => {
+    selectClient(null);
+    api.licenseCompliance = vi.fn().mockResolvedValue([ROW]);
+    renderWithProviders(<ComplianceDashboard />);
+    expect(await screen.findByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+  });
+
   // MSP clients phase 2: a license is one client's, so compliance is one row
   // per (client, product) and a client's breach is never hidden by another's
-  // spare seats. Each row says whose it is.
+  // spare seats. Each row says whose it is -- with every client chosen, the
+  // only choice under which two clients' rows are listed (design §3.4).
   it("shows a product once per client, each row naming its client", async () => {
+    selectClient(null);
     api.me = vi.fn().mockResolvedValue(ME_READS_CLIENTS);
     api.listClients = vi.fn().mockResolvedValue([clientOut("o1", "Novieri"), clientOut("c2", "Globex")]);
     api.licenseCompliance = vi.fn().mockResolvedValue([
@@ -1057,6 +1085,8 @@ describe("ComplianceDashboard", () => {
   });
 
   it("names a row's client /me does not list as all clients, and never reads the clients list", async () => {
+    // The Client column is there with every client chosen (design §3.4).
+    selectClient(null);
     api.listClients = vi.fn();
     api.licenseCompliance = vi.fn().mockResolvedValue([ROW]);
     renderWithProviders(<ComplianceDashboard />);
@@ -1109,7 +1139,25 @@ describe("RenewalCalendar (licenses)", () => {
     expect(screen.getByText("5 days")).toBeInTheDocument();
   });
 
+  // Design §3.4 (coordinator's addendum to plan Task 11), as on compliance.
+  it("hides the Client column while one client is chosen at the top", async () => {
+    selectClient("c-x");
+    api.licenseRenewals = vi.fn().mockResolvedValue([ROW]);
+    renderWithProviders(<RenewalCalendar />);
+    await screen.findByText("Acme Office Suite");
+    expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
+  });
+
+  it("shows the Client column with every client", async () => {
+    selectClient(null);
+    api.licenseRenewals = vi.fn().mockResolvedValue([ROW]);
+    renderWithProviders(<RenewalCalendar />);
+    expect(await screen.findByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+  });
+
+  // With every client chosen: the only choice that lists two clients' rows.
   it("names each renewal's client (MSP clients phase 2)", async () => {
+    selectClient(null);
     api.me = vi.fn().mockResolvedValue(ME_READS_CLIENTS);
     api.listClients = vi.fn().mockResolvedValue([clientOut("o1", "Novieri"), clientOut("c2", "Globex")]);
     api.licenseRenewals = vi.fn().mockResolvedValue([ROW, { ...ROW, license_id: "l9", client_id: "c2" }]);

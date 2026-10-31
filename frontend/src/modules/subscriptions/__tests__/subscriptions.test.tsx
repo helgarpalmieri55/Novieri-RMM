@@ -540,6 +540,14 @@ describe("SubscriptionsPage", () => {
     await waitFor(() => expect(api.createSubscription).toHaveBeenCalledWith(expect.objectContaining({ client_id: "c-acme", service_name: "Globex CRM" })));
   });
 
+  // Design §3.4: with one client chosen every row is that client's.
+  it("hides the Client column while one client is chosen at the top", async () => {
+    selectClient("c-x");
+    renderWithProviders(<SubscriptionsPage />);
+    await screen.findByText("Acme SaaS", { selector: ".cell-title a" });
+    expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
+  });
+
   // The form-kernel findings on this route. Each of these fails against the
   // pre-kernel dialog, which rendered `<Button disabled={create.isPending ||
   // !serviceName}>` with no <form>, no rules and no live region.
@@ -1046,9 +1054,36 @@ describe("SpendDashboard", () => {
     mockUseApi.mockReturnValue(api as ApiClient);
   });
 
+  // Design §3.4 (coordinator's addendum to plan Task 11): the Client column
+  // of the roll-ups is shown with every client chosen, and hidden with one --
+  // every row is then that client's. Waits for a row, so a table is there.
+  const ONE_ROW: SpendSummary = {
+    ...EMPTY_SPEND,
+    by_currency: [
+      { group_key: null, group_type: null, group_id: null, currency: "USD", client_id: "o1", monthly_total: "100.00", annual_total: "1200.00" },
+    ],
+  };
+
+  it("hides the Client column while one client is chosen at the top", async () => {
+    selectClient("c-x");
+    api.spend = vi.fn().mockResolvedValue(ONE_ROW);
+    renderWithProviders(<SpendDashboard />);
+    await screen.findByText("100.00");
+    expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
+  });
+
+  it("shows the Client column with every client", async () => {
+    selectClient(null);
+    api.spend = vi.fn().mockResolvedValue(ONE_ROW);
+    renderWithProviders(<SpendDashboard />);
+    expect(await screen.findByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+  });
+
   // MSP clients phase 2: a subscription is one client's, so every roll-up
-  // row is one client's -- never summed across clients -- and says whose.
+  // row is one client's -- never summed across clients -- and says whose
+  // (with every client chosen, the only choice that lists two clients' rows).
   it("names each spend row's client, never adding two clients together", async () => {
+    selectClient(null);
     const client = (id: string, name: string): ClientOut => ({
       id, name, kind: "customer", status: "active", email_domains: [], phone: "", address: "",
       website: "", notes: "", enabled_modules: [], device_count: 0, site_count: 0,

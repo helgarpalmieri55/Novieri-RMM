@@ -135,6 +135,20 @@ describe("PlansPage", () => {
     expect(screen.queryByText("active")).not.toBeInTheDocument();
   });
 
+  // Design §3.4: the Client column with every client chosen; with one, every
+  // row is that client's and the column is hidden.
+  it("shows the Client column with every client, and hides it with one chosen", async () => {
+    selectClient(null);
+    const { unmount } = renderWithProviders(<PlansPage />);
+    expect(await screen.findByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    unmount();
+
+    selectClient("c-x");
+    renderWithProviders(<PlansPage />);
+    await screen.findByText("Core datacenter failover");
+    expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
+  });
+
   it("hides the New plan control when the caller lacks bcp.manage", async () => {
     api.me = vi.fn().mockResolvedValue({
       ...ME,
