@@ -94,4 +94,56 @@ describe("a new client-default policy", () => {
     await waitFor(() => expect(api.upsertBackupPolicy).toHaveBeenCalled());
     expect((api.upsertBackupPolicy as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toMatchObject({ device_group_id: null, client_id: "c-acme", repository_id: "r-a" });
   });
+
+  it("with every client chosen and none picked yet, neither says the client has no repository nor links to make one", async () => {
+    // No client is no list of repositories -- not a client without one. The
+    // dialog said "No backup repository of this policy's client exists" and
+    // linked to the Repositories page before anyone had named the client.
+    selectClient(null);
+    stubApi();
+    const user = userEvent.setup();
+    renderIt(<BackupPolicyEditor />);
+    await user.click(await screen.findByRole("button", { name: /new policy/i }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("combobox", { name: /Repository/ }));
+    const list = await within(dialog).findByRole("listbox", { name: /Repository/ });
+    // Settled: the repositories have arrived, so the note is not "Loading…".
+    await waitFor(() => expect(list).not.toHaveTextContent(/Loading/));
+
+    expect(within(dialog).queryByText(/No backup repository of this policy’s client exists/)).toBeNull();
+    expect(within(dialog).queryByRole("link", { name: /Create a backup repository/ })).toBeNull();
+    expect(list).toHaveTextContent("Choose the client first: its repositories are listed here.");
+  });
+
+  it("with every client chosen, Save without a client names the Client and sends nothing", async () => {
+    selectClient(null);
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderIt(<BackupPolicyEditor />);
+    await user.click(await screen.findByRole("button", { name: /new policy/i }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Client is required");
+    expect(api.upsertBackupPolicy).not.toHaveBeenCalled();
+  });
+
+  it("still links to the Repositories page once a client with no repository is picked", async () => {
+    // The gate is on the client being known, not on the link: a client
+    // without a repository still says so, and still says where to make one.
+    selectClient(null);
+    stubApi({ listBackupRepositories: vi.fn().mockResolvedValue([repository({})]) });
+    const user = userEvent.setup();
+    renderIt(<BackupPolicyEditor />);
+    await user.click(await screen.findByRole("button", { name: /new policy/i }));
+    const dialog = await screen.findByRole("dialog");
+    await user.selectOptions(within(dialog).getByLabelText("Client"), "c-acme");
+
+    expect(await within(dialog).findByRole("link", { name: /Create a backup repository/ })).toHaveAttribute(
+      "href",
+      "/backup/repositories",
+    );
+    await user.click(within(dialog).getByRole("combobox", { name: /Repository/ }));
+    expect(await within(dialog).findByText(/No backup repository of this policy’s client exists\./)).toBeInTheDocument();
+  });
 });

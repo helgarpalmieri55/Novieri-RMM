@@ -80,6 +80,8 @@ export const backup = {
       "No backup repository of this policy’s client exists. Create one on the Repositories tab; you may also not have permission to list them.",
     repositoryEmptyHintElsewhere:
       "No backup repository of this policy’s client exists, and you cannot create one in that client: ask someone who manages its backups. You may also not have permission to list them.",
+    // The same list before the policy's Client field is filled: no client yet.
+    repositoryChooseClient: "Choose the client first: its repositories are listed here.",
     groupDevices: { one: "{count} device", other: "{count} devices" },
     // The sublabel's wire words, lower case.
     noAgent: "no agent",

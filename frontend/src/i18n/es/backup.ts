@@ -79,6 +79,7 @@ export const backup: Shape<typeof en> = {
       "No hay ningún repositorio de copia de seguridad del cliente de esta política. Crea uno en la pestaña Repositorios; también puede que no tengas permiso para listarlos.",
     repositoryEmptyHintElsewhere:
       "No existe ningún repositorio de respaldo del cliente de esta política, y no puedes crear uno en ese cliente: pídeselo a quien gestiona sus respaldos. También puede que no tengas permiso para verlos.",
+    repositoryChooseClient: "Elige primero el cliente: aquí se listan sus repositorios.",
     groupDevices: { one: "{count} dispositivo", other: "{count} dispositivos" },
     noAgent: "sin agente",
     agentOnline: "en línea",

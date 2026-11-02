@@ -330,6 +330,9 @@ function PolicyDialog({
   const target = useNewRowClient("backup.policy.manage", groupClient);
   const [pickedClient, setPickedClient] = useState("");
   const newClient = target.needsField ? pickedClient || null : target.clientId;
+  // A new client default with every client chosen: the Client field is shown,
+  // and Save asks for it.
+  const asksClient = !existing && deviceGroupId === "" && target.needsField;
   const client = policyClient(existing, deviceGroupId, groups.data ?? [], newClient);
   const clientRepositories = repositoriesOfClient(repositories.data ?? [], client);
   const repositoryOptions = repositoryPickerOptions(clientRepositories);
@@ -339,8 +342,11 @@ function PolicyDialog({
   const chosenRepository = clientRepositories.some((repo) => repo.id === repositoryId)
     ? repositoryId
     : "";
-  // Gated on a settled query so a slow fetch never reads as an empty one.
-  const noRepositories = repositories.isSuccess && clientRepositories.length === 0;
+  // Gated on a settled query so a slow fetch never reads as an empty one, and
+  // on a known client: before the Client field is filled the list is empty
+  // because there is no client yet, not because the client has no
+  // repository, and "create one" would be advice about nobody.
+  const noRepositories = client !== null && repositories.isSuccess && clientRepositories.length === 0;
   // The Repositories page files a repository only in a client where this
   // person may manage policies; for a policy of any other client the hint
   // says so, and there is no link.
@@ -360,7 +366,16 @@ function PolicyDialog({
   function submit() {
     // The previous outcome must not be readable as this one.
     upsert.reset();
-    const next: Attempt = { rules: policyRules, values: { repositoryId: chosenRepository } };
+    // The Client first, as the form shows it: without it there is no list of
+    // repositories to pick from, so "Repository is required" alone named the
+    // wrong field.
+    const next: Attempt = {
+      rules: () => [
+        ...(asksClient ? [{ name: "client", label: translate("backup.repositories.client") }] : []),
+        ...policyRules(),
+      ],
+      values: { client: newClient, repositoryId: chosenRepository },
+    };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
     upsert.mutate(
@@ -400,7 +415,7 @@ function PolicyDialog({
           before: there was no <form> on this dialog at all. */}
       <Form onSubmit={submit}>
         <div className="form-grid">
-          {!existing && deviceGroupId === "" && target.needsField ? (
+          {asksClient ? (
             <ClientField
               code="backup.policy.manage"
               value={pickedClient}
@@ -437,7 +452,18 @@ function PolicyDialog({
             value={chosenRepository}
             onChange={setRepositoryId}
             loading={repositories.isLoading}
-            emptyHint={elsewhere ? repositoryPickerEmptyHintElsewhere() : repositoryPickerEmptyHint()}
+            emptyHint={
+              // No client yet is no list yet, not a client without a
+              // repository (`noRepositories`). With the Client field shown,
+              // the list waits on it.
+              client === null
+                ? asksClient
+                  ? t("backup.picker.repositoryChooseClient")
+                  : undefined
+                : elsewhere
+                  ? repositoryPickerEmptyHintElsewhere()
+                  : repositoryPickerEmptyHint()
+            }
             placeholder={t("backup.policyDialog.searchRepositories")}
           />
           {noRepositories && !elsewhere ? (
