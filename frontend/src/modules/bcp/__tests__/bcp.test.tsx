@@ -234,6 +234,18 @@ describe("PlanDetail", () => {
     await screen.findByText("Core datacenter failover");
     expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
   });
+
+  // Phase 3 review F4: the scope is named from the plan's client's devices,
+  // asked of the server -- not from one page of every client's.
+  it("names the scope from the devices of the plan's client", async () => {
+    selectClient(null);
+    api.listDevices = vi.fn().mockResolvedValue({ items: [], total: 0 });
+    renderDetail();
+
+    await screen.findByText("Core datacenter failover");
+    await waitFor(() => expect(api.listDevices).toHaveBeenCalled());
+    expect(api.listDevices).toHaveBeenCalledExactlyOnceWith({ clientId: "o1" });
+  });
 });
 
 // UX remediation cycle 3, the two HIGH findings on this dialog. Both had the
@@ -272,6 +284,25 @@ describe("PlanEditor form validation", () => {
     await user.click(screen.getByRole("combobox", { name: "Scope 1 device" }));
     expect(await screen.findByRole("option", { name: /acme-01/ })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /own-01/ })).toBeNull();
+  });
+
+  // Phase 3 review F4. `GET /devices` answers one page (100 by default):
+  // filtered in the browser, the page read for every client could hold none
+  // of the plan's client's machines, and the editor said "Add a computer" to
+  // a client that has them. The server is asked for that client's.
+  it("with every client chosen, reads the devices of the plan's client, and none before it is chosen", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["bcp"], permissions: ME.permissions },
+    ]);
+    const user = renderEditor();
+    await user.click(screen.getByRole("button", { name: /Add scope/ }));
+    await user.click(screen.getByRole("combobox", { name: "Scope 1 device" }));
+    expect(api.listDevices).not.toHaveBeenCalled();
+
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await waitFor(() => expect(api.listDevices).toHaveBeenCalled());
+    expect(api.listDevices).toHaveBeenCalledExactlyOnceWith({ clientId: "c-acme" });
   });
 
   // Auditor (HIGH), /bcp → New plan → Save: "Empty submit is a silent no-op."

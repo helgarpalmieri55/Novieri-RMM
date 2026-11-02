@@ -179,7 +179,9 @@ export function PlanEditor({
   // makes a procedure reference possible at all.
   const open = plan != null;
   const zone = useUserTimezone();
-  const devices = useScopeDevices(open);
+  // The plan's client's devices, asked of the server: nothing before the
+  // client is known (see ./api).
+  const devices = useScopeDevices(open, planClient);
   const groups = useScopeGroups(open);
   const articles = useProcedureArticles(open);
   // Built at render, never memoised: the sublabels hold translated words.
