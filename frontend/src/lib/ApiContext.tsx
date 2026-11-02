@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { FIXTURE_MODE } from "../fixtures/mode";
 import { ApiClient } from "./api";
 import { accessToken, signIn } from "./auth";
-import { selectedClient } from "./clientChoice";
+import { isClientId, selectedClient } from "./clientChoice";
 
 const ApiContext = createContext<ApiClient | null>(null);
 
@@ -47,8 +47,20 @@ export function ApiProvider({ children }: { children: ReactNode }) {
               void signIn();
             },
             "/api/v1",
-            // The top bar's choice, read on every request (`X-Client-Id`).
-            selectedClient,
+            // The top bar's choice, read on every request (`X-Client-Id`) --
+            // and sent ONLY AS A CLIENT ID. The server answers a malformed
+            // header with 400 on every route, `/me` included, which would
+            // leave the console unable even to learn that it should drop the
+            // choice. A real choice is an id from `/me`; what this refuses
+            // is a value that was never one (a fixture id outside fixture
+            // mode, a bug), and it goes as no header: the person's whole
+            // scope, never wider -- and the provider, finding it in no `/me`
+            // list, falls back to every client and says so
+            // (`./clientScope`). Fixture mode never builds this client.
+            () => {
+              const client = selectedClient();
+              return isClientId(client) ? client : null;
+            },
           ),
     [fixture],
   );

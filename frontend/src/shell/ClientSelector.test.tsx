@@ -5,13 +5,14 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { setActiveLanguage } from "../i18n/core";
 import type { ApiClient, Me, MeClient } from "../lib/api";
 import { CLIENT_STORAGE_KEY, selectedClient } from "../lib/clientChoice";
+import { ClientScopeProvider } from "../lib/clientScope";
 import { ClientSelector } from "./ClientSelector";
 
 const mockUseApi = vi.fn();
@@ -93,5 +94,88 @@ describe("ClientSelector", () => {
     const box = await screen.findByRole("combobox", { name: "Cliente" });
     expect(within(box).getByRole("option", { name: "Todos mis clientes" })).toBeInTheDocument();
     expect(within(box).getByRole("option", { name: "Sin asignar" })).toBeInTheDocument();
+  });
+});
+
+/**
+ * INSIDE THE PROVIDER, a change starts the page again (`lib/clientScope.tsx`'s
+ * keyed fragment), and the shell with it: the `<select>` that fired `change`
+ * is unmounted and a new one drawn. What that owes the person who made the
+ * change: their focus back on the control they were using (WCAG 2.4.3, and
+ * Chrome fires `change` on every arrow key on a closed select), and a
+ * selector that stays on screen while `/me` is asked again -- not one that
+ * vanishes and takes the top bar's layout with it.
+ */
+describe("a change through the selector, inside the provider", () => {
+  const ORDER = ["All my clients", "Acme Dental", "Toeshee", "Zeta Foods", "Unassigned"];
+
+  function renderInScope(me: ReturnType<typeof vi.fn>) {
+    mockUseApi.mockReturnValue({ me } as unknown as ApiClient);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <button type="button">elsewhere</button>
+        <ClientScopeProvider>
+          <ClientSelector />
+        </ClientScopeProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("gives focus back to the new selector when the change was made through it", async () => {
+    const user = userEvent.setup();
+    renderInScope(vi.fn().mockResolvedValue(ME));
+    const before = await screen.findByRole("combobox", { name: "Client" });
+
+    await user.selectOptions(before, ACME);
+
+    const after = await screen.findByRole("combobox", { name: "Client" });
+    // NON-VACUITY: the page did start again, so this is a new element.
+    expect(before.isConnected).toBe(false);
+    expect(after).not.toBe(before);
+    expect(after).toHaveValue(ACME);
+    expect(document.activeElement).toBe(after);
+  });
+
+  it("does not take focus for a change made in another tab", async () => {
+    renderInScope(vi.fn().mockResolvedValue(ME));
+    const before = await screen.findByRole("combobox", { name: "Client" });
+    const elsewhere = screen.getByRole("button", { name: "elsewhere" });
+    elsewhere.focus();
+
+    window.localStorage.setItem(CLIENT_STORAGE_KEY, ACME);
+    act(() => {
+      window.dispatchEvent(new StorageEvent("storage", { key: CLIENT_STORAGE_KEY, newValue: ACME }));
+    });
+
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Client" })).toHaveValue(ACME));
+    expect(before.isConnected).toBe(false);
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it("stays drawn, with the person's clients, while /me is asked again", async () => {
+    let answer: (me: Me) => void = () => undefined;
+    const me = vi
+      .fn()
+      .mockResolvedValueOnce(ME)
+      .mockImplementation(
+        () =>
+          new Promise<Me>((resolve) => {
+            answer = resolve;
+          }),
+      );
+    const user = userEvent.setup();
+    renderInScope(me);
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Client" }), ACME);
+
+    // Asked again under the new choice, and not answered yet.
+    await waitFor(() => expect(me).toHaveBeenCalledTimes(2));
+    const box = screen.getByRole("combobox", { name: "Client" });
+    expect(box).toHaveValue(ACME);
+    expect(within(box).getAllByRole("option").map((option) => option.textContent)).toEqual(ORDER);
+    expect(box).toBeEnabled();
+    expect(document.activeElement).toBe(box);
+
+    await act(async () => answer(ME));
+    expect(screen.getByRole("combobox", { name: "Client" })).toBe(box);
   });
 });

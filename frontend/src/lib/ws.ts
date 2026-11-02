@@ -25,13 +25,21 @@
 // 4. Any other unplanned close keeps the doubling backoff (2 s, 4 s ... 30 s).
 // 5. THE CHOSEN CLIENT (phase 3 design §1.5) travels as `?client=<id>` -- a
 //    UUID, not a credential, so the query string is the right place for it --
-//    and the socket opens again when the choice changes. A 4403 says the
-//    scope is empty or is no longer the one subscribed: access to that client
-//    went, or a grant changed. The console asks `/me` again, which moves the
-//    top bar back to every client when the client is gone
-//    (`lib/clientScope.tsx`), and reconnects AT ONCE when the refused socket
-//    had been open. One refused at the handshake backs off instead:
-//    reconnecting at once to a scope the server has just refused would loop.
+//    and the socket opens again when the choice changes. A 4403 on an OPEN
+//    socket says the scope is no longer the one subscribed: access to that
+//    client went, or a grant changed (`backend/app/api/v1/ws.py` re-checks
+//    every `RECHECK_INTERVAL_S`). The console asks `/me` again, which moves
+//    the top bar back to every client when the client is gone
+//    (`lib/clientScope.tsx`), and reconnects at once.
+// 6. A HANDSHAKE THE SERVER REFUSES NEVER ARRIVES AS A CLOSE CODE OF ITS OWN.
+//    It refuses before `accept()` -- a bad token, an identity not admitted,
+//    an empty scope -- so uvicorn answers the upgrade with HTTP 403, and all
+//    a browser reports is a close before open, 1006: the same as a server
+//    that is down. So a socket that closes without ever opening asks `/me`
+//    again ONCE, until a socket next opens -- a client revoked while the
+//    socket was down is noticed, and an outage does not become a `/me` per
+//    retry -- and backs off like any other close: reconnecting at once to a
+//    scope the server has just refused would loop.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useSyncExternalStore } from "react";
@@ -76,9 +84,11 @@ export function useLiveEvents(onEvent: (event: UiEvent) => void): void {
     let pending: WebSocket | null = null;
     // Replaced or abandoned on purpose: their close is planned.
     const retired = new Set<WebSocket>();
-    // Sockets the server accepted: a 4403 on one of these is a scope that
-    // changed under it, not one refused at the handshake.
+    // Sockets the server accepted. A close on one that never got here is a
+    // refused (or failed) handshake, whatever the server meant (point 6).
     const accepted = new WeakSet<WebSocket>();
+    // `/me` asked again for this run of closes-before-open (point 6).
+    let askedMe = false;
     const graceTimers = new Set<ReturnType<typeof setTimeout>>();
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let retryMs = INITIAL_RETRY_MS;
@@ -89,6 +99,7 @@ export function useLiveEvents(onEvent: (event: UiEvent) => void): void {
 
     const opened = () => {
       retryMs = INITIAL_RETRY_MS;
+      askedMe = false;
       if (gap) {
         gap = false;
         deliver({ kind: RESYNC_KIND });
@@ -125,14 +136,20 @@ export function useLiveEvents(onEvent: (event: UiEvent) => void): void {
       else backoff();
     };
 
-    // A 4403 (point 5): `/me` first. When the chosen client is gone the top
-    // bar falls back to every client and this effect starts over with that
-    // choice, so `disposed` is set by the time the refetch has answered.
-    const rescope = async (wasOpen: boolean) => {
+    // A 4403 on an open socket (point 5): `/me` first, then at once.
+    //
+    // `disposed` IS NOT A PROMISE THAT THE FALLBACK HAS LANDED. The await
+    // ends when the refetch has answered, but TanStack hands the answer to
+    // its observers through `setTimeout(0)` (its `notifyManager`), so the
+    // provider may not have re-rendered: `disposed` can still be false and
+    // the choice still the refused client. Where the choice has already
+    // moved, `connect()` sees it and opens nothing. Where it has not, the
+    // socket opened here is refused or closed by this effect's cleanup once
+    // the fallback lands -- a planned close, no gap and no reconnect.
+    const rescope = async () => {
       await queryClient.invalidateQueries({ queryKey: ["me"] });
       if (disposed) return;
-      if (wasOpen) connect();
-      else backoff();
+      connect();
     };
 
     const lost = (socket: WebSocket, token: string, code: number) => {
@@ -141,15 +158,24 @@ export function useLiveEvents(onEvent: (event: UiEvent) => void): void {
       if (disposed || socket !== current) return;
       current = null;
       gap = true;
-      if (code === CLOSE_TOKEN_EXPIRED) void reauthenticate(token);
-      else if (code === CLOSE_SCOPE_REFUSED) void rescope(accepted.has(socket));
+      if (!accepted.has(socket)) {
+        // Never opened (point 6): `/me` once, then the backoff.
+        if (!askedMe) {
+          askedMe = true;
+          void queryClient.invalidateQueries({ queryKey: ["me"] });
+        }
+        backoff();
+      } else if (code === CLOSE_TOKEN_EXPIRED) void reauthenticate(token);
+      else if (code === CLOSE_SCOPE_REFUSED) void rescope();
       else backoff();
     };
 
     const connect = (given?: string) => {
       retryTimer = null;
       const token = given ?? accessToken();
-      if (!token || disposed) return;
+      // Not for a client the choice has already left: this effect is about
+      // to start over with the new one (see `rescope`).
+      if (!token || disposed || selectedClient() !== client) return;
       const socket = socketWith(token);
       current = socket;
       socket.onopen = () => {

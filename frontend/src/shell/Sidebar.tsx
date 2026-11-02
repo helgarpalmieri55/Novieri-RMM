@@ -16,7 +16,7 @@
  * link to everyone, the platform would be exactly as secure and merely ruder.
  */
 
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 import { useT } from "../i18n/context";
@@ -32,6 +32,11 @@ export interface SidebarProps {
   /** Live counts, keyed by route. Absent = no badge, which is not the same as zero. */
   badges?: Readonly<Record<string, number>>;
   orgName: string;
+  /**
+   * The client selector, on a handset only (`AppShell`, `./handset`): the top
+   * bar has no room for it at that width, so it heads the drawer instead.
+   */
+  clientSelector?: ReactNode;
 }
 
 export function Sidebar({
@@ -41,6 +46,7 @@ export function Sidebar({
   onToggleCollapsed,
   badges = {},
   orgName,
+  clientSelector,
 }: SidebarProps) {
   const t = useT();
   const groups = visibleGroups(permissions, modules ?? OPTIONAL_MODULES);
@@ -67,6 +73,11 @@ export function Sidebar({
           <Icon name={collapsed ? "chevron-right" : "chevron-left"} size={15} />
         </button>
       </div>
+
+      {/* FIRST UNDER THE BRAND, ON A HANDSET: the client is the context of
+          every link below it. `:empty` in `shell.css` folds the box away when
+          the selector draws nothing (no client to choose between). */}
+      {clientSelector ? <div className="sidebar-client">{clientSelector}</div> : null}
 
       <nav className="nav-scroll" id="nav" aria-label={t("shell.sidebar.main")}>
         {groups.map((group) => (
