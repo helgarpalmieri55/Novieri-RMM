@@ -23,6 +23,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { ClientField } from "../../components/ClientField";
 import { Button, Dialog, Table, Td, Th } from "../../components/ui";
 import { Form, FormActions, attemptProblems } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -32,7 +33,9 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { internalClientId, requireKnown } from "../../lib/internalClient";
+import { useClientScope } from "../../lib/clientScope";
+import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { useClientName } from "../settings/api";
 import { Icon } from "../../shell/icons";
 import {
   useBackupPolicies,
@@ -77,6 +80,10 @@ export function BackupPolicyEditor() {
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("backup.read");
   const canManage = permissions.includes("backup.policy.manage");
+  // With every client chosen, each policy says whose it is.
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const showClient = selected === null;
 
   const policies = useBackupPolicies();
   const repositories = useBackupRepositories();
@@ -209,6 +216,7 @@ export function BackupPolicyEditor() {
             <thead>
               <tr>
                 <Th>{t("backup.policies.colScope")}</Th>
+                {showClient ? <Th>{t("backup.policies.colClient")}</Th> : null}
                 <Th>{t("backup.policies.colRepository")}</Th>
                 <Th>{t("backup.policies.colWindow")}</Th>
                 <Th>{t("backup.policies.colState")}</Th>
@@ -228,6 +236,9 @@ export function BackupPolicyEditor() {
                       <div className="cell-sub">{t("backup.policies.clientDefaultHint")}</div>
                     )}
                   </Td>
+                  {showClient ? (
+                    <Td>{policy.client_id ? clientName(policy.client_id) : t("lib.clients.everyClient")}</Td>
+                  ) : null}
                   <Td>{nameForOption(repositoryOptions, policy.repository_id)}</Td>
                   {/* THE WINDOW IS PAINTED, SO IT IS PRINTED THE WAY IT IS
                       PAINTED. `windowLabel` puts the stored expression into
@@ -296,8 +307,6 @@ function PolicyDialog({
   onClose: () => void;
 }) {
   const t = useT();
-  const api = useApi();
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const repositories = useBackupRepositories();
   const groups = useDeviceGroups();
   const upsert = useUpsertBackupPolicyMutation();
@@ -312,11 +321,16 @@ function PolicyDialog({
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
   // The client this policy is, from the row where there is one: the policy
-  // being edited, or the group chosen.
-  // PHASE 3: the client/site selector. A new client default has no row to
-  // take its client from, so until the selector exists it is the
-  // organisation's internal client -- `/me`'s `org_id` (`lib/internalClient.ts`).
-  const client = policyClient(existing, deviceGroupId, groups.data ?? [], internalClientId(me.data));
+  // being edited, or the group chosen. A new client default has no row: it is
+  // the client chosen at the top, or with every client the Client field's
+  // (design §3.1).
+  const groupClient = deviceGroupId
+    ? (groups.data ?? []).find((group) => group.id === deviceGroupId)?.client_id
+    : undefined;
+  const target = useNewRowClient("backup.policy.manage", groupClient);
+  const [pickedClient, setPickedClient] = useState("");
+  const newClient = target.needsField ? pickedClient || null : target.clientId;
+  const client = policyClient(existing, deviceGroupId, groups.data ?? [], newClient);
   const clientRepositories = repositoriesOfClient(repositories.data ?? [], client);
   const repositoryOptions = repositoryPickerOptions(clientRepositories);
   // A repository of another client is not this policy's to name -- one a
@@ -327,11 +341,10 @@ function PolicyDialog({
     : "";
   // Gated on a settled query so a slow fetch never reads as an empty one.
   const noRepositories = repositories.isSuccess && clientRepositories.length === 0;
-  // PHASE 3: the client/site selector. The Repositories page files a new
-  // repository under the internal client only, so it is no place to send a
-  // person whose policy is another client's: for that one the hint says where
-  // its repository is made, and there is no link.
-  const elsewhere = me.data !== undefined && client !== null && client !== internalClientId(me.data);
+  // The Repositories page files a repository only in a client where this
+  // person may manage policies; for a policy of any other client the hint
+  // says so, and there is no link.
+  const elsewhere = client !== null && !target.options.some((option) => option.id === client);
   // The client default is a real, explicit choice -- not an unlabelled blank
   // -- so it is an entry in the list itself, with the id a group-less policy
   // actually carries (none, i.e. "").
@@ -387,6 +400,17 @@ function PolicyDialog({
           before: there was no <form> on this dialog at all. */}
       <Form onSubmit={submit}>
         <div className="form-grid">
+          {!existing && deviceGroupId === "" && target.needsField ? (
+            <ClientField
+              code="backup.policy.manage"
+              value={pickedClient}
+              onChange={(id) => {
+                setPickedClient(id);
+                // Another client is another set of repositories.
+                setRepositoryId("");
+              }}
+            />
+          ) : null}
           {/* No `emptyHint`: `groupOptions` always carries the client-default
               entry, so this list can never be empty (picker.tsx review
               finding 8). */}

@@ -136,7 +136,9 @@ export const devices = {
   },
   addAsset: {
     title: "Add asset",
-    note: "A record with no agent. Everything here is optional.",
+    note: "A record with no agent. Only its site is required.",
+    client: "Client",
+    site: "Site",
     name: "Name",
     namePlaceholder: "core-sw-01",
     description: "Description",
@@ -267,6 +269,7 @@ export const devices = {
     panelSubtitle: "Lower precedence claims a device first.",
     showArchived: "Show archived",
     colGroup: "Group",
+    colClient: "Client",
     colPrecedence: "Precedence",
     colDevices: "Devices",
     colMembership: "Membership",
@@ -355,6 +358,8 @@ export const devices = {
       precedenceNote: "Lower wins when two rule-driven groups both match a device. The name only breaks ties, so renaming a group moves nothing.",
       parent: "Parent group (optional)",
       parentEmpty: "No other live group to nest this under yet.",
+      // With every client chosen, a parent option says whose group it is.
+      parentOfClient: "{group} · {client}",
       parentSub: {
         one: "precedence {precedence} · {count} device",
         other: "precedence {precedence} · {count} devices",

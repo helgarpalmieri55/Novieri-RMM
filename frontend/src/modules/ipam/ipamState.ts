@@ -1455,13 +1455,15 @@ export interface PreviewedFile {
   lastModified: number;
   digest: string;
   /**
-   * The VRF the preview read -- `null` when it named the internal client's
-   * `global` VRF instead. Apply goes THERE, never to whatever the picker shows
-   * by then: the server's digest covers the VRF too and refuses any other.
-   * Required, not optional: an absent value would silently mean "the internal
-   * client".
+   * The VRF the preview read -- `null` when it named a client's `global` VRF
+   * instead: `clientId` says whose. Apply goes THERE, never to whatever the
+   * picker shows by then: the server's digest covers the VRF too and refuses
+   * any other. Required, not optional: an absent value would silently read
+   * as a client's `global` VRF.
    */
   vrfId: string | null;
+  /** The client whose `global` VRF the preview read when `vrfId` is null; ignored otherwise. */
+  clientId: string | null;
 }
 
 /**

@@ -18,7 +18,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setActiveLanguage } from "../../i18n/core";
 import { expectNoEnglish, renderInSpanish } from "../../i18n/test-utils";
 import { ApiError } from "../../lib/api";
-import type { ApiClient, Device } from "../../lib/api";
+import type { ApiClient, Device, MeClient } from "../../lib/api";
 import { PushAuthorizationsPage } from "./PushAuthorizationsPage";
 import { PushCredentialScopesPage } from "./PushCredentialScopesPage";
 import { PushInstallChooser } from "./PushInstallChooser";
@@ -37,6 +37,25 @@ import type {
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 const PERMISSIONS = ["agent.push.scope.manage", "agent.push.run", "credentials.read", "site.read", "agent.release.read"];
 
@@ -90,8 +109,10 @@ const SCOPES: PushCredentialScopeOut[] = [
   scope({ id: "s3", prefix: "10.20.9.0/24", unbound_at: "2026-09-20T09:00:00Z", unbound_by: "Marta Ruiz" }),
 ];
 
+// A push credential is one client's, and the install flow offers only the
+// machines' client's (phase 3 design §3.3): these and `device()` are `o1`'s.
 const CREDENTIALS = [
-  { id: "c1", name: "Instalación del rack B4", type: "push_install", device_group_id: null, created_at: null, last_used_at: null, has_secret: true },
+  { id: "c1", name: "Instalación del rack B4", type: "push_install", device_group_id: null, client_id: "o1", created_at: null, last_used_at: null, has_secret: true },
   { id: "c3", name: "Cuenta de dominio de Lisboa", type: "windows_domain", device_group_id: null, created_at: null, last_used_at: null, has_secret: true },
   { id: "c9", name: "Control remoto", type: "remote_control", device_group_id: null, created_at: null, last_used_at: null, has_secret: true },
 ];
@@ -214,6 +235,7 @@ function preview(over: Partial<PushRunPreviewOut> = {}): PushRunPreviewOut {
 function device(overrides: Partial<Device> = {}): Device {
   return {
     id: "d-1",
+    client_id: "o1",
     hostname: "lis-srv-12",
     fqdn: "lis-srv-12.corp.local",
     os_family: "linux",

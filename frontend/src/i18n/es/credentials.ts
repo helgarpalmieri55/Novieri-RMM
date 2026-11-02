@@ -29,6 +29,7 @@ export const credentials: Shape<typeof en> = {
     title: "Perfiles de credenciales",
     subtitle: "Solo nombres: en esta lista nunca se muestra ninguna contraseña ni clave.",
     emptyNone: "No hay credenciales guardadas.",
+    client: "Cliente",
     emptyView: "Ninguna credencial coincide con esta vista.",
     name: "Nombre",
     state: "Estado",
@@ -71,6 +72,7 @@ export const credentials: Shape<typeof en> = {
   create: {
     title: "Nueva credencial",
     name: "Nombre",
+    client: "Cliente",
     type: "Tipo",
     secret: "Secreto",
     password: "Contraseña",

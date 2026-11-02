@@ -73,7 +73,14 @@ export function PushInstallFlow({
   const mixed = windows.length > 0 && others.length > 0;
   const blocked = machines.some((m) => pushProblems(m).length > 0);
   const kind = windows.length > 0 ? WINDOWS_DOMAIN_CREDENTIAL_TYPE : PUSH_CREDENTIAL_TYPE;
-  const offered = (credentials.data ?? []).filter((c) => c.type === kind);
+  // A push credential is ONE client's, and the server refuses it for another
+  // client's machine (design §3.3): only the machines' client's are offered,
+  // and none when the machines are of more than one client.
+  const machineClients = [...new Set(machines.map((m) => m.client_id ?? ""))];
+  const oneClient = machineClients.length === 1 ? machineClients[0] : null;
+  const offered = (credentials.data ?? []).filter(
+    (c) => c.type === kind && oneClient !== null && c.client_id === oneClient,
+  );
   const chosen = offered.find((c) => c.id === credentialId) ?? null;
   const targets = machines.map((m) => m.primary_ip as string);
 
@@ -156,6 +163,11 @@ export function PushInstallFlow({
           <p className="note mt-3">{t("agentPush.flow.blocked")}</p>
         ) : (
           <div className="form-grid mt-3">
+            {/* Before the field, not inside it: `Field` is a <label>, and a
+                sentence inside it would become part of the field's name. */}
+            {machineClients.length > 1 ? (
+              <p className="notice gold">{t("agentPush.flow.severalClients")}</p>
+            ) : null}
             <Field label={t("agentPush.shared.credential")}>
               <select
                 className="select-field"
@@ -170,7 +182,9 @@ export function PushInstallFlow({
                 ))}
               </select>
             </Field>
-            {!credentials.isLoading && offered.length === 0 ? (
+            {/* With machines of several clients there is no credential to
+                add: the notice above says what to do instead. */}
+            {!credentials.isLoading && offered.length === 0 && machineClients.length <= 1 ? (
               <p className="note">
                 {credentials.isError
                   ? t("agentPush.flow.cannotView")

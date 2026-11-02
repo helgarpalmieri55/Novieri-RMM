@@ -8,7 +8,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,6 +26,7 @@ import type {
   DeviceListParams,
   DevicePage,
   Me,
+  MeClient,
   MembershipEvaluation,
 } from "../../lib/api";
 import { AddAssetDialog } from "./AddAssetDialog";
@@ -38,6 +39,25 @@ import { SuggestionsPanel } from "./SuggestionsPanel";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 vi.mock("../../lib/ws", () => ({ useLiveEvents: () => undefined }));
 
 const client = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -261,21 +281,32 @@ describe("the asset and push dialogs in Spanish", () => {
   it("words the add-asset dialog, its selects and a failed save", async () => {
     const user = userEvent.setup();
     const createAsset = vi.fn().mockRejectedValue(new ApiError(500, ""));
-    mockUseApi.mockReturnValue({ createAsset } as unknown as ApiClient);
+    const site = "00000000-0000-4000-8000-0000000000aa";
+    mockUseApi.mockReturnValue({
+      createAsset,
+      me: () =>
+        Promise.resolve({ user_id: "u1", org_id: "o1", email: "a@b.c", display_name: "A", permissions: ["assets.manage"] }),
+      listClientSites: () =>
+        Promise.resolve([
+          { id: site, client_id: "o1", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 },
+        ]),
+    } as unknown as ApiClient);
     const { baseElement } = renderInSpanish(
       <QueryClientProvider client={client()}>
-        <AddAssetDialog open onClose={() => {}} siteId="00000000-0000-4000-8000-0000000000aa" />
+        <AddAssetDialog open onClose={() => {}} />
       </QueryClientProvider>,
     );
     const dialog = await screen.findByRole("dialog", { name: "Añadir activo" });
-    expect(within(dialog).getByText("Un registro sin agente. Todo lo de aquí es opcional.")).toBeInTheDocument();
-    for (const label of ["Nombre", "Descripción", "Dirección IP", "Tipo", "Ciclo de vida", "Ubicación"]) {
+    expect(within(dialog).getByText("Un registro sin agente. Solo la sede es obligatoria.")).toBeInTheDocument();
+    for (const label of ["Nombre", "Descripción", "Dirección IP", "Tipo", "Ciclo de vida", "Ubicación", "Sede"]) {
       expect(within(dialog).getByLabelText(label)).toBeInTheDocument();
     }
     expect(within(dialog).getByRole("option", { name: "impresora" })).toBeInTheDocument();
     expect(within(dialog).getByRole("option", { name: "En servicio" })).toBeInTheDocument();
     expect(within(dialog).getByRole("option", { name: "En stock (sin desplegar)" })).toBeInTheDocument();
     await user.type(within(dialog).getByLabelText("Descripción"), "caja");
+    // The only site of the client chosen at the top is chosen for the person.
+    await waitFor(() => expect((within(dialog).getByLabelText("Sede") as HTMLSelectElement).value).toBe(site));
     await user.click(within(dialog).getByRole("button", { name: "Añadir activo" }));
     expect(await within(dialog).findByText(/No se añadió el activo\./)).toBeInTheDocument();
     expectNoEnglish(baseElement, ["core-sw-01"]);

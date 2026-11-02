@@ -92,7 +92,10 @@ import { ApiError } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
 import { useFleetPrerequisite } from "../../lib/detectors";
-import { internalClientId, requireKnown } from "../../lib/internalClient";
+import { ClientField } from "../../components/ClientField";
+import { useClientScope } from "../../lib/clientScope";
+import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { useClientName } from "../settings/api";
 import { PageHead, Panel, QueryState, StatusPill, TableWrap } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 
@@ -476,13 +479,14 @@ export function GroupsPage() {
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canManage = me.data?.permissions.includes("devices.manage") ?? false;
-  // PHASE 3: the client/site selector. A group organises ONE client's devices
-  // (MSP clients spec §1.5): a new one, and the preview of one not saved yet,
-  // name it. Until the selector exists that is the organisation's internal
-  // client, whose id is the organisation's -- `/me`'s `org_id`
-  // (`lib/internalClient.ts`). A saved group keeps its own client, which an
-  // edit never sends.
-  const internalClient = internalClientId(me.data);
+  // A group organises ONE client's devices (MSP clients spec §1.5). A new one
+  // takes its parent group's client; with no parent, the client chosen at the
+  // top, or with every client the editor's Client field (design §3.1). A
+  // saved group keeps its own client, which an edit never sends.
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const showClient = selected === null;
+  const [pickedClient, setPickedClient] = useState("");
 
   const groups = useQuery({
     queryKey: ["device-groups", showArchived],
@@ -492,6 +496,11 @@ export function GroupsPage() {
 
   const items = useMemo(() => groups.data?.items ?? [], [groups.data]);
   const rows = useMemo(() => buildTree(items), [items]);
+  const parentClient = editor?.parentGroupId
+    ? items.find((group) => group.id === editor.parentGroupId)?.client_id
+    : undefined;
+  const target = useNewRowClient("devices.manage", parentClient);
+  const newClient = target.needsField ? pickedClient || null : target.clientId;
   /**
    * The parent's NAME, for the row that is drawn inside it.
    *
@@ -535,8 +544,7 @@ export function GroupsPage() {
       };
       return state.group
         ? api.updateDeviceGroup(state.group.id, body)
-        : // PHASE 3: the client/site selector -- the internal client, above.
-          api.createDeviceGroup({ ...body, client_id: requireKnown(internalClient) });
+        : api.createDeviceGroup({ ...body, client_id: requireKnown(newClient) });
     },
     onSuccess: () => {
       setEditor(null);
@@ -580,6 +588,7 @@ export function GroupsPage() {
   function openCreate() {
     save.reset();
     setAttempt(null);
+    setPickedClient("");
     setEditor(blankEditor());
   }
 
@@ -628,17 +637,19 @@ export function GroupsPage() {
     return () => clearTimeout(timer);
   }, [documentKey]);
 
+  // A saved group's preview runs over its own client; one not saved yet
+  // names the client it will be created in. That client is in the key: the
+  // same rule matches other machines in another client.
+  const previewClient = editor?.group ? null : newClient;
   const preview = useQuery({
-    queryKey: ["device-group-preview", settled],
+    queryKey: ["device-group-preview", settled, previewClient],
     queryFn: () =>
       api.previewDeviceGroupRules(
         JSON.parse(settled ?? "null") as GroupRules,
         editor?.group?.id ?? null,
-        // PHASE 3: the client/site selector. A saved group's preview runs over
-        // its own client; one not saved yet names the internal client, above.
-        editor?.group ? null : internalClient,
+        previewClient,
       ),
-    enabled: settled !== null && canManage,
+    enabled: settled !== null && canManage && (editor?.group != null || newClient != null),
     // A preview is a statement about the fleet as it is now; a cached answer
     // from ten minutes ago is a different claim.
     staleTime: 30_000,
@@ -678,13 +689,20 @@ export function GroupsPage() {
     save.mutate(editor);
   }
 
-  // The parent options exclude the group being edited: a group cannot be its
-  // own parent, and offering the choice would be offering a 422.
+  // The parent options exclude the group being edited (a group cannot be its
+  // own parent, and offering the choice would be offering a 422) and every
+  // other client's groups: a parent is of the same client (§3.3). With every
+  // client chosen and none decided yet, all are offered, each saying whose it
+  // is -- picking one decides.
+  const rowClient = editor?.group ? editor.group.client_id : newClient;
   const parentOptions = items
     .filter((group) => group.archived_at === null && group.id !== editor?.group?.id)
+    .filter((group) => rowClient === null || group.client_id === rowClient)
     .map((group) => ({
       id: group.id,
-      label: group.name,
+      label: showClient
+        ? t("devices.groups.editor.parentOfClient", { group: group.name, client: clientName(group.client_id) })
+        : group.name,
       sublabel: t("devices.groups.editor.parentSub", {
         precedence: group.precedence,
         count: group.device_count,
@@ -778,6 +796,7 @@ export function GroupsPage() {
               <thead>
                 <tr>
                   <th scope="col">{t("devices.groups.colGroup")}</th>
+                  {showClient ? <th scope="col">{t("devices.groups.colClient")}</th> : null}
                   <th scope="col">{t("devices.groups.colPrecedence")}</th>
                   <th scope="col">{t("devices.groups.colDevices")}</th>
                   <th scope="col">{t("devices.groups.colMembership")}</th>
@@ -794,6 +813,7 @@ export function GroupsPage() {
                     <div className="cell-title">{t("devices.groups.noGroup")}</div>
                     <div className="cell-sub">{t("devices.groups.noGroupSub")}</div>
                   </Td>
+                  {showClient ? <td>{t("lib.clients.everyClient")}</td> : null}
                   <td>
                     <NoValue label={t("devices.groups.noPrecedence")} />
                   </td>
@@ -853,6 +873,7 @@ export function GroupsPage() {
                         <div className="cell-sub">{group.description}</div>
                       ) : null}
                     </Td>
+                    {showClient ? <td>{clientName(group.client_id)}</td> : null}
                     <td className="mono">{group.precedence}</td>
                     <td className="mono">{group.device_count}</td>
                     <td>
@@ -976,6 +997,9 @@ export function GroupsPage() {
               {/* A PICKER, NEVER A TYPED UUID (closeout rec. 6). Health profile
                   resolution walks this chain upward; a deployment does not
                   descend it. */}
+              {!editor.group && target.needsField ? (
+                <ClientField code="devices.manage" value={pickedClient} onChange={setPickedClient} />
+              ) : null}
               <EntityPicker
                 label={t("devices.groups.editor.parent")}
                 options={parentOptions}

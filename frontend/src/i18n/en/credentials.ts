@@ -26,6 +26,7 @@ export const credentials = {
     title: "Credential profiles",
     subtitle: "Names only: no password or key is ever shown in this list.",
     emptyNone: "No credentials stored.",
+    client: "Client",
     emptyView: "No credential is in this view.",
     name: "Name",
     state: "State",
@@ -68,6 +69,7 @@ export const credentials = {
   create: {
     title: "New credential",
     name: "Name",
+    client: "Client",
     type: "Type",
     secret: "Secret",
     password: "Password",

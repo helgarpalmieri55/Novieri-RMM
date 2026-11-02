@@ -1,14 +1,13 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { ClientField } from "../../components/ClientField";
 import { NoValue } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
 import { describeSubmitError } from "../../components/form";
 import { Button, Field, Td, Th, inputClass } from "../../components/ui";
-import type { Me } from "../../lib/api";
-import { useApi } from "../../lib/ApiContext";
+import { useClientScope } from "../../lib/clientScope";
+import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
 import { formatDate, toInstant } from "../../lib/datetime";
-import { internalClientId, requireKnown } from "../../lib/internalClient";
 import {
   FilterBar,
   PageHead,
@@ -22,6 +21,7 @@ import { Icon } from "../../shell/icons";
 import { useOrgZone } from "../../lib/zone";
 import type { BadgeVariant } from "../jobs/jobState";
 import { useUserTimezone } from "../ipam/api";
+import { useClientName } from "../settings/api";
 import {
   useCreatePushAuthorizationMutation,
   usePushAuthorizations,
@@ -38,7 +38,7 @@ import {
   parsePrefix,
   prefixSize,
 } from "./pushState";
-import type { PushAuthorizationOut } from "./types";
+import { AGENT_PUSH_SCOPE_MANAGE, type PushAuthorizationOut } from "./types";
 
 /** The presentation table's badge vocabulary, as v3 kinds. */
 const KIND_OF_VARIANT: Record<BadgeVariant, Kind> = {
@@ -88,6 +88,10 @@ export function PushAuthorizationsPage() {
   const [includeInactive, setIncludeInactive] = useState(false);
   const grants = usePushAuthorizations(includeInactive);
   const revoke = useRevokePushAuthorizationMutation();
+  // With every client chosen, each grant says whose network it opens.
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const showClient = selected === null;
 
   return (
     <div>
@@ -138,6 +142,7 @@ export function PushAuthorizationsPage() {
               <thead>
                 <tr>
                   <th scope="col">{t("agentPush.shared.prefix")}</th>
+                  {showClient ? <th scope="col">{t("agentPush.authorizations.colClient")}</th> : null}
                   <th scope="col">{t("agentPush.shared.status")}</th>
                   <th scope="col">{t("agentPush.authorizations.expires")}</th>
                   <th scope="col">{t("agentPush.shared.note")}</th>
@@ -153,6 +158,8 @@ export function PushAuthorizationsPage() {
                     key={grant.id}
                     grant={grant}
                     canManage={permissions.scopeManage}
+                    showClient={showClient}
+                    clientName={clientName}
                     onRevoke={() => revoke.mutate(grant.id)}
                   />
                 ))}
@@ -181,10 +188,14 @@ export function PushAuthorizationsPage() {
 function GrantRow({
   grant,
   canManage,
+  showClient,
+  clientName,
   onRevoke,
 }: {
   grant: PushAuthorizationOut;
   canManage: boolean;
+  showClient: boolean;
+  clientName: (id: string) => string;
   onRevoke: () => void;
 }) {
   const t = useT();
@@ -219,6 +230,7 @@ function GrantRow({
           />
         </div>
       </Td>
+      {showClient ? <td>{clientName(grant.client_id)}</td> : null}
       <Td>
         <span title={presentation.meaning}>
           <StatusPill
@@ -259,10 +271,12 @@ function GrantRow({
 
 function GrantForm() {
   const t = useT();
-  const api = useApi();
   const create = useCreatePushAuthorizationMutation();
-  // Same `["me"]` key the shell already holds, so this is a cache read.
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  // A prefix is one client's network (MSP clients phase 2, Task 12): the
+  // client chosen at the top, or with every client the Client field's.
+  const target = useNewRowClient(AGENT_PUSH_SCOPE_MANAGE);
+  const [pickedClient, setPickedClient] = useState("");
+  const grantClient = target.needsField ? pickedClient || null : target.clientId;
   const zone = useUserTimezone();
   const [prefix, setPrefix] = useState("");
   const [note, setNote] = useState("");
@@ -278,6 +292,9 @@ function GrantForm() {
       subtitle={t("agentPush.authorizations.form.subtitle")}
     >
       <div className="form-grid">
+        {target.needsField ? (
+          <ClientField code={AGENT_PUSH_SCOPE_MANAGE} value={pickedClient} onChange={setPickedClient} />
+        ) : null}
         <Field label={t("agentPush.shared.prefix")}>
           <input
             className={inputClass}
@@ -361,13 +378,9 @@ function GrantForm() {
           onClick={() =>
             create.mutate(
               () => ({
-                // A prefix is one client's network (MSP clients phase 2,
-                // Task 12): the grant authorizes pushes to that client's
-                // machines only.
-                // PHASE 3: the client/site selector. Until it exists that is
-                // the organisation's internal client, whose id is the
-                // organisation's -- `/me`'s `org_id` (`lib/internalClient.ts`).
-                client_id: requireKnown(internalClientId(me.data)),
+                // A prefix is one client's network: the grant authorizes
+                // pushes to that client's machines only.
+                client_id: requireKnown(grantClient),
                 prefix,
                 note,
                 // THE FIELD IS A WALL CLOCK; the API stores an instant.
