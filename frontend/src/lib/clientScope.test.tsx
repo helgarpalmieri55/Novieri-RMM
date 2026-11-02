@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient, Me, MeClient } from "./api";
 import { CLIENT_STORAGE_KEY, selectedClient, setSelectedClient } from "./clientChoice";
 import { ClientScopeProvider, enabledModules, useClientScope } from "./clientScope";
+import { useNewRowClient } from "./clientSelection";
 
 const mockUseApi = vi.fn();
 vi.mock("./ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -147,10 +148,14 @@ describe("ClientScopeProvider", () => {
     expect(setup).toHaveBeenCalledTimes(1);
   });
 
-  it("offers the last list's names, and nothing else of /me, while /me is asked again", async () => {
+  it("keeps the last list, whole, while /me is asked again", async () => {
     // The selector is drawn from this list. Emptied by the change, it
-    // vanished until /me answered and the top bar jumped; the person's own
-    // clients by id, name and kind are what it needs, and all it gets.
+    // vanished until /me answered and the top bar jumped. It is kept WHOLE:
+    // a new row's Client field filters it by `permissions`
+    // (`lib/clientSelection.ts`), and a list cut to id, name and kind made
+    // that read `undefined` right after every change. `/me.clients` is not
+    // narrowed by `X-Client-Id` (`lib/api.ts`), so the last list carries
+    // nothing read for the previous client.
     let answer: (me: Me) => void = () => undefined;
     const me = vi
       .fn()
@@ -164,12 +169,17 @@ describe("ClientScopeProvider", () => {
     mockUseApi.mockReturnValue({ me } as unknown as ApiClient);
     function Listed() {
       const scope = useClientScope();
-      return <pre data-testid="listed">{JSON.stringify({ ready: scope.ready, clients: scope.clients })}</pre>;
+      const newRow = useNewRowClient("devices.read");
+      const holding = newRow.options.map((option) => option.name);
+      return (
+        <pre data-testid="listed">{JSON.stringify({ ready: scope.ready, clients: scope.clients, holding })}</pre>
+      );
     }
     const listed = () =>
       JSON.parse(screen.getByTestId("listed").textContent ?? "") as {
         ready: boolean;
         clients: Record<string, unknown>[];
+        holding: string[];
       };
     render(
       <QueryClientProvider client={newQueryClient()}>
@@ -184,12 +194,15 @@ describe("ClientScopeProvider", () => {
 
     await waitFor(() => expect(me).toHaveBeenCalledTimes(2));
     expect(listed().ready).toBe(false);
+    // The full `MeClient` of each, in the selector's order.
     expect(listed().clients).toEqual([
-      { id: ACME, name: "Acme Dental", kind: "customer" },
-      { id: INTERNAL, name: "Toeshee", kind: "internal" },
-      { id: ZETA, name: "Zeta Foods", kind: "customer" },
-      { id: UNASSIGNED, name: "Unassigned", kind: "unassigned" },
+      client(ACME, "Acme Dental"),
+      client(INTERNAL, "Toeshee", "internal"),
+      client(ZETA, "Zeta Foods"),
+      client(UNASSIGNED, "Unassigned", "unassigned"),
     ]);
+    // ...which a new row's Client field can still filter by permission.
+    expect(listed().holding).toEqual(["Acme Dental", "Toeshee", "Zeta Foods"]);
 
     await act(async () => answer(ME));
     await waitFor(() => expect(listed().ready).toBe(true));

@@ -65,27 +65,30 @@ export interface ClientScope {
   /**
    * The person's clients (`/me`), by name, Unassigned last. Empty until `/me`
    * first answers. While it is asked again after a change, the list it last
-   * gave, by id, name and kind only (`ClientChoice`).
+   * gave, whole (`LastListed`).
    */
-  clients: readonly ClientChoice[];
+  clients: readonly MeClient[];
   /** `/me` has answered, and the choice is one of its clients (or every client). */
   ready: boolean;
 }
 
-/** What the selector draws of a client: its id, name and kind -- nothing else of `/me`'s. */
-export type ClientChoice = Pick<MeClient, "id" | "name" | "kind">;
-
 /**
  * THE LIST `/me` LAST GAVE, kept by the provider above the remount so the
- * selector stays drawn while `/me` is asked again under the new choice. Ids,
- * names and kinds of the person's own clients and NOTHING ELSE: no
- * permission, no module, no other answer read for the previous client. It
- * goes when the provider does, at sign-out.
+ * selector stays drawn while `/me` is asked again under the new choice.
+ *
+ * WHOLE, NOT CUT DOWN: each client with its modules and the codes held there,
+ * because a new row's Client field filters this list by `permissions`
+ * (`lib/clientSelection.ts`), and a list cut to id, name and kind made that
+ * read `undefined` right after every change. Nothing in it was read for the
+ * previous client: `/me.clients` is not narrowed by `X-Client-Id`
+ * (`lib/api.ts`), so it is the same answer under every choice -- the
+ * person's own clients. What `X-Client-Id` does narrow (`Me.permissions`)
+ * is not kept. It goes when the provider does, at sign-out.
  */
-const LastListed = createContext<readonly ClientChoice[]>([]);
+const LastListed = createContext<readonly MeClient[]>([]);
 
 /** By name, with the Unassigned client last (design §1.1). */
-export function orderClients<T extends ClientChoice>(clients: readonly T[]): T[] {
+export function orderClients(clients: readonly MeClient[]): MeClient[] {
   return [...clients].sort(
     (a, b) =>
       Number(a.kind === "unassigned") - Number(b.kind === "unassigned") ||
@@ -185,9 +188,9 @@ export function ClientScopeProvider({ children }: { children: ReactNode }) {
   }, [selected, listed]);
 
   // What the selector draws while /me is asked again after a change (`LastListed`).
-  const [last, setLast] = useState<readonly ClientChoice[]>([]);
+  const [last, setLast] = useState<readonly MeClient[]>([]);
   useEffect(() => {
-    if (listed !== undefined) setLast(orderClients(listed).map(({ id, name, kind }) => ({ id, name, kind })));
+    if (listed !== undefined) setLast(orderClients(listed));
   }, [listed]);
 
   const dismiss = useCallback(
