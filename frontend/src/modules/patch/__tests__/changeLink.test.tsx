@@ -2,12 +2,32 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
 import { DecisionBar } from "../DecisionBar";
+import type { MeClient } from "../../../lib/api";
 
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 function renderBar() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -28,8 +48,7 @@ function renderBar() {
   );
 }
 
-/** `/me`: the approval is filed under its `org_id`, the internal client
- *  (MSP clients plan 2026-10-26 Task 14). */
+/** The approval is filed under the client chosen at the top: here the internal one, `o1`. */
 const me = () =>
   vi.fn().mockResolvedValue({ user_id: "u", org_id: "o1", email: "", display_name: "", permissions: [] });
 
@@ -91,8 +110,10 @@ describe("linking an approval to a change", () => {
   });
 
   it("sends nothing before /me has answered, and says why", async () => {
-    // The approval's client is `/me`'s `org_id`; without it the body would be
-    // a global approval nobody chose (MSP clients plan 2026-10-26 Task 14).
+    // Until `/me` has answered the selector is not ready and no client is
+    // known (`useNewRowClient`); without one the body would be a global
+    // approval nobody chose (MSP clients plan 2026-10-26 Task 14).
+    mockClientScope.mockReturnValue({ selected: SCOPE_INTERNAL.id, select: vi.fn(), clients: [], ready: false });
     const user = userEvent.setup();
     const bulkApprovePatches = vi.fn();
     mockUseApi.mockReturnValue({
@@ -103,7 +124,7 @@ describe("linking an approval to a change", () => {
     renderBar();
     await user.click(await screen.findByRole("button", { name: /^Approve 1 update/ }));
     await user.click(await screen.findByRole("button", { name: "Approve" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/Nothing was sent/);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/nothing was sent/i);
     expect(bulkApprovePatches).not.toHaveBeenCalled();
   });
 });

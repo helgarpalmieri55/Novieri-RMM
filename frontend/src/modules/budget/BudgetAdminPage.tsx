@@ -24,7 +24,7 @@ import {
   useUpdateCostCenterMutation,
   useUpdateFxRateMutation,
 } from "./api";
-import { BudgetPageNav } from "./budgetState";
+import { BudgetPageNav, BudgetPickClient, useBudgetNeedsClient } from "./budgetState";
 import { PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { KV } from "../../shell/viz";
@@ -115,6 +115,7 @@ export function BudgetAdminPage() {
   // `/budget/admin#fx-rates` is where the dashboard's "could not be converted"
   // notice sends an operator; without this the fragment moves nothing.
   useScrollToHash(me.isFetched);
+  const needsClient = useBudgetNeedsClient();
 
   return (
     <div>
@@ -125,9 +126,17 @@ export function BudgetAdminPage() {
 
       <BudgetPageNav canRead={canRead} />
 
-      <SettingsPanel canManage={canManage} />
-      <CategoriesPanel canManage={canManage} />
-      <CostCentersPanel canManage={canManage} />
+      {/* The settings, categories and cost centres are one client's; the
+          exchange rates below are every client's (a global route). */}
+      {needsClient ? (
+        <BudgetPickClient />
+      ) : (
+        <>
+          <SettingsPanel canManage={canManage} />
+          <CategoriesPanel canManage={canManage} />
+          <CostCentersPanel canManage={canManage} />
+        </>
+      )}
       {/* An anchor on a wrapper: `Panel` takes no id. */}
       <div id="fx-rates">
         <FxRatesPanel canManage={canManageRates} />

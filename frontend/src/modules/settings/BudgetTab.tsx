@@ -19,7 +19,7 @@ import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
 import { formatDateTime } from "../../lib/datetime";
-import { internalClientId } from "../../lib/internalClient";
+import { useClientScope } from "../../lib/clientScope";
 import { KIND_ICON, Panel } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { ChipsField } from "../../shell/viz";
@@ -102,11 +102,11 @@ export function BudgetTab({
 }) {
   const t = useT();
   const me = useMe();
-  // Budget settings are one client's (base currency, fiscal year).
-  // PHASE 3: the client/site selector. Until it exists that is the
-  // organisation's internal client, whose id is the organisation's --
-  // `/me`'s `org_id` (`lib/internalClient.ts`).
-  const clientId = internalClientId(me.data);
+  // Budget settings are one client's (base currency, fiscal year): the
+  // client chosen at the top. With every client chosen there is none to
+  // show, and the tab says so (plan Task 11 D11.1).
+  const { selected: clientId, ready } = useClientScope();
+  const needsClient = ready && clientId === null;
   const settings = useBudgetSettings(clientId, canRead);
   const update = useUpdateBudgetSettingsMutation(clientId);
   // Only when there is actually somebody to name, and only when this session
@@ -148,7 +148,9 @@ export function BudgetTab({
       title={t("settings.budget.title")}
       subtitle={t("settings.budget.subtitle")}
     >
-      {settings.isLoading ? (
+      {needsClient ? (
+        <p className="note">{t("settings.budget.pickClient")}</p>
+      ) : settings.isLoading ? (
         <p className="note">{t("settings.budget.loading")}</p>
       ) : forbidden ? (
         <p className="note">

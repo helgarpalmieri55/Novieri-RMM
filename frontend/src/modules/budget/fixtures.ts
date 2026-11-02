@@ -52,8 +52,8 @@ const ELAPSED = new Date().getMonth() + 1;
 
 /* ---------------------------------------------------------------- settings */
 
-// Every row here is the internal client's (`ORG_ID`, the id convention): what
-// the console works on until the client selector exists (PHASE 3).
+// Every row here is the internal client's (`ORG_ID`, the id convention): the
+// client the preview works on when it is the one chosen.
 const SETTINGS: SettingsOut = {
   client_id: ORG_ID,
   base_currency: "EUR",

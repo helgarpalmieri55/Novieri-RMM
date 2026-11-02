@@ -5,7 +5,9 @@ import { Button, Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { useClientScope } from "../../lib/clientScope";
 import { formatDateTime } from "../../lib/datetime";
+import { useClientName } from "../settings/api";
 import { useChanges, useUserTimezone } from "./api";
 import { changeStateKind, changeStateLabel, changeTypeLabel, riskKind, riskLabel } from "./changeState";
 import { ChangeReadiness } from "./ChangeReadiness";
@@ -67,6 +69,11 @@ export function ChangesPage() {
   // Same `["me"]` query as the line above, read for the profile zone rather
   // than the permissions -- see `useUserTimezone` in ./api.
   const zone = useUserTimezone();
+  // WHOSE EACH ROW IS, with every client chosen (design §3.4); with one
+  // chosen every row is that client's, and the column would only repeat it.
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const showClient = selected === null;
 
   const changes = useChanges();
   const items = useMemo(() => changes.data ?? [], [changes.data]);
@@ -208,6 +215,7 @@ export function ChangesPage() {
             <thead>
               <tr>
                 <Th>{t("change.common.name")}</Th>
+                {showClient ? <Th>{t("change.list.client")}</Th> : null}
                 <Th>{t("change.common.risk")}</Th>
                 <Th>{t("change.common.state")}</Th>
                 <Th>{t("change.list.created")}</Th>
@@ -238,6 +246,7 @@ export function ChangesPage() {
                       {change.origin === "auto" ? ` · ${t("change.list.recordedAutomatically")}` : ""}
                     </div>
                   </Td>
+                  {showClient ? <Td>{clientName(change.client_id)}</Td> : null}
                   <Td>
                     <StatusPill value={change.risk} label={riskLabel(change.risk)} kind={riskKind(change.risk)} />
                   </Td>

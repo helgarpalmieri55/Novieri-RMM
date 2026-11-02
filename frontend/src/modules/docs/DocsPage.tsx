@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { Badge, Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
+import { ClientField } from "../../components/ClientField";
 import { ConfirmDialog } from "../../components/confirm";
 import { ForEveryClientToggle } from "../../components/forEveryClient";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
@@ -12,8 +13,8 @@ import type { MessageKey } from "../../i18n/core";
 import { Trans } from "../../i18n/Trans";
 import type { DocArticleInput, Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
 import { formatDate, formatDateTime } from "../../lib/datetime";
-import { newRowClient } from "../../lib/internalClient";
 import { humaniseEnum, humaniseStatus } from "../../lib/labels";
 import { DocumentsSection, DocumentView, tooLong, UploadDocumentDialog } from "./documents";
 import { renderMarkdown } from "./markdown";
@@ -242,10 +243,15 @@ export function DocsPage() {
   );
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<DocArticleInput>({ title: "", body: "", category: "General" });
-  // A NEW article is the internal client's unless the person asks for it to
-  // be every client's (MSP clients plan 2026-10-26 Task 14). Set at creation
-  // only: an article's client never changes.
+  // Every client's only when the person asks (MSP clients plan 2026-10-26
+  // Task 14). Set at creation only: an article's client never changes.
   const [forEveryClient, setForEveryClient] = useState(false);
+  // A NEW ARTICLE IS ONE CLIENT'S unless it is for every client (§3.5): the
+  // client chosen at the top, or with every client the editor's Client field.
+  const target = useNewRowClient("docs.manage");
+  // The Client field's value, `""` until chosen: read only when it is shown.
+  const [pickedClient, setPickedClient] = useState("");
+  const articleClient = target.needsField ? pickedClient || null : target.clientId;
   const [showVersions, setShowVersions] = useState(false);
   const [newRecordOpen, setNewRecordOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -308,10 +314,8 @@ export function DocsPage() {
       if (selectedId && editing && article.data) {
         return api.updateArticle(selectedId, draft);
       }
-      // PHASE 3: the client/site selector. Until it exists a new article is
-      // the organisation's internal client's -- `/me`'s `org_id`
-      // (`lib/internalClient.ts`) -- or, when asked, every client's.
-      return api.createArticle({ ...draft, ...newRowClient(me.data, forEveryClient) });
+      // A new article is the client's above, or, when asked, every client's.
+      return api.createArticle({ ...draft, ...(forEveryClient ? {} : { client_id: requireKnown(articleClient) }) });
     },
     onSuccess: (saved) => {
       invalidate();
@@ -367,6 +371,7 @@ export function DocsPage() {
     setSelectedId(null);
     setDraft({ title: "", body: "", category: "General" });
     setForEveryClient(false);
+    setPickedClient("");
     setAttempt(null);
     save.reset();
     setEditing(true);
@@ -879,6 +884,16 @@ export function DocsPage() {
                         if (save.isError) save.reset();
                       }}
                     />
+                    {!forEveryClient && target.needsField ? (
+                      <ClientField
+                        code="docs.manage"
+                        value={pickedClient}
+                        onChange={(id) => {
+                          setPickedClient(id);
+                          if (save.isError) save.reset();
+                        }}
+                      />
+                    ) : null}
                   </div>
                 ) : null}
                 <div className="mt-3 flex justify-end gap-2">
@@ -1055,7 +1070,12 @@ function NewRecordDialog({ open, onClose }: { open: boolean; onClose: () => void
   const [fieldsJson, setFieldsJson] = useState("{}");
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [forEveryClient, setForEveryClient] = useState(false);
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  // A NEW RECORD IS ONE CLIENT'S unless it is for every client (§3.5): the
+  // client chosen at the top, or with every client the dialog's Client field.
+  const target = useNewRowClient("docs.manage");
+  // The Client field's value, `""` until chosen: read only when it is shown.
+  const [pickedClient, setPickedClient] = useState("");
+  const recordClient = target.needsField ? pickedClient || null : target.clientId;
   const create = useMutation({
     // The parsed object is the mutation's input, so no `JSON.parse` runs on
     // the dispatch path: a throw there surfaced as a raw `SyntaxError` (or as
@@ -1065,10 +1085,8 @@ function NewRecordDialog({ open, onClose }: { open: boolean; onClose: () => void
         record_type: recordType,
         name,
         fields,
-        // PHASE 3: the client/site selector. Until it exists a new record is
-        // the organisation's internal client's (`lib/internalClient.ts`), or,
-        // when asked, every client's.
-        ...newRowClient(me.data, forEveryClient),
+        // The client's above, or, when asked, every client's.
+        ...(forEveryClient ? {} : { client_id: requireKnown(recordClient) }),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["doc-records"] });
@@ -1147,6 +1165,16 @@ function NewRecordDialog({ open, onClose }: { open: boolean; onClose: () => void
             clearStaleFeedback();
           }}
         />
+        {!forEveryClient && target.needsField ? (
+          <ClientField
+            code="docs.manage"
+            value={pickedClient}
+            onChange={(id) => {
+              setPickedClient(id);
+              clearStaleFeedback();
+            }}
+          />
+        ) : null}
         <div className="flex justify-end gap-2">
           {/* See the article editor: an untyped Button inside a <form>
            * submits, and Cancel must not create the record. */}

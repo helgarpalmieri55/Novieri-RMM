@@ -4,6 +4,7 @@ import { Table, Td, Th } from "../../components/ui";
 import type { Me } from "../../lib/api";
 import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
+import { useClientScope } from "../../lib/clientScope";
 import { formatDate } from "../../lib/datetime";
 import { useClientName } from "../settings/api";
 import { useProducts, useRenewals } from "./api";
@@ -21,6 +22,10 @@ export function RenewalCalendar() {
   const renewals = useRenewals();
   const products = useProducts();
   const clientName = useClientName();
+  // WHOSE EACH ROW IS, with every client chosen (design §3.4); with one
+  // chosen every row is that client's, and the column would only repeat it.
+  const { selected } = useClientScope();
+  const showClient = selected === null;
   const productNameById = useMemo(
     () => new Map((products.data ?? []).map((p) => [p.id, p.name])),
     [products.data],
@@ -48,7 +53,7 @@ export function RenewalCalendar() {
             <thead>
               <tr>
                 <Th>{t("licenses.renewals.colProduct")}</Th>
-                <Th>{t("licenses.renewals.colClient")}</Th>
+                {showClient && <Th>{t("licenses.renewals.colClient")}</Th>}
                 <Th>{t("licenses.renewals.colWhat")}</Th>
                 <Th>{t("licenses.renewals.colDate")}</Th>
                 <Th>{t("licenses.renewals.colIn")}</Th>
@@ -64,7 +69,7 @@ export function RenewalCalendar() {
                         {productNameById.get(row.product_id) ?? row.product_id}
                       </div>
                     </Td>
-                    <Td>{clientName(row.client_id)}</Td>
+                    {showClient && <Td>{clientName(row.client_id)}</Td>}
                     <Td>{row.trigger === "maintenance" ? t("licenses.renewals.maintenance") : t("licenses.renewals.renewal")}</Td>
                     {/* `due_date` is a `date` in schema.py (reporting's
                         renewal/maintenance trigger day), so it is pinned to

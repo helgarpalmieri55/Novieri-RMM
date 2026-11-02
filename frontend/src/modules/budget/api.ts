@@ -7,9 +7,9 @@
 // no worker).
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { internalClientId, loadingUntilClient, requireKnown } from "../../lib/internalClient";
+import { useClientScope } from "../../lib/clientScope";
+import { loadingUntilClient, requireKnown } from "../../lib/clientSelection";
 import type {
   BudgetCreate,
   BudgetLineInput,
@@ -36,22 +36,17 @@ import type {
 /**
  * BUDGET IS ONE CLIENT'S (MSP clients phase 2, plan 2026-10-26 Task 8): its
  * settings, categories, cost centres, budgets and expenses each belong to a
- * client, and budget is a module a client may not use. Every hook below works
- * on the client this returns: reads filter by it (and wait for it --
- * `enabled`), and creates name it.
+ * client, in that client's base currency, and budget is a module a client may
+ * not use. Every hook below works on the client this returns: reads filter by
+ * it (and wait for it -- `enabled`), and creates name it.
  *
- * `null` until `/me` has answered. A read is not sent before then; a create
- * throws `InternalScopeUnknown` inside its mutation (`requireKnown`), so the
- * form says why and NOTHING is sent -- a body without its client is a 422
- * the person can do nothing about.
+ * It is the client chosen at the top (phase 3). With every client chosen it is
+ * `null`: no read is sent, the pages ask for a client instead
+ * (`budgetState.tsx`'s `useBudgetNeedsClient`), and a create would throw
+ * `ClientNotChosen` inside its mutation (`requireKnown`) -- nothing is sent.
  */
 export function useBudgetClient(): string | null {
-  const api = useApi();
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
-  // PHASE 3: the client/site selector. Until it exists that is the
-  // organisation's internal client, whose id is the organisation's --
-  // `/me`'s `org_id` (`lib/internalClient.ts`).
-  return internalClientId(me.data);
+  return useClientScope().selected;
 }
 
 // --------------------------------------------------------------------------
@@ -107,7 +102,7 @@ export function useCreateBudgetCategoryMutation() {
   const client = useBudgetClient();
   return useMutation({
     mutationFn: (body: NewRow<CategoryCreate>) =>
-      // PHASE 3: the selected client; until then the internal one (`useBudgetClient`).
+      // The client chosen at the top (`useBudgetClient`).
       api.createBudgetCategory({ ...body, client_id: requireKnown(client) }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["budget-categories"] });
@@ -150,7 +145,7 @@ export function useCreateCostCenterMutation() {
   const client = useBudgetClient();
   return useMutation({
     mutationFn: (body: NewRow<CostCenterCreate>) =>
-      // PHASE 3: the selected client; until then the internal one (`useBudgetClient`).
+      // The client chosen at the top (`useBudgetClient`).
       api.createCostCenter({ ...body, client_id: requireKnown(client) }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["budget-cost-centers"] });
@@ -224,7 +219,7 @@ export function useCreateBudgetMutation() {
   const client = useBudgetClient();
   return useMutation({
     mutationFn: (body: NewRow<BudgetCreate>) =>
-      // PHASE 3: the selected client; until then the internal one (`useBudgetClient`).
+      // The client chosen at the top (`useBudgetClient`).
       api.createBudget({ ...body, client_id: requireKnown(client) }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["budgets"] });
@@ -351,7 +346,7 @@ export function useCreateExpenseMutation() {
   const client = useBudgetClient();
   return useMutation({
     mutationFn: (body: NewRow<ExpenseCreate>) =>
-      // PHASE 3: the selected client; until then the internal one (`useBudgetClient`).
+      // The client chosen at the top (`useBudgetClient`).
       api.createExpense({ ...body, client_id: requireKnown(client) }),
     onSuccess: () => {
       // Prefix invalidation: TanStack Query matches every query keyed
@@ -421,7 +416,7 @@ export function useMaterializeExpensesMutation() {
   const client = useBudgetClient();
   return useMutation({
     mutationFn: (body: NewRow<MaterializeRequest>) =>
-      // PHASE 3: the selected client; until then the internal one (`useBudgetClient`).
+      // The client chosen at the top (`useBudgetClient`).
       api.materializeExpenses({ ...body, client_id: requireKnown(client) }),
     onSuccess: () => {
       // N2 fix: materialization moves money from projected to committed, the

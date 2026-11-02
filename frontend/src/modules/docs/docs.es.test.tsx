@@ -20,7 +20,7 @@ import { es } from "../../i18n/es";
 import { setActiveLanguage, translate } from "../../i18n/core";
 import { expectNoEnglish, renderInSpanish } from "../../i18n/test-utils";
 import { ApiError } from "../../lib/api";
-import type { ApiClient, DocArticle, DocDocument, DocDocumentVersion, Me } from "../../lib/api";
+import type { ApiClient, DocArticle, DocDocument, DocDocumentVersion, Me, MeClient } from "../../lib/api";
 import { DocsPage } from "./DocsPage";
 import { DocumentViewer } from "./DocumentViewer";
 import { typeLabel } from "./documents";
@@ -29,6 +29,25 @@ import { PortalVisibility } from "./PortalVisibility";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 vi.mock("../../lib/download", () => ({ saveBlob: vi.fn() }));
 
 const MANAGER: Me = {

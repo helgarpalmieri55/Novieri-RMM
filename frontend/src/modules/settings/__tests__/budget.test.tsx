@@ -13,6 +13,7 @@ import {
   installDefaults,
   renderSettings,
 } from "./harness";
+import type { MeClient } from "../../../lib/api";
 
 // The OIDC client is not under test and constructs a UserManager (with a
 // silent-renew timer) at import time. `../api.ts`'s org request only needs the
@@ -31,6 +32,25 @@ vi.mock("../../../lib/auth", () => ({
 // this factory is mocking, so the import waits on a factory that is waiting on
 // the import.
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "org-1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 beforeEach(() => {
   installDefaults();
@@ -116,14 +136,22 @@ describe("Settings — Budget tab", () => {
   });
 
   // MSP clients phase 2 (plan 2026-10-26 Task 8): each client has its own
-  // base currency and fiscal year. Until the selector exists (PHASE 3) this
-  // tab shows the internal client's, whose id is `/me`'s `org_id`.
-  it("reads the internal client's settings", async () => {
+  // base currency and fiscal year. This tab shows the client chosen at the
+  // top's (plan Task 11 D11.1); here the internal one, `org-1`.
+  it("reads the selected client's settings", async () => {
     renderSettings();
     await openTab();
     await screen.findByLabelText("Base currency");
     expect(calls.getBudgetSettings).toHaveBeenCalledWith("org-1");
     for (const call of calls.getBudgetSettings.mock.calls) expect(call).toEqual(["org-1"]);
+  });
+
+  it("asks for a client at the top, and reads nothing, with every client chosen", async () => {
+    selectClient(null);
+    renderSettings();
+    await openTab();
+    expect(await screen.findByText(/choose a client at the top of the page/i)).toBeInTheDocument();
+    expect(calls.getBudgetSettings).not.toHaveBeenCalled();
   });
 
   // A client's settings are the documented defaults until somebody sets
@@ -171,8 +199,7 @@ describe("Settings — Budget tab", () => {
     await user.click(screen.getByRole("button", { name: "Save budget settings" }));
 
     await waitFor(() => expect(calls.updateBudgetSettings).toHaveBeenCalledTimes(1));
-    // The internal client's settings: its id is `/me`'s `org_id` (PHASE 3:
-    // the selector's).
+    // The selected client's settings: here the internal one, `org-1`.
     expect(calls.updateBudgetSettings).toHaveBeenCalledWith("org-1", {
       base_currency: "COP",
       fiscal_year_start_month: 1,

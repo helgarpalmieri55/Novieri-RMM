@@ -31,6 +31,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { ClientField } from "../../components/ClientField";
 import { ConfirmDialog } from "../../components/confirm";
 import { ForEveryClientToggle } from "../../components/forEveryClient";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
@@ -38,10 +39,10 @@ import type { Attempt, FieldRule } from "../../components/form";
 import { Badge, Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
-import type { DocDocument, DocDocumentListItem, DocDocumentVersion, Me } from "../../lib/api";
+import type { DocDocument, DocDocumentListItem, DocDocumentVersion } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
 import { formatDateTime } from "../../lib/datetime";
-import { newRowClient } from "../../lib/internalClient";
 import { formatBytes } from "../../lib/format";
 import { humaniseEnum } from "../../lib/labels";
 import { Panel, QueryState, StatusPill } from "../../shell/components";
@@ -871,7 +872,12 @@ export function UploadDocumentDialog({
   const [createdWithoutFile, setCreatedWithoutFile] = useState<string | null>(null);
   const [forEveryClient, setForEveryClient] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  // A NEW DOCUMENT IS ONE CLIENT'S unless it is for every client (§3.5): the
+  // client chosen at the top, or with every client the dialog's Client field.
+  const target = useNewRowClient("docs.manage");
+  // The Client field's value, `""` until chosen: read only when it is shown.
+  const [pickedClient, setPickedClient] = useState("");
+  const documentClient = target.needsField ? pickedClient || null : target.clientId;
 
   useEffect(() => {
     if (!open) return;
@@ -882,6 +888,7 @@ export function UploadDocumentDialog({
     setAttempt(null);
     setCreatedWithoutFile(null);
     setForEveryClient(false);
+    setPickedClient("");
     if (fileInput.current) fileInput.current.value = "";
   }, [open]);
 
@@ -891,10 +898,8 @@ export function UploadDocumentDialog({
         title,
         description,
         category,
-        // PHASE 3: the client/site selector. Until it exists a new document is
-        // the organisation's internal client's (`lib/internalClient.ts`), or,
-        // when asked, every client's.
-        ...newRowClient(me.data, forEveryClient),
+        // The client's above, or, when asked, every client's.
+        ...(forEveryClient ? {} : { client_id: requireKnown(documentClient) }),
       });
       if (!file) return doc;
       try {
@@ -986,6 +991,16 @@ export function UploadDocumentDialog({
             clearStale();
           }}
         />
+        {!forEveryClient && target.needsField ? (
+          <ClientField
+            code="docs.manage"
+            value={pickedClient}
+            onChange={(id) => {
+              setPickedClient(id);
+              clearStale();
+            }}
+          />
+        ) : null}
         <AcceptedTypes />
         {createdWithoutFile && (
           <p role="status" className="notice gold mt-2">

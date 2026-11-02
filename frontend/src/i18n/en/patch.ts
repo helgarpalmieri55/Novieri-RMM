@@ -309,8 +309,10 @@ export const patch = {
       one: "the 1 device of {client} in the \"{ring}\" ring",
       other: "the {count} devices of {client} in the \"{ring}\" ring",
     },
-    /** The internal client, as an approval's owner, until phase 3's selector. */
+    /** The internal client, as an approval's owner (plan Task 11 D11.3). */
     ownClient: "your organisation's own client",
+    /** An approval's owner while the bar's Client field is still empty. */
+    chosenClient: "the client you choose",
     // The "For every client" hint on an approval (components/forEveryClient.tsx):
     // what ticking does is reach, not visibility (final review E).
     forEveryClientHint:

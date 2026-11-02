@@ -6,7 +6,9 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { useClientScope } from "../../lib/clientScope";
 import { formatDateTime } from "../../lib/datetime";
+import { useClientName } from "../settings/api";
 import { usePlanStatus, usePlans, useUserTimezone } from "./api";
 import { outcomeKind, outcomeLabel, planStateLabel } from "./bcpState";
 import { BcpReadiness } from "./BcpReadiness";
@@ -85,6 +87,11 @@ export function PlansPage() {
   // Same `["me"]` query as the line above, read for the profile zone rather
   // than the permissions -- see `useUserTimezone` in ./api.
   const zone = useUserTimezone();
+  // WHOSE EACH ROW IS, with every client chosen (design §3.4); with one
+  // chosen every row is that client's, and the column would only repeat it.
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const showClient = selected === null;
 
   const plans = usePlans();
   // `review_overdue` lives on PlanStatusOut (backend/app/modules/bcp/reporting.py
@@ -255,6 +262,7 @@ export function PlansPage() {
             <thead>
               <tr>
                 <Th>{t("bcp.plans.colName")}</Th>
+                {showClient ? <Th>{t("bcp.plans.colClient")}</Th> : null}
                 <Th>{t("bcp.plans.colState")}</Th>
                 <Th>{t("bcp.plans.colReview")}</Th>
                 <Th>{t("bcp.plans.colLastTest")}</Th>
@@ -292,6 +300,7 @@ export function PlansPage() {
                         {objectives(plan)}
                       </div>
                     </Td>
+                    {showClient ? <Td>{clientName(plan.client_id)}</Td> : null}
                     <Td>
                       {/* Wire vocabulary, read as words (cycle 12). */}
                       <StatusPill
