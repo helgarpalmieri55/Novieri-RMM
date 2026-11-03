@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { ClientField } from "../../components/ClientField";
 import { NoValue } from "../../components/emptystate";
 import { Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { useClientScope } from "../../lib/clientScope";
 import { useNewRowClient } from "../../lib/clientSelection";
+import { useMePermissions } from "../../lib/mePermissions";
 import { useClientName } from "../settings/api";
 import {
   useCreateIpamVlanMutation,
@@ -171,11 +173,20 @@ function SitePanel() {
   const { selected } = useClientScope();
   const clientName = useClientName();
   const directory = useIpamSiteDirectory();
+  // NOT A PERMISSION GATE: the Clients page reads `clients.read` itself.
+  const canReadClients = useMePermissions().has("clients.read");
 
   return (
     <Panel
       title={t("ipam.registry.sitesTitle")}
       subtitle={t("ipam.registry.sitesSubtitle")}
+      actions={
+        canReadClients ? (
+          <Link className="btn" to="/clients">
+            {t("ipam.registry.manageSites")}
+          </Link>
+        ) : undefined
+      }
       bare
     >
       <QueryState

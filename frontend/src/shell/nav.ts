@@ -169,6 +169,11 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         to: "/admin",
         icon: "adjustments",
         sections: [
+          // MSP clients phase 3 (design §4.1): the companies served, their
+          // sites, contacts and optional modules.
+          section("shell.nav.section.organization", [
+            page("/clients", "shell.nav.item.clients", "building", "clients.read", { hint: "shell.nav.hint.clients" }),
+          ]),
           section("shell.nav.section.serviceDesk", [
             page("/notifications", "shell.nav.item.notifications", "bell", "notification.read", { hint: "shell.nav.hint.notifications" }),
             page("/email-intake", "shell.nav.item.emailIntake", "mail", "email_intake.read", { hint: "shell.nav.hint.emailIntake" }),

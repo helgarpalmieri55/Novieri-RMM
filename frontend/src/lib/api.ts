@@ -928,6 +928,49 @@ export interface ContactUpdate {
   status?: "active" | "disabled";
 }
 
+/** `POST /clients` (`ClientCreate`): a customer client, born with a site called Principal. */
+export interface ClientCreate {
+  name: string;
+  email_domains: string[];
+  phone: string;
+  address: string;
+  website: string;
+  notes: string;
+  enabled_modules: ("budget" | "bcp" | "change")[];
+}
+
+/** `PATCH /clients/{id}` (`ClientUpdate`): only the fields present are written. */
+export interface ClientUpdate {
+  name?: string;
+  email_domains?: string[];
+  phone?: string;
+  address?: string;
+  website?: string;
+  notes?: string;
+  enabled_modules?: ("budget" | "bcp" | "change")[];
+}
+
+/** `POST /clients/{id}/sites` (`SiteCreate`). */
+export interface SiteCreate {
+  name: string;
+  address: string;
+  description: string;
+}
+
+/** `PATCH /sites/{id}` (`SiteUpdate`): name, address and description only. */
+export interface SiteUpdate {
+  name?: string;
+  address?: string;
+  description?: string;
+}
+
+/** `POST /clients/{id}/contacts` (`ContactCreate`). A contact cannot sign in to the console. */
+export interface ContactCreate {
+  email: string;
+  display_name: string;
+  phone: string | null;
+}
+
 /**
  * The closed allowlist of org settings keys, mirroring
  * `backend/app/api/v1/orgs.py::SETTINGS_ALLOWLIST`. Every key is optional and
@@ -1736,8 +1779,9 @@ export class ApiClient {
   }
 
   /**
-   * The clients of the request's scope, archived ones left out
-   * (`clients.read`). The Users tab's grant scope picks from these.
+   * The clients of the request's scope, archived ones left out unless asked
+   * (`clients.read`). The Users tab's grant scope and the Clients page read
+   * these.
    */
   listClients(params: { include_archived?: boolean } = {}): Promise<ClientOut[]> {
     return this.request<ClientOut[]>(
@@ -1745,9 +1789,74 @@ export class ApiClient {
     );
   }
 
-  /** A client's sites, archived ones left out (`clients.read`): IPAM's site pickers. */
-  listClientSites(clientId: string): Promise<ClientSiteOut[]> {
-    return this.request<ClientSiteOut[]>(`/clients/${encodeURIComponent(clientId)}/sites`);
+  /**
+   * A client's sites (`clients.read`): archived ones left out unless
+   * `include_archived` -- the Clients page's Sites tab asks for them; the site
+   * pickers (IPAM, `SiteField`) call it with one argument.
+   */
+  listClientSites(
+    clientId: string,
+    params: { include_archived?: boolean } = {},
+  ): Promise<ClientSiteOut[]> {
+    const suffix = params.include_archived ? "?include_archived=true" : "";
+    return this.request<ClientSiteOut[]>(`/clients/${encodeURIComponent(clientId)}/sites${suffix}`);
+  }
+
+  /** One client of the request's scope, archived or not (`clients.read`). */
+  getClientRecord(clientId: string): Promise<ClientOut> {
+    return this.request<ClientOut>(`/clients/${encodeURIComponent(clientId)}`);
+  }
+
+  /**
+   * A new customer client and its Principal site. `clients.manage` on EVERY
+   * client: a global route (`lib/globalRoutes.json`), so it never carries
+   * `X-Client-Id`.
+   */
+  createClient(body: ClientCreate): Promise<ClientOut> {
+    return this.request<ClientOut>("/clients", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  /** `clients.manage` on that client. An email domain another client holds is a 409. */
+  updateClient(clientId: string, body: ClientUpdate): Promise<ClientOut> {
+    return this.request<ClientOut>(`/clients/${encodeURIComponent(clientId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * Archive a customer client. `clients.manage` on EVERY client (a global
+   * route). 409 while it has active devices, and always for the internal and
+   * unassigned clients; the server's sentence says which.
+   */
+  archiveClient(clientId: string): Promise<ClientOut> {
+    return this.request<ClientOut>(`/clients/${encodeURIComponent(clientId)}/archive`, {
+      method: "POST",
+    });
+  }
+
+  /** `sites.manage` on that client. The unassigned client has no sites (422). */
+  createClientSite(clientId: string, body: SiteCreate): Promise<ClientSiteOut> {
+    return this.request<ClientSiteOut>(`/clients/${encodeURIComponent(clientId)}/sites`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** `sites.manage` on the site's client. */
+  updateSite(siteId: string, body: SiteUpdate): Promise<ClientSiteOut> {
+    return this.request<ClientSiteOut>(`/sites/${encodeURIComponent(siteId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * Archive a site (`DELETE /sites/{id}`, never a hard delete; `sites.manage`).
+   * 409 while it holds devices, and for the internal client's Principal site.
+   */
+  archiveSite(siteId: string): Promise<ClientSiteOut> {
+    return this.request<ClientSiteOut>(`/sites/${encodeURIComponent(siteId)}`, { method: "DELETE" });
   }
 
   /**
@@ -1896,6 +2005,19 @@ export class ApiClient {
   setUserEnabled(userId: string, enabled: boolean): Promise<UserOut> {
     return this.request<UserOut>(`/users/${userId}/${enabled ? "enable" : "disable"}`, {
       method: "POST",
+    });
+  }
+
+  /** A client's contacts, disabled ones included (`clients.read`). */
+  listContacts(clientId: string): Promise<ContactOut[]> {
+    return this.request<ContactOut[]>(`/clients/${encodeURIComponent(clientId)}/contacts`);
+  }
+
+  /** `clients.manage` on that client. One email address per organisation (409). */
+  createContact(clientId: string, body: ContactCreate): Promise<ContactOut> {
+    return this.request<ContactOut>(`/clients/${encodeURIComponent(clientId)}/contacts`, {
+      method: "POST",
+      body: JSON.stringify(body),
     });
   }
 

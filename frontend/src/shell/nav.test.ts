@@ -490,3 +490,21 @@ describe("Imaging", () => {
     expect(crumbFor("/provisioning/images").title).toBe("Imaging");
   });
 });
+
+describe("the Clients page (MSP clients phase 3, design §4.1)", () => {
+  it("sits in Admin, gated on clients.read", () => {
+    const item = ALL_ITEMS.find((entry) => entry.to === "/clients");
+    expect(item?.permission).toBe("clients.read");
+    expect(item?.label).toBe("Clients");
+    expect(crumbFor("/clients/c1")).toEqual({ section: "Admin", sectionTo: "/admin", title: "Clients" });
+  });
+
+  it("is offered to a person holding only clients.read", () => {
+    const admin = visibleGroups(["clients.read"], new Set())
+      .flatMap((group) => group.items)
+      .find((entry) => entry.to === "/admin");
+    expect(admin && isArea(admin) ? admin.sections.map((section) => section.label) : []).toEqual([
+      "Organization",
+    ]);
+  });
+});

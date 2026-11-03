@@ -36,6 +36,7 @@ export const PARAMS = Object.freeze({
   actionId: "act-1",
   subnetId: "subnet-1",
   sessionId: "sess-1",
+  clientId: "cli-logistics",
 });
 
 export const EXCLUDED = new Set([
@@ -156,6 +157,8 @@ export const ROUTES = [
   "/device-groups",
   "/discovered",
   "/agent-packages",
+  "/clients",
+  "/clients/cli-logistics",
   "/settings",
   // A QUERY VARIANT: `/settings` opens Organization, so no other tab is ever
   // measured. A variant is `<a route listed here>?<query>`; the guard checks
