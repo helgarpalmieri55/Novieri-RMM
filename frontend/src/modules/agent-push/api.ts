@@ -76,9 +76,9 @@ export function usePushAuthorizations(includeRevoked: boolean) {
 
 /**
  * The body is BUILT when the mutation runs, not when the button is wired: its
- * `client_id` may not be known yet (`/me` in flight), and `requireKnown`
- * throwing there is a refusal the form shows, not an exception in a click
- * handler (`lib/internalClient.ts`).
+ * `client_id` may not be known yet, and `requireKnown` throwing there is a
+ * refusal the form shows, not an exception in a click handler
+ * (`lib/clientSelection.ts`).
  */
 export function useCreatePushAuthorizationMutation() {
   const api = useApi();

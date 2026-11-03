@@ -500,6 +500,7 @@ export const settings: Shape<typeof en> = {
   budget: {
     title: "Presupuesto",
     subtitle: "La moneda base y el inicio del año fiscal que usa cada cifra del presupuesto",
+    pickClient: "Los ajustes de presupuesto son de cada cliente. Elige un cliente arriba para ver su moneda base y su año fiscal.",
     loading: "Cargando…",
     forbidden: "La configuración del presupuesto no está disponible (permisos insuficientes: {code}).",
     baseCurrency: "Moneda base",

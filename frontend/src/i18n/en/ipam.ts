@@ -42,6 +42,9 @@ export const ipam = {
     defaultGlobal: "Default (global)",
     // A VRF decides the client of what is filed in it, so a VRF says whose it is.
     vrfOfClient: "{vrf} · {client}",
+    // With every client chosen (MSP clients phase 3): whose a row, or a site, is.
+    client: "Client",
+    siteOfClient: "{site} · {client}",
     loading: "Loading…",
     drift: "Drift",
     dormant: "Dormant",

@@ -2,8 +2,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
-import type { ApiClient, ClientSiteOut, Device } from "../../../lib/api";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ApiClient, ClientSiteOut, Device, MeClient } from "../../../lib/api";
+import { ClientNotChosen } from "../../../lib/clientSelection";
 import { AddressDialog } from "../AddressDialog";
 import { ImportPage } from "../ImportPage";
 import { RegistryPage } from "../RegistryPage";
@@ -16,13 +17,33 @@ import type { GridEntryOut, ScopeOut, SubnetOut, VlanOut, VrfOut } from "../type
 // takes its client from its VRF, or a VLAN from its site, and the server refuses
 // a body that contradicts that parent -- so the console names a client only
 // where there is no parent: a VRF always, a VLAN without a site, and a subnet,
-// an address or a scan authorization without a VRF. Until phase 3's selector
-// that client is the internal one, `/me`'s `org_id` (`lib/internalClient.ts`),
-// and nothing is sent before `/me` has answered. IPAM keeps no sites of its own:
-// its pickers list the client's (`GET /clients/{id}/sites`).
+// an address or a scan authorization without a VRF. That client is the one
+// chosen at the top, or the one the form's Client field names
+// (`lib/clientSelection.ts`, phase 3), and nothing is sent before it is known.
+// IPAM keeps no sites of its own: its pickers list the client's
+// (`GET /clients/{id}/sites`).
 
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 const ME = {
   user_id: "u1",
@@ -124,7 +145,7 @@ function bodyOf(mock: ReturnType<typeof vi.fn>): Record<string, unknown> {
 }
 
 describe("the registry names the client where nothing above a row does", () => {
-  it("files a new VRF under the internal client", async () => {
+  it("files a new VRF under the client chosen at the top", async () => {
     const createIpamVrf = vi.fn().mockResolvedValue(VRF);
     stubApi({ createIpamVrf });
     const user = userEvent.setup();
@@ -134,7 +155,7 @@ describe("the registry names the client where nothing above a row does", () => {
     await user.click(screen.getByRole("button", { name: "Add VRF" }));
 
     await waitFor(() => expect(createIpamVrf).toHaveBeenCalled());
-    // PHASE 3: the selected client; the internal one, `/me`'s `org_id`, until then.
+    // The selected client (here the internal one, `o1`).
     expect(bodyOf(createIpamVrf)).toMatchObject({ name: "lan", client_id: "o1" });
   });
 
@@ -160,7 +181,7 @@ describe("the registry names the client where nothing above a row does", () => {
     expect(body).not.toHaveProperty("client_id");
   });
 
-  it("files a VLAN with no site under the internal client", async () => {
+  it("files a VLAN with no site under the client chosen at the top", async () => {
     const createIpamVlan = vi.fn().mockResolvedValue(vlan({}));
     stubApi({ createIpamVlan });
     const user = userEvent.setup();
@@ -193,7 +214,7 @@ describe("a subnet, an address and a scan authorization", () => {
     return bodyOf(createIpamSubnet);
   }
 
-  it("files a subnet with no VRF under the internal client's global VRF", async () => {
+  it("files a subnet with no VRF under the selected client's global VRF", async () => {
     expect(await registerSubnet(null)).toMatchObject({ vrf_id: null, client_id: "o1" });
   });
 
@@ -203,7 +224,7 @@ describe("a subnet, an address and a scan authorization", () => {
     expect(body).not.toHaveProperty("client_id");
   });
 
-  it("files an authorization with no VRF under the internal client", async () => {
+  it("files an authorization with no VRF under the client chosen at the top", async () => {
     const createIpamScanAuthorization = vi.fn().mockResolvedValue(scope());
     stubApi({ createIpamScanAuthorization, listIpamSubnets: vi.fn().mockResolvedValue([subnet()]) });
     const user = userEvent.setup();
@@ -278,18 +299,18 @@ describe("a subnet, an address and a scan authorization", () => {
     expect(bodyOf(createIpamAddress)).toMatchObject({ vrf_id: "vrf-x", reserve: true });
   });
 
-  it("sends nothing before `/me` has answered where the client must be named, and says why", async () => {
+  it("sends nothing while the client is not chosen where it must be named, and says why", async () => {
     // Moved here from the address dialog, which names a VRF now. A subnet
-    // with no VRF names its client (`namingClient`), and the console cannot
-    // know it yet. Driven through the mutation itself: every page that offers
-    // the form reads its permission from the same `/me`.
+    // with no VRF names its client (`namingClient`); with every client chosen
+    // and the form's Client field still empty, that client is `null` -- the
+    // body such a form sends. Driven through the mutation itself.
     const { useCreateIpamSubnetMutation } = await import("../api");
     const { ErrorLine } = await import("../ErrorLine");
     function Register() {
       const create = useCreateIpamSubnetMutation();
       return (
         <>
-          <button onClick={() => create.mutate({ prefix: "10.4.7.0/24", kind: "assignable", vrf_id: null })}>
+          <button onClick={() => create.mutate({ prefix: "10.4.7.0/24", kind: "assignable", vrf_id: null, client_id: null })}>
             Register
           </button>
           {create.error && <ErrorLine error={create.error} />}
@@ -297,12 +318,13 @@ describe("a subnet, an address and a scan authorization", () => {
       );
     }
     const createIpamSubnet = vi.fn().mockResolvedValue(subnet());
-    stubApi({ createIpamSubnet, me: vi.fn(() => new Promise(() => {})) });
+    selectClient(null);
+    stubApi({ createIpamSubnet });
     const user = userEvent.setup();
     renderWithProviders(<Register />);
     await user.click(await screen.findByRole("button", { name: "Register" }));
 
-    expect(await screen.findByText(/Your account has not loaded yet/)).toBeInTheDocument();
+    expect(await screen.findByText(new ClientNotChosen().message)).toBeInTheDocument();
     expect(createIpamSubnet).not.toHaveBeenCalled();
   });
 });
@@ -487,7 +509,8 @@ describe("an import goes where the operator points it: a VRF, whose client is th
     expect(applyIpamImport.mock.calls[0]?.slice(2)).toEqual(["a".repeat(64), { vrfId: "vrf-x" }]);
   });
 
-  it("starts on the internal client's global VRF, and another choice clears the preview", async () => {
+  it("starts on the selected client's global VRF, and another choice clears the preview", async () => {
+    selectClient("o1");
     const previewIpamImport = vi.fn().mockResolvedValue(PREVIEW);
     const applyIpamImport = vi.fn().mockResolvedValue({ ...PREVIEW, applied: 1 });
     stubApi({
@@ -510,8 +533,8 @@ describe("an import goes where the operator points it: a VRF, whose client is th
     expect(applyIpamImport.mock.calls[0]?.[3]).toEqual({ vrfId: "vrf-x" });
   });
 
-  it("names the internal client only when no VRF is listed", async () => {
-    // PHASE 3: the selected client's global VRF; the internal one, `/me`'s `org_id`, until then.
+  it("names the selected client only when no VRF is listed", async () => {
+    // The client chosen at the top: here the internal one, o1.
     const previewIpamImport = vi.fn().mockResolvedValue(PREVIEW);
     stubApi({ previewIpamImport, listIpamVrfs: vi.fn().mockResolvedValue([]) });
     const user = userEvent.setup();

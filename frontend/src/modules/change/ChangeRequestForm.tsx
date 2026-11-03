@@ -1,14 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { ClientField } from "../../components/ClientField";
 import { attemptProblems, Form, FormActions } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
-import type { Me } from "../../lib/api";
-import { useApi } from "../../lib/ApiContext";
+import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
 import { formatDateTime, toInstant } from "../../lib/datetime";
-import { internalClientId, requireKnown } from "../../lib/internalClient";
 import { useCreateChangeMutation, useUpdateChangeMutation, useUserTimezone } from "./api";
 import { riskLabel } from "./changeState";
 import type { ChangeRequest } from "./types";
@@ -95,8 +93,13 @@ export function ChangeRequestForm({
   onClose: () => void;
 }) {
   const t = useT();
-  const api = useApi();
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  // A change is one client's (MSP clients phase 2), and that client must use
+  // change management: the client chosen at the top, or with every client the
+  // form's Client field (design §3.1; plan Task 11 D11.2).
+  const target = useNewRowClient("change.request");
+  // The Client field's value, `""` until chosen: read only when it is shown.
+  const [pickedClient, setPickedClient] = useState("");
+  const changeClient = target.needsField ? pickedClient || null : target.clientId;
   const create = useCreateChangeMutation();
   const update = useUpdateChangeMutation();
   const zone = useUserTimezone();
@@ -132,6 +135,7 @@ export function ChangeRequestForm({
     setWindowStart("");
     setWindowEnd("");
     setRollbackPlan("");
+    setPickedClient("");
     setAttempt(null);
   }
 
@@ -149,9 +153,14 @@ export function ChangeRequestForm({
   function submit() {
     // The rules close over the values of THIS submission (constants of this
     // render), never over live state.
+    // Only a new change asks for its client: an edit keeps its own.
+    const askClient = !existing && target.needsField;
     const next: Attempt = {
-      rules: () => changeRules(windowStart, windowEnd, zone),
-      values: { title, description, window_end: windowEnd },
+      rules: () => [
+        ...changeRules(windowStart, windowEnd, zone),
+        ...(askClient ? [{ name: "client", label: translate("change.form.client") }] : []),
+      ],
+      values: { title, description, window_end: windowEnd, client: changeClient },
     };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
@@ -188,14 +197,9 @@ export function ChangeRequestForm({
     if (existing) {
       update.mutate({ id: existing.id, body }, { onSuccess });
     } else {
-      // A change is one client's (MSP clients phase 2), and that client must
-      // use change management: the server's 404 says so in a sentence, which
-      // `FormActions` shows as it is.
-      // PHASE 3: the client/site selector. Until it exists that is the
-      // organisation's internal client, whose id is the organisation's --
-      // `/me`'s `org_id` (`lib/internalClient.ts`).
-      const internalClient = internalClientId(me.data);
-      create.mutate(() => ({ ...body, client_id: requireKnown(internalClient) }), { onSuccess });
+      // The server's 404 for a client without change management says so in a
+      // sentence, which `FormActions` shows as it is.
+      create.mutate(() => ({ ...body, client_id: requireKnown(changeClient) }), { onSuccess });
     }
   }
 
@@ -213,6 +217,12 @@ export function ChangeRequestForm({
             the same lie pointing the other way. */}
         <p className="note mb-3">{t("change.form.requiredNote")}</p>
         <div className="form-grid">
+          {/* With every client chosen, a new change says whose it is (design
+              §3.1). A client without change management is the server's 404,
+              shown as it is (plan Task 11 D11.2). */}
+          {!existing && target.needsField ? (
+            <ClientField code="change.request" value={pickedClient} onChange={setPickedClient} />
+          ) : null}
           <Field label={t("change.form.type")} full>
             <select className={inputClass} value={type} onChange={(e) => setType(e.target.value)}>
               <option value="standard">{t("change.form.typeStandard")}</option>

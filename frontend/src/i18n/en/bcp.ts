@@ -49,6 +49,8 @@ export const bcp = {
   },
   plans: {
     title: "BCP / DR tests",
+    // Shown with every client chosen at the top (design §3.4).
+    colClient: "Client",
     description: "Continuity and DR plans, their objectives and their tests.",
     newPlan: "New plan",
     tileActive: "Active plans",
@@ -86,6 +88,7 @@ export const bcp = {
   },
   editor: {
     titleNew: "New plan",
+    client: "Client",
     titleEdit: "Edit plan",
     requiredNote: "Fields marked * are required.",
     name: "Name",

@@ -1,12 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { ClientField } from "../../components/ClientField";
 import { ConfirmDialog } from "../../components/confirm";
 import { ForEveryClientToggle } from "../../components/forEveryClient";
 import { describeSubmitError } from "../../components/form";
 import { useT } from "../../i18n/context";
-import type { Me } from "../../lib/api";
-import { useApi } from "../../lib/ApiContext";
-import { internalClientId, newRowClient } from "../../lib/internalClient";
+import { useClientScope } from "../../lib/clientScope";
+import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
 import { Btn } from "../../shell/components";
 import { useClientName } from "../settings/api";
 import { useAuthorizingChanges, usePatchBulkApproveMutation } from "./api";
@@ -112,22 +111,21 @@ export function DecisionBar({
   scopeName: string;
   /** The client of the ROW this bar decides from -- the machine's, on its
    *  drill-down. An approval made here is filed under it (the operator's rule
-   *  of 2026-10-28); with none, under the internal client until phase 3. */
+   *  of 2026-10-28); with none, under the client chosen at the top, or the
+   *  bar's Client field's. */
   rowClientId?: string | null;
 }) {
   const t = useT();
-  const api = useApi();
   const approve = usePatchBulkApproveMutation();
   const changes = useAuthorizingChanges();
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const [ring, setRing] = useState<string>(ringOptions[0]?.name ?? "test");
   const [changeId, setChangeId] = useState<string>("");
   // AN APPROVAL IS ONE CLIENT'S unless the person asks for every client's
   // (MSP clients plan 2026-10-26 Task 14): a client's approval clears that
   // client's machines in the ring, a global one every client's.
   const [forEveryClient, setForEveryClient] = useState(false);
-  // `/me` had not answered when the approval was confirmed: nothing was sent,
-  // and the bar says why (`InternalScopeUnknown`).
+  // The client was not chosen when the approval was confirmed: nothing was
+  // sent, and the bar says why (`ClientNotChosen`).
   const [ownerError, setOwnerError] = useState<unknown>(null);
   // TRUE only while the confirmation is open; nothing is sent until it is
   // answered.
@@ -142,21 +140,26 @@ export function DecisionBar({
   const option = ringOptions.find((entry) => entry.name === ring);
   const ringDeviceCount = option?.deviceCount ?? null;
 
-  // WHOSE MACHINES THIS APPROVAL CLEARS, and how many of them are in the ring:
-  // every client's when asked; otherwise the row's client, or the internal
-  // client's (its id is the organisation's, `lib/internalClient.ts`).
+  // WHOSE MACHINES THIS APPROVAL CLEARS, and how many of them are in the
+  // ring: every client's when asked; otherwise the row's client on a
+  // machine's drill-down, else the client chosen at the top, else the bar's
+  // Client field (design §3.1).
   const clientName = useClientName();
-  const internalId = internalClientId(me.data);
-  const ownerId = forEveryClient ? null : (rowClientId ?? internalId);
-  const owner: ApprovalOwner = forEveryClient
-    ? EVERY_CLIENT
-    : {
-        kind: "client",
-        name:
-          ownerId == null || ownerId === internalId
-            ? t("patch.decision.ownClient")
-            : clientName(ownerId),
-      };
+  const { clients } = useClientScope();
+  const target = useNewRowClient("patch.approve", rowClientId ?? undefined);
+  // The Client field's value, `""` until chosen: read only when it is shown.
+  const [pickedClient, setPickedClient] = useState("");
+  const rowOwner = target.needsField ? pickedClient || null : target.clientId;
+  const ownerId = forEveryClient ? null : rowOwner;
+  // The organisation's own client keeps its words; another is named; one not
+  // chosen yet is "the client you choose" (plan Task 11 D11.3).
+  const nameOf = (id: string | null): string =>
+    id === null
+      ? t("patch.decision.chosenClient")
+      : clients.find((client) => client.id === id)?.kind === "internal"
+        ? t("patch.decision.ownClient")
+        : clientName(id);
+  const owner: ApprovalOwner = forEveryClient ? EVERY_CLIENT : { kind: "client", name: nameOf(ownerId) };
   const ownerCount = forEveryClient
     ? ringDeviceCount
     : ownerId == null || option?.clientCounts == null
@@ -165,11 +168,8 @@ export function DecisionBar({
   // The reach of THIS approval: its owner's machines (final review E).
   const reach = approvalReachMessage(owner, ring, ownerCount, fleetDeviceTotal);
   // What ticking "For every client" changes, said by the client the approval
-  // is otherwise for: the row's on a drill-down, else the internal one.
-  const untickedName =
-    rowClientId == null || rowClientId === internalId
-      ? t("patch.decision.ownClient")
-      : clientName(rowClientId);
+  // is otherwise for.
+  const untickedName = nameOf(rowOwner);
   const ceilingNotice = selectionCeilingNotice(matchingTotal, BULK_APPROVAL_MAX);
   const selectedCount = selectedIds.length;
 
@@ -204,6 +204,17 @@ export function DecisionBar({
             options={ringOptions}
             scopeName={scopeName}
           />
+          {!forEveryClient && target.needsField ? (
+            <ClientField
+              code="patch.approve"
+              value={pickedClient}
+              onChange={(id) => {
+                setPickedClient(id);
+                setOwnerError(null);
+                approve.reset();
+              }}
+            />
+          ) : null}
           {changes.data && changes.data.length > 0 ? (
             <select
               className="select-field"
@@ -367,18 +378,11 @@ export function DecisionBar({
           if (selectedIds.length === 0) return;
           let filedUnder: { client_id?: string };
           try {
-            // The ROW's client where there is one (a machine's drill-down);
-            // none at all when asked for every client.
-            filedUnder =
-              forEveryClient || rowClientId == null
-                ? // PHASE 3: the client/site selector. Until it exists an
-                  // approval with no row is the organisation's internal
-                  // client's (`lib/internalClient.ts`), or, when asked, every
-                  // client's.
-                  newRowClient(me.data, forEveryClient)
-                : { client_id: rowClientId };
+            // The ROW's client, the selected one or the bar's; none at all
+            // when asked for every client.
+            filedUnder = forEveryClient ? {} : { client_id: requireKnown(rowOwner) };
           } catch (error) {
-            // `/me` has not answered: nothing is sent without its client.
+            // The client is not chosen: nothing is sent without it.
             setOwnerError(error);
             return;
           }

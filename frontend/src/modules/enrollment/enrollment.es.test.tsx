@@ -16,7 +16,7 @@ import { en } from "../../i18n/en";
 import { es } from "../../i18n/es";
 import { setActiveLanguage } from "../../i18n/core";
 import { expectNoEnglish, renderInSpanish } from "../../i18n/test-utils";
-import type { ApiClient, Device } from "../../lib/api";
+import type { ApiClient, Device, MeClient } from "../../lib/api";
 import { expectCta, meWith } from "../../test/prerequisiteHarness";
 import { EnrollmentPage } from "./EnrollmentPage";
 import { EnrollmentPrerequisites } from "./EnrollmentPrerequisites";
@@ -24,6 +24,25 @@ import type { EnrollmentTokenCreated, EnrollmentTokenListItem, EnrollmentTokenPa
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 const listEnrollmentTokens = vi.fn();
 const createEnrollmentToken = vi.fn();
@@ -120,6 +139,10 @@ function renderPage(
           }),
     listDevices: () => Promise.resolve({ items: devices, total: devices.length }),
     listAgentReleases: () => Promise.resolve([]),
+    listClientSites: () =>
+      Promise.resolve([
+        { id: "s-1", client_id: "o", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 },
+      ]),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderInSpanish(

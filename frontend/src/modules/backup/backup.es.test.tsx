@@ -17,9 +17,10 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setActiveLanguage, translate } from "../../i18n/core";
+import { backup as esBackup } from "../../i18n/es/backup";
 import { expectNoEnglish, renderInSpanish } from "../../i18n/test-utils";
 import { ApiError } from "../../lib/api";
-import type { ApiClient, Device, DeviceGroup, Me } from "../../lib/api";
+import type { ApiClient, Device, DeviceGroup, Me, MeClient } from "../../lib/api";
 import { BackupPointsPage } from "./BackupPointsPage";
 import { BackupPolicyEditor } from "./BackupPolicyEditor";
 import { BackupReadiness, OffsiteReadiness, PolicyReadiness } from "./BackupReadiness";
@@ -45,6 +46,7 @@ import {
   devicePickerOptions,
   groupPickerOptions,
   repositoryPickerEmptyHint,
+  repositoryPickerEmptyHintElsewhere,
   repositoryPickerOptions,
 } from "./pickerOptions";
 import { RepositoriesPage } from "./RepositoriesPage";
@@ -54,6 +56,28 @@ import { windowLabel } from "./windowLabel";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  // `ME`'s backup codes, held in this client: the person here manages its
+  // policies, so the Repositories page may file this client's repository and
+  // the policy editor links there (design §3.1, plan D10.6).
+  permissions: ["backup.read", "backup.run", "backup.restore", "backup.policy.manage"],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 function renderPage(ui: ReactElement, path = "/backup") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -1236,5 +1260,21 @@ describe("the sentences the module builds outside React, in Spanish", () => {
     expect(devicePickerOptions(DEVICES.items).map((o) => o.sublabel)).toEqual(["windows · online", "linux · offline", "no agent"]);
     expect(repositoryPickerOptions([REPO_OFF])[0]?.sublabel).toBe("s3://copias/principal · disabled");
     expect(devicePickerEmptyHint()).toBe(DEVICE_PICKER_EMPTY_HINT);
+  });
+
+  it("calls a backup «copia de seguridad» throughout, never «respaldo»", () => {
+    // The module's one word for it (phase 3 review, F5): a hint added in
+    // phase 3 said «repositorio de respaldo» beside the catalogue's
+    // «repositorio de copia de seguridad».
+    const strings = (value: unknown): string[] =>
+      typeof value === "string"
+        ? [value]
+        : value !== null && typeof value === "object"
+          ? Object.values(value).flatMap(strings)
+          : [];
+    expect(strings(esBackup).filter((text) => /respald/i.test(text))).toEqual([]);
+    setActiveLanguage("es");
+    expect(repositoryPickerEmptyHintElsewhere()).toMatch(/^No hay ningún repositorio de copia de seguridad del cliente/);
+    expect(repositoryPickerEmptyHintElsewhere()).toMatch(/gestiona sus copias de seguridad/);
   });
 });

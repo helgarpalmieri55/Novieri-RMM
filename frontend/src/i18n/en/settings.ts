@@ -507,6 +507,7 @@ export const settings = {
   budget: {
     title: "Budget",
     subtitle: "The base currency and fiscal year start every budget figure uses",
+    pickClient: "Budget settings are per client. Choose a client at the top of the page to see its base currency and fiscal year.",
     loading: "Loading…",
     forbidden: "Budget settings not available (insufficient permissions: {code}).",
     baseCurrency: "Base currency",

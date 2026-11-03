@@ -59,6 +59,7 @@ export const subscriptions: Shape<typeof en> = {
   },
   list: {
     title: "Suscripciones",
+    colClient: "Cliente",
     description: "Gasto recurrente en SaaS y nube, sus responsables y fechas de renovación.",
     spend: "Gasto",
     renewals: "Renovaciones",
@@ -92,6 +93,7 @@ export const subscriptions: Shape<typeof en> = {
   },
   new: {
     title: "Nueva suscripción",
+    client: "Cliente",
     serviceName: "Nombre del servicio",
     billingCycle: "Ciclo de facturación",
     costPerCycle: "Costo por ciclo",

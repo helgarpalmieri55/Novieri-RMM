@@ -12,6 +12,7 @@ export const change: Shape<typeof en> = {
   },
   list: {
     title: "Gestión de cambios",
+    client: "Cliente",
     description: "Cambios planificados, su riesgo y lo que afectaron.",
     approvalQueue: "Cola de aprobación",
     calendar: "Calendario de cambios",
@@ -106,6 +107,7 @@ export const change: Shape<typeof en> = {
   },
   form: {
     newTitle: "Nuevo cambio",
+    client: "Cliente",
     editTitle: "Editar cambio",
     requiredNote: "Los campos marcados con * son obligatorios.",
     type: "Tipo",

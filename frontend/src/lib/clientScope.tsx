@@ -11,8 +11,9 @@
  *
  * 1. IT EMPTIES THE QUERY CACHE before anything renders again (§1.4). Every
  *    cached answer was read under the previous choice; none may be shown
- *    under the next one.
- * 2. IT STARTS THE PAGE AGAIN (a `key` on its children). `clear()` removes the
+ *    under the next one. The one query kept is the setup gate's, which
+ *    names no client and lives above this provider (`emptyForNewClient`).
+ * 2. IT STARTS THE PAGE AGAIN (a `key` on its children). Emptying removes the
  *    queries, but a mounted component keeps the result it last rendered until
  *    something renders it again -- so the shell and the page under it are
  *    mounted afresh, and every query they hold is asked again with the new
@@ -28,10 +29,12 @@
  * widens: a client outside the person's scope answers empty lists and 404s.
  */
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   Fragment,
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useState,
@@ -59,11 +62,30 @@ export interface ClientScope {
   selected: string | null;
   /** Choose a client, or `null` for every client: stored, and sent from the next request on. */
   select(id: string | null): void;
-  /** The person's clients (`/me`), by name, Unassigned last. Empty until `/me` answers. */
-  clients: MeClient[];
+  /**
+   * The person's clients (`/me`), by name, Unassigned last. Empty until `/me`
+   * first answers. While it is asked again after a change, the list it last
+   * gave, whole (`LastListed`).
+   */
+  clients: readonly MeClient[];
   /** `/me` has answered, and the choice is one of its clients (or every client). */
   ready: boolean;
 }
+
+/**
+ * THE LIST `/me` LAST GAVE, kept by the provider above the remount so the
+ * selector stays drawn while `/me` is asked again under the new choice.
+ *
+ * WHOLE, NOT CUT DOWN: each client with its modules and the codes held there,
+ * because a new row's Client field filters this list by `permissions`
+ * (`lib/clientSelection.ts`), and a list cut to id, name and kind made that
+ * read `undefined` right after every change. Nothing in it was read for the
+ * previous client: `/me.clients` is not narrowed by `X-Client-Id`
+ * (`lib/api.ts`), so it is the same answer under every choice -- the
+ * person's own clients. What `X-Client-Id` does narrow (`Me.permissions`)
+ * is not kept. It goes when the provider does, at sign-out.
+ */
+const LastListed = createContext<readonly MeClient[]>([]);
 
 /** By name, with the Unassigned client last (design §1.1). */
 export function orderClients(clients: readonly MeClient[]): MeClient[] {
@@ -72,6 +94,24 @@ export function orderClients(clients: readonly MeClient[]): MeClient[] {
       Number(a.kind === "unassigned") - Number(b.kind === "unassigned") ||
       a.name.localeCompare(b.name),
   );
+}
+
+/**
+ * WHAT A CHANGE OF CLIENT EMPTIES: every query but the setup gate's, and
+ * every mutation, the way `clear()` does -- in-flight requests are cancelled
+ * and whatever they answer lands nowhere.
+ *
+ * `["setup", ...]` IS KEPT because it is `App.tsx`'s `SetupGate`, which sits
+ * ABOVE this provider and is not started again with the page. Its request
+ * bypasses `ApiClient`, so it never carried `X-Client-Id`, and it asks the
+ * one thing about the platform no client changes: whether it has been
+ * claimed. Emptied with the rest, the gate's next re-render found no query,
+ * drew "Starting..." in place of the whole routes tree, and asked again.
+ * Nothing read under the previous client survives this.
+ */
+function emptyForNewClient(queryClient: QueryClient): void {
+  queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "setup" });
+  queryClient.getMutationCache().clear();
 }
 
 function useMeQuery() {
@@ -86,7 +126,8 @@ function useSelected(): string | null {
 export function useClientScope(): ClientScope {
   const me = useMeQuery();
   const selected = useSelected();
-  const clients = useMemo(() => orderClients(me.data?.clients ?? []), [me.data]);
+  const last = useContext(LastListed);
+  const clients = useMemo(() => (me.data ? orderClients(me.data.clients ?? []) : last), [me.data, last]);
   const ready =
     me.data !== undefined && (selected === null || clients.some((client) => client.id === selected));
   return { selected, select: setSelectedClient, clients, ready };
@@ -124,7 +165,7 @@ export function ClientScopeProvider({ children }: { children: ReactNode }) {
 
   // 1. Inside the change itself: listeners run synchronously when the choice
   //    moves, and React only renders after the change has returned.
-  useEffect(() => subscribeClient(() => queryClient.clear()), [queryClient]);
+  useEffect(() => subscribeClient(() => emptyForNewClient(queryClient)), [queryClient]);
 
   // A choice made in another tab. `key === null` is that tab clearing storage.
   useEffect(() => {
@@ -146,6 +187,12 @@ export function ClientScopeProvider({ children }: { children: ReactNode }) {
     setSelectedClient(null);
   }, [selected, listed]);
 
+  // What the selector draws while /me is asked again after a change (`LastListed`).
+  const [last, setLast] = useState<readonly MeClient[]>([]);
+  useEffect(() => {
+    if (listed !== undefined) setLast(orderClients(listed));
+  }, [listed]);
+
   const dismiss = useCallback(
     (id: string) => setNotices((current) => current.filter((notice) => notice.id !== id)),
     [],
@@ -153,8 +200,10 @@ export function ClientScopeProvider({ children }: { children: ReactNode }) {
 
   return (
     <>
-      {/* 2. A new key is a new page: every query asked again, every form empty. */}
-      <Fragment key={selected ?? "all"}>{children}</Fragment>
+      <LastListed.Provider value={last}>
+        {/* 2. A new key is a new page: every query asked again, every form empty. */}
+        <Fragment key={selected ?? "all"}>{children}</Fragment>
+      </LastListed.Provider>
       <Toaster toasts={notices} onDismiss={dismiss} />
     </>
   );

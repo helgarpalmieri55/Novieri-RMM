@@ -6,7 +6,7 @@ import type { ReactElement, ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
-import type { ApiClient, Me } from "../../../lib/api";
+import type { ApiClient, Me, MeClient } from "../../../lib/api";
 import { BudgetAdminPage } from "../BudgetAdminPage";
 import { BudgetDashboard } from "../BudgetDashboard";
 import { BudgetPlannerPage } from "../BudgetPlannerPage";
@@ -52,6 +52,25 @@ import type {
 // real fetch -- mirrors modules/subscriptions/__tests__/subscriptions.test.tsx.
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 function renderWithProviders(ui: ReactElement, initialEntries: string[] = ["/"]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -512,8 +531,8 @@ describe("ExpensesPage", () => {
     await user.click(await screen.findByRole("button", { name: "Add expected expenses" }));
     await user.click(screen.getByRole("button", { name: "Run" }));
 
-    // The internal client's subscriptions and licenses (PHASE 3: the
-    // selector's client), `/me`'s `org_id`.
+    // The selected client's subscriptions and licenses (here the internal
+    // one, `o1`).
     expect(api.materializeExpenses).toHaveBeenCalledWith({
       client_id: "o1",
       from_date: today,
@@ -540,7 +559,7 @@ describe("useCreateExpenseMutation / useUpdateExpenseMutation invalidation", () 
 
   it("invalidates budget-expenses, budget-variance, and budget-position on create", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    // `/me` already answered: the expense is the internal client's.
+    // The expense is the client chosen at the top's: here the internal one.
     queryClient.setQueryData(["me"], ME_FULL);
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     const api = { createExpense: vi.fn().mockResolvedValue(EXPENSE_EXPECTED) };
@@ -589,7 +608,7 @@ describe("useCreateExpenseMutation / useUpdateExpenseMutation invalidation", () 
   // manual refresh.
   it("invalidates budget-expenses, budget-variance, and budget-position on materialize", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    // `/me` already answered: the materialization is the internal client's.
+    // The materialization is the client chosen at the top's.
     queryClient.setQueryData(["me"], ME_FULL);
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     const api = {
@@ -2011,10 +2030,10 @@ describe("New budget: the bounds and the required markers are on the controls", 
 });
 
 /**
- * BUDGET IS ONE CLIENT'S (MSP clients phase 2, plan 2026-10-26 Task 8). Until
- * the client selector exists (PHASE 3) this console works on the internal
- * client, whose id is `/me`'s `org_id` ("o1" here): every create names it,
- * and every read -- the settings, and the four lists -- asks for it.
+ * BUDGET IS ONE CLIENT'S (MSP clients phase 2, plan 2026-10-26 Task 8): every
+ * create names it, and every read -- the settings, and the four lists -- asks
+ * for it. Budget works on the client chosen at the top (MSP clients phase 3,
+ * plan Task 11 D11.1); these tests choose the internal one, `o1`.
  */
 describe("budget belongs to a client", () => {
   function clientWrapper(queryClient: QueryClient) {
@@ -2029,7 +2048,7 @@ describe("budget belongs to a client", () => {
     return queryClient;
   }
 
-  it("files every new row under the internal client", async () => {
+  it("files every new row under the client chosen at the top", async () => {
     const api = {
       createBudgetCategory: vi.fn().mockResolvedValue(CATEGORIES[0]),
       createCostCenter: vi.fn().mockResolvedValue(COST_CENTER_ONE[0]),
@@ -2075,7 +2094,7 @@ describe("budget belongs to a client", () => {
     expect(api.updateBudgetSettings).toHaveBeenCalledWith("o1", { base_currency: "EUR" });
   });
 
-  it("reads the internal client's settings and lists", async () => {
+  it("reads the selected client's settings and lists", async () => {
     const api = {
       getBudgetSettings: vi.fn().mockResolvedValue({}),
       listBudgetCategories: vi.fn().mockResolvedValue([]),
@@ -2104,7 +2123,10 @@ describe("budget belongs to a client", () => {
     expect(api.listExpenses).toHaveBeenCalledWith({ status: "expected" }, "o1");
   });
 
+  // With every client chosen at the top there is no client to name (plan
+  // Task 11 D11.1): a create throws `ClientNotChosen` before anything is sent.
   it("sends nothing while it cannot name the client, and reads as loading meanwhile", async () => {
+    selectClient(null);
     const api = {
       me: vi.fn(() => new Promise<Me>(() => {})),
       listBudgetCategories: vi.fn().mockResolvedValue([]),
@@ -2128,7 +2150,7 @@ describe("budget belongs to a client", () => {
         .mutateAsync({ expense_date: "2026-01-15", amount: "1.00", currency: "USD", category_id: "cat1" })
         .catch((error: unknown) => error);
     });
-    expect(String(refusal)).toMatch(/Nothing was sent/);
+    expect(String(refusal)).toMatch(/nothing was sent/i);
     expect(api.createExpense).not.toHaveBeenCalled();
     expect(api.listBudgetCategories).not.toHaveBeenCalled();
     expect(api.getBudgetSettings).not.toHaveBeenCalled();

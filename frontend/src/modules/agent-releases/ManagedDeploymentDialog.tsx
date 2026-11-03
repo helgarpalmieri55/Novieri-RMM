@@ -44,7 +44,7 @@ import type {
 } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
-import { requireKnown } from "../../lib/internalClient";
+import { requireKnown } from "../../lib/clientSelection";
 import { platformLabel } from "./platform";
 
 // Catalogue keys, worded when drawn.
@@ -103,9 +103,9 @@ export function ManagedDeploymentDialog({
   timezone?: string | null;
   /**
    * The site the machines land in (MSP clients spec §1.5): the deployment
-   * token is that site's, like every enrollment token. `null` until the page
-   * knows it; a mint then refuses with a sentence rather than sending a body
-   * the server would answer with a 422.
+   * token is that site's, like every enrollment token. `null` until one is
+   * chosen on the page; a mint then refuses with a sentence rather than
+   * sending a body the server would answer with a 422.
    */
   siteId: string | null;
 }) {
@@ -129,8 +129,7 @@ export function ManagedDeploymentDialog({
         max_uses: Number(maxUses),
         expires_in_hours: Number(hours),
         channel,
-        // PHASE 3: the client/site selector. The page passes the internal
-        // client's "Principal" site (`lib/internalClient.ts`).
+        // The site chosen on the page (design §3.2).
         site_id: requireKnown(siteId),
       }),
     onSuccess: setMinted,

@@ -14,7 +14,10 @@ import { useApi } from "../../lib/ApiContext";
 import { RelTime } from "../../components/reltime";
 import { RowMenu } from "../../components/rowmenu";
 import { useOrgZone } from "../../lib/zone";
-import { internalClientId, requireKnown } from "../../lib/internalClient";
+import { ClientField } from "../../components/ClientField";
+import { useClientScope } from "../../lib/clientScope";
+import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { useClientName } from "../settings/api";
 import { PUSHABLE_CREDENTIAL_TYPES } from "../agent-push/types";
 import { CredentialPrerequisites } from "./CredentialPrerequisites";
 import { Icon } from "../../shell/icons";
@@ -135,6 +138,10 @@ export function CredentialsPage() {
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const canManage = me.data?.permissions.includes("credentials.manage") ?? false;
   const zone = useOrgZone();
+  // With every client chosen, each credential says whose it is.
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const showClient = selected === null;
 
   const credentials = useQuery({
     queryKey: ["credentials"],
@@ -316,6 +323,7 @@ export function CredentialsPage() {
             <thead>
               <tr>
                 <Th>{t("credentials.list.name")}</Th>
+                {showClient ? <Th>{t("credentials.list.client")}</Th> : null}
                 <Th>{t("credentials.list.state")}</Th>
                 <Th>{t("credentials.list.lastUsed")}</Th>
                 <Th>{t("credentials.list.actions")}</Th>
@@ -332,6 +340,13 @@ export function CredentialsPage() {
                     <div className="cell-title">{credential.name}</div>
                     <div className="cell-sub">{credentialTypeLabel(credential.type)}</div>
                   </Td>
+                  {showClient ? (
+                    <Td>
+                      {credential.client_id === null
+                        ? t("lib.clients.everyClient")
+                        : clientName(credential.client_id)}
+                    </Td>
+                  ) : null}
                   {/* The one vault fact the API states about a stored
                       credential: whether a secret is behind the reference. */}
                   <Td>
@@ -544,8 +559,14 @@ function CreateCredentialDialog({
   const [caPem, setCaPem] = useState("");
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const isWindowsDomain = type === "windows_domain";
-  // Same `["me"]` key the shell already holds, so this is a cache read.
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
+  // A PUSH CREDENTIAL HAS EXACTLY ONE CLIENT (MSP clients phase 2, Task 12):
+  // every push made with it is made in that client -- the one chosen at the
+  // top, or with every client the Client field's (design §3.1). Any other
+  // type is sent without one and serves every client, as before.
+  const pushable = PUSHABLE_CREDENTIAL_TYPES.includes(type);
+  const target = useNewRowClient("credentials.manage");
+  const [pickedClient, setPickedClient] = useState("");
+  const credentialClient = target.needsField ? pickedClient || null : target.clientId;
 
   const create = useMutation({
     // `name` is trimmed on the way out; `secret` DELIBERATELY IS NOT. Trailing
@@ -561,15 +582,7 @@ function CreateCredentialDialog({
       api.createCredential({
         name: name.trim(),
         type,
-        // A push credential has exactly one client (MSP clients phase 2, Task
-        // 12): every push made with it is made in that client. Any other type
-        // is sent without one and serves every client, as before.
-        // PHASE 3: the client/site selector. Until it exists that is the
-        // organisation's internal client, whose id is the organisation's --
-        // `/me`'s `org_id` (`lib/internalClient.ts`).
-        ...(PUSHABLE_CREDENTIAL_TYPES.includes(type)
-          ? { client_id: requireKnown(internalClientId(me.data)) }
-          : {}),
+        ...(pushable ? { client_id: requireKnown(credentialClient) } : {}),
         secret: isWindowsDomain
           ? JSON.stringify({
               username: account.trim(),
@@ -617,8 +630,14 @@ function CreateCredentialDialog({
     // rewords them. The secret is reduced to whether it is blank: the rules
     // only test for presence, and the text itself has no business in a second
     // piece of state.
-    const values = { name, account, secret: secret.trim() === "" ? "" : "x" };
-    const next: Attempt = { rules: isWindowsDomain ? windowsDomainRules : createRules, values };
+    const values = { name, account, secret: secret.trim() === "" ? "" : "x", client: credentialClient };
+    const next: Attempt = {
+      rules: () => [
+        ...(isWindowsDomain ? windowsDomainRules : createRules)(),
+        ...(pushable && target.needsField ? [{ name: "client", label: translate("credentials.create.client") }] : []),
+      ],
+      values,
+    };
     setAttempt(next);
     if (attemptProblems(next).length > 0) {
       // A stale server failure sitting beside a fresh complaint reads as though
@@ -679,6 +698,9 @@ function CreateCredentialDialog({
               ))}
             </select>
           </Field>
+          {pushable && target.needsField ? (
+            <ClientField code="credentials.manage" value={pickedClient} onChange={setPickedClient} />
+          ) : null}
           {/* The half of the enum finding the auditor called the one that
               matters: "an operator choosing between 'ssh_key' and 'domain_join'
               gets no explanation of what each type implies for how the secret is

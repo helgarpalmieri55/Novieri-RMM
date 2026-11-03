@@ -30,6 +30,21 @@ const auth = vi.hoisted(() => ({
   renew: vi.fn<() => Promise<string | null>>(),
 }));
 
+/**
+ * The choice as anyone reading it now would see it, ahead of React. Unset,
+ * `selectedClient` is the real one; set, it is a choice that has moved
+ * without the store's listeners -- React -- having been told yet.
+ */
+const choice = vi.hoisted(() => ({ unrendered: undefined as string | null | undefined }));
+
+vi.mock("./clientChoice", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./clientChoice")>();
+  return {
+    ...real,
+    selectedClient: () => (choice.unrendered !== undefined ? choice.unrendered : real.selectedClient()),
+  };
+});
+
 vi.mock("./auth", () => ({
   accessToken: () => auth.token,
   onTokenRenewed: (listener: (token: string) => void) => {
@@ -78,7 +93,7 @@ function sockets(): FakeSocket[] {
 
 let queryClient: QueryClient;
 
-/** `useLiveEvents` asks `/me` again on a 4403, through the query client. */
+/** `useLiveEvents` asks `/me` again -- on a 4403, and on a close before open -- through the query client. */
 function wrapper({ children }: { children: ReactNode }) {
   return createElement(QueryClientProvider, { client: queryClient }, children);
 }
@@ -106,6 +121,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  choice.unrendered = undefined;
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -285,17 +301,59 @@ describe("useLiveEvents and the chosen client (phase 3 design §1.5)", () => {
     expect(sockets()).toHaveLength(2);
   });
 
-  it("on a 4403 at the handshake, asks /me again and backs off, so a refused scope cannot spin", async () => {
+  // A REFUSED HANDSHAKE IS NEVER A 4403 IN A BROWSER. The server refuses an
+  // empty scope (and a token, and a malformed `client`) before `accept()`, so
+  // uvicorn answers the upgrade with HTTP 403 and all the page sees is a
+  // close before open, 1006 -- the same as a server that is down.
+  it("on a close before the socket opened, asks /me again once and backs off", () => {
     const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue(undefined);
+    setSelectedClient(ACME);
     renderHook(() => useLiveEvents(vi.fn()), { wrapper });
+
+    act(() => sockets()[0]!.ended(1006));
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["me"] });
+    // Not at once: a refused scope must not spin.
+    expect(sockets()).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(sockets()).toHaveLength(2);
+
+    // ONCE per run of refusals: an outage must not turn into a /me per retry.
+    act(() => sockets()[1]!.ended(1006));
+    act(() => vi.advanceTimersByTime(4_000));
+    expect(sockets()).toHaveLength(3);
+    expect(invalidate).toHaveBeenCalledTimes(1);
+
+    // An open starts a new run: the next refusal asks again.
+    act(() => sockets()[2]!.open());
+    act(() => sockets()[2]!.ended(1006));
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime(2_000));
+    act(() => sockets()[3]!.ended(1006));
+    expect(invalidate).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens nothing for a client the choice has left before this effect caught up", async () => {
+    // `disposed` is set by React re-running the effect, and React learns of
+    // a new choice only when it renders. TanStack hands a refetched /me to
+    // its observers through `setTimeout(0)`, so nothing guarantees the
+    // re-render has happened by the time this hook acts again. Here the
+    // choice moves with React not yet told (`choice.unrendered`): the
+    // effect is not disposed, and only `connect()`'s own look at the
+    // current choice stops a socket for the client it has left.
+    setSelectedClient(ACME);
+    vi.spyOn(queryClient, "invalidateQueries").mockImplementation(() => {
+      choice.unrendered = null;
+      return Promise.resolve();
+    });
+    renderHook(() => useLiveEvents(vi.fn()), { wrapper });
+    act(() => sockets()[0]!.open());
 
     await act(async () => {
       sockets()[0]!.ended(4403);
       await Promise.resolve();
     });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["me"] });
-    expect(sockets()).toHaveLength(1);
-    act(() => vi.advanceTimersByTime(2_000));
-    expect(sockets()).toHaveLength(2);
+
+    expect(sockets().map(clientOf)).toEqual([[ACME]]);
   });
 });

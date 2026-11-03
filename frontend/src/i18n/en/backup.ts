@@ -79,7 +79,9 @@ export const backup = {
     repositoryEmptyHint:
       "No backup repository of this policy’s client exists. Create one on the Repositories tab; you may also not have permission to list them.",
     repositoryEmptyHintElsewhere:
-      "No backup repository of this policy’s client exists. Until the console can choose a client, that client’s repository is created through the API or an AI connection (MCP); you may also not have permission to list them.",
+      "No backup repository of this policy’s client exists, and you cannot create one in that client: ask someone who manages its backups. You may also not have permission to list them.",
+    // The same list before the policy's Client field is filled: no client yet.
+    repositoryChooseClient: "Choose the client first: its repositories are listed here.",
     groupDevices: { one: "{count} device", other: "{count} devices" },
     // The sublabel's wire words, lower case.
     noAgent: "no agent",
@@ -215,6 +217,7 @@ export const backup = {
     emptyNone: "No backup policies configured.",
     emptyFiltered: "No policy matches that filter.",
     colScope: "Scope",
+    colClient: "Client",
     colRepository: "Repository",
     colWindow: "Window",
     colState: "State",
@@ -294,9 +297,11 @@ export const backup = {
     emptyNone: "No repositories registered.",
     emptyFiltered: "No repository matches that filter.",
     colName: "Name",
+    colClient: "Client",
     colState: "State",
     colRegistered: "Registered",
     dialogTitle: "New repository",
+    client: "Client",
     name: "Name",
     create: "Create",
     creating: "Creating…",

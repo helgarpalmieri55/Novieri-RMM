@@ -21,8 +21,10 @@ const user = userEvent.setup();
 import type { ComponentProps, ReactNode } from "react";
 
 import { ApiError } from "../lib/api";
+import { ClientScopeProvider } from "../lib/clientScope";
 import type { AlertSummary } from "../modules/health/types";
 import { AppShell } from "./AppShell";
+import { ClientSelector } from "./ClientSelector";
 import {
   healthSignal,
   platformLabel,
@@ -165,6 +167,105 @@ describe("AppShell", () => {
     expect(document.querySelector(".top-actions")?.firstElementChild).toBe(
       screen.getByTestId("client-selector"),
     );
+  });
+
+  it("draws the client selector in the drawer on a handset, where the bar has no room for it", () => {
+    // Measured at 390px: the cluster's other five controls take 256 of the
+    // 274px it has, so a select there got 8px and pushed the bar to 415px --
+    // a sideways page scroll on every route (harmony, both languages).
+    // `useHandset` reads `(max-width: 640px)`; jsdom has no `matchMedia`.
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(max-width: 640px)",
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    try {
+      render(
+        <MemoryRouter>
+          <AppShell
+            permissions={["devices.read", "health.read"]}
+            orgName="Operations"
+            title="Devices"
+            user={{ name: "A B", role: "Operator" }}
+            onSignOut={vi.fn()}
+            clientSelector={<span data-testid="client-selector" />}
+          >
+            <p>x</p>
+          </AppShell>
+        </MemoryRouter>,
+      );
+      const selector = screen.getByTestId("client-selector");
+      expect(document.querySelector(".top-actions")?.contains(selector)).toBe(false);
+      // In the drawer, before the navigation: the client is the context of every link in it.
+      const drawer = document.getElementById("sidebar");
+      expect(drawer?.contains(selector)).toBe(true);
+      expect(selector.compareDocumentPosition(sidebar_el()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.getAllByTestId("client-selector")).toHaveLength(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps the drawer open, and the new selector in it focused, after a change made there", async () => {
+    // A change starts the shell again (`lib/clientScope.tsx`), and a fresh
+    // shell's drawer is shut: the select that fired `change` would end up
+    // hidden behind it with focus on <body>. Closing a menu because a setting
+    // in it changed is a change of context (SC 3.2.2), so it stays open.
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(max-width: 640px)",
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    const ACME = "0b6a2c1e-6d2f-4a51-9c3e-2f4d1a7b8c01";
+    apiRef.current = {
+      me: vi.fn().mockResolvedValue({
+        user_id: "u1",
+        org_id: "o1",
+        email: "a@example.test",
+        display_name: "A B",
+        permissions: ["devices.read"],
+        clients: [
+          { id: ACME, name: "Acme Dental", kind: "customer", enabled_modules: [], permissions: ["devices.read"] },
+        ],
+      }),
+    };
+    try {
+      const user = userEvent.setup();
+      render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <MemoryRouter>
+            <ClientScopeProvider>
+              <AppShell
+                permissions={["devices.read"]}
+                orgName="Operations"
+                title="Devices"
+                user={{ name: "A B", role: "Operator" }}
+                onSignOut={vi.fn()}
+                clientSelector={<ClientSelector />}
+              >
+                <p>x</p>
+              </AppShell>
+            </ClientScopeProvider>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      await user.click(screen.getByRole("button", { name: "Open navigation" }));
+      const drawer = () => within(document.getElementById("sidebar") as HTMLElement);
+      const before = await drawer().findByRole("combobox", { name: "Client" });
+
+      await user.selectOptions(before, ACME);
+
+      const after = await drawer().findByRole("combobox", { name: "Client" });
+      expect(before.isConnected).toBe(false);
+      expect(after).toHaveValue(ACME);
+      expect(document.body).toHaveClass("nav-open");
+      expect(screen.getByRole("button", { name: "Close navigation" })).toHaveAttribute("aria-expanded", "true");
+      expect(document.activeElement).toBe(after);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("shows an operator only the links their permissions reach", () => {

@@ -8,7 +8,7 @@
  * client and says so once. A choice made in another tab is taken the same way.
  */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { createElement, useEffect, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient, Me, MeClient } from "./api";
 import { CLIENT_STORAGE_KEY, selectedClient, setSelectedClient } from "./clientChoice";
 import { ClientScopeProvider, enabledModules, useClientScope } from "./clientScope";
+import { useNewRowClient } from "./clientSelection";
 
 const mockUseApi = vi.fn();
 vi.mock("./ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -104,6 +105,107 @@ describe("ClientScopeProvider", () => {
     expect(selectedClient()).toBeNull();
     expect(window.localStorage.getItem(CLIENT_STORAGE_KEY)).toBe("all");
     expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+
+  it("keeps the setup gate's answer, which lives outside it and names no client, and nothing else", async () => {
+    // `App.tsx`'s `SetupGate` sits ABOVE the provider and holds
+    // `["setup", "status"]` with `staleTime: Infinity`. Emptied with the rest,
+    // its next re-render found no query, drew "Starting..." in place of the
+    // whole routes tree -- page state and all -- and asked again.
+    const queryClient = newQueryClient();
+    const setup = vi.fn().mockResolvedValue({ needed: false });
+    function SetupGate({ children }: { children: ReactNode }) {
+      const status = useQuery({ queryKey: ["setup", "status"], queryFn: setup, staleTime: Infinity });
+      return status.isPending ? <p>Starting</p> : <>{children}</>;
+    }
+    mockUseApi.mockReturnValue({ me: vi.fn().mockResolvedValue(ME) } as unknown as ApiClient);
+    const tree = () => (
+      <QueryClientProvider client={queryClient}>
+        <SetupGate>
+          <ClientScopeProvider>
+            <Page />
+          </ClientScopeProvider>
+        </SetupGate>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(tree());
+    expect(await screen.findByText("ready:all")).toBeInTheDocument();
+    queryClient.setQueryData(["devices"], ["a device of every client"]);
+    queryClient.setQueryData(["clients"], ["every client's name"]);
+    queryClient.getMutationCache().build(queryClient, { mutationKey: ["devices", "rename"] });
+
+    act(() => setSelectedClient(ACME));
+
+    expect(queryClient.getQueryData(["devices"])).toBeUndefined();
+    expect(queryClient.getQueryData(["clients"])).toBeUndefined();
+    expect(queryClient.getMutationCache().getAll()).toHaveLength(0);
+    expect(queryClient.getQueryData(["setup", "status"])).toEqual({ needed: false });
+
+    // The later re-render that used to find the gate's query gone.
+    rerender(tree());
+    expect(screen.queryByText("Starting")).toBeNull();
+    expect(await screen.findByText(`ready:${ACME}`)).toBeInTheDocument();
+    expect(setup).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the last list, whole, while /me is asked again", async () => {
+    // The selector is drawn from this list. Emptied by the change, it
+    // vanished until /me answered and the top bar jumped. It is kept WHOLE:
+    // a new row's Client field filters it by `permissions`
+    // (`lib/clientSelection.ts`), and a list cut to id, name and kind made
+    // that read `undefined` right after every change. `/me.clients` is not
+    // narrowed by `X-Client-Id` (`lib/api.ts`), so the last list carries
+    // nothing read for the previous client.
+    let answer: (me: Me) => void = () => undefined;
+    const me = vi
+      .fn()
+      .mockResolvedValueOnce(ME)
+      .mockImplementation(
+        () =>
+          new Promise<Me>((resolve) => {
+            answer = resolve;
+          }),
+      );
+    mockUseApi.mockReturnValue({ me } as unknown as ApiClient);
+    function Listed() {
+      const scope = useClientScope();
+      const newRow = useNewRowClient("devices.read");
+      const holding = newRow.options.map((option) => option.name);
+      return (
+        <pre data-testid="listed">{JSON.stringify({ ready: scope.ready, clients: scope.clients, holding })}</pre>
+      );
+    }
+    const listed = () =>
+      JSON.parse(screen.getByTestId("listed").textContent ?? "") as {
+        ready: boolean;
+        clients: Record<string, unknown>[];
+        holding: string[];
+      };
+    render(
+      <QueryClientProvider client={newQueryClient()}>
+        <ClientScopeProvider>
+          <Listed />
+        </ClientScopeProvider>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(listed().ready).toBe(true));
+
+    act(() => setSelectedClient(ACME));
+
+    await waitFor(() => expect(me).toHaveBeenCalledTimes(2));
+    expect(listed().ready).toBe(false);
+    // The full `MeClient` of each, in the selector's order.
+    expect(listed().clients).toEqual([
+      client(ACME, "Acme Dental"),
+      client(INTERNAL, "Toeshee", "internal"),
+      client(ZETA, "Zeta Foods"),
+      client(UNASSIGNED, "Unassigned", "unassigned"),
+    ]);
+    // ...which a new row's Client field can still filter by permission.
+    expect(listed().holding).toEqual(["Acme Dental", "Toeshee", "Zeta Foods"]);
+
+    await act(async () => answer(ME));
+    await waitFor(() => expect(listed().ready).toBe(true));
   });
 
   it("takes a choice made in another tab like one made here", async () => {

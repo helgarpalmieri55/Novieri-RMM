@@ -205,19 +205,49 @@ const BACKUP_STATE: Record<string, { verdict: string; restoreDaysAgo: number | n
   "dev-14": { verdict: "unprotected", restoreDaysAgo: null },
 };
 
+/**
+ * THE SERVER'S `BackupCoverageRow`, field for field and in its order
+ * (`backend/app/modules/reporting/definitions/backup_coverage.py`). These
+ * rows were `hostname`, `verdict` and `last_verified_restore_point` -- a
+ * shape the report no longer has -- so `/backup/coverage` keyed every row
+ * `undefined` and drew none of its columns.
+ * `modules/backup/__tests__/coverage.fixture.test.tsx` reads the model and
+ * holds the two together.
+ *
+ * `restoreDaysAgo` is the newest restorable point's age. A device with no
+ * entry, or an unprotected one, has no policy at all. A covered device's
+ * restore was exercised a week before its point; `dev-7`'s newest point was
+ * read with files in use, which the page says.
+ */
 function backupRows(): ReportRow[] {
   return managed().map((device) => {
     const state = BACKUP_STATE[device.id] ?? { verdict: "unprotected", restoreDaysAgo: null };
+    const protectedBy = state.verdict !== "unprotected";
+    const days = state.restoreDaysAgo;
+    const point = days === null ? null : ago(days * DAY);
+    const offsite = !protectedBy ? "off" : state.verdict === "stale" ? "behind" : "current";
     return {
+      device_id: device.id,
       hostname: device.hostname,
-      verdict: state.verdict,
-      last_verified_restore_point: state.restoreDaysAgo === null ? null : ago(state.restoreDaysAgo * DAY),
+      policy_present: protectedBy,
+      policy_enabled: protectedBy,
+      repository_name: protectedBy ? "MinIO · rack B4" : null,
+      last_point_taken_at: point,
+      last_point_state: point === null ? null : state.verdict === "failing" ? "failed" : "complete",
+      days_since_last_point: days,
+      last_verified_at: point,
+      last_restore_tested_at: state.verdict === "covered" && days !== null ? ago((days + 7) * DAY) : null,
+      consistency_level: point === null ? null : device.id === "dev-7" ? "live" : "snapshot",
+      crash_consistent: point === null ? null : device.id !== "dev-7",
+      offsite,
+      last_offsite_at: offsite === "off" || days === null ? null : ago((days + (offsite === "behind" ? 3 : 0)) * DAY),
+      coverage: state.verdict,
     };
   });
 }
 
 function backupTotals(rows: ReportRow[]): Record<string, number> {
-  const count = (verdict: string) => rows.filter((row) => row["verdict"] === verdict).length;
+  const count = (verdict: string) => rows.filter((row) => row["coverage"] === verdict).length;
   return {
     devices: rows.length,
     covered: count("covered"),

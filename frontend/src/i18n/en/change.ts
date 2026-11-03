@@ -16,6 +16,8 @@ export const change = {
   },
   list: {
     title: "Change management",
+    // Shown with every client chosen at the top (design §3.4).
+    client: "Client",
     description: "Planned changes, their risk, and what they touched.",
     approvalQueue: "Approval queue",
     calendar: "Change calendar",
@@ -110,6 +112,7 @@ export const change = {
   },
   form: {
     newTitle: "New change",
+    client: "Client",
     editTitle: "Edit change",
     requiredNote: "Fields marked * are required.",
     type: "Type",

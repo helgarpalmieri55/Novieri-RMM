@@ -14,11 +14,11 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ApiClient } from "../../lib/api";
+import type { ApiClient, ClientSiteOut, MeClient } from "../../lib/api";
 import { ApiError } from "../../lib/api";
 import { AddAssetDialog } from "./AddAssetDialog";
 
@@ -26,19 +26,52 @@ const createAsset = vi.fn();
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 
+const mockClientScope = vi.fn();
+vi.mock("../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
+
 /**
- * The site a hand-made asset is filed under (MSP clients, phase 1: `POST
- * /devices` requires `site_id`). The Devices page passes the internal client's
- * "Principal" site, whose id is the organisation's; any id stands in for it.
+ * The site a hand-made asset is filed under: the only site of the client
+ * chosen at the top, which `SiteField` picks by itself.
  */
 const SITE = "00000000-0000-4000-8000-0000000000aa";
+const PRINCIPAL: ClientSiteOut = {
+  id: SITE,
+  client_id: "o1",
+  name: "Principal",
+  address: "",
+  description: "",
+  egress_networks: [],
+  archived_at: null,
+  device_count: 0,
+};
 
-function renderDialog(onClose: () => void = () => {}, siteId: string | null = SITE) {
-  mockUseApi.mockReturnValue({ createAsset } as unknown as ApiClient);
+function renderDialog(onClose: () => void = () => {}, sites: ClientSiteOut[] = [PRINCIPAL]) {
+  mockUseApi.mockReturnValue({
+    createAsset,
+    me: () =>
+      Promise.resolve({ user_id: "u1", org_id: "o1", email: "a@b.c", display_name: "A", permissions: ["assets.manage"] }),
+    listClientSites: () => Promise.resolve(sites),
+  } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui = (open: boolean) => (
     <QueryClientProvider client={queryClient}>
-      <AddAssetDialog open={open} onClose={onClose} siteId={siteId} />
+      <AddAssetDialog open={open} onClose={onClose} />
     </QueryClientProvider>
   );
   const result = render(ui(true));
@@ -56,6 +89,11 @@ beforeEach(() => {
   mockUseApi.mockReset();
 });
 
+/** The Site field holds `SITE`: the form can be sent. */
+async function siteChosen(): Promise<void> {
+  await waitFor(() => expect((screen.getByLabelText("Site") as HTMLSelectElement).value).toBe(SITE));
+}
+
 describe("AddAssetDialog", () => {
   it("accepts an asset with a description and nothing else", async () => {
     renderDialog();
@@ -63,6 +101,7 @@ describe("AddAssetDialog", () => {
       screen.getByLabelText(/description/i),
       "boxed laptop, PO 4471",
     );
+    await siteChosen();
     await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
 
     expect(createAsset).toHaveBeenCalledTimes(1);
@@ -83,10 +122,11 @@ describe("AddAssetDialog", () => {
     await userEvent.type(screen.getByLabelText(/ip address/i), "172.22.104.1");
     await userEvent.selectOptions(screen.getByLabelText(/lifecycle/i), "unmanageable");
     await userEvent.selectOptions(screen.getByLabelText(/^type$/i), "network");
+    await siteChosen();
     await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
 
     expect(createAsset).toHaveBeenCalledWith({
-      // RE-POINTED: the site is part of the body now (see `SITE`).
+      // The site the Site field holds (see `SITE`).
       site_id: SITE,
       hostname: "core-sw-01",
       primary_ip: "172.22.104.1",
@@ -95,26 +135,25 @@ describe("AddAssetDialog", () => {
     });
   });
 
-  it("files the asset under the site it was given", async () => {
+  it("files the asset under the site its Site field holds", async () => {
     renderDialog();
     await userEvent.type(screen.getByLabelText(/description/i), "boxed laptop, PO 4471");
+    await siteChosen();
     await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
 
     const body = createAsset.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(body.site_id).toBe(SITE);
   });
 
-  it("sends nothing, and says why, while it does not know the site", async () => {
-    // The site comes from `/me` (the internal client's "Principal" site has
-    // the organisation's id). Before `/me` has answered, or if it failed,
-    // there is no site to name -- and a body without one is a 422 the
-    // operator could do nothing about.
-    renderDialog(() => {}, null);
+  it("sends nothing, and says why, while no site is chosen", async () => {
+    // With no site chosen there is nothing to file the asset under, and a
+    // body without one is a 422 the operator could do nothing about.
+    renderDialog(() => {}, []);
     await userEvent.type(screen.getByLabelText(/description/i), "boxed laptop, PO 4471");
     await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/account has not loaded/i);
+    expect(alert).toHaveTextContent("Site is required");
     expect(createAsset).not.toHaveBeenCalled();
   });
 
@@ -132,6 +171,7 @@ describe("AddAssetDialog", () => {
     await userEvent.type(dns, "pc1.corp.example.com");
     await userEvent.selectOptions(screen.getByLabelText(/operating system/i), "windows");
     await userEvent.selectOptions(screen.getByLabelText(/processor/i), "amd64");
+    await siteChosen();
     await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
 
     expect(createAsset).toHaveBeenCalledWith(
@@ -155,6 +195,7 @@ describe("AddAssetDialog", () => {
     createAsset.mockRejectedValue(new Error("422 primary_ip is not an address"));
     renderDialog();
     await userEvent.type(screen.getByLabelText(/ip address/i), "not-an-ip");
+    await siteChosen();
     await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
     expect(await screen.findByText(/not an address/i)).toBeInTheDocument();
   });
@@ -173,6 +214,7 @@ describe("what the operator is told when it fails", () => {
   it("announces a bodyless 503 as a sentence rather than the word Error", async () => {
     createAsset.mockRejectedValue(new ApiError(503, ""));
     renderDialog();
+    await siteChosen();
     await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
 
     const alert = await screen.findByRole("alert");
@@ -200,6 +242,7 @@ describe("what the operator is told when it fails", () => {
     );
     renderDialog();
     await userEvent.type(screen.getByLabelText(/ip address/i), "not-an-ip");
+    await siteChosen();
     await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
 
     const alert = await screen.findByRole("alert");
@@ -225,6 +268,7 @@ describe("what the operator is told when it fails", () => {
     // copy of roughly the same idea.
     createAsset.mockRejectedValue(new ApiError(503, ""));
     renderDialog();
+    await siteChosen();
     await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
 
     const alert = await screen.findByRole("alert");
@@ -238,6 +282,7 @@ describe("what the operator is told when it fails", () => {
     // outcome first, in the SAME alert so it is announced as one thing.
     createAsset.mockRejectedValue(new ApiError(500, ""));
     renderDialog();
+    await siteChosen();
     await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/The asset was not added\./);
   });
@@ -249,6 +294,7 @@ describe("what the operator is told when it fails", () => {
     createAsset.mockRejectedValue(new ApiError(422, "primary_ip is not an address"));
     const { close, reopen } = renderDialog();
     await userEvent.type(screen.getByLabelText(/ip address/i), "not-an-ip");
+    await siteChosen();
     await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
     await screen.findByRole("alert");
 
@@ -270,6 +316,7 @@ describe("what the operator is told when it fails", () => {
 describe("finishing the form from the keyboard", () => {
   it("submits on Enter, the way every other create dialog in the module does", async () => {
     renderDialog();
+    await siteChosen();
     await userEvent.type(screen.getByLabelText(/^name$/i), "core-sw-01{Enter}");
     expect(createAsset).toHaveBeenCalledTimes(1);
     expect((createAsset.mock.calls[0]?.[0] as Record<string, unknown>).hostname).toBe(

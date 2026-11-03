@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
-import type { ApiClient, Me } from "../../../lib/api";
+import type { ApiClient, Me, MeClient } from "../../../lib/api";
 import { ApprovalQueue } from "../ApprovalQueue";
 import { ChangeCalendar } from "../ChangeCalendar";
 import { availableChangeActions } from "../changeActions";
@@ -21,6 +21,25 @@ import type { ChangeRequest } from "../types";
 // stream) — mirrors modules/provisioning/__tests__/provisioning.test.tsx.
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 function renderWithProviders(ui: ReactElement, initialEntries: string[] = ["/"]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -92,6 +111,20 @@ describe("ChangesPage", () => {
     // Read as a word, not as the wire's identifier (cycle 12).
     expect(screen.getByText("Draft")).toBeInTheDocument();
     expect(screen.queryByText("draft")).not.toBeInTheDocument();
+  });
+
+  // Design §3.4: the Client column with every client chosen; with one, every
+  // row is that client's and the column is hidden.
+  it("shows the Client column with every client, and hides it with one chosen", async () => {
+    selectClient(null);
+    const { unmount } = renderWithProviders(<ChangesPage />);
+    expect(await screen.findByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    unmount();
+
+    selectClient("c-x");
+    renderWithProviders(<ChangesPage />);
+    await screen.findByText("Upgrade switch firmware");
+    expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
   });
 
   // The approval queue is a real route (App.tsx: /changes/approvals) that no
@@ -380,9 +413,9 @@ describe("ChangeRequestForm", () => {
     );
   });
 
-  // MSP clients phase 2: a change is one client's. Until the selector exists
-  // (PHASE 3) that is the internal client, `/me`'s `org_id`.
-  it("files a new change under the internal client", async () => {
+  // MSP clients phase 2: a change is one client's. A change goes to the client
+  // chosen at the top: here the internal one, `o1`.
+  it("files a new change under the client chosen at the top", async () => {
     const user = userEvent.setup();
     renderNew();
 
@@ -397,9 +430,28 @@ describe("ChangeRequestForm", () => {
     );
   });
 
+  it("with every client chosen, asks for the change's client and files it there", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["change"], permissions: ME.permissions },
+    ]);
+    const user = userEvent.setup();
+    renderNew();
+    await user.type(screen.getByLabelText("Title *"), "Upgrade switch firmware");
+    await user.type(screen.getByLabelText("Description *"), "Roll out firmware 2.1.");
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(api.createChange).toHaveBeenCalledWith(expect.objectContaining({ client_id: "c-acme", title: "Upgrade switch firmware" })),
+    );
+  });
+
   it("sends nothing while it cannot name the client", async () => {
     const user = userEvent.setup();
+    // `/me` has not answered, so the selector is not ready and no client is
+    // known yet (`useNewRowClient`).
     api.me = vi.fn(() => new Promise<Me>(() => {}));
+    mockClientScope.mockReturnValue({ selected: SCOPE_INTERNAL.id, select: vi.fn(), clients: [], ready: false });
     mockUseApi.mockReturnValue(api as ApiClient);
     renderNew();
 
@@ -407,7 +459,7 @@ describe("ChangeRequestForm", () => {
     await user.type(screen.getByLabelText("Description *"), "Roll out firmware 2.1.");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Nothing was sent");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/nothing was sent/i);
     expect(api.createChange).not.toHaveBeenCalled();
   });
 

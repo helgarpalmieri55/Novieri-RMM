@@ -113,6 +113,8 @@ export const sla: Shape<typeof en> = {
     level4: "cualquier cola + cualquier prioridad",
     title: "¿Qué política se aplica?",
     subtitle: "A qué política activa llega un ticket, y por qué.",
+    everyClientNote: "Con todos los clientes elegidos, esto previsualiza las políticas globales.",
+    clientNote: "Vista previa para {client}.",
     forbidden: "Las políticas no están disponibles (permisos insuficientes).",
     failed: "No se pudieron cargar las políticas. {reason}",
     queueId: "ID de la cola",
