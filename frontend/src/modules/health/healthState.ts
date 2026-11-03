@@ -43,6 +43,7 @@ import type {
   DeviceCheckState,
   DeviceHealthOut,
   HealthSeverity,
+  ResolutionLevel,
 } from "./types";
 
 // --------------------------------------------------------------------------
@@ -731,4 +732,25 @@ export function checkLabel(checkType: string): string {
   const key = `enums.HealthCheckType.${checkType.replace(/\./g, "_")}` as MessageKey;
   const label = translate(key);
   return label === key ? checkType : label;
+}
+
+/**
+ * "Applied by", in full (spec §0.2): the level AND what it names. A client
+ * default (MSP clients phase 3, design §5.1) names its client.
+ */
+export function appliedByLabel(
+  level: ResolutionLevel | null,
+  assignment: { device_group_id?: string | null; client_id?: string | null } | null,
+  clientName: (clientId: string) => string,
+): string {
+  switch (level) {
+    case "org":
+      return translate("health.devicePanel.appliedOrg");
+    case "group":
+      return translate("health.devicePanel.appliedGroup", { group: String(assignment?.device_group_id) });
+    case "client":
+      return translate("health.devicePanel.appliedClient", { client: clientName(assignment?.client_id ?? "") });
+    default:
+      return translate("health.devicePanel.appliedDevice");
+  }
 }

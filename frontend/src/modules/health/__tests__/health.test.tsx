@@ -36,6 +36,10 @@ import type {
 
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+vi.mock("../../../lib/clientScope", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../lib/clientScope")>()),
+  useClientScope: () => ({ selected: null, select: vi.fn(), clients: [], ready: true }),
+}));
 
 function renderWithProviders(node: React.ReactNode, at = "/health") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

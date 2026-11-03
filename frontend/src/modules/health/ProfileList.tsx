@@ -388,8 +388,9 @@ export function describeDeleteImpact(profile: Pick<ProfileOut, "assignment_count
 }
 
 /**
- * "org default", "2 groups", "3 devices" — the resolution levels this profile
- * is attached at (spec §0.2), rather than a bare count.
+ * "org default", "default of 2 clients", "2 groups", "3 devices" — the
+ * resolution levels this profile is attached at (spec §0.2; the client level
+ * since MSP clients phase 3, design §5.1), rather than a bare count.
  *
  * The level comes from the SERVER (`AssignmentOut.level`); this only groups.
  */
@@ -401,14 +402,17 @@ export function describeAssignments(
   if (mine.length === 0) return translate("health.profiles.unassigned");
   let device = 0;
   let group = 0;
+  let client = 0;
   let org = 0;
   for (const assignment of mine) {
     if (assignment.level === "device") device += 1;
     else if (assignment.level === "group") group += 1;
+    else if (assignment.level === "client") client += 1;
     else org += 1;
   }
   const parts: string[] = [];
   if (org > 0) parts.push(translate("health.profiles.orgDefault"));
+  if (client > 0) parts.push(translate("health.profiles.clientDefaults", { count: client }));
   if (group > 0) parts.push(translate("health.profiles.groups", { count: group }));
   if (device > 0) parts.push(translate("health.profiles.devices", { count: device }));
   return parts.join(", ");
