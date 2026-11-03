@@ -71,7 +71,7 @@ import { describeSubmitError } from "../../components/form";
 import { useT } from "../../i18n/context";
 import { EntityPicker } from "../../components/picker";
 import { Badge, Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
-import { Btn, KIND_ICON, Panel, QueryState } from "../../shell/components";
+import { Btn, FieldGroup, KIND_ICON, Panel, QueryState } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { Person } from "../../shell/viz";
 import { initialsOf, personIndex } from "../../lib/people";
@@ -108,6 +108,7 @@ import {
 import type { RoleAssignmentOut, UserOut } from "./types";
 import { FOLDING_FORM_GRID } from "./formGrid";
 import { settingsHref } from "./tabs";
+import { groupGrantsByClient } from "./grantGroups";
 
 export const USERS_READ = "users.read";
 export const USERS_MANAGE = "users.manage";
@@ -753,26 +754,36 @@ export function UsersTab({
               emptyLabel={t("settings.users.effectiveEmpty")}
               emptyIcon="certificate"
             >
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>{t("settings.users.effectiveColumns.permission")}</Th>
-                    <Th>{t("settings.users.effectiveColumns.grantedBy")}</Th>
-                    <Th>{t("settings.users.effectiveColumns.appliesTo")}</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(effective.data?.codes ?? []).map((grant) => (
-                    <tr key={`${grant.code}:${grant.via_role}:${grant.client_id ?? ""}`}>
-                      <Td>
-                        <span className="mono">{grant.code}</span>
-                      </Td>
-                      <Td>{roleDisplayName(grant.via_role)}</Td>
-                      <Td>{describeGrantScope(grant.client_id, clientNames)}</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
+              {/* BY CLIENT (MSP clients phase 3, design §4.2): what holds on
+                  every client first, then one table per client, by name. */}
+              {groupGrantsByClient(effective.data?.codes ?? [], (id) => clientNames.get(id) ?? id).map((group) => {
+                const label =
+                  group.clientId === null
+                    ? t("settings.users.effectiveEveryClient")
+                    : (clientNames.get(group.clientId) ?? group.clientId);
+                return (
+                  <FieldGroup key={group.clientId ?? "every"} title={label} icon={group.clientId === null ? "world" : "building"}>
+                    <Table label={label}>
+                      <thead>
+                        <tr>
+                          <Th>{t("settings.users.effectiveColumns.permission")}</Th>
+                          <Th>{t("settings.users.effectiveColumns.grantedBy")}</Th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.grants.map((grant) => (
+                          <tr key={`${grant.code}:${grant.via_role}`}>
+                            <Td>
+                              <span className="mono">{grant.code}</span>
+                            </Td>
+                            <Td>{roleDisplayName(grant.via_role)}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                  </FieldGroup>
+                );
+              })}
             </QueryState>
           </Panel>
         </section>

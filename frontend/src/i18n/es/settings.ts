@@ -244,10 +244,10 @@ export const settings: Shape<typeof en> = {
     effectiveFor: "Permisos efectivos de {email}",
     effectiveSubtitle: "Todos los códigos que tiene esta persona y el rol del que proceden",
     effectiveEmpty: "Esta persona no tiene ningún permiso.",
+    effectiveEveryClient: "Todos los clientes",
     effectiveColumns: {
       permission: "Permiso",
       grantedBy: "Concedido por",
-      appliesTo: "Se aplica a",
     },
     create: {
       title: "Crear un usuario",

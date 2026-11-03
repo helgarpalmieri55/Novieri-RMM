@@ -251,10 +251,10 @@ export const settings = {
     effectiveFor: "Effective permissions for {email}",
     effectiveSubtitle: "Every code this person holds, and the role it came from",
     effectiveEmpty: "This person holds no permissions at all.",
+    effectiveEveryClient: "Every client",
     effectiveColumns: {
       permission: "Permission",
       grantedBy: "Granted by",
-      appliesTo: "Applies to",
     },
     create: {
       title: "Create a user",

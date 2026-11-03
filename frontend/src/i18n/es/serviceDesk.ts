@@ -112,6 +112,7 @@ export const serviceDesk: Shape<typeof en> = {
   },
   table: {
     ticket: "Ticket",
+    client: "Cliente",
     due: "Vencimiento",
     type: "Tipo",
     status: "Estado",
