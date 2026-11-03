@@ -2990,6 +2990,19 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Retire a repository (`POST /backup/repositories/{id}/retire`,
+   * `backup.policy.manage` in the repository's client; MSP clients phase 3,
+   * design §5.5). Refused (409) while an active policy names it. A retired
+   * repository takes no new backups; its points stay and can be restored, so
+   * the space stays used. There is no way back to active.
+   */
+  retireBackupRepository(repositoryId: string): Promise<Repository> {
+    return this.request<Repository>(`/backup/repositories/${encodeURIComponent(repositoryId)}/retire`, {
+      method: "POST",
+    });
+  }
+
   listBackupPolicies(): Promise<BackupPolicy[]> {
     return this.request<BackupPolicy[]>("/backup/policies");
   }
