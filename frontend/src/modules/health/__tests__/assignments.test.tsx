@@ -4,15 +4,18 @@
  * client's default or as the organisation's (MSP clients phase 3, design
  * §5.1). `useNewRowClient` and `ClientField` are Task 9's and are replaced
  * here: what is pinned is the body this panel sends for each answer they give.
+ * With `state.newRow` at `null` the real ones answer, from `useClientScope`'s
+ * clients: that is how "health.admin in that client is enough" is pinned.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setActiveLanguage } from "../../../i18n/core";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me, MeClient } from "../../../lib/api";
+import type { NewRowClient } from "../../../lib/clientSelection";
 import { appliedByLabel } from "../healthState";
 import { ProfileAssignments, describeAssignmentTarget } from "../ProfileAssignments";
 import { describeAssignments } from "../ProfileList";
@@ -24,24 +27,37 @@ vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 const state = vi.hoisted(() => ({
   selected: null as string | null,
   clients: [] as MeClient[],
-  newRow: { clientId: null as string | null, needsField: true, options: [] as MeClient[] },
+  // `null`: the real `useNewRowClient` and `ClientField`.
+  newRow: { clientId: null, needsField: true, options: [] } as NewRowClient | null,
 }));
 vi.mock("../../../lib/clientScope", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../lib/clientScope")>()),
   useClientScope: () => ({ selected: state.selected, select: vi.fn(), clients: state.clients, ready: true }),
 }));
-vi.mock("../../../lib/clientSelection", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../lib/clientSelection")>()),
-  useNewRowClient: () => state.newRow,
-}));
-vi.mock("../../../components/ClientField", () => ({
-  ClientField: ({ onChange }: { onChange: (id: string | null) => void }) => (
-    <select aria-label="Client" defaultValue="" onChange={(event) => onChange(event.target.value || null)}>
-      <option value="" />
-      <option value="c-andes">Andes Logistics</option>
-    </select>
-  ),
-}));
+vi.mock("../../../lib/clientSelection", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../lib/clientSelection")>();
+  return {
+    ...actual,
+    useNewRowClient: (code: string, parentClientId?: string | null) => {
+      const real = actual.useNewRowClient(code, parentClientId);
+      return state.newRow ?? real;
+    },
+  };
+});
+vi.mock("../../../components/ClientField", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../components/ClientField")>();
+  return {
+    ClientField: (props: { code: string; value: string; onChange: (id: string | null) => void }) =>
+      state.newRow === null ? (
+        <actual.ClientField {...props} />
+      ) : (
+        <select aria-label="Client" defaultValue="" onChange={(event) => props.onChange(event.target.value || null)}>
+          <option value="" />
+          <option value="c-andes">Andes Logistics</option>
+        </select>
+      ),
+  };
+});
 
 const ANDES: MeClient = {
   id: "c-andes",
@@ -63,7 +79,7 @@ const ORG_DEFAULT: AssignmentOut = {
 };
 const ANDES_DEFAULT: AssignmentOut = { ...ORG_DEFAULT, id: "ha-andes", client_id: "c-andes", level: "client" };
 
-function me(everywhere: string[]): Me {
+function me(everywhere: string[], clients: MeClient[] = [ANDES]): Me {
   return {
     user_id: "u1",
     org_id: "org-1",
@@ -71,22 +87,29 @@ function me(everywhere: string[]): Me {
     display_name: "Operator",
     permissions: ["health.read", "health.admin"],
     permissions_everywhere: everywhere,
-    clients: [ANDES],
+    clients,
   };
 }
 
-function renderPanel(api: Partial<ApiClient>, everywhere: string[] = []) {
+function renderPanel(
+  api: Partial<ApiClient>,
+  everywhere: string[] = [],
+  { canAdmin = true, clients = [ANDES] }: { canAdmin?: boolean; clients?: MeClient[] } = {},
+) {
   mockUseApi.mockReturnValue({
-    me: vi.fn().mockResolvedValue(me(everywhere)),
+    me: vi.fn().mockResolvedValue(me(everywhere, clients)),
     listHealthAssignments: vi.fn().mockResolvedValue([]),
     ...api,
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <ProfileAssignments profileId="hp-1" canAdmin />
-    </QueryClientProvider>,
-  );
+  return {
+    queryClient,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <ProfileAssignments profileId="hp-1" canAdmin={canAdmin} />
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 beforeEach(() => {
@@ -149,7 +172,9 @@ describe("assigning a profile as a client's default", () => {
 
   it("uses the client chosen above without asking, and offers no organisation default", async () => {
     state.selected = "c-andes";
-    state.newRow = { clientId: "c-andes", needsField: false, options: [] };
+    // What `useNewRowClient` answers: the client above, and Andes among the
+    // clients holding health.admin.
+    state.newRow = { clientId: "c-andes", needsField: false, options: [ANDES] };
     const createHealthAssignment = vi.fn().mockResolvedValue(ANDES_DEFAULT);
     renderPanel({ createHealthAssignment }, ["health.admin"]);
     const user = userEvent.setup();
@@ -191,6 +216,73 @@ describe("assigning a profile as the organisation default", () => {
     renderPanel({});
     await screen.findByRole("combobox", { name: "Client" });
     expect(screen.queryByRole("combobox", { name: "Assign as" })).toBeNull();
+  });
+
+  it("is not sent once it is no longer offered, even after it was chosen", async () => {
+    const createHealthAssignment = vi.fn().mockResolvedValue(ANDES_DEFAULT);
+    const { queryClient } = renderPanel({ createHealthAssignment }, ["health.admin"]);
+    const user = userEvent.setup();
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Assign as" }), "org");
+    // `/me` answers again, without health.admin on every client.
+    act(() => queryClient.setQueryData(["me"], me([])));
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: "Assign as" })).toBeNull());
+    await user.selectOptions(screen.getByRole("combobox", { name: "Client" }), "c-andes");
+    await user.click(screen.getByRole("button", { name: "Assign" }));
+    await waitFor(() =>
+      expect(createHealthAssignment).toHaveBeenCalledWith({ profile_id: "hp-1", client_id: "c-andes" }),
+    );
+  });
+});
+
+describe("who may set a client's default", () => {
+  // The REAL `useNewRowClient` and `ClientField`. Since Task 8 `canAdmin` is
+  // health.admin on EVERY client; a client's default is a write in THAT
+  // client (backend Task 3), so health.admin there is enough.
+  const XOCHI: MeClient = { ...ANDES, id: "c-x", name: "Xochi Foods", permissions: ["health.admin", "health.read"] };
+  const YUMA: MeClient = { ...ANDES, id: "c-y", name: "Yuma Retail", permissions: ["health.read"] };
+  const XOCHI_DEFAULT: AssignmentOut = { ...ORG_DEFAULT, id: "ha-x", client_id: "c-x", level: "client" };
+  const YUMA_DEFAULT: AssignmentOut = { ...ORG_DEFAULT, id: "ha-y", client_id: "c-y", level: "client" };
+  const ONLY_IN_XOCHI = { canAdmin: false, clients: [XOCHI, YUMA] };
+
+  beforeEach(() => {
+    state.clients = [XOCHI, YUMA];
+    state.newRow = null;
+  });
+
+  it("offers the client default on the clients where the person holds health.admin, and no organisation default", async () => {
+    const createHealthAssignment = vi.fn().mockResolvedValue(XOCHI_DEFAULT);
+    renderPanel({ createHealthAssignment }, [], ONLY_IN_XOCHI);
+    const user = userEvent.setup();
+    const field = await screen.findByRole("combobox", { name: "Client" });
+    expect(within(field).getByRole("option", { name: "Xochi Foods" })).toBeInTheDocument();
+    expect(within(field).queryByRole("option", { name: "Yuma Retail" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Assign as" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Organisation default" })).toBeNull();
+    await user.selectOptions(field, "c-x");
+    await user.click(screen.getByRole("button", { name: "Assign" }));
+    await waitFor(() =>
+      expect(createHealthAssignment).toHaveBeenCalledWith({ profile_id: "hp-1", client_id: "c-x" }),
+    );
+  });
+
+  it("removes the default of a client where the person holds health.admin, and no other", async () => {
+    renderPanel(
+      { listHealthAssignments: vi.fn().mockResolvedValue([ORG_DEFAULT, XOCHI_DEFAULT, YUMA_DEFAULT]) },
+      [],
+      ONLY_IN_XOCHI,
+    );
+    expect(await screen.findByRole("button", { name: "Remove: Default of Xochi Foods" })).toBeInTheDocument();
+    expect(screen.getByText("Default of Yuma Retail")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove: Default of Yuma Retail" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove: Organisation default" })).toBeNull();
+  });
+
+  it("does not offer the default of the client chosen above where the person lacks health.admin", async () => {
+    state.selected = "c-y";
+    renderPanel({ listHealthAssignments: vi.fn().mockResolvedValue([YUMA_DEFAULT]) }, [], ONLY_IN_XOCHI);
+    expect(await screen.findByText("Default of Yuma Retail")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Assign" })).toBeNull();
+    expect(screen.queryByText(/the client the console is working on/)).toBeNull();
   });
 });
 

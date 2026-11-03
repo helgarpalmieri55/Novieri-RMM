@@ -66,22 +66,37 @@ export function ProfileAssignments({ profileId, canAdmin }: { profileId: string;
   const everywhere = useEverywherePermissions();
   const { selected, clients } = useClientScope();
   const clientName = useClientName();
+  // The clients where the person holds health.admin, from `/me.clients`.
+  // `canAdmin` (health.admin on EVERY client, since Task 8) decides only the
+  // organisation default: a client's default is a write in that client.
   const newRow = useNewRowClient(HEALTH_ADMIN);
-  const orgAllowed = selected === null && everywhere.has(HEALTH_ADMIN);
-  const clientAllowed = newRow.clientId !== null || newRow.options.length > 0;
+  const administers = (clientId: string | null | undefined): boolean =>
+    newRow.options.some((option) => option.id === clientId);
+  const orgAllowed = canAdmin && selected === null && everywhere.has(HEALTH_ADMIN);
+  // The client chosen above, where the person holds the code; or, with every
+  // client, a Client field with at least one client to offer.
+  const clientAllowed =
+    newRow.clientId !== null ? administers(newRow.clientId) : newRow.needsField && newRow.options.length > 0;
   const [target, setTarget] = useState<Target>("client");
   // `ClientField`'s value: a client id, or `""` for none chosen yet.
   const [chosen, setChosen] = useState("");
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [removing, setRemoving] = useState<AssignmentOut | null>(null);
-  const effective: Target = clientAllowed ? target : "org";
+  // What Assign sends: the choice only while both are offered. A choice of the
+  // organisation default made before `/me` stopped offering it is not sent.
+  const effective: Target = !orgAllowed ? "client" : !clientAllowed ? "org" : target;
   const client = newRow.clientId ?? (chosen || null);
   const rows = assignments.data ?? [];
 
+  // The organisation default with every client; a client's default where its
+  // client is one the person administers; a device's or a group's where the
+  // person holds health.admin in its client (the delete route's own check).
   const mayRemove = (assignment: AssignmentOut): boolean =>
     assignment.level === "org"
       ? orgAllowed
-      : clients.some((item) => item.id === assignment.client_id && item.permissions.includes(HEALTH_ADMIN));
+      : assignment.level === "client"
+        ? administers(assignment.client_id)
+        : clients.some((item) => item.id === assignment.client_id && item.permissions.includes(HEALTH_ADMIN));
 
   function submit() {
     create.reset();
@@ -119,7 +134,7 @@ export function ProfileAssignments({ profileId, canAdmin }: { profileId: string;
                 <tr key={assignment.id}>
                   <Td>{where}</Td>
                   <Td>
-                    {canAdmin && mayRemove(assignment) ? (
+                    {mayRemove(assignment) ? (
                       <Btn
                         small
                         variant="danger"
@@ -144,7 +159,7 @@ export function ProfileAssignments({ profileId, canAdmin }: { profileId: string;
         </p>
       ) : null}
 
-      {canAdmin && (clientAllowed || orgAllowed) ? (
+      {clientAllowed || orgAllowed ? (
         <Form onSubmit={submit}>
           <div className="form-grid">
             {clientAllowed && orgAllowed ? (
