@@ -75,6 +75,7 @@ import {
   type AiPersona,
   type AiRiskClass,
 } from "./types";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 /**
  * The ordered vocabulary, weakest first — `app/core/ai/autonomy.py::LEVELS`
@@ -155,6 +156,10 @@ export function AutonomyDialPage(): ReactElement {
   const t = useT();
   const ceilings = useAiCeilings();
   const setCeiling = useSetAiCeiling();
+  // The dial is configuration every client shares (`PUT /ai/autonomy` is in
+  // GLOBAL_WRITES): `ai.admin` on EVERY client, or it is read-only (phase 3
+  // design §2).
+  const canSet = useEverywherePermissions().has("ai.admin");
 
   /** Edits not yet sent. Keyed `persona:risk`; absent means "as stored". */
   const [draft, setDraft] = useState<Readonly<Record<string, AiCeilingLevel>>>({});
@@ -384,6 +389,7 @@ export function AutonomyDialPage(): ReactElement {
                             <Chips
                               items={AI_CEILING_LEVELS.map(ceilingLabel)}
                               active={AI_CEILING_LEVELS.indexOf(shownLevel(persona, risk))}
+                              disabled={!canSet}
                               onSelect={(at) => {
                                 const level = AI_CEILING_LEVELS[at];
                                 if (level !== undefined) edit(persona, risk, level);
@@ -407,34 +413,40 @@ export function AutonomyDialPage(): ReactElement {
           </Table>
         </QueryState>
 
-        <div className="form-actions" style={{ margin: 0, padding: "14px 18px 16px", borderTop: "1px solid var(--line)" }}>
-          <Btn
-            label={setCeiling.isPending ? t("aiAutomation.dial.saving") : t("aiAutomation.dial.save")}
-            icon="check"
-            variant="primary"
-            disabled={changes.length === 0 || setCeiling.isPending}
-            onClick={() => setConfirming(true)}
-          />
-          {changes.length > 0 ? (
-            <>
-              <Btn label={t("aiAutomation.dial.discard")} onClick={discard} />
-              {/* NOT `role="alert"`: this is the state of the form, announced as
-                  the operator arrives at it, not an interruption. */}
-              <span role="status" className="form-hint">
-                {t("aiAutomation.dial.unsavedChanges", {
-                  count: changes.length,
-                  changes: changes.map(describeChange).join(changes.length === 1 ? "" : "; "),
-                })}
+        {canSet ? (
+          <div className="form-actions" style={{ margin: 0, padding: "14px 18px 16px", borderTop: "1px solid var(--line)" }}>
+            <Btn
+              label={setCeiling.isPending ? t("aiAutomation.dial.saving") : t("aiAutomation.dial.save")}
+              icon="check"
+              variant="primary"
+              disabled={changes.length === 0 || setCeiling.isPending}
+              onClick={() => setConfirming(true)}
+            />
+            {changes.length > 0 ? (
+              <>
+                <Btn label={t("aiAutomation.dial.discard")} onClick={discard} />
+                {/* NOT `role="alert"`: this is the state of the form, announced as
+                    the operator arrives at it, not an interruption. */}
+                <span role="status" className="form-hint">
+                  {t("aiAutomation.dial.unsavedChanges", {
+                    count: changes.length,
+                    changes: changes.map(describeChange).join(changes.length === 1 ? "" : "; "),
+                  })}
+                </span>
+              </>
+            ) : null}
+            {saved && changes.length === 0 && !setCeiling.isError ? (
+              <span role="status" className="form-saved">
+                <Icon name={KIND_ICON.ok} size={13} />
+                {t("aiAutomation.dial.saved")}
               </span>
-            </>
-          ) : null}
-          {saved && changes.length === 0 && !setCeiling.isError ? (
-            <span role="status" className="form-saved">
-              <Icon name={KIND_ICON.ok} size={13} />
-              {t("aiAutomation.dial.saved")}
-            </span>
-          ) : null}
-        </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="note" style={{ margin: 0, padding: "14px 18px 16px" }}>
+            {t("aiAutomation.dial.everyClientOnly")}
+          </p>
+        )}
       </Panel>
 
       <WaitingActionsPanel />

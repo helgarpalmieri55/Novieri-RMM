@@ -48,7 +48,7 @@ sessions before phase 2.
 
 ```
  browser (ScreenViewer: canvas + worker decode)
-    │  WSS  /api/v1/remote/sessions/{id}/screen      (user JWT, RBAC, owner check)
+    │  WSS  /api/v1/remote/sessions/{id}/screen      (user JWT, RBAC, owner or supervisor check)
     ▼
  api process ── viewer leg ────────────┐
     │  internal WS, docker network only │  per-session viewer ticket (never sent to browser)
@@ -421,6 +421,11 @@ unchanged in behaviour. Changes:
 | `remote.privacy_blank` | **new** (phase 2) | blanking the console | super-admin, org-admin |
 | `remote.recordings.read` | existing | playback | super-admin, org-admin, auditor |
 | `remote.policy.manage` | existing | policy edits | super-admin, org-admin |
+| `remote.supervise` | **new** (2026-10-31, migration 0244) | stopping or joining another technician's session, on the session's client | super-admin, org-admin, and every role that held `orgs.manage` |
+
+The viewer WebSocket and `POST /sessions/{id}/stop` admit the session's owner or
+a holder of `remote.supervise` on the session's client (phase 3 design §5.3);
+`orgs.manage` gave that until migration 0244.
 
 Every route and the viewer WebSocket re-check server-side. Device scope uses the
 same device-group scoping as `jobs.dispatch`. None of these are reachable by an

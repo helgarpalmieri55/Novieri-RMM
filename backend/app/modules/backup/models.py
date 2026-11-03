@@ -33,6 +33,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, client_org_fk, uuid7_pk
 
+#: `backup_repositories.state`, which no CHECK constraint holds (0014). A new
+#: repository is `active`. A `retired` one (phase 3 design §5.5) takes no new
+#: backup -- the dispatch refuses it, `dedup.py` grants it no writes, no enabled
+#: policy may name it -- and its points stay restorable (`read.py`). There is no
+#: way back to `active` in this phase.
+REPOSITORY_ACTIVE = "active"
+REPOSITORY_RETIRED = "retired"
+
 
 class BackupRepository(TimestampMixin, Base):
     __tablename__ = "backup_repositories"
@@ -59,6 +67,7 @@ class BackupRepository(TimestampMixin, Base):
     storage_ref: Mapped[str] = mapped_column(Text)
     encryption_key_ref: Mapped[str] = mapped_column(Text)
     dedup_params: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    # REPOSITORY_ACTIVE or REPOSITORY_RETIRED (above).
     state: Mapped[str] = mapped_column(String(16), default="active")
     # Set = off-site copying is on for this repository (migration 0090).
     offsite_target_id: Mapped[UUID | None] = mapped_column(

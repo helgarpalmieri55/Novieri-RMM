@@ -10,6 +10,7 @@ import { MailboxList } from "./MailboxList";
 import { MessageLog } from "./MessageLog";
 import { MicrosoftConnection } from "./MicrosoftConnection";
 import { PageHead, StatCard, StatsGrid } from "../../shell/components";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // Spec §10's admin surface, gated on `email_intake.read` with every mutation
 // (and the connection test) gated on `email_intake.admin`. Both permissions
@@ -84,8 +85,8 @@ export function EmailIntakeAdminPage() {
   const t = useT();
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
-  const permissions = me.data?.permissions ?? [];
-  const canAdmin = permissions.includes("email_intake.admin");
+  // Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
+  const canAdmin = useEverywherePermissions().has("email_intake.admin");
 
   // The mailbox list is fetched in full (no pagination), so counting over it
   // is a real total, not a page tally. `{ limit: 50 }` is the SAME query key

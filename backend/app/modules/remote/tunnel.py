@@ -35,6 +35,10 @@ from app.models import Organization, RemoteSession
 #: The code this door guards; the caller's scope is where they hold it.
 REMOTE_CONTROL = "remote.control"
 
+#: The code that lets a person stop or join ANOTHER technician's session, on
+#: the session's client (phase 3 design §5.3, migration 0244).
+REMOTE_SUPERVISE = "remote.supervise"
+
 
 class TunnelAuthError(Exception):
     """Authorization failure for the tunnel WS. ``code`` is the WS close code."""
@@ -52,16 +56,24 @@ async def owner_or_admin(
     stop route so the check is defined ONCE.
 
     True iff ``user_id`` owns the session (is its technician) OR holds
-    ``orgs.manage`` (org-admin) ON THE SESSION'S CLIENT, ``client_id`` -- its
-    machine's (MSP clients plan 2026-10-26 Task 14, T4-C2 item 13): an
-    administrator of another client is not one here. The caller is
-    responsible for having already established the ``remote.control``
-    permission — this predicate only decides owner-or-admin, not the base
-    capability.
+    ``remote.supervise`` ON THE SESSION'S CLIENT, ``client_id`` -- its
+    machine's (MSP clients plan 2026-10-26 Task 14, T4-C2 item 13): a
+    supervisor of another client is not one here.
+
+    It asked ``orgs.manage`` until migration 0244 (phase 3 design §5.3): a
+    code whose description -- organisation settings, users and roles --
+    says nothing about watching or cutting a person's remote session. 0244
+    granted ``remote.supervise`` to every role that held ``orgs.manage``, so
+    the people who had the power kept it; ``orgs.manage`` alone no longer
+    gives it. The name stays: the "admin" here is the supervisor.
+
+    The caller is responsible for having already established the
+    ``remote.control`` permission — this predicate only decides
+    owner-or-supervisor, not the base capability.
     """
     if session_technician_id == user_id:
         return True
-    return await has_permission(session, user_id, "orgs.manage", client_id=client_id)
+    return await has_permission(session, user_id, REMOTE_SUPERVISE, client_id=client_id)
 
 
 async def authorize_tunnel(
@@ -82,11 +94,12 @@ async def authorize_tunnel(
     Requires the ``remote.control`` permission on at least one client -- the
     session is then looked up under the clients where it is held -- AND that
     the caller either owns the session (is its technician) or holds
-    ``orgs.manage`` (org-admin). Raises ``TunnelAuthError`` otherwise:
+    ``remote.supervise`` on the session's client (``owner_or_admin``).
+    Raises ``TunnelAuthError`` otherwise:
       * 4401 — bad/absent token, unknown org, or unknown user;
       * 4403 — not admitted (email domain, a non-active account, or a
-        contact), lacks remote.control everywhere, or not the owner and not an
-        org-admin;
+        contact), lacks remote.control everywhere, or not the owner and
+        without ``remote.supervise`` on the session's client;
       * 4404 — no such session in the caller's tenant.
 
     ADMISSION, DOOR 3 OF 3 (spec §3.2). This door is the one with real teeth:

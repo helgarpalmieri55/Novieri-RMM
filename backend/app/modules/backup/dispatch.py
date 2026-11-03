@@ -19,7 +19,9 @@ its repository in one client (`its_backup_policy_repository_guard`, migration
 check is the net under them, for a policy from before that guard. The window
 sweep runs this under scope all, where RLS hides no client: the refusal is
 audited `backup.dispatch_refused` in the device's client, and the key is
-never opened.
+never opened. A RETIRED repository (phase 3 design §5.5) takes no new backup
+either: `_dispatch_for_policy` refuses it after the client check, recorded the
+same way, reason `repository_retired`. Its points stay restorable (`read.py`).
 
 A window the parser cannot read (one stored before the API checked windows)
 is contained to its own policy: `dispatch_due_backup` skips the device and
@@ -54,6 +56,7 @@ from app.core.storage import ObjectStore, _safe_object_suffix
 from app.core.stored_english import stored_in_english
 from app.core.vault import VaultService
 from app.models import AuditEvent, BackupPoint, BackupRepository, BackupRun, Device, Job
+from app.modules.backup.models import REPOSITORY_RETIRED
 from app.modules.backup.policy import ResolvedBackupPolicy, resolve_backup_policy
 from app.modules.backup.repository import open_repo_key
 from app.modules.backup.schedule import BACKUP_JOB_TTL, START_DEADLINE, decide, rfc3339
@@ -250,7 +253,7 @@ async def _record_missed(
     only name it, which `fk_backup_runs_repository_client` refuses -- an
     error that would roll back the sweep for the whole organisation. Every
     dispatch the window tried for that fire was refused and audited
-    (`_refuse_foreign_repository`); that is the fire's record."""
+    (`_refuse_repository`); that is the fire's record."""
     if repository_id is None:
         return
     if await _repository_client(session, org_id, repository_id) != device.client_id:
@@ -287,6 +290,8 @@ async def _record_missed(
 
 
 FOREIGN_REPOSITORY = "repository_of_another_client"
+#: Phase 3 design §5.5: a retired repository takes no new backup.
+RETIRED_REPOSITORY = "repository_retired"
 UNREADABLE_WINDOW = "unreadable_window"
 #: The action as an inline SQL literal, never a bound parameter: the partial
 #: index `ix_audit_backup_dispatch_refused` (migration 0242) is usable only
@@ -337,27 +342,30 @@ def refusal_lookup(
     return select(AuditEvent.id).where(*conditions).limit(1)
 
 
-async def _refuse_foreign_repository(
+async def _refuse_repository(
     session: AsyncSession,
     *,
     org_id: UUID,
     device: Device,
     policy: ResolvedBackupPolicy,
     repository_id: UUID,
+    reason: str,
     actor_id: UUID | None,
     actor_type: Literal["user", "agent", "system"],
 ) -> None:
-    """The module docstring's net: audited, like every refusal of the module
-    (`backup.dedup_refused`, `backup.read_refused`), with a reason from a
-    fixed vocabulary and no key material (invariant 3) -- once per device
-    and policy version when the window asks (`refusal_lookup`), every time
-    a person does."""
+    """The dispatch's refusals of a policy's repository -- another client's
+    (the module docstring's net, `FOREIGN_REPOSITORY`) or a retired one
+    (phase 3 design §5.5, `RETIRED_REPOSITORY`) -- audited like every
+    refusal of the module (`backup.dedup_refused`, `backup.read_refused`),
+    with a reason from a fixed vocabulary and no key material (invariant 3):
+    once per device and policy version when the window asks
+    (`refusal_lookup`), every time a person does."""
     version = _policy_version(policy)
     if actor_type == "system" and (
         await session.execute(
             refusal_lookup(
                 org_id=org_id, target_type="device", target_id=device.id,
-                client_id=device.client_id, reason=FOREIGN_REPOSITORY,
+                client_id=device.client_id, reason=reason,
                 repository_id=repository_id, policy_id=policy.id, policy_version=version,
             )
         )
@@ -372,7 +380,7 @@ async def _refuse_foreign_repository(
         target_type="device",
         target_id=str(device.id),
         metadata={
-            "reason": FOREIGN_REPOSITORY,
+            "reason": reason,
             "device_id": str(device.id),
             "repository_id": str(repository_id),
             "policy_id": str(policy.id),
@@ -455,9 +463,17 @@ async def _dispatch_for_policy(
         # An asset row (a switch, hardware in its box): nothing to back up.
         return []
     if repo.client_id != device.client_id:
-        await _refuse_foreign_repository(
+        await _refuse_repository(
             session, org_id=org_id, device=device, policy=policy, repository_id=repo.id,
-            actor_id=actor_id, actor_type=actor_type,
+            reason=FOREIGN_REPOSITORY, actor_id=actor_id, actor_type=actor_type,
+        )
+        return []
+    if repo.state == REPOSITORY_RETIRED:
+        # Phase 3 design §5.5: no new backup into a retired repository -- no
+        # job and no key -- recorded like the refusal above. Its points stay.
+        await _refuse_repository(
+            session, org_id=org_id, device=device, policy=policy, repository_id=repo.id,
+            reason=RETIRED_REPOSITORY, actor_id=actor_id, actor_type=actor_type,
         )
         return []
     client_id = device.client_id

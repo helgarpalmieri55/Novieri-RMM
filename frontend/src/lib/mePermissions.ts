@@ -11,11 +11,16 @@
  * permission, and a page that said "you cannot see this" during the first
  * paint would be wrong for every administrator on every visit.
  *
+ * TWO LISTS SINCE PHASE 3. `useMePermissions` is the codes held in at least one
+ * client of the request's scope -- what a page draws its controls for;
+ * `useEverywherePermissions` the codes held on every client -- what a write to
+ * configuration every client shares is offered for.
+ *
  * Shares the `["me"]` query key every other page uses, so this is the same
  * cache entry and never a second request.
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 
 import type { ApiError, Me } from "./api";
 import { useApi } from "./ApiContext";
@@ -31,20 +36,45 @@ export interface MePermissions {
   lacks(code: string): boolean;
 }
 
-export function useMePermissions(): MePermissions {
+function fromMe(me: UseQueryResult<Me, ApiError>, codes: readonly string[]): MePermissions {
+  const status: MePermissions["status"] = me.isSuccess ? "ready" : me.isError ? "error" : "loading";
+  const shown = status === "ready" ? codes : [];
+  return {
+    status,
+    codes: shown,
+    has: (code) => status === "ready" && shown.includes(code),
+    lacks: (code) => status === "ready" && !shown.includes(code),
+  };
+}
+
+function useMeQuery() {
   const api = useApi();
-  const me = useQuery<Me, ApiError>({
+  return useQuery<Me, ApiError>({
     queryKey: ["me"],
     queryFn: () => api.me(),
     staleTime: 60_000,
     retry: false,
   });
-  const status: MePermissions["status"] = me.isSuccess ? "ready" : me.isError ? "error" : "loading";
-  const codes = me.data?.permissions ?? [];
-  return {
-    status,
-    codes,
-    has: (code) => status === "ready" && codes.includes(code),
-    lacks: (code) => status === "ready" && !codes.includes(code),
-  };
+}
+
+/** The codes held in at least one client of the request's scope (`/me`'s `permissions`). */
+export function useMePermissions(): MePermissions {
+  const me = useMeQuery();
+  return fromMe(me, me.data?.permissions ?? []);
+}
+
+/**
+ * The codes held on EVERY client (`/me`'s `permissions_everywhere`, phase 3
+ * design §1.3): what a screen of configuration every client shares offers its
+ * writes on (§2). The server refuses those writes to a narrower scope with
+ * 403 (`backend/tests/test_global_writes.py`); this saves the person a
+ * control that can only answer that.
+ *
+ * AN API OLDER THAN PHASE 3 SENDS NO `permissions_everywhere`, and then
+ * `permissions` IS this set: before phase 3, `/me` returned only the codes
+ * held on every client.
+ */
+export function useEverywherePermissions(): MePermissions {
+  const me = useMeQuery();
+  return fromMe(me, me.data?.permissions_everywhere ?? me.data?.permissions ?? []);
 }

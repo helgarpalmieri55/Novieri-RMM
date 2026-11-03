@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
-import type { ApiClient, ClientOut, Me } from "../../../lib/api";
+import type { ApiClient, ClientOut, Me, MeClient } from "../../../lib/api";
 import { complianceVariant, licenseTypeVariant } from "../licenseState";
 import {
   PRODUCT_PICKER_EMPTY_HINT,
@@ -97,8 +97,13 @@ function clientOut(id: string, name: string): ClientOut {
   };
 }
 
+/** A client of /me (phase 3 design §1.3): where a row's client name comes from now. */
+function meClient(id: string, name: string): MeClient {
+  return { id, name, kind: id === "o1" ? "internal" : "customer", enabled_modules: [], permissions: ["licenses.read"] };
+}
+
 /** The operator, able to read clients too: report rows then name theirs. */
-const ME_READS_CLIENTS: Me = { ...ME, permissions: [...ME.permissions, "clients.read"] };
+const ME_READS_CLIENTS: Me = { ...ME, permissions: [...ME.permissions, "clients.read"], clients: [meClient("o1", "Novieri"), meClient("c2", "Globex")] };
 
 // A bodyless 503 is what a proxy returns, and `ApiError` is built as
 // `new ApiError(status, await response.text())` -- so `message` is "". That
@@ -1016,15 +1021,15 @@ describe("ComplianceDashboard", () => {
     expect(within(mine as HTMLElement).getByText("5 over")).toBeInTheDocument();
     expect(within(theirs as HTMLElement).getByText("Globex")).toBeInTheDocument();
     expect(within(theirs as HTMLElement).getByText("40 free")).toBeInTheDocument();
-    expect(api.listClients).toHaveBeenCalledWith({ include_archived: true });
+    expect(api.listClients).not.toHaveBeenCalled();
   });
 
-  it("names a row's client by its id for someone who cannot read clients", async () => {
+  it("names a row's client /me does not list as all clients, and never reads the clients list", async () => {
     api.listClients = vi.fn();
     api.licenseCompliance = vi.fn().mockResolvedValue([ROW]);
     renderWithProviders(<ComplianceDashboard />);
     const row = (await screen.findByText("Acme Office Suite")).closest("tr") as HTMLElement;
-    expect(within(row).getByText("o1")).toBeInTheDocument();
+    expect(within(row).getByText("All clients")).toBeInTheDocument();
     expect(api.listClients).not.toHaveBeenCalled();
   });
 });

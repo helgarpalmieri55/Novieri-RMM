@@ -1,5 +1,5 @@
 import { useT } from "../i18n/context";
-import { useMePermissions } from "../lib/mePermissions";
+import { useEverywherePermissions } from "../lib/mePermissions";
 
 /**
  * "FOR EVERY CLIENT": FILE A NEW ROW AS GLOBAL CONFIGURATION.
@@ -10,7 +10,7 @@ import { useMePermissions } from "../lib/mePermissions";
  * from a machine's drill-down to that machine's client; one made for every
  * client is global, and the server lets only someone with access to every
  * client create it. So the switch renders only for a person holding `code` on
- * EVERY client -- what `/me`'s permissions list -- and for anyone else it is
+ * EVERY client -- `/me`'s `permissions_everywhere` -- and for anyone else it is
  * absent rather than offered and then refused.
  *
  * INVARIANT 6: THIS GATES NOTHING. The server refuses a global row from a
@@ -33,7 +33,7 @@ export function ForEveryClientToggle({
   onChange: (checked: boolean) => void;
 }) {
   const t = useT();
-  const permissions = useMePermissions();
+  const permissions = useEverywherePermissions();
   if (!permissions.has(code)) return null;
   return (
     <label className="flex items-start gap-2">

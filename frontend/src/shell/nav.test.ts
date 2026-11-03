@@ -17,6 +17,7 @@ import {
   isPortalOnly,
   NAV_GROUPS,
   NAV_UNLISTED,
+  OPTIONAL_MODULES,
   navAreas,
   navItems,
   ORPHAN_SECTION,
@@ -33,7 +34,7 @@ const EVERY_PERMISSION = ALL_ITEMS.map((item) => item.permission).filter(
 
 /** What an operator's rail shows, top level only. */
 function railLabels(permissions: readonly string[]): string[] {
-  return visibleGroups(permissions).flatMap((group) => group.items.map((entry) => entry.label));
+  return visibleGroups(permissions, OPTIONAL_MODULES).flatMap((group) => group.items.map((entry) => entry.label));
 }
 
 describe("two layers", () => {
@@ -194,7 +195,7 @@ describe("visibleGroups", () => {
 
   it("shows an area when any of its pages is visible, holding only those pages", () => {
     // `devices.read` opens Enrollment and Device groups, both in Admin.
-    const admin = visibleGroups(held)
+    const admin = visibleGroups(held, OPTIONAL_MODULES)
       .flatMap((group) => group.items)
       .find((entry) => entry.to === "/admin");
     expect(admin && isArea(admin)).toBe(true);
@@ -218,13 +219,13 @@ describe("visibleGroups", () => {
   });
 
   it("shows Platform status to an operator holding its code, and to nobody else", () => {
-    const pages = (permissions: string[]) => searchDestinations(permissions).map((d) => d.label);
+    const pages = (permissions: string[]) => searchDestinations(permissions, OPTIONAL_MODULES).map((d) => d.label);
     expect(pages(["platform.status.read"])).toContain("Platform status");
     expect(pages(["devices.read", "jobs.read"])).not.toContain("Platform status");
   });
 
   it("never returns a group or area with nothing in it", () => {
-    for (const group of visibleGroups(["devices.read"])) {
+    for (const group of visibleGroups(["devices.read"], OPTIONAL_MODULES)) {
       expect(group.items.length).toBeGreaterThan(0);
       for (const entry of group.items) {
         if (isArea(entry)) expect(entry.sections.every((s) => s.items.length > 0)).toBe(true);
@@ -233,7 +234,7 @@ describe("visibleGroups", () => {
   });
 
   it("is not vacuous: an operator holding everything sees every page", () => {
-    const groups = visibleGroups(EVERY_PERMISSION);
+    const groups = visibleGroups(EVERY_PERMISSION, OPTIONAL_MODULES);
     expect(groups).toHaveLength(NAV_GROUPS.length);
     expect(navItems(groups)).toHaveLength(ALL_ITEMS.length);
   });
@@ -241,7 +242,7 @@ describe("visibleGroups", () => {
 
 describe("search destinations", () => {
   it("offers every visible page, including the ones inside areas", () => {
-    const found = searchDestinations(EVERY_PERMISSION);
+    const found = searchDestinations(EVERY_PERMISSION, OPTIONAL_MODULES);
     expect(found.map((d) => d.to)).toEqual(
       expect.arrayContaining(["/devices", "/admin", "/notifications", "/jobs", "/licenses"]),
     );
@@ -249,7 +250,7 @@ describe("search destinations", () => {
   });
 
   it("offers nothing the rail would hide", () => {
-    const found = searchDestinations(["devices.read"]).map((d) => d.to);
+    const found = searchDestinations(["devices.read"], OPTIONAL_MODULES).map((d) => d.to);
     expect(found).not.toContain("/jobs");
     expect(found).not.toContain("/governance");
   });
@@ -285,7 +286,7 @@ describe("NAV_UNLISTED", () => {
       title: "Person",
     });
     expect(crumbFor("/people/unmatched").title).toBe("Needs a person");
-    expect(activeNavTo("/people/p1", visibleGroups(EVERY_PERMISSION))).toBe("/devices");
+    expect(activeNavTo("/people/p1", visibleGroups(EVERY_PERMISSION, OPTIONAL_MODULES))).toBe("/devices");
   });
 
   it("makes Add a computer the one install entry point, under Devices", () => {
@@ -390,7 +391,7 @@ describe("crumbFor", () => {
 });
 
 describe("activeNavTo", () => {
-  const visible = visibleGroups(EVERY_PERMISSION);
+  const visible = visibleGroups(EVERY_PERMISSION, OPTIONAL_MODULES);
 
   it("lights the area on any of its pages", () => {
     expect(activeNavTo("/notifications", visible)).toBe("/admin");
@@ -404,7 +405,7 @@ describe("activeNavTo", () => {
   });
 
   it("falls back to the parent when the specific page is hidden", () => {
-    expect(activeNavTo("/assistant/autonomy", visibleGroups(["ai.use"]))).toBe("/assistant");
+    expect(activeNavTo("/assistant/autonomy", visibleGroups(["ai.use"], OPTIONAL_MODULES))).toBe("/assistant");
   });
 
   it("does not match a sibling that merely shares a prefix", () => {
@@ -423,19 +424,69 @@ describe("portal-only accounts", () => {
   });
 
   it("gets the portal's destinations and no operator group", () => {
-    const groups = visibleGroups(requester);
+    const groups = visibleGroups(requester, OPTIONAL_MODULES);
     expect(navItems(groups).map((item) => item.to)).toEqual(["/portal", "/portal/new"]);
     expect(groups.map((group) => group.label)).not.toContain("Daily");
   });
 
   it("marks New ticket, not My tickets, as current on /portal/new", () => {
-    expect(activeNavTo("/portal/new", visibleGroups(requester))).toBe("/portal/new");
-    expect(activeNavTo("/portal/tickets/t1", visibleGroups(requester))).toBe("/portal");
+    expect(activeNavTo("/portal/new", visibleGroups(requester, OPTIONAL_MODULES))).toBe("/portal/new");
+    expect(activeNavTo("/portal/tickets/t1", visibleGroups(requester, OPTIONAL_MODULES))).toBe("/portal");
   });
 
   it("names portal pages without an operator section to link to", () => {
     expect(portalCrumbFor("/portal")).toEqual({ title: "My tickets" });
     expect(portalCrumbFor("/portal/new")).toEqual({ title: "New ticket" });
     expect(portalCrumbFor("/portal/tickets/t1")).toEqual({ title: "My tickets" });
+  });
+});
+
+/* OPTIONAL MODULES (phase 3 design §2): a page of one needs its permission AND
+ * the module on -- in the chosen client, or in at least one of /me's clients
+ * with "All my clients". The caller works out which modules; the model only
+ * says which page belongs to which. */
+describe("optional modules", () => {
+  const CODES = ["budget.read", "bcp.read", "change.read"];
+  const pages = (modules: readonly string[]) =>
+    navItems(visibleGroups(CODES, new Set(modules))).map((item) => item.to);
+
+  it("marks exactly Changes, Continuity and IT budget as optional modules", () => {
+    const marked = ALL_ITEMS.filter((item) => item.module !== undefined).map((item) => [item.to, item.module]);
+    expect(marked).toEqual([
+      ["/changes", "change"],
+      ["/bcp", "bcp"],
+      ["/budget", "budget"],
+    ]);
+  });
+
+  it("hides a module's page while no client of the choice uses the module, whatever the permission", () => {
+    expect(pages([])).toEqual(["/dashboard"]);
+    expect(pages(["budget"])).toEqual(["/dashboard", "/budget"]);
+    expect(pages(["budget", "bcp", "change"])).toEqual(["/dashboard", "/changes", "/bcp", "/budget"]);
+  });
+
+  it("still needs the permission when the module is on", () => {
+    expect(navItems(visibleGroups([], OPTIONAL_MODULES)).map((item) => item.to)).toEqual(["/dashboard"]);
+  });
+
+  it("keeps the search to what the rail shows", () => {
+    expect(searchDestinations(["budget.read"], new Set()).map((d) => d.to)).not.toContain("/budget");
+    expect(searchDestinations(["budget.read"], new Set(["budget"])).map((d) => d.to)).toContain("/budget");
+  });
+});
+
+/* IMAGING DEPENDS ON PXE, WHICH IS NOT BUILT (project decision P3). It leaves
+ * the rail and the search; its routes and its code stay, and a link to one of
+ * its pages still finds its place under Admin. */
+describe("Imaging", () => {
+  it("is in neither the rail nor the search, whoever holds provisioning.read", () => {
+    expect(ALL_ITEMS.map((item) => item.to)).not.toContain("/provisioning");
+    const found = searchDestinations([...EVERY_PERMISSION, "provisioning.read"], OPTIONAL_MODULES);
+    expect(found.map((d) => d.to)).not.toContain("/provisioning");
+  });
+
+  it("keeps a crumb for its pages, under Admin", () => {
+    expect(crumbFor("/provisioning")).toEqual({ section: "Admin", sectionTo: "/admin", title: "Imaging" });
+    expect(crumbFor("/provisioning/images").title).toBe("Imaging");
   });
 });

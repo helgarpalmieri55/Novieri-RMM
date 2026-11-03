@@ -210,6 +210,9 @@ async def verify_point(
             )
         )
     ).scalar_one()
+    # Read now: stamping `verified_at` below expires it (`server_onupdate`,
+    # written by trigger), and an async session cannot lazy-load it.
+    client_id = point.client_id
 
     repo_key = await open_repo_key(
         session, vault, org_id=org_id, repository_id=point.repository_id
@@ -251,6 +254,7 @@ async def verify_point(
         target_type="backup_point",
         target_id=str(backup_point_id),
         metadata={"ok": ok, "checked": checked},
+        client_id=client_id,
     )
 
     return ok

@@ -46,6 +46,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
+from uuid import UUID
 
 from app.core.ai.describe import tool_specs
 from app.core.ai.detect import MAX_FINDINGS, detect
@@ -510,8 +511,15 @@ async def run_turn(
     on_text: Callable[[str], Awaitable[None]] | None = None,
     outcome: TurnOutcome | None = None,
     act_tools: Mapping[str, Tool] | None = None,
+    requested_client: UUID | None = None,
 ) -> TurnOutcome:
     """Spec §5 steps 4-5. Loading and persisting belong to the route.
+
+    `requested_client` is the client the route's own request named in
+    `X-Client-Id`, or None. It goes on the turn's `TurnContext`, and every
+    loopback call of the turn carries it -- the read tools' here, and the act
+    tool's device probe (phase 3 design §5.2). The staff routes pass it; the
+    portal route does not.
 
     **THE CALLER MAY OWN THE OUTCOME, AND THE ROUTE DOES.** A turn that ends by
     RAISING -- a provider 429, or an exception nobody predicted -- would
@@ -549,7 +557,9 @@ async def run_turn(
         *tool_specs(app, allowed_tools, registry=profile.tools),
         *(tool.describe() for tool in act.values()),
     ]
-    ctx = TurnContext(app=app, bearer=bearer, deadline=deadline)
+    ctx = TurnContext(
+        app=app, bearer=bearer, deadline=deadline, requested_client=requested_client
+    )
     conversation: list[Message] = list(messages)
 
     calls_made = 0
@@ -638,6 +648,7 @@ async def run_turn(
                     bearer=bearer,
                     deadline=deadline,
                     registry=profile.tools,
+                    requested_client=ctx.requested_client,
                 )
 
             if isinstance(invoked, ToolError):

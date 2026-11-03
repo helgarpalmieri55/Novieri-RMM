@@ -47,6 +47,7 @@ import logging
 import time
 from collections.abc import Mapping
 from typing import Any
+from uuid import UUID
 
 import httpx
 from fastapi import FastAPI
@@ -128,8 +129,15 @@ async def invoke_portal_tool(
     bearer: str,
     deadline: float,
     registry: Mapping[str, ReadTool],
+    requested_client: UUID | None = None,
 ) -> ToolResult | ToolError:
     """Resolve -> REFUSE OFF-SURFACE -> validate -> build -> clamp -> GET -> map.
+
+    `requested_client` exists because `LoopbackExecutor` names it, and it is
+    never forwarded: a portal turn is not narrowed by the console's selector
+    (phase 3 design §5.2 -- the portal does not change), and the portal route
+    passes none. Any other value than None is refused before anything else,
+    so nothing can quietly drop a narrowing here.
 
     The same seven steps as the staff executor with one inserted second, and the
     order is the security property: an unknown name must never become an HTTP
@@ -141,6 +149,12 @@ async def invoke_portal_tool(
     before it is persisted, and a turn that read real data and was never
     persisted was never audited either.
     """
+    if requested_client is not None:
+        return ToolError(  # i18n-exempt: model-facing, tool result read by the model
+            tool=tool_name,
+            kind="forbidden",
+            message="This assistant does not take a client selection.",
+        )
     tool = registry.get(tool_name)
     if tool is None:
         return ToolError(  # i18n-exempt: model-facing, tool result read by the model

@@ -211,4 +211,8 @@ export const shell: Shape<typeof en> = {
     pageOfScope: "{label}, página de {scope}",
   },
   toaster: { dismiss: "Descartar" },
+  clientSelector: {
+    label: "Cliente",
+    all: "Todos mis clientes",
+  },
 };

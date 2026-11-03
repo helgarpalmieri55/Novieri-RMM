@@ -279,6 +279,16 @@ Unattended additionally requires `credentials.checkout` (existing). Every
 privileged route re-checks server-side (never gated in the frontend), and device
 scope is enforced by the same device-group scoping used by `jobs.dispatch`.
 
+> **Amended 2026-10-31 (phase 3 design §5.3, migration 0244):
+> `remote.supervise`** — stop or join ANOTHER technician's session, asked on
+> the session's client (its machine's). The owner-or-admin rail
+> (`tunnel.py::owner_or_admin`, shared by `POST /sessions/{id}/stop` and the
+> screen tunnel) asked `orgs.manage` until then; it now asks this code, and
+> `orgs.manage` no longer carries the power. 0244 granted it to every role that
+> held `orgs.manage` when it ran — `super-admin`, `org-admin` and any role an
+> organisation made itself — so nobody lost it unawares. `technician`,
+> `auditor` and `read-only` do not hold it.
+
 ## 11. API (`api.py`, prefix `/api/v1/remote`)
 
 - `POST /sessions` (`remote.control`) — body `{device_id, protocol,
@@ -290,8 +300,10 @@ scope is enforced by the same device-group scoping used by `jobs.dispatch`.
   filters `state`, `device_id`, `technician_id`; paginated.
 - `GET /sessions/{id}` — session detail incl. state, consent_mode, recording
   presence (never the token/secret).
-- `POST /sessions/{id}/stop` (`remote.control`, own session or org-admin) —
-  transitions to `ended (completed)`; drops the relay tunnel.
+- `POST /sessions/{id}/stop` (`remote.control`, own session or
+  `remote.supervise` on the session's client) — transitions to
+  `ended (completed)`; drops the relay tunnel. Audited `remote.session.ended`
+  with whoever stopped it as the actor.
 - `WS /sessions/{id}/tunnel` (`remote.control`) — the browser Guacamole tunnel;
   bridges to guacd via `broker.py`. Authorized per-message by the session owner.
 - `GET /sessions/{id}/recording` (`remote.recordings.read`) — stream the `.guac`
@@ -308,6 +320,9 @@ scope is enforced by the same device-group scoping used by `jobs.dispatch`.
 credential use are privileged actions and therefore mandatory audit points
 (kernel invariant #4). Because the audit log is now HMAC-authenticated
 (security-review finding A), these records are tamper- **and** forge-evident.
+Amended 2026-10-31 (phase 3 design §5.3): `remote.session.ended` carries the
+session's client, and its actor is the person who stopped the session (it
+named the owner even when another person stopped it).
 
 ## 13. Frontend (`frontend/src/modules/remote/`)
 

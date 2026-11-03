@@ -34,7 +34,22 @@ export const components = {
   // A new row filed as every client's configuration (components/forEveryClient.tsx).
   forEveryClient: {
     label: "For every client",
-    hint: "Every client's technicians will see it. Unticked, it belongs to your organisation's own client.",
+    hint: "Every client's technicians will see it. Unticked, it belongs to the client this form files it under.",
+  },
+  // A new row's client, with "All my clients" (components/ClientField.tsx).
+  clientField: {
+    label: "Client",
+    choose: "Choose a client",
+    none: "None of your clients lets you do this.",
+  },
+  // A new row's site (components/SiteField.tsx).
+  siteField: {
+    label: "Site",
+    choose: "Choose a site",
+    chooseClientFirst: "Choose the client first.",
+    loading: "Loading sites…",
+    failed: "The sites could not be loaded.",
+    none: "This client has no sites. Add one on the Clients page.",
   },
   prerequisites: {
     checking: "Checking…",

@@ -36,6 +36,11 @@ import "./shell.css";
 
 export interface AppShellProps {
   permissions: readonly string[];
+  /**
+   * Optional modules on for the current choice (`useEnabledModules`, phase 3
+   * design §2). Absent -- the shell's own tests, `/__preview` -- every one.
+   */
+  modules?: ReadonlySet<string>;
   orgName: string;
   /**
    * Breadcrumb tail, supplied by the page. OPTIONAL, and its absence is a
@@ -71,6 +76,13 @@ export interface AppShellProps {
   searchHint?: string;
   /** Omitted when the operator lacks `ai.use`; the ask row then never renders. */
   onAsk?: (question: string) => void;
+  /**
+   * The top bar's client selector (phase 3 design §1.1), drawn first in the
+   * cluster. A SLOT, NOT A COMPONENT THE SHELL RENDERS ITSELF: the selector
+   * reads `/me` through the query client, and this shell also renders where
+   * there is none -- its own tests and `/__preview`.
+   */
+  clientSelector?: ReactNode;
   children: ReactNode;
 }
 
@@ -194,6 +206,7 @@ function writeCollapsed(collapsed: boolean): void {
 
 export function AppShell({
   permissions,
+  modules,
   orgName,
   section,
   sectionTo,
@@ -210,6 +223,7 @@ export function AppShell({
   searchPlaceholder,
   searchHint,
   onAsk,
+  clientSelector,
   children,
 }: AppShellProps) {
   const t = useT();
@@ -404,6 +418,7 @@ export function AppShell({
 
       <Sidebar
         permissions={permissions}
+        modules={modules}
         collapsed={collapsed}
         onToggleCollapsed={() => setCollapsed((value) => !value)}
         badges={badges}
@@ -483,6 +498,10 @@ export function AppShell({
               Each is gated on the permission its destination requires, so the
               cluster never offers a technician a 403. */}
           <div className="top-actions">
+            {/* THE CLIENT EVERYTHING IN THIS CLUSTER, AND ON THE PAGE, IS FOR
+                (phase 3 design §1.1): first, because it is the context of the
+                rest -- "Add a computer" included. */}
+            {clientSelector}
             {/* THE FIRST THING ANYONE DOES WITH THIS PRODUCT, on every route.
 
                 ONE "ADD A COMPUTER" ENTRY. The review (2026-09-23) counted six

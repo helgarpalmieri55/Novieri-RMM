@@ -6,10 +6,11 @@
 // RENDERS; every route checks `agent.release.manage` itself, and a caller who
 // lacks it is refused by the server whatever this returns.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import type { AgentReleasePromoted, AgentVersionRemoved, ApiError, Me } from "../../lib/api";
+import type { AgentReleasePromoted, AgentVersionRemoved, ApiError } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 export const AGENT_RELEASES_KEY = "agent-releases";
 /** The self-update section's "latest stable" reads the channel too. */
@@ -17,10 +18,9 @@ const FLEET_VERSIONS_KEY = "agent-fleet-versions";
 
 export const RELEASE_MANAGE = "agent.release.manage";
 
+// Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
 export function usePublishPermission(): boolean {
-  const api = useApi();
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
-  return me.data?.permissions?.includes(RELEASE_MANAGE) ?? false;
+  return useEverywherePermissions().has(RELEASE_MANAGE);
 }
 
 /**

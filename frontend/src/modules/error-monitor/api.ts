@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "../../lib/ApiContext";
 import type { ApiError, Me } from "../../lib/api";
 import type { ErrorGroupDetail, ErrorGroupList } from "./types";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 /**
  * The zone every timestamp on this page is rendered in (cycle 5).
@@ -64,12 +65,11 @@ export function useErrorGroupDetail(groupId: string | undefined) {
  *
  * ONE CODE FOR BOTH DIRECTIONS, matching `app/api/v1/errors.py`: resolving
  * and reopening are the same privilege, so drawing one without the other
- * would invent a distinction the API does not make.
+ * would invent a distinction the API does not make -- and since phase 3, on
+ * EVERY client: `/platform/errors/{id}/resolve` is in `GLOBAL_WRITES`.
  */
 export function useErrorTriagePermission(): boolean {
-  const api = useApi();
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
-  return (me.data?.permissions ?? []).includes("platform.errors.write");
+  return useEverywherePermissions().has("platform.errors.write");
 }
 
 export function useResolveErrorGroupMutation() {

@@ -77,6 +77,7 @@ import type { MessageKey } from "../../i18n/core";
 import { useSearchParams } from "react-router-dom";
 
 import { useT } from "../../i18n/context";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 import { PageHead } from "../../shell/components";
 import type { TabItem } from "../../shell/components";
 import { useEmailSettings, useHealthSettings, useMe, useSlaSettings } from "./api";
@@ -264,19 +265,21 @@ export function SettingsPage() {
 
   const canManageOrg = held.has(ORGS_MANAGE);
   const canReadRoles = held.has(ROLES_READ);
-  const canManageRoles = held.has(ROLES_MANAGE);
   const canReadUsers = held.has(USERS_READ);
-  const canManageUsers = held.has(USERS_MANAGE);
   const canAiAdmin = held.has(AI_ADMIN);
   const canUseMcp = held.has(MCP_USE);
   const canReadNotifications = held.has(NOTIFICATION_READ);
-  const canAdminNotifications = held.has(NOTIFICATION_ADMIN);
   const canReadSla = held.has(SLA_READ);
-  const canAdminSla = held.has(SLA_ADMIN);
   const canReadHealth = held.has(HEALTH_READ);
-  const canAdminHealth = held.has(HEALTH_ADMIN);
   const canReadBudget = held.has(BUDGET_READ);
   const canManageBudget = held.has(BUDGET_MANAGE);
+  // CONFIGURATION EVERY CLIENT SHARES (phase 3 design §2). Organization,
+  // email, roles, users, the assistant, notifications, service levels and
+  // health settings are written through routes that need the code on EVERY
+  // client (`GLOBAL_WRITES`): a tab is offered with the code (`held`), its
+  // writes with the code everywhere. Budget settings are one client's, and
+  // keep `held`.
+  const everywhere = useEverywherePermissions();
 
   // THE NAV'S "IS THIS SET UP?" STATE, FOR THE THREE TABS THAT CAN ANSWER IT
   // HONESTLY. Email, Service levels and Health each already fetch a
@@ -386,30 +389,38 @@ export function SettingsPage() {
           // so the panel itself has to be reachable.
           tabIndex={0}
         >
-          {current === "organization" ? <OrganizationTab canManage={canManageOrg} /> : null}
-          {current === "email" ? <EmailTab canManage={canManageOrg} /> : null}
+          {current === "organization" ? <OrganizationTab canManage={everywhere.has(ORGS_MANAGE)} /> : null}
+          {current === "email" ? (
+            <EmailTab canManage={canManageOrg} canEdit={everywhere.has(ORGS_MANAGE)} />
+          ) : null}
           {current === "roles" ? (
-            <RolesTab canRead={canReadRoles} canManage={canManageRoles} />
+            <RolesTab canRead={canReadRoles} canManage={everywhere.has(ROLES_MANAGE)} />
           ) : null}
           {current === "users" ? (
             <UsersTab
               canRead={canReadUsers}
-              canManage={canManageUsers}
+              canManage={everywhere.has(USERS_MANAGE)}
               canReadEmail={canManageOrg}
             />
           ) : null}
-          {current === "assistant" ? <AssistantTab canAdmin={canAiAdmin} /> : null}
+          {current === "assistant" ? (
+            <AssistantTab canAdmin={canAiAdmin} canEdit={everywhere.has(AI_ADMIN)} />
+          ) : null}
           {current === "ai-connections" ? (
-            <AiConnectionsTab canUse={canUseMcp} canManageOrg={canManageOrg} />
+            <AiConnectionsTab
+              canUse={canUseMcp}
+              canManageOrg={canManageOrg}
+              canSwitch={everywhere.has(ORGS_MANAGE)}
+            />
           ) : null}
           {current === "notifications" ? (
-            <NotificationsTab canRead={canReadNotifications} canAdmin={canAdminNotifications} />
+            <NotificationsTab canRead={canReadNotifications} canAdmin={everywhere.has(NOTIFICATION_ADMIN)} />
           ) : null}
           {current === "sla" ? (
-            <ServiceLevelsTab canRead={canReadSla} canAdmin={canAdminSla} />
+            <ServiceLevelsTab canRead={canReadSla} canAdmin={everywhere.has(SLA_ADMIN)} />
           ) : null}
           {current === "health" ? (
-            <HealthTab canRead={canReadHealth} canAdmin={canAdminHealth} />
+            <HealthTab canRead={canReadHealth} canAdmin={everywhere.has(HEALTH_ADMIN)} />
           ) : null}
           {current === "budget" ? (
             <BudgetTab

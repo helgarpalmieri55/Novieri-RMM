@@ -108,6 +108,10 @@ async def test_permission_registry_complete() -> None:
         "remote.policy.manage",
         "remote.unattended",
         "remote.privacy_blank",
+        # Phase 3 design §5.3 (migration 0244): stopping or joining another
+        # technician's session, on the session's client -- the power
+        # `orgs.manage` used to carry, granted to every role that held it.
+        "remote.supervise",
         "patch.read",
         "patch.scan",
         "patch.approve",
@@ -491,11 +495,36 @@ async def test_remote_permission_grants(admin_engine, app_engine) -> None:
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await has_permission(session, tech_id, "remote.control")
         assert not await has_permission(session, tech_id, "remote.recordings.read")
+        # Supervising another person's session is admin tier (migration 0244).
+        assert not await has_permission(session, tech_id, "remote.supervise")
 
     org_id, aud_id, _ = await _seed_user_with_role(admin_engine, "auditor", "rbac-remote-a")
     async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
         assert await has_permission(session, aud_id, "remote.recordings.read")
         assert not await has_permission(session, aud_id, "remote.control")
+        assert not await has_permission(session, aud_id, "remote.supervise")
+
+
+async def test_remote_supervise_is_held_where_orgs_manage_was(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Migration 0244 granted `remote.supervise` to every role holding
+    `orgs.manage`: of the seeded roles, `super-admin` and `org-admin`. The
+    grant is the role's, so an `org-admin` assigned on one client supervises
+    on that client and nowhere else."""
+    for role in ("super-admin", "org-admin"):
+        org_id, user_id, _ = await _seed_user_with_role(
+            admin_engine, role, f"rbac-sup-{role[:5]}"
+        )
+        async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
+            assert await has_permission(session, user_id, "remote.supervise"), role
+
+    org_id, user_id, client_id = await _seed_user_with_role(
+        admin_engine, "org-admin", "rbac-sup-c", client=True
+    )
+    async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as session:
+        assert await has_permission(session, user_id, "remote.supervise", client_id=client_id)
+        assert not await has_permission(session, user_id, "remote.supervise")
 
 
 # ---------------------------------------------------------------------------

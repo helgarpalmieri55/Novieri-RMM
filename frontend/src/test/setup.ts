@@ -58,6 +58,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
 import { setActiveLanguage } from "../i18n/core";
+import { setSelectedClient } from "../lib/clientChoice";
 
 let calls: unknown[][] = [];
 let original: typeof console.error;
@@ -66,6 +67,9 @@ beforeEach(() => {
   // Every test starts in English, so one test's Spanish can never leak into
   // the next. In the existing hook, not a second one (see above).
   setActiveLanguage("en");
+  // ...and with every client chosen, so one test's choice in the top bar can
+  // never narrow the next test's requests (`lib/clientChoice.ts`).
+  setSelectedClient(null);
   calls = [];
   original = console.error;
   console.error = (...args: unknown[]) => {

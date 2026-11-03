@@ -56,7 +56,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, requested_client, require_permission
 from app.core.ai.act import ActTool, ProposeBinding
 from app.core.ai.errors import AiDisabledError, AiNotFoundError
 from app.core.ai.orchestrator import (
@@ -336,6 +336,10 @@ async def create_copilot_turn(
             allowed_tools=tools_for_permissions(codes, registry=COPILOT_PROFILE.tools),
             outcome=outcome,
             act_tools=act_tools,
+            # THE SAME CLIENT NARROWING THIS REQUEST CARRIED (phase 3 design
+            # §5.2), forwarded on every loopback call of the turn. Already
+            # validated by `auth_context` (a malformed one was a 400).
+            requested_client=requested_client(request),
         )
     except Exception:
         # DELIBERATELY BROAD, AND IT ANSWERS 200 WITH A PARTIAL, for the reason

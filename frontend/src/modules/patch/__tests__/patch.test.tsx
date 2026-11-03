@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
-import type { ApiClient, DevicePage, Me } from "../../../lib/api";
+import type { ApiClient, DevicePage, Me, MeClient } from "../../../lib/api";
 import type {
   ApprovalListResponse,
   BulkApprovalResponse,
@@ -3240,8 +3240,9 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     mockUseApi.mockImplementation(() => api);
   });
 
+  const MY_CLIENTS: MeClient[] = [{ id: "o1", name: "Novieri", kind: "internal", enabled_modules: [], permissions: ME.permissions }, { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ME.permissions }];
   /** `ME` with `clients.read`: the console can name a client. */
-  const READS_CLIENTS: Me = { ...ME, permissions: [...ME.permissions, "clients.read"] };
+  const READS_CLIENTS: Me = { ...ME, permissions: [...ME.permissions, "clients.read"], clients: MY_CLIENTS };
 
   const CLIENTS = [
     {
@@ -3398,15 +3399,15 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     );
   });
 
-  it("names the customer by its id when the clients list cannot be read", async () => {
+  it("names the customer from /me, without reading the clients list", async () => {
     const user = userEvent.setup();
     const listClients = vi.fn();
-    api = customerMachine({ listClients });
+    api = customerMachine({ me: vi.fn().mockResolvedValue({ ...ME, clients: MY_CLIENTS }), listClients });
     await chooseOnSentinel(user);
 
     expect(
       await screen.findByText(
-        "You are choosing these from sentinel, but an approval covers the 1 device of c-acme in the test ring — not sentinel alone.",
+        "You are choosing these from sentinel, but an approval covers the 1 device of Acme in the test ring — not sentinel alone.",
       ),
     ).toBeInTheDocument();
     expect(listClients).not.toHaveBeenCalled();
@@ -3479,11 +3480,11 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     ).toBeInTheDocument();
   });
 
-  it("names the client by its id in the list when the clients list cannot be read", async () => {
-    api = twinApprovals({ me: vi.fn().mockResolvedValue(ME) });
+  it("names the client from /me in the list, without clients.read", async () => {
+    api = twinApprovals({ me: vi.fn().mockResolvedValue({ ...ME, clients: MY_CLIENTS }) });
     renderWithProviders(<FleetPatchPage />);
 
-    expect(within(await rowOf("a-acme")).getByText("c-acme")).toBeInTheDocument();
+    expect(within(await rowOf("a-acme")).getByText("Acme")).toBeInTheDocument();
     expect(within(await rowOf("a-global")).getByText("Every client")).toBeInTheDocument();
   });
 

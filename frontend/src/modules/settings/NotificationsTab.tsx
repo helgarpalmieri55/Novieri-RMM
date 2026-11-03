@@ -55,8 +55,9 @@ import {
   useTicketQueues,
   useUpdateChannelMutation,
   useUpdateRuleMutation,
+  useGlobalWriteReason,
 } from "./api";
-import { isForbidden, permissionReason } from "./settingsState";
+import { isForbidden } from "./settingsState";
 import { FOLDING_FORM_GRID } from "./formGrid";
 
 export const NOTIFICATION_READ = "notification.read";
@@ -122,6 +123,7 @@ export function NotificationsTab({
   canAdmin: boolean;
 }) {
   const t = useT();
+  const reason = useGlobalWriteReason(NOTIFICATION_ADMIN);
   const channels = useNotificationChannels(canRead);
   const rules = useNotificationRules(canRead);
   const queues = useTicketQueues(canRead);
@@ -294,7 +296,7 @@ export function NotificationsTab({
         ) : (
           <>
             {!canAdmin ? (
-              <p className="note" style={UNDER_TABLE}>{permissionReason(NOTIFICATION_ADMIN)}</p>
+              <p className="note" style={UNDER_TABLE}>{reason}</p>
             ) : null}
             {/* The design's three states. "No channel is configured" and "the
                 notification service is down" mean very different things to
@@ -573,7 +575,7 @@ export function NotificationsTab({
               onClick={submitNewChannel}
             />
             {!canAdmin ? (
-              <span className="form-hint">{permissionReason(NOTIFICATION_ADMIN)}</span>
+              <span className="form-hint">{reason}</span>
             ) : null}
             {createChannel.isError ? (
               <span role="alert" className="form-error">
@@ -769,7 +771,7 @@ export function NotificationsTab({
                 onClick={submitNewRule}
               />
               {!canAdmin ? (
-                <span className="form-hint">{permissionReason(NOTIFICATION_ADMIN)}</span>
+                <span className="form-hint">{reason}</span>
               ) : null}
               {createRule.isError ? (
                 <span role="alert" className="form-error">

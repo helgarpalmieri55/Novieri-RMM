@@ -64,32 +64,42 @@ async def _estate(api_env: Any, alerts: int = 1) -> tuple[HealthOrg, str]:
 # --------------------------------------------------------------------------- #
 
 
-async def test_the_request_is_a_get_to_the_tools_own_path_with_one_header(
-    api_env: Any, monkeypatch: Any
+@pytest.mark.parametrize("narrowed", [False, True], ids=["unnarrowed", "narrowed"])
+async def test_the_request_is_a_get_to_the_tools_own_path_with_only_the_turns_headers(
+    api_env: Any, monkeypatch: Any, narrowed: bool
 ) -> None:
     """The whole of §4.4 in one recorded request: the method, the path built
-    from the tool's template, and the COMPLETE header set the executor added."""
+    from the tool's template, and the COMPLETE header set the executor added
+    -- the caller's token and, when the turn's own request carried one, its
+    `X-Client-Id` (phase 3 design §5.2). Nothing else."""
     org, bearer = await _estate(api_env)
     spy = RecordingTransport(api_env.app)
     install_spy(monkeypatch, spy)
+    # The device's own client -- the internal one, whose id is the org's.
+    client = org.org_id if narrowed else None
 
-    await invoke_tool(
+    outcome = await invoke_tool(
         registry=REGISTRY,
         tool_name="devices.health",
         raw_args={"device_id": str(org.device_id)},
         app=api_env.app,
         bearer=bearer,
         deadline=_deadline(),
+        requested_client=client,
     )
 
     request = spy.only
     assert request.method == "GET"
     assert urlparse(str(request.url)).path == f"/api/v1/devices/{org.device_id}/health"
-    assert request.headers["authorization"] == bearer
-    # Only httpx's own transport headers survive beside it -- nothing this
-    # module or the model contributed.
+    # Only httpx's own transport headers survive beside them -- nothing else
+    # this module or the model contributed.
     added = set(request.headers) - {"host", "accept", "accept-encoding", "connection", "user-agent"}
-    assert added == {"authorization"}
+    expected = {"authorization": bearer} | (
+        {} if client is None else {"x-client-id": str(client)}
+    )
+    assert {name: request.headers[name] for name in added} == expected
+    # Narrowed to the device's own client, the route still answers.
+    assert isinstance(outcome, ToolResult), outcome
 
 
 @pytest.mark.parametrize(
@@ -97,6 +107,7 @@ async def test_the_request_is_a_get_to_the_tools_own_path_with_one_header(
     [
         pytest.param({"Authorization": "Bearer other"}, id="header-injection"),
         pytest.param({"authorization": "Bearer other"}, id="header-injection-lowercase"),
+        pytest.param({"X-Client-Id": str(uuid4())}, id="client-header-injection"),
         pytest.param({"__path": "../credentials"}, id="path-override"),
         pytest.param({"url": "http://attacker.test/"}, id="url-override"),
         pytest.param({"device_id": "../../credentials"}, id="path-traversal"),

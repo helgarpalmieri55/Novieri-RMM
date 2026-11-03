@@ -19,6 +19,7 @@ import { RulesPanel } from "./RulesPanel";
 import type { ChannelKind } from "./types";
 import { PageHead, StatCard, StatsGrid } from "../../shell/components";
 import { intlLocale } from "../../lib/datetime";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // Spec §11: "One admin surface under the existing module nav, gated on
 // notification.read with mutations gated on notification.admin" -- both
@@ -89,8 +90,8 @@ export function NotificationAdminPage() {
   const t = useT();
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
-  const permissions = me.data?.permissions ?? [];
-  const canAdmin = permissions.includes("notification.admin");
+  // Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
+  const canAdmin = useEverywherePermissions().has("notification.admin");
 
   // Each of these is the SAME query a panel below already issues (identical
   // query key), so TanStack Query serves this from the same cache entry

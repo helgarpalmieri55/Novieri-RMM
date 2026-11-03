@@ -115,7 +115,7 @@ const CODES = [
   "platform.errors.read", "platform.errors.write", "platform.status.read", "policies.manage",
   "portal.ticket.read", "portal.ticket.write",
   "provisioning.manage", "provisioning.read", "provisioning.run",
-  "remote.control", "remote.policy.manage", "remote.recordings.read", "reporting.read",
+  "remote.control", "remote.policy.manage", "remote.recordings.read", "remote.supervise", "reporting.read",
   "roles.manage", "roles.read", "site.manage", "site.read", "site.wake", "sla.admin", "sla.read",
   "subscriptions.manage", "subscriptions.read",
   "ticket.admin", "ticket.approve", "ticket.assign", "ticket.read", "ticket.write",
@@ -127,7 +127,7 @@ const VERB: Record<string, string> = {
   confirm: "Confirm", propose: "Propose", use: "Use", restore: "Restore", request: "Request",
   checkout: "Check out", create: "Create", execute: "Execute", dispatch: "Dispatch", apply: "Apply",
   scan: "Scan", assign: "Assign", control: "Control", record: "Record", purge: "Purge", remediate: "Remediate",
-  wake: "Wake", review: "Review",
+  wake: "Wake", review: "Review", supervise: "Supervise",
 };
 
 function describe(module: string, action: string): string {
@@ -167,7 +167,13 @@ const ROLE_SEEDS: RoleSeed[] = [
     name: "technician",
     description: "Day-to-day fleet operations",
     is_global: true,
-    codes: [...byModule("devices", "patch", "deploy", "jobs", "health", "remote", "backup"), "ticket.read", "ticket.write", "ai.use"],
+    // Supervising another person's session is admin tier (migration 0244).
+    codes: [
+      ...byModule("devices", "patch", "deploy", "jobs", "health", "remote", "backup").filter(
+        (code) => code !== "remote.supervise",
+      ),
+      "ticket.read", "ticket.write", "ai.use",
+    ],
   },
   {
     id: "role-service-desk",

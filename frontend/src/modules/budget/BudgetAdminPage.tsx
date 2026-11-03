@@ -28,6 +28,7 @@ import { BudgetPageNav } from "./budgetState";
 import { PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { KV } from "../../shell/viz";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 /**
  * The active/inactive pill every admin table draws. The word agrees with the
@@ -108,6 +109,9 @@ export function BudgetAdminPage() {
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("budget.read");
   const canManage = permissions.includes("budget.manage");
+  // Exchange rates are configuration every client shares (GLOBAL_WRITES): the
+  // code on EVERY client (phase 3 design §2). Categories and cost centres are not.
+  const canManageRates = useEverywherePermissions().has("budget.manage");
   // `/budget/admin#fx-rates` is where the dashboard's "could not be converted"
   // notice sends an operator; without this the fragment moves nothing.
   useScrollToHash(me.isFetched);
@@ -126,7 +130,7 @@ export function BudgetAdminPage() {
       <CostCentersPanel canManage={canManage} />
       {/* An anchor on a wrapper: `Panel` takes no id. */}
       <div id="fx-rates">
-        <FxRatesPanel canManage={canManage} />
+        <FxRatesPanel canManage={canManageRates} />
       </div>
     </div>
   );

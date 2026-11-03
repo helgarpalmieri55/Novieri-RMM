@@ -19,7 +19,6 @@ import {
   useReleaseLicence,
   useReleaseSeat,
   useStartChecklist,
-  turnOffPermission,
   useTurnOffSignIn,
   useUpdatePerson,
 } from "./api";
@@ -33,6 +32,7 @@ import {
   linkSourceLabel,
 } from "./labels";
 import type { AccountOut, ChecklistKind, PersonDetailOut, PersonOut } from "./types";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 /** What a destructive button is about to do, for the confirmation. */
 type Pending =
@@ -186,8 +186,13 @@ export function PersonPage() {
 function Holdings({ data, zone }: { data: PersonDetailOut; zone: string | null | undefined }) {
   const t = useT();
   const personId = data.person.id;
-  // Staff are switched off in Settings, a client's contact as a contact.
-  const canTurnOff = useCan(data.account ? turnOffPermission(data.account) : "users.manage");
+  // Staff are switched off in Settings, through a route of configuration every
+  // client shares (`POST /users/{id}/disable`): `users.manage` on EVERY client
+  // (phase 3 design §2). A client's contact is switched off as a contact.
+  const everywhere = useEverywherePermissions();
+  const canTurnOffContact = useCan("clients.manage");
+  const canTurnOff =
+    data.account?.kind === "contact" ? canTurnOffContact : everywhere.has("users.manage");
   const canLicences = useCan("licenses.manage");
   const canSeats = useCan("subscriptions.manage");
   const releaseSeat = useReleaseSeat(personId);

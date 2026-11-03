@@ -58,7 +58,7 @@ from app.modules.backup.reporting import (
     device_backup_status,
     fleet_backup_report,
 )
-from app.modules.backup.repository import create_repository
+from app.modules.backup.repository import RetireRefused, create_repository, retire_repository
 from app.modules.backup.restore import browse_manifest, dispatch_restore
 from app.modules.backup.schema import BackupManifest
 
@@ -310,6 +310,27 @@ async def create_repository_route(
                     tr("a repository with that name exists in this client"),
                 ) from None
             raise
+        return _repository_out(repo)
+
+
+@router.post("/repositories/{repository_id}/retire", response_model=RepositoryOut)
+async def retire_repository_route(
+    repository_id: UUID,
+    request: Request,
+    ctx: AuthContext = Depends(require_permission("backup.policy.manage")),
+) -> RepositoryOut:
+    """Phase 3 design §5.5 (`repository.retire_repository`). The scope is
+    where the person holds `backup.policy.manage`, so another client's
+    repository is the 404 a missing one gets."""
+    async with org_session(
+        ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
+    ) as session:
+        try:
+            repo = await retire_repository(
+                session, org_id=ctx.org_id, actor_id=ctx.user_id, repository_id=repository_id
+            )
+        except RetireRefused as exc:
+            raise HTTPException(exc.status_code, exc.detail) from None
         return _repository_out(repo)
 
 

@@ -87,6 +87,7 @@ export const auditActions: Shape<typeof enActions> = {
   backup_replicated: "Punto de copia de seguridad replicado",
   backup_replication_failed: "Replicación de copia de seguridad fallida",
   backup_repository_created: "Repositorio de copias de seguridad creado",
+  backup_repository_retired: "Repositorio de copias de seguridad retirado",
   backup_restore_dispatched: "Restauración despachada",
   backup_restore_reconciled: "Restauración conciliada",
   backup_restore_result: "Resultado de restauración registrado",

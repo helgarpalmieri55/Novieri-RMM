@@ -62,6 +62,9 @@ async def reconcile_stuck(session: AsyncSession, org_id: UUID, *, now: datetime)
         )
     ).all()
     for run, job in runs:
+        # Read before the update: a flush expires it (`server_onupdate`,
+        # written by trigger). Phase 3 design §5.5.
+        client_id = run.client_id
         run.state = "failed"
         run.error = _reason(job)
         run.finished_at = now
@@ -74,6 +77,7 @@ async def reconcile_stuck(session: AsyncSession, org_id: UUID, *, now: datetime)
             target_type="device",
             target_id=str(run.device_id),
             metadata={"run_id": str(run.id), "job_id": str(job.id)},
+            client_id=client_id,
         )
 
     restores = (
@@ -84,6 +88,9 @@ async def reconcile_stuck(session: AsyncSession, org_id: UUID, *, now: datetime)
         )
     ).all()
     for restore, job in restores:
+        # Read before the update: a flush expires it (`server_onupdate`,
+        # written by trigger). Phase 3 design §5.5.
+        client_id = restore.client_id
         restore.state = "failed"
         restore.error = _reason(job)
         restore.finished_at = now
@@ -96,6 +103,7 @@ async def reconcile_stuck(session: AsyncSession, org_id: UUID, *, now: datetime)
             target_type="device",
             target_id=str(restore.device_id),
             metadata={"restore_job_id": str(restore.id), "job_id": str(job.id)},
+            client_id=client_id,
         )
     await session.flush()
     return {"runs": len(runs), "restores": len(restores)}

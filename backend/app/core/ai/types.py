@@ -78,10 +78,17 @@ class TurnContext:
     deadline: float = 0.0
     org_id: UUID | None = None
     user_id: UUID | None = None
+    #: The client the turn's own request named in `X-Client-Id` (the console's
+    #: selector), or None. A staff executor forwards it on every loopback
+    #: call, so the inner route runs under the scope the turn ran under --
+    #: never wider (phase 3 design §5.2, as `app.mcp.invoke` does). Filled by
+    #: the staff routes only; a portal turn never carries one.
+    requested_client: UUID | None = None
 
     def __repr__(self) -> str:
         return (
             f"TurnContext(org_id={self.org_id!r}, user_id={self.user_id!r}, "
+            f"requested_client={self.requested_client!r}, "
             f"deadline={self.deadline!r}, bearer=<redacted>)"
         )
 

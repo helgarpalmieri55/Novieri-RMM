@@ -40,3 +40,14 @@ class HealthConflictError(HealthValidationError):
     still reference, and hard-deleting a check that has opened alerts. Both name
     what is blocking rather than surfacing a bare `IntegrityError`.
     """
+
+
+class HealthUnprocessableError(HealthValidationError):
+    """The request names something that exists and is visible, but that cannot
+    take this write (maps to HTTP 422).
+
+    One case today: a default profile for the Unassigned client, the inbox
+    for what has no owner (MSP clients plan 2026-10-26 C10), which is not a
+    client to configure -- `client_sites.named_client_for_new_rows` answers
+    it with 422 for every module, and this keeps health's answer the same.
+    """

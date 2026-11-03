@@ -29,7 +29,7 @@ import {
   useDeviceGroupsQuery,
   useFleetPrerequisite,
 } from "../../lib/detectors";
-import { useMePermissions } from "../../lib/mePermissions";
+import { useEverywherePermissions, useMePermissions } from "../../lib/mePermissions";
 
 const AGENT_UPDATE_READ = "agent.update.read";
 const AGENT_RELEASE_MANAGE = "agent.release.manage";
@@ -85,7 +85,8 @@ export function AgentUpdatePrerequisites() {
     },
   });
 
-  const canMarkStable = me.has(AGENT_RELEASE_MANAGE);
+  // Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
+  const canMarkStable = useEverywherePermissions().has(AGENT_RELEASE_MANAGE);
   const stableItem = prerequisiteFromQuery({
     label: t("agentReleases.prerequisites.stableLabel"),
     query: versions,

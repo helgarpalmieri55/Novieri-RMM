@@ -743,10 +743,14 @@ async def execute_deployment(
                 )
             )
         ).scalar_one_or_none()
-        if deployment is not None:
-            refusal = await deployment_refusal(
-                session, ctx.org_id, deployment, actor_id=ctx.user_id
-            )
+        if deployment is None:
+            # Phase 3 design §5.4: a deployment this request cannot see -- of
+            # another client, or none at all -- is the GET's 404, not a 200
+            # with no jobs. Nothing has been read or written past this point.
+            raise HTTPException(status.HTTP_404_NOT_FOUND, tr("no such deployment"))
+        refusal = await deployment_refusal(
+            session, ctx.org_id, deployment, actor_id=ctx.user_id
+        )
         try:
             if refusal is None:
                 pending = await dispatch_deployment(

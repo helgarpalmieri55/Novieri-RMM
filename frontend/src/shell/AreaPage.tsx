@@ -14,6 +14,7 @@ import { Table, Td, Th } from "../components/ui";
 import type { Me } from "../lib/api";
 import { useT } from "../i18n/context";
 import { useApi } from "../lib/ApiContext";
+import { useEnabledModules } from "../lib/clientScope";
 import { PageHead, Panel, QueryState } from "./components";
 import { Icon } from "./icons";
 import { isArea, NAV_GROUPS, navAreas, visibleGroups } from "./nav";
@@ -23,7 +24,8 @@ export function AreaPage({ to }: { to: string }) {
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const area = navAreas(NAV_GROUPS).find((entry) => entry.to === to);
-  const visible = visibleGroups(me.data?.permissions ?? [])
+  const modules = useEnabledModules();
+  const visible = visibleGroups(me.data?.permissions ?? [], modules)
     .flatMap((group) => group.items)
     .find((entry) => entry.to === to);
   const sections = visible && isArea(visible) ? visible.sections : [];

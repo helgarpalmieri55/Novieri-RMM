@@ -44,6 +44,15 @@ export function permissionReason(code: string): string {
   return translate("settings.readOnly", { code });
 }
 
+/**
+ * The read-only sentence for a write to configuration EVERY client shares
+ * (phase 3 design §2), for a person who holds the code on some clients but
+ * not on all: "you lack the permission" would be false for them.
+ */
+export function everyClientReason(code: string): string {
+  return translate("settings.readOnlyEveryClient", { code });
+}
+
 /** Field-level dirtiness, so "Saved." disappears the moment an edit resumes. */
 export function isDirty<T>(form: T, seed: T): boolean {
   return JSON.stringify(form) !== JSON.stringify(seed);

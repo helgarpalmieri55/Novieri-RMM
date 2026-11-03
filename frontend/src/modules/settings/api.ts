@@ -32,8 +32,10 @@ import type {
   Me,
   OrgUpdateRequest,
 } from "../../lib/api";
+import { translate } from "../../i18n/core";
 import { useApi } from "../../lib/ApiContext";
 import { loadingUntilClient, requireKnown } from "../../lib/internalClient";
+import { everyClientReason, permissionReason } from "./settingsState";
 import type { AiProviderOut, AiSettingsOut, AiSettingsUpdate } from "../ai-admin/types";
 import type { SettingsOut as BudgetSettingsOut, SettingsUpdate as BudgetSettingsUpdate } from "../budget/types";
 import type { SettingsOut as HealthSettingsOut, SettingsUpdate as HealthSettingsUpdate } from "../health/types";
@@ -148,6 +150,16 @@ export function useMe() {
     staleTime: 60_000,
     ...NO_RETRY,
   });
+}
+
+/**
+ * Why a write to configuration every client shares is not offered (phase 3
+ * design §2): the code on every client, for someone who holds it on some;
+ * the code itself, for someone who holds it nowhere.
+ */
+export function useGlobalWriteReason(code: string): string {
+  const me = useMe();
+  return (me.data?.permissions ?? []).includes(code) ? everyClientReason(code) : permissionReason(code);
 }
 
 // --------------------------------------------------------------------------
@@ -613,19 +625,24 @@ export function useClients(enabled: boolean, params: { include_archived?: boolea
 }
 
 /**
- * A client's name by id, for a column that names each row's client (MSP
- * clients phase 2: licence compliance and renewals, subscription spend --
- * reports that are one row per client, never summed across clients). Reads
- * `GET /clients`, archived ones included because a row may be an archived
- * client's, and only for someone holding `clients.read`. Without it, or until
- * it answers, the id stands in, as the ticket page's client panel does.
+ * A client's name by id, for a column or a sentence that names a row's
+ * client (phase 3 design §3.4). Read from `/me`'s `clients` -- the person's
+ * own clients, which needs no `clients.read` -- so every technician reads a
+ * name, never an id, and no `GET /clients` is made for it.
+ *
+ * An id `/me` does not list, or none at all, is a row every client shares:
+ * "All clients". (`/me` leaves archived clients out, so an archived client's
+ * row reads the same; the design does not tell the two apart.) The Unassigned
+ * client is named in the person's language, as the top bar names it.
  */
-export function useClientName(): (clientId: string) => string {
+export function useClientName(): (clientId: string | null) => string {
   const me = useMe();
-  const canRead = (me.data?.permissions ?? []).includes("clients.read");
-  const clients = useClients(canRead, { include_archived: true });
-  const names = new Map((clients.data ?? []).map((client) => [client.id, client.name]));
-  return (clientId) => names.get(clientId) ?? clientId;
+  const known = new Map((me.data?.clients ?? []).map((client) => [client.id, client]));
+  return (clientId) => {
+    const client = clientId === null ? undefined : known.get(clientId);
+    if (client === undefined) return translate("lib.clients.everyClient");
+    return client.kind === "unassigned" ? translate("lib.clients.unassigned") : client.name;
+  };
 }
 
 export function useEffectivePermissions(userId: string | null) {

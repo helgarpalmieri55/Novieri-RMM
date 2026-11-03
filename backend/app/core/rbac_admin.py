@@ -156,9 +156,11 @@ __all__ = [
 SUPER_ADMIN = "super-admin"
 
 # Removing one of these from a role the CALLER holds strands them: `roles.manage`
-# gates this surface, `orgs.manage` gates the org-settings write and
-# remote-tunnel authorization. Neither is recoverable from the console once
-# lost, only by SQL against production.
+# gates this surface, `orgs.manage` gates the org-settings write. Neither is
+# recoverable from the console once lost, only by SQL against production.
+# (`orgs.manage` also gated remote-tunnel authorization until migration 0244
+# moved that to `remote.supervise`, which is not guarded: whoever holds
+# `roles.manage` can always grant it back.)
 GUARDED_CODES = frozenset({"roles.manage", "orgs.manage"})
 
 # The code that must still have a holder somewhere in the org after any matrix

@@ -21,6 +21,7 @@ import { ServiceDeskNav } from "./ServiceDeskNav";
 import { ticketTypeLabel } from "./serviceDeskState";
 import type { TicketType } from "./types";
 import { Btn, PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
+import { useEverywherePermissions } from "../../lib/mePermissions";
 
 // Auditor B, cross-cutting: "Same silent-no-op failure repeats on every form
 // in the module." `disabled={create.isPending || !key || !name}` on both
@@ -55,6 +56,8 @@ export function ServiceDeskAdminPage() {
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("ticket.read");
   const canAdmin = permissions.includes("ticket.admin");
+  // Configuration every client shares (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
+  const canConfigure = useEverywherePermissions().has("ticket.admin");
 
   return (
     <div>
@@ -65,9 +68,9 @@ export function ServiceDeskAdminPage() {
       <ServiceDeskNav canRead={canRead} canAdmin={canAdmin} />
 
       <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr)" }}>
-        <QueuesPanel canAdmin={canAdmin} />
-        <CategoriesPanel canAdmin={canAdmin} />
-        <SavedRepliesPanel canAdmin={canAdmin} />
+        <QueuesPanel canAdmin={canConfigure} />
+        <CategoriesPanel canAdmin={canConfigure} />
+        <SavedRepliesPanel canAdmin={canConfigure} />
       </div>
     </div>
   );

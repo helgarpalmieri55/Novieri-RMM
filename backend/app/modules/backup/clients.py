@@ -24,8 +24,8 @@ and names only a repository of that client.
 LOCK ORDER (`app.services.client_sites`): the client, read FOR SHARE, is the
 FIRST lock of the write that calls these -- before any backup row and before
 the audit chain's -- which is the order an archive takes them in. The group
-is read before it; the stored policy and the repository after it; none of
-those reads takes a lock.
+is read before it; the stored policy after it, without a lock; the repository
+last, FOR SHARE (`policy_repository`: a retire holds it, phase 3 design §5.5).
 """
 
 from uuid import UUID
@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.i18n import N_, tr, tr_marked
 from app.models import DeviceGroup
 from app.models.clients import CLIENT_KIND_UNASSIGNED
-from app.modules.backup.models import BackupRepository
+from app.modules.backup.models import REPOSITORY_RETIRED, BackupRepository
 from app.services.client_sites import (
     ClientNotFound,
     NotAcceptingNewRows,
@@ -116,17 +116,27 @@ async def client_for_policy(
 async def policy_repository(
     session: AsyncSession, *, org_id: UUID, client_id: UUID, repository_id: UUID
 ) -> None:
-    """The repository a policy of `client_id` names is that client's: a 404
-    when this organisation has no such repository (or the session cannot see
-    it), a 422 when it is another client's."""
-    repository_client = (
+    """The repository a policy of `client_id` names is that client's, and is
+    not retired: a 404 when this organisation has no such repository (or the
+    session cannot see it), a 422 when it is another client's, a 409 when it
+    is retired (phase 3 design §5.5: the dispatch would refuse every window
+    of such a policy, so the write says so first).
+
+    Read FOR SHARE, the policy write's last lock before the audit chain's. A
+    retire holds the row FOR NO KEY UPDATE while it checks that no enabled
+    policy names it and writes the state (`repository.retire_repository`), so
+    the two serialise, and an enabled policy never lands on a repository that
+    a concurrent retire found unused."""
+    repository = (
         await session.execute(
-            select(BackupRepository.client_id).where(
-                BackupRepository.org_id == org_id, BackupRepository.id == repository_id
-            )
+            select(BackupRepository.client_id, BackupRepository.state)
+            .where(BackupRepository.org_id == org_id, BackupRepository.id == repository_id)
+            .with_for_update(read=True)
         )
-    ).scalar_one_or_none()
-    if repository_client is None:
+    ).one_or_none()
+    if repository is None:
         raise BackupClientError(404, tr("no such repository"))
-    if repository_client != client_id:
+    if repository.client_id != client_id:
         raise BackupClientError(422, tr("that repository belongs to another client"))
+    if repository.state == REPOSITORY_RETIRED:
+        raise BackupClientError(409, tr("that repository is retired"))

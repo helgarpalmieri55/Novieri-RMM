@@ -14,9 +14,12 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { setSelectedClient } from "./lib/clientChoice";
 
 const signIn = vi.fn();
 const completeSignIn = vi.fn();
@@ -127,6 +130,36 @@ describe("an unauthenticated visitor", () => {
     );
     expect(await screen.findByText("secret")).toBeInTheDocument();
     expect(signIn).not.toHaveBeenCalled();
+  });
+
+  it("starts the page again, on an empty cache, when the client changes (phase 3 design §1.4)", async () => {
+    isAuthenticated.mockReturnValue(true);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let mounts = 0;
+    function Secret() {
+      useEffect(() => {
+        mounts += 1;
+      }, []);
+      return <p>secret</p>;
+    }
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider>
+          <MemoryRouter>
+            <RequireAuth>
+              <Secret />
+            </RequireAuth>
+          </MemoryRouter>
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("secret")).toBeInTheDocument();
+    queryClient.setQueryData(["devices"], ["a device of every client"]);
+
+    act(() => setSelectedClient("6b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"));
+
+    await waitFor(() => expect(mounts).toBe(2));
+    expect(queryClient.getQueryData(["devices"])).toBeUndefined();
   });
 });
 

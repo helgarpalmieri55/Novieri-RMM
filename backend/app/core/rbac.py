@@ -59,8 +59,9 @@ PERMISSIONS: dict[str, str] = {
     "orgs.manage": "Manage organization settings, users, and roles",
     # Access control administration (spec 2026-08-19 §1). DELIBERATELY NOT
     # `orgs.manage`: that code's description has always promised "settings,
-    # users, and roles", but what it gates is the org name/settings PATCH and
-    # remote-tunnel authorization. Attaching identity lifecycle to it would
+    # users, and roles", but what it gates is the org name/settings PATCH (and
+    # gated remote-tunnel authorization until migration 0244 moved it to
+    # `remote.supervise`). Attaching identity lifecycle to it would
     # upgrade every current holder from "can rename the org" to "can mint a
     # fleet admin" -- a privilege escalation delivered by a description string,
     # in a migration nobody would look twice at.
@@ -99,6 +100,15 @@ PERMISSIONS: dict[str, str] = {
         "remote policy also allows them"
     ),
     "remote.privacy_blank": "Blank the physical console during a screen session",
+    # Phase 3 design §5.3 (migration 0244). Stopping or joining ANOTHER
+    # technician's session, asked on the session's client (its machine's) by
+    # `app/modules/remote/tunnel.py::owner_or_admin`. It rode on
+    # `orgs.manage` until then, a code that says nothing about remote
+    # control; 0244 granted it to every role holding `orgs.manage`, so nobody
+    # lost the power unawares. Admin tier: no technician role holds it.
+    "remote.supervise": (
+        "Stop or join another technician's remote session on a client's devices"
+    ),
     "patch.read": "View patch catalog, device patch status, and patch runs",
     "patch.scan": "Trigger patch scans on devices",
     "patch.approve": "Approve or revoke patches for deployment rings",

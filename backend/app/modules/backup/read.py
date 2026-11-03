@@ -51,7 +51,8 @@ from app.models import BackupPoint, BackupRepository, Job, RestoreJob
 # job states may still be doing work" is one platform-wide answer, and a second
 # copy of it is a second thing to drift: a state added to one exchange and not
 # the other would refuse a legitimate restore that a legitimate backup accepts.
-from app.modules.backup.dedup import _LIVE_JOB_STATUSES
+from app.modules.backup.dedup import _LIVE_JOB_STATUSES, refusal_client
+from app.modules.backup.models import REPOSITORY_ACTIVE, REPOSITORY_RETIRED
 from app.modules.backup.schedule import RESTORE_START_DEADLINE, grant_window_end
 
 
@@ -66,6 +67,11 @@ def _as_utc(ts: datetime) -> datetime:
 # lifetime would silently widen the signing window, which is the property being
 # controlled. The job's lifetime is still a CEILING, applied below.
 READ_GRANT_TTL = 900
+
+#: The repository states a restore may read (phase 3 design §5.5): a retired
+#: repository takes no new backup, and its points stay restorable. `dedup.py`
+#: still grants writes on `active` only.
+READABLE_STATES = frozenset({REPOSITORY_ACTIVE, REPOSITORY_RETIRED})
 
 
 @dataclass(frozen=True)
@@ -90,8 +96,11 @@ async def _audit_refusal(
 
     `reason` is a word from the fixed vocabulary used below -- never a suffix,
     never a key, never an exception message. This row is hash-chained and
-    permanent.
+    permanent. Its client is `dedup.refusal_client`'s (phase 3 design §5.5).
     """
+    client_id = await refusal_client(
+        session, org_id=org_id, device_id=device_id, job_id=job_id
+    )
     await audit_service.record(
         session,
         org_id=org_id,
@@ -103,6 +112,7 @@ async def _audit_refusal(
         # `job_id` is agent-supplied and may be anything the wire model allowed;
         # bounded here so a hostile value cannot bloat an audit row.
         metadata={"reason": reason, "job_id": job_id[:64]},
+        client_id=client_id,
     )
 
 
@@ -194,7 +204,7 @@ async def _resolve_restore(
     ).scalar_one_or_none()
     if repo is None:
         return None, "no_such_repository"
-    if repo.state != "active":
+    if repo.state not in READABLE_STATES:
         return None, "repository_not_active"
 
     return (

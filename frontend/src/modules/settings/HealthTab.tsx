@@ -31,11 +31,11 @@ import { Icon } from "../../shell/icons";
 import { NUMERIC_FIELDS } from "../health/fields";
 import { SETTING_BOUNDS } from "../health/types";
 import type { SettingsOut, SettingsUpdate } from "../health/types";
-import { useHealthSettings, useTicketCategories, useTicketQueues, useUpdateHealthSettingsMutation } from "./api";
+import { useHealthSettings, useTicketCategories, useTicketQueues, useUpdateHealthSettingsMutation, useGlobalWriteReason } from "./api";
 import { FOLDING_FORM_GRID } from "./formGrid";
 import { LoadFailure } from "./LoadFailure";
 import { SaveBar } from "./SaveBar";
-import { isDirty, isForbidden, parseIntegerField, permissionReason } from "./settingsState";
+import { isDirty, isForbidden, parseIntegerField } from "./settingsState";
 
 export const HEALTH_READ = "health.read";
 export const HEALTH_ADMIN = "health.admin";
@@ -91,6 +91,7 @@ function unresolvedId(
 
 export function HealthTab({ canRead, canAdmin }: { canRead: boolean; canAdmin: boolean }) {
   const t = useT();
+  const reason = useGlobalWriteReason(HEALTH_ADMIN);
   const settings = useHealthSettings(canRead);
   const update = useUpdateHealthSettingsMutation();
   // CROSS-MODULE READS (see `useTicketQueues`/`useTicketCategories` in
@@ -458,7 +459,7 @@ export function HealthTab({ canRead, canAdmin }: { canRead: boolean; canAdmin: b
             disabledReason={
               canAdmin
                 ? t("settings.health.correct")
-                : permissionReason(HEALTH_ADMIN)
+                : reason
             }
             dirty={dirty}
             pending={update.isPending}
