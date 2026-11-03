@@ -527,6 +527,8 @@ export interface DeviceListParams {
   osFamily?: Device["os_family"];
   /** One client's machines (`?client_id=`): what IPAM's sweeper picker lists. */
   clientId?: string;
+  /** One site's machines (`?site_id=`): the fleet list's site filter (MSP clients phase 3). */
+  siteId?: string;
   limit?: number;
   offset?: number;
 }
@@ -1953,6 +1955,7 @@ export class ApiClient {
     if (params.provenance) query.set("provenance", params.provenance);
     if (params.osFamily) query.set("os_family", params.osFamily);
     if (params.clientId) query.set("client_id", params.clientId);
+    if (params.siteId) query.set("site_id", params.siteId);
     if (params.limit != null) query.set("limit", String(params.limit));
     if (params.offset) query.set("offset", String(params.offset));
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
@@ -2036,6 +2039,19 @@ export class ApiClient {
     return this.request<Device>(`/devices/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * Move a device to another site of ITS client (`PATCH /devices/{id}` with
+   * `site_id`, `assets.manage`; MSP clients phase 3, design §4.3). Another
+   * client's site is a 422, an archived one a 409, one the request cannot see
+   * a 404. Audited `device.site_changed`. A device never changes client.
+   */
+  changeDeviceSite(deviceId: string, siteId: string): Promise<Device> {
+    return this.request<Device>(`/devices/${deviceId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ site_id: siteId }),
     });
   }
 

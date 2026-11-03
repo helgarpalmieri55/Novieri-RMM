@@ -176,6 +176,17 @@ export const inventory = {
     inspectAria: "Inspect {type} job issued {when}",
     inspect: "Inspect",
   },
+  // A device's site, and moving it inside its client (MSP clients phase 3, design §4.3).
+  site: {
+    label: "Site: {site}",
+    change: "Change site",
+    dialogTitle: "Move to another site",
+    dialogNote: "Only the sites of its own client are offered: a device never changes client.",
+    move: "Move",
+    moving: "Moving…",
+    moveFailed: "The device was not moved.",
+    unchanged: "Choose another of its client's sites.",
+  },
   software: {
     title: "Software",
     description: "What is installed across the fleet, from inventory.",

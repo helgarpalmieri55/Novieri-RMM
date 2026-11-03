@@ -174,6 +174,16 @@ export const inventory: Shape<typeof en> = {
     inspectAria: "Inspeccionar la tarea {type} emitida {when}",
     inspect: "Inspeccionar",
   },
+  site: {
+    label: "Sede: {site}",
+    change: "Cambiar de sede",
+    dialogTitle: "Mover a otra sede",
+    dialogNote: "Solo se ofrecen las sedes de su propio cliente: un dispositivo nunca cambia de cliente.",
+    move: "Mover",
+    moving: "Moviendo…",
+    moveFailed: "No se movió el dispositivo.",
+    unchanged: "Elige otra sede de su cliente.",
+  },
   software: {
     title: "Software",
     description: "Lo que está instalado en toda la flota, según el inventario.",

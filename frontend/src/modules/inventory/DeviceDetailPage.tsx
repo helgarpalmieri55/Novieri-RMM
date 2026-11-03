@@ -19,6 +19,7 @@ import { KIND_ICON } from "../../shell/viz";
 import { describeAge, isStuck, jobStatusKind } from "../jobs/jobState";
 import { DeviceActions, outcomeText, type ActionOutcome } from "./DeviceActions";
 import { DeviceOverview } from "./DeviceOverview";
+import { DeviceSite } from "./DeviceSite";
 import { alertLine, certificateLine, updatesLine, useDeviceSummary } from "./deviceSummary";
 import { jobTypeLabel } from "../jobs/jobTypes";
 import { DevicePatchTab } from "../patch/DevicePatchTab";
@@ -525,6 +526,15 @@ export function DeviceDetailPage() {
             them there (final review E), so the control waits for the row. */}
         {deviceId && device.data?.client_id ? (
           <DeviceAssignedTo deviceId={deviceId} clientId={device.data.client_id} />
+        ) : null}
+        {/* ITS SITE, and the move inside its client (design §4.3). */}
+        {device.data?.client_id && device.data.site_id ? (
+          <DeviceSite
+            device={device.data}
+            canMove={(me.data?.clients ?? []).some(
+              (client) => client.id === device.data?.client_id && client.permissions.includes("assets.manage"),
+            )}
+          />
         ) : null}
         {Object.entries(facts).map(([key, value]) => {
           const badge = factBadge(key, value);
