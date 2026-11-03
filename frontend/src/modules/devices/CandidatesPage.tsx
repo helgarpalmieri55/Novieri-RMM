@@ -53,6 +53,7 @@ import { translate } from "../../i18n/core";
 import { Trans } from "../../i18n/Trans";
 import { ScanSubnetDialog } from "./ScanSubnetDialog";
 import { SuggestionsPanel } from "./SuggestionsPanel";
+import { useAdoptJourneyClient } from "../onboarding/journeyTarget";
 import {
   FilterBar,
   PageHead,
@@ -149,6 +150,8 @@ class PromoteFailed extends Error {
 }
 
 export function CandidatesPage() {
+  // Opened from the add-a-computer journey: its client (design §4.4).
+  useAdoptJourneyClient();
   const t = useT();
   const api = useApi();
   const queryClient = useQueryClient();

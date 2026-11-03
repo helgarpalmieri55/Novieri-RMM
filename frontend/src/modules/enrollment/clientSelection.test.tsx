@@ -36,7 +36,7 @@ function site(id: string, clientId: string, name: string): ClientSiteOut {
   return { id, client_id: clientId, name, address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 };
 }
 
-function renderPage() {
+function renderPage(path = "/enrollment") {
   listEnrollmentTokens.mockResolvedValue({ items: [], total: 0, revoked_count: 0, unlimited_count: 0 });
   createEnrollmentToken.mockResolvedValue({
     id: "t1", name: "lab", token: "plain", expires_at: "2099-01-01T00:00:00Z", max_uses: 1,
@@ -54,7 +54,7 @@ function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/enrollment"]}>
+      <MemoryRouter initialEntries={[path]}>
         <EnrollmentPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -107,5 +107,21 @@ describe("an enrollment token's site", () => {
     expect(await screen.findByText(/Site is required/)).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(createEnrollmentToken).not.toHaveBeenCalled();
+  });
+
+  it("starts on the journey's site when opened from the add-a-computer journey (design §4.4)", async () => {
+    selectClient("c-acme");
+    const user = userEvent.setup();
+    renderPage("/enrollment?client=c-acme&site=site-a2");
+    await user.click(await screen.findByRole("button", { name: "Create token" }));
+    await waitFor(() => expect((screen.getByLabelText("Site") as HTMLSelectElement).value).toBe("site-a2"));
+    await user.type(screen.getByLabelText("Token name"), "lab");
+    await user.click(screen.getByRole("button", { name: "Issue token…" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Issue token" }));
+    await waitFor(() =>
+      expect(createEnrollmentToken).toHaveBeenCalledWith(expect.anything(), {
+        name: "lab", expires_in_hours: 72, max_uses: 1, site_id: "site-a2",
+      }),
+    );
   });
 });

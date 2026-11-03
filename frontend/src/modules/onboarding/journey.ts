@@ -42,6 +42,27 @@ export type StepState = "done" | "partial" | "blocked" | "unknown";
 
 export type StepKey = "register" | "authorize" | "sweep" | "review" | "agent";
 
+/** The URL parameters that carry the journey's client and site (design §4.4). */
+export const JOURNEY_CLIENT_PARAM = "client";
+export const JOURNEY_SITE_PARAM = "site";
+
+/** `client=…&site=…` (no `?`): what every page the journey opens is for. */
+export function journeyQuery(client: string, site: string | null): string {
+  const query = new URLSearchParams();
+  query.set(JOURNEY_CLIENT_PARAM, client);
+  if (site !== null) query.set(JOURNEY_SITE_PARAM, site);
+  return query.toString();
+}
+
+/** `to` with the journey's query added, before any `#fragment`. */
+export function withJourney(to: string, query: string): string {
+  if (query === "") return to;
+  const hash = to.indexOf("#");
+  const path = hash < 0 ? to : to.slice(0, hash);
+  const fragment = hash < 0 ? "" : to.slice(hash);
+  return `${path}${path.includes("?") ? "&" : "?"}${query}${fragment}`;
+}
+
 export interface JourneyStep {
   readonly key: StepKey;
   readonly title: string;
@@ -77,6 +98,12 @@ export interface JourneyInput {
     | undefined;
   readonly releases: readonly { readonly has_artifact: boolean }[] | undefined;
   readonly now?: number;
+  /**
+   * `client=…&site=…` (MSP clients phase 3, design §4.4), added to every
+   * step's destination so the page it opens works on that client and site.
+   * Absent or "" until both are known.
+   */
+  readonly linkQuery?: string;
 }
 
 function gate(permissions: readonly string[], code: string): string | null {
@@ -316,13 +343,14 @@ function agentStep(input: JourneyInput): JourneyStep {
 }
 
 export function journeySteps(input: JourneyInput): readonly JourneyStep[] {
+  const query = input.linkQuery ?? "";
   return [
     registerStep(input),
     authorizeStep(input),
     sweepStep(input),
     reviewStep(input),
     agentStep(input),
-  ];
+  ].map((step) => (step.to === null ? step : { ...step, to: withJourney(step.to, query) }));
 }
 
 /**

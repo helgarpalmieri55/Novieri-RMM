@@ -116,3 +116,48 @@ describe("where new machines go", () => {
     expect(api.getInstallLink).not.toHaveBeenCalled();
   });
 });
+
+// MSP clients phase 3, design §4.4: the add-a-computer journey links here with
+// `?client=…&site=…`. Its own history entry each, so every render is an arrival
+// (`onboarding/journeyTarget.ts` decides once per entry).
+describe("opened from the add-a-computer journey", () => {
+  function renderAt(path: string) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/", path]} initialIndex={1}>
+          <AgentReleasesPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("starts on the journey's site, for the link and the command", async () => {
+    selectClient("c-acme");
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderAt("/agent-packages?client=c-acme&site=site-a2");
+    await waitFor(() => expect(api.getInstallLink).toHaveBeenCalledWith("site-a2"));
+    await waitFor(() => expect((screen.getByLabelText("Site") as HTMLSelectElement).value).toBe("site-a2"));
+    await user.click(screen.getByRole("button", { name: /install command/i }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Generate command" }));
+    await waitFor(() => expect(api.generateAgentInstallCommand).toHaveBeenCalledWith(RELEASE.id, 4, "site-a2"));
+  });
+
+  it("with every client chosen, makes the console work on the journey's client", async () => {
+    const select = vi.fn();
+    mockClientScope.mockReturnValue({ selected: null, select, clients: [INTERNAL, ACME], ready: true });
+    stubApi();
+    renderAt("/agent-packages?client=c-acme&site=site-a2");
+    await waitFor(() => expect(select).toHaveBeenCalledWith("c-acme"));
+    expect(select).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores the journey's site under another client chosen at the top", async () => {
+    const api = stubApi();
+    renderAt("/agent-packages?client=c-acme&site=site-a2");
+    // The internal client's only site, never Acme's.
+    await waitFor(() => expect(api.getInstallLink).toHaveBeenCalledWith("site-o"));
+    expect(api.getInstallLink).not.toHaveBeenCalledWith("site-a2");
+  });
+});
