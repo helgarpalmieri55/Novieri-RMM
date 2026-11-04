@@ -18,10 +18,12 @@
  *   5. screenshots the full page to `frontend/.harmony/<lang>/<viewport>/<route>.png`,
  *      which is what the review wave reads against the prototype;
  *   6. measures the top bar's two edges (`chromeProblems`): the drawer toggle
- *      is a 44 to 70 px target, and the account menu ends 10 px clear of the
- *      screen's edge -- the client mark and the selector are what could push
- *      either out, and a page-scroll check alone cannot see a bar that
- *      clips or squeezes instead of scrolling.
+ *      is a 44 to 70 px target -- at least 60 where it carries the client
+ *      mark (390x844-client), so a mark that wrapped out of sight fails --
+ *      and the account menu ends 10 px clear of the screen's edge -- the
+ *      client mark and the selector are what could push either out, and a
+ *      page-scroll check alone cannot see a bar that clips or squeezes
+ *      instead of scrolling.
  *
  * THE ALLOWLIST IS READ FROM `src/index.css` WHEN THIS RUNS, never hardcoded
  * here: the tokens are transcribed from the design file and guarded by
@@ -159,20 +161,39 @@ const CHROME_IN_PAGE = () => {
 };
 
 /**
+ * Whether the viewport draws the client mark in the drawer toggle: a client
+ * chosen, on a handset (`src/shell/handset.ts`, 640 px), where `AppShell`
+ * hands the selector to the drawer and marks the toggle instead.
+ */
+export const markDrawn = (vp) => vp.client && vp.width <= 640;
+
+/**
  * What is wrong with the top bar's edges, as sentences; `[]` when nothing.
  *
  * The drawer toggle, wherever it is drawn: 44 to 70 px wide and at least 44
  * tall -- the client mark may widen it, never past 70, and a narrow phone
- * may clip it back, never below the 44 px target. The account menu: its right
- * edge at most `innerWidth - 10`, the bar's own padding, so nothing pushed it
- * to the edge of the screen or past it.
+ * may clip it back, never below the 44 px target. WHERE THE MARK IS DRAWN
+ * (`markDrawn(vp)`) the floor is 60: a mark that wrapped out of sight leaves
+ * the plain 44 px icon, which the band alone passed (phase 3 last fix round),
+ * and a bar that draws no toggle there has nowhere to show the client. The
+ * account menu: its right edge at most `innerWidth - 10`, the bar's own
+ * padding, so nothing pushed it to the edge of the screen or past it.
+ *
+ * `vp` is optional: without it only the band is asked.
  */
-export function chromeProblems(probe) {
+export function chromeProblems(probe, vp) {
   const problems = [];
+  const marked = vp !== undefined && markDrawn(vp);
   if (probe.toggle) {
     const { width, height } = probe.toggle;
-    if (width < 44 || width > 70) problems.push(`.nav-toggle is ${width}px wide (44-70)`);
+    if (marked) {
+      if (width < 60 || width > 70) problems.push(`.nav-toggle is ${width}px wide (60-70: the client mark is drawn)`);
+    } else if (width < 44 || width > 70) {
+      problems.push(`.nav-toggle is ${width}px wide (44-70)`);
+    }
     if (height < 44) problems.push(`.nav-toggle is ${height}px tall (at least 44)`);
+  } else if (marked && probe.topbar) {
+    problems.push(".nav-toggle is not drawn (the client mark needs it)");
   }
   if (probe.profileRight !== null && probe.profileRight > probe.innerWidth - 10) {
     problems.push(`.profile-btn ends at ${probe.profileRight}px, past innerWidth - 10 (${probe.innerWidth - 10})`);
@@ -692,7 +713,7 @@ async function walkApp(args, browser, server, allow) {
       result.widths = { scroll: overflow.scroll, client: overflow.client, inner: overflow.inner };
       if (overflow.scroll > overflow.client + 1) result.overflow = overflow;
       // ...and the top bar's own edges, which can be pushed without a scroll.
-      result.chromeProblems = chromeProblems(result.chrome);
+      result.chromeProblems = chromeProblems(result.chrome, vp);
 
       // 3. axe
       const report = await runAxe(page, axe);

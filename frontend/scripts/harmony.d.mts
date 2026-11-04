@@ -24,7 +24,10 @@ export interface ChromeProbe {
 }
 export declare const VIEWPORTS: Viewport[];
 export declare function viewportLabel(vp: Viewport): string;
-export declare function chromeProblems(probe: ChromeProbe): string[];
+/** The client mark is drawn in the drawer toggle: a client chosen, on a handset (640 px). */
+export declare function markDrawn(vp: Viewport): boolean;
+/** `vp` adds the 60 px floor where `markDrawn(vp)`; without it only the 44-70 band is asked. */
+export declare function chromeProblems(probe: ChromeProbe, vp?: Viewport): string[];
 export declare function parseColor(text: string): Rgba | null;
 export declare function readTokens(css: string): Map<string, string>;
 export declare function buildAllowlist(css: string): Allowlist;

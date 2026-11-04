@@ -15,7 +15,8 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { VIEWPORTS, chromeProblems, viewportLabel } from "../../scripts/harmony.mjs";
+import { VIEWPORTS, chromeProblems, markDrawn, viewportLabel } from "../../scripts/harmony.mjs";
+import type { Viewport } from "../../scripts/harmony.mjs";
 import { CHOSEN_CLIENT, PARAMS, ROUTES } from "../../scripts/routes.mjs";
 import { fixtureClient } from "../fixtures/client";
 import { isClientId } from "../lib/clientChoice";
@@ -91,5 +92,54 @@ describe("what the gate calls a broken top bar", () => {
   it("says nothing about a toggle the layout does not draw, or a page with no top bar", () => {
     expect(chromeProblems({ toggle: null, profileRight: 1416, innerWidth: 1440 })).toEqual([]);
     expect(chromeProblems({ toggle: null, profileRight: null, innerWidth: 1440 })).toEqual([]);
+  });
+});
+
+// Phase 3 last fix round, item 7. The 44-70 px band alone passed a phone bar
+// whose client mark had WRAPPED AWAY: the toggle then shrinks back to the
+// plain 44 px icon, and the one place the bar shows the client is gone. With
+// a client chosen on a handset the mark is drawn (`AppShell`'s `marked`), so
+// the toggle holds it: 68 px today (`shell.css`), never under 60.
+describe("the client mark on the phone, with a client chosen", () => {
+  const at = (width: number, client: boolean): Viewport => {
+    const found = VIEWPORTS.find((vp) => vp.width === width && vp.client === client);
+    if (!found) throw new Error(`no ${width} viewport with client ${String(client)}`);
+    return found;
+  };
+  const phone = { toggle: { width: 68, height: 44 }, profileRight: 380, innerWidth: 390, topbar: true };
+
+  it("is expected at 390x844-client only", () => {
+    expect(VIEWPORTS.filter(markDrawn).map(viewportLabel)).toEqual(["390x844-client"]);
+  });
+
+  it("passes the toggle holding it, 60 to 70 px", () => {
+    expect(chromeProblems(phone, at(390, true))).toEqual([]);
+    expect(chromeProblems({ ...phone, toggle: { width: 60, height: 44 } }, at(390, true))).toEqual([]);
+  });
+
+  it("refuses a toggle the mark wrapped out of: the plain 44 px icon", () => {
+    expect(chromeProblems({ ...phone, toggle: { width: 44, height: 44 } }, at(390, true))).toEqual([
+      ".nav-toggle is 44px wide (60-70: the client mark is drawn)",
+    ]);
+    expect(chromeProblems({ ...phone, toggle: { width: 59, height: 44 } }, at(390, true))).toEqual([
+      ".nav-toggle is 59px wide (60-70: the client mark is drawn)",
+    ]);
+  });
+
+  it("refuses a phone bar with a client chosen that draws no toggle at all", () => {
+    expect(chromeProblems({ ...phone, toggle: null }, at(390, true))).toEqual([
+      ".nav-toggle is not drawn (the client mark needs it)",
+    ]);
+    // A page with no top bar has no mark to draw.
+    expect(chromeProblems({ ...phone, toggle: null, topbar: false }, at(390, true))).toEqual([]);
+  });
+
+  it("asks nothing more of the plain icon where no mark is drawn", () => {
+    const plain = { ...phone, toggle: { width: 44, height: 44 } };
+    expect(chromeProblems(plain, at(390, false))).toEqual([]);
+    expect(chromeProblems({ ...plain, innerWidth: 641, profileRight: 630 }, at(641, true))).toEqual([]);
+    expect(chromeProblems({ toggle: null, profileRight: 1416, innerWidth: 1440, topbar: true }, at(1440, false))).toEqual(
+      [],
+    );
   });
 });
