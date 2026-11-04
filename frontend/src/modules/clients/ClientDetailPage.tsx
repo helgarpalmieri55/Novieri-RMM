@@ -6,6 +6,12 @@
  * and with another client's id this client does not exist for the request:
  * a 404 on every tab. So the page reads nothing and says which client the
  * console is working on, with the one act that fixes it.
+ *
+ * NOT BEFORE `/me` HAS ANSWERED (phase 3 final review C, T12 minor). On a
+ * cold deep link the top bar's choice is known first, and the page named that
+ * client by its raw id and offered "Work on all my clients" for one the
+ * person may well choose. While the scope is not ready the page reads nothing
+ * and decides nothing.
  */
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
@@ -40,7 +46,7 @@ export function ClientDetailPage() {
   const { clientId = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const tab = parseTab(params.get("tab"));
-  const { selected, select, clients } = useClientScope();
+  const { selected, select, clients, ready } = useClientScope();
   const elsewhere = selected !== null && selected !== clientId;
   const client = useClientRecord(clientId, !elsewhere);
 
@@ -49,6 +55,18 @@ export function ClientDetailPage() {
       {t("clients.detail.allClients")}
     </Link>
   );
+
+  if (elsewhere && !ready) {
+    // Which client is chosen, and whether this one could be, are `/me`'s.
+    return (
+      <>
+        <PageHead title={t("clients.detail.title")} actions={back} />
+        <QueryState loading error={null} empty={false} emptyLabel={t("clients.list.empty")}>
+          {null}
+        </QueryState>
+      </>
+    );
+  }
 
   if (elsewhere) {
     const reachable = clients.some((item) => item.id === clientId);
