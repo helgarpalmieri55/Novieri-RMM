@@ -1015,6 +1015,25 @@ describe("NewTicketDialog: the client of a ticket with no device", () => {
     expect(sentBody()).not.toHaveProperty("client_id");
   });
 
+  // Phase 3 final review B, Important 4: with Unassigned chosen at the top a
+  // ticket with no device would be filed under it and refused (422), and no Client field can
+  // help. The form says so instead of offering a Save that can only fail.
+  // A device decides the client, so with one the form is not refused.
+  it("with Unassigned chosen at the top and no device, says so instead of offering Save", async () => {
+    const user = userEvent.setup();
+    setSelectedClient("c-unassigned");
+    renderWithProviders(<NewTicketDialog open onClose={() => {}} />);
+    await fillTicket(user);
+    expect(screen.getByText("Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    expect(api.createTicket).not.toHaveBeenCalled();
+
+    await pickEntity(user, "Device (optional)", /BUILD-01/);
+    expect(screen.queryByText("Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+  });
+
   it("asks nothing with a client chosen in the top bar, and files it there", async () => {
     const user = userEvent.setup();
     setSelectedClient("o1");

@@ -11,7 +11,8 @@ import { EntityPicker } from "../../components/picker";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { parentClientOf, requireKnown, useNewRowClientField } from "../../lib/clientSelection";
+import { UnassignedRefusal } from "../clients/UnassignedRefusal";
 import {
   useCreateTicketMutation,
   useDirectoryDevices,
@@ -30,7 +31,7 @@ import type { TicketCreate, TicketOut, TicketType } from "./types";
 
 // The words ON SCREEN, so "Requester is required" reads back to the field
 // being looked at. `description` is absent: TicketCreate defaults it to "".
-// `clientId` only when the form asks for it (`useNewRowClient`).
+// `clientId` only when the form asks for it (`useNewRowClientField`).
 const ticketRules = (askClient: boolean) => (): readonly FieldRule[] => [
   ...(askClient ? [{ name: "clientId", label: translate("components.clientField.label") }] : []),
   { name: "categoryId", label: translate("serviceDesk.common.category") },
@@ -79,15 +80,17 @@ export function NewTicketDialog({
   const [requesterId, setRequesterId] = useState(myUserId ?? "");
   const [assignedTo, setAssignedTo] = useState("");
   const [deviceId, setDeviceId] = useState(initialDeviceId ?? "");
-  // The Client field's value: read only when the form asks for it.
-  const [clientId, setClientId] = useState("");
-  // THE TICKET'S CLIENT (phase 3 design §3.1, §4.5). With a device it is the
-  // device's -- the server takes it from the device and refuses a different
-  // one, so nothing is asked and nothing is sent. Without one: the client
-  // chosen in the top bar or, with "All my clients", the Client field, which
-  // offers only the clients where this person may file a ticket.
-  const deviceClient = devices.data?.find((device) => device.id === deviceId)?.client_id ?? null;
-  const newRow = useNewRowClient("ticket.write", deviceId ? deviceClient : undefined);
+  // THE TICKET'S CLIENT (phase 3 design §3.1, §4.5), through the shared hook
+  // (operator decision 2). With a device it is the device's -- the server
+  // takes it from the device and refuses a different one, so nothing is asked
+  // and nothing is sent; a device not found yet is no client yet, never "no
+  // device" (`parentClientOf`). Without one: the client chosen in the top bar
+  // or, with "All my clients", the Client field, which offers only the
+  // clients where this person may file a ticket.
+  const deviceRows = devices.data?.map((device) => ({ id: device.id, client_id: device.client_id ?? null }));
+  const ticketClient = useNewRowClientField("ticket.write", parentClientOf(deviceId, deviceRows));
+  // Unassigned chosen at the top and no device: nothing can be filed.
+  const refused = ticketClient.refused !== null;
   // Set ON SUBMIT, never while typing -- a complaint about a field the
   // technician has not reached yet is its own kind of unhelpful. Held as the
   // rules and the values they were checked against, so the sentences are
@@ -112,7 +115,7 @@ export function NewTicketDialog({
     setRequesterId(myUserId ?? "");
     setAssignedTo("");
     setDeviceId(initialDeviceId ?? "");
-    setClientId("");
+    ticketClient.setPicked("");
     setAttempt(null);
   }
 
@@ -136,10 +139,11 @@ export function NewTicketDialog({
   }
 
   function submit() {
-    const askClient = newRow.needsField;
+    if (refused) return;
+    const askClient = ticketClient.needsField;
     const next: Attempt = {
       rules: ticketRules(askClient),
-      values: { clientId, categoryId, subject, requesterId },
+      values: { clientId: ticketClient.clientId, categoryId, subject, requesterId },
     };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
@@ -164,7 +168,7 @@ export function NewTicketDialog({
     // from the device, so nothing is sent. Without one it names its client --
     // the one chosen in the top bar, or in the Client field above -- and
     // nothing is sent while that is not known (`requireKnown`).
-    const client = askClient ? clientId || null : newRow.clientId;
+    const client = ticketClient.clientId;
     const build = (): TicketCreate =>
       deviceId ? base : { ...base, client_id: requireKnown(client) };
     create.mutate(build, {
@@ -185,9 +189,7 @@ export function NewTicketDialog({
         <div className="form-grid">
           {/* With "All my clients" and no device, the person says whose ticket
               this is (Q1): never the internal client by default. */}
-          {newRow.needsField ? (
-            <ClientField code="ticket.write" value={clientId} onChange={setClientId} />
-          ) : null}
+          {ticketClient.needsField ? <ClientField field={ticketClient} /> : null}
           <Field label={t("serviceDesk.common.type")}>
             <select
               className={inputClass}
@@ -298,12 +300,16 @@ export function NewTicketDialog({
               the server's own failure comes from here too -- replacing the
               `{String(create.error)}` line that rendered a raw object and, for
               the bodyless 503, nothing at all. */}
-          <FormActions
-            label={t("common.actions.save")}
-            pending={create.isPending}
-            error={create.error}
-            problems={attemptProblems(attempt)}
-          />
+          {refused ? (
+            <UnassignedRefusal />
+          ) : (
+            <FormActions
+              label={t("common.actions.save")}
+              pending={create.isPending}
+              error={create.error}
+              problems={attemptProblems(attempt)}
+            />
+          )}
         </div>
       </Form>
     </Dialog>

@@ -7,7 +7,7 @@ import { EntityPicker } from "../../components/picker";
 import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import {
   useCreatePlanMutation,
   useProcedureArticles,
@@ -26,6 +26,7 @@ import {
   scopeGroupPickerOptions,
 } from "./pickerOptions";
 import type { PlanOut, PlanScopeEntry } from "./types";
+import { UnassignedRefusal } from "../clients/UnassignedRefusal";
 import { Icon } from "../../shell/icons";
 import { ADD_COMPUTER_TO } from "../../shell/nav";
 import { KIND_ICON } from "../../shell/viz";
@@ -143,15 +144,23 @@ export function PlanEditor({
   const t = useT();
   // A plan is one client's (MSP clients phase 2), and that client must use
   // continuity. An edit keeps its own; a new one is the client chosen at the
-  // top, or with every client the form's Client field (design §3.1).
-  const target = useNewRowClient("bcp.manage");
-  // The Client field's value, `""` until chosen: read only when it is shown.
-  const [pickedClient, setPickedClient] = useState("");
+  // top, or with every client the form's Client field (design §3.1), through
+  // the shared hook (operator decision 2). Another client's pick drops the
+  // scope and the procedures chosen so far: they were the last one's.
+  const clientField = useNewRowClientField("bcp.manage", undefined, {
+    onPick: () => {
+      setScope([]);
+      setProcedureRefs([]);
+    },
+  });
   const create = useCreatePlanMutation();
   const update = useUpdatePlanMutation();
 
   const existing = plan === "new" || plan == null ? null : plan;
-  const planClient = existing ? existing.client_id : target.needsField ? pickedClient || null : target.clientId;
+  // An edit keeps the plan's own client, outside the hook (review B "(A)").
+  const planClient = existing ? existing.client_id : clientField.clientId;
+  // Unassigned chosen at the top files no new plan.
+  const refused = !existing && clientField.refused !== null;
 
   const [name, setName] = useState(existing?.name ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
@@ -231,7 +240,7 @@ export function PlanEditor({
     setProcedureRefs([]);
     setProcedurePick("");
     setReviewIntervalDays("365");
-    setPickedClient("");
+    clientField.setPicked("");
     setAttempt(null);
   }
 
@@ -247,11 +256,12 @@ export function PlanEditor({
   }
 
   function submit() {
+    if (refused) return;
     const rto = rtoMinutes;
     const rpo = rpoMinutes;
     const scopeSnapshot = scope;
     // Only a new plan asks for its client: an edit keeps its own.
-    const askClient = !existing && target.needsField;
+    const askClient = !existing && clientField.needsField;
     const next: Attempt = {
       rules: () => [
         ...planRules(rto, rpo),
@@ -329,19 +339,7 @@ export function PlanEditor({
             convention once has learned it everywhere. */}
         <p className="note mb-3">{t("bcp.editor.requiredNote")}</p>
         <div className="form-grid">
-          {!existing && target.needsField ? (
-            <ClientField
-              code="bcp.manage"
-              value={pickedClient}
-              onChange={(id) => {
-                setPickedClient(id);
-                // Another client's devices, groups and articles: the scope and
-                // the procedures chosen so far were this one's.
-                setScope([]);
-                setProcedureRefs([]);
-              }}
-            />
-          ) : null}
+          {!existing && clientField.needsField ? <ClientField field={clientField} /> : null}
           <Field label={t("bcp.editor.nameRequired")} full>
             {/* `required` states the same fact for assistive tech. It blocks
                 nothing: <Form> is `noValidate`, because a native bubble that
@@ -540,12 +538,16 @@ export function PlanEditor({
               The server failure comes from here too, so a bodyless 503 still
               produces a sentence and `role="alert"` announces it, replacing
               the `{String(mutation.error)}` line that rendered a raw object. */}
-          <FormActions
-            label={t("bcp.editor.save")}
-            pending={mutation.isPending}
-            error={mutation.error}
-            problems={attemptProblems(attempt)}
-          />
+          {refused ? (
+            <UnassignedRefusal />
+          ) : (
+            <FormActions
+              label={t("bcp.editor.save")}
+              pending={mutation.isPending}
+              error={mutation.error}
+              problems={attemptProblems(attempt)}
+            />
+          )}
         </div>
       </Form>
     </Dialog>

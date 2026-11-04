@@ -2,10 +2,17 @@
 /**
  * Where a profile applies, and the console's one way to apply it: as a
  * client's default or as the organisation's (MSP clients phase 3, design
- * §5.1). `useNewRowClient` and `ClientField` are Task 9's and are replaced
- * here: what is pinned is the body this panel sends for each answer they give.
- * With `state.newRow` at `null` the real ones answer, from `useClientScope`'s
- * clients: that is how "health.admin in that client is enough" is pinned.
+ * §5.1). `useNewRowClientField` and `ClientField` are the console core's and
+ * are replaced here: what is pinned is the body this panel sends for each
+ * answer they give. With `state.newRow` at `null` the real ones answer, from
+ * `useClientScope`'s clients: that is how "health.admin in that client is
+ * enough" is pinned.
+ *
+ * THE PANEL MOVED TO THE SHARED HOOK (phase 3 final review D2), so the
+ * stand-in moved with it: `state.newRow` still says what the decision is
+ * (`clientId`, `needsField`, `options`), and the field's pick still comes from
+ * the stand-in `<select>`, now through the hook's own `setPicked` -- as the
+ * panel's own `chosen` state used to hold it.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
@@ -15,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setActiveLanguage } from "../../../i18n/core";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me, MeClient } from "../../../lib/api";
-import type { NewRowClient } from "../../../lib/clientSelection";
+import type { NewRowClient, NewRowClientField } from "../../../lib/clientSelection";
 import { appliedByLabel } from "../healthState";
 import { ProfileAssignments, describeAssignmentTarget } from "../ProfileAssignments";
 import { describeAssignments } from "../ProfileList";
@@ -38,20 +45,28 @@ vi.mock("../../../lib/clientSelection", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../lib/clientSelection")>();
   return {
     ...actual,
-    useNewRowClient: (code: string, parentClientId?: string | null) => {
-      const real = actual.useNewRowClient(code, parentClientId);
-      return state.newRow ?? real;
+    useNewRowClientField: (
+      code: string,
+      parentClientId?: string | null,
+      opts?: { onPick?: (clientId: string) => void },
+    ): NewRowClientField => {
+      const real = actual.useNewRowClientField(code, parentClientId, opts);
+      const decided = state.newRow;
+      if (decided === null) return real;
+      // The decision is the stand-in's; with a field, the client is its pick.
+      const clientId = decided.clientId ?? (decided.needsField ? real.picked || null : null);
+      return { ...real, clientId, needsField: decided.needsField, options: decided.options, refused: null };
     },
   };
 });
 vi.mock("../../../components/ClientField", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../components/ClientField")>();
   return {
-    ClientField: (props: { code: string; value: string; onChange: (id: string | null) => void }) =>
+    ClientField: (props: { field: NewRowClientField }) =>
       state.newRow === null ? (
         <actual.ClientField {...props} />
       ) : (
-        <select aria-label="Client" defaultValue="" onChange={(event) => props.onChange(event.target.value || null)}>
+        <select aria-label="Client" defaultValue="" onChange={(event) => props.field.setPicked(event.target.value)}>
           <option value="" />
           <option value="c-andes">Andes Logistics</option>
         </select>
@@ -309,6 +324,18 @@ describe("who may set a client's default", () => {
       }),
     );
     expect(deleteHealthAssignment).toHaveBeenCalledExactlyOnceWith("ha-xg");
+  });
+
+  // Phase 3 final review B, Important 4: with Unassigned chosen at the top a
+  // client default would be filed under it and refused (422), and no Client field can
+  // help. The form says so instead of offering a Save that can only fail.
+  it("with Unassigned chosen at the top, says no default can be assigned there", async () => {
+    const unassigned: MeClient = { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ["health.read", "health.admin"] };
+    state.selected = unassigned.id;
+    state.clients = [XOCHI, unassigned];
+    renderPanel({}, ["health.read", "health.admin"], { clients: [XOCHI, unassigned] });
+    expect(await screen.findByText("Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Assign" })).toBeNull();
   });
 
   it("does not offer the default of the client chosen above where the person lacks health.admin", async () => {

@@ -36,7 +36,8 @@ import { useApi } from "../../lib/ApiContext";
 import { formatDate } from "../../lib/datetime";
 import { ClientField } from "../../components/ClientField";
 import { useClientScope } from "../../lib/clientScope";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
+import { UnassignedRefusal } from "../clients/UnassignedRefusal";
 import { useClientName } from "../settings/api";
 import { humaniseEnum } from "../../lib/labels";
 import {
@@ -469,11 +470,11 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
   const create = useCreateSubscriptionMutation();
   // A subscription is one client's (MSP clients phase 2): its seats are held by
   // that client's people. The client chosen at the top, or with every client
-  // the dialog's Client field (design §3.1).
-  const target = useNewRowClient("subscriptions.manage");
-  // The Client field's value, `""` until chosen: read only when it is shown.
-  const [pickedClient, setPickedClient] = useState("");
-  const subscriptionClient = target.needsField ? pickedClient || null : target.clientId;
+  // the dialog's Client field (design §3.1), through the shared hook
+  // (operator decision 2). Unassigned chosen at the top files no new one.
+  const clientField = useNewRowClientField("subscriptions.manage");
+  const subscriptionClient = clientField.clientId;
+  const refused = clientField.refused !== null;
   const vendors = useVendorDirectory();
   const users = useOrgUsers();
 
@@ -513,7 +514,7 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
     setOwnerUserId("");
     setNoticeDaysValue("0");
     setAutoRenew(false);
-    setPickedClient("");
+    clientField.setPicked("");
     setAttempt(null);
   }
 
@@ -527,7 +528,8 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
   }
 
   function submit() {
-    const askClient = target.needsField;
+    if (refused) return;
+    const askClient = clientField.needsField;
     const next: Attempt = {
       rules: () => [
         ...subscriptionRules(),
@@ -588,9 +590,7 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
         <div className="form-grid">
           {/* With every client chosen, the person says whose subscription
               this is (design §3.1): never the internal client by default. */}
-          {target.needsField ? (
-            <ClientField code="subscriptions.manage" value={pickedClient} onChange={setPickedClient} />
-          ) : null}
+          {clientField.needsField ? <ClientField field={clientField} /> : null}
           <Field label={t("subscriptions.new.serviceName")} full>
             <input
               className={inputClass}
@@ -747,12 +747,16 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
           {/* Enabled with an empty Service name ON PURPOSE. `disabled={... ||
               !serviceName}` was the silent no-op the audit found: the click
               moved nothing and named no field. Now the click says which. */}
-          <FormActions
-            label={t("subscriptions.common.save")}
-            pending={create.isPending}
-            error={create.error}
-            problems={attemptProblems(attempt)}
-          />
+          {refused ? (
+            <UnassignedRefusal />
+          ) : (
+            <FormActions
+              label={t("subscriptions.common.save")}
+              pending={create.isPending}
+              error={create.error}
+              problems={attemptProblems(attempt)}
+            />
+          )}
         </div>
       </Form>
     </Dialog>
