@@ -2,6 +2,7 @@ import type { Shape } from "../types";
 import type { enrollment as en } from "../en/enrollment";
 
 export const enrollment: Shape<typeof en> = {
+  unassignedRefused: "El cliente elegido es «Sin asignar», y en él no se puede crear nada nuevo. Elige antes otro cliente.",
   page: {
     title: "Inscripción",
     description: "Los tokens que permiten que un equipo nuevo se una y los certificados que tienen los equipos.",
@@ -74,6 +75,9 @@ export const enrollment: Shape<typeof en> = {
     emptyAllRevoked: "Todos los tokens de inscripción que ha emitido esta organización están revocados. Marca «Mostrar los tokens revocados» para verlos.",
     emptyNone: "No se ha emitido ningún token de inscripción.",
     token: "Token",
+    client: "Cliente",
+    site: "Sede",
+    siteUnknown: "Sede desconocida",
     expires: "Caduca",
     uses: "Usos",
     state: "Estado",

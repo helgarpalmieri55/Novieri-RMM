@@ -6,16 +6,17 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
+import { ORG_ID } from "../../fixtures/core";
 import type { EnrollmentTokenListItem } from "./types";
 
 const HOUR = 60 * 60_000;
 const at = (hours: number): string => new Date(Date.now() + hours * HOUR).toISOString();
 
 const TOKENS: EnrollmentTokenListItem[] = [
-  { id: "tok-lis-ws", name: "Workstations · Lisbon", expires_at: at(23 * 24), max_uses: 40, use_count: 14, revoked: false },
-  { id: "tok-build", name: "Build runners", expires_at: at(5 * 24), max_uses: 10, use_count: 2, revoked: false },
-  { id: "tok-porto", name: "Porto rollout", expires_at: at(-2 * 24), max_uses: 25, use_count: 25, revoked: false },
-  { id: "tok-pilot", name: "Pilot ring (2025)", expires_at: at(-90 * 24), max_uses: 5, use_count: 5, revoked: true },
+  { id: "tok-lis-ws", name: "Workstations · Lisbon", expires_at: at(23 * 24), max_uses: 40, use_count: 14, revoked: false, client_id: ORG_ID, site_id: "site-lisbon" },
+  { id: "tok-build", name: "Build runners", expires_at: at(5 * 24), max_uses: 10, use_count: 2, revoked: false, client_id: ORG_ID, site_id: "site-lisbon" },
+  { id: "tok-porto", name: "Porto rollout", expires_at: at(-2 * 24), max_uses: 25, use_count: 25, revoked: false, client_id: ORG_ID, site_id: "site-porto" },
+  { id: "tok-pilot", name: "Pilot ring (2025)", expires_at: at(-90 * 24), max_uses: 5, use_count: 5, revoked: true, client_id: ORG_ID, site_id: "site-lisbon" },
 ];
 
 const listEnrollmentTokens: FixtureMap["listEnrollmentTokens"] = (params = {}) => {
