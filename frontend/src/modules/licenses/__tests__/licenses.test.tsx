@@ -684,6 +684,24 @@ describe("LicensesPage", () => {
     await waitFor(() => expect(api.createLicense).toHaveBeenCalledWith(expect.objectContaining({ client_id: "c-acme" })));
   });
 
+  // Phase 3 final review D, Important 2: the field offers only the clients
+  // where the person may MANAGE licenses, not every one they can read.
+  it("with every client chosen, offers only the clients holding licenses.manage, never Unassigned", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ["licenses.read", "licenses.manage"] },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ["licenses.read", "licenses.manage"] },
+      { id: "c-beta", name: "Beta", kind: "customer", enabled_modules: [], permissions: ["licenses.read"] },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ["licenses.read", "licenses.manage"] },
+    ]);
+    await openNewLicense();
+    const field = screen.getByLabelText("Client");
+    expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Novieri",
+      "Acme",
+    ]);
+  });
+
   // Design §3.4: with one client chosen every row is that client's.
   it("hides the Client column while one client is chosen at the top", async () => {
     selectClient("c-x");

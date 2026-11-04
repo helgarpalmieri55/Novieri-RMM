@@ -303,6 +303,24 @@ describe("PlanEditor form validation", () => {
     expect(screen.queryByRole("option", { name: /own-01/ })).toBeNull();
   });
 
+  // Phase 3 final review D, Important 2: the field offers only the clients
+  // where the person may MANAGE plans, not every one they can read.
+  it("with every client chosen, offers only the clients holding bcp.manage, never Unassigned", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["bcp"], permissions: ME.permissions },
+      { id: "c-beta", name: "Beta", kind: "customer", enabled_modules: ["bcp"], permissions: ["bcp.read"] },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: ["bcp"], permissions: ME.permissions },
+    ]);
+    renderEditor();
+    const field = screen.getByLabelText("Client");
+    expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Novieri",
+      "Acme",
+    ]);
+  });
+
   // Phase 3 review F4. `GET /devices` answers one page (100 by default):
   // filtered in the browser, the page read for every client could hold none
   // of the plan's client's machines, and the editor said "Add a computer" to

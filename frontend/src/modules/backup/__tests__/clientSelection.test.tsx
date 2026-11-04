@@ -24,6 +24,20 @@ function selectClient(selected: string | null): void {
   mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients: [INTERNAL, ACME], ready: true });
 }
 
+// Phase 3 final review D, Important 2: Beta's people may read, run and restore
+// its backups but not manage where they go; the Unassigned client is never offered.
+const BETA: MeClient = { id: "c-beta", name: "Beta", kind: "customer", enabled_modules: [], permissions: ["backup.read", "backup.run", "backup.restore"] };
+const UNASSIGNED: MeClient = { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: CODES };
+
+/** Every client chosen, among clients one of which only reads. */
+function selectEveryClientWithAReader(): void {
+  mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [INTERNAL, ACME, BETA, UNASSIGNED], ready: true });
+}
+
+function offered(field: HTMLElement): (string | null)[] {
+  return within(field).getAllByRole("option").map((option) => option.textContent);
+}
+
 function repository(overrides: Partial<Repository>): Repository {
   return { id: "r-o", client_id: "o1", name: "Own vault", storage_ref: "s3://own", state: "active", dedup_params: {}, created_at: "2026-08-01T00:00:00Z", ...overrides };
 }
@@ -85,6 +99,16 @@ describe("a new repository", () => {
     expect((api.createBackupRepository as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toMatchObject({ client_id: "c-acme", name: "Acme offsite" });
   });
 
+  it("with every client chosen, offers only the clients holding backup.policy.manage, never Unassigned", async () => {
+    selectEveryClientWithAReader();
+    stubApi();
+    const user = userEvent.setup();
+    renderIt(<RepositoriesPage />);
+    await user.click(await screen.findByRole("button", { name: /new repository/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(offered(within(dialog).getByLabelText("Client"))).toEqual(["Choose a client", "Novieri", "Acme"]);
+  });
+
   it("shows whose each repository is with every client chosen", async () => {
     selectClient(null);
     stubApi();
@@ -127,6 +151,16 @@ describe("a new client-default policy", () => {
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.upsertBackupPolicy).toHaveBeenCalled());
     expect((api.upsertBackupPolicy as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toMatchObject({ device_group_id: null, client_id: "c-acme", repository_id: "r-a" });
+  });
+
+  it("with every client chosen, offers for a client default only the clients holding backup.policy.manage", async () => {
+    selectEveryClientWithAReader();
+    stubApi();
+    const user = userEvent.setup();
+    renderIt(<BackupPolicyEditor />);
+    await user.click(await screen.findByRole("button", { name: /new policy/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(offered(within(dialog).getByLabelText("Client"))).toEqual(["Choose a client", "Novieri", "Acme"]);
   });
 
   it("with every client chosen and none picked yet, neither says the client has no repository nor links to make one", async () => {

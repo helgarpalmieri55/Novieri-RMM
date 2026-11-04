@@ -40,6 +40,17 @@ beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 const INTERNAL_CLIENT: MeClient = { ...SCOPE_INTERNAL, permissions: ["docs.read", "docs.manage"] };
 const ACME_CLIENT: MeClient = { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ["docs.read", "docs.manage"] };
+// Phase 3 final review D, Important 2: Beta's documentation may be READ here,
+// not written; and the Unassigned client is never offered.
+const BETA_READER: MeClient = { id: "c-beta", name: "Beta", kind: "customer", enabled_modules: [], permissions: ["docs.read"] };
+const UNASSIGNED_CLIENT: MeClient = {
+  id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ["docs.read", "docs.manage"],
+};
+const WITH_A_READER = [INTERNAL_CLIENT, ACME_CLIENT, BETA_READER, UNASSIGNED_CLIENT];
+
+function offered(field: HTMLElement): (string | null)[] {
+  return within(field).getAllByRole("option").map((option) => option.textContent);
+}
 
 const MANAGER: Me = {
   user_id: "u1",
@@ -130,6 +141,14 @@ describe("a new article", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(createArticle).toHaveBeenCalledTimes(1));
     expect(createArticle.mock.calls[0]?.[0]).toMatchObject({ title: "VPN", client_id: "c-acme" });
+  });
+
+  it("with every client chosen, offers only the clients holding docs.manage, never Unassigned", async () => {
+    selectClient(null, WITH_A_READER);
+    const user = userEvent.setup();
+    renderDocs({ createArticle: vi.fn() }, { ...MANAGER, clients: WITH_A_READER });
+    await user.click(await screen.findByRole("button", { name: "New article" }));
+    expect(offered(screen.getByLabelText("Client"))).toEqual(["Choose a client", "Novieri", "Acme"]);
   });
 
   it("hides the Client field once the article is for every client", async () => {
@@ -232,6 +251,15 @@ describe("a new record", () => {
     expect(createDocRecord.mock.calls[0]?.[0]).toMatchObject({ name: "VPN gateway", client_id: "c-acme" });
   });
 
+  it("with every client chosen, offers only the clients holding docs.manage, never Unassigned", async () => {
+    selectClient(null, WITH_A_READER);
+    const user = userEvent.setup();
+    renderDocs({ createDocRecord: vi.fn() }, { ...MANAGER, clients: WITH_A_READER });
+    await user.click(await screen.findByRole("button", { name: "New record" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(offered(within(dialog).getByLabelText("Client"))).toEqual(["Choose a client", "Novieri", "Acme"]);
+  });
+
   it("is the client chosen at the top's, or every client's when asked", async () => {
     const user = userEvent.setup();
     const createDocRecord = vi.fn().mockResolvedValue({ id: "r1" });
@@ -288,6 +316,15 @@ describe("a new document", () => {
     await user.click(within(dialog).getByRole("button", { name: "Upload" }));
     await waitFor(() => expect(createDocument).toHaveBeenCalledTimes(1));
     expect(createDocument.mock.calls[0]?.[0]).toMatchObject({ title: "Contract", client_id: "c-acme" });
+  });
+
+  it("with every client chosen, offers only the clients holding docs.manage, never Unassigned", async () => {
+    selectClient(null, WITH_A_READER);
+    const user = userEvent.setup();
+    renderDocs({ createDocument: vi.fn() }, { ...MANAGER, clients: WITH_A_READER });
+    await user.click(await screen.findByRole("button", { name: "Upload document" }));
+    const dialog = await screen.findByRole("dialog", { name: "Upload document" });
+    expect(offered(within(dialog).getByLabelText("Client"))).toEqual(["Choose a client", "Novieri", "Acme"]);
   });
 
   it("is the client chosen at the top's, or every client's when asked", async () => {

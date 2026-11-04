@@ -27,6 +27,20 @@ function selectClient(selected: string | null): void {
   mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients: CLIENTS, ready: true });
 }
 
+// Phase 3 final review D, Important 2: Beta's people may READ its devices but
+// neither organise them nor add assets; the Unassigned client is never offered.
+const BETA: MeClient = { id: "c-beta", name: "Beta", kind: "customer", enabled_modules: [], permissions: ["devices.read"] };
+const UNASSIGNED: MeClient = { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: CODES };
+
+/** Every client chosen, among clients one of which only reads. */
+function selectEveryClientWithAReader(): void {
+  mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [...CLIENTS, BETA, UNASSIGNED], ready: true });
+}
+
+function offered(field: HTMLElement): (string | null)[] {
+  return within(field).getAllByRole("option").map((option) => option.textContent);
+}
+
 const ME = { user_id: "u1", org_id: "o1", email: "a@b.c", display_name: "A", permissions: CODES, permissions_everywhere: [], clients: CLIENTS };
 
 function group(overrides: Partial<DeviceGroup>): DeviceGroup {
@@ -111,6 +125,16 @@ describe("a new device group", () => {
     expect(api.createDeviceGroup!.mock.calls[0]?.[0]).toMatchObject({ name: "desks", client_id: "c-acme" });
   });
 
+  it("with every client chosen, offers only the clients holding devices.manage, never Unassigned", async () => {
+    selectEveryClientWithAReader();
+    stubApi();
+    const user = userEvent.setup();
+    renderIt(<GroupsPage />);
+    await user.click(await screen.findByRole("button", { name: "New group" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(offered(within(dialog).getByLabelText("Client"))).toEqual(["Choose a client", "Novieri", "Acme"]);
+  });
+
   it("takes the parent group's client and stops asking once a parent is picked", async () => {
     selectClient(null);
     const api = stubApi();
@@ -183,6 +207,13 @@ describe("a hand-made asset", () => {
     await user.click(screen.getByRole("button", { name: /add asset/i }));
     await waitFor(() => expect(api.createAsset).toHaveBeenCalled());
     expect(api.createAsset!.mock.calls[0]?.[0]).toMatchObject({ site_id: "site-a" });
+  });
+
+  it("with every client chosen, offers only the clients holding assets.manage, never Unassigned", async () => {
+    selectEveryClientWithAReader();
+    stubApi();
+    renderIt(<AddAssetDialog open onClose={() => {}} />);
+    expect(offered(await screen.findByLabelText("Client"))).toEqual(["Choose a client", "Novieri", "Acme"]);
   });
 
   it("sends nothing without a site, and names the field", async () => {

@@ -3340,6 +3340,26 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     expect(bulkApprovePatches.mock.calls[0]?.[0]).toMatchObject({ client_id: "c-acme" });
   });
 
+  // Phase 3 final review D, Important 2: the bar's field offers only the
+  // clients where the person may APPROVE, not every one they can read.
+  it("with every client chosen, offers on the bar only the clients holding patch.approve, never Unassigned", async () => {
+    selectClient(null, [
+      ...MY_CLIENTS,
+      { id: "c-beta", name: "Beta", kind: "customer", enabled_modules: [], permissions: ["patch.read", "devices.read"] },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ME.permissions },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<FleetPatchPage />);
+    await screen.findByText("2023-10 Cumulative Update");
+    await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
+    const field = screen.getByLabelText("Client");
+    expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Novieri",
+      "Acme",
+    ]);
+  });
+
   it("states the selected client's machines by default, and every client's when asked", async () => {
     const user = userEvent.setup();
     const bulkApprovePatches = vi.fn().mockResolvedValue(bulkResult(["p1"], "test"));

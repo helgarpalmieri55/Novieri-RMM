@@ -468,6 +468,24 @@ describe("ChangeRequestForm", () => {
     );
   });
 
+  // Phase 3 final review D, Important 2: the field offers only the clients
+  // where the person may REQUEST a change, not every one they can read.
+  it("with every client chosen, offers only the clients holding change.request, never Unassigned", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["change"], permissions: ME.permissions },
+      { id: "c-beta", name: "Beta", kind: "customer", enabled_modules: ["change"], permissions: ["change.read"] },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: ["change"], permissions: ME.permissions },
+    ]);
+    renderNew();
+    const field = screen.getByLabelText("Client");
+    expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Novieri",
+      "Acme",
+    ]);
+  });
+
   it("sends nothing while it cannot name the client", async () => {
     const user = userEvent.setup();
     // `/me` has not answered, so the selector is not ready and no client is

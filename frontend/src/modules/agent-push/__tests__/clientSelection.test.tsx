@@ -19,14 +19,21 @@ vi.mock("../../../lib/clientScope", () => ({ useClientScope: () => mockClientSco
 const CODES = [AGENT_PUSH_SCOPE_MANAGE, "credentials.read", "agent.push.run"];
 const INTERNAL: MeClient = { id: "o1", name: "Novieri", kind: "internal", enabled_modules: [], permissions: CODES };
 const ACME: MeClient = { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: CODES };
+// Beta's technicians may push, but not open a prefix: it lacks the grant's own
+// code, `agent.push.scope.manage` (phase 3 final review D, Important 2).
+const BETA: MeClient = {
+  id: "c-beta", name: "Beta", kind: "customer", enabled_modules: [], permissions: ["credentials.read", "agent.push.run"],
+};
+const UNASSIGNED: MeClient = { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: CODES };
+const CLIENTS = [INTERNAL, ACME, BETA, UNASSIGNED];
 
 function selectClient(selected: string | null): void {
-  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients: [INTERNAL, ACME], ready: true });
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients: CLIENTS, ready: true });
 }
 
 function stubApi(overrides: Partial<Record<keyof ApiClient, unknown>> = {}) {
   const api = {
-    me: vi.fn().mockResolvedValue({ user_id: "u1", org_id: "o1", email: "a@b.c", display_name: "A", permissions: CODES, clients: [INTERNAL, ACME] }),
+    me: vi.fn().mockResolvedValue({ user_id: "u1", org_id: "o1", email: "a@b.c", display_name: "A", permissions: CODES, clients: CLIENTS }),
     listPushAuthorizations: vi.fn().mockResolvedValue([]),
     createPushAuthorization: vi.fn().mockResolvedValue({}),
     listPushCredentialScopes: vi.fn().mockResolvedValue([]),
@@ -68,6 +75,19 @@ describe("a push authorization", () => {
         client_id: "c-acme", prefix: "10.4.7.0/24", note: "", expires_at: null,
       }),
     );
+  });
+
+  it("with every client chosen, offers only the clients where the person may open a prefix", async () => {
+    selectClient(null);
+    stubApi();
+    renderIt(<PushAuthorizationsPage />);
+    const field = await screen.findByLabelText("Client");
+    // Beta holds `agent.push.run` but not `agent.push.scope.manage`; Unassigned is never offered.
+    expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Novieri",
+      "Acme",
+    ]);
   });
 
   it("with every client chosen, asks for the client and authorizes the prefix in it", async () => {
