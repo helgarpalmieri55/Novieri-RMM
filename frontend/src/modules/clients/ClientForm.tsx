@@ -41,6 +41,10 @@ export function ClientFormDialog({
   const [notes, setNotes] = useState(client?.notes ?? "");
   const [modules, setModules] = useState<ReadonlySet<OptionalModule>>(new Set());
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // THE UNASSIGNED CLIENT TAKES NO EMAIL DOMAINS (phase 3 final review C, T12
+  // minor): a typed one is the server's 422. The field is not offered and the
+  // edit sends none.
+  const takesDomains = client?.kind !== "unassigned";
 
   function toggle(module: OptionalModule) {
     setModules((current) => {
@@ -58,17 +62,21 @@ export function ClientFormDialog({
     if (attemptProblems(next).length > 0) return;
     const fields = {
       name: name.trim(),
-      email_domains: parseDomains(domains),
       phone: phone.trim(),
       address: address.trim(),
       website: website.trim(),
       notes,
     };
+    const emailDomains = parseDomains(domains);
     if (client) {
-      update.mutate(fields, { onSuccess: onSaved });
+      update.mutate(takesDomains ? { ...fields, email_domains: emailDomains } : fields, { onSuccess: onSaved });
     } else {
       create.mutate(
-        { ...fields, enabled_modules: OPTIONAL_MODULES.filter((module) => modules.has(module)) },
+        {
+          ...fields,
+          email_domains: emailDomains,
+          enabled_modules: OPTIONAL_MODULES.filter((module) => modules.has(module)),
+        },
         { onSuccess: onSaved },
       );
     }
@@ -85,14 +93,16 @@ export function ClientFormDialog({
           <Field label={t("clients.form.name")}>
             <input className={inputClass} value={name} onChange={(event) => setName(event.target.value)} />
           </Field>
-          <Field label={t("clients.form.emailDomains")} help={t("clients.form.emailDomainsHelp")} full>
-            <textarea
-              className={inputClass}
-              rows={3}
-              value={domains}
-              onChange={(event) => setDomains(event.target.value)}
-            />
-          </Field>
+          {takesDomains ? (
+            <Field label={t("clients.form.emailDomains")} help={t("clients.form.emailDomainsHelp")} full>
+              <textarea
+                className={inputClass}
+                rows={3}
+                value={domains}
+                onChange={(event) => setDomains(event.target.value)}
+              />
+            </Field>
+          ) : null}
           <Field label={t("clients.form.phone")}>
             <input className={inputClass} value={phone} onChange={(event) => setPhone(event.target.value)} />
           </Field>

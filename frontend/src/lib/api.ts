@@ -1683,10 +1683,14 @@ export class ApiClient {
    * `localeCompare` can disagree with the evaluator about which rule claims a
    * device -- which is the console answering a question the server decides
    * differently.
+   *
+   * `client_id` asks for one client's groups (phase 3 final review A6): it
+   * only narrows, and a client outside the caller's scope is an empty list.
    */
-  listDeviceGroups(params: { include_archived?: boolean } = {}): Promise<DeviceGroupPage> {
+  listDeviceGroups(params: { include_archived?: boolean; client_id?: string } = {}): Promise<DeviceGroupPage> {
     const query = new URLSearchParams();
     if (params.include_archived) query.set("include_archived", "true");
+    if (params.client_id) query.set("client_id", params.client_id);
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.request<DeviceGroupPage>(`/device-groups${suffix}`);
   }
@@ -2322,11 +2326,17 @@ export class ApiClient {
     return this.request<SecurityEventDetail>(`/security-events/${id}`);
   }
 
+  /**
+   * `client_id` asks for that client's articles AND every client's -- what a
+   * record of that client may link (phase 3 final review A6). It only
+   * narrows: a client outside the caller's scope is an empty list.
+   */
   listArticles(params: {
     category?: string;
     target_type?: string;
     target_id?: string;
     include_archived?: boolean;
+    client_id?: string;
   } = {}): Promise<Page<DocArticleListItem>> {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
@@ -2340,31 +2350,49 @@ export class ApiClient {
     return this.request<DocArticle>(`/docs/articles/${id}`);
   }
 
+  /**
+   * A new article. WITHOUT A CLIENT IT IS EVERY CLIENT'S, a global row, and so
+   * global BY ITS BODY (`RequestRoute.global`): narrowed by `X-Client-Id` the
+   * server refuses it (403, `core/global_rows.py`) even to someone with every
+   * client who simply has one chosen in the top bar. The server still requires
+   * `docs.manage` on every client for it.
+   */
   createArticle(body: DocArticleInput & NewDocClient): Promise<DocArticle> {
-    return this.request<DocArticle>("/docs/articles", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.request<DocArticle>(
+      "/docs/articles",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id == null },
+    );
   }
 
-  updateArticle(id: string, body: DocArticleInput): Promise<DocArticle> {
-    return this.request<DocArticle>(`/docs/articles/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
+  /**
+   * The writes to an EXISTING article (and the document writes below) say
+   * whether the row is every client's: `global` is the row's `client_id ===
+   * null`, which only the caller holding the row knows. A global row's write
+   * goes without `X-Client-Id`, for the reason `createArticle` gives.
+   */
+  updateArticle(id: string, body: DocArticleInput, { global }: { global: boolean }): Promise<DocArticle> {
+    return this.request<DocArticle>(
+      `/docs/articles/${id}`,
+      { method: "PUT", body: JSON.stringify(body) },
+      { global },
+    );
   }
 
-  archiveArticle(id: string): Promise<{ archived: boolean }> {
-    return this.request<{ archived: boolean }>(`/docs/articles/${id}/archive`, {
-      method: "POST",
-    });
+  archiveArticle(id: string, { global }: { global: boolean }): Promise<{ archived: boolean }> {
+    return this.request<{ archived: boolean }>(`/docs/articles/${id}/archive`, { method: "POST" }, { global });
   }
 
-  setArticlePortalVisibility(id: string, portalVisible: boolean): Promise<{ portal_visible: boolean }> {
-    return this.request<{ portal_visible: boolean }>(`/docs/articles/${id}/portal-visibility`, {
-      method: "PUT",
-      body: JSON.stringify({ portal_visible: portalVisible }),
-    });
+  setArticlePortalVisibility(
+    id: string,
+    portalVisible: boolean,
+    { global }: { global: boolean },
+  ): Promise<{ portal_visible: boolean }> {
+    return this.request<{ portal_visible: boolean }>(
+      `/docs/articles/${id}/portal-visibility`,
+      { method: "PUT", body: JSON.stringify({ portal_visible: portalVisible }) },
+      { global },
+    );
   }
 
   articleVersions(id: string): Promise<DocVersion[]> {
@@ -2396,10 +2424,12 @@ export class ApiClient {
       fields: Record<string, unknown>;
     } & NewDocClient,
   ): Promise<DocRecordOut> {
-    return this.request<DocRecordOut>("/docs/records", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    // Without a client, every client's: global by its body (`createArticle`).
+    return this.request<DocRecordOut>(
+      "/docs/records",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id == null },
+    );
   }
 
   searchDocs(q: string): Promise<DocSearchHit[]> {
@@ -2450,23 +2480,25 @@ export class ApiClient {
   }
 
   createDocument(body: DocDocumentInput & NewDocClient): Promise<DocDocument> {
-    return this.request<DocDocument>("/docs/documents", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    // Without a client, every client's: global by its body (`createArticle`).
+    return this.request<DocDocument>(
+      "/docs/documents",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id == null },
+    );
   }
 
-  updateDocument(id: string, body: DocDocumentInput): Promise<DocDocument> {
-    return this.request<DocDocument>(`/docs/documents/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
+  /** `global`: the document is every client's (see `updateArticle`). */
+  updateDocument(id: string, body: DocDocumentInput, { global }: { global: boolean }): Promise<DocDocument> {
+    return this.request<DocDocument>(
+      `/docs/documents/${id}`,
+      { method: "PUT", body: JSON.stringify(body) },
+      { global },
+    );
   }
 
-  archiveDocument(id: string): Promise<{ archived: boolean }> {
-    return this.request<{ archived: boolean }>(`/docs/documents/${id}/archive`, {
-      method: "POST",
-    });
+  archiveDocument(id: string, { global }: { global: boolean }): Promise<{ archived: boolean }> {
+    return this.request<{ archived: boolean }>(`/docs/documents/${id}/archive`, { method: "POST" }, { global });
   }
 
   documentVersions(id: string): Promise<DocDocumentVersion[]> {
@@ -2485,8 +2517,11 @@ export class ApiClient {
   // every header (`filetypes.py::sniff`); "a file whose content-type lies" is
   // a sentence that cannot be formed against this route (§0.5). It is set
   // only so proxies do not attempt a transformation on the body.
-  async uploadDocumentVersion(id: string, file: File): Promise<DocDocumentVersion> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/docs/documents/${id}/versions`));
+  //
+  // `global`: the document is every client's (see `updateArticle`); a version
+  // is a row under it, refused narrowed like the document itself.
+  async uploadDocumentVersion(id: string, file: File, { global }: { global: boolean }): Promise<DocDocumentVersion> {
+    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/docs/documents/${id}/versions`, global));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(
       `${this.base}/docs/documents/${id}/versions?filename=${encodeURIComponent(file.name)}`,
@@ -2531,27 +2566,32 @@ export class ApiClient {
     return response.blob();
   }
 
-  purgeDocumentVersion(id: string, version: number): Promise<{ purged: boolean }> {
+  purgeDocumentVersion(id: string, version: number, { global }: { global: boolean }): Promise<{ purged: boolean }> {
     return this.request<{ purged: boolean }>(
       `/docs/documents/${id}/versions/${version}/purge`,
       { method: "POST" },
+      { global },
     );
   }
 
   addDocumentLink(
     id: string,
     link: { target_type: string; target_id: string },
+    { global }: { global: boolean },
   ): Promise<DocLink> {
-    return this.request<DocLink>(`/docs/documents/${id}/links`, {
-      method: "POST",
-      body: JSON.stringify(link),
-    });
+    return this.request<DocLink>(
+      `/docs/documents/${id}/links`,
+      { method: "POST", body: JSON.stringify(link) },
+      { global },
+    );
   }
 
-  removeDocumentLink(id: string, linkId: string): Promise<{ removed: boolean }> {
-    return this.request<{ removed: boolean }>(`/docs/documents/${id}/links/${linkId}`, {
-      method: "DELETE",
-    });
+  removeDocumentLink(id: string, linkId: string, { global }: { global: boolean }): Promise<{ removed: boolean }> {
+    return this.request<{ removed: boolean }>(
+      `/docs/documents/${id}/links/${linkId}`,
+      { method: "DELETE" },
+      { global },
+    );
   }
 
   listCredentials(): Promise<Credential[]> {
@@ -2945,12 +2985,19 @@ export class ApiClient {
    *
    * A patch id that is not this org's refuses the WHOLE batch with 404, so a
    * refused call leaves nothing partly cleared.
+   *
+   * WITHOUT A CLIENT THE APPROVALS ARE EVERY CLIENT'S ("For every client"), a
+   * global row, so the request is global BY ITS BODY (`RequestRoute.global`):
+   * narrowed by `X-Client-Id` the server refuses it (403) even to someone with
+   * every client who has one chosen in the top bar. It still requires
+   * `patch.approve` on every client.
    */
   bulkApprovePatches(body: BulkApprovalCreateRequest): Promise<BulkApprovalResponse> {
-    return this.request<BulkApprovalResponse>("/patch/approvals/bulk", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.request<BulkApprovalResponse>(
+      "/patch/approvals/bulk",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id == null },
+    );
   }
 
   /**
@@ -2989,9 +3036,13 @@ export class ApiClient {
    * The id this takes was unobtainable until `listPatchApprovals` existed —
    * the route has been in the module since it shipped and had never been
    * callable.
+   *
+   * `global`: the approval is every client's (`client_id` null), so the
+   * revoke goes without `X-Client-Id`, for the reason `bulkApprovePatches`
+   * gives.
    */
-  revokePatchApproval(approvalId: string): Promise<void> {
-    return this.request<void>(`/patch/approvals/${approvalId}`, { method: "DELETE" });
+  revokePatchApproval(approvalId: string, { global }: { global: boolean }): Promise<void> {
+    return this.request<void>(`/patch/approvals/${approvalId}`, { method: "DELETE" }, { global });
   }
 
   listPatchPolicies(): Promise<PatchPolicy[]> {
@@ -3897,11 +3948,18 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Stop reconciling a discovered title: for one client's computers
+   * (`client_id`), or WITHOUT ONE for every client's, a global row and so
+   * global BY ITS BODY (`RequestRoute.global`): narrowed by `X-Client-Id` the
+   * server refuses it (403, `core/global_rows.py`).
+   */
   ignoreSoftware(body: ReviewIgnoreRequest): Promise<ReviewIgnoreOut> {
-    return this.request<ReviewIgnoreOut>("/licenses/review-queue/ignore", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.request<ReviewIgnoreOut>(
+      "/licenses/review-queue/ignore",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id == null },
+    );
   }
 
   licenseRenewals(withinDays?: number): Promise<RenewalRow[]> {
@@ -4883,26 +4941,35 @@ export class ApiClient {
     return this.request<SlaPolicyOut[]>("/sla/policies");
   }
 
+  /**
+   * A new SLA policy: one client's (`client_id`), or WITHOUT ONE every
+   * client's, a global row and so global BY ITS BODY (`RequestRoute.global`):
+   * narrowed by `X-Client-Id` the server refuses it (403,
+   * `core/global_rows.py`). It still requires `sla.admin` on every client.
+   */
   createSlaPolicy(body: SlaPolicyCreate): Promise<SlaPolicyOut> {
-    return this.request<SlaPolicyOut>("/sla/policies", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.request<SlaPolicyOut>(
+      "/sla/policies",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id == null },
+    );
   }
 
   getSlaPolicy(id: string): Promise<SlaPolicyOut> {
     return this.request<SlaPolicyOut>(`/sla/policies/${id}`);
   }
 
-  updateSlaPolicy(id: string, body: SlaPolicyUpdate): Promise<SlaPolicyOut> {
-    return this.request<SlaPolicyOut>(`/sla/policies/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    });
+  /** `global`: the policy is every client's (`client_id` null); see `createSlaPolicy`. */
+  updateSlaPolicy(id: string, body: SlaPolicyUpdate, { global }: { global: boolean }): Promise<SlaPolicyOut> {
+    return this.request<SlaPolicyOut>(
+      `/sla/policies/${id}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+      { global },
+    );
   }
 
-  deleteSlaPolicy(id: string): Promise<void> {
-    return this.request<void>(`/sla/policies/${id}`, { method: "DELETE" });
+  deleteSlaPolicy(id: string, { global }: { global: boolean }): Promise<void> {
+    return this.request<void>(`/sla/policies/${id}`, { method: "DELETE" }, { global });
   }
 
   getSlaSettings(): Promise<SlaSettingsOut> {

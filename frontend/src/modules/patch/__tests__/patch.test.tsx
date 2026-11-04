@@ -2113,8 +2113,27 @@ describe("FleetPatchPage approvals", () => {
     await user.click(within(confirm).getByRole("button", { name: "Revoke approval" }));
 
     // THE WHOLE POINT OF THE LIST. This id existed nowhere a console could
-    // reach before `GET /patch/approvals`.
-    expect(api.revokePatchApproval).toHaveBeenCalledExactlyOnceWith("a1");
+    // reach before `GET /patch/approvals`. And this approval is every
+    // client's, so the revoke goes without the top bar's client (phase 3
+    // final review D2): narrowed, the server refuses it.
+    expect(api.revokePatchApproval).toHaveBeenCalledExactlyOnceWith("a1", { global: true });
+  });
+
+  it("revokes a client's approval narrowed like any other write", async () => {
+    const api = approvalsApi({
+      listPatchApprovals: vi.fn().mockResolvedValue({ items: [{ ...APPROVAL, client_id: "o1" }], total: 1 }),
+    });
+    mockUseApi.mockReturnValue(api as ApiClient);
+    const user = userEvent.setup();
+    renderWithProviders(<FleetPatchPage />);
+
+    await findApprovalRow("a1");
+    await user.click(within(approvalRow("a1")).getByRole("button", { name: /more actions/i }));
+    await user.click(screen.getByRole("menuitem", { name: "Revoke" }));
+    const confirm = await screen.findByRole("dialog", { name: "Revoke patch approval" });
+    await user.click(within(confirm).getByRole("button", { name: "Revoke approval" }));
+
+    expect(api.revokePatchApproval).toHaveBeenCalledExactlyOnceWith("a1", { global: false });
   });
 
   it("shows the approval as revoked afterwards without a manual refresh", async () => {
@@ -3384,6 +3403,60 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     expect(toggle.closest("label")).toHaveTextContent(
       "Ticked, these updates become installable on every client's machines in the test ring. Unticked, only on the machines of Acme.",
     );
+  });
+
+  // Phase 3 final review D2 (review C, Important 1): the bar had no "Client
+  // is required" rule, so an empty field reached the confirmation and was
+  // refused there with `ClientNotChosen`. It is named on Approve now, like any
+  // required field, and nothing opens or is sent.
+  it("with every client chosen and the bar's field empty, names the Client field on Approve and sends nothing", async () => {
+    selectClient(null, MY_CLIENTS);
+    const user = userEvent.setup();
+    const bulkApprovePatches = vi.fn();
+    api = { bulkApprovePatches };
+    renderWithProviders(<FleetPatchPage />);
+    await screen.findByText("2023-10 Cumulative Update");
+    await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
+    expect(screen.getByLabelText("Client")).toHaveValue("");
+
+    await user.click(screen.getByRole("button", { name: /^Approve 1 update/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(bulkApprovePatches).not.toHaveBeenCalled();
+
+    // Picking one clears the complaint.
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  // Phase 3 final review B, Important 4: with Unassigned chosen at the top an
+  // approval would be filed under it and refused. The bar says so instead of
+  // offering Approve; an approval for every client is not Unassigned's, so
+  // ticking "For every client" brings Approve back, and it goes with no client.
+  it("with Unassigned chosen at the top, says so instead of offering Approve, until it is for every client", async () => {
+    const unassigned: MeClient = {
+      id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ME.permissions,
+    };
+    selectClient(unassigned.id, [...MY_CLIENTS, unassigned]);
+    const user = userEvent.setup();
+    const bulkApprovePatches = vi.fn().mockResolvedValue(bulkResult(["p1"], "test"));
+    api = { me: vi.fn().mockResolvedValue({ ...ME, permissions_everywhere: ME.permissions }), bulkApprovePatches };
+    renderWithProviders(<FleetPatchPage />);
+    await screen.findByText("2023-10 Cumulative Update");
+    await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
+
+    expect(
+      screen.getByText(
+        "Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Approve 1 update/ })).toBeNull();
+
+    await user.click(await screen.findByRole("checkbox", { name: /For every client/ }));
+    const confirm = await openApproval(user);
+    await user.click(within(confirm).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(bulkApprovePatches).toHaveBeenCalledTimes(1));
+    expect(bulkApprovePatches.mock.calls[0]?.[0]).not.toHaveProperty("client_id");
   });
 
   it("states the selected client's machines by default, and every client's when asked", async () => {

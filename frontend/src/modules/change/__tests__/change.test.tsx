@@ -488,6 +488,24 @@ describe("ChangeRequestForm", () => {
     expect(api.createChange).not.toHaveBeenCalled();
   });
 
+  // Phase 3 final review B, Important 4: with Unassigned chosen at the top a
+  // new row would be filed under it and refused (422), and no Client field can
+  // help. The form says so instead of offering a Save that can only fail.
+  it("with Unassigned chosen at the top, says so instead of offering Save", async () => {
+    selectClient("c-unassigned", [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ME.permissions },
+    ]);
+    const user = userEvent.setup();
+    renderNew();
+    await user.type(screen.getByLabelText("Title *"), "Upgrade switch firmware");
+    expect(screen.getByText("Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await user.type(screen.getByLabelText("Title *"), "{Enter}");
+    expect(api.createChange).not.toHaveBeenCalled();
+  });
+
   // Phase 3 final review D, Important 2: the field offers only the clients
   // where the person may REQUEST a change, not every one they can read.
   it("with every client chosen, offers only the clients holding change.request, never Unassigned", async () => {

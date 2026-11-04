@@ -257,8 +257,11 @@ export const sla: Shape<typeof en> = {
     add: "Añadir política",
     forbidden: "Las políticas no están disponibles (permisos insuficientes).",
     failed: "No se pudieron cargar las políticas. {reason}",
+    colClient: "Cliente",
     colOnBreach: "Al incumplirse",
     colActive: "Activa",
+    forEveryClientHint:
+      "Marcada, mide los tickets de todos los clientes que no tienen una política activa propia. Sin marcar, solo los tickets del cliente en el que se archiva.",
     empty: "Todavía no hay políticas: sin ninguna configurada, ningún ticket tiene SLA.",
     deleteTitle: "Eliminar la política de SLA",
     deleteBody:

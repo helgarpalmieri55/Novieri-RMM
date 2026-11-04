@@ -203,8 +203,11 @@ export function useSlaPolicies() {
 export function useCreateSlaPolicyMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<PolicyOut, ApiError, PolicyCreate>({
-    mutationFn: (body) => api.createSlaPolicy(body),
+  // The body is BUILT HERE, inside the mutation: a policy whose client is
+  // not known yet throws `ClientNotChosen` (`lib/clientSelection.ts`), which
+  // fails the mutation, so the form says why and nothing is sent.
+  return useMutation<PolicyOut, ApiError, () => PolicyCreate>({
+    mutationFn: (build) => api.createSlaPolicy(build()),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["sla-policies"] });
     },
@@ -216,8 +219,10 @@ export function useCreateSlaPolicyMutation() {
 export function useUpdateSlaPolicyMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<PolicyOut, ApiError, { id: string; body: PolicyUpdate }>({
-    mutationFn: ({ id, body }) => api.updateSlaPolicy(id, body),
+  // `global`: the policy is every client's, written without the top bar's
+  // client (`ApiClient.updateSlaPolicy`): narrowed, the server refuses it.
+  return useMutation<PolicyOut, ApiError, { id: string; body: PolicyUpdate; global: boolean }>({
+    mutationFn: ({ id, body, global }) => api.updateSlaPolicy(id, body, { global }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["sla-policies"] });
       void queryClient.invalidateQueries({ queryKey: ["sla-ticket"] });
@@ -230,8 +235,9 @@ export function useUpdateSlaPolicyMutation() {
 export function useDeleteSlaPolicyMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<void, ApiError, string>({
-    mutationFn: (id) => api.deleteSlaPolicy(id),
+  // Every client's policy is deleted without the top bar's client.
+  return useMutation<void, ApiError, Pick<PolicyOut, "id" | "client_id">>({
+    mutationFn: (policy) => api.deleteSlaPolicy(policy.id, { global: policy.client_id === null }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["sla-policies"] });
     },

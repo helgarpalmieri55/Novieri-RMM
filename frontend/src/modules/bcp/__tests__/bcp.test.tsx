@@ -235,6 +235,20 @@ describe("PlanDetail", () => {
     expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
   });
 
+  // Phase 3 final review C, Important 5: the groups and the procedures too.
+  it("names the scope and the procedures from the groups and articles of the plan's client", async () => {
+    selectClient(null);
+    api.listDeviceGroups = vi.fn().mockResolvedValue({ items: [], total: 0, ungrouped_device_count: 0, evaluation: null });
+    api.listArticles = vi.fn().mockResolvedValue({ items: [], total: 0 });
+    renderDetail();
+
+    await screen.findByText("Core datacenter failover");
+    await waitFor(() => expect(api.listDeviceGroups).toHaveBeenCalled());
+    expect(api.listDeviceGroups).toHaveBeenCalledExactlyOnceWith({ client_id: "o1" });
+    await waitFor(() => expect(api.listArticles).toHaveBeenCalled());
+    expect(api.listArticles).toHaveBeenCalledExactlyOnceWith({ client_id: "o1" });
+  });
+
   // Phase 3 review F4: the scope is named from the plan's client's devices,
   // asked of the server -- not from one page of every client's.
   it("names the scope from the devices of the plan's client", async () => {
@@ -320,6 +334,21 @@ describe("PlanEditor form validation", () => {
     expect(api.createPlan).not.toHaveBeenCalled();
   });
 
+  // Phase 3 final review B, Important 4: with Unassigned chosen at the top a
+  // new row would be filed under it and refused (422), and no Client field can
+  // help. The form says so instead of offering a Save that can only fail.
+  it("with Unassigned chosen at the top, says so instead of offering Save", async () => {
+    selectClient("c-unassigned", [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ME.permissions },
+    ]);
+    const user = renderEditor();
+    await user.type(screen.getByLabelText("Name *"), "Failover");
+    expect(screen.getByText("Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(api.createPlan).not.toHaveBeenCalled();
+  });
+
   // Phase 3 final review D, Important 2: the field offers only the clients
   // where the person may MANAGE plans, not every one they can read.
   it("with every client chosen, offers only the clients holding bcp.manage, never Unassigned", async () => {
@@ -355,6 +384,53 @@ describe("PlanEditor form validation", () => {
     await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
     await waitFor(() => expect(api.listDevices).toHaveBeenCalled());
     expect(api.listDevices).toHaveBeenCalledExactlyOnceWith({ clientId: "c-acme" });
+  });
+
+  // Phase 3 final review C, Important 5 (operator decision 1, "BCP pickers ->
+  // FIX"): the groups and articles were one 100-row page of every client's,
+  // filtered here, so a plan's client could lose rows it has. They are asked
+  // of the server for the plan's client now (`client_id`, review A6), keyed by
+  // it, and nothing is asked before it is known.
+  it("with every client chosen, reads the groups and articles of the plan's client, and none before it is chosen", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["bcp"], permissions: ME.permissions },
+    ]);
+    api.listDeviceGroups = vi.fn().mockResolvedValue({ items: [], total: 0, ungrouped_device_count: 0, evaluation: null });
+    api.listArticles = vi.fn().mockResolvedValue({ items: [], total: 0 });
+    const user = renderEditor();
+    await user.click(screen.getByRole("button", { name: /Add scope/ }));
+    expect(api.listDeviceGroups).not.toHaveBeenCalled();
+    expect(api.listArticles).not.toHaveBeenCalled();
+
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await waitFor(() => expect(api.listDeviceGroups).toHaveBeenCalled());
+    expect(api.listDeviceGroups).toHaveBeenCalledExactlyOnceWith({ client_id: "c-acme" });
+    await waitFor(() => expect(api.listArticles).toHaveBeenCalled());
+    expect(api.listArticles).toHaveBeenCalledExactlyOnceWith({ client_id: "c-acme" });
+  });
+
+  // Phase 3 final review C (minor, T11): before the plan's client is chosen
+  // the pickers said "No computers to scope this plan to yet", which is not
+  // true of a client that has them. They say what to do first.
+  it("with every client chosen and none picked yet, says to choose the client first", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["bcp"], permissions: ME.permissions },
+    ]);
+    const user = renderEditor();
+    await user.click(screen.getByRole("button", { name: /Add scope/ }));
+    await user.click(screen.getByRole("combobox", { name: "Scope 1 device" }));
+    expect(await screen.findByText("Choose the client first: its computers are listed here.")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Scope 1 kind"), "group");
+    await user.click(screen.getByRole("combobox", { name: "Scope 1 group" }));
+    expect(await screen.findByText("Choose the client first: its device groups are listed here.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("combobox", { name: "Add a procedure" }));
+    expect(
+      await screen.findByText("Choose the client first: its documentation articles are listed here."),
+    ).toBeInTheDocument();
   });
 
   // Auditor (HIGH), /bcp → New plan → Save: "Empty submit is a silent no-op."
@@ -1204,8 +1280,11 @@ describe("PlanDetail confirmations", () => {
     renderDetail();
 
     await screen.findByText("Scope");
-    // `dd`, not the page title: both contain "Core datacenter".
-    expect(screen.getByText("Core datacenter", { selector: "dd" })).toBeInTheDocument();
+    // `dd`, not the page title: both contain "Core datacenter". Awaited: the
+    // groups are read for the plan's client once the plan is known (phase 3
+    // final review D2), as the devices have been since F4 -- the test of the
+    // device row above awaits its name the same way.
+    expect(await screen.findByText("Core datacenter", { selector: "dd" })).toBeInTheDocument();
     expect(screen.queryByText(/06a85c19-55e2-7f3c-8000-831c7bdba357/)).not.toBeInTheDocument();
   });
 

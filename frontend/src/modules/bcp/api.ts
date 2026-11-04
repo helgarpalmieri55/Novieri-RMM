@@ -159,28 +159,32 @@ export function useScopeDevices(enabled: boolean, clientId: string | null) {
  * plan itself, and a caller who may manage plans but not list groups should
  * meet the picker's `emptyHint` rather than three silent retries.
  *
- * NOT ONE CLIENT'S, unlike the devices: `GET /device-groups` and
- * `GET /docs/articles` take no client filter, so these two still read one
- * page (100) of every client's in the request's scope, and the editor
- * filters it (phase 3 review, F4).
+ * ONE CLIENT'S, ASKED OF THE SERVER, like the devices (phase 3 final review C,
+ * Important 5; operator decision 1). These two used to read one page (100) of
+ * every client's in the request's scope and filter it here, so with every
+ * client chosen a plan's client could lose groups or articles it has.
+ * `GET /device-groups` and `GET /docs/articles` take `client_id` now (review
+ * A6), so the read carries the plan's client, the key names it, and nothing
+ * is asked until it is known.
  */
-export function useScopeGroups(enabled: boolean) {
+export function useScopeGroups(enabled: boolean, clientId: string | null) {
   const api = useApi();
   return useQuery({
-    queryKey: ["bcp-scope-groups"],
-    queryFn: async () => (await api.listDeviceGroups()).items,
-    enabled,
+    queryKey: ["bcp-scope-groups", clientId],
+    queryFn: async () => (await api.listDeviceGroups({ client_id: requireKnown(clientId) })).items,
+    enabled: enabled && clientId !== null,
     retry: false,
     staleTime: 60_000,
   });
 }
 
-export function useProcedureArticles(enabled: boolean) {
+/** The plan's client's articles and every client's: what its procedures may name. */
+export function useProcedureArticles(enabled: boolean, clientId: string | null) {
   const api = useApi();
   return useQuery({
-    queryKey: ["bcp-procedure-articles"],
-    queryFn: async () => (await api.listArticles()).items,
-    enabled,
+    queryKey: ["bcp-procedure-articles", clientId],
+    queryFn: async () => (await api.listArticles({ client_id: requireKnown(clientId) })).items,
+    enabled: enabled && clientId !== null,
     retry: false,
     staleTime: 60_000,
   });

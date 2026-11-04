@@ -31,6 +31,8 @@ const scope = vi.hoisted(() => ({
   selected: null as string | null,
   clients: [] as MeClient[],
   select: vi.fn(),
+  // `false`: `/me` has not answered (or does not list the top bar's choice).
+  ready: true,
 }));
 vi.mock("../../../lib/clientScope", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../lib/clientScope")>()),
@@ -38,7 +40,7 @@ vi.mock("../../../lib/clientScope", async (importOriginal) => ({
     selected: scope.selected,
     select: scope.select,
     clients: scope.clients,
-    ready: true,
+    ready: scope.ready,
   }),
 }));
 
@@ -193,6 +195,7 @@ beforeEach(() => {
   scope.selected = null;
   scope.clients = [meClient(INTERNAL), meClient(ANDES), meClient(UNASSIGNED)];
   scope.select = vi.fn();
+  scope.ready = true;
 });
 
 describe("the Clients list", () => {
@@ -377,6 +380,25 @@ describe("a client's Summary", () => {
     expect(getClientRecord).not.toHaveBeenCalled();
   });
 
+  // Phase 3 final review C (T12 minor): on a cold deep link the top bar's
+  // choice is known before `/me` is, and the page named the chosen client by
+  // its raw id and offered "Work on all my clients" for a client that is the
+  // person's own. It waits for `/me` now, and reads nothing meanwhile.
+  it("waits for /me before deciding anything on a cold deep link", async () => {
+    scope.selected = "org-1";
+    scope.clients = [];
+    scope.ready = false;
+    const getClientRecord = vi.fn().mockResolvedValue(ANDES);
+    mockUseApi.mockReturnValue(api({ getClientRecord }));
+    renderAt("/clients/c-andes");
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByText(/The console is working on/)).toBeNull();
+    expect(screen.queryByText(/org-1/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Work on all my clients" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Work on this client" })).toBeNull();
+    expect(getClientRecord).not.toHaveBeenCalled();
+  });
+
   it("says an archived client is archived, above its tabs", async () => {
     // `/me` leaves an archived client out; the page is reached from the list's
     // "Show archived clients", with every client chosen.
@@ -394,6 +416,35 @@ describe("a client's Summary", () => {
     renderAt("/clients/c-andes");
     await screen.findByRole("heading", { name: "Andes Logistics", level: 1 });
     expect(screen.queryByText(/This client is archived/)).toBeNull();
+  });
+});
+
+// Phase 3 final review C (T12 minor): the Unassigned client takes no email
+// domains (a typed one is a 422), so its form does not offer the field, and
+// sends none.
+describe("editing a client's details", () => {
+  it("offers email domains for a customer", async () => {
+    scope.clients = [meClient(ANDES)];
+    mockUseApi.mockReturnValue(api());
+    const user = userEvent.setup();
+    renderAt("/clients/c-andes");
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText("Email domains")).toBeInTheDocument();
+  });
+
+  it("does not offer email domains for the Unassigned client, and sends none", async () => {
+    scope.clients = [meClient(UNASSIGNED)];
+    const updateClient = vi.fn().mockResolvedValue(UNASSIGNED);
+    mockUseApi.mockReturnValue(api({ getClientRecord: vi.fn().mockResolvedValue(UNASSIGNED), updateClient }));
+    const user = userEvent.setup();
+    renderAt("/clients/c-unassigned");
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByLabelText("Email domains")).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateClient).toHaveBeenCalledTimes(1));
+    expect(updateClient.mock.calls[0]?.[1]).not.toHaveProperty("email_domains");
   });
 });
 

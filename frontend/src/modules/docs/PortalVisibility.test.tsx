@@ -76,7 +76,8 @@ describe("PortalVisibility", () => {
     expect(screen.getByText(/People who raise tickets can find and read it/)).toBeInTheDocument();
 
     await user.click(toggle);
-    await waitFor(() => expect(api.setArticlePortalVisibility).toHaveBeenCalledWith("a1", true));
+    // `o1`'s article, not every client's: narrowed like any other write.
+    await waitFor(() => expect(api.setArticlePortalVisibility).toHaveBeenCalledWith("a1", true, { global: false }));
   });
 
   it("turns it off again", async () => {
@@ -84,7 +85,7 @@ describe("PortalVisibility", () => {
     wrap(<PortalVisibility article={{ ...ARTICLE, portal_visible: true }} canManage />);
 
     await user.click(screen.getByRole("switch", { name: "Visible in the portal" }));
-    await waitFor(() => expect(api.setArticlePortalVisibility).toHaveBeenCalledWith("a1", false));
+    await waitFor(() => expect(api.setArticlePortalVisibility).toHaveBeenCalledWith("a1", false, { global: false }));
   });
 
   it("says when the change was not saved", async () => {

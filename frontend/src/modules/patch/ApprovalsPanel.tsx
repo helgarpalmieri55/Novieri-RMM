@@ -270,7 +270,7 @@ export function ApprovalsPanel({
         onConfirm={() => {
           const approval = pendingRevoke;
           setPendingRevoke(null);
-          if (approval) revoke.mutate(approval.id);
+          if (approval) revoke.mutate(approval);
         }}
       />
     </>

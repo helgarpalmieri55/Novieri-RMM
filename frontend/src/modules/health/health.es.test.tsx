@@ -1037,6 +1037,10 @@ describe("a device's health panel, in Spanish", () => {
     const { container } = renderUi(<DeviceHealthPanel deviceId="d1" canCheckNow={false} />);
     expect(await screen.findByText("Sin perfil de estado")).toBeInTheDocument();
     expect(screen.getByText("Ningún perfil de estado se aplica a este dispositivo.")).toBeInTheDocument();
+    // The client's default is one of the levels (phase 3 final review C, T14 7).
+    expect(
+      screen.getByText("No se comprueba nada en él. Asigna un perfil al dispositivo, a su grupo, a su cliente o a la organización."),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Último contacto nunca, fuera de la ventana de desconexión de 15 min\./)).toBeInTheDocument();
     expect(screen.getByText("No hay alertas abiertas, pero este dispositivo no está informando, así que eso no prueba que esté bien.")).toBeInTheDocument();
     expectNoEnglish(container, STORED);

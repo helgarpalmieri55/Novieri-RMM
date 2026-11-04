@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { ClientField } from "../../components/ClientField";
 import { ConfirmDialog } from "../../components/confirm";
 import { NoValue } from "../../components/emptystate";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
@@ -11,6 +12,7 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { useNewRowClientField } from "../../lib/clientSelection";
 import {
   useIgnoreSoftwareMutation,
   useMapSoftwareMutation,
@@ -23,6 +25,13 @@ import type { ReviewQueueRow } from "./types";
 import { PageHead, Panel, QueryState } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useEverywherePermissions } from "../../lib/mePermissions";
+import { UnassignedRefusal } from "../clients/UnassignedRefusal";
+import { useClientName } from "../settings/api";
+
+/** The Client field Ignore needs with every client chosen, named like any required field. */
+const ignoreClientRules = (): readonly FieldRule[] => [
+  { name: "client", label: translate("components.clientField.label") },
+];
 
 export function ReviewQueue() {
   const t = useT();
@@ -32,8 +41,25 @@ export function ReviewQueue() {
   const canRead = permissions.includes("licenses.read");
   const canManage = permissions.includes("licenses.manage");
   // Mapping writes the product catalogue, configuration every client shares
-  // (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2). Ignoring is not global.
+  // (GLOBAL_WRITES): the code on EVERY client (phase 3 design §2).
   const canMap = useEverywherePermissions().has("licenses.manage");
+  // IGNORING IS ONE CLIENT'S (design §3.1; phase 3 final review B, Critical
+  // 1): a `software_ignore` row with a client hides the title on that
+  // client's computers only. Sent without one it would be GLOBAL -- every
+  // client's computers -- which is what this page used to send whoever was
+  // chosen. So: the client chosen at the top, or with every client the
+  // Client field above the queue (the shared hook, operator decision 2);
+  // Unassigned chosen at the top ignores nothing.
+  const ignoreClient = useNewRowClientField("licenses.manage", undefined, {
+    onPick: () => {
+      setAttempt(null);
+      ignore.reset();
+    },
+  });
+  const clientName = useClientName();
+  // An Ignore refused before its confirmation, held as data and worded at
+  // render: the empty Client field.
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
 
   const queue = useReviewQueue();
   const ignore = useIgnoreSoftwareMutation();
@@ -67,6 +93,20 @@ export function ReviewQueue() {
           <span>{describeSubmitError(ignore.error)}</span>
         </p>
       )}
+
+      {canManage && ignoreClient.refused !== null ? <UnassignedRefusal className="mb-3" /> : null}
+      {canManage && ignoreClient.needsField ? (
+        <div className="mb-3">
+          <ClientField field={ignoreClient} />
+          {attemptProblems(attempt).length > 0 ? (
+            <p role="alert" className="form-error">
+              {attemptProblems(attempt)
+                .map((problem) => problem.message)
+                .join(" ")}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <Panel bare>
         <QueryState
@@ -112,13 +152,25 @@ export function ReviewQueue() {
                             {t("licenses.review.map")}
                           </Button>
                         ) : null}
-                        <Button
-                          variant="outline"
-                          disabled={ignore.isPending}
-                          onClick={() => setIgnoring(row)}
-                        >
-                          {t("licenses.review.ignore")}
-                        </Button>
+                        {ignoreClient.refused === null ? (
+                          <Button
+                            variant="outline"
+                            disabled={ignore.isPending}
+                            onClick={() => {
+                              // With every client chosen the Client field is
+                              // required, and named before anything opens.
+                              const next: Attempt = {
+                                rules: () => (ignoreClient.needsField ? ignoreClientRules() : []),
+                                values: { client: ignoreClient.clientId },
+                              };
+                              setAttempt(next);
+                              if (attemptProblems(next).length > 0) return;
+                              setIgnoring(row);
+                            }}
+                          >
+                            {t("licenses.review.ignore")}
+                          </Button>
+                        ) : null}
                       </div>
                     </Td>
                   )}
@@ -140,12 +192,14 @@ export function ReviewQueue() {
         subject={
           ignoring ? t("licenses.review.ignoreSubject", { name: ignoring.name, count: ignoring.device_count }) : ""
         }
-        body={t("licenses.review.ignoreBody")}
+        body={t("licenses.review.ignoreBody", { client: clientName(ignoreClient.clientId) })}
         confirmLabel={t("licenses.review.ignoreConfirm")}
         destructive
         onCancel={() => setIgnoring(null)}
         onConfirm={() => {
-          if (ignoring) ignore.mutate({ name: ignoring.name });
+          // The client the button checked for; never none, which is global.
+          const client = ignoreClient.clientId;
+          if (ignoring && client !== null) ignore.mutate({ name: ignoring.name, client_id: client });
           setIgnoring(null);
         }}
       />

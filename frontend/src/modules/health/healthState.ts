@@ -736,20 +736,26 @@ export function checkLabel(checkType: string): string {
 
 /**
  * "Applied by", in full (spec §0.2): the level AND what it names. A client
- * default (MSP clients phase 3, design §5.1) names its client.
+ * default (MSP clients phase 3, design §5.1) names its client -- unless
+ * `clientName` cannot (`null`: not one of the person's clients), when it is
+ * "its client's default", never "All clients" (final review C, T14 5).
  */
 export function appliedByLabel(
   level: ResolutionLevel | null,
   assignment: { device_group_id?: string | null; client_id?: string | null } | null,
-  clientName: (clientId: string) => string,
+  clientName: (clientId: string) => string | null,
 ): string {
   switch (level) {
     case "org":
       return translate("health.devicePanel.appliedOrg");
     case "group":
       return translate("health.devicePanel.appliedGroup", { group: String(assignment?.device_group_id) });
-    case "client":
-      return translate("health.devicePanel.appliedClient", { client: clientName(assignment?.client_id ?? "") });
+    case "client": {
+      const name = clientName(assignment?.client_id ?? "");
+      return name === null
+        ? translate("health.devicePanel.appliedClientUnlisted")
+        : translate("health.devicePanel.appliedClient", { client: name });
+    }
     default:
       return translate("health.devicePanel.appliedDevice");
   }

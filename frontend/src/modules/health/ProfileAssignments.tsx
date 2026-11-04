@@ -6,7 +6,9 @@
  *
  * A CLIENT DEFAULT needs `health.admin` IN THAT CLIENT. The client is the one
  * chosen above, or, with «Todos mis clientes», the one chosen here from the
- * clients where the person holds the code (`useNewRowClient`, design §3.1).
+ * clients where the person holds the code (`useNewRowClientField`, design
+ * §3.1). With «Sin asignar» chosen above nothing can be assigned, and the
+ * panel says so.
  * «Sin asignar» is never offered, and the server refuses it (422).
  *
  * THE ORGANISATION DEFAULT is a global row: `health.admin` on every client,
@@ -26,9 +28,10 @@ import { Field, Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { useClientScope } from "../../lib/clientScope";
-import { useNewRowClient } from "../../lib/clientSelection";
+import { useNewRowClientField } from "../../lib/clientSelection";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 import { Btn, Panel, QueryState } from "../../shell/components";
+import { UnassignedRefusal } from "../clients/UnassignedRefusal";
 import { useClientName } from "../settings/api";
 import { useCreateHealthAssignmentMutation, useDeleteHealthAssignmentMutation, useHealthAssignments } from "./api";
 import type { AssignmentOut } from "./types";
@@ -41,16 +44,33 @@ const clientRules = (): readonly FieldRule[] => [
   { name: "client", label: translate("health.assignments.client") },
 ];
 
-/** Where an assignment applies, in words. */
+/**
+ * A client-level row's client by name, or `null` once `/me` has answered and
+ * does not list it (archived, or no role there). `useClientName` names such
+ * an id "All clients" -- right for a row every client shares, wrong for one
+ * client's default, which then read "Default of All clients", the
+ * organisation default's words (phase 3 final review C, T14 5).
+ */
+export function useListedClientName(): (clientId: string) => string | null {
+  const { clients, ready } = useClientScope();
+  const clientName = useClientName();
+  return (clientId) => (!ready || clients.some((client) => client.id === clientId) ? clientName(clientId) : null);
+}
+
+/** Where an assignment applies, in words. `clientName` gives `null` for a client it cannot name. */
 export function describeAssignmentTarget(
   assignment: Pick<AssignmentOut, "level" | "client_id" | "device_id" | "device_group_id">,
-  clientName: (clientId: string) => string,
+  clientName: (clientId: string) => string | null,
 ): string {
   switch (assignment.level) {
     case "org":
       return translate("health.assignments.levelOrg");
-    case "client":
-      return translate("health.assignments.levelClient", { client: clientName(assignment.client_id ?? "") });
+    case "client": {
+      const name = clientName(assignment.client_id ?? "");
+      return name === null
+        ? translate("health.assignments.levelClientUnlisted")
+        : translate("health.assignments.levelClient", { client: name });
+    }
     case "group":
       return translate("health.assignments.levelGroup", { group: assignment.device_group_id ?? "" });
     case "device":
@@ -66,26 +86,30 @@ export function ProfileAssignments({ profileId, canAdmin }: { profileId: string;
   const everywhere = useEverywherePermissions();
   const { selected, clients } = useClientScope();
   const clientName = useClientName();
-  // The clients where the person holds health.admin, from `/me.clients`.
+  const listedName = useListedClientName();
+  // The clients where the person holds health.admin, from `/me.clients`, and
+  // the client default's client: the shared hook (operator decision 2).
   // `canAdmin` (health.admin on EVERY client, since Task 8) decides only the
   // organisation default: a client's default is a write in that client.
-  const newRow = useNewRowClient(HEALTH_ADMIN);
+  const newRow = useNewRowClientField(HEALTH_ADMIN);
   const administers = (clientId: string | null | undefined): boolean =>
     newRow.options.some((option) => option.id === clientId);
   const orgAllowed = canAdmin && selected === null && everywhere.has(HEALTH_ADMIN);
   // The client chosen above, where the person holds the code; or, with every
   // client, a Client field with at least one client to offer.
-  const clientAllowed =
-    newRow.clientId !== null ? administers(newRow.clientId) : newRow.needsField && newRow.options.length > 0;
+  const clientAllowed = newRow.needsField
+    ? newRow.options.length > 0
+    : newRow.clientId !== null && administers(newRow.clientId);
+  // Unassigned chosen above: no client default can be filed there. Said to a
+  // person who could otherwise assign one.
+  const refused = newRow.refused !== null && newRow.options.length > 0;
   const [target, setTarget] = useState<Target>("client");
-  // `ClientField`'s value: a client id, or `""` for none chosen yet.
-  const [chosen, setChosen] = useState("");
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [removing, setRemoving] = useState<AssignmentOut | null>(null);
   // What Assign sends: the choice only while both are offered. A choice of the
   // organisation default made before `/me` stopped offering it is not sent.
   const effective: Target = !orgAllowed ? "client" : !clientAllowed ? "org" : target;
-  const client = newRow.clientId ?? (chosen || null);
+  const client = newRow.clientId;
   const rows = assignments.data ?? [];
 
   // The organisation default with every client; a client's default where its
@@ -129,7 +153,7 @@ export function ProfileAssignments({ profileId, canAdmin }: { profileId: string;
           </thead>
           <tbody>
             {rows.map((assignment) => {
-              const where = describeAssignmentTarget(assignment, clientName);
+              const where = describeAssignmentTarget(assignment, listedName);
               return (
                 <tr key={assignment.id}>
                   <Td>{where}</Td>
@@ -159,6 +183,8 @@ export function ProfileAssignments({ profileId, canAdmin }: { profileId: string;
         </p>
       ) : null}
 
+      {refused ? <UnassignedRefusal className="mt-3" /> : null}
+
       {clientAllowed || orgAllowed ? (
         <Form onSubmit={submit}>
           <div className="form-grid">
@@ -176,7 +202,7 @@ export function ProfileAssignments({ profileId, canAdmin }: { profileId: string;
             ) : null}
             {effective === "client" ? (
               newRow.needsField ? (
-                <ClientField code={HEALTH_ADMIN} value={chosen} onChange={setChosen} />
+                <ClientField field={newRow} />
               ) : (
                 <p className="note">
                   {t("health.assignments.forClient", { client: clientName(newRow.clientId ?? "") })}
@@ -198,7 +224,7 @@ export function ProfileAssignments({ profileId, canAdmin }: { profileId: string;
       <ConfirmDialog
         open={removing !== null}
         title={t("health.assignments.removeTitle")}
-        subject={removing ? describeAssignmentTarget(removing, clientName) : ""}
+        subject={removing ? describeAssignmentTarget(removing, listedName) : ""}
         body={t("health.assignments.removeBody")}
         confirmLabel={t("health.assignments.removeConfirm")}
         destructive

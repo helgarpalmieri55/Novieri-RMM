@@ -293,13 +293,24 @@ export function useDeleteScriptPolicyMutation() {
   });
 }
 
-/** Changes a deployment can be linked to: approved, or being implemented. */
-export function useAuthorizingChanges(enabled = true) {
+/**
+ * Changes a deployment can be linked to: approved, or being implemented.
+ *
+ * ONLY `clientId`'s, the deployment's target's client (phase 3 final review
+ * C, Important 4). The server links a deployment only to a change of its own
+ * client and answers "no such change" for any other
+ * (`change_mgmt/gates.py::authorizing_change`), even one the picker showed.
+ * With every client chosen `GET /changes` holds every client's, so they are
+ * filtered here (the route is not paginated); `null`, no target yet, offers
+ * none.
+ */
+export function useAuthorizingChanges(clientId: string | null, enabled = true) {
   const api = useApi();
   return useQuery({
     queryKey: ["deploy-authorizing-changes"],
     queryFn: async () =>
       (await api.listChanges()).filter((c) => c.state === "approved" || c.state === "implementing"),
+    select: (changes) => changes.filter((change) => clientId !== null && change.client_id === clientId),
     enabled,
     retry: false,
     staleTime: 30_000,

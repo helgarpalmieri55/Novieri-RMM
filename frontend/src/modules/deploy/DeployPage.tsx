@@ -548,12 +548,21 @@ function CreateDeploymentDialog({ open, onClose }: { open: boolean; onClose: () 
   const devices = useTargetDevices();
   const groups = useDeviceGroups();
   const create = useCreateDeploymentMutation();
-  const changes = useAuthorizingChanges(open);
   const [changeId, setChangeId] = useState("");
   const [packageId, setPackageId] = useState("");
   const [action, setAction] = useState<DeploymentAction>("install");
   const [targetType, setTargetType] = useState<DeployTargetType>("device");
   const [targetId, setTargetId] = useState("");
+  // THE CHANGE IT MAY IMPLEMENT IS ITS TARGET'S CLIENT'S (final review C,
+  // Important 4): none is offered before a target, and one chosen for
+  // another target's client is never sent -- the value is read only while it
+  // is still offered.
+  const targetClient =
+    (targetType === "device"
+      ? devices.data?.find((device) => device.id === targetId)?.client_id
+      : groups.data?.find((group) => group.id === targetId)?.client_id) ?? null;
+  const changes = useAuthorizingChanges(targetClient, open);
+  const linkedChange = (changes.data ?? []).some((change) => change.id === changeId) ? changeId : "";
   const [windowCron, setWindowCron] = useState("");
   // Filled ON SUBMIT only. Complaining about a field the operator has not
   // reached yet is its own kind of unhelpful. Held as rules + values and worded
@@ -584,7 +593,7 @@ function CreateDeploymentDialog({ open, onClose }: { open: boolean; onClose: () 
         // validation and is stored with the space.
         target_id: targetId.trim(),
         window_cron: windowCron.trim() || null,
-        ...(changeId ? { change_id: changeId } : {}),
+        ...(linkedChange ? { change_id: linkedChange } : {}),
       },
       {
         onSuccess: () => {
@@ -729,7 +738,7 @@ function CreateDeploymentDialog({ open, onClose }: { open: boolean; onClose: () 
             >
               <select
                 className={inputClass}
-                value={changeId}
+                value={linkedChange}
                 onChange={(event) => setChangeId(event.target.value)}
               >
                 <option value="">{t("deploy.deployments.create.noChange")}</option>

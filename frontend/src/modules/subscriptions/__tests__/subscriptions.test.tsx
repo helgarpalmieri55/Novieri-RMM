@@ -541,6 +541,24 @@ describe("SubscriptionsPage", () => {
     );
   });
 
+  // Phase 3 final review B, Important 4: with Unassigned chosen at the top a
+  // new row would be filed under it and refused (422), and no Client field can
+  // help. The form says so instead of offering a Save that can only fail.
+  it("with Unassigned chosen at the top, says so instead of offering Save", async () => {
+    selectClient("c-unassigned", [
+      { ...SCOPE_INTERNAL, permissions: ["subscriptions.read", "subscriptions.manage"] },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ["subscriptions.read", "subscriptions.manage"] },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<SubscriptionsPage />);
+    await screen.findByText("Acme SaaS", { selector: ".cell-title a" });
+    await user.click(screen.getByRole("button", { name: "New subscription" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Save" })).toBeNull();
+    expect(api.createSubscription).not.toHaveBeenCalled();
+  });
+
   it("with every client chosen, asks for the subscription's client and files it there", async () => {
     selectClient(null, [
       { ...SCOPE_INTERNAL, permissions: ["subscriptions.read", "subscriptions.manage"] },
