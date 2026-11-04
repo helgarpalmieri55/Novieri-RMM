@@ -16,7 +16,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
-import { devices, ORG_ID } from "../../fixtures/core";
+import { CUSTOMER_ID, devices, ORG_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 // Circular with the SLA fixtures, which read tickets from here; only called at request time.
 import { ticketSlaSummary } from "../sla/fixtures";
@@ -65,7 +65,7 @@ export { ME_ID } from "../../fixtures/me";
  * instead -- keep them matched to `GRANTS` there if it changes.
  *
  * Tomas Kalu carries the SCOPED grant (`technician` on one client,
- * `cli-logistics`, not everywhere) and Adaeze Okonkwo's is deliberately DUPLICATED (two
+ * Andes Logistics, not everywhere) and Adaeze Okonkwo's is deliberately DUPLICATED (two
  * identical org-wide `technician` grants) -- `GRANTS` itself holds no
  * duplicate to draw from, and the `×N` collapsing had no seed anywhere
  * without one.
@@ -118,7 +118,7 @@ export const USERS: UserOut[] = [
     display_name: "Tomas Kalu",
     status: "active",
     // Scoped, not everywhere -- see the comment above `USERS`.
-    roles: [roleGrant("sd-5", "role-technician", "technician", "cli-logistics")],
+    roles: [roleGrant("sd-5", "role-technician", "technician", CUSTOMER_ID)],
   },
   {
     id: "usr-lf",

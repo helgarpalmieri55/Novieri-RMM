@@ -24,6 +24,7 @@
  */
 
 import type { FixtureMap } from "../../fixtures/client";
+import { CUSTOMER_ID } from "../../fixtures/core";
 import { ApiError } from "../../lib/api";
 import type { ClientOut, McpAppOut } from "../../lib/api";
 import type { SettingsOut as HealthSettingsOut } from "../health/types";
@@ -204,7 +205,7 @@ const ROLE_SEEDS: RoleSeed[] = [
  * signs in to "org-toeshee") -- one customer, and the unassigned client. The
  * Users tab's grant scope picks from these.
  */
-const CLIENT_LOGISTICS = "cli-logistics";
+const CLIENT_LOGISTICS = CUSTOMER_ID;
 const CLIENTS: ClientOut[] = [
   { id: "org-toeshee", name: "Toeshee", kind: "internal", status: "active", email_domains: ["toeshee.example"], phone: "", address: "", website: "", notes: "", enabled_modules: ["budget", "bcp", "change"], device_count: 42, site_count: 1 },
   { id: CLIENT_LOGISTICS, name: "Andes Logistics", kind: "customer", status: "active", email_domains: ["andeslogistics.example"], phone: "", address: "", website: "", notes: "", enabled_modules: [], device_count: 12, site_count: 2 },

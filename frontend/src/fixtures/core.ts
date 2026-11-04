@@ -89,13 +89,23 @@ function allPermissions(): string[] {
 export const ORG_ID = "org-toeshee";
 
 /**
+ * Andes Logistics, the one customer, and its id is a UUID ON PURPOSE. The console reads
+ * back only a UUID as the client chosen in the top bar (`lib/clientChoice.ts`
+ * drops anything else, because the server answers a malformed `X-Client-Id`
+ * with 400), and this is the client the harmony gate chooses to measure the
+ * console with a client chosen (`scripts/routes.mjs`'s `CHOSEN_CLIENT`, the
+ * same value). The settings, clients and service-desk fixtures import it.
+ */
+export const CUSTOMER_ID = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
+
+/**
  * The fixture session's clients (`/me`'s `clients`, phase 3 design §1.3): the
  * three `modules/settings/fixtures.ts` lists for `GET /clients`, with every
  * code in each -- this session holds every code on every client.
  */
 const myClients = (codes: string[]): MeClient[] => [
   { id: ORG_ID, name: "Toeshee", kind: "internal", enabled_modules: ["budget", "bcp", "change"], permissions: codes },
-  { id: "cli-logistics", name: "Andes Logistics", kind: "customer", enabled_modules: [], permissions: codes },
+  { id: CUSTOMER_ID, name: "Andes Logistics", kind: "customer", enabled_modules: [], permissions: codes },
   { id: "cli-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: codes },
 ];
 

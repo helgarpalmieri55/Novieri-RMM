@@ -699,6 +699,20 @@ body.sidebar-collapsed .tenant-card { justify-content: center; padding: 8px; }
   .crumb > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .topbar { gap: 10px; padding: 0 14px; }
 
+  /* THE SELECTOR GIVES WAY, AND NOTHING ELSE IN THE CLUSTER DOES. From 641 to
+   * 1024px the selector sits in the bar beside the labelled "Add a computer".
+   * Measured at 641px with a client chosen (harmony): in Spanish the cluster
+   * ran 13px past the bar's padding, the account menu ending at 640 of 641.
+   * `.top-actions .top-client` already shrinks (`min-width: 0`), but the
+   * cluster's own automatic minimum is its content's, so it never let it.
+   * The glyphs, the install action and the account menu keep their size: a
+   * flex item with a `width` still shrinks to its content's minimum, and a
+   * 36px icon squeezed to 19 is not a smaller button, it is a broken one.
+   * Below 641px the selector is in the drawer, so the 640px block hands the
+   * cluster its content's width back. */
+  .top-actions { min-width: 0; }
+  .top-actions > :not(.top-client) { flex-shrink: 0; }
+
   /* THE SEARCH COLLAPSES TO ITS GLYPH; IT DOES NOT LEAVE.
    *
    * It was `display: none`, and that removed three things at once: the field,
@@ -748,6 +762,9 @@ body.sidebar-collapsed .tenant-card { justify-content: center; padding: 8px; }
   .sidebar-client { padding: 0 18px 14px; }
   .sidebar-client:empty { display: none; }
   .sidebar-client .top-client { width: 100%; max-width: none; }
+  /* No selector here to give way (the 1024px block), so the cluster keeps its
+   * content's width: shrunk, it would only push its own controls out. */
+  .top-actions { min-width: auto; }
   /* NO `.top-shortcut` RULE ANY MORE, and the reason is worth keeping.
    * Seven 44px targets did not fit in 390px -- measured, the bar ran 402px at
    * a 390px coarse-pointer viewport, a horizontal page scroll on every route
