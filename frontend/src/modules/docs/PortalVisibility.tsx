@@ -15,7 +15,9 @@ export function PortalVisibility({ article, canManage }: { article: DocArticle; 
   const queryClient = useQueryClient();
   const visible = article.portal_visible ?? false;
   const save = useMutation({
-    mutationFn: (next: boolean) => api.setArticlePortalVisibility(article.id, next),
+    // Every client's article is written without the top bar's client.
+    mutationFn: (next: boolean) =>
+      api.setArticlePortalVisibility(article.id, next, { global: article.client_id === null }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["doc-article", article.id] });
       void queryClient.invalidateQueries({ queryKey: ["doc-articles"] });

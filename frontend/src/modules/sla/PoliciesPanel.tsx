@@ -205,7 +205,10 @@ export function PoliciesPanel({
   function submitEdit() {
     if (!editing) return;
     if (check().length > 0) return;
-    update.mutate({ id: editing.id, body: body() }, { onSuccess: () => setEditing(null) });
+    update.mutate(
+      { id: editing.id, body: body(), global: editing.client_id === null },
+      { onSuccess: () => setEditing(null) },
+    );
   }
 
   return (
@@ -358,7 +361,7 @@ export function PoliciesPanel({
         onConfirm={() => {
           const policy = pendingDelete;
           setPendingDelete(null);
-          if (policy) del.mutate(policy.id);
+          if (policy) del.mutate(policy);
         }}
       />
 

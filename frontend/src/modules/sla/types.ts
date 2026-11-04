@@ -117,6 +117,10 @@ export interface CalendarDetail extends CalendarOut {
 // a blank cell.
 
 export interface PolicyCreate {
+  // The client whose tickets it is for (plan 2026-10-26 D2). Absent, the
+  // policy is every client's -- global -- and only a technician of every
+  // client may create one (`schema.py`'s `PolicyCreate.client_id`).
+  client_id?: string;
   queue_id?: string | null;
   priority?: SlaPriority | null;
   calendar_id: string;

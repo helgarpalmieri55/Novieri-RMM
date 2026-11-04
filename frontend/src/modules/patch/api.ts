@@ -12,6 +12,7 @@ import type {
   ApplyRequest,
   ApprovalListFilters,
   BulkApprovalCreateRequest,
+  PatchApproval,
   PatchDeviceRollupFilters,
   PatchPolicyInput,
   PatchUpdateFilters,
@@ -424,7 +425,10 @@ export function usePatchRevokeApprovalMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (approvalId: string) => api.revokePatchApproval(approvalId),
+    // An approval for every client is revoked without the top bar's client
+    // (`ApiClient.revokePatchApproval`): narrowed, the server refuses it.
+    mutationFn: (approval: Pick<PatchApproval, "id" | "client_id">) =>
+      api.revokePatchApproval(approval.id, { global: approval.client_id === null }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [PATCH_APPROVALS_QUERY_KEY] });
       void queryClient.invalidateQueries({ queryKey: ["patch-fleet"] });

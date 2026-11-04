@@ -312,7 +312,9 @@ export function DocsPage() {
   const save = useMutation({
     mutationFn: async () => {
       if (selectedId && editing && article.data) {
-        return api.updateArticle(selectedId, draft);
+        // Every client's article is written without the top bar's client
+        // (`ApiClient.updateArticle`): narrowed, the server refuses it.
+        return api.updateArticle(selectedId, draft, { global: article.data.client_id === null });
       }
       // A new article is the client's above, or, when asked, every client's.
       return api.createArticle({ ...draft, ...(forEveryClient ? {} : { client_id: requireKnown(articleClient) }) });
@@ -331,7 +333,7 @@ export function DocsPage() {
   // control below; there is no `onError` swallowing it and no optimistic
   // removal, so the article disappears only when the server said it did.
   const archive = useMutation({
-    mutationFn: () => api.archiveArticle(selectedId as string),
+    mutationFn: () => api.archiveArticle(selectedId as string, { global: article.data?.client_id === null }),
     onSuccess: () => {
       invalidate();
       setSelectedId(null);

@@ -2113,8 +2113,27 @@ describe("FleetPatchPage approvals", () => {
     await user.click(within(confirm).getByRole("button", { name: "Revoke approval" }));
 
     // THE WHOLE POINT OF THE LIST. This id existed nowhere a console could
-    // reach before `GET /patch/approvals`.
-    expect(api.revokePatchApproval).toHaveBeenCalledExactlyOnceWith("a1");
+    // reach before `GET /patch/approvals`. And this approval is every
+    // client's, so the revoke goes without the top bar's client (phase 3
+    // final review D2): narrowed, the server refuses it.
+    expect(api.revokePatchApproval).toHaveBeenCalledExactlyOnceWith("a1", { global: true });
+  });
+
+  it("revokes a client's approval narrowed like any other write", async () => {
+    const api = approvalsApi({
+      listPatchApprovals: vi.fn().mockResolvedValue({ items: [{ ...APPROVAL, client_id: "o1" }], total: 1 }),
+    });
+    mockUseApi.mockReturnValue(api as ApiClient);
+    const user = userEvent.setup();
+    renderWithProviders(<FleetPatchPage />);
+
+    await findApprovalRow("a1");
+    await user.click(within(approvalRow("a1")).getByRole("button", { name: /more actions/i }));
+    await user.click(screen.getByRole("menuitem", { name: "Revoke" }));
+    const confirm = await screen.findByRole("dialog", { name: "Revoke patch approval" });
+    await user.click(within(confirm).getByRole("button", { name: "Revoke approval" }));
+
+    expect(api.revokePatchApproval).toHaveBeenCalledExactlyOnceWith("a1", { global: false });
   });
 
   it("shows the approval as revoked afterwards without a manual refresh", async () => {

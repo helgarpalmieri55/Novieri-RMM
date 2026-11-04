@@ -13,6 +13,15 @@ import { useEverywherePermissions } from "../lib/mePermissions";
  * holding `code` on EVERY client -- `/me`'s `permissions_everywhere` -- and for
  * anyone else it is absent rather than offered and then refused.
  *
+ * WHAT IT FILES CARRIES NO `X-Client-Id`, WHATEVER THE TOP BAR SAYS (phase 3
+ * final review B, Critical 1). Narrowed to the client chosen above, the
+ * server refuses a row with no client (403, `core/global_rows.py`) -- to the
+ * very person this switch is drawn for. So the `ApiClient` method that sends
+ * the row says it is global by its body (`RequestRoute.global`; pinned per
+ * method by `docs/docsGlobalWrites.test.ts` and its siblings), and a client
+ * chosen at the top neither hides the switch nor narrows what ticking it
+ * files. The later writes to that row (edit, archive, revoke) go the same way.
+ *
  * INVARIANT 6: THIS GATES NOTHING. The server refuses a global row from a
  * narrower scope whatever the console shows.
  */

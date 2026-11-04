@@ -571,7 +571,8 @@ describe("DocsPage article view", () => {
     await archiveArticleThroughDialog(user);
 
     await waitFor(() => {
-      expect(archiveArticle).toHaveBeenCalledWith("a1");
+      // `o1`'s article, not every client's: narrowed like any other write.
+      expect(archiveArticle).toHaveBeenCalledWith("a1", { global: false });
     });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });

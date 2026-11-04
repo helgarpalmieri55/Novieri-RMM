@@ -353,8 +353,11 @@ export function DocumentView({
     void queryClient.invalidateQueries({ queryKey: ["doc-document-bytes", documentId] });
   };
 
+  // Every client's document is written without the top bar's client
+  // (`ApiClient.updateArticle`): narrowed, the server refuses it.
+  const global = document.data?.client_id === null;
   const archive = useMutation({
-    mutationFn: () => api.archiveDocument(documentId),
+    mutationFn: () => api.archiveDocument(documentId, { global }),
     onSuccess: () => {
       invalidate();
       onCleared();
@@ -362,7 +365,7 @@ export function DocumentView({
   });
 
   const purge = useMutation({
-    mutationFn: (version: number) => api.purgeDocumentVersion(documentId, version),
+    mutationFn: (version: number) => api.purgeDocumentVersion(documentId, version, { global }),
     onSuccess: () => invalidate(),
   });
 
@@ -552,6 +555,7 @@ export function DocumentView({
       <UploadVersionDialog
         open={uploading}
         documentId={doc.id}
+        global={doc.client_id === null}
         onClose={() => setUploading(false)}
         onUploaded={() => {
           setUploading(false);
@@ -727,14 +731,19 @@ function DocumentLinks({
   const [attempt, setAttempt] = useState<Attempt | null>(null);
 
   const add = useMutation({
-    mutationFn: () => api.addDocumentLink(doc.id, { target_type: targetType, target_id: targetId }),
+    mutationFn: () =>
+      api.addDocumentLink(
+        doc.id,
+        { target_type: targetType, target_id: targetId },
+        { global: doc.client_id === null },
+      ),
     onSuccess: () => {
       setTargetId("");
       onChanged();
     },
   });
   const remove = useMutation({
-    mutationFn: (linkId: string) => api.removeDocumentLink(doc.id, linkId),
+    mutationFn: (linkId: string) => api.removeDocumentLink(doc.id, linkId, { global: doc.client_id === null }),
     onSuccess: onChanged,
   });
 
@@ -903,7 +912,8 @@ export function UploadDocumentDialog({
       });
       if (!file) return doc;
       try {
-        await api.uploadDocumentVersion(doc.id, file);
+        // The file of a document for every client goes as the document did.
+        await api.uploadDocumentVersion(doc.id, file, { global: doc.client_id === null });
       } catch (error) {
         // The row landed. Say so, then re-throw so the refusal is rendered:
         // silently swallowing this would leave a document the operator did not
@@ -1028,11 +1038,14 @@ export function UploadDocumentDialog({
 export function UploadVersionDialog({
   open,
   documentId,
+  global,
   onClose,
   onUploaded,
 }: {
   open: boolean;
   documentId: string;
+  /** The document is every client's: the version goes without the top bar's client. */
+  global: boolean;
   onClose: () => void;
   onUploaded: () => void;
 }) {
@@ -1050,7 +1063,7 @@ export function UploadVersionDialog({
   }, [open]);
 
   const upload = useMutation({
-    mutationFn: () => api.uploadDocumentVersion(documentId, file as File),
+    mutationFn: () => api.uploadDocumentVersion(documentId, file as File, { global }),
     onSuccess: onUploaded,
   });
 
@@ -1128,7 +1141,8 @@ function EditDocumentDialog({
   }, [open, doc.title, doc.category, doc.description]);
 
   const save = useMutation({
-    mutationFn: () => api.updateDocument(doc.id, { title, description, category }),
+    mutationFn: () =>
+      api.updateDocument(doc.id, { title, description, category }, { global: doc.client_id === null }),
     onSuccess: onSaved,
   });
 
