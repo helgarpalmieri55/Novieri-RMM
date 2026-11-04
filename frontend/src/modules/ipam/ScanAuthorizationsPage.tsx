@@ -37,6 +37,7 @@ import type { ScopeOut, SubnetOut } from "./types";
 import { IPAM_SCOPE_MANAGE } from "./types";
 import { formatDate, toInstant } from "../../lib/datetime";
 import { Icon } from "../../shell/icons";
+import { useAdoptJourneyClient } from "../onboarding/journeyTarget";
 import {
   Btn,
   FilterBar,
@@ -77,6 +78,8 @@ import {
 // to hold the code. That is cosmetic: the server refuses regardless, and it is
 // the only thing that refuses.
 export function ScanAuthorizationsPage() {
+  // Opened from the add-a-computer journey: its client (design §4.4).
+  useAdoptJourneyClient();
   const t = useT();
   const permissions = useIpamPermissions();
   const [includeRevoked, setIncludeRevoked] = useState(false);

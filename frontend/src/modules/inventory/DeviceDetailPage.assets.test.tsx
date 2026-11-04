@@ -71,10 +71,16 @@ function asset(overrides: Partial<Device> = {}): Device {
 
 function renderPage(
   device: Device,
-  extra: { permissions?: string[]; updateAsset?: ReturnType<typeof vi.fn> } = {},
+  extra: {
+    permissions?: string[];
+    updateAsset?: ReturnType<typeof vi.fn>;
+    me?: Partial<Me>;
+    listClientSites?: ReturnType<typeof vi.fn>;
+  } = {},
 ) {
   mockUseApi.mockReturnValue({
-    me: vi.fn().mockResolvedValue({ ...ME, permissions: extra.permissions ?? ME.permissions }),
+    me: vi.fn().mockResolvedValue({ ...ME, permissions: extra.permissions ?? ME.permissions, ...extra.me }),
+    listClientSites: extra.listClientSites ?? vi.fn().mockResolvedValue([]),
     updateAsset: extra.updateAsset ?? vi.fn(),
     getDevice: vi.fn().mockResolvedValue(device),
     getDeviceInventory: vi.fn().mockResolvedValue(EMPTY_INVENTORY),
@@ -157,5 +163,32 @@ describe("a device page for an asset with no agent", () => {
     expect(await screen.findByRole("tab", { name: "Health" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Updates" })).toBeInTheDocument();
     expect(screen.queryByText(/no agent on this asset/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("the device's site (MSP clients phase 3, design §4.3)", () => {
+  const SITES = [
+    { id: "s-main", client_id: "c-andes", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 1 },
+  ];
+  const andes = (permissions: string[]) => ({
+    clients: [{ id: "c-andes", name: "Andes", kind: "customer", enabled_modules: [], permissions }],
+  });
+
+  it("names the site, and offers to move it to an asset manager of its client", async () => {
+    renderPage(asset({ client_id: "c-andes", site_id: "s-main" }), {
+      me: andes(["clients.read", "assets.manage"]) as Partial<Me>,
+      listClientSites: vi.fn().mockResolvedValue(SITES),
+    });
+    expect(await screen.findByText("Site: Principal")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Change site" })).toBeInTheDocument();
+  });
+
+  it("offers no move without assets.manage on the device's client", async () => {
+    renderPage(asset({ client_id: "c-andes", site_id: "s-main" }), {
+      me: andes(["clients.read"]) as Partial<Me>,
+      listClientSites: vi.fn().mockResolvedValue(SITES),
+    });
+    expect(await screen.findByText("Site: Principal")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Change site" })).toBeNull();
   });
 });

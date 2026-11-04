@@ -17,6 +17,11 @@ import type { TicketListFilters, TicketOut, TicketSlaSummary } from "../types";
 
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+const clientScope = vi.hoisted(() => ({ selected: null as string | null }));
+vi.mock("../../../lib/clientScope", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../lib/clientScope")>()),
+  useClientScope: () => ({ selected: clientScope.selected, select: vi.fn(), clients: [], ready: true }),
+}));
 
 const NOW = Date.parse("2026-09-23T12:00:00Z");
 const at = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
@@ -131,6 +136,7 @@ const lastFilters = (fn: ReturnType<typeof fakeListTickets>): TicketListFilters 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
+  clientScope.selected = null;
 });
 
 afterEach(() => {
@@ -245,5 +251,38 @@ describe("My work", () => {
       (card) => card.querySelector(".stat-label")?.textContent === "Assigned to you",
     );
     expect(tile).toHaveAttribute("href", "/service-desk?scope=mine");
+  });
+});
+
+describe("the Client column (MSP clients phase 3, design §4.5)", () => {
+  const ME_WITH_CLIENTS = {
+    ...ME,
+    clients: [
+      { id: "c-andes", name: "Andes Logistics", kind: "customer", enabled_modules: [], permissions: ["ticket.read"] },
+    ],
+    permissions_everywhere: [],
+  } as Me;
+  const ANDES_TICKET = ticket("7", { client_id: "c-andes" });
+
+  it("names each ticket's client while every client is shown", async () => {
+    mockUseApi.mockReturnValue({
+      ...api(fakeListTickets([ANDES_TICKET])),
+      me: vi.fn().mockResolvedValue(ME_WITH_CLIENTS),
+    } as unknown as ApiClient);
+    renderAt(<TicketListPage />, "/service-desk");
+    const row = (await screen.findByRole("link", { name: "INC-7" })).closest("tr") as HTMLElement;
+    expect(screen.getByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    expect(await within(row).findByText("Andes Logistics")).toBeInTheDocument();
+  });
+
+  it("hides it with one client chosen, on My work too", async () => {
+    clientScope.selected = "c-andes";
+    mockUseApi.mockReturnValue({
+      ...api(fakeListTickets([{ ...ANDES_TICKET, assigned_to: ME.user_id }])),
+      me: vi.fn().mockResolvedValue(ME_WITH_CLIENTS),
+    } as unknown as ApiClient);
+    renderAt(<MyWorkPage />, "/service-desk/my-work");
+    await screen.findByRole("link", { name: "INC-7" });
+    expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
   });
 });

@@ -1,9 +1,11 @@
 /**
  * The two audit routes the kernel serves, and nothing else.
  *
- * Both are gated `audit.read` SERVER-SIDE (`require_permission("audit.read")`
- * on each route in `backend/app/api/v1/audit.py`). Whatever this console
- * chooses to render, the server decides what it may have — invariant 6.
+ * Both need `audit.read` ON EVERY CLIENT, server-side
+ * (`require_permission_on_every_client("audit.read")` in
+ * `backend/app/api/v1/audit.py`): the log describes every client, and phase 3
+ * decided not to open it per client (design 2026-10-31, Q2). Whatever this
+ * console chooses to render, the server decides what it may have -- invariant 6.
  */
 
 import type { ApiClient } from "../../lib/api";

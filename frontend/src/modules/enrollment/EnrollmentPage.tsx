@@ -148,6 +148,7 @@ import type {
   EnrollmentTokenState,
 } from "./types";
 import { EnrollmentPrerequisites } from "./EnrollmentPrerequisites";
+import { useAdoptJourneyClient, useJourneySiteState } from "../onboarding/journeyTarget";
 
 /** The codes `shell/nav.ts` uses, and the codes the routes enforce server-side. */
 const DEVICES_READ = "devices.read";
@@ -273,6 +274,8 @@ type PendingRevoke =
 type TokenDraft = Omit<EnrollmentTokenCreateRequest, "site_id">;
 
 export function EnrollmentPage() {
+  // Opened from the add-a-computer journey: its client (design §4.4).
+  useAdoptJourneyClient();
   const t = useT();
   const api = useApi();
   const queryClient = useQueryClient();
@@ -408,6 +411,13 @@ export function EnrollmentPage() {
   const [pickedClient, setPickedClient] = useState("");
   const tokenClient = target.needsField ? pickedClient || null : target.clientId;
   const [siteId, setSiteId] = useState("");
+  // THE JOURNEY'S SITE FIRST (design §4.4): a page opened from the
+  // add-a-computer journey starts on the site chosen there.
+  const [journeySite] = useJourneySiteState();
+  useEffect(() => {
+    if (journeySite !== null && siteId === "") setSiteId(journeySite);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seeds once from the journey
+  }, [journeySite]);
 
   const create = useMutation({
     mutationFn: (body: TokenDraft) =>

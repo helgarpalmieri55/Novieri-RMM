@@ -19,17 +19,70 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ApiClient } from "../../lib/api";
+import type { ApiClient, ClientSiteOut, MeClient } from "../../lib/api";
 import type { ScopeOut, SubnetOut, SweepRunOut } from "../ipam/types";
 import { OnboardPage } from "./OnboardPage";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+const clientScope = vi.hoisted(() => ({
+  selected: null as string | null,
+  select: vi.fn(),
+  clients: [] as MeClient[],
+}));
+vi.mock("../../lib/clientScope", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/clientScope")>()),
+  useClientScope: () => ({
+    selected: clientScope.selected,
+    select: clientScope.select,
+    clients: clientScope.clients,
+    ready: true,
+  }),
+}));
+// The Task 9 pickers, as plain selects: what is pinned is what the page does
+// with the choice, not how the picker draws. Their contract: `""` is none.
+vi.mock("../../components/ClientField", () => ({
+  ClientField: ({ onChange }: { onChange: (id: string) => void }) => (
+    <select aria-label="Client" defaultValue="" onChange={(event) => onChange(event.target.value)}>
+      <option value="" />
+      <option value="c-andes">Andes Logistics</option>
+    </select>
+  ),
+}));
+vi.mock("../../components/SiteField", () => ({
+  SiteField: ({ value, onChange }: { value: string; onChange: (id: string) => void }) => (
+    <select aria-label="Site" value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value="" />
+      <option value="s-main">Principal</option>
+      <option value="s-north">Bodega norte</option>
+    </select>
+  ),
+}));
+
+const ANDES: MeClient = {
+  id: "c-andes",
+  name: "Andes Logistics",
+  kind: "customer",
+  enabled_modules: [],
+  permissions: ["devices.read", "clients.read"],
+};
+const MAIN: ClientSiteOut = {
+  id: "s-main",
+  client_id: "c-andes",
+  name: "Principal",
+  address: "",
+  description: "",
+  egress_networks: [],
+  archived_at: null,
+  device_count: 0,
+};
+const NORTH: ClientSiteOut = { ...MAIN, id: "s-north", name: "Bodega norte" };
 
 const subnet = (over: Partial<SubnetOut> = {}): SubnetOut => ({
   client_id: "o1",
@@ -76,6 +129,7 @@ function renderPage({
   runs = [] as SweepRunOut[],
   candidates = { items: [], total: 0, truncated: false, unsweepable_subnets: 0 },
   releases = [] as unknown[],
+  sites = [] as ClientSiteOut[],
 }: Record<string, unknown> = {}) {
   mockUseApi.mockReturnValue({
     me: () =>
@@ -86,7 +140,10 @@ function renderPage({
         display_name: "Operator",
         permissions,
         timezone: null,
+        clients: [ANDES],
+        permissions_everywhere: [],
       }),
+    listClientSites: () => Promise.resolve(sites),
     listIpamSubnets: () => Promise.resolve(subnets),
     listIpamScanAuthorizations: () => Promise.resolve(scopes),
     listIpamSweepRuns: () => Promise.resolve(runs),
@@ -106,6 +163,9 @@ function renderPage({
 
 beforeEach(() => {
   mockUseApi.mockReset();
+  clientScope.selected = null;
+  clientScope.select = vi.fn();
+  clientScope.clients = [ANDES];
 });
 
 describe("the five steps are one page", () => {
@@ -249,5 +309,49 @@ describe("the honesty rules", () => {
     // fact it has not established.
     renderPage();
     expect(await screen.findAllByText(/^Checking…$|Loading/)).toBeTruthy();
+  });
+});
+
+describe("the client and the site come first (MSP clients phase 3, design §4.4)", () => {
+  it("asks for the client with every client chosen, and choosing one makes the console work on it", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Client" }), "c-andes");
+    expect(clientScope.select).toHaveBeenCalledWith("c-andes");
+    // Nothing chosen yet, so the links carry nothing.
+    const link = await screen.findByRole("link", { name: /Open IP Address Management/i });
+    expect(link.getAttribute("href")).toBe("/ipam");
+  });
+
+  it("asks nothing for a client with one site, and every link carries both", async () => {
+    clientScope.selected = "c-andes";
+    renderPage({ sites: [MAIN] });
+    expect(await screen.findByText("Site: Principal, the client's only one.")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Site" })).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /Open IP Address Management/i }).getAttribute("href")).toBe(
+        "/ipam?client=c-andes&site=s-main",
+      ),
+    );
+    expect(screen.getByRole("link", { name: /Get the installer/i }).getAttribute("href")).toBe(
+      "/agent-packages?client=c-andes&site=s-main",
+    );
+    expect(screen.getByRole("link", { name: /Enrollment tokens/i }).getAttribute("href")).toBe(
+      "/enrollment?client=c-andes&site=s-main",
+    );
+  });
+
+  it("asks for the site when the client has several", async () => {
+    clientScope.selected = "c-andes";
+    const user = userEvent.setup();
+    renderPage({ sites: [MAIN, NORTH] });
+    const site = await screen.findByRole("combobox", { name: "Site" });
+    expect(screen.getByRole("link", { name: /Get the installer/i }).getAttribute("href")).toBe("/agent-packages");
+    await user.selectOptions(site, "s-north");
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /Get the installer/i }).getAttribute("href")).toBe(
+        "/agent-packages?client=c-andes&site=s-north",
+      ),
+    );
   });
 });
