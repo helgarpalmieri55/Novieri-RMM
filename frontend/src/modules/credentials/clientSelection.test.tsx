@@ -51,6 +51,28 @@ function renderPage(api: Partial<ApiClient>) {
 beforeEach(() => selectClient("o1"));
 
 describe("a push credential's client", () => {
+  it("files it under the client chosen at the top, which is not the organisation's own", async () => {
+    // `org_id` is "o1": the phase 1-2 rule filed every new row there whoever
+    // was chosen, so only a client other than "o1" tells the two rules apart
+    // (phase 3 final review D, Important 1).
+    selectClient("c-acme");
+    const createCredential = vi.fn().mockResolvedValue(credential());
+    const user = userEvent.setup();
+    renderPage({ listCredentials: () => Promise.resolve([]), createCredential });
+    await user.click(await screen.findByRole("button", { name: /new credential/i }));
+
+    await user.selectOptions(screen.getByLabelText("Type"), "push_install");
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await user.type(screen.getByLabelText("Name"), "Branch installer");
+    await user.type(screen.getByLabelText("Secret"), "s3cret");
+    await user.click(screen.getByRole("button", { name: "Store" }));
+    await waitFor(() =>
+      expect(createCredential).toHaveBeenCalledExactlyOnceWith({
+        name: "Branch installer", type: "push_install", client_id: "c-acme", secret: "s3cret",
+      }),
+    );
+  });
+
   it("with every client chosen, asks for it for a push type only, and files the credential there", async () => {
     selectClient(null);
     const createCredential = vi.fn().mockResolvedValue(credential());

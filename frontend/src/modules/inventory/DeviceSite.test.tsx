@@ -15,9 +15,11 @@ import { DeviceSiteDialog } from "./DeviceSite";
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 // Task 9's contract: `value` is the site chosen or `""`, and so is `onChange`'s.
+// `clientId` is whose sites the real picker lists: rendered, so it is asserted
+// (phase 3 final review D, Minor 6).
 vi.mock("../../components/SiteField", () => ({
-  SiteField: ({ value, onChange }: { value: string; onChange: (id: string) => void }) => (
-    <select aria-label="Site" value={value} onChange={(event) => onChange(event.target.value)}>
+  SiteField: ({ clientId, value, onChange }: { clientId: string | null; value: string; onChange: (id: string) => void }) => (
+    <select aria-label="Site" data-client={clientId ?? ""} value={value} onChange={(event) => onChange(event.target.value)}>
       <option value="" />
       <option value="s-main">Principal</option>
       <option value="s-north">Bodega norte</option>
@@ -51,6 +53,12 @@ describe("moving a device to another site of its client", () => {
     await user.click(within(dialog).getByRole("button", { name: "Move" }));
     await waitFor(() => expect(changeDeviceSite).toHaveBeenCalledWith("d1", "s-north"));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("lists only the sites of the device's own client (design §4.3)", async () => {
+    renderDialog(vi.fn());
+    const dialog = await screen.findByRole("dialog", { name: "Move to another site" });
+    expect(within(dialog).getByRole("combobox", { name: "Site" })).toHaveAttribute("data-client", "c-andes");
   });
 
   it("says the move did not happen, in the server's words", async () => {

@@ -30,7 +30,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
-import type { ApiClient, Device, MeClient } from "../../lib/api";
+import type { ApiClient, ClientSiteOut, Device, MeClient } from "../../lib/api";
 import { ENROLLMENT_TOKENS_PAGE_SIZE } from "./api";
 import { EnrollmentPage } from "./EnrollmentPage";
 import type { EnrollmentTokenListItem, EnrollmentTokenPage } from "./types";
@@ -56,6 +56,11 @@ function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTE
 }
 
 beforeEach(() => selectClient(SCOPE_INTERNAL.id));
+
+/** The internal client's only site: the one a new token enrols into here. */
+const PRINCIPAL_SITE: ClientSiteOut = {
+  id: "s-1", client_id: "o", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0,
+};
 
 const listEnrollmentTokens = vi.fn();
 const createEnrollmentToken = vi.fn();
@@ -197,12 +202,13 @@ function renderPage(options: {
             timezone: options.timezone ?? null,
           }),
     listDevices,
-    listClientSites: () =>
-      Promise.resolve([
-        { id: "s-1", client_id: "o", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 },
-      ]),
+    listClientSites: () => Promise.resolve([PRINCIPAL_SITE]),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // LOAD ROBUSTNESS, NOT A CHANGE OF WHAT IS ASSERTED (phase 3 final review
+  // C5): the Site field's read is in the cache before the first render, so
+  // it picks the only site at once rather than one async hop later.
+  queryClient.setQueryData(["client-sites", SCOPE_INTERNAL.id], [PRINCIPAL_SITE]);
   const ui: ReactElement = (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[options.entry ?? "/enrollment"]}>

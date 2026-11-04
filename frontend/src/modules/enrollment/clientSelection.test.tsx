@@ -43,7 +43,11 @@ function site(id: string, clientId: string, name: string): ClientSiteOut {
  * `remount` starts the page again on the same URL, as a change of client does
  * (`lib/clientScope.tsx`).
  */
-function renderPage(path = "/enrollment", behind: string[] = []) {
+function renderPage(
+  path = "/enrollment",
+  behind: string[] = [],
+  acmeSites: ClientSiteOut[] = [site("site-a1", "c-acme", "Acme HQ"), site("site-a2", "c-acme", "Acme Lab")],
+) {
   listEnrollmentTokens.mockResolvedValue({ items: [], total: 0, revoked_count: 0, unlimited_count: 0 });
   createEnrollmentToken.mockResolvedValue({
     id: "t1", name: "lab", token: "plain", expires_at: "2099-01-01T00:00:00Z", max_uses: 1,
@@ -54,7 +58,7 @@ function renderPage(path = "/enrollment", behind: string[] = []) {
     listDevices: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     listClientSites: vi.fn((clientId: string) =>
       Promise.resolve(
-        clientId === "c-acme" ? [site("site-a1", "c-acme", "Acme HQ"), site("site-a2", "c-acme", "Acme Lab")] : [site("site-o", "o", "Principal")],
+        clientId === "c-acme" ? acmeSites : [site("site-o", "o", "Principal")],
       ),
     ),
   } as unknown as ApiClient);
@@ -103,6 +107,27 @@ describe("an enrollment token's site", () => {
     await user.click(await screen.findByRole("button", { name: "Create token" }));
     expect(screen.queryByLabelText("Client")).toBeNull();
     await waitFor(() => expect((screen.getByLabelText("Site") as HTMLSelectElement).value).toBe("site-o"));
+  });
+
+  it("uses the only site of a client chosen at the top that is not the organisation's own", async () => {
+    // `org_id` is "o": the phase 1-2 rule took the organisation's own client
+    // whoever was chosen, so only a client other than "o" tells the two rules
+    // apart (phase 3 final review D, Important 1).
+    selectClient("c-acme");
+    const user = userEvent.setup();
+    renderPage("/enrollment", [], [site("site-a1", "c-acme", "Acme HQ")]);
+    await user.click(await screen.findByRole("button", { name: "Create token" }));
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await waitFor(() => expect((screen.getByLabelText("Site") as HTMLSelectElement).value).toBe("site-a1"));
+    expect(within(screen.getByLabelText("Site")).queryByRole("option", { name: "Principal" })).toBeNull();
+    await user.type(screen.getByLabelText("Token name"), "lab");
+    await user.click(screen.getByRole("button", { name: "Issue token…" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Issue token" }));
+    await waitFor(() =>
+      expect(createEnrollmentToken).toHaveBeenCalledWith(expect.anything(), {
+        name: "lab", expires_in_hours: 72, max_uses: 1, site_id: "site-a1",
+      }),
+    );
   });
 
   it("refuses to open the confirmation without a site, and names the field", async () => {

@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me, MeClient } from "../../../lib/api";
+import { ClientNotChosen } from "../../../lib/clientSelection";
 import { ApprovalQueue } from "../ApprovalQueue";
 import { ChangeCalendar } from "../ChangeCalendar";
 import { availableChangeActions } from "../changeActions";
@@ -430,6 +431,28 @@ describe("ChangeRequestForm", () => {
     );
   });
 
+  // Phase 3 final review D, Important 1: the test above cannot tell this rule
+  // from the phase 1-2 one, which filed every change under `/me.org_id` ("o1")
+  // whoever was chosen. A client other than "o1" at the top can.
+  it("files a new change under the client chosen at the top, which is not the organisation's own", async () => {
+    selectClient("c-acme", [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["change"], permissions: ME.permissions },
+    ]);
+    const user = userEvent.setup();
+    renderNew();
+    expect(screen.queryByLabelText("Client")).toBeNull();
+
+    await user.type(screen.getByLabelText("Title *"), "Upgrade switch firmware");
+    await user.type(screen.getByLabelText("Description *"), "Roll out firmware 2.1.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(api.createChange).toHaveBeenCalledTimes(1));
+    expect(api.createChange).toHaveBeenCalledWith(
+      expect.objectContaining({ client_id: "c-acme", title: "Upgrade switch firmware" }),
+    );
+  });
+
   it("with every client chosen, asks for the change's client and files it there", async () => {
     selectClient(null, [
       { ...SCOPE_INTERNAL, permissions: ME.permissions },
@@ -446,6 +469,43 @@ describe("ChangeRequestForm", () => {
     );
   });
 
+  // Phase 3 final review D (T11): "Client is required" had only its not-ready
+  // twin under test. With every client chosen and the field left empty, Save
+  // names the Client field -- before anything is built -- and sends nothing.
+  it("with every client chosen, names the empty Client field on Save and sends nothing", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["change"], permissions: ME.permissions },
+    ]);
+    const user = userEvent.setup();
+    renderNew();
+    await user.type(screen.getByLabelText("Title *"), "Upgrade switch firmware");
+    await user.type(screen.getByLabelText("Description *"), "Roll out firmware 2.1.");
+    expect(screen.getByLabelText("Client")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(api.createChange).not.toHaveBeenCalled();
+  });
+
+  // Phase 3 final review D, Important 2: the field offers only the clients
+  // where the person may REQUEST a change, not every one they can read.
+  it("with every client chosen, offers only the clients holding change.request, never Unassigned", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["change"], permissions: ME.permissions },
+      { id: "c-beta", name: "Beta", kind: "customer", enabled_modules: ["change"], permissions: ["change.read"] },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: ["change"], permissions: ME.permissions },
+    ]);
+    renderNew();
+    const field = screen.getByLabelText("Client");
+    expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Novieri",
+      "Acme",
+    ]);
+  });
+
   it("sends nothing while it cannot name the client", async () => {
     const user = userEvent.setup();
     // `/me` has not answered, so the selector is not ready and no client is
@@ -459,7 +519,8 @@ describe("ChangeRequestForm", () => {
     await user.type(screen.getByLabelText("Description *"), "Roll out firmware 2.1.");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/nothing was sent/i);
+    // The shared sentence, exactly (phase 3 final review D, Minor 4).
+    expect(await screen.findByRole("alert")).toHaveTextContent(new ClientNotChosen().message);
     expect(api.createChange).not.toHaveBeenCalled();
   });
 

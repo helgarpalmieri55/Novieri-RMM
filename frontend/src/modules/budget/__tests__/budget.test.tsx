@@ -7,6 +7,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me, MeClient } from "../../../lib/api";
+import { ClientNotChosen } from "../../../lib/clientSelection";
 import { BudgetAdminPage } from "../BudgetAdminPage";
 import { BudgetDashboard } from "../BudgetDashboard";
 import { BudgetPlannerPage } from "../BudgetPlannerPage";
@@ -2150,7 +2151,9 @@ describe("budget belongs to a client", () => {
         .mutateAsync({ expense_date: "2026-01-15", amount: "1.00", currency: "USD", category_id: "cat1" })
         .catch((error: unknown) => error);
     });
-    expect(String(refusal)).toMatch(/nothing was sent/i);
+    // The shared sentence, exactly (phase 3 final review D, Minor 4).
+    expect(refusal).toBeInstanceOf(ClientNotChosen);
+    expect((refusal as Error).message).toBe(new ClientNotChosen().message);
     expect(api.createExpense).not.toHaveBeenCalled();
     expect(api.listBudgetCategories).not.toHaveBeenCalled();
     expect(api.getBudgetSettings).not.toHaveBeenCalled();

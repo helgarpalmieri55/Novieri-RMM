@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
 import { DecisionBar } from "../DecisionBar";
 import type { MeClient } from "../../../lib/api";
+import { ClientNotChosen } from "../../../lib/clientSelection";
 
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -124,7 +125,8 @@ describe("linking an approval to a change", () => {
     renderBar();
     await user.click(await screen.findByRole("button", { name: /^Approve 1 update/ }));
     await user.click(await screen.findByRole("button", { name: "Approve" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/nothing was sent/i);
+    // The shared sentence, exactly (phase 3 final review D, Minor 4).
+    expect(await screen.findByRole("alert")).toHaveTextContent(new ClientNotChosen().message);
     expect(bulkApprovePatches).not.toHaveBeenCalled();
   });
 });

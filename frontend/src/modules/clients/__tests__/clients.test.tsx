@@ -359,6 +359,42 @@ describe("a client's Summary", () => {
     await user.click(screen.getByRole("button", { name: "Work on this client" }));
     expect(scope.select).toHaveBeenCalledWith("c-andes");
   });
+
+  // Phase 3 final review D (T12): neither branch below had a test.
+  it("offers to work on all my clients when the page's client is not one the person may choose", async () => {
+    // `/me` lists no Andes (archived, say, or no role there), so the top bar
+    // cannot choose it: the one act that reads it is "all my clients".
+    scope.selected = "org-1";
+    scope.clients = [meClient(INTERNAL), meClient(UNASSIGNED)];
+    const getClientRecord = vi.fn().mockResolvedValue(ANDES);
+    mockUseApi.mockReturnValue(api({ getClientRecord }));
+    const user = userEvent.setup();
+    renderAt("/clients/c-andes");
+    expect(await screen.findByText(/The console is working on Toeshee/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Work on this client" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Work on all my clients" }));
+    expect(scope.select).toHaveBeenCalledExactlyOnceWith(null);
+    expect(getClientRecord).not.toHaveBeenCalled();
+  });
+
+  it("says an archived client is archived, above its tabs", async () => {
+    // `/me` leaves an archived client out; the page is reached from the list's
+    // "Show archived clients", with every client chosen.
+    scope.clients = [meClient(INTERNAL), meClient(UNASSIGNED)];
+    mockUseApi.mockReturnValue(api({ getClientRecord: vi.fn().mockResolvedValue({ ...ANDES, status: "archived" }) }));
+    renderAt("/clients/c-andes");
+    expect(await screen.findByRole("heading", { name: "Andes Logistics", level: 1 })).toBeInTheDocument();
+    const notice = screen.getByText("This client is archived. Its records are kept and take no changes.");
+    expect(notice.closest('[role="status"]')).not.toBeNull();
+    expect(screen.getByRole("tab", { name: "Summary" })).toBeInTheDocument();
+  });
+
+  it("says nothing about archiving for an active client", async () => {
+    mockUseApi.mockReturnValue(api());
+    renderAt("/clients/c-andes");
+    await screen.findByRole("heading", { name: "Andes Logistics", level: 1 });
+    expect(screen.queryByText(/This client is archived/)).toBeNull();
+  });
 });
 
 describe("a client's Sites", () => {

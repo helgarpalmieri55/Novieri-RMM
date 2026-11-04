@@ -1104,7 +1104,8 @@ describe("BackupPolicyEditor", () => {
     );
 
     // A customer's group: that page cannot file one under the customer, so
-    // the hint says where it is made and there is no link.
+    // the hint says to ask someone who manages that client's backups, and
+    // there is no link.
     await choose(user, "Applies to", /Customer servers/);
     expect(screen.queryByRole("link", { name: /Create a backup repository/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("combobox", { name: "Repository" }));

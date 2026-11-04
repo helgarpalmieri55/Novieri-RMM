@@ -272,6 +272,23 @@ describe("PlanEditor form validation", () => {
     return user;
   }
 
+  // Phase 3 final review D, Important 1. `ME.org_id` is "o1", where phases 1-2
+  // filed every new plan whoever was chosen; only a client other than "o1"
+  // chosen at the top tells that rule from this one.
+  it("files a new plan under the client chosen at the top, which is not the organisation's own", async () => {
+    selectClient("c-acme", [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["bcp"], permissions: ME.permissions },
+    ]);
+    const user = renderEditor();
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await user.type(screen.getByLabelText("Name *"), "Acme failover");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(api.createPlan).toHaveBeenCalledTimes(1));
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ client_id: "c-acme", name: "Acme failover" }));
+  });
+
   it("with every client chosen, asks for the plan's client and offers only its devices", async () => {
     selectClient(null, [
       { ...SCOPE_INTERNAL, permissions: ME.permissions },
@@ -284,6 +301,41 @@ describe("PlanEditor form validation", () => {
     await user.click(screen.getByRole("combobox", { name: "Scope 1 device" }));
     expect(await screen.findByRole("option", { name: /acme-01/ })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /own-01/ })).toBeNull();
+  });
+
+  // Phase 3 final review D (T11): "Client is required" had only its not-ready
+  // twin under test. With every client chosen and the field left empty, Save
+  // names the Client field -- before anything is built -- and sends nothing.
+  it("with every client chosen, names the empty Client field on Save and sends nothing", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["bcp"], permissions: ME.permissions },
+    ]);
+    const user = renderEditor();
+    await user.type(screen.getByLabelText("Name *"), "Acme failover");
+    expect(screen.getByLabelText("Client")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(api.createPlan).not.toHaveBeenCalled();
+  });
+
+  // Phase 3 final review D, Important 2: the field offers only the clients
+  // where the person may MANAGE plans, not every one they can read.
+  it("with every client chosen, offers only the clients holding bcp.manage, never Unassigned", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["bcp"], permissions: ME.permissions },
+      { id: "c-beta", name: "Beta", kind: "customer", enabled_modules: ["bcp"], permissions: ["bcp.read"] },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: ["bcp"], permissions: ME.permissions },
+    ]);
+    renderEditor();
+    const field = screen.getByLabelText("Client");
+    expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Novieri",
+      "Acme",
+    ]);
   });
 
   // Phase 3 review F4. `GET /devices` answers one page (100 by default):

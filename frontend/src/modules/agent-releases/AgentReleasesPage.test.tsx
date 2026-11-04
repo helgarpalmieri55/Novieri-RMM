@@ -34,7 +34,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
-import type { AgentRelease, ApiClient, MeClient } from "../../lib/api";
+import type { AgentRelease, ApiClient, ClientSiteOut, MeClient } from "../../lib/api";
 import { AgentReleasesPage } from "./AgentReleasesPage";
 
 const mockUseApi = vi.fn();
@@ -58,6 +58,11 @@ function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTE
 }
 
 beforeEach(() => selectClient(SCOPE_INTERNAL.id));
+
+/** The internal client's only site: where new machines go on this page. */
+const PRINCIPAL_SITE: ClientSiteOut = {
+  id: "s-1", client_id: "o", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0,
+};
 
 function release(overrides: Partial<AgentRelease> = {}): AgentRelease {
   return {
@@ -100,12 +105,13 @@ function renderPage(
       }),
     listAgentReleases,
     generateAgentInstallCommand,
-    listClientSites: () =>
-      Promise.resolve([
-        { id: "s-1", client_id: "o", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 },
-      ]),
+    listClientSites: () => Promise.resolve([PRINCIPAL_SITE]),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // LOAD ROBUSTNESS, NOT A CHANGE OF WHAT IS ASSERTED (phase 3 final review
+  // C5): the Site field's read is in the cache before the first render, so
+  // it picks the only site at once rather than one async hop later.
+  queryClient.setQueryData(["client-sites", SCOPE_INTERNAL.id], [PRINCIPAL_SITE]);
   const ui: ReactElement = (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
@@ -685,12 +691,11 @@ describe("the install link panel on Agent packages", () => {
     });
     mockUseApi.mockReturnValue({
       me, listAgentReleases: () => Promise.resolve([]), getInstallLink,
-      listClientSites: () =>
-        Promise.resolve([
-          { id: "s-1", client_id: "o", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 },
-        ]),
+      listClientSites: () => Promise.resolve([PRINCIPAL_SITE]),
     } as unknown as ApiClient);
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Load robustness (phase 3 final review C5): see `renderPage`.
+    queryClient.setQueryData(["client-sites", SCOPE_INTERNAL.id], [PRINCIPAL_SITE]);
     render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>

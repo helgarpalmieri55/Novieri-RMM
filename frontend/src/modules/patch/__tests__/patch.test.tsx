@@ -3300,6 +3300,29 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     return screen.findByRole("dialog", { name: "Approve updates into a deployment ring" });
   }
 
+  // Phase 3 final review D, Important 1. `ME.org_id` is "o1", where phases 1-2
+  // filed every approval whoever was chosen; only a client other than "o1"
+  // chosen at the top tells that rule from this one.
+  it("files an approval under the client chosen at the top, which is not the organisation's own", async () => {
+    selectClient("c-acme", MY_CLIENTS);
+    const user = userEvent.setup();
+    const bulkApprovePatches = vi.fn().mockResolvedValue(bulkResult(["p1"], "test"));
+    api = { me: vi.fn().mockResolvedValue({ ...ME, clients: MY_CLIENTS }), bulkApprovePatches };
+    renderWithProviders(<FleetPatchPage />);
+    await screen.findByText("2023-10 Cumulative Update");
+    await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
+    expect(screen.queryByLabelText("Client")).toBeNull();
+
+    const confirm = await openApproval(user);
+    expect(confirm).toHaveTextContent(/installable on the 1 device of Acme in the "test" ring/);
+    await user.click(within(confirm).getByRole("button", { name: "Approve" }));
+    expect(bulkApprovePatches).toHaveBeenCalledExactlyOnceWith({
+      patch_ids: ["p1"],
+      ring_name: "test",
+      client_id: "c-acme",
+    });
+  });
+
   it("with every client chosen, asks the bar for the client and files the approval there", async () => {
     selectClient(null, [
       { id: "o1", name: "Novieri", kind: "internal", enabled_modules: [], permissions: ME.permissions },
@@ -3317,6 +3340,50 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     await user.click(within(confirm).getByRole("button", { name: "Approve" }));
     await waitFor(() => expect(bulkApprovePatches).toHaveBeenCalled());
     expect(bulkApprovePatches.mock.calls[0]?.[0]).toMatchObject({ client_id: "c-acme" });
+  });
+
+  // Phase 3 final review D, Important 2: the bar's field offers only the
+  // clients where the person may APPROVE, not every one they can read.
+  it("with every client chosen, offers on the bar only the clients holding patch.approve, never Unassigned", async () => {
+    selectClient(null, [
+      ...MY_CLIENTS,
+      { id: "c-beta", name: "Beta", kind: "customer", enabled_modules: [], permissions: ["patch.read", "devices.read"] },
+      { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ME.permissions },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<FleetPatchPage />);
+    await screen.findByText("2023-10 Cumulative Update");
+    await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
+    const field = screen.getByLabelText("Client");
+    expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Novieri",
+      "Acme",
+    ]);
+  });
+
+  // Plan Task 11 D11.3 (`patch.decision.chosenClient`), which no test read:
+  // with every client chosen and the bar's Client field still empty, the
+  // approval is "the client you choose" -- not the organisation's own, and not
+  // "All clients" -- until a client is picked, and then that client by name.
+  it("names the approval's owner as the client you choose until the bar's field names one", async () => {
+    selectClient(null, MY_CLIENTS);
+    const user = userEvent.setup();
+    api = { me: vi.fn().mockResolvedValue({ ...ME, clients: MY_CLIENTS }) };
+    renderWithProviders(<FleetPatchPage />);
+    await screen.findByText("2023-10 Cumulative Update");
+    await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
+
+    const toggle = screen.getByRole("checkbox", { name: /For every client/ });
+    expect(screen.getByLabelText("Client")).toHaveValue("");
+    expect(toggle.closest("label")).toHaveTextContent(
+      "Ticked, these updates become installable on every client's machines in the test ring. Unticked, only on the machines of the client you choose.",
+    );
+
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    expect(toggle.closest("label")).toHaveTextContent(
+      "Ticked, these updates become installable on every client's machines in the test ring. Unticked, only on the machines of Acme.",
+    );
   });
 
   it("states the selected client's machines by default, and every client's when asked", async () => {
