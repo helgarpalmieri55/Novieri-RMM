@@ -1,7 +1,7 @@
 # Autenticación propia (sin Keycloak) — diseño
 
-**Estado:** aprobado por el operador (Helgar Palmieri, Novieri) sección por sección entre el 2026-11-02 y el 2026-11-04.
-Pendiente de su revisión como documento completo.
+**Estado:** aprobado por el operador (Helgar Palmieri, Novieri): sección por sección entre el 2026-11-02 y el 2026-11-04,
+y como documento completo el 2026-11-04.
 
 Es el **proyecto 2 de 4** del plan acordado el 2026-10-23
 (`docs/superpowers/specs/2026-10-23-msp-clientes-design.md`):
