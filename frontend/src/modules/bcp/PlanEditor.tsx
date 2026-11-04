@@ -26,7 +26,7 @@ import {
   scopeGroupPickerOptions,
 } from "./pickerOptions";
 import type { PlanOut, PlanScopeEntry } from "./types";
-import { UnassignedRefusal } from "../clients/UnassignedRefusal";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { Icon } from "../../shell/icons";
 import { ADD_COMPUTER_TO } from "../../shell/nav";
 import { KIND_ICON } from "../../shell/viz";

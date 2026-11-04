@@ -1024,13 +1024,13 @@ describe("NewTicketDialog: the client of a ticket with no device", () => {
     setSelectedClient("c-unassigned");
     renderWithProviders(<NewTicketDialog open onClose={() => {}} />);
     await fillTicket(user);
-    expect(screen.getByText("Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.")).toBeInTheDocument();
+    expect(screen.getByText("Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.queryByLabelText("Client")).toBeNull();
     expect(api.createTicket).not.toHaveBeenCalled();
 
     await pickEntity(user, "Device (optional)", /BUILD-01/);
-    expect(screen.queryByText("Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.")).toBeNull();
+    expect(screen.queryByText("Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.")).toBeNull();
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
   });
 

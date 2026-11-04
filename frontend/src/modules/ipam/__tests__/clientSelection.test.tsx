@@ -291,7 +291,7 @@ describe("an import with no VRF listed names a client", () => {
 // been chosen" -- and, with Unassigned chosen at the top, they say that nothing
 // new can be filed there instead of offering a create that can only fail.
 const UNASSIGNED: MeClient = { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: CODES };
-const REFUSED = "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.";
+const REFUSED = "Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.";
 
 function selectUnassigned(): void {
   mockClientScope.mockReturnValue({ selected: UNASSIGNED.id, select: vi.fn(), clients: [...CLIENTS, UNASSIGNED], ready: true });

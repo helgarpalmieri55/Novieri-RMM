@@ -31,7 +31,7 @@ import { useClientScope } from "../../lib/clientScope";
 import { useNewRowClientField } from "../../lib/clientSelection";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 import { Btn, Panel, QueryState } from "../../shell/components";
-import { UnassignedRefusal } from "../clients/UnassignedRefusal";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { useClientName } from "../settings/api";
 import { useCreateHealthAssignmentMutation, useDeleteHealthAssignmentMutation, useHealthAssignments } from "./api";
 import type { AssignmentOut } from "./types";

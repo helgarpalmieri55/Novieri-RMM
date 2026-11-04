@@ -2,7 +2,6 @@ import type { Shape } from "../types";
 import type { credentials as en } from "../en/credentials";
 
 export const credentials: Shape<typeof en> = {
-  unassignedRefused: "El cliente elegido es «Sin asignar», y en él no se puede crear nada nuevo. Elige antes otro cliente.",
   page: {
     title: "Credenciales",
     description: "Contraseñas y claves para sesiones remotas y aprovisionamiento, almacenadas cifradas.",

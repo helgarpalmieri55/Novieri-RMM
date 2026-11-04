@@ -2,7 +2,6 @@ import type { Shape } from "../types";
 import type { enrollment as en } from "../en/enrollment";
 
 export const enrollment: Shape<typeof en> = {
-  unassignedRefused: "El cliente elegido es «Sin asignar», y en él no se puede crear nada nuevo. Elige antes otro cliente.",
   page: {
     title: "Inscripción",
     description: "Los tokens que permiten que un equipo nuevo se una y los certificados que tienen los equipos.",

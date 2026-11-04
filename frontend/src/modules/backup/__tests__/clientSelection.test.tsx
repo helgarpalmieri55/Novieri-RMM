@@ -220,7 +220,7 @@ describe("a new client-default policy", () => {
 // chosen at the top nothing new can be filed, and the header confines the
 // request to Unassigned, so a Save could only fail; the forms say so.
 describe("with Unassigned chosen at the top", () => {
-  const REFUSED = "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.";
+  const REFUSED = "Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.";
 
   function selectUnassigned(): void {
     mockClientScope.mockReturnValue({ selected: UNASSIGNED.id, select: vi.fn(), clients: [INTERNAL, ACME, UNASSIGNED], ready: true });

@@ -245,7 +245,7 @@ describe("an install command or a deployment token with nothing to name its site
     const api = stubApi();
     const user = userEvent.setup();
     renderPage();
-    const refused = "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.";
+    const refused = "Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.";
     expect(await screen.findByText(refused)).toBeInTheDocument();
     expect(screen.queryByLabelText("Site")).toBeNull();
     await askForCommand(user);

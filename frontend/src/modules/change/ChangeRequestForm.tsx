@@ -7,7 +7,7 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { formatDateTime, toInstant } from "../../lib/datetime";
-import { UnassignedRefusal } from "../clients/UnassignedRefusal";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { useCreateChangeMutation, useUpdateChangeMutation, useUserTimezone } from "./api";
 import { riskLabel } from "./changeState";
 import type { ChangeRequest } from "./types";

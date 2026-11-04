@@ -40,6 +40,7 @@ import {
   prefixSize,
 } from "./pushState";
 import { AGENT_PUSH_SCOPE_MANAGE, type PushAuthorizationOut } from "./types";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 
 /** The presentation table's badge vocabulary, as v3 kinds. */
 const KIND_OF_VARIANT: Record<BadgeVariant, Kind> = {
@@ -298,10 +299,7 @@ function GrantForm() {
           title={t("agentPush.authorizations.form.title")}
           subtitle={t("agentPush.authorizations.form.subtitle")}
         >
-          <div className="notice" role="note">
-            <Icon name="info" size={17} />
-            <p>{t("agentPush.unassignedRefused")}</p>
-          </div>
+          <UnassignedRefusal />
         </Panel>
       </div>
     );

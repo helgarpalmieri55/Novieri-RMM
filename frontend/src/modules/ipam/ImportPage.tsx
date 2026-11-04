@@ -18,7 +18,8 @@ import {
 import { IpamNav } from "./IpamNav";
 import { DetailFacts } from "./DetailFacts";
 import { ErrorLine } from "./ErrorLine";
-import { clientRule, ProblemLine, UnassignedRefused } from "./NewRowClient";
+import { clientRule, ProblemLine } from "./NewRowClient";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import {
   describeImportDetail,
   importActionPresentation,
@@ -198,7 +199,7 @@ function CsvImportPanel() {
       {/* With Unassigned chosen at the top and no VRF to import into, nothing
           new can be filed: the panel says so instead of offering a preview
           that can only be refused. */}
-      {namesClient && newRow.refused === "unassigned" ? <UnassignedRefused /> : null}
+      {namesClient && newRow.refused === "unassigned" ? <UnassignedRefusal /> : null}
 
       <Field label={t("ipam.importExport.csvFile")}>
         {/* THE NATIVE CONTROL STAYS -- it is what the browser's picker and the

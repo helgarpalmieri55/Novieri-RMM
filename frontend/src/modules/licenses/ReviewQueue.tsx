@@ -25,7 +25,7 @@ import type { ReviewQueueRow } from "./types";
 import { PageHead, Panel, QueryState } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useEverywherePermissions } from "../../lib/mePermissions";
-import { UnassignedRefusal } from "../clients/UnassignedRefusal";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { useClientName } from "../settings/api";
 
 /** The Client field Ignore needs with every client chosen, named like any required field. */

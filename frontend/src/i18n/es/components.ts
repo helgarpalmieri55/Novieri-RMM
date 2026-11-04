@@ -2,6 +2,10 @@ import type { Shape } from "../types";
 import type { components as en } from "../en/components";
 
 export const components: Shape<typeof en> = {
+  // The notice a new-row form shows in place of Save while Unassigned is
+  // chosen at the top (components/UnassignedRefusal.tsx).
+  unassignedRefusal:
+    "El cliente elegido arriba es «Sin asignar», y en él no se puede crear nada nuevo. Elige antes otro cliente.",
   ui: {
     actions: "Acciones",
     scrollForMore: "Desplázate para ver más columnas",

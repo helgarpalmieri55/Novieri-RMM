@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 
 import { ConfirmDialog } from "../../components/confirm";
 import { useT } from "../../i18n/context";
@@ -339,10 +340,7 @@ export function AgentReleasesPage() {
         {/* With Unassigned chosen at the top there is no site to enrol into:
             the panel says so instead of a Site field that can only be empty. */}
         {client.refused === "unassigned" ? (
-          <div className="notice" role="note">
-            <Icon name="info" size={17} />
-            <p>{t("agentReleases.unassignedRefused")}</p>
-          </div>
+          <UnassignedRefusal />
         ) : (
           <div className="form-grid">
             {client.needsField ? <ClientField field={client} /> : null}

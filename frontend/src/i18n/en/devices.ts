@@ -1,6 +1,5 @@
 export const devices = {
   // A create form with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
-  unassignedRefused: "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.",
   page: {
     title: "Devices",
     description: "Every computer and device you manage, with or without an agent.",

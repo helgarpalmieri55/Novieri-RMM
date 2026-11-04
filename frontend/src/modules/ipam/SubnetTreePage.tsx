@@ -25,7 +25,8 @@ import {
 } from "./api";
 import { IpamNav } from "./IpamNav";
 import { IpamReadiness } from "./IpamReadiness";
-import { clientRule, UnassignedRefused } from "./NewRowClient";
+import { clientRule } from "./NewRowClient";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import {
   buildSubnetTree,
   flattenSubnetTree,
@@ -738,7 +739,7 @@ function CreateSubnetForm() {
             With Unassigned chosen at the top and no VRF to decide, nothing
             new can be filed: the form says so instead (a VRF still can). */}
         {newRow.refused === "unassigned" ? (
-          <UnassignedRefused />
+          <UnassignedRefusal />
         ) : (
           <FormActions
             label={t("ipam.tree.register")}

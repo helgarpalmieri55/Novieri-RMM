@@ -14,7 +14,7 @@ import { ApiError } from "../../lib/api";
 import { useClientScope } from "../../lib/clientScope";
 import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { humaniseStatus } from "../../lib/labels";
-import { UnassignedRefusal } from "../clients/UnassignedRefusal";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { useClientName } from "../settings/api";
 import {
   useCreateSlaPolicyMutation,

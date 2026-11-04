@@ -5,6 +5,7 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { Trans } from "../../i18n/Trans";
 import { ConfirmDialog } from "../../components/confirm";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
 import { NoValue } from "../../components/emptystate";
@@ -823,10 +824,7 @@ function CreateCredentialDialog({
               that can only fail. Every client's is no client's, so ticking
               "For every client" (where offered) still stores one. */}
           {client.refused === "unassigned" && !everyClient ? (
-            <div className="notice" role="note">
-              <Icon name="info" size={17} />
-              <p>{t("credentials.unassignedRefused")}</p>
-            </div>
+            <UnassignedRefusal />
           ) : (
             <FormActions
               label={t("credentials.create.store")}

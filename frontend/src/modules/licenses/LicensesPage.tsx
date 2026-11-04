@@ -42,7 +42,7 @@ import { formatDate } from "../../lib/datetime";
 import { ClientField } from "../../components/ClientField";
 import { useClientScope } from "../../lib/clientScope";
 import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
-import { UnassignedRefusal } from "../clients/UnassignedRefusal";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { useClientName } from "../settings/api";
 import { humaniseEnum } from "../../lib/labels";
 import {

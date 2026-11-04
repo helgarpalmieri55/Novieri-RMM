@@ -20,6 +20,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 
 import { attemptProblems, Form, FormActions } from "../../components/form";
 import type { Attempt } from "../../components/form";
@@ -32,7 +33,6 @@ import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { humaniseEnum } from "../../lib/labels";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
-import { Icon } from "../../shell/icons";
 import { PushDetailsFields, type PushDetails } from "./PushDetailsFields";
 
 const ASSET_TYPES: Device["asset_type"][] = [
@@ -130,10 +130,7 @@ function AddAssetForm({ onClose }: { onClose: () => void }) {
   if (client.refused === "unassigned") {
     return (
       <Dialog open onClose={close} title={t("devices.addAsset.title")}>
-        <div className="notice" role="note">
-          <Icon name="info" size={17} />
-          <p>{t("devices.unassignedRefused")}</p>
-        </div>
+        <UnassignedRefusal />
         <div className="flex items-center justify-end gap-2 mt-3">
           <Button type="button" variant="ghost" onClick={close}>
             {t("common.actions.cancel")}

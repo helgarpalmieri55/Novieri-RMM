@@ -554,7 +554,7 @@ describe("SubscriptionsPage", () => {
     await screen.findByText("Acme SaaS", { selector: ".cell-title a" });
     await user.click(screen.getByRole("button", { name: "New subscription" }));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.")).toBeInTheDocument();
+    expect(within(dialog).getByText("Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.")).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Save" })).toBeNull();
     expect(api.createSubscription).not.toHaveBeenCalled();
   });

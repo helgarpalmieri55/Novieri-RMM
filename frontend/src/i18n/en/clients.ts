@@ -158,10 +158,4 @@ export const clients = {
     unassigned: "The unassigned client has no optional modules.",
     saveFailed: "The modules were not changed.",
   },
-  // A form that would file a new row while Unassigned is chosen in the top
-  // bar (modules/clients/UnassignedRefusal.tsx, phase 3 design §3.1).
-  newRow: {
-    unassigned:
-      "Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.",
-  },
 };

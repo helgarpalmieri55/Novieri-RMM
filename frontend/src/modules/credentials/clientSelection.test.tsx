@@ -187,7 +187,7 @@ describe("a credential of any other type", () => {
     const user = userEvent.setup();
     renderPage({ me: meWith(["credentials.manage"]), listCredentials: () => Promise.resolve([]), createCredential });
     await openNew(user);
-    const refused = "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.";
+    const refused = "Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.";
     expect(screen.getByText(refused)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Store" })).toBeNull();
     // Every client's is no client's: it may still be stored, and goes global.

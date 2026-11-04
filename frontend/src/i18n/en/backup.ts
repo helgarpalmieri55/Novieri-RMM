@@ -6,7 +6,6 @@
  */
 export const backup = {
   // A create dialog with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
-  unassignedRefused: "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.",
   nav: {
     label: "Backup",
     points: "Backup points",

@@ -45,7 +45,7 @@ import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { formatDateTime } from "../../lib/datetime";
 import { formatBytes } from "../../lib/format";
 import { humaniseEnum } from "../../lib/labels";
-import { UnassignedRefusal } from "../clients/UnassignedRefusal";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { Panel, QueryState, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { DocumentViewer, DownloadVersionButton } from "./DocumentViewer";

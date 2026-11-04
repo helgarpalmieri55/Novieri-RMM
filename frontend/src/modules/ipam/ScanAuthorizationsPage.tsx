@@ -21,7 +21,8 @@ import {
 } from "./api";
 import { ErrorLine } from "./ErrorLine";
 import { IpamNav } from "./IpamNav";
-import { clientRule, ProblemLine, UnassignedRefused } from "./NewRowClient";
+import { clientRule, ProblemLine } from "./NewRowClient";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import {
   describeScope,
   formatAge,
@@ -484,7 +485,7 @@ function GrantForm({ subnets }: { subnets: SubnetOut[] }) {
       {/* With Unassigned chosen at the top and no VRF to decide, nothing new
           can be filed: the form says so instead (a VRF still can). */}
       {newRow.refused === "unassigned" ? (
-        <UnassignedRefused />
+        <UnassignedRefusal />
       ) : (
         <div className="form-actions">
           <Btn

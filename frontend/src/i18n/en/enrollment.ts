@@ -1,6 +1,5 @@
 export const enrollment = {
   // The token form with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
-  unassignedRefused: "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.",
   page: {
     title: "Enrollment",
     description: "Tokens that let a new computer join, and the certificates computers hold.",

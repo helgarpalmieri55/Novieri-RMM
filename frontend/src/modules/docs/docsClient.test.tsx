@@ -418,7 +418,7 @@ describe("a new document", () => {
 // Unassigned, so ticking it brings the Save back.
 describe("with Unassigned chosen at the top", () => {
   const REFUSAL =
-    "Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.";
+    "Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.";
   const ADMIN: Me = { ...MANAGER, permissions_everywhere: ["docs.read", "docs.manage"] };
 
   beforeEach(() => selectClient(UNASSIGNED_CLIENT.id, [INTERNAL_CLIENT, UNASSIGNED_CLIENT]));
@@ -472,7 +472,7 @@ describe("with Unassigned chosen at the top", () => {
     await user.click(await screen.findByRole("button", { name: "Registro nuevo" }));
     expect(
       await screen.findByText(
-        "Arriba está elegido «Sin asignar», y en él no se puede guardar nada nuevo. Elige otro cliente, o «Todos mis clientes», para guardar esto.",
+        "El cliente elegido arriba es «Sin asignar», y en él no se puede crear nada nuevo. Elige antes otro cliente.",
       ),
     ).toBeInTheDocument();
   });

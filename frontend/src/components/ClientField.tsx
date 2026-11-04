@@ -13,7 +13,8 @@
  *   The field reads no scope of its own, so there is one source of truth for
  *   what is offered.
  * - `<ClientField code value onChange/>`: the older shape, where the form
- *   keeps the value. Shown where `useNewRowClient(code).needsField` says so.
+ *   keeps the value. Shown where the decision's `needsField` says so (a form reads it from
+ *   `useNewRowClientField`; `useNewRowClient` is that decision alone).
  *
  * Either way the form sends the client inside its mutation (`requireKnown`).
  *

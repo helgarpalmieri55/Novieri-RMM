@@ -2,7 +2,6 @@ import type { Shape } from "../types";
 import type { backup as en } from "../en/backup";
 
 export const backup: Shape<typeof en> = {
-  unassignedRefused: "El cliente elegido es «Sin asignar», y en él no se puede crear nada nuevo. Elige antes otro cliente.",
   nav: {
     label: "Copia de seguridad",
     points: "Puntos de copia",

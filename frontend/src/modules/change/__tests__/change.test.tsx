@@ -499,7 +499,7 @@ describe("ChangeRequestForm", () => {
     const user = userEvent.setup();
     renderNew();
     await user.type(screen.getByLabelText("Title *"), "Upgrade switch firmware");
-    expect(screen.getByText("Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.")).toBeInTheDocument();
+    expect(screen.getByText("Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.queryByLabelText("Client")).toBeNull();
     await user.type(screen.getByLabelText("Title *"), "{Enter}");

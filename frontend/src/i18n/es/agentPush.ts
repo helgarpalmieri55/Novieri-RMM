@@ -2,7 +2,6 @@ import type { Shape } from "../types";
 import type { agentPush as en } from "../en/agentPush";
 
 export const agentPush: Shape<typeof en> = {
-  unassignedRefused: "El cliente elegido es «Sin asignar», y en él no se puede crear nada nuevo. Elige antes otro cliente.",
   nav: {
     label: "Instalación remota",
     authorizations: "Autorizaciones de instalación remota",

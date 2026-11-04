@@ -59,6 +59,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 
 import { Trans } from "../../i18n/Trans";
 import { useT } from "../../i18n/context";
@@ -1280,10 +1281,7 @@ export function GroupsPage() {
                 nothing new can be filed: the editor says so instead of
                 offering a create that can only fail. */}
             {!editor.group && newRow.refused === "unassigned" ? (
-              <div className="notice" role="note">
-                <Icon name="info" size={17} />
-                <p>{t("devices.unassignedRefused")}</p>
-              </div>
+              <UnassignedRefusal />
             ) : (
               <FormActions
                 label={editor.group ? t("devices.groups.editor.save") : t("devices.groups.editor.create")}

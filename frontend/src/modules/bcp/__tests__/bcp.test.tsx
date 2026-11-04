@@ -344,7 +344,7 @@ describe("PlanEditor form validation", () => {
     ]);
     const user = renderEditor();
     await user.type(screen.getByLabelText("Name *"), "Failover");
-    expect(screen.getByText("Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.")).toBeInTheDocument();
+    expect(screen.getByText("Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(api.createPlan).not.toHaveBeenCalled();
   });

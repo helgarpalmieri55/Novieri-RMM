@@ -162,8 +162,4 @@ export const clients: Shape<typeof en> = {
     unassigned: "El cliente «Sin asignar» no tiene módulos opcionales.",
     saveFailed: "No se cambiaron los módulos.",
   },
-  newRow: {
-    unassigned:
-      "Arriba está elegido «Sin asignar», y en él no se puede guardar nada nuevo. Elige otro cliente, o «Todos mis clientes», para guardar esto.",
-  },
 };

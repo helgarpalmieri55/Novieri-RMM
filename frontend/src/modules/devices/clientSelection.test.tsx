@@ -231,7 +231,7 @@ describe("a hand-made asset", () => {
 // brings the "Client is required" rule the group editor lacked, and with
 // Unassigned chosen at the top the forms say nothing new can be filed there
 // instead of offering a create that can only fail.
-const REFUSED = "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.";
+const REFUSED = "Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.";
 
 function selectUnassigned(): void {
   mockClientScope.mockReturnValue({ selected: UNASSIGNED.id, select: vi.fn(), clients: [...CLIENTS, UNASSIGNED], ready: true });

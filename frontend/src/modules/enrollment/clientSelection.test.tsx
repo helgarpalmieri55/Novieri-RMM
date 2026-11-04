@@ -210,7 +210,7 @@ describe("with Unassigned chosen at the top", () => {
     renderPage();
     await user.click(await screen.findByRole("button", { name: "Create token" }));
     expect(
-      await screen.findByText("Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first."),
+      await screen.findByText("Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Issue token…" })).toBeNull();
     expect(screen.queryByLabelText("Site")).toBeNull();

@@ -180,7 +180,7 @@ describe("the grant form's client, through the shared hook", () => {
     stubApi();
     renderIt(<PushAuthorizationsPage />);
     expect(
-      await screen.findByText("Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first."),
+      await screen.findByText("Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Authorize" })).toBeNull();
     expect(screen.queryByPlaceholderText("10.4.7.0/24")).toBeNull();

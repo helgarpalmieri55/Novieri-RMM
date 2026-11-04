@@ -1,6 +1,5 @@
 export const agentPush = {
   // The grant form with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
-  unassignedRefused: "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.",
   nav: {
     label: "Push install",
     authorizations: "Push authorizations",

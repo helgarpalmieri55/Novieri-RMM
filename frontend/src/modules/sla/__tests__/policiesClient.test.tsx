@@ -204,7 +204,7 @@ describe("a new policy is one client's, or every client's when asked (§3.1)", (
     await pickCalendar(user, dialog);
     expect(
       within(dialog).getByText(
-        "Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.",
+        "Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.",
       ),
     ).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Save" })).toBeNull();

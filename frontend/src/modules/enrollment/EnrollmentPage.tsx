@@ -113,6 +113,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 
 import { ConfirmDialog } from "../../components/confirm";
 import { Form, FormActions, attemptProblems, describeSubmitError } from "../../components/form";
@@ -786,10 +787,7 @@ export function EnrollmentPage() {
             {formOpen && client.refused === "unassigned" ? (
               // Unassigned has no site and files nothing new: the form says so
               // instead of offering an Issue that can only fail.
-              <div className="notice" role="note">
-                <Icon name="info" size={17} />
-                <p>{t("enrollment.unassignedRefused")}</p>
-              </div>
+              <UnassignedRefusal />
             ) : formOpen ? (
               <Form onSubmit={submitIssue}>
                 {client.needsField ? <ClientField field={client} /> : null}

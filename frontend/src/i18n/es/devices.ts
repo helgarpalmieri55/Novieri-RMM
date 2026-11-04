@@ -2,7 +2,6 @@ import type { Shape } from "../types";
 import type { devices as en } from "../en/devices";
 
 export const devices: Shape<typeof en> = {
-  unassignedRefused: "El cliente elegido es «Sin asignar», y en él no se puede crear nada nuevo. Elige antes otro cliente.",
   page: {
     title: "Dispositivos",
     description: "Todos los equipos y dispositivos que administras, con o sin agente.",

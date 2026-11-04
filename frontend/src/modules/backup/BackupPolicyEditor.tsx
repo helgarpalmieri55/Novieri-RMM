@@ -24,6 +24,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ClientField } from "../../components/ClientField";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { Button, Dialog, Table, Td, Th } from "../../components/ui";
 import { Form, FormActions, attemptProblems } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -504,10 +505,7 @@ function PolicyDialog({
               disables itself on a missing Repository: that was the silent
               no-op; the click now names the field. */}
           {refused ? (
-            <div className="notice" role="note">
-              <Icon name="info" size={17} />
-              <p>{t("backup.unassignedRefused")}</p>
-            </div>
+            <UnassignedRefusal />
           ) : (
             <FormActions
               label={t("backup.policyDialog.save")}

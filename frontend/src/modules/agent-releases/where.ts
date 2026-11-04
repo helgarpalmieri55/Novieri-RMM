@@ -15,7 +15,7 @@ import type { NewRowClientField } from "../../lib/clientSelection";
  * every client chosen, then the Site field.
  */
 export function whereMissing(client: NewRowClientField, siteId: string): string | null {
-  if (client.refused === "unassigned") return translate("agentReleases.unassignedRefused");
+  if (client.refused === "unassigned") return translate("components.unassignedRefusal");
   if (siteId !== "") return null;
   if (client.needsField && client.clientId === null) {
     return translate("validation.required", { label: translate("components.clientField.label") });

@@ -1,6 +1,5 @@
 export const credentials = {
   // The create dialog with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
-  unassignedRefused: "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.",
   page: {
     title: "Credentials",
     description: "Passwords and keys for remote sessions and provisioning, stored encrypted.",

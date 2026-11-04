@@ -16,7 +16,7 @@ import { useApi } from "../../lib/ApiContext";
 import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { formatDate, formatDateTime } from "../../lib/datetime";
 import { humaniseEnum, humaniseStatus } from "../../lib/labels";
-import { UnassignedRefusal } from "../clients/UnassignedRefusal";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { clientRule, DocumentsSection, DocumentView, tooLong, UploadDocumentDialog } from "./documents";
 import { renderMarkdown } from "./markdown";
 import { RowButton } from "./RowButton";

@@ -18,6 +18,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ClientField } from "../../components/ClientField";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { ConfirmDialog } from "../../components/confirm";
 import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { Form, FormActions, attemptProblems, describeSubmitError } from "../../components/form";
@@ -325,10 +326,7 @@ function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () 
           {/* With Unassigned chosen at the top nothing new can be filed: the
               dialog says so instead of offering a Create that can only fail. */}
           {client.refused === "unassigned" ? (
-            <div className="notice" role="note">
-              <Icon name="info" size={17} />
-              <p>{t("backup.unassignedRefused")}</p>
-            </div>
+            <UnassignedRefusal />
           ) : (
             <FormActions
               label={t("backup.repositories.create")}

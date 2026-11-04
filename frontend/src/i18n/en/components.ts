@@ -1,4 +1,8 @@
 export const components = {
+  // The notice a new-row form shows in place of Save while Unassigned is
+  // chosen at the top (components/UnassignedRefusal.tsx).
+  unassignedRefusal:
+    "Unassigned is the client chosen at the top, and nothing new can be filed under it. Choose another client first.",
   ui: {
     actions: "Actions",
     scrollForMore: "Scroll for more columns",

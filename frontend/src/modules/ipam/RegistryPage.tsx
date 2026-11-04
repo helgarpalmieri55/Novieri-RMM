@@ -20,7 +20,8 @@ import {
 } from "./api";
 import { ErrorLine } from "./ErrorLine";
 import { IpamNav } from "./IpamNav";
-import { clientRule, ProblemLine, UnassignedRefused } from "./NewRowClient";
+import { clientRule, ProblemLine } from "./NewRowClient";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { IPAM_MANAGE } from "./types";
 import { Icon } from "../../shell/icons";
 import { Btn, PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
@@ -152,7 +153,7 @@ function VrfPanel({ canManage }: { canManage: boolean }) {
       {canManage && (
         <AddRow>
           {client.refused === "unassigned" ? (
-            <UnassignedRefused />
+            <UnassignedRefusal />
           ) : (
             <>
               <div className="form-grid">
@@ -335,7 +336,7 @@ function VlanPanel({ canManage }: { canManage: boolean }) {
       </QueryState>
       {canManage && client.refused === "unassigned" ? (
         <AddRow>
-          <UnassignedRefused />
+          <UnassignedRefusal />
         </AddRow>
       ) : canManage ? (
         <AddRow>

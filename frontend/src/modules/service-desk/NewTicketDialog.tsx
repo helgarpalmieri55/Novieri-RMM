@@ -12,7 +12,7 @@ import { Button, Dialog, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { parentClientOf, requireKnown, useNewRowClientField } from "../../lib/clientSelection";
-import { UnassignedRefusal } from "../clients/UnassignedRefusal";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import {
   useCreateTicketMutation,
   useDirectoryDevices,

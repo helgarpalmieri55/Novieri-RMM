@@ -17,8 +17,9 @@
  * ONE HOOK FOR A FORM: `useNewRowClientField` answers all of it -- the
  * client, whether to ask, the field's value and options, and Unassigned
  * chosen at the top (`refused`) -- so no form keeps its own copy of the glue
- * (operator decision 2, 2026-11-02). `useNewRowClient` is the decision alone,
- * still exported while the forms move over; it goes private once none calls it.
+ * (operator decision 2, 2026-11-02). Forms use `useNewRowClientField`;
+ * `useNewRowClient` is the decision alone, kept exported for that hook and its
+ * tests.
  *
  * Phases 1 and 2 filed every new row under the organisation's internal client,
  * whoever was working; this module replaced that helper in phase 3, and

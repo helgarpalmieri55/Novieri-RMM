@@ -14,7 +14,6 @@ export const ipam = {
     importExport: "Import / export",
   },
   // A create form with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
-  unassignedRefused: "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.",
   // Words shared by several screens: a field's label is also its column's header.
   fields: {
     name: "Name",

@@ -15,16 +15,16 @@
  * console offers.
  */
 
-import { useT } from "../../i18n/context";
-import { Icon } from "../../shell/icons";
-import { KIND_ICON } from "../../shell/viz";
+import { useT } from "../i18n/context";
+import { Icon } from "../shell/icons";
+import { KIND_ICON } from "../shell/viz";
 
 export function UnassignedRefusal({ className = "" }: { className?: string }) {
   const t = useT();
   return (
     <div role="status" className={`notice ${className}`.trim()}>
       <Icon name={KIND_ICON.info} size={17} />
-      <div>{t("clients.newRow.unassigned")}</div>
+      <div>{t("components.unassignedRefusal")}</div>
     </div>
   );
 }

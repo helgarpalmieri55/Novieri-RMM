@@ -9,7 +9,7 @@ import { translate } from "../../i18n/core";
 import { useClientScope } from "../../lib/clientScope";
 import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { Btn } from "../../shell/components";
-import { UnassignedRefusal } from "../clients/UnassignedRefusal";
+import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { useClientName } from "../settings/api";
 import { useAuthorizingChanges, usePatchBulkApproveMutation } from "./api";
 import {
