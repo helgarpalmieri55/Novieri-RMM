@@ -44,12 +44,22 @@ const WRITES: readonly {
     global: (api) => api.bulkApprovePatches({ patch_ids: ["p1"], ring_name: "test" }),
     client: (api) => api.bulkApprovePatches({ patch_ids: ["p1"], ring_name: "test", client_id: ACME }),
   },
+  // The single approval, which no screen calls (the bar sends the bulk one):
+  // the same body rule, so the same flag (phase 3 last fix round, item 4).
+  {
+    name: "approvePatch",
+    global: (api) => api.approvePatch({ patch_id: "p1", ring_name: "test" }),
+    client: (api) => api.approvePatch({ patch_id: "p1", ring_name: "test", client_id: ACME }),
+  },
   {
     name: "revokePatchApproval",
     global: (api) => api.revokePatchApproval("ap1", { global: true }),
     client: (api) => api.revokePatchApproval("ap1", { global: false }),
   },
 ];
+
+/** The patch approval methods that only read, named so a new one is classified, not missed. */
+const READS = ["listPatchApprovals"];
 
 describe("X-Client-Id on a patch approval write, with a client chosen in the top bar", () => {
   it.each(WRITES)("$name: not sent for every client's approval, sent for a client's", async ({ global, client }) => {
@@ -59,5 +69,14 @@ describe("X-Client-Id on a patch approval write, with a client chosen in the top
     await client(api);
     expect(sent(fetchMock, 0).has("X-Client-Id")).toBe(false);
     expect(sent(fetchMock, 1).get("X-Client-Id")).toBe(ACME);
+  });
+
+  it("covers every ApiClient method on patch approvals", () => {
+    // NON-VACUITY: a new approval write that is not in the table above is one
+    // nobody has decided the header of (phase 3 last fix round).
+    const methods = Object.getOwnPropertyNames(ApiClient.prototype).filter((name) =>
+      /patch.*approv|approv.*patch/i.test(name),
+    );
+    expect(methods.sort()).toEqual([...WRITES.map((row) => row.name), ...READS].sort());
   });
 });

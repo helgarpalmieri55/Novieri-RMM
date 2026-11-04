@@ -70,6 +70,19 @@ const WRITES: readonly {
     global: (api) => api.setArticlePortalVisibility("a1", true, { global: true }),
     client: (api) => api.setArticlePortalVisibility("a1", true, { global: false }),
   },
+  // No screen calls these two yet (phase 3 last fix round, item 4): a link of
+  // a global article is itself global (`doc_links` takes its article's
+  // client), so they are flagged by the row's client like the writes above.
+  {
+    name: "addArticleLink",
+    global: (api) => api.addArticleLink("a1", { target_type: "device", target_id: "x" }, { global: true }),
+    client: (api) => api.addArticleLink("a1", { target_type: "device", target_id: "x" }, { global: false }),
+  },
+  {
+    name: "removeArticleLink",
+    global: (api) => api.removeArticleLink("a1", "l1", { global: true }),
+    client: (api) => api.removeArticleLink("a1", "l1", { global: false }),
+  },
   {
     name: "createDocRecord",
     global: (api) => api.createDocRecord(RECORD),
@@ -112,6 +125,28 @@ const WRITES: readonly {
   },
 ];
 
+/**
+ * The documentation methods that are not a write of one documentation row,
+ * each with why, so a new method is classified rather than missed.
+ */
+const NOT_ROW_WRITES: Readonly<Record<string, string>> = {
+  listArticles: "a read",
+  getArticle: "a read",
+  articleVersions: "a read",
+  listDocRecords: "a read",
+  listDocuments: "a read",
+  getDocument: "a read",
+  documentVersions: "a read",
+  downloadDocumentVersion: "a read",
+  suggestDocArticles: "a read",
+  getPortalHelpArticle: "a read, on the portal's own API",
+  // IPAM's, and deliberately narrowed: run under one client it converts that
+  // client's network records and SKIPS the ones with no client, saying so
+  // (`ipam/importer.py` `convert_doc_records`). Dropping the header would
+  // widen it to every client's records.
+  convertIpamDocRecords: "IPAM's conversion, narrowed on purpose",
+};
+
 describe("X-Client-Id on a documentation write, with a client chosen in the top bar", () => {
   it.each(WRITES)("$name: not sent for every client's row, sent for a client's", async ({ global, client }) => {
     const fetchMock = stubFetch();
@@ -120,5 +155,14 @@ describe("X-Client-Id on a documentation write, with a client chosen in the top 
     await client(api);
     expect(sent(fetchMock, 0).has("X-Client-Id")).toBe(false);
     expect(sent(fetchMock, 1).get("X-Client-Id")).toBe(ACME);
+  });
+
+  it("covers every ApiClient method on articles, records and documents", () => {
+    // NON-VACUITY: a new documentation write that is not in the table above
+    // is one nobody has decided the header of (phase 3 last fix round).
+    const methods = Object.getOwnPropertyNames(ApiClient.prototype).filter((name) =>
+      /article|docrecord|document/i.test(name),
+    );
+    expect(methods.sort()).toEqual([...WRITES.map((row) => row.name), ...Object.keys(NOT_ROW_WRITES)].sort());
   });
 });

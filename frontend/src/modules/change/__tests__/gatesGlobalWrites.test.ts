@@ -77,7 +77,7 @@ describe("X-Client-Id on a change gate write, with a client chosen in the top ba
   it("covers every ApiClient method on change gates", () => {
     // NON-VACUITY: a new gate write that is not in the table above is one
     // nobody has decided the header of.
-    const methods = Object.getOwnPropertyNames(ApiClient.prototype).filter((name) => /ChangeGate/.test(name));
+    const methods = Object.getOwnPropertyNames(ApiClient.prototype).filter((name) => /changegate/i.test(name));
     expect(methods.sort()).toEqual([...WRITES.map((row) => row.name), ...READS].sort());
   });
 });

@@ -41,4 +41,12 @@ describe("X-Client-Id on Ignore, with a client chosen in the top bar", () => {
     expect(sent(fetchMock, 0).has("X-Client-Id")).toBe(false);
     expect(sent(fetchMock, 1).get("X-Client-Id")).toBe(ACME);
   });
+
+  it("is the only ApiClient method on the ignore list", () => {
+    // NON-VACUITY: `software_ignore` is the licences family's one O table; a
+    // new method that writes it (an un-ignore, say) is one nobody has decided
+    // the header of until it is pinned above (phase 3 last fix round).
+    const methods = Object.getOwnPropertyNames(ApiClient.prototype).filter((name) => /ignore/i.test(name));
+    expect(methods).toEqual(["ignoreSoftware"]);
+  });
 });

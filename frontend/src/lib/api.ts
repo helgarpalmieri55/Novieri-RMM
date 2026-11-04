@@ -2399,17 +2399,30 @@ export class ApiClient {
     return this.request<DocVersion[]>(`/docs/articles/${id}/versions`);
   }
 
-  addArticleLink(id: string, link: { target_type: string; target_id: string }): Promise<DocLink> {
-    return this.request<DocLink>(`/docs/articles/${id}/links`, {
-      method: "POST",
-      body: JSON.stringify(link),
-    });
+  /**
+   * `global`: the ARTICLE is every client's (see `updateArticle`). A link
+   * takes its article's client (`doc_links`), so a global article's link is a
+   * global row and goes without `X-Client-Id`.
+   */
+  addArticleLink(
+    id: string,
+    link: { target_type: string; target_id: string },
+    { global }: { global: boolean },
+  ): Promise<DocLink> {
+    return this.request<DocLink>(
+      `/docs/articles/${id}/links`,
+      { method: "POST", body: JSON.stringify(link) },
+      { global },
+    );
   }
 
-  removeArticleLink(id: string, linkId: string): Promise<{ removed: boolean }> {
-    return this.request<{ removed: boolean }>(`/docs/articles/${id}/links/${linkId}`, {
-      method: "DELETE",
-    });
+  /** `global`: the article is every client's (see `addArticleLink`). */
+  removeArticleLink(id: string, linkId: string, { global }: { global: boolean }): Promise<{ removed: boolean }> {
+    return this.request<{ removed: boolean }>(
+      `/docs/articles/${id}/links/${linkId}`,
+      { method: "DELETE" },
+      { global },
+    );
   }
 
   listDocRecords(recordType?: string): Promise<Page<DocRecordOut>> {
@@ -2966,11 +2979,16 @@ export class ApiClient {
     });
   }
 
+  /**
+   * One patch into one ring. Without a client it is every client's, global
+   * BY ITS BODY, for the reason `bulkApprovePatches` gives.
+   */
   approvePatch(body: ApprovalCreateRequest): Promise<PatchApproval> {
-    return this.request<PatchApproval>("/patch/approvals", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.request<PatchApproval>(
+      "/patch/approvals",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id == null },
+    );
   }
 
   /**

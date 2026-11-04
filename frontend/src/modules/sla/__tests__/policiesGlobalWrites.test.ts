@@ -58,6 +58,9 @@ const WRITES: readonly {
   },
 ];
 
+/** The SLA policy methods that only read, named so a new one is classified, not missed. */
+const READS = ["listSlaPolicies", "getSlaPolicy"];
+
 describe("X-Client-Id on an SLA policy write, with a client chosen in the top bar", () => {
   it.each(WRITES)("$name: not sent for every client's policy, sent for a client's", async ({ global, client }) => {
     const fetchMock = stubFetch();
@@ -66,5 +69,12 @@ describe("X-Client-Id on an SLA policy write, with a client chosen in the top ba
     await client(api);
     expect(sent(fetchMock, 0).has("X-Client-Id")).toBe(false);
     expect(sent(fetchMock, 1).get("X-Client-Id")).toBe(ACME);
+  });
+
+  it("covers every ApiClient method on SLA policies", () => {
+    // NON-VACUITY: a new policy write that is not in the table above is one
+    // nobody has decided the header of (phase 3 last fix round).
+    const methods = Object.getOwnPropertyNames(ApiClient.prototype).filter((name) => /slapolic/i.test(name));
+    expect(methods.sort()).toEqual([...WRITES.map((row) => row.name), ...READS].sort());
   });
 });

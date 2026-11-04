@@ -79,7 +79,7 @@ describe("X-Client-Id on a patch policy write, with a client chosen in the top b
   it("covers every ApiClient method on patch policies", () => {
     // NON-VACUITY: a new policy write that is not in the table above is one
     // nobody has decided the header of.
-    const methods = Object.getOwnPropertyNames(ApiClient.prototype).filter((name) => /PatchPolic/.test(name));
+    const methods = Object.getOwnPropertyNames(ApiClient.prototype).filter((name) => /patchpolic/i.test(name));
     expect(methods.sort()).toEqual([...WRITES.map((row) => row.name), ...READS].sort());
   });
 });
