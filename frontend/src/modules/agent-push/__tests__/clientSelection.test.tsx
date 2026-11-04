@@ -52,6 +52,24 @@ function renderIt(node: React.ReactNode) {
 beforeEach(() => selectClient("o1"));
 
 describe("a push authorization", () => {
+  it("files it under the client chosen at the top, which is not the organisation's own", async () => {
+    // `org_id` is "o1": the phase 1-2 rule filed every new row there whoever
+    // was chosen, so only a client other than "o1" tells the two rules apart
+    // (phase 3 final review D, Important 1).
+    selectClient("c-acme");
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderIt(<PushAuthorizationsPage />);
+    await user.type(await screen.findByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Authorize" }));
+    await waitFor(() =>
+      expect(api.createPushAuthorization).toHaveBeenCalledExactlyOnceWith({
+        client_id: "c-acme", prefix: "10.4.7.0/24", note: "", expires_at: null,
+      }),
+    );
+  });
+
   it("with every client chosen, asks for the client and authorizes the prefix in it", async () => {
     selectClient(null);
     const api = stubApi();

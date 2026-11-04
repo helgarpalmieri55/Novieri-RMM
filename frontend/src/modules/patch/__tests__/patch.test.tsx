@@ -3298,6 +3298,29 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     return screen.findByRole("dialog", { name: "Approve updates into a deployment ring" });
   }
 
+  // Phase 3 final review D, Important 1. `ME.org_id` is "o1", where phases 1-2
+  // filed every approval whoever was chosen; only a client other than "o1"
+  // chosen at the top tells that rule from this one.
+  it("files an approval under the client chosen at the top, which is not the organisation's own", async () => {
+    selectClient("c-acme", MY_CLIENTS);
+    const user = userEvent.setup();
+    const bulkApprovePatches = vi.fn().mockResolvedValue(bulkResult(["p1"], "test"));
+    api = { me: vi.fn().mockResolvedValue({ ...ME, clients: MY_CLIENTS }), bulkApprovePatches };
+    renderWithProviders(<FleetPatchPage />);
+    await screen.findByText("2023-10 Cumulative Update");
+    await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
+    expect(screen.queryByLabelText("Client")).toBeNull();
+
+    const confirm = await openApproval(user);
+    expect(confirm).toHaveTextContent(/installable on the 1 device of Acme in the "test" ring/);
+    await user.click(within(confirm).getByRole("button", { name: "Approve" }));
+    expect(bulkApprovePatches).toHaveBeenCalledExactlyOnceWith({
+      patch_ids: ["p1"],
+      ring_name: "test",
+      client_id: "c-acme",
+    });
+  });
+
   it("with every client chosen, asks the bar for the client and files the approval there", async () => {
     selectClient(null, [
       { id: "o1", name: "Novieri", kind: "internal", enabled_modules: [], permissions: ME.permissions },

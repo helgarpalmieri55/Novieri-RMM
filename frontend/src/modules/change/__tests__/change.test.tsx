@@ -430,6 +430,28 @@ describe("ChangeRequestForm", () => {
     );
   });
 
+  // Phase 3 final review D, Important 1: the test above cannot tell this rule
+  // from the phase 1-2 one, which filed every change under `/me.org_id` ("o1")
+  // whoever was chosen. A client other than "o1" at the top can.
+  it("files a new change under the client chosen at the top, which is not the organisation's own", async () => {
+    selectClient("c-acme", [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["change"], permissions: ME.permissions },
+    ]);
+    const user = userEvent.setup();
+    renderNew();
+    expect(screen.queryByLabelText("Client")).toBeNull();
+
+    await user.type(screen.getByLabelText("Title *"), "Upgrade switch firmware");
+    await user.type(screen.getByLabelText("Description *"), "Roll out firmware 2.1.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(api.createChange).toHaveBeenCalledTimes(1));
+    expect(api.createChange).toHaveBeenCalledWith(
+      expect.objectContaining({ client_id: "c-acme", title: "Upgrade switch firmware" }),
+    );
+  });
+
   it("with every client chosen, asks for the change's client and files it there", async () => {
     selectClient(null, [
       { ...SCOPE_INTERNAL, permissions: ME.permissions },

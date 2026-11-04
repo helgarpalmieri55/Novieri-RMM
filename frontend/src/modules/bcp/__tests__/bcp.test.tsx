@@ -272,6 +272,23 @@ describe("PlanEditor form validation", () => {
     return user;
   }
 
+  // Phase 3 final review D, Important 1. `ME.org_id` is "o1", where phases 1-2
+  // filed every new plan whoever was chosen; only a client other than "o1"
+  // chosen at the top tells that rule from this one.
+  it("files a new plan under the client chosen at the top, which is not the organisation's own", async () => {
+    selectClient("c-acme", [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["bcp"], permissions: ME.permissions },
+    ]);
+    const user = renderEditor();
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await user.type(screen.getByLabelText("Name *"), "Acme failover");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(api.createPlan).toHaveBeenCalledTimes(1));
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ client_id: "c-acme", name: "Acme failover" }));
+  });
+
   it("with every client chosen, asks for the plan's client and offers only its devices", async () => {
     selectClient(null, [
       { ...SCOPE_INTERNAL, permissions: ME.permissions },

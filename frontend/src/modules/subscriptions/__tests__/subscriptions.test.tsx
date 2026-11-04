@@ -520,6 +520,27 @@ describe("SubscriptionsPage", () => {
     });
   });
 
+  // Phase 3 final review D, Important 1. `ME.org_id` is "o1", where phases 1-2
+  // filed every subscription whoever was chosen; only a client other than "o1"
+  // chosen at the top tells that rule from this one.
+  it("files a new subscription under the client chosen at the top, which is not the organisation's own", async () => {
+    selectClient("c-acme", [
+      { ...SCOPE_INTERNAL, permissions: ["subscriptions.read", "subscriptions.manage"] },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ["subscriptions.read", "subscriptions.manage"] },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<SubscriptionsPage />);
+    await screen.findByText("Acme SaaS", { selector: ".cell-title a" });
+    await user.click(screen.getByRole("button", { name: "New subscription" }));
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await user.type(screen.getByLabelText("Service name"), "Globex CRM");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.createSubscription).toHaveBeenCalledTimes(1));
+    expect(api.createSubscription).toHaveBeenCalledWith(
+      expect.objectContaining({ client_id: "c-acme", service_name: "Globex CRM" }),
+    );
+  });
+
   it("with every client chosen, asks for the subscription's client and files it there", async () => {
     selectClient(null, [
       { ...SCOPE_INTERNAL, permissions: ["subscriptions.read", "subscriptions.manage"] },

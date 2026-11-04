@@ -80,6 +80,23 @@ function renderIt(node: React.ReactNode) {
 beforeEach(() => selectClient("o1"));
 
 describe("a new device group", () => {
+  it("files it under the client chosen at the top, which is not the organisation's own", async () => {
+    // `org_id` is "o1": the phase 1-2 rule filed every new row there whoever
+    // was chosen, so only a client other than "o1" tells the two rules apart
+    // (phase 3 final review D, Important 1).
+    selectClient("c-acme");
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderIt(<GroupsPage />);
+    await user.click(await screen.findByRole("button", { name: "New group" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByLabelText("Client")).toBeNull();
+    await user.type(within(dialog).getByLabelText("Name"), "desks");
+    await user.click(within(dialog).getByRole("button", { name: "Create group" }));
+    await waitFor(() => expect(api.createDeviceGroup).toHaveBeenCalledTimes(1));
+    expect(api.createDeviceGroup!.mock.calls[0]?.[0]).toMatchObject({ name: "desks", client_id: "c-acme" });
+  });
+
   it("with every client chosen, asks for the client and files the group there", async () => {
     selectClient(null);
     const api = stubApi();
@@ -139,6 +156,22 @@ describe("a new device group", () => {
 });
 
 describe("a hand-made asset", () => {
+  it("with a client chosen at the top that is not the organisation's own, files it at that client's site", async () => {
+    // The body names a site, and the server takes the client from it; so the
+    // site offered must be the chosen client's ("c-acme"), not `org_id`'s ("o1").
+    selectClient("c-acme");
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderIt(<AddAssetDialog open onClose={() => {}} />);
+    await waitFor(() => expect((screen.getByLabelText("Site") as HTMLSelectElement).value).toBe("site-a"));
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    expect(api.listClientSites).toHaveBeenCalledWith("c-acme");
+    expect(api.listClientSites).not.toHaveBeenCalledWith("o1");
+    await user.click(screen.getByRole("button", { name: /add asset/i }));
+    await waitFor(() => expect(api.createAsset).toHaveBeenCalledTimes(1));
+    expect(api.createAsset!.mock.calls[0]?.[0]).toMatchObject({ site_id: "site-a" });
+  });
+
   it("asks for the client and then its site, and files the asset there", async () => {
     selectClient(null);
     const api = stubApi();

@@ -87,6 +87,27 @@ describe("where new machines go", () => {
     await waitFor(() => expect(api.generateAgentInstallCommand).toHaveBeenCalledWith(RELEASE.id, 4, "site-o"));
   });
 
+  it("uses the only site of a client chosen at the top that is not the organisation's own", async () => {
+    // `org_id` is "o": the phase 1-2 rule took the organisation's own client
+    // whoever was chosen, so only a client other than "o" tells the two rules
+    // apart (phase 3 final review D, Important 1).
+    selectClient("c-acme");
+    const api = stubApi({
+      listClientSites: vi.fn((clientId: string) =>
+        Promise.resolve(clientId === "c-acme" ? [site("site-a1", "c-acme", "Acme HQ")] : [site("site-o", "o", "Principal")]),
+      ),
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(api.getInstallLink).toHaveBeenCalledWith("site-a1"));
+    expect(api.getInstallLink).not.toHaveBeenCalledWith("site-o");
+    expect(screen.queryByLabelText("Client")).toBeNull();
+
+    await user.click(await screen.findByRole("button", { name: /install command/i }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Generate command" }));
+    await waitFor(() => expect(api.generateAgentInstallCommand).toHaveBeenCalledExactlyOnceWith(RELEASE.id, 4, "site-a1"));
+  });
+
   it("with every client chosen, asks for the client, then the site, and mints for that site", async () => {
     selectClient(null);
     const api = stubApi();

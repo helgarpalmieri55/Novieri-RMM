@@ -80,7 +80,29 @@ function renderDocs(api: Partial<Record<keyof ApiClient, unknown>>, me: Me = MAN
   );
 }
 
+// Phase 3 final review D, Important 1: `MANAGER.org_id` is "o1", where
+// phases 1-2 filed every new row whoever was chosen, so a test that chooses
+// "o1" at the top cannot tell that rule from this one. These choose "c-acme".
+
 describe("a new article", () => {
+  it("is the client chosen at the top's, which is not the organisation's own", async () => {
+    selectClient("c-acme", [INTERNAL_CLIENT, ACME_CLIENT]);
+    const user = userEvent.setup();
+    const createArticle = vi.fn().mockResolvedValue(ARTICLE);
+    renderDocs({ createArticle });
+    await user.click(await screen.findByRole("button", { name: "New article" }));
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await user.type(screen.getByLabelText("Title"), "VPN");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(createArticle).toHaveBeenCalledTimes(1));
+    expect(createArticle.mock.calls[0]?.[0]).toEqual({
+      title: "VPN",
+      body: "",
+      category: "General",
+      client_id: "c-acme",
+    });
+  });
+
   it("is the client chosen at the top's", async () => {
     const user = userEvent.setup();
     const createArticle = vi.fn().mockResolvedValue(ARTICLE);
@@ -182,6 +204,20 @@ describe("a new article", () => {
 });
 
 describe("a new record", () => {
+  it("is the client chosen at the top's, which is not the organisation's own", async () => {
+    selectClient("c-acme", [INTERNAL_CLIENT, ACME_CLIENT]);
+    const user = userEvent.setup();
+    const createDocRecord = vi.fn().mockResolvedValue({ id: "r1" });
+    renderDocs({ createDocRecord });
+    await user.click(await screen.findByRole("button", { name: "New record" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByLabelText("Client")).toBeNull();
+    await user.type(within(dialog).getByLabelText("Name"), "VPN gateway");
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(createDocRecord).toHaveBeenCalledTimes(1));
+    expect(createDocRecord.mock.calls[0]?.[0]).toMatchObject({ name: "VPN gateway", client_id: "c-acme" });
+  });
+
   it("with every client chosen, asks for the client and files it there", async () => {
     selectClient(null, [INTERNAL_CLIENT, ACME_CLIENT]);
     const user = userEvent.setup();
@@ -220,6 +256,23 @@ describe("a new record", () => {
 });
 
 describe("a new document", () => {
+  it("is the client chosen at the top's, which is not the organisation's own", async () => {
+    selectClient("c-acme", [INTERNAL_CLIENT, ACME_CLIENT]);
+    const user = userEvent.setup();
+    const createDocument = vi.fn().mockResolvedValue({ ...ARTICLE, id: "d1", current: null });
+    const uploadDocumentVersion = vi.fn().mockResolvedValue({ version: 1 });
+    renderDocs({ createDocument, uploadDocumentVersion });
+
+    await user.click(await screen.findByRole("button", { name: "Upload document" }));
+    const dialog = await screen.findByRole("dialog", { name: "Upload document" });
+    expect(within(dialog).queryByLabelText("Client")).toBeNull();
+    await user.type(within(dialog).getByLabelText("Title"), "Contract");
+    await user.upload(within(dialog).getByLabelText("File"), new File(["%PDF"], "c.pdf"));
+    await user.click(within(dialog).getByRole("button", { name: "Upload" }));
+    await waitFor(() => expect(createDocument).toHaveBeenCalledTimes(1));
+    expect(createDocument.mock.calls[0]?.[0]).toMatchObject({ title: "Contract", client_id: "c-acme" });
+  });
+
   it("with every client chosen, asks for the client and files it there", async () => {
     selectClient(null, [INTERNAL_CLIENT, ACME_CLIENT]);
     const user = userEvent.setup();

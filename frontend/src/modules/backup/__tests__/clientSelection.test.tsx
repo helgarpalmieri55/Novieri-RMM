@@ -54,6 +54,23 @@ function renderIt(node: React.ReactNode) {
 beforeEach(() => selectClient("o1"));
 
 describe("a new repository", () => {
+  it("files it under the client chosen at the top, which is not the organisation's own", async () => {
+    // `org_id` is "o1": the phase 1-2 rule filed every new row there whoever
+    // was chosen, so only a client other than "o1" tells the two rules apart
+    // (phase 3 final review D, Important 1).
+    selectClient("c-acme");
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderIt(<RepositoriesPage />);
+    await user.click(await screen.findByRole("button", { name: /new repository/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByLabelText("Client")).toBeNull();
+    await user.type(within(dialog).getByLabelText("Name"), "Acme offsite");
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(api.createBackupRepository).toHaveBeenCalledTimes(1));
+    expect((api.createBackupRepository as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toEqual({ client_id: "c-acme", name: "Acme offsite" });
+  });
+
   it("with every client chosen, asks for the client and files the repository there", async () => {
     selectClient(null);
     const api = stubApi();
@@ -79,6 +96,23 @@ describe("a new repository", () => {
 });
 
 describe("a new client-default policy", () => {
+  it("files it under the client chosen at the top, and offers only that client's repositories", async () => {
+    // Not the organisation's own ("o1"): the old rule's answer whatever the top said.
+    selectClient("c-acme");
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderIt(<BackupPolicyEditor />);
+    await user.click(await screen.findByRole("button", { name: /new policy/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByLabelText("Client")).toBeNull();
+    await user.click(within(dialog).getByRole("combobox", { name: /Repository/ }));
+    await user.click(await screen.findByRole("option", { name: /Acme vault/ }));
+    expect(screen.queryByRole("option", { name: /Own vault/ })).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.upsertBackupPolicy).toHaveBeenCalledTimes(1));
+    expect((api.upsertBackupPolicy as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toMatchObject({ device_group_id: null, client_id: "c-acme", repository_id: "r-a" });
+  });
+
   it("with every client chosen, asks for the client and offers only its repositories", async () => {
     selectClient(null);
     const api = stubApi();
