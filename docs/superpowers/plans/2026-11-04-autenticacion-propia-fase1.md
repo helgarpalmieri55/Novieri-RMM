@@ -197,7 +197,7 @@ Rutas: `/sign-in`, `/sign-in/factor`, `/sign-in/enroll`, `/sign-in/recovery-code
 
 ### Task 13 — cierre
 
-`admit()` deja de aceptar el Bearer de la consola (`azp` it-suite-web); `ApiEnv.headers` (`tests/conftest.py:289-311`) crea una sesión y devuelve `Cookie`, `X-ITMS-Request` y `Origin`; ~45 archivos migrados (D12); `test_console_auth_realm.py` re-apuntado (D24); documentos de §9 del diseño; falsificadores §10 de esta fase.
+`admit()` deja de aceptar el Bearer de la consola (`azp` it-suite-web); `ApiEnv.headers` (`tests/conftest.py:289-311`) crea una sesión y devuelve `Cookie`, `X-ITMS-Request` y `Origin`; ~45 archivos migrados (D12); `test_console_auth_realm.py` ya re-apuntado por la Task 10 (D24); documentos de §9 del diseño; falsificadores §10 de esta fase.
 
 ## Apéndice B — Decisiones del coordinador (D1–D24)
 
@@ -18427,7 +18427,7 @@ class ForgotIn(BaseModel):
 
 class ResetIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    token: str = Field(min_length=40, max_length=200)
+    token: str = Field(max_length=200)
     password: str = Field(min_length=1, max_length=1024)
 
 
@@ -20061,18 +20061,22 @@ reciben un enlace, de los tres tipos (invitar, recuperar, restablecer):
 async def test_a_made_up_link_is_the_same_410_on_every_link_page(lifecycle_env: Any) -> None:
     env = lifecycle_env
     org = await env.create_org("dead-links")
-    made_up = f"{org.hex}.{'x' * 43}"
-    answers = [
-        await env.client.post(path, headers=browser(), json=body)
-        for path, body in (
-            ("/api/v1/auth/invite/details", {"token": made_up}),
-            ("/api/v1/auth/invite/accept", {"token": made_up, "password": "Pelican-Orbit-58x"}),
-            ("/api/v1/auth/recover/details", {"token": made_up}),
-            ("/api/v1/auth/recover/accept", {"token": made_up}),
-            ("/api/v1/auth/password/reset", {"token": made_up, "password": "Pelican-Orbit-58x"}),
-        )
-    ]
-    assert [(a.status_code, a.json()["code"]) for a in answers] == [(410, "invalid_link")] * 5
+    # A made-up token, and the empty one a page sends after a reload took the
+    # fragment away (Task 11's `useLinkToken`): both are an unknown link, so a
+    # length rule on `token` (a 422) would show the person a validation error
+    # instead of "this link is no longer valid".
+    for made_up in (f"{org.hex}.{'x' * 43}", ""):
+        answers = [
+            await env.client.post(path, headers=browser(), json=body)
+            for path, body in (
+                ("/api/v1/auth/invite/details", {"token": made_up}),
+                ("/api/v1/auth/invite/accept", {"token": made_up, "password": "Pelican-Orbit-58x"}),
+                ("/api/v1/auth/recover/details", {"token": made_up}),
+                ("/api/v1/auth/recover/accept", {"token": made_up}),
+                ("/api/v1/auth/password/reset", {"token": made_up, "password": "Pelican-Orbit-58x"}),
+            )
+        ]
+        assert [(a.status_code, a.json()["code"]) for a in answers] == [(410, "invalid_link")] * 5, made_up
 ```
 
 - [ ] **Step 3: `service.py` sin Keycloak**
@@ -21433,12 +21437,12 @@ async def accept_recovery(request: Request, *, token: str) -> SignIn:
 ```python
 class LinkTokenIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    token: str = Field(min_length=40, max_length=200)
+    token: str = Field(max_length=200)
 
 
 class InviteAcceptIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    token: str = Field(min_length=40, max_length=200)
+    token: str = Field(max_length=200)
     password: str = Field(min_length=1, max_length=1024)
 
 
@@ -25401,7 +25405,7 @@ describe("signOut", () => {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useEffect } from "react";
+import { StrictMode, useEffect } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -25484,12 +25488,13 @@ describe("a visitor with no session", () => {
 
   it("is sent once, not on every render", async () => {
     // The navigation replaces the document; firing it twice is two loads,
-    // and React strict mode runs effects twice on purpose.
+    // and React strict mode runs effects twice on purpose -- so the test runs
+    // under it, or removing the `leaving` ref would still pass.
     stubServer(() => ({ status: 401 }));
     const { ui } = guarded();
-    const { rerender } = render(ui);
+    const { rerender } = render(<StrictMode>{ui}</StrictMode>);
     await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
-    rerender(ui);
+    rerender(<StrictMode>{ui}</StrictMode>);
     expect(assign).toHaveBeenCalledTimes(1);
   });
 });
@@ -28460,7 +28465,7 @@ error del navegador (`NotAllowedError` al cerrar o caducar el diálogo) y `code`
 **Decisiones del plan (Task 11):**
 - *Decisión del plan: el alta de la app TOTP muestra la clave de configuración y el enlace `otpauth://`, sin código QR.* La consola no trae un codificador QR y añadir una dependencia a una plataforma que es un objetivo de primer orden es una decisión de cadena de suministro que esta tarea no toma; la clave en grupos de cuatro se teclea en cualquier app, el enlace abre la app en un teléfono, y la clave de acceso se ofrece primero (§2.2). Si el coordinador quiere QR: que la Task 7 devuelva además un SVG hecho en el servidor, o una dependencia revisada.
 - *Decisión del plan: «No volver a preguntar en este equipo» solo aparece si `POST /auth/login` dice cuántos días* (`remember_device_days`, entero o `null`). El Apéndice A no lo traía (ya enmendado); sin él la consola no sabe si la organización lo tiene encendido (§2.4) ni cuántos días, y sin el dato no se dibuja la casilla. **Se pide a la Task 7** añadir `remember_device_days` a la respuesta `factor_required` (de `auth_org_settings.remember_device_days`, o `null` si `remember_device_enabled` es falso). La casilla nace desmarcada siempre.
-- *Decisión del plan: los métodos del segundo factor llegan en el estado del router;* abierta directamente (recarga, marcador, harmony) la página ofrece los tres. El servidor rechaza uno que la cuenta no tiene igual que un código malo, y la contraseña ya estaba comprobada: no revela nada.
+- *Decisión del plan: los métodos del segundo factor llegan en el estado del router;* abierta directamente (recarga, marcador, harmony) la página ofrece los tres. El servidor rechaza uno que la cuenta no tiene con 409 `method_unavailable` (Task 7, `_unavailable`), y la página lo dice con su frase; la contraseña ya estaba comprobada, así que no revela nada a quien no la sabe.
 - *Decisión del plan: los diez códigos de recuperación pasan de una página a otra en memoria (`flow.ts`), nunca en la URL ni en el estado del router* (que es `history.state`, que el navegador guarda con el historial y puede escribir a disco). Una recarga los pierde, que es lo cierto: el servidor solo guarda su hash. La consola solo abre tras marcar «He guardado estos códigos».
 - *Decisión del coordinador (sustituye a `/reset-password/:token` e `/invite/:token` del contrato inicial): el token de los enlaces va en el **fragmento*** (`/invite#<token>`, `/reset-password#<token>`; también `#token=<token>`). El navegador nunca manda el fragmento: no llega al registro de acceso de `nginx` ni al `Referer`. La página lo lee una vez, lo quita de la dirección (`useLinkToken`, con `replace`, para que tampoco quede en el historial de la pestaña) y lo manda en el cuerpo. Una recarga ya no tiene token y el servidor la trata como un enlace desconocido (410); el correo lo sigue teniendo. Sin fragmento la página pregunta igual, con un token vacío: el 410 del servidor decide, y el modo fixtures (harmony no puede añadir un fragmento: `withFixtures` pone `?__fixtures` detrás) dibuja el formulario. **No** se usa `<meta name="referrer" content="no-referrer">`: con esa política el navegador manda `Origin: null` en un POST del mismo origen y la puerta de CSRF de la Task 6 lo rechaza.
 - *Decisión del plan: cada refusal dice una frase.* Un 401 o un 400 de un paso es «no se aceptó» (§2.3: la página no puede ser más precisa que el servidor); solo se distinguen `auth_required` (la sesión previa al factor se fue: empezar de nuevo) y 429 (esperar, con los segundos si llegan). Una contraseña rechazada dice su motivo (NIST SP 800-63B-4 §3.1.1.2, «SHALL provide the reason for rejection», [S1]): la frase de `password_rejected` (`detail`, ya traducida por `tr()`), tal cual; la longitud se comprueba antes en la consola contando puntos de código (`Array.from`), como el servidor. Un 503 `sign_in_unavailable` cae en `describeSubmitError` («el servicio no está disponible»).
@@ -31318,7 +31323,14 @@ export function InvitePage() {
   // Asked even with no token: the server answers an empty one as it answers
   // any unknown link (410), and fixture mode -- which cannot add a fragment --
   // still draws the form for the harmony gate.
-  const invite = useQuery({ queryKey: ["auth", "invite", token], queryFn: () => api.getInvite(token), retry: false });
+  // Asked once: every ask spends the per-IP limit the accept step shares (Task 7, `_LINK`).
+  const invite = useQuery({
+    queryKey: ["auth", "invite", token],
+    queryFn: () => api.getInvite(token),
+    retry: false,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
   const [password, setPassword] = useState("");
   const [again, setAgain] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -31843,6 +31855,9 @@ export function RecoverPage() {
     queryKey: ["auth", "recover", token],
     queryFn: () => api.getRecovery(token),
     retry: false,
+    // Asked once: every ask spends the per-IP limit the accept step shares.
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
   });
   const [dead, setDead] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32945,11 +32960,11 @@ test ! -e frontend/src/lib/auth.ts && echo "lib/auth.ts gone"
 grep -rln 'lib/auth"' frontend/src --include=*.ts --include=*.tsx | wc -l
 grep -n '"@simplewebauthn/browser": "14.0.0"' frontend/package.json
 grep -c "enrollTotpStart\|enrollTotpConfirm\|enrollPasskeyOptions\|enrollPasskey(" frontend/src/lib/api.ts
-grep -c "ACCOUNT_ACTIONS\|FRONTEND_AUTH" backend/tests/test_console_auth_realm.py
+grep -c "FRONTEND_AUTH.read_text" backend/tests/test_console_auth_realm.py
 grep -n '"/users/invite"\|"/users/{user_id}/factors/reset"\|"/users/{user_id}/sessions"\|"/users/{user_id}/invite"\|"/users/{user_id}/invite/resend"\|"/settings/sessions"' frontend/src/lib/globalRoutes.json
 ```
 
-Expected: `lib/auth.ts gone`; `0`; una línea con `14.0.0`; un número ≥ 4; `0` (la Task 10 re-apuntó D24); seis
+Expected: `lib/auth.ts gone`; `0`; una línea con `14.0.0`; un número ≥ 4; `0` (la Task 10 re-apuntó D24: ya nada lee `lib/auth.ts`); seis
 líneas de `globalRoutes.json` (cinco de la Task 8 y `PUT /settings/sessions` de la Task 6). **Si cualquiera falla, no
 sigas: avisa al coordinador** — esta tarea no escribe esas piezas y sin ellas sus pruebas y `tsc -b` no pueden pasar.
 
@@ -33313,11 +33328,10 @@ En `frontend/src/lib/api.ts`:
 
 ```ts
 import type { MySecurity, PasswordChange, RecoveryCodesOut } from "../modules/profile/types";
-import type { AuthenticationResponseJSON, PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 ```
 
-   (Si la Task 11 ya importa tipos de `@simplewebauthn/browser` en este archivo, estos dos nombres se añaden a esa misma
-   declaración en lugar de abrir otra.)
+   (`AuthenticationResponseJSON` y `PublicKeyCredentialRequestOptionsJSON` ya los importa la Task 11 en este archivo,
+   desde `../modules/auth/types`: no se añade otra declaración, que sería un identificador duplicado para `tsc`.)
 
 2. Tras `updateMe` (`:1888-1890`), la sección nueva:
 
@@ -36012,7 +36026,6 @@ async function openProfile() {
   return user;
 }
 
-describe("Your profile", () => {
 describe("Your profile", () => {
   it("says it is loading rather than rendering an empty form", async () => {
     calls.me.mockReturnValue(new Promise(() => {}));
@@ -39821,7 +39834,7 @@ las pruebas entran con ese Bearer (`tests/conftest.py:289-311`). Esta tarea cier
 2. `ApiEnv.headers` crea una sesión y devuelve `Cookie`, `X-ITMS-Request` y `Origin`, y los Settings de prueba
    fijan `public_console_url`; así migran centralmente las 925 llamadas de 153 archivos (D12), y los ~45 archivos
    que no usan el ayudante se migran por grupos;
-3. `tests/test_console_auth_realm.py` deja de leer `frontend/src/lib/auth.ts` (D24);
+3. `tests/test_console_auth_realm.py` ya no lee `frontend/src/lib/auth.ts`: lo re-apuntó la Task 10 (D24), y esta tarea solo lo comprueba;
 4. los documentos de §9 del diseño se corrigen;
 5. los falsificadores de esta fase quedan en un archivo, a través de la superficie HTTP, y el 4 además en la CI
    con el autenticador virtual de Chromium.
@@ -39847,8 +39860,7 @@ las pruebas entran con ese Bearer (`tests/conftest.py:289-311`). Esta tarea cier
 - Modify: `.github/workflows/ci.yml` (job nuevo `webauthn-uv` entre `harmony-gate` `:914-925` y `agent` `:927`)
 - Modify: `frontend/src/lib/noVendorNames.test.ts` (después del `describe` de `:265-284`)
 - Modify: `backend/tests/test_no_vendor_names_backend.py` (después de `_python_files`, `:164-165`)
-- Modify: `backend/tests/test_console_auth_realm.py` (`:1927-1934`, `:1973-1979`, `:2179-2217`)
-- Modify (grupos de la Step 6 a la Step 11): `backend/tests/test_auth_session_door.py` (de la Task 6),
+- Modify (grupos de la Step 6 a la Step 10): `backend/tests/test_auth_session_door.py` (de la Task 6),
   `backend/tests/test_token_origin.py`, `test_domain_gate_doors.py`,
   `test_domain_policy.py`, `test_org_settings.py`, `test_clients_api.py`, `test_client_rbac.py`,
   `test_me_profile.py`, `test_me_locale.py`, `test_user_admin_api.py`, `test_i18n_core_api.py`,
@@ -39946,7 +39958,7 @@ plataforma pasa `require_user_verification=True` siempre, D22) en pytest; la mit
 `webauthn-uv`. Ese job usa py_webauthn con los mismos argumentos, no las rutas, porque una sesión de navegador
 contra el servidor completo necesita una base de datos que el job no tiene.
 
-**Pruebas que cambian a propósito** (la Step 6 a la Step 11 dan cada una, antiguo → nuevo): las que afirmaban que
+**Pruebas que cambian a propósito** (la Step 6 a la Step 10 dan cada una, antiguo → nuevo): las que afirmaban que
 la consola admite un Bearer pasan a afirmar que no lo admite; las que probaban propiedades del Bearer de consola
 que siguen existiendo en MCP (refresco del correo desde el claim, auto-alta por `sub`, orden org/dominio) pasan al
 canal MCP; las que solo usaban un Bearer para entrar pasan a la cookie. Ninguna se borra ni se salta.
@@ -40868,7 +40880,7 @@ valor que ahora traen los Settings.)
 - [ ] **Step 5: Correr los 153 archivos que usan el ayudante**
 
 Run: `cd backend && .venv/bin/pytest -q --ignore=tests/test_token_origin.py --ignore=tests/test_domain_gate_doors.py $(grep -l "\.headers(" tests/test_*.py | tr '\n' ' ')`
-Expected: los fallos que quedan están todos en los archivos de los grupos de la Step 6 a la Step 11. Un fallo en
+Expected: los fallos que quedan están todos en los archivos de los grupos de la Step 6 a la Step 10. Un fallo en
 otro archivo es una prueba que dependía de `public_console_url=None` por defecto: si su petición es un GET se le
 añade `monkeypatch.setattr(api_env.settings, "public_console_url", None)` donde antes contaba con el valor por
 defecto; si es una escritura se aplica el patrón de la Step 10 (envolver el servicio, no los Settings). Se anotan en
@@ -41199,71 +41211,17 @@ Decisión (4). Antiguo → nuevo, con la misma afirmación:
   `"Host": "itms.example.com"`; las afirmaciones (503, el texto, `store.reads == []`, sin auditoría) no cambian.
 - `tests/test_mcp_admin_api.py:304` pone `None` y solo hace un GET: sin cambios.
 
-- [ ] **Step 11: D24, `test_console_auth_realm.py` deja de leer `lib/auth.ts`**
+- [ ] **Step 11: D24 ya está hecho (Task 10): comprobarlo**
 
-`frontend/src/lib/auth.ts` lo borró la Task 10. En `backend/tests/test_console_auth_realm.py`:
+La Task 10 borró `frontend/src/lib/auth.ts` y re-apuntó las tres pruebas de `backend/tests/test_console_auth_realm.py`
+que lo leían (su Decisión del plan sobre D24). Esta tarea no edita ese archivo:
 
-`:1927-1934` pasa a:
-
-```python
-FRONTEND_SRC = REPO / "frontend/src"
-
-
-def _actions_the_console_starts() -> set[str]:
-    """The `kc_action` values the browser sends. Own authentication phase 1:
-    none. The console signs in, changes passwords and registers factors with
-    the platform's own screens, so no file under `frontend/src` names an
-    account action of the realm any more; the realm keeps those actions only
-    for the paths that still mail them (`_actions_the_backend_mails`)."""
-    sources = [
-        path
-        for path in FRONTEND_SRC.rglob("*")
-        if path.suffix in {".ts", ".tsx"} and "node_modules" not in path.parts
-    ]
-    assert len(sources) > 50, "the walk found no console sources; it is looking in the wrong place"
-    assert not (FRONTEND_SRC / "lib/auth.ts").exists()
-    return {
-        match
-        for path in sources
-        for match in re.findall(r"kc_action\W+([A-Za-z_-]+)", path.read_text())
-    }
+```bash
+grep -c "FRONTEND_AUTH.read_text" backend/tests/test_console_auth_realm.py
+cd backend && .venv/bin/pytest -q tests/test_console_auth_realm.py
 ```
 
-`:1973-1979` (`test_the_action_sets_are_read_from_both_sides_and_are_not_empty`): las dos líneas de la consola
-(`"UPDATE_PASSWORD" in console`, `len(console) == 3`) pasan a `assert console == set(), sorted(console)`; la de
-`mailed` se queda. El docstring dice «Non-vacuity: the backend side is not empty, and the console side is empty
-on purpose -- the walk that proves it asserts it read the sources». `:1983-1995` no cambia: recorre
-`console | mailed`.
-
-`:2179-2217` (`test_the_post_logout_uri_the_browser_asks_for_is_one_the_realm_accepts`): la consola ya no hace el
-cierre de sesión en Keycloak (RP-initiated logout); cierra la suya con `POST /api/v1/auth/logout`. La comprobación
-del realm se queda (el realm vive hasta la fase 4 para MCP) y la de la consola pasa a ser su contrario:
-
-```python
-def test_the_console_never_sends_the_browser_to_the_realms_sign_out() -> None:
-    """Was: the post-logout URI `lib/auth.ts` asked for had to be one the
-    realm accepts (auditor A's first blocker, 2026-08-20). Own authentication
-    phase 1 retired the browser's OIDC client, so the console signs out of its
-    own session and never visits Keycloak's end-session endpoint -- the
-    dead-end page that blocker was about cannot be reached from the console.
-    The realm half stays true while the realm exists (phase 4)."""
-    registered = _web_client()["attributes"]["post.logout.redirect.uris"]
-    assert registered != "+", (
-        "'+' resolves to the redirect URIs, which are callback paths -- it "
-        "cannot match the origin a browser would ask to be returned to"
-    )
-    offenders = [
-        str(path.relative_to(REPO))
-        for path in FRONTEND_SRC.rglob("*")
-        if path.suffix in {".ts", ".tsx"}
-        and re.search(
-            r"post_logout_redirect_uri|signoutRedirect|openid-connect/logout", path.read_text()
-        )
-    ]
-    assert offenders == []
-```
-
-`:2220-2230` (`test_the_post_logout_uri_is_a_path_and_not_a_hostname`): solo lee el realm; sin cambios.
+Expected: `0`, y PASS.
 
 - [ ] **Step 12: Falsificador 10, las dos guardas recorren el inicio de sesión propio**
 
@@ -41703,7 +41661,7 @@ Run, desde `frontend/`: `npx vitest run src/lib/noVendorNames.test.ts`. Expected
 git add backend/app/api/deps.py backend/app/api/v1/ws.py backend/app/modules/remote/api.py backend/app/modules/remote/tunnel.py backend/app/core/security.py backend/app/core/auth/loopback.py backend/app/core/i18n/es.py backend/tests/conftest.py backend/tests/session_support.py backend/tests/test_auth_falsifiers.py backend/tests/test_route_session_discipline.py
 git rm backend/app/core/ws_auth.py
 git commit -m "feat(auth): no console door reads a bearer any more; tests sign in by cookie (own auth phase 1 Task 13)"
-git add backend/tests/test_auth_session_door.py backend/tests/test_token_origin.py backend/tests/test_domain_gate_doors.py backend/tests/test_domain_policy.py backend/tests/test_org_settings.py backend/tests/test_clients_api.py backend/tests/test_client_rbac.py backend/tests/test_me_profile.py backend/tests/test_me_locale.py backend/tests/test_user_admin_api.py backend/tests/test_i18n_core_api.py backend/tests/ai_act_fixtures.py backend/tests/ai_admin_fakes.py backend/tests/test_ai_act_confirm_authz.py backend/tests/test_ai_act_propose.py backend/tests/test_ai_admin_api.py backend/tests/test_ai_admin_boundaries.py backend/tests/test_ai_admin_egress.py backend/tests/test_ai_admin_executor.py backend/tests/test_ai_admin_executor_authz.py backend/tests/test_ai_admin_orchestrator.py backend/tests/test_ai_admin_scrub.py backend/tests/test_ai_client_narrowing.py backend/tests/test_ai_portal.py backend/tests/test_client_record_checks.py backend/tests/test_ui_ws.py backend/tests/test_remote_tunnel.py backend/tests/test_remote_screen_relay.py backend/tests/test_remote_supervise.py backend/tests/test_agent_push_api.py backend/tests/test_email_intake_oauth_flow.py backend/tests/test_install_link_msi.py backend/tests/test_console_auth_realm.py
+git add backend/tests/test_auth_session_door.py backend/tests/test_token_origin.py backend/tests/test_domain_gate_doors.py backend/tests/test_domain_policy.py backend/tests/test_org_settings.py backend/tests/test_clients_api.py backend/tests/test_client_rbac.py backend/tests/test_me_profile.py backend/tests/test_me_locale.py backend/tests/test_user_admin_api.py backend/tests/test_i18n_core_api.py backend/tests/ai_act_fixtures.py backend/tests/ai_admin_fakes.py backend/tests/test_ai_act_confirm_authz.py backend/tests/test_ai_act_propose.py backend/tests/test_ai_admin_api.py backend/tests/test_ai_admin_boundaries.py backend/tests/test_ai_admin_egress.py backend/tests/test_ai_admin_executor.py backend/tests/test_ai_admin_executor_authz.py backend/tests/test_ai_admin_orchestrator.py backend/tests/test_ai_admin_scrub.py backend/tests/test_ai_client_narrowing.py backend/tests/test_ai_portal.py backend/tests/test_client_record_checks.py backend/tests/test_ui_ws.py backend/tests/test_remote_tunnel.py backend/tests/test_remote_screen_relay.py backend/tests/test_remote_supervise.py backend/tests/test_agent_push_api.py backend/tests/test_email_intake_oauth_flow.py backend/tests/test_install_link_msi.py
 git commit -m "test(auth): door, assistant, socket and console-address tests move to the cookie session (own auth phase 1 Task 13)"
 git add backend/tests/webauthn_uv_probe.py frontend/scripts/webauthn-uv.mjs .github/workflows/ci.yml frontend/src/lib/noVendorNames.test.ts backend/tests/test_no_vendor_names_backend.py docs/superpowers/specs/2026-08-19-invisible-identity-layer-design.md docs/modules/console-auth/spec.md docs/03-security-model.md deploy/README.md
 git commit -m "docs(auth): own authentication replaces Keycloak for the console; falsifier 4 in Chromium (own auth phase 1 Task 13)"
