@@ -5,9 +5,10 @@ import { useEverywherePermissions } from "../lib/mePermissions";
  * "FOR EVERY CLIENT": FILE A NEW ROW AS GLOBAL CONFIGURATION.
  *
  * MSP clients plan 2026-10-26 Task 14. An article, record, document or patch
- * approval made in this console belongs to one client -- the one chosen in the
- * top bar, or the one its form's Client field names (`lib/clientSelection.ts`);
- * a patch approval made from a machine's drill-down, to that machine's client.
+ * approval made in this console -- and, since phase 3's final review, an SLA
+ * policy -- belongs to one client: the one chosen in the top bar, or the one
+ * its form's Client field names (`lib/clientSelection.ts`); a patch approval
+ * made from a machine's drill-down, to that machine's client.
  * One made for every client is global, and the server lets only someone with
  * access to every client create it. So the switch renders only for a person
  * holding `code` on EVERY client -- `/me`'s `permissions_everywhere` -- and for
@@ -31,7 +32,7 @@ export function ForEveryClientToggle({
   checked,
   onChange,
 }: {
-  /** The permission the create route is gated on (`docs.manage`, `patch.approve`). */
+  /** The permission the create route is gated on (`docs.manage`, `patch.approve`, `sla.admin`). */
   code: string;
   /**
    * What ticking does, where the generic sentence -- who will SEE the row --

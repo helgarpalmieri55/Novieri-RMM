@@ -203,8 +203,11 @@ export function useSlaPolicies() {
 export function useCreateSlaPolicyMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<PolicyOut, ApiError, PolicyCreate>({
-    mutationFn: (body) => api.createSlaPolicy(body),
+  // The body is BUILT HERE, inside the mutation: a policy whose client is
+  // not known yet throws `ClientNotChosen` (`lib/clientSelection.ts`), which
+  // fails the mutation, so the form says why and nothing is sent.
+  return useMutation<PolicyOut, ApiError, () => PolicyCreate>({
+    mutationFn: (build) => api.createSlaPolicy(build()),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["sla-policies"] });
     },

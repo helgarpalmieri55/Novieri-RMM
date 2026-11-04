@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { ClientField } from "../../components/ClientField";
 import { ConfirmDialog } from "../../components/confirm";
+import { ForEveryClientToggle } from "../../components/forEveryClient";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
 import type { Attempt, FieldRule, Problem } from "../../components/form";
 import { EntityPicker } from "../../components/picker";
@@ -9,7 +11,11 @@ import { Btn, Panel, StatusPill } from "../../shell/components";
 import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
 import { ApiError } from "../../lib/api";
+import { useClientScope } from "../../lib/clientScope";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { humaniseStatus } from "../../lib/labels";
+import { UnassignedRefusal } from "../clients/UnassignedRefusal";
+import { useClientName } from "../settings/api";
 import {
   useCreateSlaPolicyMutation,
   useDeleteSlaPolicyMutation,
@@ -76,6 +82,12 @@ function priorityOptionLabel(priority: string): string {
 // three separate faults -- no calendar, a bad response target, a bad
 // resolution target -- into one dead button that named none of them.
 //
+// The Client field of a new policy with every client chosen (§3.1), named
+// like any required field. Worded when read.
+const clientRules = (): readonly FieldRule[] => [
+  { name: "client", label: translate("components.clientField.label") },
+];
+
 // A function so the words are looked up when the refusal is rendered.
 const policyRules = (): readonly FieldRule[] => [
   // Every policy needs one: the calendar is what turns minutes into an
@@ -132,6 +144,27 @@ export function PoliciesPanel({
   // On submit only -- see CalendarsPanel for why not while typing. Held as the
   // rules and the values they were checked against, worded at render.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // WHOSE A NEW POLICY IS (plan 2026-10-26 D2; phase 3 design §3.1): the
+  // client chosen at the top, or with every client the dialog's Client field
+  // (the shared hook, operator decision 2) -- or, when the person asks and
+  // holds `sla.admin` on every client, every client's (a global policy, sent
+  // without the top bar's client: `ApiClient.createSlaPolicy`). Set at
+  // creation: an edit never changes a policy's client.
+  const [forEveryClient, setForEveryClient] = useState(false);
+  const policyClient = useNewRowClientField("sla.admin", undefined, {
+    onPick: () => {
+      setAttempt(null);
+      create.reset();
+    },
+  });
+  // Unassigned chosen at the top files no policy; every client's is not filed
+  // under it, so the toggle lifts the refusal.
+  const refusedNew = !forEveryClient && policyClient.refused !== null;
+  // The Client column (§3.4): with every client chosen a client's policy must
+  // not read as one every client shares. Hidden with one chosen.
+  const { selected } = useClientScope();
+  const showClient = selected === null;
+  const clientName = useClientName();
 
   const forbidden = policies.error instanceof ApiError && policies.error.status === 403;
   const failed = policies.error != null && !forbidden;
@@ -145,6 +178,8 @@ export function PoliciesPanel({
   // dialog is opened, against a request nobody has made yet.
   function openCreate() {
     setDraft(emptyDraft());
+    setForEveryClient(false);
+    policyClient.setPicked("");
     setAttempt(null);
     create.reset();
     setCreating(true);
@@ -184,13 +219,14 @@ export function PoliciesPanel({
 
   // Returns the problems so each caller can stop on a non-empty list; the
   // rules are shared because create and edit refuse for the same reasons.
-  function check(): readonly Problem[] {
+  function check(askClient = false): readonly Problem[] {
     const next: Attempt = {
-      rules: policyRules,
+      rules: () => [...policyRules(), ...(askClient ? clientRules() : [])],
       values: {
         calendarId: draft.calendarId,
         responseMinutes: draft.responseMinutes,
         resolutionMinutes: draft.resolutionMinutes,
+        client: policyClient.clientId,
       },
     };
     setAttempt(next);
@@ -198,8 +234,16 @@ export function PoliciesPanel({
   }
 
   function submitCreate() {
-    if (check().length > 0) return;
-    create.mutate(body(), { onSuccess: () => setCreating(false) });
+    if (refusedNew) return;
+    if (check(!forEveryClient && policyClient.needsField).length > 0) return;
+    const draftBody = body();
+    create.mutate(
+      () => ({
+        ...draftBody,
+        ...(forEveryClient ? {} : { client_id: requireKnown(policyClient.clientId) }),
+      }),
+      { onSuccess: () => setCreating(false) },
+    );
   }
 
   function submitEdit() {
@@ -233,6 +277,7 @@ export function PoliciesPanel({
           <thead>
             <tr>
               <Th>{t("sla.common.priority")}</Th>
+              {showClient ? <Th>{t("sla.policies.colClient")}</Th> : null}
               <Th>{t("sla.common.calendar")}</Th>
               <Th>{t("sla.common.response")}</Th>
               <Th>{t("sla.common.resolution")}</Th>
@@ -265,6 +310,7 @@ export function PoliciesPanel({
                     {policy.queue_id === null ? t("sla.common.anyQueue") : queueName(policy.queue_id)}
                   </div>
                 </Td>
+                {showClient ? <Td>{clientName(policy.client_id)}</Td> : null}
                 <Td>{calendarName(policy.calendar_id)}</Td>
                 <Td>
                   <span className="mono">{formatMinutes(policy.response_target_minutes)}</span>
@@ -318,7 +364,7 @@ export function PoliciesPanel({
             ))}
             {policies.data && policies.data.length === 0 && (
               <tr>
-                <Td colSpan={canAdmin ? 7 : 6}>
+                <Td colSpan={(canAdmin ? 7 : 6) + (showClient ? 1 : 0)}>
                   <span className="note">
                     {t("sla.policies.empty")}
                   </span>
@@ -383,6 +429,17 @@ export function PoliciesPanel({
                 : undefined
             }
           />
+          <ForEveryClientToggle
+            code="sla.admin"
+            hint={t("sla.policies.forEveryClientHint")}
+            checked={forEveryClient}
+            onChange={(checked) => {
+              setForEveryClient(checked);
+              setAttempt(null);
+              create.reset();
+            }}
+          />
+          {!forEveryClient && policyClient.needsField ? <ClientField field={policyClient} /> : null}
           <div className="flex items-center justify-end gap-2">
             {/* `type="button"`: inside a <form>, an untyped button submits, so
                 Cancel would save the policy it was meant to abandon. */}
@@ -391,12 +448,16 @@ export function PoliciesPanel({
             </Button>
             {/* Enabled with no calendar chosen ON PURPOSE -- the press is what
                 produces "Calendar is required". A dead button was the BLOCKER. */}
-            <FormActions
-              label={t("common.actions.save")}
-              pending={create.isPending}
-              error={create.error}
-              problems={attemptProblems(attempt)}
-            />
+            {refusedNew ? (
+              <UnassignedRefusal />
+            ) : (
+              <FormActions
+                label={t("common.actions.save")}
+                pending={create.isPending}
+                error={create.error}
+                problems={attemptProblems(attempt)}
+              />
+            )}
           </div>
         </Form>
       </Dialog>

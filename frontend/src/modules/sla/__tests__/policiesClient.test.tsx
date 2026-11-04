@@ -126,3 +126,112 @@ describe("an existing policy says whether it is every client's", () => {
     await waitFor(() => expect(api.deleteSlaPolicy).toHaveBeenCalledWith(id, { global }));
   });
 });
+
+/* ------------------------------------------------------------ a new policy */
+
+async function openAdd(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
+  await user.click(await screen.findByRole("button", { name: "Add policy" }));
+  return screen.findByRole("dialog", { name: "Add policy" });
+}
+
+async function pickCalendar(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement): Promise<void> {
+  await user.click(within(dialog).getByRole("combobox", { name: "Calendar" }));
+  await user.click(await within(dialog).findByRole("option", { name: /UK business hours/ }));
+}
+
+describe("a new policy is one client's, or every client's when asked (§3.1)", () => {
+  it("files it under the client chosen at the top, which is not the organisation's own", async () => {
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderPanel();
+    const dialog = await openAdd(user);
+    expect(within(dialog).queryByLabelText("Client")).toBeNull();
+    await pickCalendar(user, dialog);
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.createSlaPolicy).toHaveBeenCalledTimes(1));
+    expect(api.createSlaPolicy.mock.calls[0]?.[0]).toMatchObject({ client_id: "c-acme", calendar_id: "cal1" });
+  });
+
+  it("files it for every client, with no client, when asked", async () => {
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderPanel();
+    const dialog = await openAdd(user);
+    await pickCalendar(user, dialog);
+    const toggle = await within(dialog).findByRole("checkbox", { name: /For every client/ });
+    expect(toggle.closest("label")).toHaveTextContent(
+      "Ticked, it measures the tickets of every client that has no active policy of its own. Unticked, only the tickets of the client it is filed under.",
+    );
+    await user.click(toggle);
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.createSlaPolicy).toHaveBeenCalledTimes(1));
+    expect(api.createSlaPolicy.mock.calls[0]?.[0]).not.toHaveProperty("client_id");
+  });
+
+  it("with every client chosen, asks for the client, offering only those holding sla.admin, never Unassigned", async () => {
+    const reader: MeClient = { id: "c-beta", name: "Beta", kind: "customer", enabled_modules: [], permissions: ["sla.read"] };
+    const unassigned: MeClient = { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ADMIN_CODES };
+    selectClient(null, [INTERNAL, ACME, reader, unassigned]);
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderPanel();
+    const dialog = await openAdd(user);
+    const field = within(dialog).getByLabelText("Client");
+    expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Novieri",
+      "Acme",
+    ]);
+
+    await pickCalendar(user, dialog);
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Client is required");
+    expect(api.createSlaPolicy).not.toHaveBeenCalled();
+
+    await user.selectOptions(field, "c-acme");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.createSlaPolicy).toHaveBeenCalledTimes(1));
+    expect(api.createSlaPolicy.mock.calls[0]?.[0]).toMatchObject({ client_id: "c-acme" });
+  });
+
+  it("with Unassigned chosen at the top, says so instead of offering Save, until it is for every client", async () => {
+    const unassigned: MeClient = { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: ADMIN_CODES };
+    selectClient(unassigned.id, [INTERNAL, unassigned]);
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderPanel();
+    const dialog = await openAdd(user);
+    await pickCalendar(user, dialog);
+    expect(
+      within(dialog).getByText(
+        "Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Save" })).toBeNull();
+
+    await user.click(within(dialog).getByRole("checkbox", { name: /For every client/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.createSlaPolicy).toHaveBeenCalledTimes(1));
+    expect(api.createSlaPolicy.mock.calls[0]?.[0]).not.toHaveProperty("client_id");
+  });
+});
+
+/* ------------------------------------------------------- the Client column */
+
+describe("the list says whose each policy is (§3.4)", () => {
+  it("with every client chosen, names each policy's client, and every client's as All clients", async () => {
+    selectClient(null);
+    stubApi();
+    renderPanel();
+    expect(await screen.findByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    expect(within(await rowOf("Urgent")).getByText("All clients")).toBeInTheDocument();
+    expect(within(await rowOf("High")).getByText("Acme")).toBeInTheDocument();
+  });
+
+  it("hides the column with one client chosen", async () => {
+    stubApi();
+    renderPanel();
+    await rowOf("Urgent");
+    expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
+  });
+});
