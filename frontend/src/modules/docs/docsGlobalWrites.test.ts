@@ -33,7 +33,7 @@ function sent(fetchMock: ReturnType<typeof vi.fn>, call = 0): Headers {
 }
 
 /** Acme chosen in the top bar, as `ApiContext.tsx` wires it. */
-const narrowed = (): ApiClient => new ApiClient(() => "t", vi.fn(), "/api/v1", () => ACME);
+const narrowed = (): ApiClient => new ApiClient(vi.fn(), "/api/v1", () => ACME);
 
 afterEach(() => {
   vi.unstubAllGlobals();

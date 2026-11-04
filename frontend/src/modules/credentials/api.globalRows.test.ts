@@ -36,7 +36,7 @@ function sent(fetchMock: ReturnType<typeof vi.fn>, call = 0): Headers {
 
 /** A console with Acme chosen in the top bar. */
 function narrowedToAcme(): ApiClient {
-  return new ApiClient(() => "t", vi.fn(), "/api/v1", () => ACME);
+  return new ApiClient(vi.fn(), "/api/v1", () => ACME);
 }
 
 afterEach(() => {

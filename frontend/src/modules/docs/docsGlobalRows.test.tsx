@@ -92,7 +92,7 @@ function realApiOverFetch(): ReturnType<typeof vi.fn> {
     return Promise.resolve(json({ items: [], total: 0 }));
   });
   vi.stubGlobal("fetch", fetchMock);
-  mockUseApi.mockReturnValue(new ApiClient(() => "t", vi.fn(), "/api/v1", () => ACME_ID));
+  mockUseApi.mockReturnValue(new ApiClient(vi.fn(), "/api/v1", () => ACME_ID));
   return fetchMock;
 }
 

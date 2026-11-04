@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { FIXTURE_MODE } from "../fixtures/mode";
 import { ApiClient } from "./api";
-import { accessToken, signIn } from "./auth";
 import { isClientId, selectedClient } from "./clientChoice";
+import { sessionEnded } from "./sessionEnd";
 
 const ApiContext = createContext<ApiClient | null>(null);
 
@@ -42,10 +42,14 @@ export function ApiProvider({ children }: { children: ReactNode }) {
       FIXTURE_MODE
         ? fixture
         : new ApiClient(
-            accessToken,
-            () => {
-              void signIn();
-            },
+            // A 401 IS THE SESSION ENDING, NOT A NAVIGATION (own-auth design
+            // §2.4). `lib/auth.ts`'s `signIn()` used to redirect from here, on
+            // any 401, from any page -- including a sign-in page whose own
+            // language save answered 401, which is a loop (plan decision
+            // D20). The flag is read by the guard, which sends a tab that
+            // never had a session to sign in, and by the shell, which keeps a
+            // page whose session ended mid-task and says so.
+            sessionEnded,
             "/api/v1",
             // The top bar's choice, read on every request (`X-Client-Id`) --
             // and sent ONLY AS A CLIENT ID. The server answers a malformed

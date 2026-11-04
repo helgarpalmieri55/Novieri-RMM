@@ -326,7 +326,7 @@ describe("email-intake admin", () => {
         }),
       );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "tok", vi.fn());
+    const client = new ApiClient(vi.fn());
     await client.listEmailIntakeMessages({ disposition: "quarantined", limit: 50 });
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(url).toContain("/email-intake/messages?");

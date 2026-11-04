@@ -11,7 +11,7 @@ describe("a device's site", () => {
       .fn()
       .mockImplementation(() => Promise.resolve(new Response(JSON.stringify({}), { status: 200 })));
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn(), "/api/v1", () => null);
+    const client = new ApiClient(vi.fn(), "/api/v1", () => null);
     await client.listDevices({ siteId: "s-north", limit: 50 });
     await client.changeDeviceSite("d1", "s-north");
     const sent = (fetchMock.mock.calls as [string, RequestInit][]).map(([url, init]) => [

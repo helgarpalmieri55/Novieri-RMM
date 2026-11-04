@@ -20,7 +20,7 @@ function stubFetch(body: unknown): ReturnType<typeof vi.fn> {
   return fetchMock;
 }
 
-const api = (): ApiClient => new ApiClient(() => "t", vi.fn(), "/api/v1");
+const api = (): ApiClient => new ApiClient(vi.fn(), "/api/v1");
 
 describe("one client's groups and articles", () => {
   it("asks for one client's device groups", async () => {

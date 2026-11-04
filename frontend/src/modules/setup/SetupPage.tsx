@@ -64,7 +64,7 @@ export type Claimed = {
  */
 export async function fetchSetupStatus(): Promise<SetupStatus> {
   const response = await fetch("/api/v1/setup/status", {
-    headers: requestHeaders(null, { Accept: "application/json" }),
+    headers: requestHeaders({ Accept: "application/json" }),
   });
   if (!response.ok) throw new Error(`setup status: HTTP ${response.status}`);
   return (await response.json()) as SetupStatus;
@@ -148,7 +148,7 @@ export function SetupPage() {
     try {
       const response = await fetch("/api/v1/setup/claim", {
         method: "POST",
-        headers: requestHeaders(null, { "Content-Type": "application/json", Accept: "application/json" }),
+        headers: requestHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
         body: JSON.stringify({
           code: form.code.trim(),
           email: form.email.trim(),
