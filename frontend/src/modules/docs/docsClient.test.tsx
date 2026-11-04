@@ -14,6 +14,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ApiClient, DocArticle, Me, MeClient } from "../../lib/api";
+import { ClientNotChosen } from "../../lib/clientSelection";
 import { DocsPage } from "./DocsPage";
 
 const mockUseApi = vi.fn();
@@ -91,6 +92,12 @@ function renderDocs(api: Partial<Record<keyof ApiClient, unknown>>, me: Me = MAN
   );
 }
 
+// Phase 3 final review D, Important 3. In documentation a row with no client
+// is EVERY client's (`backend/app/modules/documentation/api.py`), so a body
+// sent with the Client field still empty would file a global article, record
+// or document for a person who only forgot to pick one. With every client
+// chosen and the field empty, Save says nothing was sent, and nothing is.
+
 // Phase 3 final review D, Important 1: `MANAGER.org_id` is "o1", where
 // phases 1-2 filed every new row whoever was chosen, so a test that chooses
 // "o1" at the top cannot tell that rule from this one. These choose "c-acme".
@@ -149,6 +156,20 @@ describe("a new article", () => {
     renderDocs({ createArticle: vi.fn() }, { ...MANAGER, clients: WITH_A_READER });
     await user.click(await screen.findByRole("button", { name: "New article" }));
     expect(offered(screen.getByLabelText("Client"))).toEqual(["Choose a client", "Novieri", "Acme"]);
+  });
+
+  it("with every client chosen and no client picked, Save sends nothing and says so", async () => {
+    selectClient(null, [INTERNAL_CLIENT, ACME_CLIENT]);
+    const user = userEvent.setup();
+    const createArticle = vi.fn().mockResolvedValue(ARTICLE);
+    renderDocs({ createArticle });
+    await user.click(await screen.findByRole("button", { name: "New article" }));
+    await user.type(screen.getByLabelText("Title"), "VPN");
+    expect(screen.getByLabelText("Client")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(new ClientNotChosen().message);
+    expect(createArticle).not.toHaveBeenCalled();
   });
 
   it("hides the Client field once the article is for every client", async () => {
@@ -260,6 +281,21 @@ describe("a new record", () => {
     expect(offered(within(dialog).getByLabelText("Client"))).toEqual(["Choose a client", "Novieri", "Acme"]);
   });
 
+  it("with every client chosen and no client picked, Create sends nothing and says so", async () => {
+    selectClient(null, [INTERNAL_CLIENT, ACME_CLIENT]);
+    const user = userEvent.setup();
+    const createDocRecord = vi.fn().mockResolvedValue({ id: "r1" });
+    renderDocs({ createDocRecord });
+    await user.click(await screen.findByRole("button", { name: "New record" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Name"), "VPN gateway");
+    expect(within(dialog).getByLabelText("Client")).toHaveValue("");
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(new ClientNotChosen().message);
+    expect(createDocRecord).not.toHaveBeenCalled();
+  });
+
   it("is the client chosen at the top's, or every client's when asked", async () => {
     const user = userEvent.setup();
     const createDocRecord = vi.fn().mockResolvedValue({ id: "r1" });
@@ -325,6 +361,24 @@ describe("a new document", () => {
     await user.click(await screen.findByRole("button", { name: "Upload document" }));
     const dialog = await screen.findByRole("dialog", { name: "Upload document" });
     expect(offered(within(dialog).getByLabelText("Client"))).toEqual(["Choose a client", "Novieri", "Acme"]);
+  });
+
+  it("with every client chosen and no client picked, Upload sends nothing and says so", async () => {
+    selectClient(null, [INTERNAL_CLIENT, ACME_CLIENT]);
+    const user = userEvent.setup();
+    const createDocument = vi.fn().mockResolvedValue({ ...ARTICLE, id: "d1", current: null });
+    const uploadDocumentVersion = vi.fn().mockResolvedValue({ version: 1 });
+    renderDocs({ createDocument, uploadDocumentVersion });
+    await user.click(await screen.findByRole("button", { name: "Upload document" }));
+    const dialog = await screen.findByRole("dialog", { name: "Upload document" });
+    await user.type(within(dialog).getByLabelText("Title"), "Contract");
+    await user.upload(within(dialog).getByLabelText("File"), new File(["%PDF"], "c.pdf"));
+    expect(within(dialog).getByLabelText("Client")).toHaveValue("");
+    await user.click(within(dialog).getByRole("button", { name: "Upload" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(new ClientNotChosen().message);
+    expect(createDocument).not.toHaveBeenCalled();
+    expect(uploadDocumentVersion).not.toHaveBeenCalled();
   });
 
   it("is the client chosen at the top's, or every client's when asked", async () => {
