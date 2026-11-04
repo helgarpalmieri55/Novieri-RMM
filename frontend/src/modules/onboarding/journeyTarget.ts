@@ -17,6 +17,18 @@
  * when `/me` has listed the person's clients, and a remount on that entry
  * leaves the choice to the person.
  *
+ * AND THE PAGE'S OWN NAVIGATIONS ARE THE SAME ARRIVAL. A page that writes its
+ * query -- Enrollment's tabs push `?tab=`, the subnet tree pushes `?state=`
+ * and replaces `?register=` away -- makes a new history entry, with a new
+ * key, that keeps the journey's `client=`. Deciding on it afresh would switch
+ * a person who had since chosen «Todos mis clientes» back at the first tab
+ * click (and every other tab through `storage`). So a new entry reached while
+ * the page stays mounted, on the same path with the same journey client,
+ * inherits the decision already made; the page's own navigations never
+ * remount it. An arrival is a page mounting on an entry: the journey's link
+ * followed, the URL opened (or reloaded, or reached after signing in), Back
+ * or Forward from another page -- and an entry already decided stays decided.
+ *
  * THE SITE IS THE PAGE'S FIRST CHOICE. `useJourneySiteState` starts a page's
  * site at the journey's, once the console works on the journey's client; the
  * person can still choose another.
@@ -32,16 +44,25 @@ const decided = new Set<string>();
 
 export function useAdoptJourneyClient(): void {
   const [params] = useSearchParams();
-  const { key } = useLocation();
+  const { key, pathname } = useLocation();
   const wanted = params.get(JOURNEY_CLIENT_PARAM);
   const { selected, select, clients, ready } = useClientScope();
+  // The path and journey client this mounted page has decided on, or stood
+  // on once decided: lives exactly as long as the page does.
+  const standing = useRef<string | null>(null);
   useEffect(() => {
     // Not before `/me` has listed the clients: an empty list is not "not one
     // of the person's", it is "not known yet".
-    if (wanted === null || !ready || decided.has(key)) return;
+    if (wanted === null || !ready) return;
+    const place = `${pathname}?${JOURNEY_CLIENT_PARAM}=${wanted}`;
+    const sameArrival = standing.current === place;
+    standing.current = place;
+    if (decided.has(key)) return;
     decided.add(key);
+    // A tab, a view, a dialog closed: this page's own navigation.
+    if (sameArrival) return;
     if (selected === null && clients.some((client) => client.id === wanted)) select(wanted);
-  }, [wanted, ready, key, selected, clients, select]);
+  }, [wanted, ready, key, pathname, selected, clients, select]);
 }
 
 /** The journey's site, while the console works on the journey's client. */

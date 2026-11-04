@@ -36,7 +36,14 @@ function site(id: string, clientId: string, name: string): ClientSiteOut {
   return { id, client_id: clientId, name, address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 };
 }
 
-function renderPage(path = "/enrollment") {
+/**
+ * `behind` puts history entries before the page, so it arrives on an entry
+ * with a key of its own (the first entry's is always "default", and
+ * `useAdoptJourneyClient` remembers the entries it has decided on).
+ * `remount` starts the page again on the same URL, as a change of client does
+ * (`lib/clientScope.tsx`).
+ */
+function renderPage(path = "/enrollment", behind: string[] = []) {
   listEnrollmentTokens.mockResolvedValue({ items: [], total: 0, revoked_count: 0, unlimited_count: 0 });
   createEnrollmentToken.mockResolvedValue({
     id: "t1", name: "lab", token: "plain", expires_at: "2099-01-01T00:00:00Z", max_uses: 1,
@@ -52,13 +59,15 @@ function renderPage(path = "/enrollment") {
     ),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const ui = (key: string) => (
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[path]}>
-        <EnrollmentPage />
+      <MemoryRouter initialEntries={[...behind, path]} initialIndex={behind.length}>
+        <EnrollmentPage key={key} />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = render(ui("first"));
+  return { ...view, remount: (key: string) => view.rerender(ui(key)) };
 }
 
 beforeEach(() => {
@@ -123,5 +132,44 @@ describe("an enrollment token's site", () => {
         name: "lab", expires_in_hours: 72, max_uses: 1, site_id: "site-a2",
       }),
     );
+  });
+});
+
+describe("a tab clicked on a page opened from the journey (design §4.4)", () => {
+  // A tab is pushed into the URL (`?tab=`) with the journey's `client=` kept:
+  // the same arrival, so the client the person chose since is not undone.
+  const select = vi.fn();
+  function scopeOn(selected: string | null): void {
+    mockClientScope.mockReturnValue({ selected, select, clients: [INTERNAL, ACME], ready: true });
+  }
+  beforeEach(() => select.mockReset());
+
+  it("keeps «Todos mis clientes» chosen after the journey's client was adopted", async () => {
+    scopeOn(null);
+    const user = userEvent.setup();
+    const view = renderPage("/enrollment?client=c-acme&site=site-a2", ["/devices/onboard"]);
+    expect(select).toHaveBeenCalledWith("c-acme");
+    // The console works on Acme: the page starts again.
+    scopeOn("c-acme");
+    view.remount("on-acme");
+    // The person picks «Todos mis clientes» above: it starts again, and stays.
+    scopeOn(null);
+    view.remount("every-client");
+    await user.click(await screen.findByRole("tab", { name: "Certificates" }));
+    expect(screen.getByRole("tab", { name: "Certificates" })).toHaveAttribute("aria-selected", "true");
+    await user.click(screen.getByRole("tab", { name: "Enrollment flow" }));
+    expect(screen.getByRole("tab", { name: "Enrollment flow" })).toHaveAttribute("aria-selected", "true");
+    expect(select).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps «Todos mis clientes» chosen after arriving on the journey's client", async () => {
+    scopeOn("c-acme");
+    const user = userEvent.setup();
+    const view = renderPage("/enrollment?client=c-acme&site=site-a2", ["/devices/onboard"]);
+    scopeOn(null);
+    view.remount("every-client");
+    await user.click(await screen.findByRole("tab", { name: "Certificates" }));
+    expect(screen.getByRole("tab", { name: "Certificates" })).toHaveAttribute("aria-selected", "true");
+    expect(select).not.toHaveBeenCalled();
   });
 });

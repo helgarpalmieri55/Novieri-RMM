@@ -650,3 +650,50 @@ describe("the sweeper picker asks only when it may be used", () => {
     expect(within(picker).queryByRole("option", { name: "pending-01" })).toBeNull();
   });
 });
+
+describe("the subnet tree opened from the add-a-computer journey (design §4.4)", () => {
+  // Closing the register dialog replaces `?register=` away and choosing a view
+  // pushes `?state=`, both keeping the journey's `client=`: the same arrival,
+  // so the client the person chose since is not undone.
+  const ACME_SCOPE: MeClient = { id: "c-x", name: "Acme", kind: "customer", enabled_modules: [], permissions: [] };
+  const select = vi.fn();
+  function scopeOn(selected: string | null): void {
+    mockClientScope.mockReturnValue({ selected, select, clients: [SCOPE_INTERNAL, ACME_SCOPE], ready: true });
+  }
+  beforeEach(() => select.mockReset());
+
+  it("keeps «Todos mis clientes» chosen when the dialog is closed and a view chosen", async () => {
+    stubApi();
+    scopeOn(null);
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // A change of client starts the page again on the same URL (`lib/clientScope.tsx`).
+    const ui = (key: string) => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter
+          initialEntries={["/devices/onboard", "/ipam?client=c-x&site=site-x&register=1"]}
+          initialIndex={1}
+        >
+          <SubnetTreePage key={key} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const view = render(ui("first"));
+    expect(select).toHaveBeenCalledWith("c-x");
+    scopeOn("c-x");
+    view.rerender(ui("on-acme"));
+    // The person picks «Todos mis clientes» above: it starts again, and stays.
+    scopeOn(null);
+    view.rerender(ui("every-client"));
+
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    const views = screen.getByLabelText("Filter by view") as HTMLSelectElement;
+    await user.selectOptions(views, "assignable");
+    expect(views.value).toBe("assignable");
+    await user.selectOptions(views, "never-swept");
+    expect(views.value).toBe("never-swept");
+    expect(select).toHaveBeenCalledTimes(1);
+  });
+});
