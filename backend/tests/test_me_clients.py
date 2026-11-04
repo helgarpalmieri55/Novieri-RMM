@@ -22,6 +22,8 @@ among others; `read-only` holds only read codes (`devices.read`,
 tests read each role's codes from the database rather than restate them.
 """
 
+import ast
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -290,3 +292,29 @@ async def test_patch_me_answers_with_the_same_map(api_env: Any) -> None:
     assert body["clients"] == (await _me(env, headers))["clients"]
     assert body["permissions"] == sorted(await _codes_of(env, "read-only"))
     assert body["permissions_everywhere"] == []
+
+
+def test_the_kernel_imports_no_service_module() -> None:
+    """`app/core` is what the services are built on, never the other way:
+    the `/me` profile (`app/core/identity/own_profile.py`) was the one kernel
+    module importing `app.services`, for the archived-client word, which now
+    lives with the `clients` table it constrains (`app/models/clients.py`,
+    next to `ck_clients_status`). Final review A3.
+    FALSIFIER: any `from app.services ...` or `import app.services...` under
+    `app/core`."""
+    core = Path(__file__).resolve().parents[1] / "app" / "core"
+    offenders = []
+    for path in sorted(core.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            elif isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            else:
+                continue
+            offenders += [
+                f"{path.relative_to(core.parent.parent)}:{node.lineno} {name}"
+                for name in names
+                if name == "app.services" or name.startswith("app.services.")
+            ]
+    assert offenders == []

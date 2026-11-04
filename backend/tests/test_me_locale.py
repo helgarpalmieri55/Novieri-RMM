@@ -401,6 +401,45 @@ async def test_a_misconfigured_secret_file_does_not_fail_the_save(
     assert (await _row(env.api.admin_engine, env.sub)).locale == "es"
 
 
+async def test_a_failed_client_map_read_saves_nothing_and_the_retry_mirrors(
+    env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`PATCH /me` answers with the client map (phase 3 design §1.3). Read
+    AFTER the commit, a failed read was a 500 for a saved language, and the
+    retry -- seeing that language already stored -- never mirrored it to
+    Keycloak (final review A3). The map is read before the commit: a failed
+    read saves nothing, so the retry saves and mirrors.
+    FALSIFIER: `update_own_profile` (`own_profile.py`) reading the map after
+    its `org_session` block again."""
+    from app.core.identity import own_profile
+
+    real = own_profile._own_clients
+    calls: list[int] = []
+
+    async def unreachable_once(*args: Any, **kwargs: Any) -> Any:
+        calls.append(1)
+        if len(calls) == 1:
+            raise ConnectionError("the client map could not be read")
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(own_profile, "_own_clients", unreachable_once)
+
+    try:
+        failed = await _patch(env, {"locale": "es"})
+    except ConnectionError:
+        pass  # the test transport re-raises what the 500 was made of
+    else:
+        assert failed.status_code == 500, failed.text
+    assert (await _row(env.api.admin_engine, env.sub)).locale is None
+    assert env.kc.seen == []
+
+    retried = await _patch(env, {"locale": "es"})
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["locale"] == "es"
+    assert retried.json()["identity_locale_synced"] is True
+    assert env.kc.bodies[-1]["attributes"]["locale"] == ["es"]
+
+
 async def test_keycloak_is_not_called_when_locale_was_not_supplied(env: Any) -> None:
     response = await _patch(env, {"phone": "0101"})
     assert response.status_code == 200

@@ -58,9 +58,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import N_, tr, tr_marked
 from app.models import Client, Site
-from app.models.clients import CLIENT_KIND_UNASSIGNED
-
-CLIENT_ARCHIVED = "archived"
+from app.models.clients import CLIENT_ARCHIVED, CLIENT_KIND_UNASSIGNED
 
 
 class SiteNotFound(LookupError):
