@@ -2686,29 +2686,50 @@ export class ApiClient {
     return this.request<PushRunOut>(`/agent-push/runs/${id}/cancel`, { method: "POST" });
   }
 
+  /**
+   * A CREDENTIAL WITH NO CLIENT IS EVERY CLIENT'S, a global row (`credentials`
+   * is an O table), and the server refuses writing one narrowed by
+   * `X-Client-Id` (403, `app/core/global_rows.py`). So each write below is
+   * global BY ITS BODY OR ITS ROW (`RequestRoute.global`, as
+   * `revokeMcpConnection` is): a body that names no client, or a row whose
+   * `client_id` is null, goes without the header. The server still requires
+   * the code on every client (phase 3 final review B, Critical 1).
+   */
   createCredential(body: {
     name: string;
     type: string;
     secret: string;
-    /** Required for a push credential (`push_install`, `windows_domain`): it has exactly one client. */
+    /**
+     * The client it serves. Required for a push credential (`push_install`,
+     * `windows_domain`): it has exactly one. Absent, every client's (global).
+     */
     client_id?: string;
   }): Promise<Credential> {
-    return this.request<Credential>("/credentials", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.request<Credential>(
+      "/credentials",
+      { method: "POST", body: JSON.stringify(body) },
+      { global: body.client_id === undefined },
+    );
   }
 
   // Returns the plaintext to the caller once; never cache this in query state.
-  checkoutCredential(id: string, reason: string): Promise<{ secret: string }> {
-    return this.request<{ secret: string }>(`/credentials/${id}/checkout`, {
-      method: "POST",
-      body: JSON.stringify({ reason }),
-    });
+  // A WRITE TOO: the checkout stamps the row's `last_used_at`, so every
+  // client's credential (`clientId` null) is checked out without the header.
+  checkoutCredential(id: string, reason: string, clientId: string | null): Promise<{ secret: string }> {
+    return this.request<{ secret: string }>(
+      `/credentials/${id}/checkout`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+      { global: clientId === null },
+    );
   }
 
-  deleteCredential(id: string): Promise<{ deleted: boolean }> {
-    return this.request<{ deleted: boolean }>(`/credentials/${id}`, { method: "DELETE" });
+  /** `clientId` is the row's: `null` (every client's) is deleted without the header. */
+  deleteCredential(id: string, clientId: string | null): Promise<{ deleted: boolean }> {
+    return this.request<{ deleted: boolean }>(
+      `/credentials/${id}`,
+      { method: "DELETE" },
+      { global: clientId === null },
+    );
   }
 
   listRemoteSessions(params: RemoteSessionFilters = {}): Promise<Page<RemoteSession>> {

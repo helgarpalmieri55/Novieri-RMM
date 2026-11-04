@@ -220,9 +220,13 @@ describe("CredentialsPage", () => {
     await user.type(screen.getByPlaceholderText(/helpdesk ticket/i), "helpdesk ticket 4821");
     await user.click(screen.getByRole("button", { name: "Reveal" }));
 
+    // The row's client (`null`: every client's) is the third argument: it
+    // decides whether the request carries X-Client-Id (phase 3 final review B,
+    // Critical 1).
     expect(checkoutCredential).toHaveBeenCalledExactlyOnceWith(
       credential().id,
       "helpdesk ticket 4821",
+      null,
     );
     // Now, and only now, the secret is on the page -- inside the dialog that
     // says it is shown once.
@@ -336,9 +340,12 @@ describe("CredentialsPage's New credential form", () => {
     await user.type(screen.getByLabelText("Secret"), " hunter2 ");
     await user.click(screen.getByRole("button", { name: "Store" }));
 
+    // Under the client chosen at the top, `o1` (design §3.1): before the final
+    // review a non-push type was always every client's and named none.
     expect(createCredential).toHaveBeenCalledExactlyOnceWith({
       name: "Domain support admin",
       type: "windows_admin",
+      client_id: "o1",
       secret: " hunter2 ",
     });
   });
@@ -604,7 +611,8 @@ describe("CredentialsPage — deleting a stored credential", () => {
 
     await deleteCredentialNamed(user, "Linux support key");
 
-    expect(deleteCredential).toHaveBeenCalledExactlyOnceWith("keep-me");
+    // With the row's client (`null`: every client's), which decides X-Client-Id.
+    expect(deleteCredential).toHaveBeenCalledExactlyOnceWith("keep-me", null);
   });
 
   // No `requireTyping` here, deliberately: the blast radius is one credential
@@ -716,13 +724,17 @@ describe("CredentialsPage — credential types as a person reads them", () => {
     expect(createCredential).toHaveBeenCalledExactlyOnceWith({
       name: "Linux support key",
       type: "ssh_key",
+      // The client chosen at the top (design §3.1; phase 3 final review C,
+      // Important 2): every type is a client's unless ticked for every client.
+      client_id: "o1",
       secret: "-----BEGIN KEY-----",
     });
   });
 
-  it("files a push install credential under the client chosen at the top, and only a push credential", async () => {
+  it("files a push install credential under the client chosen at the top", async () => {
     // MSP clients phase 2, Task 12: a push credential has exactly one client.
-    // The ssh_key above is sent with none and serves every client, as before.
+    // Since the final review the ssh_key above goes to that client too; only
+    // a non-push type may instead be every client's ("For every client").
     const user = userEvent.setup();
     const createCredential = vi.fn().mockResolvedValue(credential({ type: "push_install" }));
     renderPage({ listCredentials: () => Promise.resolve([]), createCredential });
