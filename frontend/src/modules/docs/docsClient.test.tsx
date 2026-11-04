@@ -13,8 +13,8 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { setActiveLanguage } from "../../i18n/core";
 import type { ApiClient, DocArticle, Me, MeClient } from "../../lib/api";
-import { ClientNotChosen } from "../../lib/clientSelection";
 import { DocsPage } from "./DocsPage";
 
 const mockUseApi = vi.fn();
@@ -168,7 +168,10 @@ describe("a new article", () => {
     expect(screen.getByLabelText("Client")).toHaveValue("");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(new ClientNotChosen().message);
+    // The field is named before anything is built (phase 3 final review D2):
+    // the form's own "Client is required", where it used to fall through to
+    // `ClientNotChosen`. Nothing is sent either way.
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
     expect(createArticle).not.toHaveBeenCalled();
   });
 
@@ -292,7 +295,8 @@ describe("a new record", () => {
     expect(within(dialog).getByLabelText("Client")).toHaveValue("");
     await user.click(within(dialog).getByRole("button", { name: "Create" }));
 
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent(new ClientNotChosen().message);
+    // Named by the form's own rule now (phase 3 final review D2); nothing sent.
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Client is required");
     expect(createDocRecord).not.toHaveBeenCalled();
   });
 
@@ -376,7 +380,8 @@ describe("a new document", () => {
     expect(within(dialog).getByLabelText("Client")).toHaveValue("");
     await user.click(within(dialog).getByRole("button", { name: "Upload" }));
 
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent(new ClientNotChosen().message);
+    // Named by the form's own rule now (phase 3 final review D2); nothing sent.
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Client is required");
     expect(createDocument).not.toHaveBeenCalled();
     expect(uploadDocumentVersion).not.toHaveBeenCalled();
   });
@@ -403,5 +408,72 @@ describe("a new document", () => {
     await user.click(within(dialog).getByRole("button", { name: "Upload" }));
     await waitFor(() => expect(createDocument).toHaveBeenCalledTimes(2));
     expect(createDocument.mock.calls[1]?.[0]).not.toHaveProperty("client_id");
+  });
+});
+
+// Phase 3 final review B, Important 4: with Unassigned chosen at the top every
+// new row is filed under it and refused (422), and no Client field can help --
+// the header confines the request to Unassigned. The forms say so instead of
+// offering a Save that can only fail; "For every client" files nothing under
+// Unassigned, so ticking it brings the Save back.
+describe("with Unassigned chosen at the top", () => {
+  const REFUSAL =
+    "Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.";
+  const ADMIN: Me = { ...MANAGER, permissions_everywhere: ["docs.read", "docs.manage"] };
+
+  beforeEach(() => selectClient(UNASSIGNED_CLIENT.id, [INTERNAL_CLIENT, UNASSIGNED_CLIENT]));
+
+  it("a new article says so instead of offering Save, until it is for every client", async () => {
+    const user = userEvent.setup();
+    const createArticle = vi.fn().mockResolvedValue({ ...ARTICLE, client_id: null });
+    renderDocs({ createArticle }, ADMIN);
+    await user.click(await screen.findByRole("button", { name: "New article" }));
+    await user.type(screen.getByLabelText("Title"), "VPN");
+    expect(screen.getByText(REFUSAL)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    // Enter in the title submits the form: still nothing is sent.
+    await user.type(screen.getByLabelText("Title"), "{Enter}");
+    expect(createArticle).not.toHaveBeenCalled();
+
+    await user.click(await screen.findByRole("checkbox", { name: /For every client/ }));
+    expect(screen.queryByText(REFUSAL)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(createArticle).toHaveBeenCalledTimes(1));
+    expect(createArticle.mock.calls[0]?.[0]).not.toHaveProperty("client_id");
+  });
+
+  it("a new record says so instead of offering Create", async () => {
+    const user = userEvent.setup();
+    const createDocRecord = vi.fn();
+    renderDocs({ createDocRecord });
+    await user.click(await screen.findByRole("button", { name: "New record" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(REFUSAL)).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Create" })).toBeNull();
+    expect(createDocRecord).not.toHaveBeenCalled();
+  });
+
+  it("a new document says so instead of offering Upload", async () => {
+    const user = userEvent.setup();
+    const createDocument = vi.fn();
+    renderDocs({ createDocument });
+    await user.click(await screen.findByRole("button", { name: "Upload document" }));
+    const dialog = await screen.findByRole("dialog", { name: "Upload document" });
+    expect(within(dialog).getByText(REFUSAL)).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Upload" })).toBeNull();
+    expect(createDocument).not.toHaveBeenCalled();
+  });
+
+  it("says it in Spanish", async () => {
+    setActiveLanguage("es");
+    const user = userEvent.setup();
+    renderDocs({ createDocRecord: vi.fn() });
+    await user.click(await screen.findByRole("button", { name: "Registro nuevo" }));
+    expect(
+      await screen.findByText(
+        "Arriba está elegido «Sin asignar», y en él no se puede guardar nada nuevo. Elige otro cliente, o «Todos mis clientes», para guardar esto.",
+      ),
+    ).toBeInTheDocument();
   });
 });

@@ -41,10 +41,11 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import type { DocDocument, DocDocumentListItem, DocDocumentVersion } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { formatDateTime } from "../../lib/datetime";
 import { formatBytes } from "../../lib/format";
 import { humaniseEnum } from "../../lib/labels";
+import { UnassignedRefusal } from "../clients/UnassignedRefusal";
 import { Panel, QueryState, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { DocumentViewer, DownloadVersionButton } from "./DocumentViewer";
@@ -702,6 +703,15 @@ function VersionHistory({
 
 /* ------------------------------------------------------- the links editor */
 
+/**
+ * The Client field's rule, for a new article, record or document with every
+ * client chosen (phase 3 final review D2): named like any other required
+ * field, before anything is built. Worded when read.
+ */
+export function clientRule(): FieldRule {
+  return { name: "client", label: translate("components.clientField.label") };
+}
+
 /** The link form's one rule, worded when read. */
 function targetRules(): FieldRule[] {
   return [
@@ -882,11 +892,14 @@ export function UploadDocumentDialog({
   const [forEveryClient, setForEveryClient] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   // A NEW DOCUMENT IS ONE CLIENT'S unless it is for every client (§3.5): the
-  // client chosen at the top, or with every client the dialog's Client field.
-  const target = useNewRowClient("docs.manage");
-  // The Client field's value, `""` until chosen: read only when it is shown.
-  const [pickedClient, setPickedClient] = useState("");
-  const documentClient = target.needsField ? pickedClient || null : target.clientId;
+  // client chosen at the top, or with every client the dialog's Client field
+  // (`useNewRowClientField`). A new pick clears a stale refusal.
+  const documentClient = useNewRowClientField("docs.manage", undefined, {
+    onPick: () => clearStale(),
+  });
+  const resetPick = documentClient.setPicked;
+  // Unassigned chosen at the top files nothing new, unless for every client.
+  const refused = !forEveryClient && documentClient.refused !== null;
 
   useEffect(() => {
     if (!open) return;
@@ -897,9 +910,9 @@ export function UploadDocumentDialog({
     setAttempt(null);
     setCreatedWithoutFile(null);
     setForEveryClient(false);
-    setPickedClient("");
+    resetPick("");
     if (fileInput.current) fileInput.current.value = "";
-  }, [open]);
+  }, [open, resetPick]);
 
   const create = useMutation({
     mutationFn: async () => {
@@ -908,7 +921,7 @@ export function UploadDocumentDialog({
         description,
         category,
         // The client's above, or, when asked, every client's.
-        ...(forEveryClient ? {} : { client_id: requireKnown(documentClient) }),
+        ...(forEveryClient ? {} : { client_id: requireKnown(documentClient.clientId) }),
       });
       if (!file) return doc;
       try {
@@ -935,9 +948,12 @@ export function UploadDocumentDialog({
   };
 
   const submit = () => {
+    if (refused) return;
+    // The Client field is required, and named before anything is built.
+    const askClient = !forEveryClient && documentClient.needsField;
     const next: Attempt = {
-      rules: () => [...titleCategoryRules(), fileRule()],
-      values: { title, category, file: fileSnapshot(file) },
+      rules: () => [...titleCategoryRules(), fileRule(), ...(askClient ? [clientRule()] : [])],
+      values: { title, category, file: fileSnapshot(file), client: documentClient.clientId },
     };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
@@ -1001,16 +1017,7 @@ export function UploadDocumentDialog({
             clearStale();
           }}
         />
-        {!forEveryClient && target.needsField ? (
-          <ClientField
-            code="docs.manage"
-            value={pickedClient}
-            onChange={(id) => {
-              setPickedClient(id);
-              clearStale();
-            }}
-          />
-        ) : null}
+        {!forEveryClient && documentClient.needsField ? <ClientField field={documentClient} /> : null}
         <AcceptedTypes />
         {createdWithoutFile && (
           <p role="status" className="notice gold mt-2">
@@ -1021,13 +1028,17 @@ export function UploadDocumentDialog({
           <Button type="button" variant="ghost" onClick={onClose}>
             {t("docs.documents.dialog.cancel")}
           </Button>
-          <FormActions
-            label={t("docs.documents.dialog.upload")}
-            pending={create.isPending}
-            error={create.isError ? create.error : undefined}
-            problems={attemptProblems(attempt)}
-            failedMessage={t("docs.documents.dialog.uploadRefused")}
-          />
+          {refused ? (
+            <UnassignedRefusal />
+          ) : (
+            <FormActions
+              label={t("docs.documents.dialog.upload")}
+              pending={create.isPending}
+              error={create.isError ? create.error : undefined}
+              problems={attemptProblems(attempt)}
+              failedMessage={t("docs.documents.dialog.uploadRefused")}
+            />
+          )}
         </div>
       </Form>
     </Dialog>
