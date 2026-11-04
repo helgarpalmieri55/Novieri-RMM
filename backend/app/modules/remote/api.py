@@ -38,6 +38,7 @@ from sqlalchemy import func, select
 
 from app.api.deps import AuthContext, bound_auth_context, narrowed_to_any, require_permission
 from app.core.audit import audit_service
+from app.core.global_rows import refuse_unless_every_client
 from app.core.i18n import tr
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
@@ -419,6 +420,11 @@ async def upsert_policy(
         # and recording.py's order_by(id).limit(1)).
         query = select(RemotePolicy)
         if body.device_group_id is None:
+            # The org default is the global row: refused under a narrowed
+            # scope before anything is read, even for a body identical to it
+            # (patch's `upsert_policy` gives the reason; phase 3 last fix
+            # round).
+            refuse_unless_every_client(session, "remote_policies")
             query = query.where(RemotePolicy.device_group_id.is_(None))
         else:
             query = query.where(RemotePolicy.device_group_id == body.device_group_id)
