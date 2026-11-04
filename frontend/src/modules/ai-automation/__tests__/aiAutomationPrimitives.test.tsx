@@ -508,6 +508,26 @@ describe("AutonomyDialPage", () => {
     expect(screen.getByText("require_approval")).toBeInTheDocument();
   });
 
+  it("says the dial is read-only only once /me says so, never while it loads", async () => {
+    // An administrator's every visit would otherwise open on "Read-only" and
+    // then lose it: a permission list that has not loaded is not a missing
+    // permission (`lib/mePermissions.ts`).
+    let answer: (me: Me) => void = () => undefined;
+    const me = vi.fn().mockReturnValue(
+      new Promise<Me>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    stubApi({ me });
+    renderWithProviders(<AutonomyDialPage />);
+    await screen.findByTestId("dial-admin-low");
+    expect(screen.queryByText(/Read-only: every client shares the autonomy dial/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
+
+    answer({ ...ME, permissions_everywhere: [] });
+    expect(await screen.findByText(/Read-only: every client shares the autonomy dial/)).toBeInTheDocument();
+  });
+
   it("names the personas rather than printing their identifiers as headings", async () => {
     stubApi();
     renderWithProviders(<AutonomyDialPage />);

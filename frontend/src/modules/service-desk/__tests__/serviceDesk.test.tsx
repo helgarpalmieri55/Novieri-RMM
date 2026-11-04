@@ -983,6 +983,24 @@ describe("NewTicketDialog: the client of a ticket with no device", () => {
     expect(api.createTicket).not.toHaveBeenCalled();
   });
 
+  it("drops the refusal about the client once a device is chosen: the device's client is the ticket's", async () => {
+    // "Client is required" was checked against a form that asked for a client.
+    // Choosing a device takes the question away, so the sentence would refer
+    // to a field that is no longer on screen.
+    const user = userEvent.setup();
+    renderWithProviders(<NewTicketDialog open onClose={() => {}} />);
+    await fillTicket(user);
+    await screen.findByLabelText("Client");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+
+    await pickEntity(user, "Device (optional)", /BUILD-01/);
+
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    expect(screen.queryByText(/Client is required/)).toBeNull();
+    expect(api.createTicket).not.toHaveBeenCalled();
+  });
+
   it("asks nothing once a device is chosen, and sends no client: the device's is the ticket's", async () => {
     const user = userEvent.setup();
     renderWithProviders(<NewTicketDialog open onClose={() => {}} />);

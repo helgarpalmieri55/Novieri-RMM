@@ -1733,6 +1733,19 @@ describe("HealthSettingsPanel", () => {
     expect(await screen.findByRole("button", { name: "Save" })).toBeDisabled();
     expect(screen.getByText(/do not have permission to change health settings/)).toBeInTheDocument();
   });
+
+  it("tells someone holding health.admin on some clients that it is needed on every client", async () => {
+    // Every client shares these settings (GLOBAL_WRITES): "you do not have
+    // permission" would be false for someone who holds it, only not everywhere.
+    stubSettings({
+      me: vi.fn().mockResolvedValue({ ...me(), permissions: ["health.admin"], permissions_everywhere: [] }),
+    });
+    renderWithProviders(<HealthSettingsPanel canAdmin={false} />);
+
+    expect(await screen.findByRole("button", { name: "Save" })).toBeDisabled();
+    expect(await screen.findByText(/requires the health\.admin permission on every client/)).toBeInTheDocument();
+    expect(screen.queryByText(/do not have permission to change health settings/)).toBeNull();
+  });
 });
 
 // --------------------------------------------------------------------------

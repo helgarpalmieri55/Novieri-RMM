@@ -1083,7 +1083,11 @@ describe("SpendDashboard", () => {
   // row is one client's -- never summed across clients -- and says whose
   // (with every client chosen, the only choice that lists two clients' rows).
   it("names each spend row's client, never adding two clients together", async () => {
-    selectClient(null);
+    // The top bar lists the clients /me does (below): names are read from that list.
+    selectClient(null, [
+      SCOPE_INTERNAL,
+      { id: "c2", name: "Globex", kind: "customer", enabled_modules: [], permissions: ME.permissions },
+    ]);
     const client = (id: string, name: string): ClientOut => ({
       id, name, kind: "customer", status: "active", email_domains: [], phone: "", address: "",
       website: "", notes: "", enabled_modules: [], device_count: 0, site_count: 0,

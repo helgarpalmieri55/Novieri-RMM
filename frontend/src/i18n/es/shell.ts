@@ -84,7 +84,6 @@ export const shell: Shape<typeof en> = {
       pushInstall: "Qué redes pueden recibir una instalación remota y con qué credencial.",
       deviceGroups: "Grupos a los que se dirigen las políticas, los despliegues y el acceso.",
       siteServers: "Dispositivos que hacen barridos y encienden equipos de su propia red.",
-      imaging: "Imágenes de sistema operativo y perfiles de compilación.",
       aiAutomation: "Cuánto puede hacer el asistente por su cuenta.",
       jobHistory: "Cada tarea enviada a un dispositivo y lo que respondió.",
       credentials: "Contraseñas guardadas para sesiones desatendidas y para la creación de imágenes.",

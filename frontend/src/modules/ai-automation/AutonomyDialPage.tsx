@@ -158,8 +158,11 @@ export function AutonomyDialPage(): ReactElement {
   const setCeiling = useSetAiCeiling();
   // The dial is configuration every client shares (`PUT /ai/autonomy` is in
   // GLOBAL_WRITES): `ai.admin` on EVERY client, or it is read-only (phase 3
-  // design §2).
-  const canSet = useEverywherePermissions().has("ai.admin");
+  // design §2). Neither the Save row nor the read-only note while `/me`
+  // loads: an unloaded list is not a missing permission.
+  const everywhere = useEverywherePermissions();
+  const canSet = everywhere.has("ai.admin");
+  const readOnly = everywhere.lacks("ai.admin");
 
   /** Edits not yet sent. Keyed `persona:risk`; absent means "as stored". */
   const [draft, setDraft] = useState<Readonly<Record<string, AiCeilingLevel>>>({});
@@ -442,11 +445,11 @@ export function AutonomyDialPage(): ReactElement {
               </span>
             ) : null}
           </div>
-        ) : (
+        ) : readOnly ? (
           <p className="note" style={{ margin: 0, padding: "14px 18px 16px" }}>
             {t("aiAutomation.dial.everyClientOnly")}
           </p>
-        )}
+        ) : null}
       </Panel>
 
       <WaitingActionsPanel />

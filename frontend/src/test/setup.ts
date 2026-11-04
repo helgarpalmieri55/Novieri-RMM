@@ -59,6 +59,7 @@ import { cleanup } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
 import { setActiveLanguage } from "../i18n/core";
 import { setSelectedClient } from "../lib/clientChoice";
+import { takeSelectorChange } from "../shell/selectorChange";
 
 let calls: unknown[][] = [];
 let original: typeof console.error;
@@ -68,8 +69,12 @@ beforeEach(() => {
   // the next. In the existing hook, not a second one (see above).
   setActiveLanguage("en");
   // ...and with every client chosen, so one test's choice in the top bar can
-  // never narrow the next test's requests (`lib/clientChoice.ts`).
+  // never narrow the next test's requests (`lib/clientChoice.ts`) -- and with
+  // no selector change left marked, so a change one test made through the
+  // selector cannot focus the next test's selector or reopen its drawer
+  // (`shell/selectorChange.ts`).
   setSelectedClient(null);
+  takeSelectorChange();
   calls = [];
   original = console.error;
   console.error = (...args: unknown[]) => {

@@ -254,8 +254,10 @@ export const NAV_UNLISTED: readonly NavUnlisted[] = [
   unlisted("/discovered", "shell.nav.page.discovered", "/devices"),
   unlisted("/agent-push", "shell.nav.item.pushInstall", "/admin"),
   // IMAGING LEFT THE RAIL AND THE SEARCH (phase 3 design §2, project decision
-  // P3: it depends on PXE, which is not built). Its pages stay reachable by a
-  // link -- a device's Imaging tab -- and keep their place under Admin.
+  // P3: it depends on PXE, which is not built). Nothing outside its own pages
+  // links to them any more -- a device's Imaging tab shows that device's
+  // imaging and links nowhere -- so they are reached by their address, and
+  // keep their place under Admin for the crumb and the tab title.
   unlisted("/provisioning", "shell.nav.item.imaging", "/admin"),
   // PEOPLE LEFT THE RAIL ON 2026-09-23: the operator read it as a second
   // Settings -> Users, and a device's holder is now set on the device. The

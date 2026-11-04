@@ -10,17 +10,17 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ApiClient, Me, Page } from "../../../lib/api";
+import type { ApiClient, Me, MeClient, Page } from "../../../lib/api";
 import { MyWorkPage } from "../MyWorkPage";
 import { TicketListPage } from "../TicketListPage";
 import type { TicketListFilters, TicketOut, TicketSlaSummary } from "../types";
 
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
-const clientScope = vi.hoisted(() => ({ selected: null as string | null }));
+const clientScope = vi.hoisted(() => ({ selected: null as string | null, clients: [] as MeClient[] }));
 vi.mock("../../../lib/clientScope", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../lib/clientScope")>()),
-  useClientScope: () => ({ selected: clientScope.selected, select: vi.fn(), clients: [], ready: true }),
+  useClientScope: () => ({ selected: clientScope.selected, select: vi.fn(), clients: clientScope.clients, ready: true }),
 }));
 
 const NOW = Date.parse("2026-09-23T12:00:00Z");
@@ -137,6 +137,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
   clientScope.selected = null;
+  clientScope.clients = [];
 });
 
 afterEach(() => {
@@ -265,6 +266,8 @@ describe("the Client column (MSP clients phase 3, design §4.5)", () => {
   const ANDES_TICKET = ticket("7", { client_id: "c-andes" });
 
   it("names each ticket's client while every client is shown", async () => {
+    // The top bar lists the clients /me does: names are read from that list.
+    clientScope.clients = ME_WITH_CLIENTS.clients ?? [];
     mockUseApi.mockReturnValue({
       ...api(fakeListTickets([ANDES_TICKET])),
       me: vi.fn().mockResolvedValue(ME_WITH_CLIENTS),
