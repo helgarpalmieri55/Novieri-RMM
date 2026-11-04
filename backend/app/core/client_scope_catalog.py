@@ -44,6 +44,16 @@ CATALOG: dict[str, Entry] = {
     "agent_releases": G, "dashboard_layouts": G, "mcp_revocation": G,
     "platform_error_group": G, "platform_error_event": G, "platform_health_sample": G,
     "platform_probe_notice": G, "org_vault_keys": G, "domain_events": O(),
+    # own authentication (migration 0245): a person's credentials and sessions
+    # follow their `users` row -- NULL (global) for a technician, the
+    # contact's client for a contact. The session and account-mail settings
+    # are the org's.
+    "auth_passwords": O("users", "user_id"), "auth_totp": O("users", "user_id"),
+    "auth_passkeys": O("users", "user_id"), "auth_recovery_codes": O("users", "user_id"),
+    "auth_trusted_devices": O("users", "user_id"), "auth_sessions": O("users", "user_id"),
+    "auth_failures": O("users", "user_id"), "auth_action_tokens": O("users", "user_id"),
+    "auth_webauthn_challenges": O("users", "user_id"), "auth_org_settings": G,
+    "account_mail_settings": G,
     # clients themselves
     "clients": G, "sites": C,
     # fleet

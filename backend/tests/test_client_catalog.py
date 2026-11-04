@@ -583,6 +583,16 @@ SURROGATE_COLUMNS: dict[tuple[str, str], str] = {
     ("ticket", "email_token"): (
         "a random 256-bit reply token (`email_intake/identity.py::mint_email_token`)"
     ),
+    # Own authentication (migration 0245): the SHA-256 of a random 256-bit
+    # cookie or link the person holds. Unique across the platform because the
+    # door finds the row by it before the organization is known.
+    ("auth_sessions", "token_hash"): "the SHA-256 of a random 256-bit session cookie",
+    ("auth_trusted_devices", "token_hash"): "the SHA-256 of a random 256-bit device cookie",
+    ("auth_action_tokens", "token_hash"): "the SHA-256 of a random 256-bit single-use link",
+    ("auth_passkeys", "credential_id"): (
+        "a WebAuthn credential id: at least 16 random bytes the authenticator chose, and "
+        "W3C WebAuthn §7.1 refuses one already registered to anyone"
+    ),
 }
 
 #: Unique keys on scoped tables that are deliberately organisation-wide.
@@ -613,6 +623,13 @@ ORG_WIDE_KEYS: dict[str, str] = {
         "(`ticket_number_counter`, G): nobody types it, every client's tickets share the "
         "sequence, and a moved ticket keeps its number. Per client, INC-12 could name two "
         "tickets"
+    ),
+    "ux_users_org_lower_email_staff": (
+        "a technician's address (migration 0245, own-authentication plan decision D2): "
+        "sign-in finds a technician by (organization, address). Partial on `kind = 'staff'`, "
+        "and every staff row is a global row (`ck_users_kind_client`) created and changed only "
+        "under scope all, so no narrowed scope writes one or misses one; contacts are held "
+        "per organization by 0232's `its_contact_email_unique`"
     ),
     "person_user_id_key": (
         "an account is one person: one user, one person row, in the client the account "
