@@ -20,7 +20,7 @@
 - **Alcance.** Toda tabla nueva tiene `org_id` + RLS (ENABLE + FORCE + `tenant_isolation`, patrón de `0210:70-75`) y entra en `client_scope_catalog.CATALOG`; las de una persona como `O("users","user_id")`. Las lecturas antes de saber quién es la persona van SOLO por las dos funciones `SECURITY DEFINER` de la Task 1 (en `ALL_SCOPE_ALLOWLIST` si hace falta, nunca un archivo de rutas).
 - **Parámetros (diseño §2):** contraseña 12–128 (técnicos); lista de bloqueo; argon2id por defecto de argon2-cffi + HMAC pepper (transit); TOTP 30 s, 6 dígitos, ±1 paso, sin reutilizar; 10 códigos de recuperación; espera desde el 5.º fallo (1 s duplicando hasta 15 min); a los 100 fallos seguidos el factor queda desactivado; inactividad 30 min, máximo 12 h, recordar equipo 15 días; confirmación reciente 10 min; enlace de invitación 72 h, de restablecimiento 30 min, de recuperación 15 min.
 - **Cookies:** `__Host-itms_session` y `__Host-itms_device`; `HttpOnly; Secure; SameSite=Strict; Path=/`; valor aleatorio de 32 bytes (base64url), guardado solo como SHA-256.
-- **CSRF:** toda petición que no sea GET/HEAD/OPTIONS a `/api/v1` con sesión por cookie exige la cabecera `X-ITMS-Request: 1` y un `Origin` (o `Sec-Fetch-Site: same-origin`) igual a `ITS_PUBLIC_CONSOLE_URL`; sin `Origin` o con `Origin: null`, 403. Todo `/api/v1/auth/` la exige aunque no haya cookie.
+- **CSRF:** toda petición que no sea GET/HEAD/OPTIONS a `/api/v1` con sesión por cookie exige la cabecera `X-ITMS-Request: 1` y un `Origin` igual a `ITS_PUBLIC_CONSOLE_URL`; si además viene `Sec-Fetch-Site`, ha de ser `same-origin`; sin `Origin` o con `Origin: null`, 403. Todo `/api/v1/auth/` la exige aunque no haya cookie.
 - **Enlaces de un solo uso** (invitación, restablecimiento, recuperación): el token viaja en el **fragmento** de la URL (`/invite#<token>`, `/reset-password#<token>`, `/recover#<token>`), nunca en la ruta ni en la consulta, para que no llegue a los logs de nginx ni de uvicorn ni a un `Referer`. La página lo lee de `location.hash` y lo manda en el cuerpo de un `POST` (`/auth/invite/details`, `/auth/invite/accept`, `/auth/password/reset`, `/auth/recover/details`, `/auth/recover/accept`). Un enlace usado, caducado o desconocido responde **410** `{"code": "invalid_link", "detail"}`, el mismo para los tres tipos.
 - **Negativas de `/auth/*` y `/me/*`:** cuerpo `{"code", "detail", …}` (`AuthRefusal`, Task 6; campos extra como `wait_s` junto a ellos, Task 7). Una espera es 429 con `wait_s` en el cuerpo y `Retry-After`. Un factor equivocado es 401 `factor_failed` solo en `/auth/factor/*`; en `/auth/step-up/*` y `/auth/enroll/*` es 400, porque la consola los llama con la sesión abierta y un 401 la cerraría.
 - **Textos.** Backend por `tr()` con `app/core/i18n/es.py`; consola por `t()` con claves en `i18n/en/` y `i18n/es/`; el término español para *passkey* es **«clave de acceso»** (glosario `es/index.ts:96`).
@@ -207,7 +207,7 @@ Se tomaron leyendo el código de la rama antes de redactar las tareas; las tarea
 - **D2** El inicio de sesión busca por (organización, `lower(email)`); hoy un despliegue es una organización (`default_org_slug`). Se añade una regla de unicidad para el correo de los técnicos en cada organización (los contactos ya la tienen, `0232:149-173`). Función `SECURITY DEFINER`, plpgsql, `SET search_path = public, pg_temp`, dueño `its_admin` (precedentes `0065:70`, `0230:125`, `0232:116,149`).
 - **D3** La búsqueda de la sesión en cada petición ocurre antes de saber la organización → su propia función `SECURITY DEFINER`, que devuelve solo la persona y los campos de la sesión a partir del hash del token.
 - **D4** El módulo `keycloak_events` y la tabla `keycloak_event_ingest` se quitan en la **fase 4**, con Keycloak (el diseño §6.1 lista el borrado; pasa a la fase 4 porque MCP sigue en Keycloak hasta la fase 3).
-- **D5** MCP sigue en Keycloak en las fases 1 y 2: un técnico invitado por la plataforma no puede obtener un token de MCP hasta la fase 3; el alta automática de la puerta de MCP por el `sub` de Keycloak se queda (solo CI). Aceptado: no hay despliegue hasta que acaben los cuatro proyectos.
+- **D5** MCP sigue en Keycloak en las fases 1 y 2: un técnico invitado por la plataforma no puede obtener un token de MCP hasta la fase 3; el alta automática de la puerta de MCP por el `sub` de Keycloak se queda (solo CI). Mientras tanto, un `sub` de Keycloak cuyo correo ya tiene la fila de otro técnico choca con el índice único de D2 en el alta automática de `admit()` (`deps.py:287-293`) o en la copia del correo (`deps.py:369`) y la puerta responde 500 en vez de admitirlo. Aceptado con lo demás: no hay despliegue hasta que acaben los cuatro proyectos, y la fase 3 sustituye esa puerta.
 - **D6** El pepper de las contraseñas es una clave HMAC de transit de OpenBao (clave nueva + política `its-app.hcl` + `init.sh`); nunca está en la memoria del proceso. La API de HMAC de transit se verifica en la documentación oficial.
 - **D7** La firma de tokens (el interno ahora, MCP en la fase 3) es una clave ecdsa-p256 de transit (endpoint `sign`); el JWKS sale de la clave pública exportada.
 - **D8** El secreto TOTP se sella con `seal_bytes`/`open_bytes` de la bóveda (`vault.py:190-212`), atado al id de la fila.
@@ -289,7 +289,9 @@ de auditoría ni descripción MCP.
       coordinador): la Task 4 guarda `(await vault.seal_bytes(session, org_id=..., key_id=user_id,
       plaintext=secret)).encode("ascii")` y abre con `open_bytes(..., sealed=row.secret_sealed.decode("ascii"))`
       (`backend/app/core/vault.py:190-212` devuelve y recibe una cadena ASCII).
-    - Todo `code_hash` y `token_hash` mide **exactamente 32 bytes** (CHECK): SHA-256 o HMAC-SHA256 con el pepper.
+    - Todo `token_hash` mide **exactamente 32 bytes** (CHECK): SHA-256 o HMAC-SHA256 con el pepper. `code_hash`
+      guarda el hash argon2id **codificado** de la Task 4 (con su sal; NIST SP 800-63B-4 §3.1.2.2, un código de
+      50 bits está por debajo de 112): CHECK de **32 a 256 bytes** (el codificado mide ~97).
     - `auth_failures.last_failed_at` es NOT NULL; `consecutive` por defecto 0.
     - `auth_sessions`: `ended_at` y `ended_reason` van juntos (CHECK `ck_auth_sessions_ended`);
       `trusted_device_id` solo puede nombrar un equipo **de la misma persona** (FK compuesta
@@ -1170,9 +1172,10 @@ HMAC with the OpenBao pepper (`app.core.auth.passwords`); `AuthTotp.
 secret_sealed` is sealed by the vault, bound to the user id
 (`app.core.vault.seal_bytes`); the account-mail relay's password is the
 vault secret of `AccountMailSettings.credential_id`, never a column; every
-`code_hash` and `token_hash` is a 32-byte digest (SHA-256, or HMAC-SHA256
-with the pepper) of a random value the person holds -- a CHECK in 0245 holds
-the length.
+`token_hash` is a 32-byte digest (SHA-256, or HMAC-SHA256 with the pepper) of
+a random value the person holds, and a recovery code's `code_hash` is its
+salted argon2id hash in the encoded form (NIST SP 800-63B-4 §3.1.2.2) --
+CHECKs in 0245 hold both lengths.
 
 A PERSON'S ROWS FOLLOW THEIR `users` ROW (catalog kind O, parent `users`
 through `user_id`): `client_id` is copied by the `its_client_from_parent`
@@ -1314,7 +1317,9 @@ class AuthRecoveryCode(Base):
     __tablename__ = "auth_recovery_codes"
     __table_args__ = (
         client_org_fk("auth_recovery_codes"),
-        CheckConstraint("octet_length(code_hash) = 32", name="ck_auth_recovery_codes_code_hash"),
+        CheckConstraint(
+            "octet_length(code_hash) BETWEEN 32 AND 256", name="ck_auth_recovery_codes_code_hash"
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()
@@ -1609,6 +1614,7 @@ En `backend/app/models/__init__.py`, debajo de `:9`
 
 ```python
 from app.models.auth import (
+    AccountMailSettings,
     AuthActionToken,
     AuthFailure,
     AuthOrgSettings,
@@ -1625,6 +1631,7 @@ from app.models.auth import (
 y en `__all__`, debajo de `"AuditEvent",` (`:223`):
 
 ```python
+    "AccountMailSettings",
     "AuthActionToken",
     "AuthFailure",
     "AuthOrgSettings",
@@ -1670,9 +1677,10 @@ NO SECRET IS STORED IN CLEAR. A password is an argon2id hash over an HMAC with
 the OpenBao pepper (`hash`, `pepper_version`); a TOTP secret is sealed by the
 vault (`secret_sealed`, the ASCII string `app.core.vault.seal_bytes` returns,
 bound to the user id); a
-recovery code, a session or device cookie and a single-use link are stored as
-a 32-byte digest (`code_hash`, `token_hash`: SHA-256, or HMAC-SHA256 with the
-pepper), and a CHECK holds the length. A WebAuthn challenge is not a secret
+session or device cookie and a single-use link are stored as a 32-byte digest
+(`token_hash`: SHA-256, or HMAC-SHA256 with the pepper), a recovery code as its
+salted argon2id hash (`code_hash`, the encoded form), and CHECKs hold the
+lengths. A WebAuthn challenge is not a secret
 (the browser signs it in the open) and is stored as issued.
 
 THE TWO FUNCTIONS ARE THE ONLY READ BEFORE THE ORGANIZATION IS KNOWN (§6.2).
@@ -1940,7 +1948,7 @@ def upgrade() -> None:
         sa.Column("code_hash", sa.LargeBinary(), nullable=False),
         _when("used_at", nullable=True),
         sa.CheckConstraint(
-            "octet_length(code_hash) = 32", name="ck_auth_recovery_codes_code_hash"
+            "octet_length(code_hash) BETWEEN 32 AND 256", name="ck_auth_recovery_codes_code_hash"
         ),
     )
     op.create_index("ix_auth_recovery_codes_user_id", "auth_recovery_codes", ["user_id"])
@@ -11678,6 +11686,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from app.core.auth.csrf import CSRF_HEADER
+from app.core.auth.devices import remember
 from app.core.auth.sessions import DEVICE_COOKIE, SESSION_COOKIE, start_session
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
@@ -11761,6 +11770,18 @@ async def sign_in(
         session_id = row.id
     headers = {"Cookie": cookie_header(token), **console_headers()}
     return SignedIn(session_id=session_id, user_id=user_id, token=token, headers=headers)
+
+
+async def remembered_device(env: Any, org_id: UUID, sub: str) -> UUID:
+    """A REAL remembered device of the person (`devices.remember`), for
+    `sign_in(..., trusted_device_id=...)`: a session may name only a device row
+    of the same person (FK `fk_auth_sessions_device_user`, Task 1)."""
+    user_id = await user_id_of(env, sub)
+    async with org_session(org_id, engine=env.app_engine, clients=ClientScope.all()) as s:
+        user = (await s.execute(select(User).where(User.id == user_id))).scalar_one()
+        device, _token = await remember(s, user, http_request(env))
+        device_id: UUID = device.id
+    return device_id
 ```
 
 Crear `backend/tests/test_auth_sessions.py`:
@@ -11778,7 +11799,7 @@ Each refusal names the line it protects.
 import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 from sqlalchemy import select, update
@@ -11809,7 +11830,13 @@ from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import User
 from app.models.auth import AuthOrgSettings, AuthPassword, AuthSession, AuthTrustedDevice
-from tests.session_support import cookie_header, http_request, sign_in, user_id_of
+from tests.session_support import (
+    cookie_header,
+    http_request,
+    remembered_device,
+    sign_in,
+    user_id_of,
+)
 
 NOW_SLACK = timedelta(seconds=30)
 
@@ -11955,7 +11982,15 @@ async def test_the_maximum_follows_the_policy_and_the_device(api_env: Any) -> No
     now = datetime.now(UTC)
     plain = await _row(api_env, (await sign_in(api_env, org_id, sub)).session_id)
     remembered = await _row(
-        api_env, (await sign_in(api_env, org_id, sub, trusted_device_id=uuid4())).session_id
+        api_env,
+        (
+            await sign_in(
+                api_env,
+                org_id,
+                sub,
+                trusted_device_id=await remembered_device(api_env, org_id, sub),
+            )
+        ).session_id,
     )
     assert abs(plain.expires_at - (now + timedelta(hours=12))) < NOW_SLACK
     assert abs(remembered.expires_at - (now + timedelta(hours=168))) < NOW_SLACK
@@ -12022,7 +12057,9 @@ async def test_a_remembered_device_is_not_a_recent_confirmation(api_env: Any) ->
     Protects `step_up_at = ... trusted_device_id is None` in `start_session`;
     `mark_step_up` makes it fresh for exactly `STEP_UP_WINDOW`."""
     org_id, sub = await _person(api_env, "read-only")
-    signed = await sign_in(api_env, org_id, sub, trusted_device_id=uuid4())
+    signed = await sign_in(
+        api_env, org_id, sub, trusted_device_id=await remembered_device(api_env, org_id, sub)
+    )
     principal = await _resolve(api_env, signed.token)
     assert principal is not None and principal.factor_done is True
     assert step_up_fresh(principal, datetime.now(UTC)) is False
@@ -13093,7 +13130,7 @@ from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import Client, Device, User
 from app.models.auth import AuthSession
-from tests.session_support import sign_in, use_console
+from tests.session_support import remembered_device, sign_in, use_console
 
 
 @pytest.fixture(autouse=True)
@@ -13274,7 +13311,9 @@ async def test_the_vault_asks_a_remembered_device_for_the_second_factor(api_env:
     the vault refuses until one is (`mark_step_up`, Task 7's step-up routes)."""
     org_id = await api_env.create_org("door-vault")
     sub = await api_env.create_user(org_id, "org-admin")
-    remembered = await sign_in(api_env, org_id, sub, trusted_device_id=uuid4())
+    remembered = await sign_in(
+        api_env, org_id, sub, trusted_device_id=await remembered_device(api_env, org_id, sub)
+    )
     credential_id = await _credential(api_env, remembered.headers)
 
     refused = await _checkout(api_env, credential_id, remembered.headers)
@@ -39913,7 +39952,7 @@ las pruebas entran con ese Bearer (`tests/conftest.py:289-311`). Esta tarea cier
     (`/opt/node-tools/node_modules/playwright-core/types/protocol.d.ts:18652-18919`, Playwright 1.56.1).
 - Produces:
   - **Nuevos:** `ApiEnv.loopback_bearer(org_id, sub) -> str` (`"Bearer <token interno>"` de una sesión nueva de
-    esa persona); `tests/session_support.py::socket_connection(token, *, origin=CONSOLE) -> HTTPConnection` (el
+    esa persona); `tests/session_support.py::socket_connection(env, token, *, origin=CONSOLE) -> HTTPConnection` (el
     `connection` de `authorize_tunnel_session` en las pruebas que lo llaman directamente).
   - Ninguna ruta nueva y ninguna acción de auditoría nueva.
 
@@ -40857,12 +40896,14 @@ En el fixture `api_env` (`:314-336`): importar `from urllib.parse import urlspli
 Al final de `backend/tests/session_support.py` (import `from starlette.requests import HTTPConnection, Request`):
 
 ```python
-def socket_connection(token: str, *, origin: str = CONSOLE) -> HTTPConnection:
+def socket_connection(env: Any, token: str, *, origin: str = CONSOLE) -> HTTPConnection:
     """A socket handshake carrying the session cookie, for the tests that call
-    `authorize_tunnel_session` directly rather than through a socket."""
+    `authorize_tunnel_session` directly rather than through a socket. `app` is
+    in the scope because `sessions.resolve` reads `connection.app.state`."""
     return HTTPConnection(
         {
             "type": "websocket",
+            "app": env.app,
             "path": "/api/v1/remote/sessions/x/screen",
             "query_string": b"",
             "headers": [
@@ -40955,7 +40996,7 @@ async def test_an_mcp_token_off_the_channel_is_no_credential(mcp_env) -> None:
     `_person` devuelve `org_id` como primer elemento.
   - `:419-428`: el `assert ... idp.token(sub, slug)) is True` pasa al control por cookie; `both` sigue `False`.
   - `:434-442` `_authorize(env, token)` pasa a `_authorize(env, cookie)`, que llama a
-    `authorize_tunnel_session(connection=socket_connection(cookie), session_id=uuid4(), settings=env.settings,
+    `authorize_tunnel_session(connection=socket_connection(env, cookie), session_id=uuid4(), settings=env.settings,
     app_engine=env.app_engine)`; `:445-458`: el caso genuino usa `(await sign_in(api_env, org_id, sub)).token`
     (sigue esperando 4404 para una sesión remota que no existe) y los tres tokens pasan a «una cookie que no nombra
     ninguna sesión» (`"garbage"`), que sigue esperando 4401. El nombre pasa a
@@ -40997,7 +41038,7 @@ async def _signed_in_as(api_env, org_id: UUID, sub: str, email: str | None = Non
     `cookie="garbage"` (sigue 4401). `:323-328` (organización desconocida) pasa a «la cookie de una sesión
     terminada cierra 4401». `:336-375` (socket real): `websockets.connect(url, **ws_cookie(cookie))`.
   - Túnel (`:379-450`, `:775-797`): `_authorize(api_env, token, sid)` → `_authorize(api_env, cookie, sid)`, que
-    llama a `authorize_tunnel_session(connection=socket_connection(cookie), session_id=sid,
+    llama a `authorize_tunnel_session(connection=socket_connection(api_env, cookie), session_id=sid,
     settings=api_env.settings, app_engine=api_env.app_engine)`; `:441` mala → `"garbage"`, sigue 4401.
   - `:453-610` (preflight) y `:833-…`: sin cambios.
 - `tests/test_domain_policy.py:594-637`: el orden «organización desconocida (401) antes que el dominio (403)» solo
@@ -41014,7 +41055,7 @@ async def _signed_in_as(api_env, org_id: UUID, sub: str, email: str | None = Non
   first-seen provisioning (D5), the only door that still writes an address an identity provider asserted».
 - `tests/test_client_rbac.py:64-68` `_headers(env, org_id, **extra)` pasa a
   `return {**(await env.headers(org_id, f"sub-{org_id}")), **extra}`; `:332-338` `_tunnel` llama a
-  `authorize_tunnel_session(connection=socket_connection((await sign_in(env, org, f"sub-{org}")).token),
+  `authorize_tunnel_session(connection=socket_connection(env, (await sign_in(env, org, f"sub-{org}")).token),
   session_id=uuid4(), settings=env.settings, app_engine=env.app_engine)`.
 - `tests/test_me_profile.py:56-67` `_headers(env, org_id, sub, *, email=None)`: sin `email`,
   `return await env.headers(org_id, sub)`. Las pruebas del refresco del correo desde el claim (`:322-386`) y la del
@@ -41135,7 +41176,7 @@ async def test_a_subprotocol_token_no_longer_opens_the_socket(api_env, live_api)
 ```
 
 - `tests/test_remote_tunnel.py`: `:61` `_token` pasa a devolver `(await sign_in(api_env, org_id, sub)).token`;
-  `_authorize(api_env, token, sid)` pasa a llamar a `authorize_tunnel_session(connection=socket_connection(cookie),
+  `_authorize(api_env, token, sid)` pasa a llamar a `authorize_tunnel_session(connection=socket_connection(api_env, cookie),
   session_id=sid, settings=api_env.settings, app_engine=api_env.app_engine)`, y `:91`, `:101`, `:109` le pasan la
   cookie; `:156`
   (`subprotocols=["bearer", "garbage"]`) pasa a `**ws_cookie("garbage")`; `:185` (las formas de subprotocolo)
