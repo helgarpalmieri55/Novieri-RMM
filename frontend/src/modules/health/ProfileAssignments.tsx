@@ -44,16 +44,33 @@ const clientRules = (): readonly FieldRule[] => [
   { name: "client", label: translate("health.assignments.client") },
 ];
 
-/** Where an assignment applies, in words. */
+/**
+ * A client-level row's client by name, or `null` once `/me` has answered and
+ * does not list it (archived, or no role there). `useClientName` names such
+ * an id "All clients" -- right for a row every client shares, wrong for one
+ * client's default, which then read "Default of All clients", the
+ * organisation default's words (phase 3 final review C, T14 5).
+ */
+export function useListedClientName(): (clientId: string) => string | null {
+  const { clients, ready } = useClientScope();
+  const clientName = useClientName();
+  return (clientId) => (!ready || clients.some((client) => client.id === clientId) ? clientName(clientId) : null);
+}
+
+/** Where an assignment applies, in words. `clientName` gives `null` for a client it cannot name. */
 export function describeAssignmentTarget(
   assignment: Pick<AssignmentOut, "level" | "client_id" | "device_id" | "device_group_id">,
-  clientName: (clientId: string) => string,
+  clientName: (clientId: string) => string | null,
 ): string {
   switch (assignment.level) {
     case "org":
       return translate("health.assignments.levelOrg");
-    case "client":
-      return translate("health.assignments.levelClient", { client: clientName(assignment.client_id ?? "") });
+    case "client": {
+      const name = clientName(assignment.client_id ?? "");
+      return name === null
+        ? translate("health.assignments.levelClientUnlisted")
+        : translate("health.assignments.levelClient", { client: name });
+    }
     case "group":
       return translate("health.assignments.levelGroup", { group: assignment.device_group_id ?? "" });
     case "device":
@@ -69,6 +86,7 @@ export function ProfileAssignments({ profileId, canAdmin }: { profileId: string;
   const everywhere = useEverywherePermissions();
   const { selected, clients } = useClientScope();
   const clientName = useClientName();
+  const listedName = useListedClientName();
   // The clients where the person holds health.admin, from `/me.clients`, and
   // the client default's client: the shared hook (operator decision 2).
   // `canAdmin` (health.admin on EVERY client, since Task 8) decides only the
@@ -135,7 +153,7 @@ export function ProfileAssignments({ profileId, canAdmin }: { profileId: string;
           </thead>
           <tbody>
             {rows.map((assignment) => {
-              const where = describeAssignmentTarget(assignment, clientName);
+              const where = describeAssignmentTarget(assignment, listedName);
               return (
                 <tr key={assignment.id}>
                   <Td>{where}</Td>
@@ -206,7 +224,7 @@ export function ProfileAssignments({ profileId, canAdmin }: { profileId: string;
       <ConfirmDialog
         open={removing !== null}
         title={t("health.assignments.removeTitle")}
-        subject={removing ? describeAssignmentTarget(removing, clientName) : ""}
+        subject={removing ? describeAssignmentTarget(removing, listedName) : ""}
         body={t("health.assignments.removeBody")}
         confirmLabel={t("health.assignments.removeConfirm")}
         destructive

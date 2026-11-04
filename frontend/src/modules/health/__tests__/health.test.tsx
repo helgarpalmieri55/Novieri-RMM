@@ -758,6 +758,13 @@ describe("DeviceHealthPanel", () => {
     expect(
       screen.getByText(/No health profile resolves to this device/),
     ).toBeInTheDocument();
+    // Every level that can give it one, the client's default among them
+    // (phase 3 design §5.1; final review C, T14 7).
+    expect(
+      screen.getByText(
+        "Nothing is being checked on it. Assign a profile to the device, its group, its client, or the organisation.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Healthy")).toBeNull();
   });
 

@@ -12,7 +12,7 @@ import {
   useDeviceHealth,
   useUserTimezone,
 } from "./api";
-import { useClientName } from "../settings/api";
+import { useListedClientName } from "./ProfileAssignments";
 import {
   ALERT_STATE_PRESENTATION,
   CHECK_STATE_PRESENTATION,
@@ -56,7 +56,9 @@ export function DeviceHealthPanel({
   onOpenAlert?: (alertId: string) => void;
 }) {
   const t = useT();
-  const clientName = useClientName();
+  // A client default's client by name, never "All clients" for one the
+  // person's `/me` does not list.
+  const clientName = useListedClientName();
   const health = useDeviceHealth(deviceId);
   const zone = useUserTimezone();
   const checkNow = useCheckDeviceNowMutation();

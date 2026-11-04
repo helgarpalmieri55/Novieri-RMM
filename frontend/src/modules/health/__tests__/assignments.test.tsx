@@ -338,6 +338,16 @@ describe("who may set a client's default", () => {
     expect(screen.queryByRole("button", { name: "Assign" })).toBeNull();
   });
 
+  it("lists a client default of a client /me does not list without calling it every client's", async () => {
+    renderPanel(
+      { listHealthAssignments: vi.fn().mockResolvedValue([{ ...XOCHI_DEFAULT, id: "ha-gone", client_id: "c-gone" }]) },
+      [],
+      ONLY_IN_XOCHI,
+    );
+    expect(await screen.findByText("Default of a client not in your list")).toBeInTheDocument();
+    expect(screen.queryByText("Default of All clients")).toBeNull();
+  });
+
   it("does not offer the default of the client chosen above where the person lacks health.admin", async () => {
     state.selected = "c-y";
     renderPanel({ listHealthAssignments: vi.fn().mockResolvedValue([YUMA_DEFAULT]) }, [], ONLY_IN_XOCHI);
@@ -366,6 +376,19 @@ describe("the words for a client default", () => {
     expect(appliedByLabel("group", { device_group_id: "g1" }, name)).toBe("a group assignment (g1)");
     expect(appliedByLabel("org", null, name)).toBe("the organisation default assignment");
     expect(appliedByLabel("device", null, name)).toBe("an assignment on this device");
+  });
+
+  // Phase 3 final review C (T14 5): a client the person's `/me` does not list
+  // (archived, or no role there) was named "All clients" by `useClientName`,
+  // so a client's default read "Default of All clients" -- the organisation
+  // default's words. A name the caller cannot give (`null`) is said as such.
+  it("does not call a client default of an unlisted client every client's", () => {
+    const unlisted = () => null;
+    expect(describeAssignmentTarget(ANDES_DEFAULT, unlisted)).toBe("Default of a client not in your list");
+    expect(appliedByLabel("client", { client_id: "c-gone" }, unlisted)).toBe("its client's default");
+    setActiveLanguage("es");
+    expect(describeAssignmentTarget(ANDES_DEFAULT, unlisted)).toBe("Por defecto de un cliente que no está en tu lista");
+    expect(appliedByLabel("client", { client_id: "c-gone" }, unlisted)).toBe("el perfil por defecto de su cliente");
   });
 
   it("says it in Spanish", () => {
