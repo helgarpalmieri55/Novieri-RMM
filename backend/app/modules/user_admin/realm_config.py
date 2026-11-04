@@ -137,7 +137,8 @@ from typing import Any
 import httpx
 
 from app.core.i18n import tr
-from app.core.identity.email_domain import is_allowed_domain
+from app.core.mail import recipient_permitted as _permitted
+from app.core.mail import split_address as _split
 from app.modules.user_admin.kc_client import KeycloakAdminConfig, KeycloakAdminError
 
 __all__ = [
@@ -339,41 +340,6 @@ async def _set_email(
         json={**user, "email": email},
         headers=headers,
     )
-
-
-def _split(address: str) -> tuple[str, str] | None:
-    """(local part without any `+tag`, lower-cased domain) of a plausible single
-    address; None otherwise.
-
-    Deliberately small: the relay is the authority on whether an address
-    exists. This only has to say which mailbox an address names, and refuse
-    anything that is not one address.
-    """
-    address = address.strip()
-    if (
-        address.count("@") != 1
-        or any(ch.isspace() or ch in ',;<>"' for ch in address)
-        or len(address) > 254
-    ):
-        return None
-    local, domain = address.split("@")
-    domain = domain.lower().rstrip(".")
-    base = local.split("+", 1)[0].lower()
-    if not base or "." not in domain or domain.startswith("."):
-        return None
-    return base, domain
-
-
-def _permitted(address: str, sender: str, caller_email: str, org_domain: str | None) -> bool:
-    wanted = _split(address)
-    if wanted is None:
-        return False
-    if address.strip().lower() == sender.strip().lower():
-        return True
-    if wanted == _split(caller_email):
-        return True
-    root = (org_domain or "").strip()
-    return bool(root) and is_allowed_domain(address.strip(), root)
 
 
 async def send_test_email(

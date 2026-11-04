@@ -24,7 +24,9 @@ THE TWO TRANSPORTS, AND WHY THEY ARE TREATED DIFFERENTLY (§5, §7).
   customers it targets. `aiosmtplib` is not a dependency of this project;
   stdlib `smtplib` is used via `asyncio.to_thread` so a blocking SMTP
   conversation never stalls the event loop that also serves the agent
-  gateway's WebSocket connections.
+  gateway's WebSocket connections. The conversation itself is
+  `app/core/mail.py::send_smtp_sync`, shared with account email
+  (invitations, password resets).
 
 WHY THE TWO TRANSPORTS' "STATUS CODES" ARE KEPT OUT OF EACH OTHER'S WAY.
 `is_retryable`'s numeric branch (`_RETRYABLE_STATUS`) is an HTTP-status
@@ -90,11 +92,9 @@ already claimed and hands back one classified outcome; it does not touch
 import asyncio
 import json
 import smtplib
-import ssl
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from email.message import EmailMessage
 from typing import Any, Literal
 from uuid import UUID
 
@@ -107,6 +107,7 @@ from app.api.probes import probe_label
 from app.core.audit import audit_service
 from app.core.egress import EgressBlocked, post_json
 from app.core.i18n import N_, tr, tr_marked, use_locale
+from app.core.mail import send_smtp_sync
 from app.core.ticket_words import TICKET_STATUS_WORDS
 from app.core.vault import VaultService
 from app.models import DomainEvent, NotificationChannel, NotificationDelivery, User
@@ -137,7 +138,6 @@ BACKOFF_SECONDS: tuple[int, ...] = (60, 300, 1500, 7200, 36000)
 MAX_ATTEMPTS: int = len(BACKOFF_SECONDS) + 1
 
 _EXCERPT_MAX = 500  # matches notification_deliveries.last_error's String(500)
-_SMTP_TIMEOUT_S = 30.0
 
 # HTTP status codes that retry (spec §7): a transient 5xx, or 429 (rate
 # limited -- the caller should back off and try again, not stop).
@@ -1255,70 +1255,6 @@ async def _send_webhook(
     )
 
 
-def _send_smtp_sync(
-    *,
-    host: str,
-    port: int,
-    use_tls: bool,
-    username: str | None,
-    password: str | None,
-    from_address: str,
-    to_address: str,
-    subject: str,
-    body: str,
-    reply_to: str | None = None,
-    access_token: str | None = None,
-) -> None:
-    """Blocking SMTP conversation -- always called through `asyncio.to_thread`
-    (see the module docstring: this process also serves the agent gateway's
-    WebSocket connections on the same event loop, so a blocking `smtplib`
-    call inline would stall every other connection for as long as the SMTP
-    round-trip takes).
-
-    `use_tls` means STARTTLS on the given port (the common on-prem relay
-    shape, e.g. port 587), not implicit TLS/SMTPS -- `config`'s shape (spec
-    §2.2: `{host, port, from_address, use_tls}`) has no separate scheme field
-    to select SMTPS, and STARTTLS is what a customer's internal relay
-    predominantly speaks.
-
-    `reply_to` is OPTIONAL and defaults to None -- absent, the message this
-    builds is byte-for-byte what it was before email intake existed. When
-    present it is the email-intake module's per-ticket reply address (see
-    `email_intake.identity.reply_to_for_ticket`), and the header is added
-    only then: an empty or always-present `Reply-To` would invite replies to
-    an address nothing polls.
-    """
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = from_address
-    message["To"] = to_address
-    if reply_to is not None:
-        message["Reply-To"] = reply_to
-    message.set_content(body)
-
-    with smtplib.SMTP(host, port, timeout=_SMTP_TIMEOUT_S) as client:
-        if use_tls:
-            client.starttls(context=ssl.create_default_context())
-        if access_token is not None:
-            _authenticate_xoauth2(client, username or from_address, access_token)
-        elif username:
-            client.login(username, password or "")
-        client.send_message(message)
-
-
-def _authenticate_xoauth2(client: smtplib.SMTP, user: str, access_token: str) -> None:
-    """`AUTH XOAUTH2` with the SASL string as the initial response. On failure
-    Microsoft sends a 334 JSON challenge and waits for an empty line; answering
-    it lets the server finish with 535 instead of holding the connection."""
-    client.ehlo_or_helo_if_needed()
-
-    def respond(challenge: bytes | None = None) -> str:
-        if challenge is not None:
-            return ""
-        return f"user={user}\x01auth=Bearer {access_token}\x01\x01"
-
-    client.auth("XOAUTH2", respond, initial_response_ok=True)
-
 
 async def _recipient_language(session: AsyncSession, org_id: UUID, address: str) -> str:
     """The recipient's own language (spec §3.4); English for an address that is no user's.
@@ -1463,7 +1399,7 @@ async def _send_email(
 
     try:
         await asyncio.to_thread(
-            _send_smtp_sync,
+            send_smtp_sync,
             host=host,
             port=port,
             use_tls=use_tls,

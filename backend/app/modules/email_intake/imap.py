@@ -95,7 +95,7 @@ import threading
 from typing import Protocol
 
 # Spec §4: "the IMAP connection is bounded by an explicit timeout". Matches
-# `notification/delivery.py`'s `_SMTP_TIMEOUT_S` -- the same class of
+# `app/core/mail.py`'s `SMTP_TIMEOUT_S` -- the same class of
 # outbound mail conversation, from the same worker, with the same reason for
 # being bounded (an unbounded one holds a worker slot forever).
 #

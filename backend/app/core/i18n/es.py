@@ -1198,6 +1198,25 @@ CATALOG: dict[str, str] = {
     "the client secret may be at most {max_client_secret} characters": (
         "el secreto de cliente puede tener como máximo {max_client_secret} caracteres"
     ),
+    "The mail relay refused the message.": "El servidor de correo rechazó el mensaje.",
+    "The mail relay refused the recipient address.": (
+        "El servidor de correo rechazó la dirección del destinatario."
+    ),
+    "The mail relay could not be reached.": "No se pudo contactar con el servidor de correo.",
+    "The mail relay or Microsoft 365 refused the sign-in.": (
+        "El servidor de correo o Microsoft 365 rechazó el inicio de sesión."
+    ),
+    "Microsoft 365 sign-in could not be reached.": (
+        "No se pudo contactar con el inicio de sesión de Microsoft 365."
+    ),
+    "The saved sign-in is missing or unreadable; enter it again.": (
+        "El inicio de sesión guardado falta o no se puede leer; introdúcelo de nuevo."
+    ),
+    "The message could not be built from these settings; check the sender, the display name "
+    "and the reply-to address.": (
+        "No se pudo construir el mensaje con esta configuración; revisa el remitente, el nombre "
+        "visible y la dirección de respuesta."
+    ),
     "no fields supplied; send name and/or description": (
         "no se indicó ningún campo; envía name y/o description"
     ),

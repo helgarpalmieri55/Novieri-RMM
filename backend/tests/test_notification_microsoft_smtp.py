@@ -23,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_extensions import uuid7
 
+from app.core import mail as mail_module
 from app.core.config import override_settings
 from app.core.vault import LocalVaultService
 from app.models import AuditEvent, Credential, DomainEvent, NotificationDelivery, User
@@ -216,7 +217,7 @@ class _FakeSmtpServer:
 def test_xoauth2_sends_the_sasl_string_and_nothing_else() -> None:
     server = _FakeSmtpServer(accept=True)
     with smtplib.SMTP("127.0.0.1", server.port, timeout=5) as client:
-        delivery_module._authenticate_xoauth2(client, SENDER, ACCESS)
+        mail_module.authenticate_xoauth2(client, SENDER, ACCESS)
 
     auth = next(line for line in server.lines if line.startswith("AUTH "))
     mechanism, encoded = auth.split(" ")[1:]
@@ -231,7 +232,7 @@ def test_a_refused_xoauth2_finishes_the_exchange_instead_of_hanging() -> None:
     started = time.monotonic()
     with pytest.raises(smtplib.SMTPAuthenticationError) as raised:
         with smtplib.SMTP("127.0.0.1", server.port, timeout=5) as client:
-            delivery_module._authenticate_xoauth2(client, SENDER, ACCESS)
+            mail_module.authenticate_xoauth2(client, SENDER, ACCESS)
 
     assert time.monotonic() - started < 2
     assert raised.value.smtp_code == 535
