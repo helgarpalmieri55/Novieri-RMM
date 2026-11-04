@@ -7,6 +7,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "../../lib/ApiContext";
 import type { Me } from "../../lib/api";
+import { requireKnown } from "../../lib/clientSelection";
 import type {
   FindingCreateRequest,
   FindingUpdateRequest,
@@ -59,8 +60,8 @@ export function useCreatePlanMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     // The body is BUILT HERE, inside the mutation, not before it: a body that
-    // cannot name its client yet throws `InternalScopeUnknown`
-    // (`lib/internalClient.ts`), which then fails the mutation -- so the
+    // cannot name its client yet throws `ClientNotChosen`
+    // (`lib/clientSelection.ts`), which then fails the mutation -- so the
     // form's error surface says why and nothing is sent.
     mutationFn: (build: () => PlanCreateRequest) => api.createPlan(build()),
     onSuccess: () => {
@@ -123,13 +124,21 @@ export function usePlanStatus() {
  * `retry: false` because a 403 -- a continuity owner holding `bcp.manage` but
  * not `devices.read` -- is an answer, not a flake, and retrying it only delays
  * the empty hint that explains it.
+ *
+ * ONE CLIENT'S, ASKED OF THE SERVER (phase 3 review, F4). A plan names only
+ * its client's devices (design §3.3), and `GET /devices` answers one page --
+ * 100 by default. Filtered in the browser, the page read with every client
+ * chosen could hold none of the plan's client's machines, and the editor
+ * said "Add a computer" to a client that has them. So the read carries the
+ * plan's client (`client_id`), the key names it, and nothing is asked until
+ * it is known.
  */
-export function useScopeDevices(enabled: boolean) {
+export function useScopeDevices(enabled: boolean, clientId: string | null) {
   const api = useApi();
   return useQuery({
-    queryKey: ["bcp-scope-devices"],
-    queryFn: async () => (await api.listDevices()).items,
-    enabled,
+    queryKey: ["bcp-scope-devices", clientId],
+    queryFn: async () => (await api.listDevices({ clientId: requireKnown(clientId) })).items,
+    enabled: enabled && clientId !== null,
     retry: false,
     staleTime: 60_000,
   });
@@ -149,6 +158,11 @@ export function useScopeDevices(enabled: boolean) {
  * reason `useScopeDevices` above gives: this feeds a picker rather than the
  * plan itself, and a caller who may manage plans but not list groups should
  * meet the picker's `emptyHint` rather than three silent retries.
+ *
+ * NOT ONE CLIENT'S, unlike the devices: `GET /device-groups` and
+ * `GET /docs/articles` take no client filter, so these two still read one
+ * page (100) of every client's in the request's scope, and the editor
+ * filters it (phase 3 review, F4).
  */
 export function useScopeGroups(enabled: boolean) {
   const api = useApi();

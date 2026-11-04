@@ -2,11 +2,31 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GatesPanel, gateCoverage } from "../GatesPanel";
+import type { MeClient } from "../../../lib/api";
 
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 function renderPanel(canManage: boolean) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

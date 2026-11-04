@@ -20,12 +20,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setActiveLanguage } from "../../i18n/core";
 import { expectNoEnglish, renderInSpanish } from "../../i18n/test-utils";
 import { ApiError } from "../../lib/api";
-import type { AgentRelease, ApiClient, FleetVersions, UpdateRollout } from "../../lib/api";
+import type { AgentRelease, ApiClient, FleetVersions, MeClient, UpdateRollout } from "../../lib/api";
 import { AgentReleasesPage } from "./AgentReleasesPage";
 import { PublishReleaseDialog } from "./PublishReleaseDialog";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 vi.mock("../../lib/download", () => ({ saveBlob: vi.fn() }));
 
 const PUBLISHER = [
@@ -146,6 +165,10 @@ const PACKAGE = {
 function stubApi(overrides: Record<string, unknown> = {}, permissions: string[] = PUBLISHER) {
   const api = {
     me: vi.fn().mockResolvedValue({ user_id: "u", org_id: "o", email: "op@example.com", display_name: "Operadora", permissions, timezone: "UTC" }),
+    listClientSites: () =>
+      Promise.resolve([
+        { id: "s-1", client_id: "o", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 },
+      ]),
     listAgentReleases: vi.fn().mockResolvedValue(RELEASES),
     generateAgentInstallCommand: vi.fn().mockResolvedValue({
       release: RELEASES[0],

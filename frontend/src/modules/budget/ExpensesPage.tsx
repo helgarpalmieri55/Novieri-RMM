@@ -20,7 +20,13 @@ import {
   useUpdateExpenseMutation,
   useUploadExpenseAttachmentMutation,
 } from "./api";
-import { BudgetPageNav, expenseSourceKind, expenseStatusKind } from "./budgetState";
+import {
+  BudgetPageNav,
+  BudgetPickClient,
+  expenseSourceKind,
+  expenseStatusKind,
+  useBudgetNeedsClient,
+} from "./budgetState";
 import {
   categoryPickerEmptyHint,
   categoryPickerOptions,
@@ -94,6 +100,7 @@ export function ExpensesPage() {
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("budget.read");
   const canRecord = permissions.includes("expense.record");
+  const needsClient = useBudgetNeedsClient();
 
   const categories = useBudgetCategories();
   const categoryName = (id: string) => categories.data?.find((c) => c.id === id)?.name ?? id;
@@ -105,6 +112,18 @@ export function ExpensesPage() {
   const expenses = useExpenses(filters);
   const uploadAttachment = useUploadExpenseAttachmentMutation();
   const items = expenses.data ?? [];
+
+  // ONE CLIENT AT A TIME (plan Task 11 D11.1): with every client chosen there
+  // is no base currency to add these figures in, so the page asks for one.
+  if (needsClient) {
+    return (
+      <div>
+        <PageHead title={t("budget.expenses.title")} description={t("budget.expenses.description")} />
+        <BudgetPageNav canRead={canRead} />
+        <BudgetPickClient />
+      </div>
+    );
+  }
 
   return (
     <div>

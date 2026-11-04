@@ -23,20 +23,39 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
-import type { ApiClient, Device } from "../../lib/api";
+import type { ApiClient, Device, MeClient } from "../../lib/api";
 import { ENROLLMENT_TOKENS_PAGE_SIZE } from "./api";
 import { EnrollmentPage } from "./EnrollmentPage";
 import type { EnrollmentTokenListItem, EnrollmentTokenPage } from "./types";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 const listEnrollmentTokens = vi.fn();
 const createEnrollmentToken = vi.fn();
@@ -178,6 +197,10 @@ function renderPage(options: {
             timezone: options.timezone ?? null,
           }),
     listDevices,
+    listClientSites: () =>
+      Promise.resolve([
+        { id: "s-1", client_id: "o", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 },
+      ]),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui: ReactElement = (
@@ -194,6 +217,9 @@ function renderPage(options: {
  *  step it is actually about. */
 async function issueToken(fields: { name?: string; hours?: string; maxUses?: string } = {}) {
   await userEvent.click(screen.getByRole("button", { name: "Create token" }));
+  // The site the token enrols into: the only site of the client chosen at the
+  // top, which the Site field picks by itself once it has read it.
+  await waitFor(() => expect((screen.getByLabelText("Site") as HTMLSelectElement).value).toBe("s-1"));
   if (fields.name !== undefined) {
     await userEvent.type(screen.getByLabelText("Token name"), fields.name);
   }
@@ -392,12 +418,10 @@ describe("EnrollmentPage", () => {
       name: "Bogota rollout",
       expires_in_hours: 72,
       max_uses: 1,
-      // RE-POINTED (MSP clients, phase 1): `POST /enrollment-tokens` requires
-      // the site a machine enrolled with the token lands in. Until the client
-      // selector (phase 3) the console issues for the organisation's internal
-      // client, whose "Principal" site has the organisation's id -- `/me`'s
-      // `org_id`, "o" in `renderPage`.
-      site_id: "o",
+      // `POST /enrollment-tokens` requires the site a machine enrolled with
+      // the token lands in. The site the form's Site field holds: the only
+      // site of the client chosen at the top.
+      site_id: "s-1",
     });
   });
 

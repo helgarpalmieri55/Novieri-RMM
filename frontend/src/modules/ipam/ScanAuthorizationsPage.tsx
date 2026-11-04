@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { ClientField } from "../../components/ClientField";
 import { ConfirmDialog } from "../../components/confirm";
 import { NoValue } from "../../components/emptystate";
 import { RowMenu } from "../../components/rowmenu";
 import { Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
+import { useClientScope } from "../../lib/clientScope";
+import { useNewRowClient } from "../../lib/clientSelection";
 import { useClientName } from "../settings/api";
 import {
   useCreateIpamScanAuthorizationMutation,
@@ -31,6 +34,7 @@ import {
 } from "./ipamState";
 import { variantKind } from "./kinds";
 import type { ScopeOut, SubnetOut } from "./types";
+import { IPAM_SCOPE_MANAGE } from "./types";
 import { formatDate, toInstant } from "../../lib/datetime";
 import { Icon } from "../../shell/icons";
 import {
@@ -81,6 +85,10 @@ export function ScanAuthorizationsPage() {
   const scopes = useIpamScanAuthorizations(includeRevoked);
   const subnets = useIpamSubnets();
   const revoke = useRevokeIpamScanAuthorizationMutation();
+  // With every client chosen, each grant says whose network it opens.
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const showClient = selected === null;
 
   return (
     <div>
@@ -148,6 +156,7 @@ export function ScanAuthorizationsPage() {
                     inside its card, and the column an operator most needs to
                     read was the one cut in half by the fold. */}
                 <Th>{t("ipam.scans.colPrefix")}</Th>
+                {showClient ? <Th>{t("ipam.fields.client")}</Th> : null}
                 <Th>{t("ipam.scans.colState")}</Th>
                 <Th>{t("ipam.scans.colPermits")}</Th>
                 <Th>{t("ipam.scans.colNote")}</Th>
@@ -161,6 +170,8 @@ export function ScanAuthorizationsPage() {
                   scope={scope}
                   subnets={subnets.data ?? []}
                   canManage={permissions.scopeManage}
+                  showClient={showClient}
+                  clientName={clientName}
                   onRevoke={() => setRevoking({ id: scope.id, prefix: scope.prefix })}
                 />
               ))}
@@ -201,11 +212,15 @@ function ScopeRow({
   scope,
   subnets,
   canManage,
+  showClient,
+  clientName,
   onRevoke,
 }: {
   scope: ScopeOut;
   subnets: SubnetOut[];
   canManage: boolean;
+  showClient: boolean;
+  clientName: (id: string) => string;
   onRevoke: () => void;
 }) {
   const t = useT();
@@ -242,6 +257,7 @@ function ScopeRow({
           />
         </div>
       </Td>
+      {showClient ? <Td>{clientName(scope.client_id)}</Td> : null}
       <Td>
         <span title={presentation.meaning}>
           <StatusPill
@@ -310,6 +326,12 @@ function GrantForm({ subnets }: { subnets: SubnetOut[] }) {
   const [vrfId, setVrfId] = useState("");
   const [note, setNote] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
+  // The VRF decides the grant's client; with none, the client chosen at the
+  // top or the Client field's, whose `global` VRF it is for.
+  const vrfClient = vrfId ? vrfs.data?.find((vrf) => vrf.id === vrfId)?.client_id : undefined;
+  const target = useNewRowClient(IPAM_SCOPE_MANAGE, vrfClient);
+  const [pickedClient, setPickedClient] = useState("");
+  const client = vrfId ? (vrfClient ?? null) : target.needsField ? pickedClient || null : target.clientId;
 
   const parsed = parsePrefix(prefix);
   // Which registered subnet, if any, the Prefix currently names, so the picker
@@ -392,6 +414,9 @@ function GrantForm({ subnets }: { subnets: SubnetOut[] }) {
             ))}
           </select>
         </Field>
+        {!vrfId && target.needsField ? (
+          <ClientField code={IPAM_SCOPE_MANAGE} value={pickedClient} onChange={setPickedClient} />
+        ) : null}
         <Field label={t("ipam.scans.noteWhy")}>
           <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
@@ -464,6 +489,7 @@ function GrantForm({ subnets }: { subnets: SubnetOut[] }) {
               {
                 prefix,
                 vrf_id: vrfId || null,
+                client_id: client,
                 note,
                 // THE FIELD IS A WALL CLOCK; the API stores an instant.
                 // `new Date("2026-08-25").toISOString()` reads it as UTC

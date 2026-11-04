@@ -37,6 +37,7 @@ import type {
   DeviceGroupReferences,
   GroupRules,
   Me,
+  MeClient,
   MembershipEvaluation,
   RulePreview,
 } from "../../lib/api";
@@ -110,8 +111,27 @@ const unarchiveDeviceGroup = vi.fn();
 const addDeviceGroupMembers = vi.fn();
 const removeDeviceGroupMember = vi.fn();
 
-/** `/me`'s `org_id`: the organisation's, and its internal client's, id. */
+/** The internal client's id, chosen at the top in these tests (`selectClient(ORG)`). */
 const ORG = "00000000-0000-4000-8000-00000000000a";
+
+const mockClientScope = vi.fn();
+vi.mock("../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: ORG,
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 function renderPage(permissions: string[] = ["devices.read", "devices.manage"]) {
   mockUseApi.mockReturnValue({
@@ -125,8 +145,8 @@ function renderPage(permissions: string[] = ["devices.read", "devices.manage"]) 
     unarchiveDeviceGroup,
     addDeviceGroupMembers,
     removeDeviceGroupMember,
-    // `org_id` is the internal client's id (MSP clients, phase 1): a new
-    // group, and the preview of one, are filed under it.
+    // A new group, and the preview of one, go to the client chosen at the
+    // top (design §3.1): here the internal client, ORG.
     me: vi.fn().mockResolvedValue({ permissions, org_id: ORG } as Me),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -395,10 +415,7 @@ describe("the editor", () => {
       // PATCH the difference between "absent" and "null" is the difference
       // between leaving a rules document alone and clearing it.
       rules: null,
-      // RE-POINTED (MSP clients, phase 1): a group organises one client's
-      // devices and `POST /device-groups` requires it. Until the client
-      // selector (phase 3) that is the internal client, whose id is `/me`'s
-      // `org_id`.
+      // The client chosen at the top (design §3.1): here the internal one.
       client_id: ORG,
     });
   });
@@ -821,8 +838,8 @@ describe("the rules builder", () => {
     expect(previewDeviceGroupRules).toHaveBeenCalledWith(
       { all: [{ fact: "os_family", op: "eq", value: "windows" }] },
       null,
-      // RE-POINTED: a group not saved yet has no client of its own, so the
-      // preview names the one it will be created in -- the internal client.
+      // A group not saved yet has no client of its own, so the preview names
+      // the one it will be created in: the client chosen at the top.
       ORG,
     );
   });

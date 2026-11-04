@@ -17,6 +17,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { ClientField } from "../../components/ClientField";
 import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
 import { Form, FormActions, attemptProblems } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -26,7 +27,9 @@ import { translate } from "../../i18n/core";
 import { formatDateTime } from "../../lib/datetime";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import { internalClientId, requireKnown } from "../../lib/internalClient";
+import { useClientScope } from "../../lib/clientScope";
+import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { useClientName } from "../settings/api";
 import { Icon } from "../../shell/icons";
 import { useBackupRepositories, useCreateBackupRepositoryMutation } from "./api";
 import { repositoryStateKind, repositoryStateLabel } from "./backupState";
@@ -55,6 +58,10 @@ export function RepositoriesPage() {
 
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
+  // With every client chosen, each repository says whose it is.
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const showClient = selected === null;
   const canRead = permissions.includes("backup.read");
   const canManage = permissions.includes("backup.policy.manage");
 
@@ -155,6 +162,7 @@ export function RepositoriesPage() {
             <thead>
               <tr>
                 <Th>{t("backup.repositories.colName")}</Th>
+                {showClient ? <Th>{t("backup.repositories.colClient")}</Th> : null}
                 <Th>{t("backup.repositories.colState")}</Th>
                 <Th>{t("backup.repositories.colRegistered")}</Th>
               </tr>
@@ -166,6 +174,7 @@ export function RepositoriesPage() {
                     <div className="cell-title">{repo.name}</div>
                     <div className="cell-sub mono">{repo.storage_ref}</div>
                   </Td>
+                  {showClient ? <Td>{clientName(repo.client_id)}</Td> : null}
                   <Td>
                     <StatusPill
                       value={repo.state}
@@ -192,13 +201,6 @@ export function RepositoriesPage() {
         key={createOpen ? "open" : "closed"}
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        // A repository is ONE client's: its key travels to every device that
-        // backs up into it (MSP clients phase 2, Task 13). Nothing on this
-        // page is a row of a client to take it from.
-        // PHASE 3: the client/site selector. Until it exists that is the
-        // organisation's internal client, whose id is the organisation's --
-        // `/me`'s `org_id` (`lib/internalClient.ts`).
-        clientId={internalClientId(me.data)}
       />
     </div>
   );
@@ -208,19 +210,17 @@ const repositoryRules = (): readonly FieldRule[] => [
   { name: "name", label: translate("backup.repositories.name") },
 ];
 
-function CreateRepositoryDialog({
-  open,
-  onClose,
-  clientId,
-}: {
-  open: boolean;
-  onClose: () => void;
-  /** The client the repository is filed under; `null` until it is known. */
-  clientId: string | null;
-}) {
+function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useT();
   const create = useCreateBackupRepositoryMutation();
   const [name, setName] = useState("");
+  // A repository is ONE client's: its key travels to every device that backs
+  // up into it (MSP clients phase 2, Task 13). Nothing on this page is a row
+  // to take it from, so it is the client chosen at the top, or with every
+  // client the dialog's Client field (design §3.1).
+  const target = useNewRowClient("backup.policy.manage");
+  const [pickedClient, setPickedClient] = useState("");
+  const clientId = target.needsField ? pickedClient || null : target.clientId;
   // Populated ON SUBMIT, never while typing. Held as data (rules and values)
   // so a language switch re-words the sentences.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
@@ -228,7 +228,13 @@ function CreateRepositoryDialog({
   function submit() {
     // The previous outcome must not be readable as this one.
     create.reset();
-    const next: Attempt = { rules: repositoryRules, values: { name } };
+    const next: Attempt = {
+      rules: () => [
+        ...repositoryRules(),
+        ...(target.needsField ? [{ name: "client", label: translate("backup.repositories.client") }] : []),
+      ],
+      values: { name, client: clientId },
+    };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
     create.mutate(
@@ -246,6 +252,9 @@ function CreateRepositoryDialog({
     <Dialog open={open} onClose={onClose} title={t("backup.repositories.dialogTitle")}>
       {/* A real <form>, so Enter in Name creates the repository. */}
       <Form onSubmit={submit}>
+        {target.needsField ? (
+          <ClientField code="backup.policy.manage" value={pickedClient} onChange={setPickedClient} />
+        ) : null}
         <Field label={t("backup.repositories.name")}>
           <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
         </Field>

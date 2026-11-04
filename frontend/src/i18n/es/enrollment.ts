@@ -40,6 +40,8 @@ export const enrollment: Shape<typeof en> = {
   form: {
     title: "Emitir un token de inscripción",
     subtitle: "Un pase de corta duración que permite que equipos nuevos se unan a esta organización",
+    client: "Cliente",
+    site: "Sede",
     name: "Nombre del token",
     namePlaceholder: "p. ej., equipos de la sede de Bogotá",
     hours: "Vigencia en horas",

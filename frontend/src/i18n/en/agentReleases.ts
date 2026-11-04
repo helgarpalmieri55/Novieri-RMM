@@ -22,6 +22,8 @@ export const agentReleases = {
     showOlder: "Show older versions ({versions})",
     hideOlder: "Hide older versions",
   },
+  // The site new machines are enrolled into (MSP clients phase 3, design §3.2).
+  where: { title: "Where new machines go", subtitle: "The site an install command, the install link and a managed deployment enrol machines into." },
   empty: {
     headline: "No agent packages published yet.",
     body: "Nothing here has failed. <strong>The platform never builds, fetches or pushes the agent.</strong> A publisher uploads one, and it appears here.",

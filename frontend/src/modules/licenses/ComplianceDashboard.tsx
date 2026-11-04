@@ -3,6 +3,7 @@ import { Table, Td, Th } from "../../components/ui";
 import type { Me } from "../../lib/api";
 import { useT } from "../../i18n/context";
 import { useApi } from "../../lib/ApiContext";
+import { useClientScope } from "../../lib/clientScope";
 import { useClientName } from "../settings/api";
 import { useCompliance } from "./api";
 import { LicenseReadiness } from "./LicenseReadiness";
@@ -19,6 +20,10 @@ export function ComplianceDashboard() {
 
   const compliance = useCompliance();
   const clientName = useClientName();
+  // WHOSE EACH ROW IS, with every client chosen (design §3.4); with one
+  // chosen every row is that client's, and the column would only repeat it.
+  const { selected } = useClientScope();
+  const showClient = selected === null;
   const items = compliance.data ?? [];
 
   return (
@@ -44,7 +49,7 @@ export function ComplianceDashboard() {
             <thead>
               <tr>
                 <Th>{t("licenses.compliance.colProduct")}</Th>
-                <Th>{t("licenses.compliance.colClient")}</Th>
+                {showClient && <Th>{t("licenses.compliance.colClient")}</Th>}
                 <Th>{t("licenses.compliance.colUsedOwned")}</Th>
                 <Th>{t("licenses.compliance.colEntitled")}</Th>
                 <Th>{t("licenses.compliance.colInstalled")}</Th>
@@ -68,7 +73,7 @@ export function ComplianceDashboard() {
                     <Td lead={<Icon name="license" size={18} />} gutter={kind}>
                       <div className="cell-title">{row.name}</div>
                     </Td>
-                    <Td>{clientName(row.client_id)}</Td>
+                    {showClient && <Td>{clientName(row.client_id)}</Td>}
                     <Td>
                       <div style={{ display: "grid", gap: 4, minWidth: 140 }}>
                         <span className="mono">{`${row.installed} / ${row.entitled}`}</span>

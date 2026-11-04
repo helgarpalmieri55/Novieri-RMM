@@ -1,18 +1,23 @@
 import { useState } from "react";
+import { ClientField } from "../../components/ClientField";
 import { NoValue } from "../../components/emptystate";
 import { Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
+import { useClientScope } from "../../lib/clientScope";
+import { useNewRowClient } from "../../lib/clientSelection";
 import { useClientName } from "../settings/api";
 import {
   useCreateIpamVlanMutation,
   useCreateIpamVrfMutation,
   useIpamPermissions,
+  useIpamSiteDirectory,
   useIpamSites,
   useIpamVlans,
   useIpamVrfs,
 } from "./api";
 import { ErrorLine } from "./ErrorLine";
 import { IpamNav } from "./IpamNav";
+import { IPAM_MANAGE } from "./types";
 import { Icon } from "../../shell/icons";
 import { Btn, PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
 
@@ -24,8 +29,9 @@ import { Btn, PageHead, Panel, QueryState, StatusPill } from "../../shell/compon
 // this console's registry is the scoping tables, and the address list is the
 // subnet detail's grid.
 //
-// EVERY ROW IS ONE CLIENT'S (MSP clients phase 2): this console files them under
-// the internal client until phase 3's selector (`api.ts::useIpamClient`).
+// EVERY ROW IS ONE CLIENT'S (MSP clients phase 2): a new one goes to its
+// parent's client, else to the client chosen at the top, else to the one its
+// form's Client field names (phase 3, `lib/clientSelection.ts`).
 // IPAM HAS NO SITES OF ITS OWN ANY MORE: the sites panel lists the client's
 // sites read-only -- an office is the client's, managed with the client -- and
 // the VLAN and subnet pickers name them.
@@ -73,6 +79,10 @@ function VrfPanel({ canManage }: { canManage: boolean }) {
   // A VRF is one client's, and decides the client of what is filed in it.
   const clientName = useClientName();
   const create = useCreateIpamVrfMutation();
+  // No parent: the client chosen at the top, or the Client field's (§3.1).
+  const target = useNewRowClient(IPAM_MANAGE);
+  const [pickedClient, setPickedClient] = useState("");
+  const vrfClient = target.needsField ? pickedClient || null : target.clientId;
   const [name, setName] = useState("");
   const [rd, setRd] = useState("");
 
@@ -120,6 +130,9 @@ function VrfPanel({ canManage }: { canManage: boolean }) {
       {canManage && (
         <AddRow>
           <div className="form-grid">
+            {target.needsField ? (
+              <ClientField code={IPAM_MANAGE} value={pickedClient} onChange={setPickedClient} />
+            ) : null}
             <Field label={t("ipam.fields.name")}>
               <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
@@ -134,7 +147,7 @@ function VrfPanel({ canManage }: { canManage: boolean }) {
               disabled={create.isPending || name.trim() === ""}
               onClick={() =>
                 create.mutate(
-                  { name, rd: rd || null },
+                  { name, rd: rd || null, client_id: vrfClient },
                   {
                     onSuccess: () => {
                       setName("");
@@ -152,10 +165,12 @@ function VrfPanel({ canManage }: { canManage: boolean }) {
   );
 }
 
-/** The client's sites, read-only: IPAM names them and no longer creates them. */
+/** The sites in view, read-only: IPAM names them and no longer creates them. */
 function SitePanel() {
   const t = useT();
-  const sites = useIpamSites();
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const directory = useIpamSiteDirectory();
 
   return (
     <Panel
@@ -164,9 +179,9 @@ function SitePanel() {
       bare
     >
       <QueryState
-        loading={sites.isLoading}
-        error={sites.error}
-        empty={(sites.data ?? []).length === 0}
+        loading={directory.isLoading}
+        error={directory.error}
+        empty={directory.sites.length === 0}
         emptyLabel={t("ipam.registry.sitesEmpty")}
         emptyIcon="building"
       >
@@ -178,17 +193,22 @@ function SitePanel() {
           </thead>
           <tbody>
             {/* One column: in the two-column grid a second column clipped at
-                the panel edge at 1440, so the address rides in the sub-line. */}
-            {sites.data?.map((site) => (
-              <tr key={site.id}>
-                <Td lead={<Icon name="building" size={18} />}>
-                  <div className="cell-title">{site.name}</div>
-                  {site.description || site.address ? (
-                    <div className="cell-sub">{site.description || site.address}</div>
-                  ) : null}
-                </Td>
-              </tr>
-            ))}
+                the panel edge at 1440, so the address -- and, with every
+                client chosen, whose office it is -- rides in the sub-line. */}
+            {directory.sites.map((site) => {
+              const sub = [
+                selected === null ? clientName(site.client_id) : "",
+                site.description || site.address,
+              ].filter((part) => part !== "");
+              return (
+                <tr key={site.id}>
+                  <Td lead={<Icon name="building" size={18} />}>
+                    <div className="cell-title">{site.name}</div>
+                    {sub.length > 0 ? <div className="cell-sub">{sub.join(" · ")}</div> : null}
+                  </Td>
+                </tr>
+              );
+            })}
           </tbody>
         </Table>
       </QueryState>
@@ -199,7 +219,17 @@ function SitePanel() {
 function VlanPanel({ canManage }: { canManage: boolean }) {
   const t = useT();
   const vlans = useIpamVlans();
-  const sites = useIpamSites();
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const directory = useIpamSiteDirectory();
+  // No parent above the form: the client chosen at the top, or the Client
+  // field's. Its sites are the only ones a new VLAN may name; a site, once
+  // picked, decides the VLAN's client (the body then names none).
+  const target = useNewRowClient(IPAM_MANAGE);
+  const [pickedClient, setPickedClient] = useState("");
+  const vlanClient = target.needsField ? pickedClient || null : target.clientId;
+  const sites = useIpamSites(vlanClient);
+  const showClient = selected === null;
   const create = useCreateIpamVlanMutation();
   const [vid, setVid] = useState("");
   const [siteId, setSiteId] = useState("");
@@ -222,6 +252,7 @@ function VlanPanel({ canManage }: { canManage: boolean }) {
           <thead>
             <tr>
               <Th>{t("ipam.fields.vlan")}</Th>
+              {showClient ? <Th>{t("ipam.fields.client")}</Th> : null}
               <Th>{t("ipam.registry.colScope")}</Th>
             </tr>
           </thead>
@@ -235,6 +266,7 @@ function VlanPanel({ canManage }: { canManage: boolean }) {
                   </div>
                   {vlan.description ? <div className="cell-sub">{vlan.description}</div> : null}
                 </Td>
+                {showClient ? <Td>{clientName(vlan.client_id)}</Td> : null}
                 <Td>
                   {vlan.site_id === null ? (
                     <StatusPill
@@ -246,7 +278,7 @@ function VlanPanel({ canManage }: { canManage: boolean }) {
                     <StatusPill
                       value="site"
                       kind="mut"
-                      label={sites.data?.find((site) => site.id === vlan.site_id)?.name ?? vlan.site_id}
+                      label={directory.siteName(vlan.site_id)}
                     />
                   )}
                 </Td>
@@ -258,6 +290,17 @@ function VlanPanel({ canManage }: { canManage: boolean }) {
       {canManage && (
         <AddRow>
           <div className="form-grid">
+            {target.needsField ? (
+              <ClientField
+                code={IPAM_MANAGE}
+                value={pickedClient}
+                onChange={(id) => {
+                  setPickedClient(id);
+                  // Another client is another set of sites.
+                  setSiteId("");
+                }}
+              />
+            ) : null}
             <Field label={t("ipam.registry.vid")}>
               <input
                 className={inputClass}
@@ -293,7 +336,7 @@ function VlanPanel({ canManage }: { canManage: boolean }) {
               disabled={create.isPending || vid === ""}
               onClick={() =>
                 create.mutate(
-                  { vid: Number(vid), site_id: siteId || null, name },
+                  { vid: Number(vid), site_id: siteId || null, client_id: vlanClient, name },
                   {
                     onSuccess: () => {
                       setVid("");

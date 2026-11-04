@@ -24,7 +24,7 @@ import {
   useUpdateBudgetMutation,
 } from "./api";
 import { humaniseEnum } from "../../lib/labels";
-import { BudgetPageNav, budgetStatusKind } from "./budgetState";
+import { BudgetPageNav, BudgetPickClient, budgetStatusKind, useBudgetNeedsClient } from "./budgetState";
 import type { BudgetLineInput, BudgetOut, BudgetUpdateStatus, Granularity } from "./types";
 import { Btn, PageHead, Panel, QueryState, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -85,9 +85,22 @@ export function BudgetPlannerPage() {
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("budget.read");
   const canManage = permissions.includes("budget.manage");
+  const needsClient = useBudgetNeedsClient();
 
   const budgets = useBudgets();
   const items = budgets.data ?? [];
+
+  // ONE CLIENT AT A TIME (plan Task 11 D11.1): with every client chosen there
+  // is no base currency to add these figures in, so the page asks for one.
+  if (needsClient) {
+    return (
+      <div>
+        <PageHead title={t("budget.planner.title")} description={t("budget.planner.description")} />
+        <BudgetPageNav canRead={canRead} />
+        <BudgetPickClient />
+      </div>
+    );
+  }
 
   return (
     <div>

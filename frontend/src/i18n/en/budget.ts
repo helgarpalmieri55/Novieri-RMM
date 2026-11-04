@@ -24,6 +24,12 @@ export const budget = {
     categoryRetired: "{key} · retired",
     costCenterRetired: "{code} · retired",
   },
+  // With every client chosen at the top (plan Task 11 D11.1): budget is one
+  // client's, in its base currency.
+  pickClient: {
+    title: "Choose a client at the top of the page",
+    body: "Budget is kept per client, in that client's base currency, so it is shown one client at a time.",
+  },
   readiness: {
     title: "Before expected spend can be projected",
     subtitle: "Coming costs are projected from the subscription and license registers.",

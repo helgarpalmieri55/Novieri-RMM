@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
-import type { ApiClient, Device, Me } from "../../../lib/api";
+import type { ApiClient, Device, Me, MeClient } from "../../../lib/api";
 import { BcpReport } from "../BcpReport";
 import { outcomeVariant, remediationVariant, severityVariant } from "../bcpState";
 import { PlanDetail } from "../PlanDetail";
@@ -22,6 +22,25 @@ import type { FindingOut, PlanOut, PlanStatusOut, TestOut } from "../types";
 // stream) — mirrors modules/change/__tests__/change.test.tsx.
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 function renderWithProviders(ui: ReactElement, initialEntries: string[] = ["/"]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -116,6 +135,20 @@ describe("PlansPage", () => {
     expect(screen.queryByText("active")).not.toBeInTheDocument();
   });
 
+  // Design §3.4: the Client column with every client chosen; with one, every
+  // row is that client's and the column is hidden.
+  it("shows the Client column with every client, and hides it with one chosen", async () => {
+    selectClient(null);
+    const { unmount } = renderWithProviders(<PlansPage />);
+    expect(await screen.findByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    unmount();
+
+    selectClient("c-x");
+    renderWithProviders(<PlansPage />);
+    await screen.findByText("Core datacenter failover");
+    expect(screen.queryByRole("columnheader", { name: "Client" })).toBeNull();
+  });
+
   it("hides the New plan control when the caller lacks bcp.manage", async () => {
     api.me = vi.fn().mockResolvedValue({
       ...ME,
@@ -201,6 +234,18 @@ describe("PlanDetail", () => {
     await screen.findByText("Core datacenter failover");
     expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
   });
+
+  // Phase 3 review F4: the scope is named from the plan's client's devices,
+  // asked of the server -- not from one page of every client's.
+  it("names the scope from the devices of the plan's client", async () => {
+    selectClient(null);
+    api.listDevices = vi.fn().mockResolvedValue({ items: [], total: 0 });
+    renderDetail();
+
+    await screen.findByText("Core datacenter failover");
+    await waitFor(() => expect(api.listDevices).toHaveBeenCalled());
+    expect(api.listDevices).toHaveBeenCalledExactlyOnceWith({ clientId: "o1" });
+  });
 });
 
 // UX remediation cycle 3, the two HIGH findings on this dialog. Both had the
@@ -215,6 +260,8 @@ describe("PlanEditor form validation", () => {
     api = {
       me: vi.fn().mockResolvedValue(ME),
       createPlan: vi.fn().mockResolvedValue(PLANS[0]),
+      // `useScopeDevices` reads `api.listDevices()` (`bcp/api.ts`).
+      listDevices: vi.fn().mockResolvedValue({ items: [{ id: "d-acme", hostname: "acme-01", client_id: "c-acme", agent_status: "online", os_family: "windows" }, { id: "d-own", hostname: "own-01", client_id: "o1", agent_status: "online", os_family: "linux" }], total: 2 }),
     };
     mockUseApi.mockReturnValue(api as ApiClient);
   });
@@ -224,6 +271,39 @@ describe("PlanEditor form validation", () => {
     renderWithProviders(<PlanEditor plan="new" onClose={vi.fn()} />);
     return user;
   }
+
+  it("with every client chosen, asks for the plan's client and offers only its devices", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["bcp"], permissions: ME.permissions },
+    ]);
+    const user = renderEditor();
+    await user.type(screen.getByLabelText("Name *"), "Acme failover");
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await user.click(screen.getByRole("button", { name: /Add scope/ }));
+    await user.click(screen.getByRole("combobox", { name: "Scope 1 device" }));
+    expect(await screen.findByRole("option", { name: /acme-01/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /own-01/ })).toBeNull();
+  });
+
+  // Phase 3 review F4. `GET /devices` answers one page (100 by default):
+  // filtered in the browser, the page read for every client could hold none
+  // of the plan's client's machines, and the editor said "Add a computer" to
+  // a client that has them. The server is asked for that client's.
+  it("with every client chosen, reads the devices of the plan's client, and none before it is chosen", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["bcp"], permissions: ME.permissions },
+    ]);
+    const user = renderEditor();
+    await user.click(screen.getByRole("button", { name: /Add scope/ }));
+    await user.click(screen.getByRole("combobox", { name: "Scope 1 device" }));
+    expect(api.listDevices).not.toHaveBeenCalled();
+
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await waitFor(() => expect(api.listDevices).toHaveBeenCalled());
+    expect(api.listDevices).toHaveBeenCalledExactlyOnceWith({ clientId: "c-acme" });
+  });
 
   // Auditor (HIGH), /bcp → New plan → Save: "Empty submit is a silent no-op."
   // The click used to land on a disabled control -- nothing moved and no field
@@ -297,7 +377,7 @@ describe("PlanEditor form validation", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(api.createPlan).toHaveBeenCalledWith({
-      // The internal client, `/me`'s `org_id` (PHASE 3: the selector's).
+      // The client chosen at the top: here the internal one, `o1`.
       client_id: "o1",
       name: "Core datacenter failover",
       description: "",
@@ -1294,8 +1374,11 @@ describe("bcp picker options", () => {
 describe("PlanEditor scope and procedure references", () => {
   let api: Partial<ApiClient>;
 
+  // Each of the plan's client (the internal one, chosen at the top): the
+  // pickers list only that client's rows (design §3.3).
   const DEVICE = {
     id: "9f1f4a1e-0000-4000-8000-000000000001",
+    client_id: "o1",
     hostname: "WKS-042",
     fqdn: null,
     os_family: "windows",
@@ -1311,6 +1394,7 @@ describe("PlanEditor scope and procedure references", () => {
 
   const ARTICLE = {
     id: "3c2b1a09-0000-4000-8000-000000000002",
+    client_id: "o1",
     title: "Datacenter failover runbook",
     category: "runbook",
     archived: false,
@@ -1320,6 +1404,7 @@ describe("PlanEditor scope and procedure references", () => {
 
   const GROUP = {
     id: "06a85c19-55e2-7f3c-8000-831c7bdba357",
+    client_id: "o1",
     name: "Core datacenter",
     parent_group_id: null,
     description: "",

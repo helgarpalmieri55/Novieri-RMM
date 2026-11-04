@@ -1,6 +1,8 @@
 import { Link, useLocation } from "react-router-dom";
+import { EmptyState } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
+import { useClientScope } from "../../lib/clientScope";
 import { humaniseStatus } from "../../lib/labels";
 import type { BadgeVariant } from "../jobs/jobState";
 import type { Kind } from "../../shell/viz";
@@ -164,4 +166,21 @@ export function sourceNote(source: string): string {
 
 export function expenseSourceKind(source: string): Kind {
   return source === "subscription" || source === "license" ? "info" : "mut";
+}
+
+/**
+ * True when a budget page has nothing to show: every client is chosen at the
+ * top. Budget figures are one client's, in its base currency, and are never
+ * added across clients (plan Task 11 D11.1). False until `/me` has answered,
+ * so the pages keep their own loading state meanwhile.
+ */
+export function useBudgetNeedsClient(): boolean {
+  const { selected, ready } = useClientScope();
+  return ready && selected === null;
+}
+
+/** What a budget page says instead of its figures with every client chosen. */
+export function BudgetPickClient() {
+  const t = useT();
+  return <EmptyState icon="building" title={t("budget.pickClient.title")} body={t("budget.pickClient.body")} />;
 }

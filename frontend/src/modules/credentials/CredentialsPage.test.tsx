@@ -19,12 +19,32 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type ApiClient, type Credential, type Me } from "../../lib/api";
+import { ApiError, type ApiClient, type Credential, type Me, type MeClient } from "../../lib/api";
+import { ClientNotChosen } from "../../lib/clientSelection";
 import { NO_DATE } from "../../lib/datetime";
 import { CredentialsPage } from "./CredentialsPage";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 function credential(overrides: Partial<Credential> = {}): Credential {
   return {
@@ -40,8 +60,8 @@ function credential(overrides: Partial<Credential> = {}): Credential {
   };
 }
 
-// `org_id` is the internal client's id, which a push credential is filed
-// under until the client selector exists (`lib/internalClient.ts`).
+// A push credential goes to the client chosen at the top: here the
+// internal one, `o1` (`selectClient` above).
 const ME: Me = { permissions: ["credentials.manage"], org_id: "o1" } as Me;
 
 /**
@@ -700,7 +720,7 @@ describe("CredentialsPage — credential types as a person reads them", () => {
     });
   });
 
-  it("files a push install credential under the internal client, and only a push credential", async () => {
+  it("files a push install credential under the client chosen at the top, and only a push credential", async () => {
     // MSP clients phase 2, Task 12: a push credential has exactly one client.
     // The ssh_key above is sent with none and serves every client, as before.
     const user = userEvent.setup();
@@ -925,9 +945,10 @@ describe("CredentialsPage — a Windows domain account", () => {
   it("sends no push credential before its client is known", async () => {
     const user = userEvent.setup();
     const createCredential = vi.fn().mockResolvedValue(credential({ type: "windows_domain" }));
+    // `/me` has not answered: the selector cannot say whose the credential is yet.
+    mockClientScope.mockReturnValue({ selected: null, select: vi.fn(), clients: [], ready: false });
     renderPage(
       {
-        me: vi.fn().mockResolvedValue({ permissions: ["credentials.manage"] } as Me),
         listCredentials: () => Promise.resolve([]),
         createCredential,
       },
@@ -938,9 +959,7 @@ describe("CredentialsPage — a Windows domain account", () => {
     await user.type(within(dialog).getByLabelText(/^Account/), "svc-push@corp.example.com");
     await user.type(within(dialog).getByLabelText(/^Password/), "s3cret");
     await user.click(within(dialog).getByRole("button", { name: "Store" }));
-    expect(
-      await within(dialog).findByText(/cannot tell which client this is for\. Nothing was sent/),
-    ).toBeInTheDocument();
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(new ClientNotChosen().message);
     expect(createCredential).not.toHaveBeenCalled();
   });
 

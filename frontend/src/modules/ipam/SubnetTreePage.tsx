@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { ClientField } from "../../components/ClientField";
 import { NoValue } from "../../components/emptystate";
 import { Link, useSearchParams } from "react-router-dom";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
@@ -6,14 +7,16 @@ import type { Attempt, FieldRule } from "../../components/form";
 import { Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
+import { useClientScope } from "../../lib/clientScope";
+import { useNewRowClient } from "../../lib/clientSelection";
 import { humaniseEnum } from "../../lib/labels";
 import { Icon } from "../../shell/icons";
 import { useClientName } from "../settings/api";
 import {
   useCreateIpamSubnetMutation,
-  useIpamClient,
   useIpamDrift,
   useIpamPermissions,
+  useIpamSiteDirectory,
   useIpamSites,
   useIpamSubnetUtilization,
   useIpamSubnets,
@@ -32,7 +35,7 @@ import {
 } from "./ipamState";
 import { UtilizationBar } from "./UtilizationBar";
 import type { SubnetFilters, SubnetKind, SubnetOut } from "./types";
-import { SUBNET_KINDS } from "./types";
+import { IPAM_MANAGE, SUBNET_KINDS } from "./types";
 import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, StatusPill } from "../../shell/components";
 
 // The subnet tree (spec §12): the DERIVED hierarchy, per-node utilisation,
@@ -124,7 +127,10 @@ export function SubnetTreePage() {
   };
   const subnets = useIpamSubnets(filters);
   const vrfs = useIpamVrfs();
-  const sites = useIpamSites();
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const directory = useIpamSiteDirectory();
+  const showClient = selected === null;
   const vlans = useIpamVlans();
   // The default drift list already excludes `dormant` and resolved items
   // server-side; `isDriftFinding` is applied anyway so the badge cannot start
@@ -154,8 +160,7 @@ export function SubnetTreePage() {
 
   const rows = useMemo(() => flattenSubnetTree(buildSubnetTree(inView)), [inView]);
 
-  const siteName = (id: string | null): string =>
-    id === null ? "" : (sites.data?.find((site) => site.id === id)?.name ?? id);
+  const siteName = directory.siteName;
   const vlanLabel = (id: string | null): string => {
     if (id === null) return "";
     const vlan = vlans.data?.find((row) => row.id === id);
@@ -309,9 +314,11 @@ export function SubnetTreePage() {
             onChange={(e) => setFilters({ ...filters, site: e.target.value || undefined })}
           >
             <option value="">{t("ipam.tree.allSites")}</option>
-            {sites.data?.map((site) => (
+            {directory.sites.map((site) => (
               <option key={site.id} value={site.id}>
-                {site.name}
+                {showClient
+                  ? t("ipam.fields.siteOfClient", { site: site.name, client: clientName(site.client_id) })
+                  : site.name}
               </option>
             ))}
           </select>
@@ -394,6 +401,7 @@ export function SubnetTreePage() {
             <thead>
               <tr>
                 <Th>{t("ipam.tree.colName")}</Th>
+                {showClient ? <Th>{t("ipam.fields.client")}</Th> : null}
                 <Th>{t("ipam.tree.colUsed")}</Th>
                 <Th>{t("ipam.tree.colDrift")}</Th>
                 <Th>{t("ipam.tree.colSweep")}</Th>
@@ -433,6 +441,7 @@ export function SubnetTreePage() {
                         {subline.length > 0 ? subline.join(" · ") : <NoValue label={t("ipam.tree.noSubline")} />}
                       </div>
                     </Td>
+                    {showClient ? <Td>{clientName(node.subnet.client_id)}</Td> : null}
                     <Td>
                       <UtilizationCell subnet={node.subnet} />
                     </Td>
@@ -566,7 +575,6 @@ function CreateSubnetForm() {
   const create = useCreateIpamSubnetMutation();
   const vrfs = useIpamVrfs();
   const clientName = useClientName();
-  const own = useIpamClient();
   const vlans = useIpamVlans();
   const [prefix, setPrefix] = useState("");
   const [name, setName] = useState("");
@@ -574,11 +582,15 @@ function CreateSubnetForm() {
   const [vrfId, setVrfId] = useState("");
   const [siteId, setSiteId] = useState("");
   const [vlanId, setVlanId] = useState("");
-  // THE VRF DECIDES THE SUBNET'S CLIENT (with none, the console's own client's
-  // `global` VRF), so the sites and VLANs offered are that client's -- the
-  // server refuses any other's (final review E). `null` while the chosen VRF
+  // THE VRF DECIDES THE SUBNET'S CLIENT; with none, the client chosen at the
+  // top or the Client field's, whose `global` VRF it goes into. The sites and
+  // VLANs offered are that client's -- the server refuses any other's (final
+  // review E). `null` while the Client field is empty, or while the chosen VRF
   // is not in the list yet.
-  const client = vrfId ? (vrfs.data?.find((vrf) => vrf.id === vrfId)?.client_id ?? null) : own;
+  const vrfClient = vrfId ? vrfs.data?.find((vrf) => vrf.id === vrfId)?.client_id : undefined;
+  const target = useNewRowClient(IPAM_MANAGE, vrfClient);
+  const [pickedClient, setPickedClient] = useState("");
+  const client = vrfId ? (vrfClient ?? null) : target.needsField ? pickedClient || null : target.clientId;
   const sites = useIpamSites(client);
   const clientVlans = (vlans.data ?? []).filter((vlan) => vlan.client_id === client);
   const [gateway, setGateway] = useState("");
@@ -603,6 +615,7 @@ function CreateSubnetForm() {
         kind,
         name: name.trim(),
         vrf_id: vrfId || null,
+        client_id: client,
         site_id: siteId || null,
         vlan_id: vlanId || null,
         gateway: gateway.trim() || null,
@@ -673,6 +686,17 @@ function CreateSubnetForm() {
               ))}
             </select>
           </Field>
+          {!vrfId && target.needsField ? (
+            <ClientField
+              code={IPAM_MANAGE}
+              value={pickedClient}
+              onChange={(id) => {
+                setPickedClient(id);
+                setSiteId("");
+                setVlanId("");
+              }}
+            />
+          ) : null}
           <Field label={t("ipam.fields.site")}>
             <select
               className={inputClass}

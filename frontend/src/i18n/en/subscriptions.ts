@@ -64,6 +64,8 @@ export const subscriptions = {
   },
   list: {
     title: "Subscriptions",
+    // Shown with every client chosen at the top (design §3.4).
+    colClient: "Client",
     description: "Recurring SaaS and cloud spend, its owners and renewal dates.",
     spend: "Spend",
     renewals: "Renewals",
@@ -97,6 +99,7 @@ export const subscriptions = {
   },
   new: {
     title: "New subscription",
+    client: "Client",
     serviceName: "Service name",
     billingCycle: "Billing cycle",
     costPerCycle: "Cost per cycle",

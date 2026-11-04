@@ -107,6 +107,12 @@ describe("requireKnown", () => {
     setActiveLanguage("es");
     expect(() => requireKnown(null)).toThrow(/tu cuenta aún no se ha cargado/i);
   });
+
+  it("refuses an empty one: a form's field before a client is chosen", () => {
+    // Field state is a string where "" means "not chosen"; a form that
+    // forgets `|| null` must still send nothing, never `client_id: ""`.
+    expect(() => requireKnown("")).toThrow(ClientNotChosen);
+  });
 });
 
 describe("loadingUntilClient", () => {

@@ -72,9 +72,15 @@ export class ClientNotChosen extends Error {
   }
 }
 
-/** `id`, or `ClientNotChosen` when it is not known yet. For a mutation's body. */
+/**
+ * `id`, or `ClientNotChosen` when it is not known yet. For a mutation's body.
+ *
+ * `""` IS NOT KNOWN EITHER. A form's field state is a string where `""` means
+ * "not chosen", and the forms pass it as `pickedClient || null`; a copy that
+ * drops the `|| null` must still send nothing, never `client_id: ""`.
+ */
 export function requireKnown(id: string | null): string {
-  if (id === null) throw new ClientNotChosen();
+  if (id === null || id === "") throw new ClientNotChosen();
   return id;
 }
 

@@ -23,6 +23,7 @@ import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ApiClient, Me } from "../lib/api";
+import { setSelectedClient } from "../lib/clientChoice";
 import { AgentReleasesPage } from "../modules/agent-releases/AgentReleasesPage";
 import { AutonomyDialPage } from "../modules/ai-automation/AutonomyDialPage";
 import { BudgetAdminPage } from "../modules/budget/BudgetAdminPage";
@@ -55,7 +56,16 @@ interface Screen {
   stays?: string;
   /** Reads that answer (by `ApiClient` method), for controls drawn per row. */
   answers?: Record<string, unknown>;
+  /**
+   * The client chosen at the top, for a screen that draws its one-client
+   * writes only with one chosen: budget asks for a client with every client
+   * chosen (plan Task 11 D11.1). Absent: every client.
+   */
+  client?: string;
 }
+
+/** A client of the person's, for `Screen.client`. */
+const ACME_ID = "00000000-0000-4000-8000-0000000000c1";
 
 const SCREENS: Screen[] = [
   { route: "/notifications", page: () => <NotificationAdminPage />, held: ["notification.read", "notification.admin"], code: "notification.admin", write: "Add channel" },
@@ -75,7 +85,7 @@ const SCREENS: Screen[] = [
     stays: "Ignore",
     answers: { reviewQueue: [{ name: "7-Zip", publisher: "Igor Pavlov", device_count: 4 }] },
   },
-  { route: "/budget/admin", page: () => <BudgetAdminPage />, held: ["budget.read", "budget.manage"], code: "budget.manage", write: "New rate", stays: "New category" },
+  { route: "/budget/admin", page: () => <BudgetAdminPage />, held: ["budget.read", "budget.manage"], code: "budget.manage", write: "New rate", stays: "New category", client: ACME_ID },
   { route: "/provisioning/images", page: () => <ImagesPage />, held: ["provisioning.read", "provisioning.manage"], code: "provisioning.manage", write: "New image" },
   { route: "/provisioning/profiles", page: () => <ProfilesPage />, held: ["provisioning.read", "provisioning.manage"], code: "provisioning.manage", write: "New profile" },
   { route: "/agent-packages", page: () => <AgentReleasesPage />, held: ["agent.release.read", "agent.release.manage"], code: "agent.release.manage", write: "Publish a release…" },
@@ -91,7 +101,7 @@ const SCREENS: Screen[] = [
   },
 ];
 
-function meWith(held: string[], everywhere: string[]): Me {
+function meWith(held: string[], everywhere: string[], client?: string): Me {
   return {
     user_id: "u1",
     org_id: "o1",
@@ -100,7 +110,14 @@ function meWith(held: string[], everywhere: string[]): Me {
     timezone: null,
     permissions: held,
     permissions_everywhere: everywhere,
+    // A chosen client is one of /me's, or the selector is not ready.
+    ...(client ? { clients: [{ id: client, name: "Acme", kind: "customer" as const, enabled_modules: [], permissions: held }] } : {}),
   };
+}
+
+/** Choose `client` at the top (`test/setup.ts` chose every client before each test). */
+function chooseClient(client: string | undefined): void {
+  if (client) setSelectedClient(client);
 }
 
 /** `/me` and the named reads answer; every other read stays in flight. */
@@ -126,15 +143,17 @@ function renderPage(page: ReactElement): void {
   );
 }
 
-describe.each(SCREENS)("$route", ({ page, held, code, write, stays, answers }) => {
+describe.each(SCREENS)("$route", ({ page, held, code, write, stays, answers, client }) => {
   it("offers the write to a holder of the code on every client", async () => {
-    stubApi(meWith(held, held), answers);
+    chooseClient(client);
+    stubApi(meWith(held, held, client), answers);
     renderPage(page());
     expect(await screen.findByRole("button", { name: write })).toBeInTheDocument();
   });
 
   it("does not offer it to a holder of the code on some clients only", async () => {
-    const me = stubApi(meWith(held, held.filter((one) => one !== code)), answers);
+    chooseClient(client);
+    const me = stubApi(meWith(held, held.filter((one) => one !== code), client), answers);
     renderPage(page());
     await waitFor(() => expect(me).toHaveBeenCalled());
     if (stays) {

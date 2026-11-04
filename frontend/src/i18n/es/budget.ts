@@ -18,6 +18,10 @@ export const budget: Shape<typeof en> = {
     categoryRetired: "{key} · retirada",
     costCenterRetired: "{code} · retirado",
   },
+  pickClient: {
+    title: "Elige un cliente arriba",
+    body: "El presupuesto se lleva por cliente, en la moneda base de ese cliente, así que se muestra de un cliente en uno.",
+  },
   readiness: {
     title: "Antes de poder proyectar el gasto previsto",
     subtitle: "Los costos futuros se proyectan a partir de los registros de suscripciones y licencias.",

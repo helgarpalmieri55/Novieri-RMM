@@ -34,11 +34,30 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../lib/api";
-import type { AgentRelease, ApiClient } from "../../lib/api";
+import type { AgentRelease, ApiClient, MeClient } from "../../lib/api";
 import { AgentReleasesPage } from "./AgentReleasesPage";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 function release(overrides: Partial<AgentRelease> = {}): AgentRelease {
   return {
@@ -81,6 +100,10 @@ function renderPage(
       }),
     listAgentReleases,
     generateAgentInstallCommand,
+    listClientSites: () =>
+      Promise.resolve([
+        { id: "s-1", client_id: "o", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 },
+      ]),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui: ReactElement = (
@@ -410,13 +433,13 @@ describe("AgentReleasesPage", () => {
     expect(dialog).toHaveTextContent(/expires in 4 hours/i);
     expect(generate).not.toHaveBeenCalled();
 
+    // MSP clients, phase 1: the token the command carries is minted for a
+    // site -- the site chosen on the page: the only site of the client chosen
+    // at the top, "s-1".
+    await waitFor(() => expect((screen.getByLabelText("Site") as HTMLSelectElement).value).toBe("s-1"));
     await userEvent.click(within(dialog).getByRole("button", { name: "Generate command" }));
     expect(generate).toHaveBeenCalledTimes(1);
-    // MSP clients, phase 1: the token the command carries is minted for a
-    // site, and until the client selector (phase 3) that is the internal
-    // client's "Principal" site, whose id is the organisation's -- `/me`'s
-    // `org_id`, "o" in `renderPage`.
-    expect(generate).toHaveBeenCalledWith("11111111-1111-1111-1111-111111111111", 4, "o");
+    expect(generate).toHaveBeenCalledWith("11111111-1111-1111-1111-111111111111", 4, "s-1");
   });
 
   it("mints nothing when the confirmation is cancelled", async () => {
@@ -662,6 +685,10 @@ describe("the install link panel on Agent packages", () => {
     });
     mockUseApi.mockReturnValue({
       me, listAgentReleases: () => Promise.resolve([]), getInstallLink,
+      listClientSites: () =>
+        Promise.resolve([
+          { id: "s-1", client_id: "o", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 },
+        ]),
     } as unknown as ApiClient);
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -678,8 +705,8 @@ describe("the install link panel on Agent packages", () => {
     const { getInstallLink } = renderWith(["enrollment.link.manage"]);
     expect(await screen.findByRole("heading", { name: "Install link" })).toBeInTheDocument();
     // One link per site now (MSP clients, phase 1): the panel manages the
-    // internal client's "Principal" site, whose id is `/me`'s `org_id`.
-    expect(getInstallLink).toHaveBeenCalledWith("o");
+    // site chosen on the page.
+    await waitFor(() => expect(getInstallLink).toHaveBeenCalledWith("s-1"));
   });
 
   it("is not offered, and not asked for, without that permission", async () => {

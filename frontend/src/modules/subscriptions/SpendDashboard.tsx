@@ -1,5 +1,6 @@
 import { Table, Td, Th } from "../../components/ui";
 import { useT } from "../../i18n/context";
+import { useClientScope } from "../../lib/clientScope";
 import { Panel, PageHead, QueryState } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useClientName } from "../settings/api";
@@ -30,6 +31,10 @@ function RollupTable({
 }) {
   const t = useT();
   const clientName = useClientName();
+  // WHOSE EACH ROW IS, with every client chosen (design §3.4); with one
+  // chosen every row is that client's, and the column would only repeat it.
+  const { selected } = useClientScope();
+  const showClient = selected === null;
   return (
     <Panel title={title} subtitle={subtitle} bare>
       <QueryState
@@ -43,7 +48,7 @@ function RollupTable({
           <thead>
             <tr>
               <Th>{groupLabel}</Th>
-              <Th>{t("subscriptions.spend.colClient")}</Th>
+              {showClient && <Th>{t("subscriptions.spend.colClient")}</Th>}
               <Th>{t("subscriptions.spend.colCurrency")}</Th>
               <Th>{t("subscriptions.spend.colMonthly")}</Th>
               <Th>{t("subscriptions.spend.colAnnual")}</Th>
@@ -58,7 +63,7 @@ function RollupTable({
                 <Td lead={<Icon name={glyph} size={18} />}>
                   <div className="cell-title">{row.group_key ?? (row.group_type ? t("subscriptions.spend.notResolved") : t("subscriptions.spend.allSubscriptions"))}</div>
                 </Td>
-                <Td>{clientName(row.client_id)}</Td>
+                {showClient && <Td>{clientName(row.client_id)}</Td>}
                 <Td>
                   <span className="mono">{row.currency}</span>
                 </Td>

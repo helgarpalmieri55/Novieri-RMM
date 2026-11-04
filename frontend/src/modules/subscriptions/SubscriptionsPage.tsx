@@ -34,7 +34,10 @@ import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { formatDate } from "../../lib/datetime";
-import { internalClientId, requireKnown } from "../../lib/internalClient";
+import { ClientField } from "../../components/ClientField";
+import { useClientScope } from "../../lib/clientScope";
+import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { useClientName } from "../settings/api";
 import { humaniseEnum } from "../../lib/labels";
 import {
   useCreateSubscriptionMutation,
@@ -170,6 +173,11 @@ export function SubscriptionsPage() {
   const permissions = me.data?.permissions ?? [];
   const canRead = permissions.includes("subscriptions.read");
   const canManage = permissions.includes("subscriptions.manage");
+  // WHOSE EACH ROW IS, with every client chosen (design §3.4); with one
+  // chosen every row is that client's, and the column would only repeat it.
+  const { selected } = useClientScope();
+  const clientName = useClientName();
+  const showClient = selected === null;
 
   const subscriptions = useSubscriptions();
   const renewals = useSubscriptionRenewals(RENEWAL_WINDOW_DAYS);
@@ -387,6 +395,7 @@ export function SubscriptionsPage() {
             <thead>
               <tr>
                 <Th>{t("subscriptions.list.colService")}</Th>
+                {showClient ? <Th>{t("subscriptions.list.colClient")}</Th> : null}
                 <Th>{t("subscriptions.list.colCycle")}</Th>
                 <Th>{t("subscriptions.list.colCost")}</Th>
                 <Th>{t("subscriptions.list.colSeats")}</Th>
@@ -413,6 +422,7 @@ export function SubscriptionsPage() {
                           : t("subscriptions.list.seats", { count: sub.seats })}
                       </div>
                     </Td>
+                    {showClient ? <Td>{clientName(sub.client_id)}</Td> : null}
                     {/* TEXT, NOT A PILL. The cadence went through the
                         severity vocabulary -- annual `info`, everything else
                         `mut` -- so every monthly and quarterly row drew the
@@ -456,9 +466,14 @@ export function SubscriptionsPage() {
 
 function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useT();
-  const api = useApi();
-  const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const create = useCreateSubscriptionMutation();
+  // A subscription is one client's (MSP clients phase 2): its seats are held by
+  // that client's people. The client chosen at the top, or with every client
+  // the dialog's Client field (design §3.1).
+  const target = useNewRowClient("subscriptions.manage");
+  // The Client field's value, `""` until chosen: read only when it is shown.
+  const [pickedClient, setPickedClient] = useState("");
+  const subscriptionClient = target.needsField ? pickedClient || null : target.clientId;
   const vendors = useVendorDirectory();
   const users = useOrgUsers();
 
@@ -498,6 +513,7 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
     setOwnerUserId("");
     setNoticeDaysValue("0");
     setAutoRenew(false);
+    setPickedClient("");
     setAttempt(null);
   }
 
@@ -511,8 +527,12 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
   }
 
   function submit() {
+    const askClient = target.needsField;
     const next: Attempt = {
-      rules: subscriptionRules,
+      rules: () => [
+        ...subscriptionRules(),
+        ...(askClient ? [{ name: "client", label: translate("subscriptions.new.client") }] : []),
+      ],
       values: {
         service_name: serviceName,
         cost_per_cycle: costPerCycle,
@@ -520,20 +540,15 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
         seats,
         renews_at: renewsAt,
         notice_days: noticeDaysValue,
+        client: subscriptionClient,
       },
     };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
 
-    // A subscription is one client's (MSP clients phase 2): its seats are held
-    // by that client's people.
-    // PHASE 3: the client/site selector. Until it exists that is the
-    // organisation's internal client, whose id is the organisation's --
-    // `/me`'s `org_id` (`lib/internalClient.ts`).
-    const internalClient = internalClientId(me.data);
     create.mutate(
       () => ({
-        client_id: requireKnown(internalClient),
+        client_id: requireKnown(subscriptionClient),
         service_name: serviceName,
         billing_cycle: billingCycle,
         // Money stays a STRING to the wire (module docstring / invariant #6).
@@ -571,6 +586,11 @@ function NewSubscriptionDialog({ open, onClose }: { open: boolean; onClose: () =
             seats, the renewal date beside the notice that counts back from
             it. */}
         <div className="form-grid">
+          {/* With every client chosen, the person says whose subscription
+              this is (design §3.1): never the internal client by default. */}
+          {target.needsField ? (
+            <ClientField code="subscriptions.manage" value={pickedClient} onChange={setPickedClient} />
+          ) : null}
           <Field label={t("subscriptions.new.serviceName")} full>
             <input
               className={inputClass}

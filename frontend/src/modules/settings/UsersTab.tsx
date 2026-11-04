@@ -13,8 +13,8 @@
 // "technician on Warehouse only" are different answers to the question this
 // tab exists to answer.
 //
-// PHASE 3: the client/site selector. The phase-3 console restyles this editor
-// (spec §3.4, "editor de asignaciones"); the wire shape it sends is final.
+// The wire shape this editor sends is final (MSP clients design §3.4); phase 3
+// adds the per-client view of effective permissions (design §4.2).
 //
 // THE DIRECTORY COLLAPSES IDENTICAL GRANTS; THE ROLES PANEL DOES NOT.
 // `user_roles` accepted the same org-wide grant without limit until migration

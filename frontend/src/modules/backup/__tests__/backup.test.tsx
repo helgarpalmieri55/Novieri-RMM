@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
 import { NO_DATE } from "../../../lib/datetime";
-import type { ApiClient, Device, DeviceGroup, Me, Page } from "../../../lib/api";
+import type { ApiClient, Device, DeviceGroup, Me, MeClient, Page } from "../../../lib/api";
 import { formatBytes } from "../../../lib/format";
 import {
   DEVICE_PICKER_EMPTY_HINT,
@@ -43,6 +43,28 @@ import type {
 // mutations succeed (mirrors modules/deploy/__tests__/deploy.test.tsx).
 const mockUseApi = vi.fn();
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  // `ME`'s backup codes, held in this client: the person here manages its
+  // policies, so the Repositories page may file this client's repository and
+  // the policy editor links there (design §3.1, plan D10.6).
+  permissions: ["backup.read", "backup.run", "backup.restore", "backup.policy.manage"],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 /**
  * Choose an option from an `EntityPicker`, the way a person does: focus the
@@ -878,7 +900,7 @@ describe("BackupPolicyEditor", () => {
     expect(sent).not.toHaveProperty("client_id");
   });
 
-  it("posts null for the device group, and the internal client, when the client default is left chosen", async () => {
+  it("posts null for the device group, and the client chosen at the top, when the client default is left chosen", async () => {
     api.upsertBackupPolicy = vi.fn().mockResolvedValue(POLICIES[0]);
     const user = userEvent.setup();
     renderWithProviders(<BackupPolicyEditor />);
@@ -890,8 +912,8 @@ describe("BackupPolicyEditor", () => {
     await waitFor(() => expect(api.upsertBackupPolicy).toHaveBeenCalled());
     const [sent] = (api.upsertBackupPolicy as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(sent.device_group_id).toBeNull();
-    // PHASE 3: no client selector yet, so a new client default is the
-    // internal client's -- `/me`'s `org_id`.
+    // A new client default is the client chosen at the top's: here the
+    // internal one, `o1`.
     expect(sent.client_id).toBe("o1");
   });
 
@@ -1033,7 +1055,7 @@ describe("BackupPolicyEditor", () => {
     renderWithProviders(<BackupPolicyEditor />);
     await user.click(await screen.findByRole("button", { name: "New policy" }));
 
-    // The client default: the internal client's (PHASE 3), whose repository
+    // The client default: the selected client's (here the internal one), whose repository
     // is primary-vault.
     const internal = await repositoryOptions(user);
     expect(internal.some((name) => name.includes("primary-vault"))).toBe(true);
@@ -1087,7 +1109,7 @@ describe("BackupPolicyEditor", () => {
     expect(screen.queryByRole("link", { name: /Create a backup repository/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole("combobox", { name: "Repository" }));
     expect(
-      await screen.findByText(/that client’s repository is created through the API or an AI connection \(MCP\)/),
+      await screen.findByText(/you cannot create one in that client: ask someone who manages its backups/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Create one on the Repositories tab/)).not.toBeInTheDocument();
   });
@@ -1298,7 +1320,7 @@ describe("CreateRepositoryDialog failure and validation", () => {
 
   // MSP clients phase 2, Task 13: a repository is ONE client's, and nothing
   // on this page is a row to take the client from.
-  it("files a new repository under the internal client", async () => {
+  it("files a new repository under the client chosen at the top", async () => {
     const user = userEvent.setup();
     await openCreateDialog(user);
 
@@ -1306,7 +1328,7 @@ describe("CreateRepositoryDialog failure and validation", () => {
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     await waitFor(() => expect(api.createBackupRepository).toHaveBeenCalled());
-    // PHASE 3: the internal client -- `/me`'s `org_id` -- until the selector.
+    // The client chosen at the top: here the internal one, `o1`.
     expect(api.createBackupRepository).toHaveBeenCalledWith({ client_id: "o1", name: "cold-vault" });
   });
 

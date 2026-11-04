@@ -1,23 +1,45 @@
 /**
  * Whose a new article, record or document is (MSP clients plan 2026-10-26
- * Task 14). Until phase 3's selector the console files what a technician
- * documents under the organisation's INTERNAL client -- `/me`'s `org_id`
- * (`lib/internalClient.ts`) -- and files it for EVERY client only when the
- * person asks, with the "For every client" switch, by sending no client at all.
- * An edit never sends one: a row's client is set at creation.
+ * Task 14; phase 3 design §3.1, §3.5). The console files what a technician
+ * documents under the client chosen at the top or, with every client chosen,
+ * the one picked in the form's Client field -- and files it for EVERY client
+ * only when the person asks, with the "For every client" switch, by sending no
+ * client at all. An edit never sends one: a row's client is set at creation.
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ApiClient, DocArticle, Me } from "../../lib/api";
+import type { ApiClient, DocArticle, Me, MeClient } from "../../lib/api";
 import { DocsPage } from "./DocsPage";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+
+const mockClientScope = vi.fn();
+vi.mock("../../lib/clientScope", () => ({ useClientScope: () => mockClientScope() }));
+
+/** The internal client every test here works in unless it chooses otherwise. */
+const SCOPE_INTERNAL: MeClient = {
+  id: "o1",
+  name: "Novieri",
+  kind: "internal",
+  enabled_modules: [],
+  permissions: [],
+};
+
+/** The selector (Task 7): `selected` is the client chosen at the top, `null` for every client. */
+function selectClient(selected: string | null, clients: MeClient[] = [SCOPE_INTERNAL]): void {
+  mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients, ready: true });
+}
+
+beforeEach(() => selectClient(SCOPE_INTERNAL.id));
+
+const INTERNAL_CLIENT: MeClient = { ...SCOPE_INTERNAL, permissions: ["docs.read", "docs.manage"] };
+const ACME_CLIENT: MeClient = { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ["docs.read", "docs.manage"] };
 
 const MANAGER: Me = {
   user_id: "u1",
@@ -25,6 +47,7 @@ const MANAGER: Me = {
   email: "operator@example.com",
   display_name: "Operator",
   permissions: ["docs.read", "docs.manage"],
+  clients: [INTERNAL_CLIENT, ACME_CLIENT],
 };
 
 const ARTICLE: DocArticle = {
@@ -58,7 +81,7 @@ function renderDocs(api: Partial<Record<keyof ApiClient, unknown>>, me: Me = MAN
 }
 
 describe("a new article", () => {
-  it("is the internal client's", async () => {
+  it("is the client chosen at the top's", async () => {
     const user = userEvent.setup();
     const createArticle = vi.fn().mockResolvedValue(ARTICLE);
     renderDocs({ createArticle });
@@ -72,6 +95,29 @@ describe("a new article", () => {
       category: "General",
       client_id: "o1",
     });
+  });
+
+  it("with every client chosen, asks for the client, and not when it is for every client", async () => {
+    selectClient(null, [INTERNAL_CLIENT, ACME_CLIENT]);
+    const user = userEvent.setup();
+    const createArticle = vi.fn().mockResolvedValue(ARTICLE);
+    renderDocs({ createArticle });
+    await user.click(await screen.findByRole("button", { name: "New article" }));
+    await user.type(screen.getByLabelText("Title"), "VPN");
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(createArticle).toHaveBeenCalledTimes(1));
+    expect(createArticle.mock.calls[0]?.[0]).toMatchObject({ title: "VPN", client_id: "c-acme" });
+  });
+
+  it("hides the Client field once the article is for every client", async () => {
+    selectClient(null, [INTERNAL_CLIENT, ACME_CLIENT]);
+    const user = userEvent.setup();
+    renderDocs({ createArticle: vi.fn() });
+    await user.click(await screen.findByRole("button", { name: "New article" }));
+    expect(screen.getByLabelText("Client")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: /For every client/ }));
+    expect(screen.queryByLabelText("Client")).toBeNull();
   });
 
   it("is every client's when asked, sending no client", async () => {
@@ -136,7 +182,21 @@ describe("a new article", () => {
 });
 
 describe("a new record", () => {
-  it("is the internal client's, or every client's when asked", async () => {
+  it("with every client chosen, asks for the client and files it there", async () => {
+    selectClient(null, [INTERNAL_CLIENT, ACME_CLIENT]);
+    const user = userEvent.setup();
+    const createDocRecord = vi.fn().mockResolvedValue({ id: "r1" });
+    renderDocs({ createDocRecord });
+    await user.click(await screen.findByRole("button", { name: "New record" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Name"), "VPN gateway");
+    await user.selectOptions(within(dialog).getByLabelText("Client"), "c-acme");
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(createDocRecord).toHaveBeenCalledTimes(1));
+    expect(createDocRecord.mock.calls[0]?.[0]).toMatchObject({ name: "VPN gateway", client_id: "c-acme" });
+  });
+
+  it("is the client chosen at the top's, or every client's when asked", async () => {
     const user = userEvent.setup();
     const createDocRecord = vi.fn().mockResolvedValue({ id: "r1" });
     renderDocs({ createDocRecord });
@@ -160,7 +220,24 @@ describe("a new record", () => {
 });
 
 describe("a new document", () => {
-  it("is the internal client's, or every client's when asked", async () => {
+  it("with every client chosen, asks for the client and files it there", async () => {
+    selectClient(null, [INTERNAL_CLIENT, ACME_CLIENT]);
+    const user = userEvent.setup();
+    const createDocument = vi.fn().mockResolvedValue({ ...ARTICLE, id: "d1", current: null });
+    const uploadDocumentVersion = vi.fn().mockResolvedValue({ version: 1 });
+    renderDocs({ createDocument, uploadDocumentVersion });
+
+    await user.click(await screen.findByRole("button", { name: "Upload document" }));
+    const dialog = await screen.findByRole("dialog", { name: "Upload document" });
+    await user.type(within(dialog).getByLabelText("Title"), "Contract");
+    await user.upload(within(dialog).getByLabelText("File"), new File(["%PDF"], "c.pdf"));
+    await user.selectOptions(within(dialog).getByLabelText("Client"), "c-acme");
+    await user.click(within(dialog).getByRole("button", { name: "Upload" }));
+    await waitFor(() => expect(createDocument).toHaveBeenCalledTimes(1));
+    expect(createDocument.mock.calls[0]?.[0]).toMatchObject({ title: "Contract", client_id: "c-acme" });
+  });
+
+  it("is the client chosen at the top's, or every client's when asked", async () => {
     const user = userEvent.setup();
     const createDocument = vi.fn().mockResolvedValue({ ...ARTICLE, id: "d1", current: null });
     const uploadDocumentVersion = vi.fn().mockResolvedValue({ version: 1 });
