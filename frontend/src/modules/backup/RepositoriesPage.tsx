@@ -18,8 +18,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ClientField } from "../../components/ClientField";
+import { ConfirmDialog } from "../../components/confirm";
 import { Button, Dialog, Field, inputClass, Table, Td, Th } from "../../components/ui";
-import { Form, FormActions, attemptProblems } from "../../components/form";
+import { Form, FormActions, attemptProblems, describeSubmitError } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
 import { useSearchParams } from "react-router-dom";
 import { useT } from "../../i18n/context";
@@ -31,10 +32,15 @@ import { useClientScope } from "../../lib/clientScope";
 import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
 import { useClientName } from "../settings/api";
 import { Icon } from "../../shell/icons";
-import { useBackupRepositories, useCreateBackupRepositoryMutation } from "./api";
+import {
+  useBackupRepositories,
+  useCreateBackupRepositoryMutation,
+  useRetireBackupRepositoryMutation,
+} from "./api";
 import { repositoryStateKind, repositoryStateLabel } from "./backupState";
 import { BackupPageNav } from "./backupNav";
 import { OffsiteReadiness } from "./BackupReadiness";
+import type { Repository } from "./types";
 import {
   Btn,
   FilterBar,
@@ -50,7 +56,7 @@ export function RepositoriesPage() {
   const t = useT();
   const api = useApi();
   const [createOpen, setCreateOpen] = useState(false);
-  // The state filter lives in the URL so the "Active"/"Disabled" tiles can
+  // The state filter lives in the URL so the "Active"/"Retired" tiles can
   // hand over the exact rows they counted; the select below is the same
   // vocabulary, so a reader who arrives by tile can see and clear it.
   const [params, setParams] = useSearchParams();
@@ -72,12 +78,25 @@ export function RepositoriesPage() {
   const repositories = useBackupRepositories();
   const items = repositories.data ?? [];
   const activeCount = items.filter((repo) => repo.state === "active").length;
+  const retiredCount = items.filter((repo) => repo.state === "retired").length;
   const visible =
     stateFilter === "active"
       ? items.filter((repo) => repo.state === "active")
-      : stateFilter === "disabled"
-        ? items.filter((repo) => repo.state !== "active")
+      : stateFilter === "retired"
+        ? items.filter((repo) => repo.state === "retired")
         : items;
+
+  // RETIRE (design §5.5): offered on an active repository of a client where
+  // the person holds `backup.policy.manage`, from `/me.clients`. A courtesy
+  // (invariant 6): the route checks the code, and refuses with a 409 while an
+  // active policy names the repository -- explained below the table.
+  const retire = useRetireBackupRepositoryMutation();
+  const [retiring, setRetiring] = useState<Repository | null>(null);
+  const mayRetire = (repo: Repository) =>
+    repo.state === "active" &&
+    (me.data?.clients ?? []).some(
+      (client) => client.id === repo.client_id && client.permissions.includes("backup.policy.manage"),
+    );
 
   return (
     <div>
@@ -95,12 +114,11 @@ export function RepositoriesPage() {
       <OffsiteReadiness />
 
       {/* The total is the way back to the unfiltered list: arriving from
-          `?state=disabled` that is what clears the filter, which is the one
+          `?state=retired` that is what clears the filter, which is the one
           job a total tile can honestly do. The other two open the rows they
-          counted. Nothing here is `urgent`: a repository that is registered
-          but not active is a configuration state somebody chose, not an
-          incident with a deadline, and gold without weight says exactly
-          that. */}
+          counted. Nothing here is `urgent`: a retired repository is a
+          decision somebody made, not an incident with a deadline, and gold
+          without weight says exactly that. */}
       <StatsGrid columns={3}>
         <StatCard
           label={t("backup.repositories.tileRepositories")}
@@ -119,10 +137,10 @@ export function RepositoriesPage() {
           zeroLabel={t("backup.repositories.noneAccept")}
         />
         <StatCard
-          label={t("backup.repositories.tileDisabled")}
-          value={String(items.length - activeCount)}
+          label={t("backup.repositories.tileRetired")}
+          value={String(retiredCount)}
           icon="minus"
-          to="/backup/repositories?state=disabled"
+          to="/backup/repositories?state=retired"
           tone="gold"
           zeroLabel={t("backup.repositories.everyActive")}
         />
@@ -143,7 +161,7 @@ export function RepositoriesPage() {
           >
             <option value="">{t("backup.repositories.allRepositories")}</option>
             <option value="active">{t("backup.repositories.tileActive")}</option>
-            <option value="disabled">{t("backup.repositories.notActive")}</option>
+            <option value="retired">{t("backup.repositories.tileRetired")}</option>
           </select>
           <span className="filter-spacer" />
         </FilterBar>
@@ -165,6 +183,7 @@ export function RepositoriesPage() {
                 {showClient ? <Th>{t("backup.repositories.colClient")}</Th> : null}
                 <Th>{t("backup.repositories.colState")}</Th>
                 <Th>{t("backup.repositories.colRegistered")}</Th>
+                <Th />
               </tr>
             </thead>
             <tbody>
@@ -186,12 +205,46 @@ export function RepositoriesPage() {
                   <Td>
                     {formatDateTime(repo.created_at, zone)}
                   </Td>
+                  <Td>
+                    {mayRetire(repo) ? (
+                      <Btn
+                        small
+                        variant="danger"
+                        label={t("backup.repositories.retire")}
+                        ariaLabel={t("backup.repositories.retireAria", { name: repo.name })}
+                        onClick={() => {
+                          retire.reset();
+                          setRetiring(repo);
+                        }}
+                      />
+                    ) : null}
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </Table>
         </QueryState>
+        {retire.isError ? (
+          <p role="alert" className="form-error">
+            {t("backup.repositories.retireFailed")} {describeSubmitError(retire.error)}
+          </p>
+        ) : null}
       </Panel>
+
+      <ConfirmDialog
+        open={retiring !== null}
+        title={t("backup.repositories.retireTitle")}
+        subject={retiring?.name ?? ""}
+        body={t("backup.repositories.retireBody")}
+        confirmLabel={t("backup.repositories.retireConfirm")}
+        destructive
+        onCancel={() => setRetiring(null)}
+        onConfirm={() => {
+          const repo = retiring;
+          setRetiring(null);
+          if (repo) retire.mutate(repo.id);
+        }}
+      />
 
       {/* KEYED so a refusal cannot outlive the dialog that produced it: this
           component is never unmounted (only `Dialog` returns null when

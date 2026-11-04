@@ -18,6 +18,7 @@ import { AlertDetail } from "./AlertDetail";
 import { ApprovedActionList } from "./ApprovedActionList";
 import { HealthReportPanel } from "./HealthReportPanel";
 import { HealthSettingsPanel } from "./HealthSettingsPanel";
+import { ProfileAssignments } from "./ProfileAssignments";
 import { ProfileEditor } from "./ProfileEditor";
 import { ProfileList } from "./ProfileList";
 import { useHealthAlerts } from "./api";
@@ -253,6 +254,7 @@ export function HealthPage() {
         />
 
         {selectedProfileId && <ProfileEditor profileId={selectedProfileId} canAdmin={canAdmin} />}
+        {selectedProfileId && <ProfileAssignments profileId={selectedProfileId} canAdmin={canAdmin} />}
       </div>
 
       <div id="approved-actions">
