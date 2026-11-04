@@ -18,6 +18,5 @@ export const setup = {
     checkInbox: "Check that inbox for a link to choose a password, then sign in.",
     invitationFailed: "The invitation email could not be sent, so no sign-in link has arrived.",
     goToSignIn: "Go to sign in",
-    signInFailed: "Sign-in could not be started. {reason}",
   },
 } as const;

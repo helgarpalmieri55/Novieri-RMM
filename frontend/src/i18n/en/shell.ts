@@ -125,15 +125,14 @@ export const shell = {
     // The Assistant as the object of "Ask …" in the search panel.
     assistantObject: "the Assistant",
     sessionExpired:
-      "Your session has expired. Anything unsaved is still on this page — finish and save, then sign in again to send it.",
+      "Your session has expired. Anything unsaved is still on this page — copy what you want to keep, then sign in again.",
     signInAgain: "Sign in again",
     breadcrumb: "Breadcrumb",
     signInUnavailable: "Sign-in is unavailable",
-    identityProviderUnreachable: "The console could not reach its identity provider at <mono>{authority}</mono>.",
+    serverUnreachable: "The console could not ask the server whether you are signed in. {reason}",
     redirecting: "Redirecting to sign-in…",
     starting: "Starting…",
-    completingSignIn: "Completing sign-in…",
-    signInFailed: "Sign-in failed: {error}",
+    signOutFailed: "Sign-out did not reach the server, so your session is still open. Try again.",
     pageType: "Page",
   },
   health: {

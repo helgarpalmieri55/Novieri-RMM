@@ -122,15 +122,14 @@ export const shell: Shape<typeof en> = {
     askAssistant: "Preguntar al Asistente",
     assistantObject: "al Asistente",
     sessionExpired:
-      "Tu sesión ha caducado. Lo que no hayas guardado sigue en esta página: termina y guarda, y luego vuelve a iniciar sesión para enviarlo.",
+      "Tu sesión ha caducado. Lo que no hayas guardado sigue en esta página: copia lo que quieras conservar y vuelve a iniciar sesión.",
     signInAgain: "Iniciar sesión de nuevo",
     breadcrumb: "Ruta de navegación",
     signInUnavailable: "El inicio de sesión no está disponible",
-    identityProviderUnreachable: "La consola no pudo conectar con su proveedor de identidad en <mono>{authority}</mono>.",
+    serverUnreachable: "La consola no pudo preguntar al servidor si has iniciado sesión. {reason}",
     redirecting: "Redirigiendo al inicio de sesión…",
     starting: "Iniciando…",
-    completingSignIn: "Completando el inicio de sesión…",
-    signInFailed: "Error al iniciar sesión: {error}",
+    signOutFailed: "El cierre de sesión no llegó al servidor, así que tu sesión sigue abierta. Inténtalo de nuevo.",
     pageType: "Página",
   },
   health: {

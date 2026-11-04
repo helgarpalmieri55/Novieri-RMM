@@ -15,11 +15,10 @@
 import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ApiClient } from "./api";
+import { ApiError, type ApiClient } from "./api";
 import { ApiProvider, useApi } from "./ApiContext";
 import { setSelectedClient } from "./clientChoice";
-
-vi.mock("./auth", () => ({ accessToken: () => "t", signIn: vi.fn() }));
+import { isSessionEnded } from "./sessionEnd";
 
 const ACME = "0b6a2c1e-6d2f-4a51-9c3e-2f4d1a7b8c01";
 
@@ -71,5 +70,23 @@ describe("ApiProvider's X-Client-Id", () => {
     }
     expect(fetchMock).toHaveBeenCalledTimes(5);
     for (let call = 0; call < 5; call += 1) expect(sent(fetchMock, call).has("X-Client-Id")).toBe(false);
+  });
+});
+
+/**
+ * A 401 IS THE SESSION ENDING, NOT A NAVIGATION (own-auth design §2.4, plan
+ * decision D20). RE-POINTED (own-auth Task 10): this file mocked `./auth`,
+ * whose `signIn()` was `onUnauthorized` -- a redirect from any page on any
+ * 401, the sign-in page's own language save included. The provider now marks
+ * the session ended and the guard and the shell decide what the person sees.
+ */
+describe("ApiProvider's onUnauthorized", () => {
+  it("marks the session ended on a 401, and navigates nowhere", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response('{"code":"auth_required"}', { status: 401 })));
+    const api = providedApi();
+    expect(isSessionEnded()).toBe(false);
+    await expect(api.listDevices()).rejects.toBeInstanceOf(ApiError);
+    expect(isSessionEnded()).toBe(true);
+    expect(window.location.pathname).toBe("/");
   });
 });

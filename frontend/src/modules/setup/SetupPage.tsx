@@ -37,7 +37,7 @@ import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
 import { Field, inputClass } from "../../components/ui";
 import { ApiError, requestHeaders } from "../../lib/api";
-import { signIn } from "../../lib/auth";
+import { SIGN_IN_PATH, navigation } from "../../lib/session";
 import { Btn, KIND_ICON } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 
@@ -57,10 +57,10 @@ export type Claimed = {
 /**
  * Ask whether this installation still needs setting up.
  *
- * UNGATED AND DELIBERATELY NOT ON `ApiClient`. That client attaches a bearer
- * token and, on a 401, kicks the browser into a sign-in redirect. This question
- * is asked before any of that exists, and the answer decides whether a sign-in
- * redirect would be a dead end.
+ * UNGATED AND DELIBERATELY NOT ON `ApiClient`. That client reads a 401 as a
+ * session that ended. This question is asked before any session can exist,
+ * and the answer decides whether sending the visitor to sign in would be a
+ * dead end.
  */
 export async function fetchSetupStatus(): Promise<SetupStatus> {
   const response = await fetch("/api/v1/setup/status", {
@@ -83,9 +83,9 @@ export async function fetchSetupStatus(): Promise<SetupStatus> {
  * rest of the product's error paths already look like, so this screen gets the
  * same sentences as every other form despite not going through `ApiClient`.
  *
- * WHY NOT `ApiClient` ITSELF: it attaches a bearer token and, on a 401, kicks
- * the browser into a sign-in redirect. This request is made before any of that
- * exists. Only the error TYPE is borrowed.
+ * WHY NOT `ApiClient` ITSELF: it reads a 401 as a session that ended, and
+ * this request is made before any session exists. Only the error TYPE is
+ * borrowed.
  */
 async function refusal(response: Response): Promise<string> {
   // `.text()` rather than `.json()`, matching how `ApiClient` builds an
@@ -258,7 +258,6 @@ export function SetupPage() {
  */
 function Claim({ claimed }: { claimed: Claimed }) {
   const t = useT();
-  const [signInError, setSignInError] = useState<string | null>(null);
   return (
     <>
       <h1 style={HEADLINE}>{t("setup.claim.title")}</h1>
@@ -282,28 +281,19 @@ function Claim({ claimed }: { claimed: Claimed }) {
         </p>
       )}
       <div className="form-actions" style={{ marginTop: 20 }}>
-        {/* `void signIn()` SWALLOWED THE REJECTION ENTIRELY. `signinRedirect`
-            fetches the provider's discovery document first, so an identity
-            provider that is not up yet — the likeliest state of a freshly
-            installed appliance — rejected here and the button did visibly
-            nothing, on the last screen of an installation, with no other way
-            forward. */}
+        {/* A WHOLE-DOCUMENT LOAD, NOT A ROUTE CHANGE. `SetupGate` holds
+            `needed: true` for the life of this tab (`staleTime: Infinity`),
+            so a route change would land on this same screen; a fresh page
+            asks again and finds the installation claimed. Nothing is fetched
+            first, so -- unlike the identity provider's discovery document
+            this button used to wait on -- nothing can fail before it goes. */}
         <Btn
           label={t("setup.claim.goToSignIn")}
           icon="lock"
           variant="primary"
-          onClick={() => {
-            setSignInError(null);
-            signIn().catch((cause: unknown) => setSignInError(describeSubmitError(cause)));
-          }}
+          onClick={() => navigation.assign(SIGN_IN_PATH)}
         />
       </div>
-      {signInError ? (
-        <p role="alert" className="notice red" style={{ marginTop: 12 }}>
-          <Icon name={KIND_ICON.crit} size={16} />
-          <span>{t("setup.claim.signInFailed", { reason: signInError })}</span>
-        </p>
-      ) : null}
     </>
   );
 }

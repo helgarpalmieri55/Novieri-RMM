@@ -21,21 +21,13 @@ import { I18nProvider, readStoredLanguage, useLanguage, useT } from "./i18n/cont
 import { setActiveLanguage, subscribe, translate } from "./i18n/core";
 import { resolveLanguage } from "./i18n/resolve";
 import type { Language } from "./i18n/types";
-import { Trans } from "./i18n/Trans";
 import { Toaster, type ToastItem } from "./shell/Toaster";
 import { FIXTURE_MODE } from "./fixtures/mode";
 import { PreviewPage } from "./preview/PreviewPage";
-import {
-  completeSignIn,
-  initAuth,
-  isAuthenticated,
-  isSessionExpiring,
-  oidcAuthority,
-  onSessionExpiring,
-  safeReturnTo,
-  signIn,
-  signOut,
-} from "./lib/auth";
+import { goToSignIn, hasSession, signOut, useSession } from "./lib/session";
+import { describeSubmitError } from "./components/form";
+import { KIND_ICON } from "./shell/components";
+import { Icon } from "./shell/icons";
 import { roleChipName } from "./modules/settings/types";
 import { CandidatesPage } from "./modules/devices/CandidatesPage";
 import { DevicesPage } from "./modules/devices/DevicesPage";
@@ -150,50 +142,6 @@ export const queryClient = new QueryClient({
 });
 
 /**
- * The OIDC redirect lands here, and it lands here for TWO different journeys:
- * an ordinary sign-in, and a credential step the user started from inside ITMS
- * (`startAccountAction`). The second one is the reason this reads `state`.
- *
- * A CREDENTIAL STEP THAT DUMPS YOU ON THE DEVICE LIST IS A HALF-KEPT PROMISE.
- * The whole argument for an application-initiated action over a link to the
- * identity provider's own account pages is that the user never leaves ITMS --
- * and "never leaves" includes coming back to the tab they were on, not to the
- * app's front door. `startAccountAction` records that page in the OIDC `state`;
- * this reads it back.
- *
- * `safeReturnTo` IS NOT OPTIONAL AND IS NOT A FORMATTING DETAIL. The value
- * arrives from the identity provider, so it is untrusted input, and
- * `navigate()` on a protocol-relative path (`//evil.example`) leaves the origin
- * -- an open redirect out of the auth callback, which is the one route in the
- * application a phishing chain most wants. The filter is in `lib/auth.ts` with
- * its whitelist stated; the refusals are tested in `App.auth.test.tsx`.
- */
-export function CallbackPage() {
-  const t = useT();
-  const navigate = useNavigate();
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    completeSignIn()
-      .then((user) => navigate(safeReturnTo(user?.state), { replace: true }))
-      .catch((err: unknown) => setError(String(err)));
-  }, [navigate]);
-  // `role="alert"` because this screen is the END of a redirect chain: the
-  // browser has just navigated back into the console on its own, so nobody's
-  // focus is anywhere useful and a sighted user is looking at a page that
-  // changed under them. Auditor A found the untreated version of exactly this
-  // -- "the browser ends up back at /login showing the identical card. No
-  // error text, no banner, no toast, no reason" -- and an unannounced
-  // paragraph is that same silence for anyone not watching the pixels.
-  if (error)
-    return (
-      <p className="p-8 text-[var(--red)]" role="alert">
-        {t("shell.app.signInFailed", { error })}
-      </p>
-    );
-  return <p className="p-8 text-[var(--muted)]">{t("shell.app.completingSignIn")}</p>;
-}
-
-/**
  * The chrome every authenticated route renders inside.
  *
  * EXPORTED FOR ONE REASON: `App.crumb.test.tsx`. Everything this component
@@ -264,10 +212,17 @@ export function Shell({ children }: { children: React.ReactNode }) {
     return Object.keys(counts).length > 0 ? counts : undefined;
   }, [health.openAlerts, reviewCount]);
 
-  // The session notice, subscribed once. `isSessionExpiring()` seeds it so a
-  // renewal that failed while this component was unmounted is not missed.
-  const [expiring, setExpiring] = useState(isSessionExpiring);
-  useEffect(() => onSessionExpiring(({ expiring: value }) => setExpiring(value)), []);
+  // THE SESSION NOTICE (own-auth design §2.4). A 401 after `/me` answered is
+  // a session that ended while the person was here -- the 30 minutes of
+  // inactivity, the 12-hour maximum, an administrator. The page stays drawn
+  // and the shell says so; the person copies what they were writing and
+  // chooses when to sign in again (auditor A, HIGH: "the session drops
+  // mid-task ... total loss of context").
+  const session = useSession();
+  // A SIGN-OUT THE SERVER NEVER HEARD IS SAID OUT LOUD. Shown the sign-in page
+  // while the session stays open, a person on a shared computer walks away
+  // from it (`lib/session.ts::signOut`).
+  const [signOutFailed, setSignOutFailed] = useState(false);
 
   // Breadcrumb and page title come from the nav model rather than a second
   // hand-maintained route->title map -- and the derivation itself lives in
@@ -373,10 +328,19 @@ export function Shell({ children }: { children: React.ReactNode }) {
         // `roleChipName`: as stored in English, the seeded role's own name in another language.
         role: roleChipName(me.data?.roles?.[0] ?? ""),
       }}
-      onSignOut={() => void signOut()}
-      sessionExpiring={expiring}
-      onSignIn={() => void signIn()}
+      onSignOut={() => {
+        setSignOutFailed(false);
+        signOut(api).catch(() => setSignOutFailed(true));
+      }}
+      sessionExpiring={session.status === "signed_out"}
+      onSignIn={() => goToSignIn(location.pathname + location.search)}
     >
+      {signOutFailed ? (
+        <p role="alert" className="notice red">
+          <Icon name={KIND_ICON.crit} size={16} />
+          <span>{t("shell.app.signOutFailed")}</span>
+        </p>
+      ) : null}
       {children}
     </AppShell>
   );
@@ -402,81 +366,72 @@ export function Landing() {
 }
 
 /**
- * The guard. An unauthenticated visitor goes to Keycloak immediately: there is
- * no ITMS launcher any more (docs/modules/console-auth/spec.md §3.4).
+ * The guard (own-auth design §1.1, §6.5). A tab with no session goes to the
+ * console's own sign-in page, carrying the page it asked for as `?next=`.
  *
- * THE LAUNCHER WAS COVERING TWO FAILURES, and removing it means handling both.
- * A page with a button renders whether or not Keycloak is reachable; an
- * automatic redirect has nothing to render when the redirect itself fails. So
- * a rejected `signIn()` becomes a screen that NAMES the authority it tried --
- * `lib/auth.ts`'s header records what the alternative costs: a login that did
- * nothing, and no error anywhere.
+ * WHAT DECIDES IS `GET /me` (`lib/session.ts::useSession`). An answer renders
+ * the page. A 401 in a tab that never had a session sends it to sign in --
+ * once: `leaving` is a ref because the navigation replaces the document, and
+ * React strict mode runs this effect twice on purpose. A 401 AFTER the person
+ * was here keeps the shell and the page drawn and raises the shell's notice
+ * instead (`Shell`). A failure that is not a 401 -- the server down, a proxy's
+ * 502 -- is said, inside an alert, with its reason: this screen replaces a
+ * page the person expected, and a redirect to sign in would blame their
+ * session for the server's outage.
  *
- * `redirecting` is a ref rather than state because `signinRedirect()` is a side
- * effect that navigates the whole page. Firing it from an effect that runs
- * twice -- which React strict mode does deliberately -- starts two
- * authorization requests, and the second overwrites the first's PKCE state in
- * sessionStorage. The symptom is a callback failing with "state mismatch"
- * after a login that looked fine.
+ * FIXTURE MODE NEEDS NO BRANCH HERE. Its client answers `/me`
+ * (`fixtures/core.ts`), so the review harness renders every route signed in;
+ * a real API would still answer every request it makes with 401, because the
+ * console gates nothing (invariant 6).
  */
 export function RequireAuth({ children }: { children: React.ReactNode }) {
   const t = useT();
-  const [error, setError] = useState<string | null>(null);
-  const redirecting = useRef(false);
-  // FIXTURE MODE COUNTS AS SIGNED IN, and only there. The flag is `false` in
-  // a production build (`fixtures/mode.ts`), so this is the review harness
-  // rendering every route over invented data, never the console skipping its
-  // identity provider. The frontend gates nothing (invariant 6): a session
-  // that looks signed in here still holds no token, and a real API would
-  // answer every request with 401.
-  const authed = isAuthenticated() || FIXTURE_MODE;
+  const location = useLocation();
+  const session = useSession();
+  const leaving = useRef(false);
+  const mustSignIn = session.status === "signed_out" && session.me === undefined;
+  const here = location.pathname + location.search;
 
   useEffect(() => {
-    if (authed || redirecting.current) return;
-    redirecting.current = true;
-    signIn().catch((err: unknown) => setError(String(err)));
-  }, [authed]);
+    if (!mustSignIn || leaving.current) return;
+    leaving.current = true;
+    goToSignIn(here);
+  }, [mustSignIn, here]);
 
   // INSIDE THE GUARD, AROUND THE SHELL: the client selection needs `/me`, which
   // only a signed-in session can ask, and a change of client starts the shell
   // and the page again (`lib/clientScope.tsx`).
-  if (authed) {
+  if (session.me !== undefined) {
     return (
       <ClientScopeProvider>
         <Shell>{children}</Shell>
       </ClientScopeProvider>
     );
   }
-  if (error) {
+  if (session.failure !== undefined) {
     return (
       <div className="flex min-h-screen items-center justify-center p-8">
-        {/* Announced, for the same reason as the callback failure above: this
-            replaces a redirect that was expected to leave the page. */}
         <div
           className="w-full max-w-md rounded-lg border border-[var(--line)] p-8 shadow-sm"
           role="alert"
         >
           <h1 className="mb-2 text-lg font-semibold">{t("shell.app.signInUnavailable")}</h1>
-          <p className="mb-4 text-sm text-[var(--muted)]">
-            <Trans
-              k="shell.app.identityProviderUnreachable"
-              vars={{ authority: oidcAuthority }}
-              components={{ mono: <span className="font-mono" /> }}
-            />
+          <p className="text-sm text-[var(--muted)]">
+            {t("shell.app.serverUnreachable", { reason: describeSubmitError(session.failure) })}
           </p>
-          <p className="text-xs text-[var(--muted)]">{error}</p>
         </div>
       </div>
     );
   }
-  return <p className="p-8 text-[var(--muted)]">{t("shell.app.redirecting")}</p>;
+  if (mustSignIn) return <p className="p-8 text-[var(--muted)]">{t("shell.app.redirecting")}</p>;
+  return <p className="p-8 text-[var(--muted)]">{t("shell.ui.loading")}</p>;
 }
 
 /**
  * BEFORE THE AUTH GATE, AND THAT ORDER IS THE WHOLE POINT.
  *
- * `RequireAuth` sends an unauthenticated visitor straight to the identity
- * provider. On an installation that has never been set up there is nobody to
+ * `RequireAuth` sends a visitor with no session straight to the sign-in
+ * page. On an installation that has never been set up there is nobody to
  * authenticate as, so that redirect is a dead end with no way out: a sign-in
  * page for a platform with zero accounts, and nothing on screen that explains
  * it. The first browser visit to a new appliance is exactly that case, so the
@@ -535,6 +490,12 @@ export function LanguageBridge({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const onChange = useCallback(
     (language: Language) => {
+      // ONLY WITH A SESSION (plan decision D20). The bridge sits outside
+      // `RequireAuth`, so it is also on the sign-in pages, where there is no
+      // account to save to: the request would only answer 401. The choice is
+      // kept in this browser either way (`itms.lang`), and the next sign-in
+      // opens in it.
+      if (!hasSession(queryClient)) return;
       api
         .updateMe({ locale: language })
         .then((saved) => {
@@ -588,18 +549,15 @@ export function LanguageBridge({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * NOTHING IS AWAITED BEFORE THE FIRST PAINT. `lib/auth.ts`'s `initAuth()` read
+ * the OIDC user out of `sessionStorage` before anything rendered; the session
+ * is a cookie now, and the one question about it is `/me`, which `RequireAuth`
+ * asks behind a loading line. So a run with no backend at all -- the
+ * accessibility pass over `/__preview` (`scripts/a11y-browser.mjs`) -- and
+ * fixture mode render at once, and no network call can hold the page blank.
+ */
 export default function App() {
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    // No identity provider is consulted in fixture mode: `RequireAuth` treats
-    // the session as signed in and `ApiProvider` hands out the fixture proxy.
-    if (FIXTURE_MODE) {
-      setReady(true);
-      return;
-    }
-    void initAuth().finally(() => setReady(true));
-  }, []);
-  if (!ready) return null;
   return (
     <QueryClientProvider client={queryClient}>
       <ApiProvider>
@@ -615,7 +573,6 @@ export default function App() {
         {import.meta.env.DEV ? (
           <Route path="/__preview" element={<PreviewPage />} />
         ) : null}
-            <Route path="/auth/callback" element={<CallbackPage />} />
             <Route
               path="/devices"
               element={

@@ -416,6 +416,8 @@ const getDeviceInventory = (deviceId: string): DeviceInventory => {
 export const fixtures: FixtureMap = {
   me,
   getCurrentOrg: org,
+  /** The account menu's Sign out: the server ended the session (a 204). */
+  logout: () => undefined,
 
   /** Behind the health glyph and the rail's `/health` count. */
   getHealthAlertSummary: () => ({
