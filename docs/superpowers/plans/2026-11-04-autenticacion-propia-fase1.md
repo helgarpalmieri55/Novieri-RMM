@@ -177,7 +177,7 @@ Todas públicas salvo indicación; respuestas sin secretos; mensajes genéricos 
 
 ### Task 9 — asistente y portal
 
-- `backend/app/core/auth/loopback.py`: `async def mint_loopback(principal: SessionPrincipal) -> str` (JWT ES256 vía `keys.sign_es256`, `aud="loopback"`, 5 min, `sid`=session_id); la puerta lo admite solo en las llamadas internas del propio proceso (la Task 9 fija cómo). Los ejecutores (`executor_staff.py:287`, `executor_portal.py:203`, `act.py:445-455`) lo usan en vez del `Authorization` recibido.
+- `backend/app/core/auth/loopback.py`: `async def mint_loopback(principal: SessionPrincipal) -> str` (JWT ES256 vía `keys.sign_jwt(..., typ="loopback+jwt")` de la Task 2, que firma con `keys.sign_es256`; `aud="loopback"`, 5 min, `sid`=session_id); la puerta lo admite solo en las llamadas internas del propio proceso (la Task 9 fija cómo). Los ejecutores (`executor_staff.py:287`, `executor_portal.py:203`, `act.py:445-455`) lo usan en vez del `Authorization` recibido.
 - Portal: los técnicos con `portal.*` entran con la cookie.
 
 ### Task 10 — consola, núcleo
@@ -2488,10 +2488,12 @@ y las reglas de contraseña sobre los que las Tasks 4 a 9 construyen; no añade 
       compatible con la firma del Apéndice A): `None` = la última, un entero = la guardada con el hash.
     - `async def sign_es256(signing_input: bytes) -> tuple[bytes, str]`: arriba; el `kid` es la huella RFC 7638 de
       la clave pública de la versión que firmó.
-    - **Nuevo:** `async def sign_jwt(claims: Mapping[str, Any]) -> str`: un JWS compacto ES256 con
-      `{"alg":"ES256","kid":...,"typ":"JWT"}`. El `kid` va en la cabecera firmada **antes** de firmar, así que
-      `sign_jwt` lo compara con el que devuelve `sign_es256` y repite una vez si OpenBao rotó entre medias. La
-      Task 9 acuña el token `loopback` con esto en vez de montar la cabecera a mano.
+    - **Nuevo:** `async def sign_jwt(claims: Mapping[str, Any], *, typ: str = "JWT") -> str`: un JWS compacto
+      ES256 con `{"alg":"ES256","kid":...,"typ":typ}`. El `kid` va en la cabecera firmada **antes** de firmar, así
+      que `sign_jwt` lo compara con el que devuelve `sign_es256` y repite una vez si OpenBao rotó entre medias.
+      `typ` (kw-only, `"JWT"` por defecto) es el *explicit typing* de RFC 8725 §3.11: la Task 9 acuña el token
+      `loopback` con `keys.sign_jwt(payload, typ="loopback+jwt")` en vez de montar la cabecera a mano. Prueba:
+      `test_sign_jwt_puts_the_typ_it_is_given_in_the_signed_header`.
     - `async def jwks() -> dict[str, Any]`: arriba.
     - **Nuevos:** `configure(settings)`, `set_backend(backend | None)`, `build(settings) -> AuthKeys`;
       `class LocalAuthKeys` (`.generate()`, `.from_dir(dir, *, allow_generate)`), `class OpenBaoAuthKeys`,
@@ -2753,6 +2755,24 @@ async def test_a_token_signed_here_verifies_against_the_published_set(installed:
         )
 
 
+async def test_sign_jwt_puts_the_typ_it_is_given_in_the_signed_header(installed: Any) -> None:
+    """`typ` is RFC 8725 §3.11 explicit typing (Task 9's `loopback+jwt`): it is
+    part of the SIGNED header, so changing it afterwards breaks the signature."""
+    installed(LocalAuthKeys.generate())
+    now = int(time.time())
+
+    token = await keys.sign_jwt({"sub": "u-1", "exp": now + 300}, typ="loopback+jwt")
+
+    header = jwt.get_unverified_header(token)
+    assert (header["alg"], header["typ"]) == ("ES256", "loopback+jwt")
+    public = jwt.PyJWKSet.from_dict(await keys.jwks())[header["kid"]].key
+    assert jwt.decode(token, public, algorithms=["ES256"])["sub"] == "u-1"
+    _, payload, signature = token.split(".")
+    retyped = _b64url(json.dumps({**header, "typ": "JWT"}, separators=(",", ":")).encode())
+    with pytest.raises(jwt.InvalidSignatureError):
+        jwt.decode(f"{retyped}.{payload}.{signature}", public, algorithms=["ES256"])
+
+
 async def test_sign_es256_answers_r_and_s_and_the_kid(installed: Any) -> None:
     private = _p256()
     installed(LocalAuthKeys(pepper={1: b"\x00" * 32}, signing={1: private}))
@@ -2973,6 +2993,7 @@ Qué protege cada prueba:
 | `version=` en `LocalAuthKeys.hmac` / `key_version` en `OpenBaoAuthKeys.hmac` | un hash guardado deja de verificar tras rotar | `test_the_latest_pepper_is_used_and_a_stored_version_honoured`, `test_openbao_macs_with_the_pepper_and_honours_the_version` |
 | `marshaling_algorithm: "jws"` y la longitud de 64 bytes | firma DER, que un JWT no acepta | `test_openbao_signs_in_jws_form_and_names_the_key` |
 | el `kid` de la versión que firmó y el reintento de `sign_jwt` | token con un `kid` que no verifica | `test_openbao_public_keys_are_read_once_per_ttl_and_on_a_new_version` |
+| `"typ": typ` en la cabecera firmada de `sign_jwt` | el token `loopback` (Task 9) sale con `typ` `JWT` y se confunde con otro | `test_sign_jwt_puts_the_typ_it_is_given_in_the_signed_header` |
 | `sorted(keys, reverse=True)[:2]` en `jwks` | se publican todas o falta la anterior | `test_the_set_holds_the_current_key_and_the_one_before` |
 | `AuthKeysUnavailable` en cada llamada a OpenBao | un error de transporte se convierte en otra cosa | `test_openbao_failing_is_unavailable_never_a_guess` |
 | `allow_generate=settings.environment != "production"` | producción inventa un pepper | `test_production_refuses_to_invent_a_pepper` |
@@ -3409,11 +3430,13 @@ def _segment(value: Mapping[str, Any]) -> str:
     return _b64url(json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8"))
 
 
-async def sign_jwt(claims: Mapping[str, Any]) -> str:
+async def sign_jwt(claims: Mapping[str, Any], *, typ: str = "JWT") -> str:
     """A compact JWS (RFC 7515 §7.1) of `claims`, ES256, with the signing key's
-    `kid` in its header. The `kid` goes into the signed header BEFORE the
-    signature exists, so a key rotated in between (OpenBao signs with its
-    latest version; this process's copy of the public keys may be older) is
+    `kid` and `typ` in its header. `typ` is RFC 8725 §3.11 explicit typing: the
+    assistant's internal token (Task 9) is `loopback+jwt`, so it cannot be taken
+    for any other token this key signs. The `kid` goes into the signed header
+    BEFORE the signature exists, so a key rotated in between (OpenBao signs with
+    its latest version; this process's copy of the public keys may be older) is
     caught by comparing it with the one `sign_es256` reports -- which has read
     the keys again on meeting the new version -- and the token is made once
     more."""
@@ -3421,7 +3444,7 @@ async def sign_jwt(claims: Mapping[str, Any]) -> str:
     for _attempt in range(2):
         keys = await backend.public_keys()
         kid = thumbprint(keys[max(keys)])
-        signing_input = f"{_segment({'alg': 'ES256', 'kid': kid, 'typ': 'JWT'})}.{_segment(claims)}"
+        signing_input = f"{_segment({'alg': 'ES256', 'kid': kid, 'typ': typ})}.{_segment(claims)}"
         signature, used = await sign_es256(signing_input.encode("ascii"))
         if used == kid:
             return f"{signing_input}.{_b64url(signature)}"
@@ -3445,7 +3468,7 @@ async def jwks() -> dict[str, Any]:
 - [ ] **Step 5: Ver que pasan**
 
 Run: `.venv/bin/pytest -q tests/test_auth_keys.py`
-Expected: PASS (15).
+Expected: PASS (16).
 
 - [ ] **Step 6: La lista de bloqueo: pruebas, script, archivo y procedencia**
 
@@ -4525,7 +4548,7 @@ git commit -m "feat(auth): OpenBao pepper and ES256 signing key, JWKS, argon2id 
 - [ ] **Step 12: Verificación final**
 
 Desde `backend/` (con `pg_ctlcluster 16 main start; redis-cli ping || redis-server --daemonize yes`):
-- `.venv/bin/pytest -q tests/test_auth_keys.py tests/test_auth_blocklist.py tests/test_auth_passwords.py tests/test_auth_jwks.py tests/test_auth_openbao_provisioning.py`. Expected: PASS (54).
+- `.venv/bin/pytest -q tests/test_auth_keys.py tests/test_auth_blocklist.py tests/test_auth_passwords.py tests/test_auth_jwks.py tests/test_auth_openbao_provisioning.py`. Expected: PASS (55).
 - `.venv/bin/mypy app`. Expected: `Success: no issues found`.
 - `.venv/bin/ruff check app tests ../scripts/build_password_blocklist.py`. Expected: `All checks passed!`.
 - La suite completa la corre el coordinador.
@@ -4573,6 +4596,9 @@ a `app/core/mail.py`. La forma de la API no cambia, así que la consola sigue fu
 - Modify: `backend/tests/test_notification_microsoft_smtp.py` (imports `:26-34`; `:219` y `:234`)
 - Modify: `backend/tests/test_ai_tool_surface.py:631-636` (comentario)
 - Modify: `frontend/src/i18n/en/auditVocabulary.ts:186` y `frontend/src/i18n/es/auditVocabulary.ts:183`
+- Modify: `backend/tests/test_logging_discipline.py` (docstring `:441`, recuento `:524-525`: +1, el `logger.warning`
+  de `rate_limit.hit`) y `docs/superpowers/specs/2026-08-14-logging-kernel-design.md` (§2.2, encima de «NOW 107» de
+  `:178`)
 - Test: `backend/tests/test_rate_limit.py`, `backend/tests/test_account_mail.py`,
   `backend/tests/test_realm_settings_api.py`, `backend/tests/test_realm_config.py`,
   `backend/tests/test_notification_delivery.py`, `backend/tests/test_notification_microsoft_smtp.py`,
@@ -5067,15 +5093,39 @@ def ip_key(request: Request, bucket: str) -> str:
     return f"{bucket}:ip:{address if address is not None else 'unknown'}"
 ```
 
+El `logger.warning` de `hit` es una llamada de log nueva: `tests/test_logging_discipline.py::test_the_sweep_actually_finds_log_calls`
+la cuenta. En `backend/tests/test_logging_discipline.py`, el recuento de `:524-525` sube en **uno** sobre el que vea
+esta tarea (`107` → `108` en la rama de hoy, en el `assert` y en el `expected 107` del mensaje; las Tasks 4 y 9
+añaden otra cada una y el coordinador suma los deltas al fusionar, Global Constraints), y el docstring gana, encima
+del párrafo «NOW 107» (`:441`), que pasa a empezar por «BEFORE THAT, 107»:
+
+```python
+    NOW 108, own authentication phase 1 Task 3: one static WARNING in
+    `app/core/rate_limit.py::hit`, when Redis fails and the shared limiter
+    lets the request through (`exc_info=True`). Nothing in `extra`: never
+    the key, which names a person's address or account, nor the count.
+```
+
+En `docs/superpowers/specs/2026-08-14-logging-kernel-design.md` §2.2, encima de `**NOW 107, MSP clients phase 2 final
+review.**` (`:178`), que pasa a `**BEFORE THAT, 107, MSP clients phase 2 final review.**`:
+
+```markdown
+**NOW 108, own authentication phase 1 (Task 3).** One static WARNING in
+`app/core/rate_limit.py::hit`, when Redis fails and the shared limiter lets
+the request through (`exc_info=True`). Nothing in `extra`: never the key,
+which names a person's address or account, nor the count.
+```
+
 - [ ] **Step 5: Ver que pasan**
 
 Run: `.venv/bin/pytest -q tests/test_rate_limit.py tests/test_logging_discipline.py tests/test_i18n_catalog.py`
-Expected: PASS (10 en `test_rate_limit.py`).
+Expected: PASS (10 en `test_rate_limit.py`; `test_logging_discipline.py` con el recuento nuevo).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/app/core/rate_limit.py backend/tests/test_rate_limit.py
+git add backend/app/core/rate_limit.py backend/tests/test_rate_limit.py \
+  backend/tests/test_logging_discipline.py docs/superpowers/specs/2026-08-14-logging-kernel-design.md
 git commit -m "feat(auth): one shared fixed-window Redis limiter, failing open and logged (P2 phase 1 Task 3)"
 ```
 
@@ -8191,6 +8241,9 @@ sesión del llamante, que para estas filas (`O("users","user_id")`, cliente NULL
 - Create: `backend/tests/test_auth_totp.py`
 - Create: `backend/tests/test_auth_recovery.py`
 - Modify: `frontend/src/i18n/en/auditVocabulary.ts:65` y `frontend/src/i18n/es/auditVocabulary.ts:62`
+- Modify: `backend/tests/test_logging_discipline.py` (docstring `:441`, recuento `:524-525`: +1, el `logger.warning`
+  de `totp._open`) y `docs/superpowers/specs/2026-08-14-logging-kernel-design.md` (§2.2, encima de «NOW 107» de
+  `:178`)
 - Test: los tres archivos nuevos, `backend/tests/test_i18n_catalog.py`, `backend/tests/test_logging_discipline.py`,
   `backend/tests/test_client_catalog.py`, `frontend/src/modules/audit/auditVocabulary.coverage.test.ts`
 
@@ -9348,10 +9401,34 @@ async def remove_totp(session: AsyncSession, user_id: UUID) -> bool:
     return removed is not None
 ```
 
+El `logger.warning` de `_open` es una llamada de log nueva: `tests/test_logging_discipline.py::test_the_sweep_actually_finds_log_calls`
+la cuenta. En `backend/tests/test_logging_discipline.py`, el recuento de `:524-525` sube en **uno** sobre el que vea
+esta tarea (`107` → `108` en la rama de hoy, en el `assert` y en el `expected 107` del mensaje; las Tasks 3 y 9
+añaden otra cada una y el coordinador suma los deltas al fusionar, Global Constraints), y el docstring gana, encima
+del párrafo «NOW 107» (`:441`), que pasa a empezar por «BEFORE THAT, 107»:
+
+```python
+    NOW 108, own authentication phase 1 Task 4: one static WARNING in
+    `app/core/auth/totp.py::_open`, when a person's sealed TOTP secret does
+    not open for their row (moved from another row, or damaged) and the
+    code is refused. Nothing in `extra`: never the seal, the code or the
+    person.
+```
+
+En `docs/superpowers/specs/2026-08-14-logging-kernel-design.md` §2.2, encima de `**NOW 107, MSP clients phase 2 final
+review.**` (`:178`), que pasa a `**BEFORE THAT, 107, MSP clients phase 2 final review.**`:
+
+```markdown
+**NOW 108, own authentication phase 1 (Task 4).** One static WARNING in
+`app/core/auth/totp.py::_open`, when a person's sealed TOTP secret does not
+open for their row (moved from another row, or damaged) and the code is
+refused. Nothing in `extra`: never the seal, the code or the person.
+```
+
 - [ ] **Step 11: Ver que pasan**
 
 Run: `.venv/bin/pytest -q tests/test_auth_totp.py tests/test_logging_discipline.py tests/test_i18n_catalog.py`
-Expected: PASS (24 en `test_auth_totp.py`).
+Expected: PASS (24 en `test_auth_totp.py`; `test_logging_discipline.py` con el recuento nuevo).
 
 Quitar a mano `and (after is None or step > after)` de `_matching_step` **y** cambiar el `guard` confirmado por `True`:
 `test_a_code_is_accepted_once` y `test_two_requests_with_one_code_cannot_both_win` quedan en rojo. Devolverlo.
@@ -9359,7 +9436,8 @@ Quitar a mano `and (after is None or step > after)` de `_matching_step` **y** ca
 - [ ] **Step 12: Commit**
 
 ```bash
-git add backend/app/core/auth/totp.py backend/tests/test_auth_totp.py
+git add backend/app/core/auth/totp.py backend/tests/test_auth_totp.py \
+  backend/tests/test_logging_discipline.py docs/superpowers/specs/2026-08-14-logging-kernel-design.md
 git commit -m "feat(auth): TOTP per RFC 6238 with one step of tolerance, a code accepted once, its secret sealed to its person (P2 phase 1 Task 4)"
 ```
 
@@ -11496,7 +11574,8 @@ salir) son de la Task 7; esta tarea da las piezas y las prueba directamente.
 - Modify: `backend/app/api/v1/orgs.py:610` y `:784`; `backend/app/api/v1/realm_settings.py` (cada `ctx.claims.email`:
   `:514`, `:564`, `:597` en la cabeza de la rama; la Task 3 reescribe el archivo, así que se buscan con `grep`)
 - Modify: `backend/app/mcp/server.py:249`, `:278`, `:354`, `:389`
-- Modify: `backend/app/main.py` (`:231`, `:285`, `:308`, `:343`)
+- Modify: `backend/app/main.py` (`:225-231`: la regla CSRF se añade ANTES que `McpNeverExposedGuard`, Step 8;
+  `:285`, `:308`, `:343`)
 - Modify: `backend/app/core/client_scope.py:100` (`ALL_SCOPE_ALLOWLIST`)
 - Modify: `backend/app/core/i18n/es.py` (al final, antes del `}` de `:4954`)
 - Modify: `backend/app/mcp/descriptions/part_d.py:462` (antes de `# --- software ---`)
@@ -11594,7 +11673,8 @@ exige la cabecera y el `Origin` en todo `/api/v1/auth/`. Un Bearer sin cookie no
 no lo pone solo): las llamadas internas de MCP, el bucle del asistente y las pruebas hasta la Task 13 no cambian.
 `Sec-Fetch-Site`, si viene, tiene que ser `same-origin`. Sin `ITS_PUBLIC_CONSOLE_URL` no hay origen con que comparar:
 se rechaza (y la Task 5 tampoco tendría RP ID). **Las pruebas de la Task 7 que llamen a `/api/v1/auth/*` mandan
-`console_headers()` y fijan `use_console`.**
+`console_headers()` y fijan `use_console`.** La regla corre **dentro** de `McpNeverExposedGuard` (se añade antes que
+él, Step 8): en el canal MCP una ruta nunca expuesta responde con la negativa del guardia, nunca con `csrf`.
 
 **Decisión del plan (4): el identificador cambia al iniciar sesión y al confirmar el factor, no en la confirmación
 reciente.** Es lo que dice §2.4. Rotar en cada confirmación reciente dejaría con 401 a las peticiones de la consola que
@@ -12960,7 +13040,10 @@ same setting (`console_host`).
 
 A PURE-ASGI MIDDLEWARE, like `app/mcp/guard.py`, registered inside the locale
 and security-header layers (`app/main.py`): the 403 is translated and carries
-the security headers. It reads headers only; the body is never touched.
+the security headers. And INSIDE `McpNeverExposedGuard`: an in-process MCP call
+to a never-exposed route (every `/api/v1/auth/` route) is the guard's to
+refuse, so it must never meet this rule's `csrf` first. It reads headers only;
+the body is never touched.
 """
 
 from urllib.parse import urlsplit
@@ -13642,6 +13725,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.csrf import console_host, console_origin
 from app.models import User
+from tests.mcp_support import marked_client
 from tests.session_support import CONSOLE, console_headers, cookie_header, sign_in, use_console
 
 
@@ -13763,6 +13847,23 @@ async def test_the_refusal_is_in_the_requests_language(api_env: Any, signed: Any
     assert response.json()["detail"] == "se rechazó esta petición porque no vino de la consola"
 
 
+async def test_an_mcp_call_meets_the_guard_before_this_rule(api_env: Any, signed: Any) -> None:
+    """Protects the ORDER in `app/main.py`: this rule is added BEFORE
+    `McpNeverExposedGuard`, so the guard is the outer layer. An in-process MCP
+    call to a never-exposed route that also carries a session cookie and no
+    console header is refused by BOTH; it must get the guard's answer, not
+    `csrf` -- the one every never-exposed `/api/v1/auth/` route gives the
+    channel from Task 7 on (`tests/test_mcp_channel_api.py::
+    test_every_never_exposed_route_refuses_the_channel`). Adding the rule
+    after the guard turns this red with a 403 `csrf`."""
+    async with marked_client(api_env) as client:
+        response = await client.post(
+            "/api/v1/enrollment-tokens", json={}, headers={"Cookie": cookie_header(signed.token)}
+        )
+    assert response.status_code == 403
+    assert response.json() == {"detail": "this action is never available to an AI app"}
+
+
 @pytest.mark.parametrize(
     ("configured", "origin", "host"),
     [
@@ -13792,23 +13893,64 @@ def test_the_console_origin_is_read_from_the_setting(
 Run: `cd backend && .venv/bin/pytest -q tests/test_auth_csrf.py`
 Expected: FAIL: las escrituras sin cabecera o de otro origen responden 200 (el middleware no está registrado) y
 `test_the_sign_in_routes_are_held_to_it_without_a_cookie` recibe 404 en vez de 403.
+`test_an_mcp_call_meets_the_guard_before_this_rule` ya pasa (sin el middleware solo responde el guardia); la Step 8
+la mantiene verde solo si registra la regla en el orden correcto.
 
-- [ ] **Step 8: El middleware**
+- [ ] **Step 8: El middleware, dentro del guardia de MCP**
 
-`backend/app/main.py`, tras `app.add_middleware(McpNeverExposedGuard)` (`:231`):
+**El orden importa.** `add_middleware` de Starlette inserta cada capa al principio de `app.user_middleware`
+(`starlette/applications.py:107`, `self.user_middleware.insert(0, ...)`; `app.middleware("http")` pasa por él), así
+que la capa que se añade **última** es la **exterior** y corre primero. Hoy `backend/app/main.py:225-237` añade, en
+este orden, `McpNeverExposedGuard` (`:231`), `security_headers_middleware`, `request_context_middleware` y
+`locale_middleware`: de fuera a dentro, locale → request context → security headers → guardia. Si la regla CSRF se
+añadiera **después** del guardia quedaría **fuera** de él: una llamada MCP en proceso a una ruta nunca expuesta bajo
+`/api/v1/auth/` (todas las `POST /auth/*` de las Tasks 7 y 8 lo son, y la regla mira todo `/api/v1/auth/` aunque no
+haya cookie) recibiría el 403 `csrf` en vez de la negativa del guardia, y
+`tests/test_mcp_channel_api.py::test_every_never_exposed_route_refuses_the_channel` (`:157-168`, espera `NEVER_ES`)
+fallaría en cuanto la Task 7 añada esas rutas a `NEVER_EXPOSED`. Por eso la regla se añade **antes** que el
+guardia y corre **dentro** de él: de fuera a dentro, locale → request context → security headers → guardia → CSRF.
+Su 403 sigue traducido y con las cabeceras de seguridad.
+
+En `backend/app/main.py`, `:225-231`:
 
 ```python
-    # A write that rides on the console's session cookie must carry the
-    # console's own header and Origin (P2 design §6.4). Outside the MCP guard
-    # and inside the security-header and locale layers, so its 403 is
-    # translated and carries the headers.
-    from app.core.auth.csrf import RequireConsoleRequestHeader
+    # The MCP channel's never-exposed guard (`app/mcp/guard.py`) is added
+    # FIRST, so it is the INNERMOST of these layers: the locale is set when it
+    # answers, and its refusal still carries the security headers. Its route
+    # table is filled in after `modules.register_all` below.
+    from app.mcp.guard import McpNeverExposedGuard
 
-    app.add_middleware(RequireConsoleRequestHeader)
+    app.add_middleware(McpNeverExposedGuard)
 ```
 
-Run: `cd backend && .venv/bin/pytest -q tests/test_auth_csrf.py tests/test_auth_session_door.py tests/test_global_writes.py tests/test_mcp_server.py tests/test_i18n_catalog.py`
-Expected: PASS (`test_auth_csrf.py`: 23 con los parámetros).
+pasa a:
+
+```python
+    # Starlette inserts each layer at the FRONT of the stack: the one added
+    # last runs first. The console's CSRF rule (`app/core/auth/csrf.py`, P2
+    # design §6.4: a write on the session cookie carries the console's header
+    # and Origin) is added FIRST, so it is the INNERMOST layer. The MCP
+    # channel's never-exposed guard (`app/mcp/guard.py`) is added next, so it
+    # runs BEFORE the CSRF rule: an in-process MCP call to a never-exposed
+    # route -- every `/api/v1/auth/` route among them -- gets the guard's
+    # refusal, never `csrf`. Both sit inside the layers added below: the
+    # locale is set when either answers, and their refusals still carry the
+    # security headers. The guard's route table is filled in after
+    # `modules.register_all` below.
+    from app.core.auth.csrf import RequireConsoleRequestHeader
+    from app.mcp.guard import McpNeverExposedGuard
+
+    app.add_middleware(RequireConsoleRequestHeader)
+    app.add_middleware(McpNeverExposedGuard)
+```
+
+(las tres líneas que siguen, `security_headers_middleware`, `request_context_middleware` y `locale_middleware`, no
+cambian).
+
+Run: `cd backend && .venv/bin/pytest -q tests/test_auth_csrf.py tests/test_auth_session_door.py tests/test_global_writes.py tests/test_mcp_server.py tests/test_mcp_channel_api.py tests/test_i18n_catalog.py`
+Expected: PASS (`test_auth_csrf.py`: 24 con los parámetros). Cambiar a mano el orden de las dos
+`app.add_middleware` pone en rojo `test_an_mcp_call_meets_the_guard_before_this_rule` (403 con `"code": "csrf"`);
+devolverlo.
 
 - [ ] **Step 9: Commit**
 
@@ -19487,9 +19629,11 @@ lee de `auth_action_tokens` (propósito `invite`, `used_at` nulo) y de la ausenc
 nueva. Una invitación caducada sigue pendiente (se puede reenviar o cancelar); una persona creada antes de esta
 fase, sin contraseña y sin invitación, no aparece como pendiente.
 
-**Decisión del plan (9): el recuento de llamadas de log se da como «menos 5», no como un número.** Las Tasks 3, 4 y
-9 añaden un `logger.warning` cada una (`rate_limit.py`, `totp.py`, el token `loopback`) y la 9 va en paralelo con
-esta: el número absoluto depende del orden en que se fusionen. Lo que esta tarea cambia es fijo: quita cinco.
+**Decisión del plan (9): el recuento de llamadas de log se da como «el que encuentre, menos 5», no como un
+número.** Las Tasks 3, 4 y 9 añaden un `logger.warning` cada una (`rate_limit.py`, `totp.py`, el token `loopback`) y
+se fusionan antes que esta (oleadas 2 y 3; esta va sola en la oleada 4), así que el número que vea depende de lo que
+el coordinador ya fusionó: 110 si están las tres (107 de la rama de hoy + 3). Lo que esta tarea cambia es fijo: quita
+cinco. El paso lo escribe como «N − 5» sobre el N que encuentre; el resultado esperado es 105 (Global Constraints).
 
 **Decisión del plan (10): el enlace de recuperación no cambia la contraseña; abre una sesión sin factor.** Decisión
 del coordinador: quien recupera perdió los segundos factores, no la contraseña. `POST /auth/recover/accept` consume el
@@ -22942,13 +23086,16 @@ def test_the_user_lifecycle_has_no_identity_provider_wording_to_forward() -> Non
 ```
 
 6. `backend/tests/test_logging_discipline.py`: el recuento baja en **exactamente 5** (`setup.py:221,285,467`,
-   `me.py:280`, `service.py:235`; Decisión del plan (9)). En la rama de hoy la aserción (`:524-525`) dice `107`, y la
-   Task 7 no la mueve; si al empezar esta tarea dice otro número (otra tarea de la fase añadió o quitó llamadas),
-   se resta 5 a ese. Con la rama de hoy: `assert total == 107` y los dos `107` del mensaje pasan a `102`, y encima del
-   párrafo `NOW 107, MSP clients phase 2 final review` (`:441`), que pasa a empezar por `BEFORE THAT, 107,`:
+   `me.py:280`, `service.py:235`; Decisión del plan (9)). Primero se lee el número que encuentra esta tarea:
+   `grep -n "assert total ==" tests/test_logging_discipline.py` da `assert total == N` (N = 110 con las Tasks 3, 4 y 9
+   ya fusionadas, que es la base de esta oleada; la Task 7 no lo mueve). El número nuevo es **N − 5**, sea cual sea
+   N, y va en tres sitios: el `assert total == N` y el `expected N` del mensaje (`:524-525` hoy) pasan a N − 5, y el
+   párrafo nuevo del docstring dice `NOW <N − 5>`. Va encima del párrafo `NOW N, …` más reciente (el que añadió la
+   última tarea fusionada; en la rama de hoy, el `NOW 107, MSP clients phase 2 final review` de `:441`), que pasa a
+   empezar por `BEFORE THAT, N,`. Con la base esperada, N = 110 y el número nuevo es 105:
 
 ```
-    NOW 102, P2 phase 1 Task 8: five WARNINGs go with the identity provider's
+    NOW 105, P2 phase 1 Task 8: five WARNINGs go with the identity provider's
     calls they described -- `user_admin/service.py::_translating`, the
     language mirror (`app/api/v1/me.py::_mirror_locale`), and three on the
     first-boot path (`setup.py::_provisioning`, `_refusal_detail`,
@@ -22958,9 +23105,11 @@ def test_the_user_lifecycle_has_no_identity_provider_wording_to_forward() -> Non
 
 ```
 
-   y el mismo párrafo como `**NOW 102, P2 phase 1 Task 8.** …` encima de `**NOW 107, MSP clients phase 2 final
-   review.**` en `docs/superpowers/specs/2026-08-14-logging-kernel-design.md:178`, que pasa a
-   `**BEFORE THAT, 107, MSP clients phase 2 final review.**` (y el `**BEFORE THAT, 106, …**` de `:185` se queda).
+   (si `grep` dio otro N, los tres números son N − 5 y el `BEFORE THAT` lleva ese N; nunca un número copiado de
+   este plan), y el mismo párrafo como `**NOW <N − 5>, P2 phase 1 Task 8.** …` (con N = 110,
+   `**NOW 105, P2 phase 1 Task 8.** …`) encima del párrafo `**NOW N, …**` más reciente de §2.2 en
+   `docs/superpowers/specs/2026-08-14-logging-kernel-design.md` (en la rama de hoy el `**NOW 107, MSP clients phase 2
+   final review.**` de `:178`), que pasa a `**BEFORE THAT, N, …**`; los `**BEFORE THAT, …**` de debajo se quedan.
 
 Run: `.venv/bin/pytest -q tests/test_i18n_modules_rest.py tests/test_no_vendor_names_backend.py tests/test_global_writes.py tests/test_console_global_routes.py tests/test_mcp_channel_api.py tests/test_route_gating.py tests/test_logging_discipline.py`
 Expected: FAIL solo en `test_mcp_catalog`/`test_mcp_descriptions` si aún no se hizo el Step 13; estas siete: PASS.
@@ -23171,8 +23320,9 @@ de `request.headers.get("Authorization", "")` (`backend/app/modules/ai_admin/api
 (`backend/app/core/ai/executor_staff.py:287`, `backend/app/core/ai/executor_portal.py:203`) y a la sonda de
 equipo de los actos (`backend/app/core/ai/act.py:445-455`). Con la consola por cookie esa cabecera llega vacía y
 cada lectura del asistente sería un 401 (`session_expired`). Desde esta tarea cada turno acuña su propio token:
-JWT ES256 firmado por `keys.sign_es256` (Task 2), audiencia `loopback`, 5 minutos, atado a la sesión por `sid`.
-La puerta lo admite solo en una llamada interna, solo para leer y solo mientras la sesión vive.
+JWT ES256 firmado por `keys.sign_jwt` (Task 2, que firma con `keys.sign_es256`), audiencia `loopback`, 5 minutos,
+atado a la sesión por `sid`. La puerta lo admite solo en una llamada interna, solo para leer y solo mientras la
+sesión vive.
 
 MCP no cambia: `backend/app/mcp/invoke.py:242` sigue reenviando el JWT de MCP (`principal.bearer`) y marca la
 llamada con su propia extensión `itms.mcp`; ningún archivo de `app/mcp/` se toca en esta tarea.
@@ -23207,10 +23357,13 @@ llamada con su propia extensión `itms.mcp`; ningún archivo de `app/mcp/` se to
 
 **Interfaces:**
 - Consumes:
-  - Task 2, `backend/app/core/auth/keys.py`: `async def sign_es256(signing_input: bytes) -> tuple[bytes, str]`
-    (firma, `kid`) y `async def jwks() -> dict` (claves públicas actual y anterior, formato JWKS RFC 7517). **Se
-    supone que la firma es la de JWS (R‖S, 64 bytes), no DER**: es lo que ES256 exige (RFC 7518 §3.4) y lo que
-    PyJWT verifica; la primera prueba de esta tarea lo comprueba verificando el token con PyJWT.
+  - Task 2, `backend/app/core/auth/keys.py`: `async def sign_jwt(claims: Mapping[str, Any], *, typ: str = "JWT")
+    -> str` (un JWS compacto ES256 con `alg`, `kid` y `typ` en la cabecera firmada; elige el `kid` antes de
+    firmar y vuelve a firmar una vez si `sign_es256` dice que firmó otra versión), que firma con
+    `async def sign_es256(signing_input: bytes) -> tuple[bytes, str]` (firma, `kid`), y `async def jwks() -> dict`
+    (claves públicas actual y anterior, formato JWKS RFC 7517). **Se supone que la firma es la de JWS (R‖S, 64
+    bytes), no DER**: es lo que ES256 exige (RFC 7518 §3.4) y lo que PyJWT verifica; la primera prueba de esta
+    tarea lo comprueba verificando el token con PyJWT.
   - Task 6, `backend/app/core/auth/sessions.py`: `SESSION_COOKIE`, `SessionPrincipal(session_id, user_id, org_id,
     kind, factor_done, step_up_at, email, display_name, expires_at)`, `async def resolve(connection, *,
     touch=True) -> SessionPrincipal | None` (la única llamada con la que `admit()` lee la cookie, dentro de
@@ -23268,11 +23421,13 @@ principal con `step_up_at=None` aunque la sesión tenga una confirmación de hac
 (cambiar factores, restablecer los de otro, sacar una credencial) son de la persona, nunca del asistente. Y una
 petición admitida por el token interno no acuña otro (`loopback_authorization` lo rechaza): no hay cadenas.
 
-**Decisión del plan (4): el `kid` va en la cabecera antes de firmar.** `sign_es256` devuelve el `kid` después de
-firmar, pero la cabecera firmada tiene que llevarlo. `mint_loopback` toma como primera apuesta el `kid` de la
-primera clave de `keys.jwks()`, firma, y si `sign_es256` dice que firmó otra clave (una rotación entre las dos
-llamadas, o un JWKS que no pone la actual primero) vuelve a firmar una vez con ese `kid`. Dos discrepancias
-seguidas son un error. Así la tarea no depende del orden del JWKS. Emisor fijo `urn:itms:loopback` y
+**Decisión del plan (4): la cabecera y la firma las pone `keys.sign_jwt` (Task 2), no esta tarea.** La cabecera
+firmada tiene que llevar el `kid`, que `sign_es256` solo dice después de firmar; `sign_jwt` ya resuelve eso (elige
+el `kid` de la versión más nueva, firma, y si `sign_es256` dice que firmó otra versión vuelve a firmar una vez;
+dos discrepancias seguidas son `AuthKeysUnavailable`). `mint_loopback` solo arma los claims y llama a
+`keys.sign_jwt(payload, typ=LOOPBACK_TYP)`: una sola copia de la firma en el código, y la de la Task 2 ya tiene sus
+pruebas de rotación (`test_openbao_public_keys_are_read_once_per_ttl_and_on_a_new_version`) y de `typ`
+(`test_sign_jwt_puts_the_typ_it_is_given_in_the_signed_header`). Emisor fijo `urn:itms:loopback` y
 `typ: "loopback+jwt"` (RFC 8725 §3.11, *explicit typing*): el token no puede confundirse con el de MCP de la
 fase 3, que firmará la misma clave con otra audiencia y otro emisor.
 
@@ -23412,7 +23567,7 @@ así el marcador que viaja es el del ejecutor, nunca el de la prueba.
 Until this task the in-app assistant re-entered the API carrying the caller's
 own `Authorization` header. A console signed in by cookie sends no such
 header, so every loopback read would have been a 401. Now each turn mints its
-own token: ES256 through `keys.sign_es256`, audience `loopback`, five minutes,
+own token: ES256 through `keys.sign_jwt`, audience `loopback`, five minutes,
 bound to the person's session by `sid`. The door admits it ONLY on an
 in-process call -- an ASGI scope extension no network client can set -- that
 also says `X-ITMS-Loopback: 1`, only to read, and only while the session lives.
@@ -23912,7 +24067,7 @@ in. A console signed in by cookie has no bearer, and the session cookie must
 never leave the browser's own requests -- so each turn mints this instead.
 
 WHAT IT IS. A JWT, ES256, signed by the platform's key in OpenBao
-(`app.core.auth.keys.sign_es256`), audience `loopback`, issuer
+(`app.core.auth.keys.sign_jwt`, which signs through `sign_es256`), audience `loopback`, issuer
 `urn:itms:loopback`, `typ` `loopback+jwt` (RFC 8725 §3.11), five minutes, naming
 the person (`sub`), their organisation (`org`) and THE SESSION it was minted
 from (`sid`). It carries no permission of its own.
@@ -23942,8 +24097,6 @@ and the token lives five minutes. A loopback read is the person's own turn,
 so it renews nothing either.
 """
 
-import base64
-import json
 import logging
 import time
 from dataclasses import dataclass
@@ -23986,20 +24139,6 @@ def _now() -> int:
     return int(time.time())
 
 
-def _b64(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
-
-
-def _signing_input(kid: str, payload: dict[str, Any]) -> bytes:
-    header = {"alg": "ES256", "typ": LOOPBACK_TYP, "kid": kid}
-    compact = (
-        _b64(json.dumps(header, separators=(",", ":")).encode())
-        + "."
-        + _b64(json.dumps(payload, separators=(",", ":")).encode())
-    )
-    return compact.encode("ascii")
-
-
 async def mint_loopback(principal: SessionPrincipal) -> str:
     """A token for one turn of this person's assistant, bound to their session."""
     if not principal.factor_done:
@@ -24017,19 +24156,10 @@ async def mint_loopback(principal: SessionPrincipal) -> str:
         "iat": issued,
         "exp": issued + LOOPBACK_TTL_S,
     }
-    # The `kid` is signed, so it is chosen first: the JWKS's first key as the
-    # guess, and the key `sign_es256` actually used if that differs (a rotation
-    # between the two calls). Twice in a row is not a race; it is a defect.
-    kid = str((await keys.jwks())["keys"][0]["kid"])
-    for _ in range(2):
-        signing_input = _signing_input(kid, payload)
-        signature, signed_with = await keys.sign_es256(signing_input)
-        if signed_with == kid:
-            return f"{signing_input.decode('ascii')}.{_b64(signature)}"
-        kid = signed_with
-    raise RuntimeError(  # i18n-exempt: a wiring defect, never shown to a person
-        "the signing key changed twice while a loopback token was minted"
-    )
+    # Task 2's `sign_jwt` puts `alg`, the signing key's `kid` and this `typ` in
+    # the signed header, and signs once more if OpenBao rotated in between: the
+    # one copy of that logic in the code base.
+    return await keys.sign_jwt(payload, typ=LOOPBACK_TYP)
 
 
 def is_loopback_token(authorization: str) -> bool:
