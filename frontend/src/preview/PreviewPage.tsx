@@ -1009,6 +1009,10 @@ export function PreviewPage() {
          green, amber or red. One reading here paints the real top bar; the
          panel below draws all four side by side. */
       health={HEALTH_AMBER}
+      /* A CLIENT CHOSEN, so the browser pass grades the phone's client mark
+         in the drawer toggle (operator decision 4) as it grades the rest of
+         the chrome: at 390px it is drawn, at 320px it wraps out of sight. */
+      clientMark={{ short: "AL", name: "Andes Logistics" }}
       user={{ name: "Alex Morgan", role: "Administrator" }}
       onSignOut={() => undefined}
     >

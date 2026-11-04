@@ -116,6 +116,8 @@ export const shell: Shape<typeof en> = {
     dismissNavigation: "Ocultar la navegación",
     closeNavigation: "Cerrar la navegación",
     openNavigation: "Abrir la navegación",
+    openNavigationClient: "Abrir la navegación — cliente: {client}",
+    closeNavigationClient: "Cerrar la navegación — cliente: {client}",
     addComputer: "Añadir un equipo",
     askAssistant: "Preguntar al Asistente",
     assistantObject: "al Asistente",

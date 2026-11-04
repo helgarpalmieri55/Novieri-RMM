@@ -14,12 +14,13 @@ import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const user = userEvent.setup();
 
 import type { ComponentProps, ReactNode } from "react";
 
+import { setActiveLanguage } from "../i18n/core";
 import { ApiError } from "../lib/api";
 import { ClientScopeProvider } from "../lib/clientScope";
 import type { AlertSummary } from "../modules/health/types";
@@ -266,6 +267,107 @@ describe("AppShell", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  /* --- The chosen client in the phone's top bar (operator decision 4) ----- */
+
+  describe("the client mark in the drawer toggle", () => {
+    const ANDES = { short: "AL", name: "Andes Logistics" };
+
+    function handset(on: boolean) {
+      vi.stubGlobal("matchMedia", (query: string) => ({
+        matches: on && query === "(max-width: 640px)",
+        media: query,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      }));
+    }
+
+    function renderMarked(clientMark?: { short: string; name: string }) {
+      return render(
+        <MemoryRouter>
+          <AppShell
+            permissions={["devices.read", "health.read"]}
+            orgName="Operations"
+            title="Devices"
+            user={{ name: "A B", role: "Operator" }}
+            onSignOut={vi.fn()}
+            clientMark={clientMark}
+          >
+            <p>x</p>
+          </AppShell>
+        </MemoryRouter>,
+      );
+    }
+
+    const mark = () => document.querySelector(".nav-toggle .client-mark");
+
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("is absent with every client: the toggle stays the plain 44px icon", () => {
+      handset(true);
+      renderMarked(undefined);
+      expect(mark()).toBeNull();
+      const toggle = screen.getByRole("button", { name: "Open navigation" });
+      expect(toggle).not.toHaveAttribute("title");
+    });
+
+    it("is absent on the desktop, where the bar shows the selector itself", () => {
+      handset(false);
+      renderMarked(ANDES);
+      expect(mark()).toBeNull();
+      expect(screen.getByRole("button", { name: "Open navigation" })).toBeInTheDocument();
+    });
+
+    it("marks the chosen client on a handset, and names it in full", () => {
+      handset(true);
+      renderMarked(ANDES);
+      expect(mark()).toHaveTextContent("AL");
+      // The monogram is a picture of the name; the name itself is spoken.
+      expect(mark()).toHaveAttribute("aria-hidden", "true");
+      const toggle = screen.getByRole("button", { name: "Open navigation — client: Andes Logistics" });
+      expect(toggle).toHaveAttribute("title", "Open navigation — client: Andes Logistics");
+      expect(toggle).toContainElement(mark() as HTMLElement);
+    });
+
+    it("names the client in the person's language", () => {
+      handset(true);
+      setActiveLanguage("es");
+      renderMarked({ short: "SA", name: "Sin asignar" });
+      expect(
+        screen.getByRole("button", { name: "Abrir la navegación — cliente: Sin asignar" }),
+      ).toBeInTheDocument();
+    });
+
+    it("can only give the toggle back its 44px, never widen the bar (the 640px block)", () => {
+      // jsdom lays nothing out; harmony measures 390px (the toggle 68px, the
+      // account menu at 380). What it cannot see is a narrower phone, where
+      // the mark must drop out of sight rather than squeeze or push: so the
+      // declarations that make it do so are held here.
+      const css = readFileSync(resolve(import.meta.dirname, "shell.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      const opener = css.indexOf("@media (max-width: 640px) {");
+      const block = css.slice(opener, css.indexOf("@media", opener + 1));
+      const toggle = /\n\s*\.nav-toggle\s*\{([^}]*)\}/.exec(block)?.[1] ?? "";
+      expect(toggle, "no `.nav-toggle` rule in the 640px block").not.toBe("");
+      expect(toggle).toMatch(/flex:\s*0 1 auto/);
+      expect(toggle).toMatch(/min-width:\s*44px/);
+      expect(toggle).toMatch(/flex-wrap:\s*wrap/);
+      expect(toggle).toMatch(/overflow:\s*hidden/);
+      // The 8px the mark needs come from the cluster's gaps, at this width only.
+      expect(block).toMatch(/\.top-actions\s*\{[^}]*gap:\s*8px/);
+      // And the search, focused, takes the mark's room back.
+      expect(block).toMatch(/\.topbar:has\(\.topbar-find:focus-within\) \.client-mark/);
+    });
+
+    it("is still the drawer toggle: tapping it opens the drawer, which says so", async () => {
+      handset(true);
+      renderMarked(ANDES);
+      await user.click(screen.getByRole("button", { name: "Open navigation — client: Andes Logistics" }));
+      expect(document.body).toHaveClass("nav-open");
+      const toggle = screen.getByRole("button", { name: "Close navigation — client: Andes Logistics" });
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(mark()).toHaveTextContent("AL");
+    });
   });
 
   it("shows an operator only the links their permissions reach", () => {
