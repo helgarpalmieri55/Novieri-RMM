@@ -14,6 +14,12 @@
  * The body is still built INSIDE the mutation (`requireKnown`): nothing is
  * sent before the client is known.
  *
+ * ONE HOOK FOR A FORM: `useNewRowClientField` answers all of it -- the
+ * client, whether to ask, the field's value and options, and Unassigned
+ * chosen at the top (`refused`) -- so no form keeps its own copy of the glue
+ * (operator decision 2, 2026-11-02). `useNewRowClient` is the decision alone,
+ * still exported while the forms move over; it goes private once none calls it.
+ *
  * Phases 1 and 2 filed every new row under the organisation's internal client,
  * whoever was working; this module replaced that helper in phase 3, and
  * `lib/noPhase3.test.ts` keeps it from coming back.
@@ -24,11 +30,44 @@
  */
 
 import type { UseQueryResult } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { translate } from "../i18n/core";
 import type { MeClient } from "./api";
 import { useClientScope } from "./clientScope";
+
+/**
+ * WHAT A FORM THAT CREATES A ROW NEEDS TO KNOW ABOUT ITS CLIENT, in one
+ * answer (operator decision 2, 2026-11-02): the decision of §3.1 and the
+ * Client field's own state, so a form copies none of the glue. The field is
+ * drawn as `<ClientField field={…}/>` and the body built inside the mutation
+ * with `requireKnown(field.clientId)`.
+ */
+export interface NewRowClientField {
+  /**
+   * Where the row goes: the parent's client, the one chosen at the top, or the
+   * pick once it is one of `options`. `null` until known -- `/me`, the parent
+   * or the pick -- and NEVER `""`.
+   */
+  readonly clientId: string | null;
+  /** Draw `<ClientField field={…}/>`: "All my clients", and no parent decides. */
+  readonly needsField: boolean;
+  /** The field's value: `""` until the person picks. */
+  readonly picked: string;
+  /** The field's change. Runs `opts.onPick` when the pick really changes. */
+  readonly setPicked: (clientId: string) => void;
+  /** What the field offers: the person's clients holding `code`, never Unassigned (C10). */
+  readonly options: readonly MeClient[];
+  /** `/me` has answered and the top bar's choice is one of its clients. */
+  readonly ready: boolean;
+  /**
+   * Unassigned is chosen at the top: nothing new can be filed. The server files
+   * nothing new there, and the header confines the request to it, so a Client
+   * field could not help either; the form says so instead of offering a Save
+   * that can only fail.
+   */
+  readonly refused: "unassigned" | null;
+}
 
 export interface NewRowClient {
   /** Where the row goes when the form need not ask; `null` when it must, or while unknown. */
@@ -57,6 +96,81 @@ export function useNewRowClient(code: string, parentClientId?: string | null): N
   if (!ready) return { clientId: null, needsField: false, options };
   if (selected !== null) return { clientId: selected, needsField: false, options };
   return { clientId: null, needsField: true, options };
+}
+
+/**
+ * Where a new row goes, and the Client field that asks when nothing else
+ * decides (`NewRowClientField`). `code` is the permission its create route
+ * checks. `parentClientId`: absent for a row that hangs from nothing; `null`
+ * for one whose parent's client is not known yet (`parentClientOf`); an id,
+ * that client. `opts.onPick` runs on a real change of the pick -- the form's
+ * own reset of what depended on the client, such as its site.
+ *
+ * THE DECISION, IN ORDER:
+ *   1. a parent is given: its client, whatever the top bar says;
+ *   2. `/me` has not answered (or does not list the top bar's choice): no
+ *      client yet, nothing asked, nothing refused;
+ *   3. Unassigned is chosen at the top: `refused`;
+ *   4. a client is chosen at the top: that one;
+ *   5. otherwise ask: `needsField`, and the pick is the client only while it
+ *      is one of `options`.
+ */
+export function useNewRowClientField(
+  code: string,
+  parentClientId?: string | null,
+  opts?: { onPick?: (clientId: string) => void },
+): NewRowClientField {
+  const { selected, clients, ready } = useClientScope();
+  const options = useMemo(() => clientsHolding(clients, code), [clients, code]);
+  const [picked, setPickedState] = useState("");
+
+  // THE LATEST CALLBACK, read when the pick changes: a form passes an inline
+  // arrow, and the one it rendered with last is the one that knows its state.
+  const onPick = useRef(opts?.onPick);
+  useEffect(() => {
+    onPick.current = opts?.onPick;
+  });
+  // A real change only: the same pick twice resets nothing.
+  const current = useRef(picked);
+  const setPicked = useCallback((clientId: string) => {
+    if (clientId === current.current) return;
+    current.current = clientId;
+    setPickedState(clientId);
+    onPick.current?.(clientId);
+  }, []);
+
+  const base = { picked, setPicked, options, ready };
+  if (parentClientId !== undefined) {
+    return { ...base, clientId: parentClientId, needsField: false, refused: null };
+  }
+  if (!ready) return { ...base, clientId: null, needsField: false, refused: null };
+  if (selected !== null) {
+    const unassigned = clients.some((client) => client.id === selected && client.kind === "unassigned");
+    if (unassigned) return { ...base, clientId: null, needsField: false, refused: "unassigned" };
+    return { ...base, clientId: selected, needsField: false, refused: null };
+  }
+  const listed = options.some((client) => client.id === picked);
+  return { ...base, clientId: listed ? picked : null, needsField: true, refused: null };
+}
+
+/**
+ * The client of a new row's parent, for `useNewRowClientField`'s second
+ * argument, from the rows the parent is picked out of.
+ *
+ * `undefined` when there is no parent (`null`, or a form's `""`): the row
+ * hangs from nothing. `null` while the rows are missing or do not hold the
+ * id -- a parent not found YET is not "no parent", and reading it as one
+ * would file the row under the top bar's client instead of the parent's.
+ * Otherwise the parent's own `client_id`.
+ */
+export function parentClientOf(
+  parentId: string | null | undefined,
+  rows: readonly { id: string; client_id: string | null }[] | undefined,
+): string | null | undefined {
+  if (parentId === undefined || parentId === null || parentId === "") return undefined;
+  if (rows === undefined) return null;
+  const parent = rows.find((row) => row.id === parentId);
+  return parent === undefined ? null : parent.client_id;
 }
 
 /**

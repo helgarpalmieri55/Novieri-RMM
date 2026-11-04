@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { setActiveLanguage } from "../i18n/core";
 import type { ApiClient, Me, MeClient } from "../lib/api";
+import type { NewRowClientField } from "../lib/clientSelection";
 import { ClientField } from "./ClientField";
 
 const mockUseApi = vi.fn();
@@ -82,5 +83,72 @@ describe("ClientField", () => {
     renderField();
     const field = await screen.findByLabelText("Cliente");
     expect(within(field).getByRole("option", { name: "Elige un cliente" })).toBeInTheDocument();
+  });
+
+  it("says \"none\" only once /me has answered: before it, every person has no clients", async () => {
+    let answer: (me: Me) => void = () => undefined;
+    const pending = new Promise<Me>((resolve) => {
+      answer = resolve;
+    });
+    mockUseApi.mockReturnValue({ me: vi.fn().mockReturnValue(pending) } as unknown as ApiClient);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <ClientField code="ticket.write" value="" onChange={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByLabelText("Client")).toBeInTheDocument();
+    expect(screen.queryByText("None of your clients lets you do this.")).toBeNull();
+
+    answer({ ...ME, clients: [client(NORTH, "Northwind", ["ticket.read"])] });
+    expect(await screen.findByText("None of your clients lets you do this.")).toBeInTheDocument();
+  });
+});
+
+/**
+ * `<ClientField field={…}/>`: the form's `useNewRowClientField` answer drawn
+ * as it is. The field reads no scope of its own -- these render it with no
+ * query client at all -- so there is one source of truth for the options.
+ */
+describe("ClientField with a field", () => {
+  function field(over: Partial<NewRowClientField> = {}): NewRowClientField {
+    return {
+      clientId: null,
+      needsField: true,
+      picked: "",
+      setPicked: vi.fn(),
+      options: [client(ZETA, "Zeta Foods", ["ticket.write"]), client(ACME, "Acme Dental", ["ticket.write"])],
+      ready: true,
+      refused: null,
+      ...over,
+    };
+  }
+
+  it("offers the field's options in its order, chooses none, and is required", () => {
+    render(<ClientField field={field()} />);
+    const select = screen.getByLabelText("Client");
+    expect(within(select).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Zeta Foods",
+      "Acme Dental",
+    ]);
+    expect(select).toHaveValue("");
+    expect(select).toBeRequired();
+  });
+
+  it("shows the pick and hands a new one to the field", async () => {
+    const user = userEvent.setup();
+    const setPicked = vi.fn();
+    render(<ClientField field={field({ picked: ZETA, setPicked })} />);
+    const select = screen.getByLabelText("Client");
+    expect(select).toHaveValue(ZETA);
+    await user.selectOptions(select, ACME);
+    expect(setPicked).toHaveBeenCalledWith(ACME);
+  });
+
+  it("says \"none\" only when the field is ready and offers nothing", () => {
+    const { rerender } = render(<ClientField field={field({ options: [], ready: false })} />);
+    expect(screen.queryByText("None of your clients lets you do this.")).toBeNull();
+    rerender(<ClientField field={field({ options: [], ready: true })} />);
+    expect(screen.getByText("None of your clients lets you do this.")).toBeInTheDocument();
   });
 });
