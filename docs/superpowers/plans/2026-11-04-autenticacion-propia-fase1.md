@@ -16,6 +16,7 @@
   - Ninguna tarea cambia trabajos firmados, el sobre ni el protocolo del agente.
   - La consola no protege nada: toda comprobación vive en el servidor.
   - Ningún secreto (contraseña, código TOTP, secreto TOTP, código de recuperación, token de un solo uso, identificador de sesión o de equipo) aparece en logs, respuestas (salvo el valor recién creado que la persona debe ver una vez) ni en la base de datos en claro.
+  - Un 422 tampoco: el servidor quita `input` de cada error de validación (Task 6, Step 9b), y los campos secretos no llevan límites de Pydantic: los comprueba la ruta (Tasks 7 y 8).
 - **Migración.** Una sola, **0245** (`backend/migrations/versions/0245_auth_core.py`, revision `"0245"`, down_revision `"0244"`), hacia adelante; `downgrade()` funcional (la CI corre `upgrade head → downgrade base → upgrade head`). 0230–0244 no se tocan.
 - **Alcance.** Toda tabla nueva tiene `org_id` + RLS (ENABLE + FORCE + `tenant_isolation`, patrón de `0210:70-75`) y entra en `client_scope_catalog.CATALOG`; las de una persona como `O("users","user_id")`. Las lecturas antes de saber quién es la persona van SOLO por las dos funciones `SECURITY DEFINER` de la Task 1 (en `ALL_SCOPE_ALLOWLIST` si hace falta, nunca un archivo de rutas).
 - **Parámetros (diseño §2):** contraseña 12–128 (técnicos); lista de bloqueo; argon2id por defecto de argon2-cffi + HMAC pepper (transit); TOTP 30 s, 6 dígitos, ±1 paso, sin reutilizar; 10 códigos de recuperación; espera desde el 5.º fallo (1 s duplicando hasta 15 min); a los 100 fallos seguidos el factor queda desactivado; inactividad 30 min, máximo 12 h, recordar equipo 15 días; confirmación reciente 10 min; enlace de invitación 72 h, de restablecimiento 30 min, de recuperación 15 min.
@@ -77,7 +78,7 @@ Las tareas se redactaron en paralelo. Estas notas recogen lo que cruza de una a 
   - `backend/app/api/v1/realm_settings.py`: la Task 3 lo reescribe entero; la Task 6 cambia cada `ctx.claims.email` por `ctx.email`. Se toma el archivo de la Task 3 y se le aplica el cambio de la Task 6; `grep -n "ctx.claims" app/api/v1/realm_settings.py` queda vacío.
   - `backend/app/api/v1/credentials.py`: las Tasks 3 y 6 cambian `checkout_credential`; se conservan los dos cambios.
   - `backend/app/core/i18n/es.py`, `backend/app/mcp/descriptions/part_d.py`, `backend/tests/test_client_catalog.py`, `backend/tests/test_i18n_catalog.py`: unión de las entradas.
-  - `tests/test_ai_tool_surface.py`, `tests/test_global_writes.py`, `tests/test_logging_discipline.py`, `auditVocabulary.coverage.test.ts` y `frontend/src/i18n/{en,es}/auditVocabulary.ts`: unión, y los recuentos sumados (Global Constraints).
+  - `tests/test_ai_tool_surface.py`, `tests/test_global_writes.py`, `tests/test_logging_discipline.py`, `auditVocabulary.coverage.test.ts` y `frontend/src/i18n/{en,es}/auditVocabulary.ts`: unión, y los recuentos sumados (Global Constraints). Las Tasks 3 y 4 escriben cada una un párrafo «NOW 108»: al fusionar la segunda, su párrafo pasa a «NOW 109» y la aserción a 109.
   - `frontend/src/lib/globalRoutes.json`: regenerado tras fusionar la Task 6.
 - **Oleada 3, choques esperados:** `backend/app/core/client_scope.py` y `backend/app/core/i18n/es.py` (Tasks 7 y 9): unión de las entradas.
 - **Firmas que una tarea fija y otras consumen** (la sección de la tarea que las crea tiene el detalle):
@@ -148,7 +149,7 @@ Todas con `org_id UUID NOT NULL` + RLS `tenant_isolation`, en `CATALOG` como `O(
 - `backend/app/core/auth/sessions.py`: `SESSION_COOKIE = "__Host-itms_session"`, `DEVICE_COOKIE = "__Host-itms_device"`; `start_session(session, user, *, kind, request, factor_done, trusted_device_id, resume=None) -> tuple[AuthSession, str]`; `resolve(connection, *, touch=True) -> SessionPrincipal | None` (usa `its_auth_session`; inactividad y caducidad de `auth_org_settings`; renueva `last_seen_at`); `end(session, session_id, reason)`; `end_all_for_user(session, user_id, reason, except_id=None)`; `mark_factor(session, session_id) -> str` (el nuevo valor de la cookie); `mark_step_up(session, session_id)`; `step_up_fresh(principal, now) -> bool` (10 min).
 - `SessionPrincipal(session_id, user_id, org_id, kind, factor_done: bool, step_up_at, email, display_name, expires_at)`.
 - `backend/app/core/auth/devices.py`: `remember(session, user, request) -> tuple[AuthTrustedDevice, str]`; `recognised(session, user_id, request) -> AuthTrustedDevice | None`; `revoke(...)`; `revoke_all_for_user(...)`.
-- `backend/app/core/auth/csrf.py`: middleware `RequireConsoleRequestHeader` con la regla de Global Constraints; `CSRF_HEADER = "X-ITMS-Request"`.
+- `backend/app/core/auth/csrf.py`: middleware `RequireConsoleRequestHeader` con la regla de Global Constraints; `CSRF_HEADER = "X-ITMS-Request"`. Se registra **dentro** de `McpNeverExposedGuard` (en `main.py` se añade antes que él), para que una llamada MCP a una ruta nunca expuesta reciba la negativa del guardia y no `csrf`.
 - `deps.py::admit()`: si hay `__Host-itms_session` válido con `factor_done`, admite por la sesión; si no, el camino Bearer actual (D21) sigue hasta la Task 13. Los consumidores de `ctx.claims` (D14) leen `ctx.email`.
 - Sockets `/ws` y pantalla remota: cookie en el handshake + `Origin` (D15).
 - `GET/PUT /api/v1/settings/sessions` (`AuthOrgSettings`; PUT con `orgs.manage` en todos los clientes).
@@ -11560,6 +11561,7 @@ salir) son de la Task 7; esta tarea da las piezas y las prueba directamente.
 - Create: `backend/app/core/auth/refusals.py` (`AuthRefusal` con `code`)
 - Create: `backend/app/core/auth/csrf.py` (middleware `RequireConsoleRequestHeader`, origen de la consola)
 - Create: `backend/app/api/v1/session_settings.py` (`GET/PUT /api/v1/settings/sessions`)
+- Create: `backend/app/core/errors/validation.py` (un 422 sin `input`, Step 9b) y `backend/tests/test_validation_errors.py`
 - Create: `backend/tests/session_support.py` (ayudante: una sesión real y sus cabeceras)
 - Create: `backend/tests/test_auth_sessions.py`, `backend/tests/test_auth_session_door.py`,
   `backend/tests/test_auth_csrf.py`, `backend/tests/test_session_sockets.py`,
@@ -11582,6 +11584,7 @@ salir) son de la Task 7; esta tarea da las piezas y las prueba directamente.
 - Modify: `backend/tests/test_route_session_discipline.py:84-89`, `backend/tests/test_global_writes.py:70-71`,
   `backend/tests/test_ai_tool_surface.py:589-590`, `:643`, `:977`
 - Modify: `frontend/src/i18n/en/auditVocabulary.ts:70`, `frontend/src/i18n/es/auditVocabulary.ts:67`
+- Modify: `frontend/src/components/form.tsx:133-136` (comentario «THE SHAPE», Step 9b)
 - Modify (regenerado): `frontend/src/lib/globalRoutes.json` (una línea tras `:89`)
 - Test: los cinco archivos nuevos, y `tests/test_ui_ws.py`, `tests/test_domain_gate_doors.py`,
   `tests/test_remote_tunnel.py`, `tests/test_token_origin.py`, `tests/test_credentials_api.py`,
@@ -13959,6 +13962,157 @@ git add backend/app/main.py backend/tests/test_auth_csrf.py
 git commit -m "feat(auth): console writes on the session cookie need X-ITMS-Request and the console Origin"
 ```
 
+- [ ] **Step 9b: Un 422 no devuelve lo que se envió**
+
+**Decisión del coordinador (revisión previa del plan): el servidor quita `input` de cada error de validación.** El
+manejador por defecto de FastAPI 0.161.1 (`fastapi/exception_handlers.py::request_validation_exception_handler`)
+responde `{"detail": jsonable_encoder(exc.errors())}`, y cada error de Pydantic lleva `input`: el valor que falló o,
+si falta un campo, **el objeto entero** del que falta. Comprobado con la versión instalada: un `POST` con
+`{"password": "Secret-Marker-123"}` a un modelo que pide también `email` responde
+`{"detail":[{"type":"missing","loc":["body","email"],"msg":"Field required","input":{"password":"Secret-Marker-123"}}]}`.
+Es decir, `POST /api/v1/auth/login` sin `email` devolvería la contraseña, y `PUT /settings/email` sin `host`, la del
+correo. Las Tasks 7 y 8 ya quitan los límites de los campos secretos (los comprueba la ruta), pero un campo que
+falta no se arregla así. La consola ya no lee `input` (`frontend/src/components/form.tsx:138`, «`input` IS
+DELIBERATELY NEVER READ»); ahora el servidor tampoco lo manda. Nada del backend ni de sus pruebas lee `input` de un 422
+(`grep` en `backend/app` y `backend/tests`: solo aparece en el corpus canónico y en los vectores de semver, que no son
+respuestas HTTP), y `app/mcp/invoke.py::error_text` solo usa el texto.
+
+Crear `backend/tests/test_validation_errors.py`:
+
+```python
+"""A 422 never hands back what was submitted (P2 phase 1, Task 6 Step 9b).
+
+Pydantic puts the failing value in each error's `input` -- for a missing
+field, the whole object it is missing from, secrets included. Protects
+`app/core/errors/validation.py::validation_error_without_input` and its
+registration in `app/main.py`: remove either and these fail.
+"""
+
+from typing import Any
+
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.testclient import TestClient
+from pydantic import BaseModel
+
+from app.core.errors.validation import validation_error_without_input
+
+MARKER = "Validation-Echo-Marker-7"
+
+
+class _Login(BaseModel):
+    email: str
+    password: str
+
+
+def _app() -> FastAPI:
+    app = FastAPI()
+    app.add_exception_handler(RequestValidationError, validation_error_without_input)
+
+    @app.post("/login")
+    def login(body: _Login) -> dict[str, str]:
+        return {"email": body.email}
+
+    return app
+
+
+def test_a_missing_field_does_not_echo_the_rest_of_the_body() -> None:
+    response = TestClient(_app()).post("/login", json={"password": MARKER})
+
+    assert response.status_code == 422
+    assert MARKER not in response.text
+    [error] = response.json()["detail"]
+    assert error["loc"] == ["body", "email"]
+    assert error["msg"] == "Field required"
+    assert "input" not in error
+
+
+def test_a_wrong_type_does_not_echo_the_value() -> None:
+    body = {"email": "a@example.com", "password": [MARKER]}
+    response = TestClient(_app()).post("/login", json=body)
+
+    assert response.status_code == 422
+    assert MARKER not in response.text
+    assert all("input" not in error for error in response.json()["detail"])
+
+
+async def test_the_platform_answers_its_422s_with_this_handler(api_env: Any) -> None:
+    """The registration in `create_app` -- without it the two tests above
+    would still pass and every route would echo."""
+    assert api_env.app.exception_handlers[RequestValidationError] is validation_error_without_input
+```
+
+Run: `cd backend && .venv/bin/pytest -q tests/test_validation_errors.py`
+Expected: FAIL — `ModuleNotFoundError: No module named 'app.core.errors.validation'`.
+
+Crear `backend/app/core/errors/validation.py`:
+
+```python
+"""422 bodies without the submitted values.
+
+FastAPI's default handler answers a RequestValidationError with
+`{"detail": jsonable_encoder(exc.errors())}`, and every Pydantic error carries
+`input`: the value that failed or, for a missing field, the WHOLE object it is
+missing from. `POST /api/v1/auth/login` without `email` would hand the
+password back in the response body -- to every proxy log, error report and
+screenshot on the way. This answers the same shape with `input` removed from
+each error. The console never read it either
+(`frontend/src/components/form.tsx`).
+"""
+
+from fastapi import Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+
+async def validation_error_without_input(_request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, RequestValidationError)
+    errors = [
+        {key: value for key, value in error.items() if key != "input"} for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
+```
+
+En `backend/app/main.py`, justo antes de `app.add_exception_handler(GlobalRowNotWritable, _global_row)`, añadir:
+
+```python
+    # A 422 never hands back what was submitted: Pydantic puts the failing
+    # value -- for a missing field, the whole body -- in each error's `input`,
+    # and a body can carry a password (`app/core/errors/validation.py`).
+    from fastapi.exceptions import RequestValidationError
+
+    from app.core.errors.validation import validation_error_without_input
+
+    app.add_exception_handler(RequestValidationError, validation_error_without_input)
+
+```
+
+En `frontend/src/components/form.tsx`, el párrafo «THE SHAPE» (`:133-136`) pasa a decir lo que hace el servidor:
+
+```ts
+ * THE SHAPE. A 422 arrives as `{"detail":[{"type","loc","msg","ctx"}, …]}`
+ * (`backend/app/core/errors/validation.py` removes Pydantic's `input`). Every
+ * part of that is for a machine except `msg`, and `loc` -- which names the
+ * field -- is an array whose first element is the request part ("body").
+```
+
+y el párrafo siguiente («`input` IS DELIBERATELY NEVER READ…») se queda: si un día vuelve, la consola sigue sin
+mostrarlo.
+
+Run: `cd backend && .venv/bin/pytest -q tests/test_validation_errors.py`
+Expected: PASS (3). Quitar la línea `app.add_exception_handler(RequestValidationError, …)` hace fallar
+`test_the_platform_answers_its_422s_with_this_handler`; volver al manejador de FastAPI, las otras dos.
+
+Run: `cd frontend && npx vitest run src/components`
+Expected: PASS (solo cambió un comentario).
+
+```bash
+git add backend/app/core/errors/validation.py backend/tests/test_validation_errors.py backend/app/main.py \
+  frontend/src/components/form.tsx
+git commit -m "fix(api): a 422 no longer echoes the submitted values (passwords included)"
+```
+
 - [ ] **Step 10: Las pruebas de los sockets (fallan)**
 
 Crear `backend/tests/test_session_sockets.py`:
@@ -15000,7 +15154,8 @@ cd backend
   tests/test_mcp_catalog.py tests/test_mcp_descriptions.py tests/test_ai_tool_surface.py \
   tests/test_client_catalog.py tests/test_route_session_discipline.py tests/test_route_gating.py \
   tests/test_logging_discipline.py tests/test_bound_auth_context.py tests/test_i18n_catalog.py \
-  tests/test_i18n_core_api.py tests/test_mcp_server.py tests/test_domain_policy.py tests/test_realm_settings_api.py
+  tests/test_i18n_core_api.py tests/test_mcp_server.py tests/test_domain_policy.py tests/test_realm_settings_api.py \
+  tests/test_validation_errors.py
 .venv/bin/mypy app
 .venv/bin/ruff check app tests
 cd ../frontend
@@ -15115,8 +15270,10 @@ Task 6 (`credentials.py` con `require_permission_with_step_up`): aquí solo se u
     `async issue(session, *, org_id, user_id, purpose, ttl, created_by) -> str`;
     `async revoke_open(session, *, user_id, purpose)`; `async peek(session, *, token, purposes)`;
     `async consume(session, *, token, purposes)`.
-  - `app.core.auth.staff_password`: `async require_acceptable(plain, *, email, display_name)`
-    (422 `password_rejected`, `detail` = `PasswordRejected.message`), `async store(session, *, org_id, user_id, plain)`.
+  - `app.core.auth.staff_password`: `async require_acceptable(plain, *, email, display_name, org_name)`
+    (422 `password_rejected`, `detail` = `PasswordRejected.message`; decisión 17),
+    `async organization_name(session, org_id) -> str`, `SUBMITTED_MAX = 1024` (decisión 16),
+    `async store(session, *, org_id, user_id, plain)`.
   - `app.core.auth.notices`: `PRODUCT = "Novieri"`, `Notice`,
     `async deliver(session, *, org_id, to, subject, text, vault, actor_id) -> bool`,
     `async tell(session, user, kind, *, vault, actor_id, factor=None, days=None, left=None) -> bool`,
@@ -15217,7 +15374,10 @@ la persona, como la Task 4) y lo deja en Redis 10 minutos bajo `auth:totp-replac
 lo abre y, en **una** transacción, quita el TOTP viejo (`remove_totp`), prepara el nuevo (`stage_secret`) y acepta el
 código (`confirm_secret`); si el código no vale, la excepción deshace las tres y el viejo sigue funcionando. Redis
 nunca ve el secreto en claro, y la clave nombra la sesión: otra sesión de la misma persona no puede confirmarlo.
-Quitar el TOTP sin poner otro sigue rechazado si es el último segundo factor (`DELETE /me/totp`, 409).
+Quitar el TOTP sin poner otro sigue rechazado si es el último segundo factor (`DELETE /me/totp`, 409). Confirmar un
+secreto nuevo **no** borra los fallos del TOTP: `enroll_totp_confirm` no llama a `reset_factor` (la Decisión 7 de la
+Task 4, NIST SP 800-63B-4 §3.1.3: «Generating a new authentication secret SHALL NOT reset the failed authentication
+count»); lo fija `test_a_new_authenticator_app_does_not_clear_the_failures`.
 
 **Decisión del plan (8): el correo del enlace de restablecimiento se manda en segundo plano.** OWASP [S8]: «Ensure
 that the time taken for the user response message is uniform». `password/forgot` responde 202 al momento y una
@@ -15268,6 +15428,36 @@ consola, y la Task 10 pide esas rutas como anónimas.
 `read_policy` (Task 6) en el mismo paso, `null` si `remember_device_enabled` es falso. Las respuestas que no son
 `factor_required` no llevan ni `methods` ni `remember_device_days` (`response_model_exclude_unset`), así que un
 `null` explícito solo aparece donde significa «no se puede».
+
+**Decisión del plan (16): un campo que lleva un secreto no tiene restricción de Pydantic; sus límites los pone el
+flujo.** FastAPI responde a un cuerpo inválido con un 422 cuyo `detail` repite el `input` del campo que falló, y
+la plataforma no tiene manejador propio de `RequestValidationError`: un `max_length` en la contraseña o un `pattern`
+en el código pondría la contraseña o el código en el cuerpo de la respuesta (y en cualquier registro que la
+guarde). Es la regla que ya sigue el repositorio (Task 3,
+`test_an_over_long_password_is_refused_without_repeating_it`: «The bound lives in the route, not on the field»).
+Así que `LoginIn.password`, el `code` de `CodeIn`, `RecoveryIn`, `StepUpCodeIn`, `StepUpRecoveryIn` y
+`EnrollCodeIn`, `ResetIn.password` y `PasswordChangeIn.current`/`.new` son `str` sin restricción, y:
+- una contraseña que se **verifica** (login, la actual de `PUT /me/password`) se limita a
+  `staff_password.SUBMITTED_MAX` (1024) antes de que el pepper y argon2 la vean, y una más larga (o vacía, en el
+  login) es una contraseña equivocada: `invalid_credentials` (401 en el login, igual para cualquier dirección; 403
+  en `PUT /me/password`, contada);
+- una contraseña **nueva** la limita la regla de la Task 2: `password_rejected` con el motivo `too_short` o
+  `too_long`;
+- un **código** va tal cual a la Task 4: `verify_totp`/`confirm_secret` quitan los espacios y exigen seis dígitos,
+  `recovery.normalise` quita espacios y guiones; cualquier otra forma es un código equivocado, `factor_failed` (401
+  en `/auth/factor/*`, 400 en `step-up` y `enroll`, decisión 14). Un código escrito «123 456» ahora entra, como la
+  Task 4 quería.
+Lo fijan una prueba por familia de rutas: `test_an_over_long_secret_is_refused_as_a_wrong_one_and_never_repeated`
+(inicio de sesión), `test_an_over_long_code_is_refused_as_a_wrong_one_and_never_repeated` (confirmación reciente y
+alta), y `test_an_over_long_password_is_refused_without_repeating_it` en `test_auth_password_reset.py` y en
+`test_auth_my_security.py`. La Task 8 aplica lo mismo a `InviteAcceptIn.password` y `SetupClaim.password`.
+
+**Decisión del plan (17): el contexto de una contraseña nueva lleva el nombre de la organización.** La Decisión 5 de
+la Task 2 lo pide («la Task 7 y la 8 pasan el nombre de la organización y el de la persona»).
+`staff_password.require_acceptable` gana `org_name` (kw-only, obligatorio) y lo pasa a `context_words(email,
+org_name, display_name)`; `staff_password.organization_name(session, org_id)` lo lee en la sesión del flujo, cuya RLS
+deja ver justo la fila de esa organización (`organizations` es G; como lo lee `app/modules/remote/service.py:487`).
+Lo fija `test_a_password_built_on_the_organizations_name_is_refused`.
 
 **Pruebas existentes que cambian.** Ninguna fija un comportamiento que esta tarea cambie a propósito; cambian los
 registros que cuentan rutas, con estos deltas sobre lo que deje la Task 6 en la cabeza de la rama:
@@ -16168,6 +16358,60 @@ async def test_no_sign_in_answer_carries_a_secret(auth_env: Any) -> None:
     for meta in metas:
         for secret in (token, device, code, who.password, *who.recovery_codes):
             assert secret not in meta
+
+
+async def test_an_over_long_secret_is_refused_as_a_wrong_one_and_never_repeated(
+    auth_env: Any,
+) -> None:
+    """Decision 16. A password or a code in a request body has no Pydantic
+    bound: a field failure repeats its INPUT in the 422, and the input is the
+    secret. The flow bounds it and answers as for a wrong one --
+    `invalid_credentials` for the password (`staff_password.SUBMITTED_MAX`,
+    held in `flows.login`), `factor_failed` for a code (Task 4's `verify_totp`
+    and `recovery.normalise` drop spaces and refuse any other shape). Put a
+    `max_length` back on `LoginIn.password`, or a `pattern` or a length on
+    `CodeIn.code` / `RecoveryIn.code`, and the 422 repeats the secret: red. A
+    code typed with a space still signs in, which `^[0-9]{6}$` refused."""
+    org = await auth_env.create_org("signin-long")
+    who = await signed_in(auth_env, org, "technician")
+    who.session = None
+    long_password = who.password + "x" * 2000
+    long_code = "9" * 2000
+    long_recovery = "Z" * 2000
+
+    refused = await auth_env.client.post(
+        "/api/v1/auth/login",
+        headers=who.headers(),
+        json={"email": who.email, "password": long_password},
+    )
+    step = await login(auth_env, who)
+    by_code = await auth_env.client.post(
+        "/api/v1/auth/factor/totp",
+        headers=who.headers(),
+        json={"code": long_code, "remember_device": False},
+    )
+    by_recovery = await auth_env.client.post(
+        "/api/v1/auth/factor/recovery",
+        headers=who.headers(),
+        json={"code": long_recovery, "remember_device": False},
+    )
+    code = await fresh_code(auth_env, who)
+    spaced = await auth_env.client.post(
+        "/api/v1/auth/factor/totp",
+        headers=who.headers(),
+        json={"code": f"{code[:3]} {code[3:]}", "remember_device": False},
+    )
+
+    assert refused.status_code == 401, refused.text
+    assert refused.json()["code"] == "invalid_credentials"
+    assert long_password not in refused.text and who.password not in refused.text
+    assert step.json()["state"] == "factor_required", step.text
+    for response, secret in ((by_code, long_code), (by_recovery, long_recovery)):
+        assert response.status_code == 401, response.text
+        assert response.json()["code"] == "factor_failed"
+        assert secret not in response.text
+    assert spaced.status_code == 200, spaced.text
+    assert spaced.json() == {"state": "signed_in"}
 ```
 
 Run: `.venv/bin/pytest -q tests/test_auth_signin.py`
@@ -16197,7 +16441,8 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuditEvent
+from app.core.auth.passwords import STAFF_MINIMUM, PasswordRejected
+from app.models import AuditEvent, Organization
 from app.models.auth import AuthActionToken, AuthSession
 from tests.auth_support import (
     CONSOLE,
@@ -16343,10 +16588,58 @@ async def test_a_newer_link_replaces_the_older_one(auth_env: Any) -> None:
 
     assert (await _reset(auth_env, older, "Pelican-Orbit-Lantern-58")).status_code == 410
     assert (await _reset(auth_env, newer, "Pelican-Orbit-Lantern-58")).status_code == 204
+
+
+async def test_an_over_long_password_is_refused_without_repeating_it(auth_env: Any) -> None:
+    """Decision 16: `ResetIn.password` has no Pydantic bound -- a field
+    failure repeats its INPUT in the 422, and the input is the new password.
+    The rule's `too_long` refuses it (422 `password_rejected`), and the link
+    stays usable, as for any refused password."""
+    org = await auth_env.create_org("reset-long")
+    who = await signed_in(auth_env, org, "technician")
+    await _forgot(auth_env, who.email)
+    token = link_token(_resets(auth_env)[-1].text)
+    long_password = "Pelican-Orbit-Lantern-58" * 100
+
+    refused = await _reset(auth_env, token, long_password)
+    good = await _reset(auth_env, token, "Pelican-Orbit-Lantern-58")
+
+    assert refused.status_code == 422, refused.text
+    assert refused.json() == {
+        "code": "password_rejected",
+        "detail": PasswordRejected(reason="too_long", minimum=STAFF_MINIMUM).message,
+    }
+    assert long_password not in refused.text
+    assert good.status_code == 204, good.text
+
+
+async def test_a_password_built_on_the_organizations_name_is_refused(auth_env: Any) -> None:
+    """Task 2's decision 5: the context is the address, the ORGANIZATION'S NAME
+    and the person's. Drop `org_name=` from `flows.reset_password` (or the
+    name from `staff_password.require_acceptable`'s `context_words`) and this
+    password -- 16 characters, on no list, built on nothing but that name --
+    is taken: red."""
+    org = await auth_env.create_org("reset-org")
+    who = await signed_in(auth_env, org, "technician")
+    async with AsyncSession(auth_env.admin_engine) as session:
+        await session.execute(
+            update(Organization).where(Organization.id == org).values(name="Quokkaworks Ltd")
+        )
+        await session.commit()
+    await _forgot(auth_env, who.email)
+    token = link_token(_resets(auth_env)[-1].text)
+
+    refused = await _reset(auth_env, token, "Quokkaworks 2026")
+
+    assert refused.status_code == 422, refused.text
+    assert refused.json() == {
+        "code": "password_rejected",
+        "detail": PasswordRejected(reason="context", minimum=STAFF_MINIMUM).message,
+    }
 ```
 
 Run: `.venv/bin/pytest -q tests/test_auth_password_reset.py`
-Expected: FAIL (6): la colección pasa (este archivo no importa `flows`); cada prueba se detiene en
+Expected: FAIL (8): la colección pasa (este archivo no importa `flows`); cada prueba se detiene en
 `tests/auth_support.py::signed_in` con `AssertionError: {"detail":"Not Found"}`: `/api/v1/auth/login` aún no existe.
 
 - [ ] **Step 4: Las pruebas de Mi seguridad, que fallan**
@@ -16621,10 +16914,116 @@ async def test_forgetting_a_device_brings_the_factor_back(auth_env: Any) -> None
 
     assert forgot.status_code == 204
     assert after.json()["state"] == "factor_required"
+
+
+async def test_an_over_long_code_is_refused_as_a_wrong_one_and_never_repeated(
+    auth_env: Any,
+) -> None:
+    """Decision 16, with the session open: a step-up or an enrolment code has
+    no Pydantic bound (a 422 would repeat it), and a code of any other shape
+    is a wrong one -- 400 `factor_failed` (decision 14), never echoed. A
+    `pattern` or a length back on `StepUpCodeIn`, `StepUpRecoveryIn` or
+    `EnrollCodeIn` turns this red with a 422 that carries the code."""
+    org = await auth_env.create_org("mysec-long-code")
+    who = await signed_in(auth_env, org, "technician")
+    long_code = "9" * 2000
+    long_recovery = "Z" * 2000
+
+    step_up = await auth_env.client.post(
+        "/api/v1/auth/step-up/totp", headers=who.headers(), json={"code": long_code}
+    )
+    by_recovery = await auth_env.client.post(
+        "/api/v1/auth/step-up/recovery", headers=who.headers(), json={"code": long_recovery}
+    )
+    start = await auth_env.client.post("/api/v1/auth/enroll/totp/start", headers=who.headers())
+    assert start.status_code == 200, start.text
+    confirm = await auth_env.client.post(
+        "/api/v1/auth/enroll/totp/confirm", headers=who.headers(), json={"code": long_code}
+    )
+
+    for response, secret in (
+        (step_up, long_code),
+        (by_recovery, long_recovery),
+        (confirm, long_code),
+    ):
+        assert response.status_code == 400, response.text
+        assert response.json()["code"] == "factor_failed"
+        assert secret not in response.text
+
+
+async def test_an_over_long_password_is_refused_without_repeating_it(auth_env: Any) -> None:
+    """Decision 16 for `PUT /me/password`: neither field has a Pydantic bound
+    (a 422 would repeat it). An over-long CURRENT password is a wrong one -- 403
+    `invalid_credentials`, never handed to the pepper
+    (`staff_password.SUBMITTED_MAX`); an over-long NEW one is the rule's
+    `too_long` -- 422 `password_rejected`. Neither body repeats it, and the
+    password does not change."""
+    org = await auth_env.create_org("mysec-pw-long")
+    who = await signed_in(auth_env, org, "technician")
+    long_current = who.password + "x" * 2000
+    long_new = "Pelican-Orbit-Lantern-58" * 100
+
+    by_current = await auth_env.client.put(
+        "/api/v1/me/password",
+        headers=who.headers(),
+        json={"current": long_current, "new": "Pelican-Orbit-Lantern-58"},
+    )
+    by_new = await auth_env.client.put(
+        "/api/v1/me/password",
+        headers=who.headers(),
+        json={"current": who.password, "new": long_new},
+    )
+
+    assert by_current.status_code == 403, by_current.text
+    assert by_current.json()["code"] == "invalid_credentials"
+    assert long_current not in by_current.text
+    assert by_new.status_code == 422, by_new.text
+    assert by_new.json()["code"] == "password_rejected"
+    assert long_new not in by_new.text
+    who.session = None
+    assert (await login(auth_env, who)).json()["state"] == "factor_required"
+
+
+async def test_a_new_authenticator_app_does_not_clear_the_failures(auth_env: Any) -> None:
+    """Task 4's decision 7 (NIST SP 800-63B-4 §3.1.3: "Generating a new
+    authentication secret SHALL NOT reset the failed authentication count"):
+    confirming a new authenticator app leaves the TOTP's failures where they
+    were. A `reset_factor` in `flows.enroll_totp_confirm` deletes the row:
+    red."""
+    org = await auth_env.create_org("mysec-totp-failures")
+    who = await signed_in(auth_env, org, "technician")
+    assert who.totp_secret
+    for _ in range(3):
+        wrong = await auth_env.client.post(
+            "/api/v1/auth/step-up/totp",
+            headers=who.headers(),
+            json={"code": wrong_code(who.totp_secret)},
+        )
+        assert wrong.status_code == 400, wrong.text
+    start = await auth_env.client.post("/api/v1/auth/enroll/totp/start", headers=who.headers())
+    assert start.status_code == 200, start.text
+    new_secret = parse_qs(urlsplit(start.json()["otpauth_uri"]).query)["secret"][0]
+
+    right = await auth_env.client.post(
+        "/api/v1/auth/enroll/totp/confirm",
+        headers=who.headers(),
+        json={"code": pyotp.TOTP(new_secret).now()},
+    )
+
+    assert right.status_code == 204, right.text
+    async with AsyncSession(auth_env.admin_engine) as session:
+        failure = (
+            await session.execute(
+                select(AuthFailure).where(
+                    AuthFailure.user_id == who.user_id, AuthFailure.factor == "totp"
+                )
+            )
+        ).scalar_one_or_none()
+    assert failure is not None and failure.consecutive == 3
 ```
 
 Run: `.venv/bin/pytest -q tests/test_auth_my_security.py`
-Expected: FAIL (9): `test_my_security_needs_the_console_session` con `assert 404 == 401`; las demás en
+Expected: FAIL (12): `test_my_security_needs_the_console_session` con `assert 404 == 401`; las demás en
 `tests/auth_support.py::signed_in` con `AssertionError: {"detail":"Not Found"}`.
 
 - [ ] **Step 5: La búsqueda previa a la identidad y los enlaces de un solo uso**
@@ -17025,10 +17424,17 @@ Crear `backend/app/core/auth/staff_password.py`:
 
 THE RULE IS TASK 2's (`passwords.check_new_password`): twelve characters at
 least, 128 at most, whole against the shipped blocklist and against the
-words of the context -- the address and its parts, the person's name and the
-platform's names (`passwords.context_words`). This module applies it to a
-technician and says the reason (NIST SP 800-63B-4 §3.1.1.2; plan decision
-11): `PasswordRejected.message` is already in the request's language.
+words of the context -- the address and its parts, the organization's name,
+the person's name and the platform's names (`passwords.context_words`; Task
+2's decision 5). This module applies it to a technician and says the reason
+(NIST SP 800-63B-4 §3.1.1.2; plan decision 11): `PasswordRejected.message` is
+already in the request's language.
+
+A PASSWORD IN A REQUEST BODY HAS NO PYDANTIC BOUND (plan decision 16): a field
+failure repeats its INPUT in the 422, and the input is the password. A new
+password is bounded by this rule (`too_short`, `too_long`); a password to
+VERIFY is held to `SUBMITTED_MAX` by its flow before the pepper and argon2 see
+it (`flows.login`, `account.change_password`).
 
 THE BLOCKLIST LOADS ON FIRST USE (~0.5 s), so the check runs in a worker
 thread, as Task 2 asks: an anonymous reset must not stall the event loop.
@@ -17039,6 +17445,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.passwords import (
@@ -17049,16 +17456,38 @@ from app.core.auth.passwords import (
     hash_password,
 )
 from app.core.auth.refusals import AuthRefusal
+from app.models import Organization
 from app.models.auth import AuthPassword
 
+#: The longest password a request may hand to the pepper and argon2 for
+#: VERIFYING: longer than any the rule accepts (`passwords.MAX_LENGTH`, 128
+#: code points after NFC, even typed decomposed), short enough that an
+#: anonymous caller cannot send OpenBao a megabyte to HMAC.
+SUBMITTED_MAX = 1024
 
-async def require_acceptable(plain: str, *, email: str, display_name: str) -> None:
+
+async def organization_name(session: AsyncSession, org_id: UUID) -> str:
+    """The organization's name, for the password's context (Task 2's decision
+    5). Read in the caller's session, whose RLS shows exactly this
+    organization's row -- as `app/modules/remote/service.py:487` reads it."""
+    name: str = (
+        await session.execute(select(Organization.name).where(Organization.id == org_id))
+    ).scalar_one()
+    return name
+
+
+async def require_acceptable(
+    plain: str, *, email: str, display_name: str, org_name: str
+) -> None:
+    """The rule of design §2.1 for a technician, or a 422 `password_rejected`
+    whose `detail` says why. The context is the address, the organization's
+    name and the person's name."""
     try:
         await asyncio.to_thread(
             check_new_password,
             plain,
             minimum=STAFF_MINIMUM,
-            context=context_words(email, display_name),
+            context=context_words(email, org_name, display_name),
         )
     except PasswordRejected as exc:
         raise AuthRefusal(
@@ -17618,6 +18047,12 @@ async def login(request: Request, *, email: str, password: str) -> SignIn:
                 "sign in to"
             ),
         )
+    if not password or len(password) > staff_password.SUBMITTED_MAX:
+        # Plan decision 16: the bound lives here, not on `LoginIn` (a field
+        # failure repeats the password in its 422). No password the rule
+        # accepts is empty or this long, so this is a wrong one -- answered
+        # alike whoever the address names, before the pepper sees it.
+        raise _invalid_credentials()
     found = await find_staff(_engine(request), org_slug=slug, email=email)
     if found is None or found.status != ACTIVE_STATUS:
         # Falsifier 2: the same argon2 work as a wrong password, so neither
@@ -17884,7 +18319,10 @@ async def enroll_totp_confirm(request: Request, principal: SessionPrincipal, *, 
                 session, user.id, code, vault=_vault(request), now=_now()
             )
         if accepted:
-            await reset_factor(session, user.id, "totp")
+            # No `reset_factor` here: a new secret does not clear the TOTP's
+            # failures (Task 4's decision 7, NIST SP 800-63B-4 §3.1.3:
+            # "Generating a new authentication secret SHALL NOT reset the
+            # failed authentication count").
             replaced = sealed is not None
             await _audit(
                 session, user, "auth.factor_added", {"factor": "totp", "replaced": replaced}
@@ -18103,7 +18541,10 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
             raise _invalid_link()
         # Raises a 422 that rolls the `consume` back: the link stays usable.
         await staff_password.require_acceptable(
-            password, email=user.email, display_name=user.display_name
+            password,
+            email=user.email,
+            display_name=user.display_name,
+            org_name=await staff_password.organization_name(session, org_id),
         )
         await staff_password.store(session, org_id=org_id, user_id=user.id, plain=password)
         await reset_factor(session, user.id, "password")
@@ -18331,9 +18772,16 @@ async def change_password(
         stored = await session.get(AuthPassword, user.id)
         state = await check_allowed(session, user.id, "password")
         if stored is not None and state.allowed:
-            if await verify_password(user.org_id, current, stored.hash, stored.pepper_version):
+            # Plan decision 16: an over-long current password is a wrong one,
+            # counted, and never handed to the pepper (`SUBMITTED_MAX`).
+            if len(current) <= staff_password.SUBMITTED_MAX and await verify_password(
+                user.org_id, current, stored.hash, stored.pepper_version
+            ):
                 await staff_password.require_acceptable(
-                    new, email=user.email, display_name=user.display_name
+                    new,
+                    email=user.email,
+                    display_name=user.display_name,
+                    org_name=await staff_password.organization_name(session, user.org_id),
                 )
                 await staff_password.store(session, org_id=user.org_id, user_id=user.id, plain=new)
                 await record_success(session, user.id, "password")
@@ -18546,26 +18994,35 @@ _LINK = _limit("auth-link", 20, 600)
 
 # --------------------------------------------------------------------------- #
 # models -- every request body `extra="forbid"`
+#
+# A FIELD THAT CARRIES A SECRET -- a password, a TOTP code, a recovery code --
+# IS A PLAIN `str` (plan decision 16). A Pydantic constraint that fails puts
+# the field's INPUT in the 422 body, and the input would be the secret (Task
+# 3's `test_an_over_long_password_is_refused_without_repeating_it`: "The bound
+# lives in the route, not on the field"). The flows bound them instead:
+# `flows.login` and `account.change_password` hold a password to verify to
+# `staff_password.SUBMITTED_MAX` (`invalid_credentials`); a new password is
+# `check_new_password`'s (`password_rejected`, `too_short`/`too_long`); a code
+# goes to Task 4's `verify_totp`/`confirm_secret` (spaces dropped, six digits)
+# or `recovery.normalise`, and any other shape is `factor_failed`.
 # --------------------------------------------------------------------------- #
 
 
 class LoginIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     email: str = Field(min_length=3, max_length=320)
-    #: Longer than any password the rule accepts (128), short enough that an
-    #: anonymous caller cannot hand argon2 a megabyte.
-    password: str = Field(min_length=1, max_length=1024)
+    password: str
 
 
 class CodeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    code: str = Field(pattern=r"^[0-9]{6}$")
+    code: str
     remember_device: bool = False
 
 
 class RecoveryIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    code: str = Field(min_length=8, max_length=32)
+    code: str
     remember_device: bool = False
 
 
@@ -18577,12 +19034,12 @@ class PasskeyIn(BaseModel):
 
 class StepUpCodeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    code: str = Field(pattern=r"^[0-9]{6}$")
+    code: str
 
 
 class StepUpRecoveryIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    code: str = Field(min_length=8, max_length=32)
+    code: str
 
 
 class StepUpPasskeyIn(BaseModel):
@@ -18592,7 +19049,7 @@ class StepUpPasskeyIn(BaseModel):
 
 class EnrollCodeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    code: str = Field(pattern=r"^[0-9]{6}$")
+    code: str
 
 
 class EnrollPasskeyIn(BaseModel):
@@ -18609,13 +19066,13 @@ class ForgotIn(BaseModel):
 class ResetIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     token: str = Field(max_length=200)
-    password: str = Field(min_length=1, max_length=1024)
+    password: str
 
 
 class PasswordChangeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    current: str = Field(min_length=1, max_length=1024)
-    new: str = Field(min_length=1, max_length=1024)
+    current: str
+    new: str
 
 
 class SignInOut(BaseModel):
@@ -19043,7 +19500,7 @@ Y después de la línea `    app.add_exception_handler(AuthRefusal, auth_refusal
 - [ ] **Step 12: Ver que pasan las pruebas de comportamiento**
 
 Run: `.venv/bin/pytest -q tests/test_auth_signin.py tests/test_auth_password_reset.py tests/test_auth_my_security.py`
-Expected: PASS (17 + 6 + 9).
+Expected: PASS (18 + 8 + 12).
 
 Si `test_whoever_is_refused_is_refused_alike_and_in_the_same_time` falla con `assert 3 == 4`, una rama de
 `flows.login` dejó de llamar a `verify_against_nobody`: es el falsificador 2 haciendo su trabajo; arreglar el
@@ -19223,7 +19680,8 @@ def test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes(
 ```
 
    `test_every_never_exposed_route_refuses_the_channel` (`:157-168`) recorre `NEVER_EXPOSED` y ahora cubre las 20
-   rutas nuevas: el guardia (`app/mcp/guard.py`) responde 403 antes de enrutar.
+   rutas nuevas: el guardia (`app/mcp/guard.py`) responde 403 antes de enrutar, y antes que la regla CSRF, que la
+   Task 6 registró dentro de él (su Step 8): una `POST /auth/*` marcada como MCP recibe `NEVER_ES`, no `csrf`.
 
 5. `backend/tests/test_ai_tool_surface.py`: `EXPECTED_GET_ROUTES` (`:589`) +1 y `"P2 gated"` (`:731`) +1 sobre lo
    que dejó la Task 6; encima de `EXPECTED_GET_ROUTES`, después de la última nota (`:585-588`, o la que añadió la
@@ -19518,7 +19976,9 @@ MCP usa sus propios usuarios.
 **Interfaces:**
 - Consumes: lo que produce la Task 7 (nombres de su sección «Produces»): `action_tokens.{INVITE, RECOVER,
   INVITE_TTL, RECOVER_TTL, issue, revoke_open, peek, consume, link, org_of}`,
-  `staff_password.{require_acceptable (async), store}`, `notices.{deliver, tell, PRODUCT}` (los dos con `vault` y
+  `staff_password.{require_acceptable (async; `org_name` obligatorio, decisión 17 de la Task 7),
+  organization_name (async), store}` (las contraseñas de los cuerpos sin restricción de Pydantic, decisión 16 de la
+  Task 7: `InviteAcceptIn.password` y `SetupClaim.password` igual), `notices.{deliver, tell, PRODUCT}` (los dos con `vault` y
   `actor_id`), `factors.clear_second_factors`, `lookup.find_staff`, `flows.{_identity_session, _engine, _vault,
   _audit, _started, _invalid_link, SignIn}`, el `_LINK` y `_answer` de `api/v1/auth.py`. De la Task 6:
   `sessions.end_all_for_user(session, user_id, reason, except_id=None)` con `EndReason` (aquí `"disabled"`,
@@ -19543,7 +20003,8 @@ MCP usa sus propios usuarios.
     sesión sin factor (la consola va al alta del primer factor); 422 `{"code": "password_rejected", "detail"}` deja
     el enlace usable.
   - `POST /api/v1/setup/claim {code, email, display_name, organization_name, password}` (`password` obligatorio,
-    1–1024 en el cuerpo; la regla es `check_new_password` con `STAFF_MINIMUM`) → 201
+    sin restricción de Pydantic en el cuerpo, decisión 16 de la Task 7; la regla es `check_new_password` con
+    `STAFF_MINIMUM` y el nombre de la organización en el contexto) → 201
     `{"organization_id", "organization_slug", "user_id", "email"}`; 422 `{"code": "password_rejected", "detail"}`
     sin crear nada. El primer factor se registra en el primer inicio de sesión.
   - `python -m app.core.auth.recover --email <correo>` imprime `{ITS_PUBLIC_CONSOLE_URL}/recover#<token>` (15 min,
@@ -19716,8 +20177,9 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth.passwords import STAFF_MINIMUM, PasswordRejected
 from app.core.auth.sessions import DEVICE_COOKIE, SESSION_COOKIE
-from app.models import AuditEvent, Role, User, UserRole
+from app.models import AuditEvent, Organization, Role, User, UserRole
 from app.models.auth import AuthPassword, AuthSession, AuthTotp
 from tests.auth_support import (
     CONSOLE,
@@ -20057,6 +20519,67 @@ async def test_an_invited_technician_has_a_password_row_only_after_accepting(
     invited = await _invite(env, admin.headers())
     async with AsyncSession(env.admin_engine) as session:
         assert await session.get(AuthPassword, UUID(invited.json()["user_id"])) is None
+
+
+async def test_an_over_long_password_is_refused_without_repeating_it(lifecycle_env: Any) -> None:
+    """Task 7's decision 16: `InviteAcceptIn.password` has no Pydantic bound,
+    because a field failure repeats its INPUT in the 422 and the input is the
+    invitee's password. The rule's `too_long` refuses it -- 422
+    `password_rejected`, the body never repeating it -- and the link stays
+    usable. A `max_length` back on the field turns this red."""
+    env = lifecycle_env
+    org = await env.create_org("invite-long")
+    admin = await signed_in(env, org, "org-admin")
+    await _invite(env, admin.headers())
+    token = link_token(env.mail.sent[-1].text)
+    long_password = "Pelican-Orbit-Lantern-58" * 100
+
+    refused = await env.client.post(
+        "/api/v1/auth/invite/accept",
+        headers=browser(),
+        json={"token": token, "password": long_password},
+    )
+    accepted = await env.client.post(
+        "/api/v1/auth/invite/accept",
+        headers=browser(),
+        json={"token": token, "password": "Pelican-Orbit-Lantern-58"},
+    )
+
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["code"] == "password_rejected"
+    assert long_password not in refused.text
+    assert accepted.status_code == 200, accepted.text
+
+
+async def test_an_invitees_password_is_checked_against_the_organizations_name(
+    lifecycle_env: Any,
+) -> None:
+    """Task 2's decision 5, as Task 7's `staff_password.require_acceptable`
+    applies it: the organization's name is context. Drop `org_name=` from
+    `flows.accept_invite` and this password -- 16 characters, on no list,
+    built on nothing but that name -- is taken: red."""
+    env = lifecycle_env
+    org = await env.create_org("invite-orgname")
+    admin = await signed_in(env, org, "org-admin")
+    async with AsyncSession(env.admin_engine) as session:
+        await session.execute(
+            update(Organization).where(Organization.id == org).values(name="Quokkaworks Ltd")
+        )
+        await session.commit()
+    await _invite(env, admin.headers())
+    token = link_token(env.mail.sent[-1].text)
+
+    refused = await env.client.post(
+        "/api/v1/auth/invite/accept",
+        headers=browser(),
+        json={"token": token, "password": "Quokkaworks 2026"},
+    )
+
+    assert refused.status_code == 422, refused.text
+    assert refused.json() == {
+        "code": "password_rejected",
+        "detail": PasswordRejected(reason="context", minimum=STAFF_MINIMUM).message,
+    }
 ```
 
 `test_an_invitation_needs_the_console_address` usa el Bearer (`env.headers`) porque, sin `ITS_PUBLIC_CONSOLE_URL`,
@@ -20064,7 +20587,7 @@ la regla CSRF de la Task 6 no tiene origen con el que comparar una petición con
 hasta la Task 13, que re-apunta esta prueba con las demás (D12).
 
 Run: `.venv/bin/pytest -q tests/test_user_lifecycle.py`
-Expected: FAIL (12): `POST /api/v1/users/invite` responde 405 (la ruta no existe; `/users/{user_id}` solo acepta
+Expected: FAIL (13): `POST /api/v1/users/invite` responde 405 (la ruta no existe; `/users/{user_id}` solo acepta
 DELETE) y las que no invitan fallan con 404 en `factors/reset`, `invite/resend`, `DELETE …/invite` y
 `DELETE …/sessions`; `test_disable_signs_the_person_out…` falla en `assert … cut.status_code == 401` con `200`.
 
@@ -20226,12 +20749,51 @@ def test_the_recovery_command_does_not_exist_over_http() -> None:
 
     source = RECOVER_PY.read_text()
     assert "APIRouter" not in source and "fastapi" not in source
-    issuers = sorted(
-        str(py.relative_to(APP))
-        for py in APP.rglob("*.py")
-        if "purpose=action_tokens.RECOVER" in py.read_text()
+    issued = _issue_calls()
+    # Not vacuous: the walk sees Task 7's reset link and this task's
+    # invitation as well as the recovery link, whatever spelling each uses.
+    assert {purpose for _, purpose in issued} >= {"INVITE", "RESET", "RECOVER"}, issued
+    recovery_issuers = sorted(
+        path for path, purpose in issued if purpose not in {"INVITE", "RESET"}
     )
-    assert issuers == ["core/auth/recover.py"]
+    assert recovery_issuers == ["core/auth/recover.py"], issued
+
+
+def _purpose(call: ast.Call) -> str:
+    """The `purpose=` of one `issue(...)` call as written: a constant's name
+    (`action_tokens.RECOVER`, or `RECOVER` imported bare) or a literal
+    upper-cased (`"recover"`). Anything else -- a variable, `**kwargs`, no
+    keyword at all -- comes back as its own source and counts as a possible
+    recovery issuer: the safe direction for this list to be wrong in."""
+    for keyword in call.keywords:
+        if keyword.arg == "purpose":
+            value = keyword.value
+            if isinstance(value, ast.Attribute):
+                return value.attr
+            if isinstance(value, ast.Name):
+                return value.id
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                return value.value.upper()
+            return ast.unparse(value)
+    return "<no purpose keyword>"
+
+
+def _issue_calls() -> list[tuple[str, str]]:
+    """Every call to `issue(...)` or `<anything>.issue(...)` under `app/` --
+    `action_tokens.issue` however it was imported or aliased -- as
+    `(path, purpose)`. Matched on the AST, not on text, so neither a line break
+    nor another spelling of the purpose hides an issuer."""
+    found: list[tuple[str, str]] = []
+    for py in sorted(APP.rglob("*.py")):
+        for node in ast.walk(ast.parse(py.read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if (isinstance(func, ast.Name) and func.id == "issue") or (
+                isinstance(func, ast.Attribute) and func.attr == "issue"
+            ):
+                found.append((str(py.relative_to(APP)), _purpose(node)))
+    return found
 ```
 
 Run: `.venv/bin/pytest -q tests/test_auth_recover_command.py`
@@ -21258,12 +21820,15 @@ from app.modules.user_admin import service as user_admin
 from app.modules.user_admin.service import ORG_ADMIN, UserAdminError
 ```
 
-3. `SetupClaim` (`:106-125`) gana, después de `display_name`:
+3. `SetupClaim` (`:106-125`) gana, después de `display_name` (sin `min_length` ni `max_length`: un campo que falla
+   repite su `input` en el 422, y el `input` sería la contraseña; la regla de §2.1 la limita en
+   `staff_password.require_acceptable`, Task 7, su decisión 16):
 
 ```python
+    #: No length bound here (P2 Task 7's decision 16): a field failure would
+    #: repeat the password in its 422. The rule of design §2.1 bounds it in
+    #: `staff_password.require_acceptable` (`too_short`, `too_long`).
     password: str = Field(
-        min_length=1,
-        max_length=1024,
         description="The first administrator's password: 12 characters at least (design §2.1).",
     )
 ```
@@ -21307,7 +21872,11 @@ async def claim_platform(body: SetupClaim, request: Request) -> ClaimedOut:
 
     _refuse_without_the_code(body.code)
     await staff_password.require_acceptable(
-        body.password, email=body.email.strip().lower(), display_name=body.display_name
+        body.password,
+        email=body.email.strip().lower(),
+        display_name=body.display_name,
+        # The organization this claim is about to create (Task 2's decision 5).
+        org_name=body.organization_name.strip(),
     )
 
     async with admin_session(engine=engine) as session:
@@ -21555,7 +22124,10 @@ async def accept_invite(request: Request, *, token: str, password: str) -> SignI
     async with _identity_session(org_id, _engine(request)) as session:
         user = await _invited(session, token, consume=True)
         await staff_password.require_acceptable(
-            password, email=user.email, display_name=user.display_name
+            password,
+            email=user.email,
+            display_name=user.display_name,
+            org_name=await staff_password.organization_name(session, org_id),
         )
         await staff_password.store(session, org_id=org_id, user_id=user.id, plain=password)
         await _audit(session, user, "auth.password_changed", {"via": "invite"})
@@ -21626,7 +22198,9 @@ class LinkTokenIn(BaseModel):
 class InviteAcceptIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     token: str = Field(max_length=200)
-    password: str = Field(min_length=1, max_length=1024)
+    #: No Pydantic bound (Task 7's decision 16): a field failure repeats the
+    #: password in its 422. `staff_password.require_acceptable` bounds it.
+    password: str
 
 
 class InviteOut(BaseModel):
@@ -21813,7 +22387,7 @@ if __name__ == "__main__":
 - [ ] **Step 8: Ver que pasan las pruebas nuevas**
 
 Run: `.venv/bin/pytest -q tests/test_user_lifecycle.py tests/test_auth_recover_command.py`
-Expected: PASS (12 + 4).
+Expected: PASS (14 + 4).
 
 - [ ] **Step 9: `test_user_admin_api.py` re-apuntado**
 
@@ -22703,6 +23277,49 @@ async def test_a_refused_claim_answers_in_the_requests_language_and_logs_nothing
     assert [r for r in caplog.records if r.name == "app.api.v1.setup"] == []
 ```
 
+15. Dos pruebas nuevas al final del archivo: la contraseña del dueño sin restricción de Pydantic (Task 7, su decisión
+    16) y el nombre de la organización en su contexto (Decisión 5 de la Task 2):
+
+```python
+async def test_an_over_long_password_is_refused_without_repeating_it(setup_env: Any) -> None:
+    """P2 Task 7's decision 16: `SetupClaim.password` has no Pydantic bound,
+    because a field failure repeats its INPUT in the 422 and the input is the
+    owner's password. The rule's `too_long` refuses it after the install code,
+    the body never repeats it, and nothing is made. A `max_length` back on the
+    field turns this red."""
+    long_password = "Owner-Passphrase-2026" * 100
+
+    response = await setup_env.client.post(
+        "/api/v1/setup/claim", json=_body(code=setup_env.code, password=long_password)
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json() == {
+        "code": "password_rejected",
+        "detail": PasswordRejected(reason="too_long", minimum=STAFF_MINIMUM).message,
+    }
+    assert long_password not in response.text
+    assert await setup_env.orgs() == []
+    assert await setup_env.users() == []
+
+
+async def test_a_password_built_on_the_organizations_name_is_refused(setup_env: Any) -> None:
+    """Task 2's decision 5: the organization being set up is context. Drop
+    `org_name=` from `claim_platform` and this password -- 16 characters, on
+    no list, built on nothing but that name -- is taken: red."""
+    response = await setup_env.client.post(
+        "/api/v1/setup/claim",
+        json=_body(name="Quokkaworks Ltd", code=setup_env.code, password="Quokkaworks 2026"),
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json() == {
+        "code": "password_rejected",
+        "detail": PasswordRejected(reason="context", minimum=STAFF_MINIMUM).message,
+    }
+    assert await setup_env.orgs() == []
+```
+
 Run: `.venv/bin/pytest -q tests/test_setup_api.py`
 Expected: PASS.
 
@@ -23068,7 +23685,8 @@ def test_the_user_lifecycle_has_no_identity_provider_wording_to_forward() -> Non
     ("POST", "/api/v1/users/{user_id}/invite/resend"),
 ```
 
-   y `assert len(NEVER_EXPOSED) == 30` → `36`.
+   y `assert len(NEVER_EXPOSED) == 30` → `36`. `test_every_never_exposed_route_refuses_the_channel` cubre las seis
+   (el guardia de MCP corre antes que la regla CSRF, Task 6 Step 8, así que las cuatro `/auth/*` reciben `NEVER_ES`).
 
 5. `backend/tests/test_route_gating.py`: después de la entrada de `/api/v1/auth/password/reset` (Task 7):
 
@@ -24642,13 +25260,14 @@ async def test_a_confirm_signed_in_by_cookie_probes_with_its_own_token(api_env: 
     org_id = await api_env.create_org("confirm-cookie")
     _, sub = await ai_user(api_env, org_id, "ai.use", "devices.read")
     session_id = (await sign_in(api_env, org_id, sub)).session_id
+    # Awaited out here: a class body is not a coroutine, and `await` inside
+    # one is a SyntaxError.
+    principal = await principal_for(api_env, session_id)
 
     class _Request:
         app = api_env.app
         headers = Headers({})
-        state = SimpleNamespace(
-            session_principal=await principal_for(api_env, session_id), via_loopback=False
-        )
+        state = SimpleNamespace(session_principal=principal, via_loopback=False)
 
     ctx = await api_module._turn_context(_Request())  # type: ignore[arg-type]
     claims = jwt.decode(ctx.bearer.removeprefix("Bearer "), options={"verify_signature": False})
@@ -24665,6 +25284,12 @@ Run, desde `backend/`:
 Expected: PASS. En particular `test_ai_boundaries.py::test_the_kernel_has_exactly_three_http_client_construction_sites`
 sigue en tres (el envoltorio no es un cliente HTTP) y `test_client_catalog.py` acepta la entrada nueva de la lista.
 
+Run, desde `frontend/` (Global Constraints, «Auditoría»: esta tarea toca `backend/app`, y la prueba de cobertura lee
+los literales del backend, docstrings incluidos):
+`npx vitest run src/modules/audit/auditVocabulary.coverage.test.ts src/i18n`
+Expected: PASS (esta tarea no añade ninguna acción de auditoría; si falla, un literal nuevo de `backend/app` parece
+una acción y se corrige el literal o se añade su entrada, nunca se salta la prueba).
+
 - [ ] **Step 11: Commit**
 
 ```bash
@@ -24679,7 +25304,11 @@ Desde `backend/` (con `pg_ctlcluster 16 main start; redis-cli ping || redis-serv
 - `.venv/bin/mypy app`. Expected: `Success`.
 - `.venv/bin/ruff check app tests`. Expected: `All checks passed!`.
 
-La suite completa la corre el coordinador. La consola no se toca en esta tarea.
+Desde `frontend/`:
+- `npx vitest run src/modules/audit/auditVocabulary.coverage.test.ts src/i18n`. Expected: PASS.
+
+La suite completa la corre el coordinador. La consola no se toca en esta tarea (la prueba de arriba solo lee el
+backend).
 
 ---
 
@@ -28622,10 +29251,10 @@ error del navegador (`NotAllowedError` al cerrar o caducar el diálogo) y `code`
 - Produces (del Apéndice A): las rutas `/sign-in`, `/sign-in/factor`, `/sign-in/enroll`, `/sign-in/recovery-codes`, `/forgot-password`, `/reset-password`, `/invite` (el token, en el fragmento); el catálogo `auth`; `ApiClient.login`, `factorTotp`, `factorPasskeyOptions`, `factorPasskey`, `factorRecovery`, `enrollTotpStart`, `enrollTotpConfirm`, `enrollPasskeyOptions`, `enrollPasskey`, `enrollFinish`, `forgotPassword`, `resetPassword`, `getInvite`, `acceptInvite`, `logoutEverywhere` (y `logout`, ya en la Task 10). Firmas, pactadas con la Task 12:
   - `login(body: { email: string; password: string }): Promise<LoginResult>`
   - `factorTotp(body: { code: string; remember_device: boolean }): Promise<SignedIn>`; `factorPasskeyOptions(): Promise<PublicKeyCredentialRequestOptionsJSON>`; `factorPasskey(body: { credential: AuthenticationResponseJSON; remember_device: boolean }): Promise<SignedIn>`; `factorRecovery(body: { code: string; remember_device: boolean }): Promise<SignedIn>`
-  - `enrollTotpStart(): Promise<TotpEnrollment>` (`{ otpauth_uri: string }`); `enrollTotpConfirm(code: string): Promise<void>`; `enrollPasskeyOptions(): Promise<PublicKeyCredentialCreationOptionsJSON>`; `enrollPasskey(credential: RegistrationResponseJSON, name: string): Promise<void>`; `enrollFinish(): Promise<RecoveryCodes>` (`{ recovery_codes: string[] }`)
+  - `enrollTotpStart(from?: EnrollFrom): Promise<TotpEnrollment>` (`{ otpauth_uri: string }`); `enrollTotpConfirm(code: string, from?: EnrollFrom): Promise<void>`; `enrollPasskeyOptions(from?: EnrollFrom): Promise<PublicKeyCredentialCreationOptionsJSON>`; `enrollPasskey(credential: RegistrationResponseJSON, name: string, from?: EnrollFrom): Promise<void>` (`EnrollFrom = { signedIn?: boolean }`: sin él, `anonymous`, la página del primer factor; con `{ signedIn: true }`, `global`, Mi seguridad de la Task 12); `enrollFinish(): Promise<RecoveryCodes>` (`{ recovery_codes: string[] }`)
   - `forgotPassword(body: { email: string }): Promise<void>`; `resetPassword(body: { token: string; password: string }): Promise<void>`; `getInvite(token: string): Promise<InviteDetails>`; `acceptInvite(body: { token: string; password: string }): Promise<void>`; `logoutEverywhere(): Promise<void>`
 - Produces (nombres nuevos):
-  - `frontend/src/modules/auth/types.ts`: `FactorMethod`, `LoginResult`, `SignedIn`, `TotpEnrollment`, `RecoveryCodes`, `InviteDetails`, y reexporta los cuatro tipos `*JSON` de `@simplewebauthn/browser`.
+  - `frontend/src/modules/auth/types.ts`: `FactorMethod`, `LoginResult`, `SignedIn`, `TotpEnrollment`, `EnrollFrom`, `RecoveryCodes`, `InviteDetails`, y reexporta los cuatro tipos `*JSON` de `@simplewebauthn/browser`.
   - `errors.ts`: `waitSeconds`, `passwordRefusal` (la frase de `password_rejected`), `describeAuthError(error, { rejected?, canTimeOut? })`, `isDeadLink` (410 o `invalid_link`), `checkNewPassword(password, again)`.
   - `flow.ts`: `useNext`, `carryNext`, `tokenFromHash`, `useLinkToken`, `digitsOf`, `recoveryCodeOf`, `setupKeyOf`, `handOverCodes`, `heldCodes`, `forgetCodes` (la Task 12 puede usar los tres últimos para mostrar los códigos regenerados).
   - `passkey.ts`: `canUsePasskeys`, `createPasskey`, `signWithPasskey`, `describePasskeyError`.
@@ -28641,6 +29270,7 @@ error del navegador (`NotAllowedError` al cerrar o caducar el diálogo) y `code`
 - *Decisión del plan: las páginas públicas no comprueban si ya hay sesión* (D19, y el modo fixtures de harmony): abrir `/sign-in` con sesión inicia sesión otra vez. Rebotar a la consola exigiría un `/me` aquí, y el modo fixtures, que siempre tiene sesión, no dejaría ver nunca la página.
 - *La `SetupPage` (contraseña del dueño) y la página `/recover` son del addendum del coordinador, al final de esta tarea.*
 - *Decisión del plan: `enrollTotpConfirm(code)` y `enrollPasskey(credential, name)` llevan argumentos sueltos, no un objeto*: es la firma que la Task 12 (Mi seguridad) consume.
+- *Decisión del plan: las cuatro de alta (`enrollTotpStart`, `enrollTotpConfirm`, `enrollPasskeyOptions`, `enrollPasskey`) ganan un último argumento opcional, `{ signedIn: true }` (`EnrollFrom`).* Mi seguridad (Task 12) las llama con la sesión completa de la consola, y ahí un 401 es esa sesión que terminó: con `anonymous` nunca llegaría a `onUnauthorized` y la página se quedaría en un error en vez de llevar a iniciar sesión. Con el argumento la petición no es `anonymous` sino `global` (sin `X-Client-Id`, como antes); sin él, la página del primer factor (`/sign-in/enroll`) sigue como estaba. `enrollFinish` no lo necesita: solo vale en una sesión pendiente (Task 7, su decisión 6).
 
 
 **Cómo leer los cambios:** igual que en la Task 10 — archivos nuevos completos; los cambios a archivos existentes,
@@ -28754,6 +29384,14 @@ const CASES: [string, (api: ApiClient) => Promise<unknown>, string, string, unkn
   ["logoutEverywhere", (api) => api.logoutEverywhere(), "POST", "/api/v1/auth/logout-everywhere", undefined],
 ];
 
+/** The four enrol routes as My security calls them, with the full console session (`EnrollFrom`). */
+const SIGNED_IN: [string, (api: ApiClient) => Promise<unknown>, string, string, unknown][] = [
+  ["enrollTotpStart", (api) => api.enrollTotpStart({ signedIn: true }), "POST", "/api/v1/auth/enroll/totp/start", undefined],
+  ["enrollTotpConfirm", (api) => api.enrollTotpConfirm("123456", { signedIn: true }), "POST", "/api/v1/auth/enroll/totp/confirm", { code: "123456" }],
+  ["enrollPasskeyOptions", (api) => api.enrollPasskeyOptions({ signedIn: true }), "POST", "/api/v1/auth/enroll/passkey/options", undefined],
+  ["enrollPasskey", (api) => api.enrollPasskey(CREDENTIAL, "Work laptop", { signedIn: true }), "POST", "/api/v1/auth/enroll/passkey", { credential: CREDENTIAL, name: "Work laptop" }],
+];
+
 describe("the sign-in routes", () => {
   it.each(CASES)("%s: method, path and body", async (_name, call, method, url, body) => {
     const fetchMock = stubFetch();
@@ -28777,6 +29415,25 @@ describe("the sign-in routes", () => {
     expect((failure as ApiError).status).toBe(401);
     expect(JSON.parse((failure as ApiError).message)).toEqual({ code: "auth_required" });
     expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it.each(SIGNED_IN)("%s from My security: a 401 is the session ending, so it reaches onUnauthorized", async (_name, call) => {
+    stubFetch(401, { code: "auth_required" });
+    const onUnauthorized = vi.fn();
+    const failure = await call(new ApiClient(onUnauthorized)).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ApiError);
+    expect((failure as ApiError).status).toBe(401);
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(SIGNED_IN)("%s from My security: same route, same body, still no X-Client-Id", async (_name, call, method, url, body) => {
+    const fetchMock = stubFetch();
+    await call(new ApiClient(vi.fn(), "/api/v1", () => CLIENT));
+    const [sentUrl, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(sentUrl).toBe(url);
+    expect(init.method ?? "GET").toBe(method);
+    expect(init.body === undefined ? undefined : JSON.parse(init.body as string)).toEqual(body);
+    expect(new Headers(init.headers).has("X-Client-Id")).toBe(false);
   });
 
   it("reads the 202 of a forgotten password with no body as done", async () => {
@@ -28857,6 +29514,19 @@ export interface TotpEnrollment {
   otpauth_uri: string;
 }
 
+/**
+ * Who calls an enrol route (`/auth/enroll/totp/*`, `/auth/enroll/passkey*`).
+ * The first-factor page (`/sign-in/enroll`) calls with a session still
+ * waiting for its factor, where a 401 is the step's own answer (`request()`'s
+ * `anonymous`): leave it out. My security (own-auth Task 12) calls with the
+ * full console session, `{ signedIn: true }`: there a 401 IS that session
+ * ending, and it must reach `onUnauthorized` like any other console request.
+ * Neither carries `X-Client-Id`.
+ */
+export interface EnrollFrom {
+  signedIn?: boolean;
+}
+
 /** `POST /auth/enroll/finish` and the regeneration in Sign-in and security: ten codes, shown once. */
 export interface RecoveryCodes {
   recovery_codes: string[];
@@ -28876,12 +29546,13 @@ diff --git a/frontend/src/lib/api.ts b/frontend/src/lib/api.ts
 index 83413e5..89a9dbd 100644
 --- a/frontend/src/lib/api.ts
 +++ b/frontend/src/lib/api.ts
-@@ -1126,6 +1126,17 @@ import type {
+@@ -1126,6 +1126,18 @@ import type {
    SiteWakeOut,
    SiteWakeRequest,
  } from "../modules/site-servers/types";
 +import type {
 +  AuthenticationResponseJSON,
++  EnrollFrom,
 +  InviteDetails,
 +  LoginResult,
 +  PublicKeyCredentialCreationOptionsJSON,
@@ -28894,7 +29565,7 @@ index 83413e5..89a9dbd 100644
  import type {
    CreatedUserOut,
    EffectivePermissionsOut,
-@@ -1747,6 +1758,110 @@ export class ApiClient {
+@@ -1747,6 +1759,124 @@ export class ApiClient {
      return this.request<void>("/auth/logout", { method: "POST" }, { anonymous: true });
    }
  
@@ -28936,35 +29607,49 @@ index 83413e5..89a9dbd 100644
 +    return this.request<SignedIn>("/auth/factor/recovery", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
 +  }
 +
++  // The four enrol routes serve two sessions (`EnrollFrom`): without an
++  // argument they are the first-factor page's (`anonymous`, as above); with
++  // `{ signedIn: true }` they are My security's (own-auth Task 12), whose
++  // session is complete, so a 401 is that session ending and reaches
++  // `onUnauthorized`. `global` keeps `X-Client-Id` off either way.
++
 +  /** `POST /auth/enroll/totp/start`: a new secret, once, as an `otpauth://` URI. */
-+  enrollTotpStart(): Promise<TotpEnrollment> {
-+    return this.request<TotpEnrollment>("/auth/enroll/totp/start", { method: "POST" }, { anonymous: true });
++  enrollTotpStart({ signedIn = false }: EnrollFrom = {}): Promise<TotpEnrollment> {
++    return this.request<TotpEnrollment>(
++      "/auth/enroll/totp/start",
++      { method: "POST" },
++      signedIn ? { global: true } : { anonymous: true },
++    );
 +  }
 +
 +  /** `POST /auth/enroll/totp/confirm`: the first code, which proves the app holds the secret. */
-+  enrollTotpConfirm(code: string): Promise<void> {
++  enrollTotpConfirm(code: string, { signedIn = false }: EnrollFrom = {}): Promise<void> {
 +    return this.request<void>(
 +      "/auth/enroll/totp/confirm",
 +      { method: "POST", body: JSON.stringify({ code }) },
-+      { anonymous: true },
++      signedIn ? { global: true } : { anonymous: true },
 +    );
 +  }
 +
 +  /** `POST /auth/enroll/passkey/options`: the options for `startRegistration`, untouched. */
-+  enrollPasskeyOptions(): Promise<PublicKeyCredentialCreationOptionsJSON> {
++  enrollPasskeyOptions({ signedIn = false }: EnrollFrom = {}): Promise<PublicKeyCredentialCreationOptionsJSON> {
 +    return this.request<PublicKeyCredentialCreationOptionsJSON>(
 +      "/auth/enroll/passkey/options",
 +      { method: "POST" },
-+      { anonymous: true },
++      signedIn ? { global: true } : { anonymous: true },
 +    );
 +  }
 +
 +  /** `POST /auth/enroll/passkey`: the new credential, and the name the person gave it. */
-+  enrollPasskey(credential: RegistrationResponseJSON, name: string): Promise<void> {
++  enrollPasskey(
++    credential: RegistrationResponseJSON,
++    name: string,
++    { signedIn = false }: EnrollFrom = {},
++  ): Promise<void> {
 +    return this.request<void>(
 +      "/auth/enroll/passkey",
 +      { method: "POST", body: JSON.stringify({ credential, name }) },
-+      { anonymous: true },
++      signedIn ? { global: true } : { anonymous: true },
 +    );
 +  }
 +
@@ -29011,7 +29696,9 @@ index 83413e5..89a9dbd 100644
 
 Run: `npx vitest run src/lib/api.auth.test.ts src/lib/api.session.test.ts src/lib/api.language.test.ts src/lib/api.clientScope.test.ts && npx tsc -b`
 Expected: PASS. Falsificador: quitar `{ anonymous: true }` de cualquiera de los quince hace fallar su caso «a 401 is
-the step's answer…» (y el de `X-Client-Id`, porque `anonymous` es también lo que lo calla).
+the step's answer…» (y el de `X-Client-Id`, porque `anonymous` es también lo que lo calla); dejar `anonymous` también
+con `{ signedIn: true }` hace fallar su caso «from My security: a 401 is the session ending…», y quitar el
+`global: true` de esa rama, su caso «…still no X-Client-Id».
 
 ```bash
 git add frontend/src/lib/api.ts frontend/src/lib/api.auth.test.ts frontend/src/modules/auth/types.ts
@@ -31880,7 +32567,7 @@ index 41e9ecb..e2bd443 100644
 +  ["acceptRecovery", (api) => api.acceptRecovery("tok-1"), "POST", "/api/v1/auth/recover/accept", { token: "tok-1" }],
  ];
  
- describe("the sign-in routes", () => {
+ /** The four enrol routes as My security calls them, with the full console session (`EnrollFrom`). */
 diff --git a/frontend/src/lib/session.test.ts b/frontend/src/lib/session.test.ts
 index 4325e78..0b53d45 100644
 --- a/frontend/src/lib/session.test.ts
@@ -32109,7 +32796,7 @@ diff --git a/frontend/src/lib/api.ts b/frontend/src/lib/api.ts
 index 89a9dbd..a29c3a1 100644
 --- a/frontend/src/lib/api.ts
 +++ b/frontend/src/lib/api.ts
-@@ -1133,6 +1133,7 @@ import type {
+@@ -1134,6 +1134,7 @@ import type {
    PublicKeyCredentialCreationOptionsJSON,
    PublicKeyCredentialRequestOptionsJSON,
    RecoveryCodes,
@@ -32117,7 +32804,7 @@ index 89a9dbd..a29c3a1 100644
    RegistrationResponseJSON,
    SignedIn,
    TotpEnrollment,
-@@ -1857,6 +1858,28 @@ export class ApiClient {
+@@ -1872,6 +1873,28 @@ export class ApiClient {
      return this.request<void>("/auth/invite/accept", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
    }
  
@@ -32150,7 +32837,7 @@ diff --git a/frontend/src/modules/auth/types.ts b/frontend/src/modules/auth/type
 index ed48e09..17894e4 100644
 --- a/frontend/src/modules/auth/types.ts
 +++ b/frontend/src/modules/auth/types.ts
-@@ -57,3 +57,8 @@ export interface InviteDetails {
+@@ -70,3 +70,8 @@ export interface InviteDetails {
    email: string;
    display_name: string;
  }
@@ -32929,10 +33616,12 @@ invitación con asignaciones por cliente y el enlace mostrado una vez, y una pes
 
 **Files:**
 - Create: `frontend/src/components/stepUp.tsx` (la confirmación reciente: `useStepUp`, `isStepUpRequired`,
-  `StepUpCancelled`, `describeWebAuthnFailure`, `MY_SECURITY_KEY`)
+  `StepUpCancelled`, `MY_SECURITY_KEY`; la clave de acceso, con `signWithPasskey` y `describePasskeyError` de la
+  Task 11)
 - Create: `frontend/src/components/stepUp.test.tsx`
 - Create: `frontend/src/modules/profile/types.ts`, `frontend/src/modules/profile/api.ts`,
-  `frontend/src/modules/profile/layout.ts`, `frontend/src/modules/profile/SecurityPage.tsx`
+  `frontend/src/modules/profile/SecurityPage.tsx` (la rejilla que se pliega es la de
+  `frontend/src/modules/settings/formGrid.ts`, que ya existe: no se crea otra)
 - Create: `frontend/src/modules/profile/SecurityPage.test.tsx`, `frontend/src/modules/profile/security.es.test.tsx`
 - Create: `frontend/src/modules/settings/SessionsTab.tsx`, `frontend/src/modules/settings/__tests__/sessions.test.tsx`
 - Create: `frontend/src/lib/api.account.test.ts`
@@ -32961,7 +33650,9 @@ invitación con asignaciones por cliente y el enlace mostrado una vez, y una pes
   `:489-512`; tras `renderProfilePage` (`:523-534`) `renderSecurityPage`
 - Modify: `frontend/src/modules/credentials/CredentialsPage.tsx` — imports `:1-42`, `:126-128`, `:153-157`, `:475-479`,
   `:533-536`; `frontend/src/modules/credentials/CredentialsPage.test.tsx` (describe nuevo al final)
-- Modify: `frontend/src/App.tsx` — import `:126`, puerta del solicitante `:328`, ruta tras `:1441-1447`
+- Modify: `frontend/src/App.tsx` — import `:126`, puerta del solicitante `:328`, ruta tras `:1441-1447`; en
+  `LanguageBridge` la rama de `identity_locale_synced` (`:540-553` antes de la Task 10)
+- Modify: `frontend/src/lib/api.ts` — además de lo de arriba, `Me.identity_locale_synced` y su comentario (`:848-854`)
 - Modify: `frontend/src/shell/nav.ts:279`, `frontend/src/shell/nav.test.ts:302-320`,
   `frontend/src/shell/AccountMenu.tsx:122-124`, `frontend/src/shell/AccountMenu.language.test.tsx:23-28`,
   `frontend/src/shell/AppShell.test.tsx:505-519`
@@ -32975,7 +33666,8 @@ invitación con asignaciones por cliente y el enlace mostrado una vez, y una pes
   `frontend/src/modules/settings/__tests__/settingsPage.test.tsx:80-89,189-200,202-217`,
   `frontend/src/modules/settings/__tests__/everyClient.test.tsx:49-57`,
   `frontend/src/modules/settings/settings.es.test.tsx:128-139,317-341,470-489,595-633,649-656` (más un `describe` de Sesiones),
-  `frontend/src/modules/profile/ProfilePage.language.test.tsx:8`
+  `frontend/src/modules/profile/ProfilePage.language.test.tsx:8,57-105`, `frontend/src/App.language.test.tsx` (el
+  `describe("LanguageBridge: the sign-in pages", …)`)
 - Test: todo lo anterior, más `frontend/src/test/routes-covered.test.ts`, `frontend/src/lib/noVendorNames.test.ts`,
   `frontend/src/lib/noWireNames.test.ts`, `frontend/src/i18n/*.test.ts*`, `frontend/src/lib/api.language.test.ts`,
   `frontend/src/lib/api.clientScope.test.ts`, `frontend/src/test/dialog-grid.test.ts`; del backend, solo los que leen la
@@ -32987,10 +33679,15 @@ invitación con asignaciones por cliente y el enlace mostrado una vez, y una pes
     `new ApiError(status, await response.text())` (`frontend/src/lib/api.ts:1666-1668` hoy) y el 401 sigue llamando a
     `onUnauthorized` (`:1662-1665`); `lib/auth.ts` ya no existe.
   - Task 11: dependencia `@simplewebauthn/browser` **14.0.0** en `frontend/package.json` y los métodos
-    `enrollTotpStart(): Promise<{ otpauth_uri: string }>`, `enrollTotpConfirm(code: string): Promise<unknown>`,
-    `enrollPasskeyOptions(): Promise<PublicKeyCredentialCreationOptionsJSON>`,
-    `enrollPasskey(credential: RegistrationResponseJSON, name: string): Promise<unknown>` de `ApiClient`
+    `enrollTotpStart(from?: EnrollFrom): Promise<TotpEnrollment>`, `enrollTotpConfirm(code: string, from?: EnrollFrom):
+    Promise<void>`, `enrollPasskeyOptions(from?: EnrollFrom): Promise<PublicKeyCredentialCreationOptionsJSON>`,
+    `enrollPasskey(credential: RegistrationResponseJSON, name: string, from?: EnrollFrom): Promise<void>` de `ApiClient`
     (rutas `POST /auth/enroll/totp/start|confirm`, `POST /auth/enroll/passkey/options`, `POST /auth/enroll/passkey`).
+    `EnrollFrom = { signedIn?: boolean }` (`modules/auth/types.ts`): **Mi seguridad los llama siempre con
+    `{ signedIn: true }`** — la sesión es la completa de la consola, y así un 401 llega a `onUnauthorized` (sin el
+    argumento son `anonymous`, los de la página del primer factor). También de la Task 11: `checkNewPassword`
+    (`modules/auth/errors.ts`), `setupKeyOf` (`modules/auth/flow.ts`), `createPasskey`, `signWithPasskey`,
+    `describePasskeyError` (`modules/auth/passkey.ts`) y `RecoveryCodes` (`modules/auth/types.ts`).
   - Task 7: `GET /api/v1/me/security` → `{has_totp, passkeys:[{id,name,created_at,last_used_at,backup_state}],
     recovery_codes_left, trusted_devices:[…], sessions:[…]}`; `PUT /me/password {current, new}`; `DELETE /me/passkeys/{id}`;
     `DELETE /me/totp`; `POST /me/recovery-codes` → `{recovery_codes}`; `DELETE /me/trusted-devices/{id}`;
@@ -33013,7 +33710,8 @@ invitación con asignaciones por cliente y el enlace mostrado una vez, y una pes
 - Produces (Apéndice A, Task 12) — métodos de `ApiClient`:
   - `getMySecurity(): Promise<MySecurity>`; `changePassword(body: PasswordChange): Promise<void>`;
     `removePasskey(passkeyId: string): Promise<void>`; `removeTotp(): Promise<void>`;
-    `regenerateRecoveryCodes(): Promise<RecoveryCodesOut>`; `revokeTrustedDevice(deviceId: string): Promise<void>`;
+    `regenerateRecoveryCodes(): Promise<RecoveryCodes>` (el tipo de la Task 11, `modules/auth/types.ts`);
+    `revokeTrustedDevice(deviceId: string): Promise<void>`;
     `endMySession(sessionId: string): Promise<void>`;
   - `stepUpTotp(code: string): Promise<void>`; `stepUpPasskeyOptions(): Promise<PublicKeyCredentialRequestOptionsJSON>`;
     `stepUpPasskey(credential: AuthenticationResponseJSON): Promise<void>`; `stepUpRecovery(code: string): Promise<void>`;
@@ -33023,16 +33721,22 @@ invitación con asignaciones por cliente y el enlace mostrado una vez, y una pes
   - `getSessionSettings(): Promise<SessionSettingsOut>`; `putSessionSettings(body: SessionSettingsUpdate): Promise<SessionSettingsOut>`.
 - Produces (nombres nuevos, fuera del Apéndice A):
   - `frontend/src/components/stepUp.tsx`: `MY_SECURITY_KEY = "my-security"`; `class StepUpCancelled extends Error`;
-    `isStepUpRequired(error: unknown): boolean`; `describeWebAuthnFailure(error: unknown): string`;
+    `isStepUpRequired(error: unknown): boolean`;
     `type StepUpRun = <T>(action: () => Promise<T>) => Promise<T>`; `interface StepUp { run: StepUpRun; open: boolean; dialog: ReactNode }`;
     `useStepUp(): StepUp`.
   - `frontend/src/modules/profile/types.ts`: `MyPasskey`, `MyTrustedDevice`, `MySession`, `MySecurity`, `PasswordChange`,
-    `RecoveryCodesOut`, `PASSWORD_MIN = 12`, `PASSWORD_MAX = 128`, `RECOVERY_CODE_COUNT = 10`.
+    `RECOVERY_CODE_COUNT = 10`.
   - `frontend/src/modules/profile/api.ts`: `useMySecurity`, `useChangePasswordMutation`, `useAddPasskeyMutation`,
     `useRemovePasskeyMutation`, `useStartTotpMutation`, `useConfirmTotpMutation`, `useRemoveTotpMutation`,
     `useRegenerateRecoveryCodesMutation`, `useRevokeTrustedDeviceMutation`, `useEndMySessionMutation` (todas `(run: StepUpRun)`).
-  - `frontend/src/modules/profile/SecurityPage.tsx`: `SecurityPage()`, `totpKeyOf(uri: string): string`.
-  - `frontend/src/modules/profile/layout.ts`: `FOLDING_FORM_GRID`.
+  - `frontend/src/modules/profile/SecurityPage.tsx`: `SecurityPage()`.
+- Reutiliza de la Task 11 (no los vuelve a escribir): `checkNewPassword(password, again)` y sus textos
+  `auth.password.{too_short,too_long,mismatch}` (`modules/auth/errors.ts`); `setupKeyOf(otpauthUri): string | null`
+  (`modules/auth/flow.ts`); `createPasskey`, `signWithPasskey` y `describePasskeyError` con sus textos
+  `auth.passkey.{cancelled,alreadyRegistered,unsupported}` (`modules/auth/passkey.ts`); el tipo `RecoveryCodes`
+  (`modules/auth/types.ts`); y el argumento `{ signedIn: true }` (`EnrollFrom`) de los cuatro métodos de alta, para
+  que un 401 de Mi seguridad llegue a `onUnauthorized`. De la consola: `FOLDING_FORM_GRID` de
+  `modules/settings/formGrid.ts`.
   - `frontend/src/modules/settings/types.ts`: `InviteGrant`, `UserInvite`, `InviteOut`, `InviteLinkOut`,
     `SessionSettingsOut`, `SessionSettingsUpdate`, `SessionNumberKey`, `SESSION_BOUNDS`; `UserOut.invite_pending?: boolean`.
   - `frontend/src/modules/settings/api.ts`: `SESSION_SETTINGS_KEY`, `useSessionSettings`, `useUpdateSessionSettingsMutation`,
@@ -33049,6 +33753,8 @@ invitación con asignaciones por cliente y el enlace mostrado una vez, y una pes
 - *Decisión del plan: añadir una clave de acceso o (re)configurar la app desde Mi seguridad usa las rutas de alta de la
   Task 7 (`/auth/enroll/totp/*`, `/auth/enroll/passkey*`) con la sesión completa.* El Apéndice A da a Mi seguridad solo
   rutas para leer y quitar (`/me/*`), y el diseño quiere «varias por cuenta» (§2.2) y poder cambiar los factores (§2.5).
+  Las cuatro llamadas van con `{ signedIn: true }` (el `EnrollFrom` de la Task 11): con la sesión completa un 401 es esa
+  sesión que terminó y tiene que llegar a `onUnauthorized`; la página del primer factor sigue llamándolas sin él.
   Requisito para la Task 7 (se dice en el informe): esas cuatro rutas aceptan también una sesión con `factor_done`,
   exigen la confirmación reciente (403 `step_up_required`) y `totp/confirm` con un TOTP activo lo **reemplaza**.
 - *Decisión del plan: el 403 `step_up_required` se reconoce con `code` en la raíz del cuerpo o en `detail.code`.*
@@ -33067,8 +33773,13 @@ invitación con asignaciones por cliente y el enlace mostrado una vez, y una pes
   `trusted_devices[] = {id, label, created_at, expires_at, last_used_at, current}`, `UserOut.invite_pending: bool`,
   `POST /users/{id}/invite/resend` → `{invite_link: str | null}` (como la invitación), `SessionSettingsOut.updated_at`
   opcional. La consola trata un `invite_pending` ausente como `false`.
-- *Decisión del plan: sin QR.* No se añade ninguna dependencia: Mi seguridad muestra la clave en grupos de cuatro y un
-  enlace `otpauth://` (solo si empieza así). Si la Task 11 añadió un componente QR, el coordinador puede usarlo al fusionar.
+- *Decisión del plan: sin QR.* No se añade ninguna dependencia: Mi seguridad muestra la clave en grupos de cuatro
+  (`setupKeyOf` de la Task 11) y un enlace `otpauth://` (solo si empieza así).
+- *Decisión del plan: lo que la Task 11 ya escribió no se escribe dos veces.* La regla de una contraseña nueva y sus
+  frases (`checkNewPassword`, `auth.password.*`), la clave del TOTP en grupos (`setupKeyOf`), la ceremonia de la clave de
+  acceso y sus frases (`createPasskey`, `signWithPasskey`, `describePasskeyError`, `auth.passkey.*`) y el tipo de los
+  códigos (`RecoveryCodes`) son los de `modules/auth/`; la rejilla que se pliega es la de `settings/formGrid.ts`. Una
+  segunda copia diría lo mismo con otras palabras en la consola y se desviaría de la primera. Si la Task 11 añadió un componente QR, el coordinador puede usarlo al fusionar.
 - *Decisión del plan: la consola deja de ofrecer «Restablecer contraseña» y «Reenviar inscripción» a un administrador.*
   Eran correos de Keycloak; el diseño deja el restablecimiento en manos de la persona (§2.8, «olvidé mi contraseña») y
   da al administrador «restablecer factores» (§7). `createUser`, `resetUserPassword`, `resendUserEnrolment` y sus tipos
@@ -33096,8 +33807,11 @@ invitación con asignaciones por cliente y el enlace mostrado una vez, y una pes
   rechaza igualmente (requisito para la Task 7: 409 con `detail`).
 - *Decisión del plan: Mi seguridad cierra las otras sesiones una a una*; no ofrece «cerrar sesión en todas partes»
   (`logoutEverywhere` es de la Task 11).
-- *Decisión del plan: el aviso `identity_locale_synced` de `ProfilePage.tsx:326-333` se conserva sin cambios*: es el
-  espejo de idioma de Keycloak (`me.py:230-284`) y lo retira quien retire ese espejo.
+- *Decisión del plan: el aviso `identity_locale_synced` se va de la consola.* Era el espejo de idioma de Keycloak
+  (`me.py:230-284`), que la Task 8 retira: `MeResponse` ya no lleva `identity_locale_synced`, así que las dos ramas que
+  lo leían quedarían muertas (`App.tsx`, `LanguageBridge`, `:540-553` antes de la Task 10; `ProfilePage.tsx:326-333`). Salen esas dos
+  ramas, el campo de `Me` (`lib/api.ts:848-854`) y `profile.page.languageNotMirrored` (`en/profile.ts:14`,
+  `es/profile.ts:17`); las cinco pruebas que fijaban el aviso se re-apuntan (Step 13).
 
 **Pruebas existentes que cambian a propósito** (corregidas, ninguna borrada):
 
@@ -33119,6 +33833,9 @@ invitación con asignaciones por cliente y el enlace mostrado una vez, y una pes
 | `settings/__tests__/everyClient.test.tsx:49-57` | «Create user» desactivado | «Send invitation» desactivado |
 | `settings/settings.es.test.tsx:128-139,317-341,470-489,595-633,649-656` | lista de pestañas, «no se puede invitar a nadie», «Avanzado: solo para una nube … gubernamental o nacional», restablecer contraseña, crear usuario, reenviar a casey | «Sesiones», el texto nuevo del correo, «Avanzado», restablecer segundos factores, invitar, banner nuevo |
 | `shell/AccountMenu.language.test.tsx:27` | `["Your profile", "Settings", "Language: English", "Sign out"]` | con `"Your security"` tras `"Your profile"` |
+| `profile/ProfilePage.language.test.tsx:57-105` (tres pruebas) | con `identity_locale_synced: false` se dice que las páginas de inicio de sesión no siguieron; con `true`, nada | el guardado cambia la consola y no dice nada más, en los dos idiomas |
+| `App.language.test.tsx`, `describe("LanguageBridge: the sign-in pages")` (dos pruebas, una con tres casos) | el aviso de `LanguageBridge` con `false`; silencio con `true`, `null`, `undefined` | silencio tras un guardado que funcionó, con tres respuestas |
+| `profile/SecurityPage.test.tsx` «totpKeyOf» | la copia de la página | `setupKeyOf` de la Task 11, el mismo fixture; lo que no es una dirección da `null` |
 
 - [ ] **Step 0: Comprobar que las tareas de las que depende están en la rama**
 
@@ -33129,11 +33846,13 @@ test ! -e frontend/src/lib/auth.ts && echo "lib/auth.ts gone"
 grep -rln 'lib/auth"' frontend/src --include=*.ts --include=*.tsx | wc -l
 grep -n '"@simplewebauthn/browser": "14.0.0"' frontend/package.json
 grep -c "enrollTotpStart\|enrollTotpConfirm\|enrollPasskeyOptions\|enrollPasskey(" frontend/src/lib/api.ts
+grep -c "export interface EnrollFrom\|export function checkNewPassword\|export function setupKeyOf\|export function createPasskey\|export function signWithPasskey\|export function describePasskeyError\|export interface RecoveryCodes" frontend/src/modules/auth/types.ts frontend/src/modules/auth/errors.ts frontend/src/modules/auth/flow.ts frontend/src/modules/auth/passkey.ts
 grep -c "FRONTEND_AUTH.read_text" backend/tests/test_console_auth_realm.py
 grep -n '"/users/invite"\|"/users/{user_id}/factors/reset"\|"/users/{user_id}/sessions"\|"/users/{user_id}/invite"\|"/users/{user_id}/invite/resend"\|"/settings/sessions"' frontend/src/lib/globalRoutes.json
 ```
 
-Expected: `lib/auth.ts gone`; `0`; una línea con `14.0.0`; un número ≥ 4; `0` (la Task 10 re-apuntó D24: ya nada lee `lib/auth.ts`); seis
+Expected: `lib/auth.ts gone`; `0`; una línea con `14.0.0`; un número ≥ 4; por archivo, `types.ts:2`, `errors.ts:1`,
+`flow.ts:1` y `passkey.ts:3` (lo que esta tarea reutiliza de la Task 11, con `EnrollFrom`); `0` (la Task 10 re-apuntó D24: ya nada lee `lib/auth.ts`); seis
 líneas de `globalRoutes.json` (cinco de la Task 8 y `PUT /settings/sessions` de la Task 6). **Si cualquiera falla, no
 sigas: avisa al coordinador** — esta tarea no escribe esas piezas y sin ellas sus pruebas y `tsc -b` no pueden pasar.
 
@@ -33379,19 +34098,10 @@ export interface PasswordChange {
   new: string;
 }
 
-/** `POST /me/recovery-codes`: ten new codes, shown once (design §2.2). */
-export interface RecoveryCodesOut {
-  recovery_codes: string[];
-}
-
-/**
- * The server's password bounds for a technician (design §2.1), restated only
- * to say so before the round trip: the blocklist, the context words and these
- * very bounds are the server's, and its refusal is what counts. Each code
- * point counts as one, so the console counts with `[...value].length`.
- */
-export const PASSWORD_MIN = 12;
-export const PASSWORD_MAX = 128;
+// `POST /me/recovery-codes` answers the very shape `POST /auth/enroll/finish`
+// does, `RecoveryCodes` of `modules/auth/types.ts` (own-auth Task 11), and
+// the new-password bounds before the round trip are Task 11's
+// `checkNewPassword` (`modules/auth/errors.ts`): neither is restated here.
 
 /** How many codes a set holds (design §2.2). */
 export const RECOVERY_CODE_COUNT = 10;
@@ -33496,11 +34206,12 @@ En `frontend/src/lib/api.ts`:
    `SessionSettingsOut`, `SessionSettingsUpdate` y `UserInvite`. Justo debajo de esa declaración:
 
 ```ts
-import type { MySecurity, PasswordChange, RecoveryCodesOut } from "../modules/profile/types";
+import type { MySecurity, PasswordChange } from "../modules/profile/types";
 ```
 
-   (`AuthenticationResponseJSON` y `PublicKeyCredentialRequestOptionsJSON` ya los importa la Task 11 en este archivo,
-   desde `../modules/auth/types`: no se añade otra declaración, que sería un identificador duplicado para `tsc`.)
+   (`AuthenticationResponseJSON`, `PublicKeyCredentialRequestOptionsJSON` y `RecoveryCodes` ya los importa la Task 11
+   en este archivo, desde `../modules/auth/types`: no se añade otra declaración, que sería un identificador duplicado
+   para `tsc`. `regenerateRecoveryCodes` devuelve ese mismo `RecoveryCodes`, el de `enrollFinish`.)
 
 2. Tras `updateMe` (`:1888-1890`), la sección nueva:
 
@@ -33546,8 +34257,8 @@ import type { MySecurity, PasswordChange, RecoveryCodesOut } from "../modules/pr
    * Ten new codes; the old ones stop working. This answer is the one place
    * they exist in the clear: show it once and keep it nowhere.
    */
-  regenerateRecoveryCodes(): Promise<RecoveryCodesOut> {
-    return this.request<RecoveryCodesOut>("/me/recovery-codes", { method: "POST" }, { global: true });
+  regenerateRecoveryCodes(): Promise<RecoveryCodes> {
+    return this.request<RecoveryCodes>("/me/recovery-codes", { method: "POST" }, { global: true });
   }
 
   revokeTrustedDevice(deviceId: string): Promise<void> {
@@ -33725,7 +34436,13 @@ const api = vi.hoisted(() => ({
 vi.mock("../lib/ApiContext", () => ({ useApi: () => api }));
 
 const { startAuthentication } = vi.hoisted(() => ({ startAuthentication: vi.fn() }));
-vi.mock("@simplewebauthn/browser", () => ({ startAuthentication, startRegistration: vi.fn() }));
+// The real module but for the ceremony: Task 11's `modules/auth/passkey.ts`,
+// which this hook signs through, also reads `WebAuthnError` from it.
+vi.mock("@simplewebauthn/browser", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@simplewebauthn/browser")>()),
+  startAuthentication,
+  startRegistration: vi.fn(),
+}));
 
 /** The server's answer to a change whose second factor is not fresh (Task 6). */
 const REFUSED = () => new ApiError(403, JSON.stringify({ detail: { code: "step_up_required" } }));
@@ -33888,8 +34605,10 @@ describe("useStepUp", () => {
 
     await user.click(await within(dialog).findByRole("button", { name: "Use a passkey" }));
 
+    // Task 11's sentence for a closed prompt (`describePasskeyError`), the one
+    // the sign-in pages say too.
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-      "The passkey prompt was cancelled or timed out. Nothing was changed.",
+      "The passkey prompt was closed or timed out, so nothing was used.",
     );
     expect(api.stepUpPasskey).not.toHaveBeenCalled();
     expect(action).toHaveBeenCalledTimes(1);
@@ -34015,13 +34734,13 @@ Crear `frontend/src/components/stepUp.tsx`:
  */
 
 import { useQuery } from "@tanstack/react-query";
-import { startAuthentication } from "@simplewebauthn/browser";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useT } from "../i18n/context";
 import { translate } from "../i18n/core";
 import { ApiError } from "../lib/api";
 import { useApi } from "../lib/ApiContext";
+import { describePasskeyError, signWithPasskey } from "../modules/auth/passkey";
 import type { MySecurity } from "../modules/profile/types";
 import { Btn } from "../shell/components";
 import { Icon } from "../shell/icons";
@@ -34056,21 +34775,13 @@ export function isStepUpRequired(error: unknown): boolean {
 }
 
 /**
- * What a passkey ceremony that failed means to the person. The browser's
- * `NotAllowedError` (or `AbortError`) is a cancelled or timed-out prompt --
- * `@simplewebauthn/browser` 14 keeps the browser's `name` on its own
- * `WebAuthnError` (`helpers/webAuthnError.ts`) -- and is said plainly; a refusal
- * from the server is the server's own words; anything else names the
- * browser's reason.
+ * What a passkey ceremony that failed means to the person: the browser's
+ * refusal in Task 11's words (`describePasskeyError`, the sentence the
+ * sign-in pages say), and anything else -- the server's refusal, a closed
+ * confirmation -- as `describeSubmitError` words it.
  */
-export function describeWebAuthnFailure(error: unknown): string {
-  if (error instanceof StepUpCancelled) return error.message;
-  if (error instanceof ApiError) return describeSubmitError(error);
-  if (error instanceof Error && (error.name === "NotAllowedError" || error.name === "AbortError")) {
-    return translate("components.stepUp.passkeyCancelled");
-  }
-  const reason = error instanceof Error && error.message.trim() ? error.message : translate("validation.unexplained");
-  return translate("components.stepUp.passkeyFailed", { reason });
+function describePasskeyFailure(error: unknown): string {
+  return describePasskeyError(error) ?? describeSubmitError(error);
 }
 
 /** Send `action`; on 403 `step_up_required`, confirm the second factor and send it once more. */
@@ -34203,10 +34914,9 @@ function StepUpDialog({
             disabled={busy}
             onClick={() =>
               void attempt(async () => {
-                const optionsJSON = await api.stepUpPasskeyOptions();
-                const credential = await startAuthentication({ optionsJSON });
+                const credential = await signWithPasskey(await api.stepUpPasskeyOptions());
                 await api.stepUpPasskey(credential);
-              }, describeWebAuthnFailure)
+              }, describePasskeyFailure)
             }
           />
         </div>
@@ -34301,8 +35011,6 @@ En `frontend/src/i18n/en/components.ts`, tras la sección `weekPainter` (antes d
     },
     confirmRecovery: "Use this code",
     noMethod: "Your account has no second factor, so this change cannot be confirmed. Ask an administrator to reset your second factors.",
-    passkeyCancelled: "The passkey prompt was cancelled or timed out. Nothing was changed.",
-    passkeyFailed: "The browser could not use a passkey: {reason}",
     cancelled: "Nothing was changed: the confirmation was closed.",
   },
 ```
@@ -34325,8 +35033,6 @@ En `frontend/src/i18n/es/components.ts`, en el mismo sitio:
     },
     confirmRecovery: "Usar este código",
     noMethod: "Tu cuenta no tiene ningún segundo factor, así que este cambio no se puede confirmar. Pide a un administrador que restablezca tus segundos factores.",
-    passkeyCancelled: "Se canceló la solicitud de la clave de acceso o se agotó el tiempo. No se cambió nada.",
-    passkeyFailed: "El navegador no pudo usar una clave de acceso: {reason}",
     cancelled: "No se cambió nada: se cerró la confirmación.",
   },
 ```
@@ -34552,14 +35258,22 @@ import {
   renderSecurityPage,
   stepUpRequired,
 } from "../settings/__tests__/harness";
-import { totpKeyOf } from "./SecurityPage";
+import { setupKeyOf } from "../auth/flow";
 
 const { startRegistration, startAuthentication } = vi.hoisted(() => ({
   startRegistration: vi.fn(),
   startAuthentication: vi.fn(),
 }));
-vi.mock("@simplewebauthn/browser", () => ({ startRegistration, startAuthentication }));
+// The real module but for the two ceremonies: the page goes through Task 11's
+// `modules/auth/passkey.ts`, which also reads `WebAuthnError` from it.
+vi.mock("@simplewebauthn/browser", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@simplewebauthn/browser")>()),
+  startRegistration,
+  startAuthentication,
+}));
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
+
+const { WebAuthnError } = await import("@simplewebauthn/browser");
 
 /** What `startRegistration` hands back: the browser's answer, as W3C JSON. */
 const ATTESTATION = {
@@ -34647,16 +35361,18 @@ describe("Your security", () => {
   });
 
   it("refuses a short new password, and two that differ, before the round trip", async () => {
+    // Task 11's rule and sentences (`checkNewPassword`), the ones the sign-in
+    // pages say: one check of a new password in the console, not two.
     const user = userEvent.setup();
     renderSecurityPage();
     const password = await panel("Password");
     await typePassword(user, password, "too short");
-    expect(await within(password).findByRole("alert")).toHaveTextContent("The new password needs at least 12 characters.");
+    expect(await within(password).findByRole("alert")).toHaveTextContent("Use at least 12 characters.");
 
     await user.clear(within(password).getByLabelText("New password"));
     await user.type(within(password).getByLabelText("New password"), PASSWORD.new);
     await user.click(within(password).getByRole("button", { name: "Change password" }));
-    expect(await within(password).findByRole("alert")).toHaveTextContent("The two new passwords are not the same.");
+    expect(await within(password).findByRole("alert")).toHaveTextContent("The two passwords are not the same.");
     expect(calls.changePassword).not.toHaveBeenCalled();
   });
 
@@ -34672,7 +35388,7 @@ describe("Your security", () => {
       await user.paste("🔑🔑🔑🔑🔑🔑");
     }
     await user.click(within(password).getByRole("button", { name: "Change password" }));
-    expect(await within(password).findByRole("alert")).toHaveTextContent("The new password needs at least 12 characters.");
+    expect(await within(password).findByRole("alert")).toHaveTextContent("Use at least 12 characters.");
     expect(within(password).getByText("6 characters")).toBeInTheDocument();
     expect(calls.changePassword).not.toHaveBeenCalled();
   });
@@ -34717,7 +35433,10 @@ describe("Your security", () => {
 
     await waitFor(() => expect(calls.enrollPasskey).toHaveBeenCalledTimes(1));
     expect(startRegistration).toHaveBeenCalledExactlyOnceWith({ optionsJSON: CREATION_OPTIONS_FIXTURE });
-    expect(calls.enrollPasskey).toHaveBeenCalledWith(ATTESTATION, "Desk key");
+    // With the full console session (Task 11's `EnrollFrom`): a 401 here is the
+    // session ending, and must reach `onUnauthorized`.
+    expect(calls.enrollPasskeyOptions).toHaveBeenCalledExactlyOnceWith({ signedIn: true });
+    expect(calls.enrollPasskey).toHaveBeenCalledWith(ATTESTATION, "Desk key", { signedIn: true });
     // What the page shows next is what the server holds after the write.
     await waitFor(() => expect(calls.getMySecurity).toHaveBeenCalledTimes(2));
     expect(within(passkeys).getByLabelText<HTMLInputElement>("Name for the new passkey")).toHaveValue("");
@@ -34733,17 +35452,21 @@ describe("Your security", () => {
     await user.type(within(passkeys).getByLabelText("Name for the new passkey"), "Desk key");
     await user.click(within(passkeys).getByRole("button", { name: "Add a passkey" }));
 
+    // Task 11's sentence for a closed prompt (`describePasskeyError`).
     expect(await within(passkeys).findByRole("alert")).toHaveTextContent(
-      "The passkey prompt was cancelled or timed out. Nothing was changed.",
+      "The passkey prompt was closed or timed out, so nothing was used.",
     );
     expect(calls.enrollPasskey).not.toHaveBeenCalled();
   });
 
   it("says a passkey already on the account is already there", async () => {
+    // The library's own error, as Task 11's tests raise it: `describePasskeyError`
+    // reads its `code`.
     startRegistration.mockRejectedValue(
-      Object.assign(new Error("The authenticator was previously registered"), {
-        name: "InvalidStateError",
+      new WebAuthnError({
+        message: "The authenticator was previously registered",
         code: "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED",
+        cause: Object.assign(new Error("invalid state"), { name: "InvalidStateError" }),
       }),
     );
     const user = userEvent.setup();
@@ -34751,7 +35474,10 @@ describe("Your security", () => {
     const passkeys = await panel("Passkeys");
     await user.type(within(passkeys).getByLabelText("Name for the new passkey"), "Desk key");
     await user.click(within(passkeys).getByRole("button", { name: "Add a passkey" }));
-    expect(await within(passkeys).findByRole("alert")).toHaveTextContent("That passkey is already on your account.");
+    expect(await within(passkeys).findByRole("alert")).toHaveTextContent(
+      "This device already holds a passkey for your account.",
+    );
+    expect(calls.enrollPasskey).not.toHaveBeenCalled();
   });
 
   it("removes a passkey once the confirmation names it", async () => {
@@ -34784,11 +35510,14 @@ describe("Your security", () => {
 
     await user.click(within(app).getByRole("button", { name: "Set up the app" }));
     expect(await within(app).findByText("JBSW Y3DP EHPK 3PXP")).toBeInTheDocument();
+    expect(calls.enrollTotpStart).toHaveBeenCalledExactlyOnceWith({ signedIn: true });
     expect(within(app).getByRole("link", { name: "Open in an authenticator app" })).toHaveAttribute("href", OTPAUTH_URI_FIXTURE);
 
     await user.type(within(app).getByLabelText("Code the app shows now"), "123 456");
     await user.click(within(app).getByRole("button", { name: "Turn it on" }));
-    await waitFor(() => expect(calls.enrollTotpConfirm).toHaveBeenCalledExactlyOnceWith("123456"));
+    await waitFor(() =>
+      expect(calls.enrollTotpConfirm).toHaveBeenCalledExactlyOnceWith("123456", { signedIn: true }),
+    );
     await waitFor(() => expect(within(app).queryByText("JBSW Y3DP EHPK 3PXP")).not.toBeInTheDocument());
     expect(document.body.innerHTML).not.toContain("JBSWY3DPEHPK3PXP");
   });
@@ -34866,10 +35595,13 @@ describe("Your security", () => {
   });
 });
 
-describe("totpKeyOf", () => {
+describe("the key this page shows is Task 11's setupKeyOf", () => {
+  // RE-POINTED from the page's own copy of this reading, now gone: the page
+  // and the first-factor page read the key the same way. Same fixture, same
+  // groups of four; a string that is no address is `null`, not "".
   it("reads the key out of the otpauth address, in groups of four", () => {
-    expect(totpKeyOf(OTPAUTH_URI_FIXTURE)).toBe("JBSW Y3DP EHPK 3PXP");
-    expect(totpKeyOf("not an address")).toBe("");
+    expect(setupKeyOf(OTPAUTH_URI_FIXTURE)).toBe("JBSW Y3DP EHPK 3PXP");
+    expect(setupKeyOf("not an address")).toBeNull();
   });
 });
 ```
@@ -34892,7 +35624,11 @@ import { setActiveLanguage } from "../../i18n/core";
 import { expectNoEnglish } from "../../i18n/test-utils";
 import { apiClient, calls, installDefaults, renderSecurityPage, stepUpRequired } from "../settings/__tests__/harness";
 
-vi.mock("@simplewebauthn/browser", () => ({ startRegistration: vi.fn(), startAuthentication: vi.fn() }));
+vi.mock("@simplewebauthn/browser", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@simplewebauthn/browser")>()),
+  startRegistration: vi.fn(),
+  startAuthentication: vi.fn(),
+}));
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
 
 /** Recorded words the fixture puts on screen. "Phone" is also an English catalogue word. */
@@ -34952,7 +35688,9 @@ Qué protege cada prueba de la página (Step 11):
 |---|---|---|
 | la página pinta campos con nombre de `MySecurity`, nunca la respuesta | `totp_secret` llegaría a la pantalla | «shows the factors…» (`PLANTED_SECRET`) |
 | `onSettled` vacía las tres cajas de contraseña | la contraseña queda en la página tras la respuesta | «changes the password…» |
-| `[...next].length` contra `PASSWORD_MIN` | `.length` contaría unidades UTF-16 | «counts each character once…» |
+| `checkNewPassword` de la Task 11 en `submit` (cuenta con `Array.from`) | se mandaría una contraseña corta, o `.length` contaría unidades UTF-16 | «refuses a short new password…», «counts each character once…» |
+| `{ signedIn: true }` en las cuatro llamadas de alta (`api.ts` del módulo) | un 401 de la sesión completa no llegaría a `onUnauthorized` | «adds a passkey…», «sets up the app…» |
+| `describePasskeyError` (Task 11) para el error de `createPasskey` | la clave repetida o cancelada se diría con otras palabras que las del inicio de sesión | «changes nothing when the person cancels…», «says a passkey already on the account…» |
 | el `Failure` del error del servidor | la negativa del servidor se perdería | «shows the server's own reason…» |
 | la mutación de contraseña pasa por `run` | el 403 llegaría como error sin confirmación | «asks for the second factor again…» |
 | `start.reset()` y el estado local de la clave TOTP; `setSetupUri(null)` al confirmar o cancelar | la clave sobrevive en pantalla | «sets up the app…», «forgets the key…» |
@@ -34967,35 +35705,11 @@ Expected: FAIL — `Failed to resolve import "../../profile/SecurityPage" from "
 
 - [ ] **Step 11: La página, sus consultas y sus textos**
 
-Crear `frontend/src/modules/profile/layout.ts` (el comentario sale de `ProfilePage.tsx:113-136`, que el Step 15 reescribe
-importándolo de aquí):
-
-```ts
-/**
- * THE PROFILE'S FIELDS FOLD TO ONE COLUMN ON A HANDSET.
- *
- * `.form-grid` WAS `repeat(2, minmax(0, 1fr))` at every width: the rule meant
- * to fold it lived in `shell.css` and lost on import order to the
- * unconditional rule in `components.css`. So at 390px "Display name" / "Phone"
- * and "Timezone" / "Locale" stayed two-up at about 148px each. Reflow at that
- * width is SC 1.4.10. The kit rule has since landed and folds every
- * `.form-grid` at 640px; this one stays because it does more than fold.
- *
- * `auto-fit` counts the columns from the space available rather than from a
- * breakpoint: two while each can hold 260px, one below. `min(100%, 260px)`
- * keeps the single column from overflowing a container narrower than the
- * minimum. The 560px ceiling is `.field`'s own `max-width`, so a pair of
- * fields is no wider than one field standing alone.
- *
- * Shared by the two pages of this module -- your profile and your security --
- * and by no other module: a module does not reach into another for a style,
- * and the kit is where the one copy belongs once it lands there.
- */
-export const FOLDING_FORM_GRID = {
-  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))",
-  maxWidth: 560,
-} as const;
-```
+La rejilla que se pliega en un teléfono es `FOLDING_FORM_GRID` de `frontend/src/modules/settings/formGrid.ts` (ya en el
+árbol; la importan los ocho formularios de Ajustes, `UsersTab.tsx:109` entre ellos): Mi seguridad y, en el Step 15, `ProfilePage.tsx` la importan de
+ahí en vez de crear una copia en `profile/`. Mismo valor (`repeat(auto-fit, minmax(min(100%, 260px), 1fr))`, tope de
+560px), así que `ProfilePage.test.tsx` «lets the four fields fold…» sigue igual. El comentario de `ProfilePage.tsx:113-136`
+que explicaba su copia local se va con ella.
 
 Crear `frontend/src/modules/profile/api.ts`:
 
@@ -35013,15 +35727,22 @@ Crear `frontend/src/modules/profile/api.ts`:
  * The answers that carry a value shown once (the authenticator key, new
  * recovery codes) are not cached here: the page moves them into its own state
  * and empties the mutation.
+ *
+ * THE FOUR ENROL CALLS SAY `{ signedIn: true }` (Task 11's `EnrollFrom`): this
+ * page has the full console session, so a 401 from them is that session
+ * ending and must reach `onUnauthorized`, not stay a message on the page. The
+ * passkey ceremony is Task 11's `createPasskey`, the one the first-factor page
+ * uses.
  */
 
-import { startRegistration } from "@simplewebauthn/browser";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { MY_SECURITY_KEY, type StepUpRun } from "../../components/stepUp";
 import type { ApiError } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
-import type { MySecurity, PasswordChange, RecoveryCodesOut } from "./types";
+import { createPasskey } from "../auth/passkey";
+import type { RecoveryCodes } from "../auth/types";
+import type { MySecurity, PasswordChange } from "./types";
 
 export function useMySecurity() {
   const api = useApi();
@@ -35059,9 +35780,9 @@ export function useAddPasskeyMutation(run: StepUpRun) {
   const refetch = useRefetchSecurity();
   return useMutation<void, Error, { name: string }>({
     mutationFn: async ({ name }) => {
-      const optionsJSON = await run(() => api.enrollPasskeyOptions());
-      const credential = await startRegistration({ optionsJSON });
-      await run(() => api.enrollPasskey(credential, name));
+      const optionsJSON = await run(() => api.enrollPasskeyOptions({ signedIn: true }));
+      const credential = await createPasskey(optionsJSON);
+      await run(() => api.enrollPasskey(credential, name, { signedIn: true }));
     },
     onSuccess: refetch,
   });
@@ -35080,7 +35801,7 @@ export function useRemovePasskeyMutation(run: StepUpRun) {
 export function useStartTotpMutation(run: StepUpRun) {
   const api = useApi();
   return useMutation<{ otpauth_uri: string }, Error, void>({
-    mutationFn: () => run(() => api.enrollTotpStart()),
+    mutationFn: () => run(() => api.enrollTotpStart({ signedIn: true })),
   });
 }
 
@@ -35090,7 +35811,7 @@ export function useConfirmTotpMutation(run: StepUpRun) {
   const refetch = useRefetchSecurity();
   return useMutation<void, Error, string>({
     mutationFn: async (code) => {
-      await run(() => api.enrollTotpConfirm(code));
+      await run(() => api.enrollTotpConfirm(code, { signedIn: true }));
     },
     onSuccess: refetch,
   });
@@ -35108,7 +35829,7 @@ export function useRemoveTotpMutation(run: StepUpRun) {
 export function useRegenerateRecoveryCodesMutation(run: StepUpRun) {
   const api = useApi();
   const refetch = useRefetchSecurity();
-  return useMutation<RecoveryCodesOut, Error, void>({
+  return useMutation<RecoveryCodes, Error, void>({
     mutationFn: () => run(() => api.regenerateRecoveryCodes()),
     onSuccess: refetch,
   });
@@ -35153,10 +35874,11 @@ Crear `frontend/src/modules/profile/SecurityPage.tsx`:
 //   DELETE /me/trusted-devices/{id}                            forget a remembered device
 //   DELETE /me/sessions/{id}                                   sign out another session
 //
-// THE SERVER DECIDES EVERYTHING (invariant 6). The password bounds restated in
-// the form (12 to 128 characters, each code point one) only save a round trip;
-// the blocklist, the context words and the bounds are the server's (§2.1), and
-// its refusal is shown in its own words. Removing the last second factor is
+// THE SERVER DECIDES EVERYTHING (invariant 6). The form checks a new password
+// with the sign-in pages' own rule (Task 11's `checkNewPassword`: 12 to 128
+// characters, each code point one), which only saves a round trip; the
+// blocklist, the context words and the bounds are the server's (§2.1), and its
+// refusal is shown in its own words. Removing the last second factor is
 // refused by the server; the console only says so before the click. A change
 // that needs the second factor confirmed in the last 10 minutes (§2.5) is the
 // server's 403 `step_up_required`, answered through `useStepUp`.
@@ -35178,14 +35900,17 @@ import { useState, type CSSProperties } from "react";
 
 import { ConfirmDialog } from "../../components/confirm";
 import { describeSubmitError, Form } from "../../components/form";
-import { describeWebAuthnFailure, useStepUp, type StepUpRun } from "../../components/stepUp";
+import { useStepUp, type StepUpRun } from "../../components/stepUp";
 import { Badge, Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
-import type { MessageKey } from "../../i18n/core";
 import { describeWhen, formatDate } from "../../lib/datetime";
 import { useOrgZone } from "../../lib/zone";
 import { Btn, KIND_ICON, PageHead, Panel } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { checkNewPassword } from "../auth/errors";
+import { setupKeyOf } from "../auth/flow";
+import { describePasskeyError } from "../auth/passkey";
+import { FOLDING_FORM_GRID } from "../settings/formGrid";
 import {
   useAddPasskeyMutation,
   useChangePasswordMutation,
@@ -35198,10 +35923,7 @@ import {
   useRevokeTrustedDeviceMutation,
   useStartTotpMutation,
 } from "./api";
-import { FOLDING_FORM_GRID } from "./layout";
 import {
-  PASSWORD_MAX,
-  PASSWORD_MIN,
   RECOVERY_CODE_COUNT,
   type MyPasskey,
   type MySecurity,
@@ -35214,16 +35936,6 @@ const ROW: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "cen
 const ROW_TEXT: CSSProperties = { flex: "1 1 240px", minWidth: 0 };
 /** A browser's own string or a key has no spaces to break at; at 390px it must still wrap. */
 const WRAP_ANYWHERE: CSSProperties = { overflowWrap: "anywhere" };
-
-/** `otpauth://totp/…?secret=ABCD…` -> "ABCD EFGH …": the key in groups of four, to type into an app. */
-export function totpKeyOf(uri: string): string {
-  try {
-    const secret = new URL(uri).searchParams.get("secret") ?? "";
-    return secret.replace(/(.{4})/g, "$1 ").trim();
-  } catch {
-    return "";
-  }
-}
 
 /**
  * Copying without swallowing the failure (the pattern of
@@ -35239,27 +35951,12 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
-/** A refusal held as data, so a change of language re-words it. */
-interface Refusal {
-  key: MessageKey;
-  vars?: Record<string, number>;
-}
-
 function Failure({ message }: { message: string }) {
   return (
     <p role="alert" className="notice red" style={{ marginTop: 12 }}>
       <Icon name={KIND_ICON.crit} size={16} />
       <span>{message}</span>
     </p>
-  );
-}
-
-/** `@simplewebauthn/browser`'s code for a passkey the account already holds. */
-function isAlreadyRegistered(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: unknown }).code === "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED"
   );
 }
 
@@ -35305,24 +36002,23 @@ function PasswordPanel({ run }: { run: StepUpRun }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [repeat, setRepeat] = useState("");
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
+  // Whether "Change password" was pressed: from then on the console's own
+  // check is shown, worked out again on every render so a change of language
+  // re-words it (`checkNewPassword` speaks the active language).
+  const [checked, setChecked] = useState(false);
   // Each code point is one character, as the server counts them (design §2.1).
-  const length = [...next].length;
+  const length = Array.from(next).length;
+  const refusal = !checked
+    ? null
+    : current === ""
+      ? t("profile.securityPage.password.missingCurrent")
+      : // Task 11's rule and sentences, the ones the sign-in pages say.
+        checkNewPassword(next, repeat);
 
   function submit() {
     change.reset();
-    const found: Refusal | null =
-      current === ""
-        ? { key: "profile.securityPage.password.missingCurrent" }
-        : length < PASSWORD_MIN
-          ? { key: "profile.securityPage.password.tooShort", vars: { min: PASSWORD_MIN } }
-          : length > PASSWORD_MAX
-            ? { key: "profile.securityPage.password.tooLong", vars: { max: PASSWORD_MAX } }
-            : next !== repeat
-              ? { key: "profile.securityPage.password.mismatch" }
-              : null;
-    setRefusal(found);
-    if (found) return;
+    setChecked(true);
+    if (current === "" || checkNewPassword(next, repeat) !== null) return;
     change.mutate(
       { current, new: next },
       {
@@ -35332,6 +36028,7 @@ function PasswordPanel({ run }: { run: StepUpRun }) {
           setCurrent("");
           setNext("");
           setRepeat("");
+          setChecked(false);
         },
       },
     );
@@ -35383,7 +36080,7 @@ function PasswordPanel({ run }: { run: StepUpRun }) {
           {refusal ? (
             <span role="alert" className="form-error">
               <Icon name={KIND_ICON.crit} size={13} />
-              {t(refusal.key, refusal.vars)}
+              {refusal}
             </span>
           ) : null}
           {change.error ? (
@@ -35412,11 +36109,10 @@ function PasskeysPanel({ security, run, zone }: { security: MySecurity; run: Ste
   const [removing, setRemoving] = useState<MyPasskey | null>(null);
   // The server refuses removing the last second factor; this only says so first.
   const onlyFactor = security.passkeys.length + (security.has_totp ? 1 : 0) <= 1;
-  const addFailure = add.error
-    ? isAlreadyRegistered(add.error)
-      ? t("profile.securityPage.passkeys.duplicate")
-      : describeWebAuthnFailure(add.error)
-    : null;
+  // The browser's refusal in Task 11's words (a passkey already on the
+  // account, a closed prompt); anything else -- the server's refusal, a
+  // closed confirmation -- as `describeSubmitError` words it.
+  const addFailure = add.error ? (describePasskeyError(add.error) ?? describeSubmitError(add.error)) : null;
 
   return (
     <Panel title={t("profile.securityPage.passkeys.title")} subtitle={t("profile.securityPage.passkeys.subtitle")}>
@@ -35573,7 +36269,7 @@ function TotpPanel({ security, run }: { security: MySecurity; run: StepUpRun }) 
           <p style={{ marginTop: 10 }}>
             <span className="k">{t("profile.securityPage.totp.key")}</span>{" "}
             <code className="code" style={WRAP_ANYWHERE}>
-              {totpKeyOf(setupUri)}
+              {setupKeyOf(setupUri) ?? ""}
             </code>
           </p>
           <Form onSubmit={finish}>
@@ -35891,10 +36587,8 @@ el Step 15):
       next: "New password",
       repeat: "New password again",
       length: { one: "{count} character", other: "{count} characters" },
+      // The length and the match are Task 11's `auth.password.*` (`checkNewPassword`).
       missingCurrent: "Enter your current password.",
-      tooShort: "The new password needs at least {min} characters.",
-      tooLong: "The new password can have at most {max} characters.",
-      mismatch: "The two new passwords are not the same.",
       submit: "Change password",
       changing: "Changing…",
       changed: "Your password was changed. Devices you had remembered ask for your second factor again.",
@@ -35913,7 +36607,6 @@ el Step 15):
       namePlaceholder: "e.g. Work laptop",
       add: "Add a passkey",
       adding: "Waiting for your browser…",
-      duplicate: "That passkey is already on your account.",
       onlyFactor: "This is your only second factor. Add another before you remove it.",
     },
     totp: {
@@ -36016,10 +36709,8 @@ En `frontend/src/i18n/es/profile.ts`, en el mismo sitio:
       next: "Contraseña nueva",
       repeat: "Repite la contraseña nueva",
       length: { one: "{count} carácter", other: "{count} caracteres" },
+      // La longitud y la coincidencia son `auth.password.*` de la Task 11 (`checkNewPassword`).
       missingCurrent: "Escribe tu contraseña actual.",
-      tooShort: "La contraseña nueva necesita al menos {min} caracteres.",
-      tooLong: "La contraseña nueva puede tener como máximo {max} caracteres.",
-      mismatch: "Las dos contraseñas nuevas no coinciden.",
       submit: "Cambiar contraseña",
       changing: "Cambiando…",
       changed: "Se cambió tu contraseña. Los equipos que tenías recordados vuelven a pedir tu segundo factor.",
@@ -36038,7 +36729,6 @@ En `frontend/src/i18n/es/profile.ts`, en el mismo sitio:
       namePlaceholder: "p. ej., Portátil del trabajo",
       add: "Añadir una clave de acceso",
       adding: "Esperando a tu navegador…",
-      duplicate: "Esa clave de acceso ya está en tu cuenta.",
       onlyFactor: "Es tu único segundo factor. Añade otro antes de quitarlo.",
     },
     totp: {
@@ -36134,7 +36824,7 @@ Expected: PASS. `SecurityPage.test.tsx` 21 pruebas, `security.es.test.tsx` 2; la
 Task 10 las dejó sin `lib/auth`); `tsc -b` limpio.
 
 ```bash
-git add frontend/src/modules/profile/layout.ts frontend/src/modules/profile/api.ts \
+git add frontend/src/modules/profile/api.ts \
   frontend/src/modules/profile/SecurityPage.tsx frontend/src/modules/profile/SecurityPage.test.tsx \
   frontend/src/modules/profile/security.es.test.tsx frontend/src/modules/settings/__tests__/harness.tsx \
   frontend/src/i18n/en/profile.ts frontend/src/i18n/es/profile.ts
@@ -36438,6 +37128,121 @@ describe("your profile in Spanish", () => {
 `frontend/src/modules/profile/ProfilePage.language.test.tsx:8`: la línea `vi.mock("../../lib/auth", …)` se borra si sigue
 ahí (la Task 10 pudo haberla borrado ya; `grep -n "lib/auth" src/modules/profile/` no debe imprimir nada al terminar).
 
+**El aviso de idioma de Keycloak, fuera (Decisión del plan: `identity_locale_synced`).** La Task 8 quitó
+`identity_locale_synced` de la respuesta de `PATCH /me`; la consola tenía dos ramas que lo leían (`App.tsx`,
+`LanguageBridge`, `:540-553` antes de la Task 10; `ProfilePage.tsx:326-333`), el campo en el tipo `Me` (`lib/api.ts:848-854`) y el texto
+`profile.page.languageNotMirrored` en `en` y `es`. Se van en el Step 15. Las cinco pruebas que fijaban el aviso se
+re-apuntan (ninguna se borra): antes, «con `identity_locale_synced: false` se dice que las páginas de inicio de sesión no
+siguieron el idioma»; ahora, «un guardado que funcionó cambia la consola y no dice nada más», porque las páginas de inicio
+de sesión son de la consola.
+
+En `frontend/src/modules/profile/ProfilePage.language.test.tsx`, las tres últimas pruebas (`:57-105` de hoy; `:56-104` si la Task 10 ya borró la línea 8) pasan a:
+
+```tsx
+  it("saves the language and switches the console, and says nothing more", async () => {
+    // RE-POINTED from "says so, without blocking, when the sign-in pages could
+    // not be switched": the sign-in pages are this console's own now (own
+    // authentication phase 1), so there is no second place the language must
+    // reach, and `PATCH /me` no longer says whether another system took it (Task 8).
+    calls.me.mockResolvedValue({ ...ME_FIXTURE, permissions: [...ALL_PERMISSIONS] });
+    // The refetch after the save serves what was saved, as the real API does.
+    calls.updateMe.mockImplementation(async () => {
+      calls.me.mockResolvedValue({ ...ME_FIXTURE, locale: "es", permissions: [...ALL_PERMISSIONS] });
+      return { ...ME_FIXTURE, locale: "es" };
+    });
+    renderProfilePage();
+    const select = await screen.findByLabelText<HTMLSelectElement>("Language");
+    await userEvent.selectOptions(select, "es");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    // The save went through and the console switched, in Spanish.
+    await waitFor(() => expect(getLanguage()).toBe("es"));
+    await waitFor(() => expect(calls.me.mock.calls.length).toBeGreaterThan(1));
+    expect(calls.updateMe).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/páginas de inicio de sesión no se pudieron/)).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("switches to English and says nothing more", async () => {
+    // RE-POINTED from "shows the English note when the console switches to
+    // English": the same save the other way round, with no note to show.
+    setActiveLanguage("es");
+    calls.me.mockResolvedValue({ ...ME_FIXTURE, locale: "es", permissions: [...ALL_PERMISSIONS] });
+    calls.updateMe.mockImplementation(async () => {
+      calls.me.mockResolvedValue({ ...ME_FIXTURE, locale: "en", permissions: [...ALL_PERMISSIONS] });
+      return { ...ME_FIXTURE, locale: "en" };
+    });
+    renderProfilePage();
+    const select = await screen.findByLabelText<HTMLSelectElement>("Idioma");
+    await userEvent.selectOptions(select, "en");
+    await userEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+    await waitFor(() => expect(getLanguage()).toBe("en"));
+    await waitFor(() => expect(calls.me.mock.calls.length).toBeGreaterThan(1));
+    expect(screen.queryByText(/sign-in pages could not be switched/)).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows no note after the save", async () => {
+    // RE-POINTED from "shows no note when the sign-in pages followed": the
+    // assertions are the same; the answer no longer carries the flag.
+    calls.me.mockResolvedValue({ ...ME_FIXTURE, permissions: [...ALL_PERMISSIONS] });
+    calls.updateMe.mockImplementation(async () => {
+      calls.me.mockResolvedValue({ ...ME_FIXTURE, locale: "es", permissions: [...ALL_PERMISSIONS] });
+      return { ...ME_FIXTURE, locale: "es" };
+    });
+    renderProfilePage();
+    await userEvent.selectOptions(await screen.findByLabelText<HTMLSelectElement>("Language"), "es");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(getLanguage()).toBe("es"));
+    await waitFor(() => expect(calls.me.mock.calls.length).toBeGreaterThan(1));
+    expect(screen.queryByText(/sign-in pages could not be switched/)).toBeNull();
+    expect(screen.queryByText(/páginas de inicio de sesión no se pudieron/)).toBeNull();
+  });
+```
+
+En `frontend/src/App.language.test.tsx` (como lo dejó la Task 10), el `describe("LanguageBridge: the sign-in pages", …)`
+entero pasa a:
+
+```tsx
+describe("LanguageBridge: the sign-in pages", () => {
+  // RE-POINTED (own authentication phase 1): these pinned a note for a
+  // language the identity provider's sign-in pages did not take (a flag
+  // `PATCH /me` used to carry). Those pages are this console's own now and
+  // the flag is gone (Task 8), so a save that worked says nothing at all --
+  // which is what is pinned now.
+  it("says nothing after a save that worked: the sign-in pages are the console's own", async () => {
+    const updateMe = vi.fn().mockResolvedValue({ locale: "es" });
+    apiRef.current = { updateMe, me: vi.fn().mockResolvedValue({ locale: "es" }) };
+    render(withClient(<LanguageBridge><Picker /></LanguageBridge>));
+    await userEvent.click(screen.getByRole("button", { name: "current en" }));
+    await waitFor(() => expect(updateMe).toHaveBeenCalledTimes(1));
+    // Let the promise chain behind the click settle before asserting an absence.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText(/páginas de inicio de sesión no se pudieron/)).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(getLanguage()).toBe("es");
+  });
+
+  it.each([{ locale: "es" }, { locale: "es", display_name: "Ada" }, {}])(
+    "is silent whatever the saved profile carries (%o)",
+    async (answer) => {
+      const updateMe = vi.fn().mockResolvedValue(answer);
+      apiRef.current = { updateMe, me: vi.fn().mockResolvedValue({ locale: "es" }) };
+      render(withClient(<LanguageBridge><Picker /></LanguageBridge>));
+      await userEvent.click(screen.getByRole("button", { name: "current en" }));
+      await waitFor(() => expect(updateMe).toHaveBeenCalledTimes(1));
+      // Let the promise chain behind the click settle before asserting an absence.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(screen.queryByRole("status")).toBeNull();
+    },
+  );
+});
+```
+
+(Antiguo → nuevo: «says so, without an error tone, when the save worked but the sign-in pages did not follow» →
+«says nothing after a save that worked…»; «is silent when identity_locale_synced is %s» (`true`, `null`, `undefined`) →
+«is silent whatever the saved profile carries (%o)», con tres respuestas.)
+
 `frontend/src/shell/nav.test.ts`, dentro de `describe("ORPHAN_SECTION", …)` (`:302-320`), una prueba más:
 
 ```ts
@@ -36513,8 +37318,8 @@ import { Icon } from "../../shell/icons";
 import { useMe, useUpdateMeMutation } from "../settings/api";
 import { SaveBar } from "../settings/SaveBar";
 import { isDirty } from "../settings/settingsState";
+import { FOLDING_FORM_GRID } from "../settings/formGrid";
 import type { MeProfileUpdate } from "../settings/types";
-import { FOLDING_FORM_GRID } from "./layout";
 
 type ProfileForm = {
   display_name: string;
@@ -36693,14 +37498,6 @@ export function ProfilePage() {
               saved={update.isSuccess && !dirty}
               onSave={submit}
             />
-            {update.isSuccess && !dirty && update.data.identity_locale_synced === false ? (
-              // NON-BLOCKING: the save succeeded and the console already
-              // switched; this only says the sign-in pages did not follow.
-              <p role="status" className="notice gold" style={{ marginTop: 12 }}>
-                <Icon name={KIND_ICON.warn} size={16} />
-                <span>{t("profile.page.languageNotMirrored")}</span>
-              </p>
-            ) : null}
           </>
         )}
       </Panel>
@@ -36722,7 +37519,8 @@ export function ProfilePage() {
 }
 ```
 
-`frontend/src/i18n/en/profile.ts`: la sección `security` (`:16-33`) pasa a ser:
+`frontend/src/i18n/en/profile.ts`: `page.languageNotMirrored` (`:14`) se borra (lo leían solo las dos ramas de
+`identity_locale_synced`, Decisión del plan), y la sección `security` (`:16-33`) pasa a ser:
 
 ```ts
   security: {
@@ -36733,7 +37531,8 @@ export function ProfilePage() {
   },
 ```
 
-`frontend/src/i18n/es/profile.ts`: la sección `security` (`:19-36`) pasa a ser:
+`frontend/src/i18n/es/profile.ts`: `page.languageNotMirrored` (`:17`) se borra, y la sección `security` (`:19-36`) pasa a
+ser:
 
 ```ts
   security: {
@@ -36744,8 +37543,61 @@ export function ProfilePage() {
   },
 ```
 
+`frontend/src/lib/api.ts`, en `interface Me` (`:848-854`), las líneas
+
+```ts
+  locale?: string | null;
+  /**
+   * Present only on the `PATCH /me` response, and only when `locale` was sent.
+   * `false`: the language was saved here but could not be written to the
+   * sign-in pages. `true` or absent/null: nothing for the person to be told.
+   */
+  identity_locale_synced?: boolean | null;
+}
+```
+
+pasan a
+
+```ts
+  locale?: string | null;
+}
+```
+
 `frontend/src/App.tsx`:
 
+0. En `LanguageBridge` (como lo dejó la Task 10), el `.then` del guardado
+
+```tsx
+        .then((saved) => {
+          // Saved here, but the sign-in pages did not follow: not an error,
+          // so not the red toast -- the language did change and was kept.
+          if (saved.identity_locale_synced === false) {
+            setToasts((current) => [
+              ...current,
+              { id: `lang-${++toastSeq}`, title: translate("profile.page.languageNotMirrored"), tone: "info" },
+            ]);
+          }
+          // The cached `/me` carries the saved locale; left stale, the profile
+          // page would seed its form from the old value and an unrelated save
+          // could flip the language back.
+          return queryClient.invalidateQueries({ queryKey: ["me"] });
+        })
+```
+
+   pasa a
+
+```tsx
+        .then(() =>
+          // The cached `/me` carries the saved locale; left stale, the profile
+          // page would seed its form from the old value and an unrelated save
+          // could flip the language back. The sign-in pages are this console's
+          // own (own authentication phase 1): there is no second place the
+          // language must reach, and nothing more to tell the person.
+          queryClient.invalidateQueries({ queryKey: ["me"] }),
+        )
+```
+
+   (`translate` y `setToasts` siguen en uso: el `.catch` de abajo dice el guardado que falló.)
 1. Tras `import { ProfilePage } from "./modules/profile/ProfilePage";` (`:126`):
    `import { SecurityPage } from "./modules/profile/SecurityPage";`
 2. La puerta del solicitante (`:325-330`) deja pasar también su propia seguridad:
@@ -36973,10 +37825,13 @@ export default fixtures;
 - [ ] **Step 16: Ver que pasan, y commit**
 
 Run (desde `frontend/`): `npx vitest run src/modules/profile src/shell src/test/routes-covered.test.ts src/fixtures src/i18n src/lib/noVendorNames.test.ts src/lib/noWireNames.test.ts && npx tsc -b`
-Expected: PASS. `grep -rn "startAccountAction\|AccountAction\|UPDATE_PASSWORD\|CONFIGURE_TOTP\|webauthn-register-passwordless" src/modules/profile` no imprime nada.
+Expected: PASS. `grep -rn "startAccountAction\|AccountAction\|UPDATE_PASSWORD\|CONFIGURE_TOTP\|webauthn-register-passwordless" src/modules/profile` no imprime nada,
+y `grep -rn "identity_locale_synced\|languageNotMirrored" src` tampoco.
+Run también: `npx vitest run src/App.language.test.tsx`. Expected: PASS.
 
 ```bash
-git add frontend/src/modules/profile frontend/src/App.tsx frontend/src/shell/nav.ts frontend/src/shell/nav.test.ts \
+git add frontend/src/modules/profile frontend/src/App.tsx frontend/src/App.language.test.tsx frontend/src/lib/api.ts \
+  frontend/src/shell/nav.ts frontend/src/shell/nav.test.ts \
   frontend/src/shell/AccountMenu.tsx frontend/src/shell/AccountMenu.language.test.tsx frontend/src/shell/AppShell.test.tsx \
   frontend/src/i18n/en/profile.ts frontend/src/i18n/es/profile.ts frontend/src/i18n/en/shell.ts frontend/src/i18n/es/shell.ts \
   frontend/scripts/routes.mjs
@@ -37043,7 +37898,7 @@ En `frontend/src/modules/settings/__tests__/users.test.tsx`:
   it("shows the link once when no mail is configured, and forgets it when told", async () => {
     calls.inviteUser.mockResolvedValue({
       user_id: INVITED_USER.id,
-      invite_link: "https://itms.example.test/invite/one-time-token",
+      invite_link: "https://itms.example.test/invite#one-time-token",
     });
     const user = await openUsers();
     const invite = await screen.findByRole("region", { name: "Invite a person" });
@@ -37052,7 +37907,7 @@ En `frontend/src/modules/settings/__tests__/users.test.tsx`:
 
     const shown = await screen.findByRole("region", { name: "Invitation link for newbie@example.com" });
     expect(within(shown).getByLabelText<HTMLInputElement>("Invitation link")).toHaveValue(
-      "https://itms.example.test/invite/one-time-token",
+      "https://itms.example.test/invite#one-time-token",
     );
     expect(within(shown).getByText(/It is shown only now/)).toBeInTheDocument();
 
@@ -37130,7 +37985,7 @@ En `frontend/src/modules/settings/__tests__/users.test.tsx`:
 
   it("shows a resent invitation's fresh link once when no mail is configured", async () => {
     calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
-    calls.resendInvite.mockResolvedValue({ invite_link: "https://itms.example.test/invite/fresh-token" });
+    calls.resendInvite.mockResolvedValue({ invite_link: "https://itms.example.test/invite#fresh-token" });
     const user = await openUsers();
     const row = await screen.findByRole("row", { name: /invitee@example\.com/ });
     await openMoreActions(user, row);
@@ -37138,7 +37993,7 @@ En `frontend/src/modules/settings/__tests__/users.test.tsx`:
 
     const shown = await screen.findByRole("region", { name: "Invitation link for invitee@example.com" });
     expect(within(shown).getByLabelText<HTMLInputElement>("Invitation link")).toHaveValue(
-      "https://itms.example.test/invite/fresh-token",
+      "https://itms.example.test/invite#fresh-token",
     );
   });
 
@@ -37249,7 +38104,7 @@ En `frontend/src/modules/settings/__tests__/users.test.tsx`:
     // when the invitation could not be sent": an account starts as an
     // invitation, and without mail its link is shown once.
     const user = userEvent.setup();
-    calls.inviteUser.mockResolvedValue({ user_id: "u-new", invite_link: "https://itms.example.test/invite/one-time-token" });
+    calls.inviteUser.mockResolvedValue({ user_id: "u-new", invite_link: "https://itms.example.test/invite#one-time-token" });
     const { container } = await openIn("users");
     const invite = await screen.findByRole("region", { name: "Invitar a una persona" });
     expect(
@@ -37485,12 +38340,12 @@ const inviteUser: FixtureMap["inviteUser"] = (body) => {
       : [];
   });
   GRANTS.set(id, grants);
-  return { user_id: id, invite_link: email.configured ? null : `https://itms.toeshee.example/invite/fixture-${invited}` };
+  return { user_id: id, invite_link: email.configured ? null : `https://itms.toeshee.example/invite#fixture-${invited}` };
 };
 
 const resendInvite: FixtureMap["resendInvite"] = (userId) => {
   if (!userId.startsWith("usr-invited-")) throw conflict("this person has no pending invitation");
-  return { invite_link: email.configured ? null : "https://itms.toeshee.example/invite/fixture-again" };
+  return { invite_link: email.configured ? null : "https://itms.toeshee.example/invite#fixture-again" };
 };
 
 const cancelInvite: FixtureMap["cancelInvite"] = (userId) => {
@@ -39969,10 +40824,12 @@ npx vitest run
 npx tsc -b
 npm run build
 grep -rn "startAccountAction\|UPDATE_PASSWORD\|CONFIGURE_TOTP\|webauthn-register-passwordless\|createUser\|resetUserPassword\|resendUserEnrolment\|tokenAddress" src/modules/profile src/modules/settings src/lib/api.ts src/i18n
+grep -rn "identity_locale_synced\|languageNotMirrored\|totpKeyOf\|describeWebAuthnFailure\|RecoveryCodesOut\|PASSWORD_MIN\|PASSWORD_MAX\|FOLDING_FORM_GRID = " src/modules/profile src/components src/App.tsx src/lib/api.ts src/i18n
 ```
 
 Expected: toda la suite en verde (la cobertura del vocabulario de auditoría lee el backend; esta tarea no añade acciones);
-`tsc -b` y la compilación limpios; el `grep` no imprime nada. El gate harmony de la CI (`.github/workflows/ci.yml:829-912`,
+`tsc -b` y la compilación limpios; los dos `grep` no imprimen nada (el segundo: ninguna copia de lo que la Task 11 y
+`settings/formGrid.ts` ya tienen, y nada del aviso de idioma de Keycloak). El gate harmony de la CI (`.github/workflows/ci.yml:829-912`,
 `--strict-fixtures`, en y es) recorre ahora `/profile/security` y `/settings?tab=sessions` con los fixtures de los
 Steps 15 y 19.
 
@@ -40029,7 +40886,10 @@ las pruebas entran con ese Bearer (`tests/conftest.py:289-311`). Esta tarea cier
 - Modify: `.github/workflows/ci.yml` (job nuevo `webauthn-uv` entre `harmony-gate` `:914-925` y `agent` `:927`)
 - Modify: `frontend/src/lib/noVendorNames.test.ts` (después del `describe` de `:265-284`)
 - Modify: `backend/tests/test_no_vendor_names_backend.py` (después de `_python_files`, `:164-165`)
-- Modify (grupos de la Step 6 a la Step 10): `backend/tests/test_auth_session_door.py` (de la Task 6),
+- Modify (grupos de la Step 6 a la Step 10): `backend/tests/test_auth_session_door.py` y
+  `backend/tests/test_auth_csrf.py` (de la Task 6), `backend/tests/test_auth_my_security.py` (de la Task 7),
+  `backend/tests/test_user_lifecycle.py` (de la Task 8), `backend/tests/test_ai_act_api.py` (como lo dejó la Task 9),
+  `backend/tests/test_mcp_server.py`, `backend/tests/test_mcp_channel_api.py`,
   `backend/tests/test_token_origin.py`, `test_domain_gate_doors.py`,
   `test_domain_policy.py`, `test_org_settings.py`, `test_clients_api.py`, `test_client_rbac.py`,
   `test_me_profile.py`, `test_me_locale.py`, `test_user_admin_api.py`, `test_i18n_core_api.py`,
@@ -40060,7 +40920,15 @@ las pruebas entran con ese Bearer (`tests/conftest.py:289-311`). Esta tarea cier
     `/auth/enroll/totp/confirm`, `/auth/enroll/finish`, `/auth/logout`, `PUT /api/v1/me/password`.
   - Task 2: `hash_password(org_id, plain) -> (str, int)`; Task 1: `AuthPassword`, `AuthFailure`, `AuthPasskey`,
     `AuthSession`; Task 5: `registration_options`, `verify_registration`, `authentication_options`,
-    `verify_authentication`; Task 8: el módulo `app/core/auth/recover.py`.
+    `verify_authentication`; Task 8: el módulo `app/core/auth/recover.py`, las rutas `POST /api/v1/auth/recover/details`
+    y `/accept` (consumen el enlace, nunca lo emiten), y en `tests/test_auth_recover_command.py`
+    `_issue_calls() -> list[tuple[str, str]]` (cada llamada a `issue(...)`/`….issue(...)` bajo `app/`, por el AST,
+    como `(ruta relativa a app/, propósito)`: `"INVITE"`, `"RESET"`, `"RECOVER"` o el texto de lo que no sea una
+    constante); `user_admin.api._console_url(request) -> str` (503 sin `public_console_url`) y la prueba
+    `tests/test_user_lifecycle.py::test_an_invitation_needs_the_console_address`.
+  - Task 7: `tests/auth_support.py::browser()` (cada navegador con su propia dirección en `X-Forwarded-For`, y
+    `console_ready` confía en `127.0.0.1/32` como proxy: `client_address.parse_trusted_proxies`), y la prueba
+    `tests/test_auth_my_security.py::test_my_security_needs_the_console_session`.
   - Task 9: `tests/session_support.py` (`sign_in(..., step_up=True)`, `principal_for`, `refusal_code`,
     `ws_cookie`), `loopback.loopback_app`, `loopback.mint_loopback`, `loopback.claims_loopback`,
     `deps._session_principal`.
@@ -40152,6 +41020,7 @@ import base64
 import contextlib
 import json
 import re
+import secrets
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -40172,7 +41041,9 @@ from app.core.auth import passkeys
 from app.core.auth.passwords import hash_password
 from app.core.auth.refusals import AuthRefusal
 from app.core.auth.sessions import DEVICE_COOKIE, SessionPrincipal
+from app.core.client_address import parse_trusted_proxies
 from app.core.client_scope import ClientScope
+from app.core.router_inspect import flatten
 from app.core.security import TokenClaims
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Client, User
@@ -40186,7 +41057,7 @@ from tests.session_support import (
     refusal_code,
     sign_in,
 )
-from tests.test_ai_portal import _flatten
+from tests.test_auth_recover_command import _issue_calls
 
 PASSWORD = "correct horse battery staple 12"
 NEW_PASSWORD = "a different passphrase for 2026"
@@ -40195,14 +41066,22 @@ APP = Path(app_package.__file__).resolve().parent
 
 class _Browser:
     """One browser on the console: it keeps the cookies the platform sets and
-    sends them back, with the console's CSRF header and Origin."""
+    sends them back, with the console's CSRF header and Origin -- from an
+    address of its own, as Task 7's `tests/auth_support.py::browser` does. The
+    test client's peer (127.0.0.1) is trusted as the proxy, so the
+    `X-Forwarded-For` names this browser and its per-IP sign-in limits
+    (`auth-login`, `auth-factor`: 30 in 10 minutes) are its own: a second run
+    of this file inside ten minutes does not meet the first one's 429."""
 
     def __init__(self, env: Any) -> None:
         self.env = env
         self.jar: dict[str, str] = {}
+        env.app.state.trusted_proxies = parse_trusted_proxies("127.0.0.1/32")
+        a, b = secrets.randbelow(65536), secrets.randbelow(65536)
+        self.address = f"2001:db8:{a:x}:{b:x}::1"
 
     async def send(self, method: str, path: str, body: Any = None) -> httpx.Response:
-        headers = console_headers()
+        headers = {**console_headers(), "X-Forwarded-For": self.address}
         if self.jar:
             headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in self.jar.items())
         response = await self.env.client.request(method, path, json=body, headers=headers)
@@ -40645,9 +41524,16 @@ async def test_falsifier_7_a_cookie_write_without_its_proof_of_origin_is_refused
 
 
 def test_falsifier_9_the_recovery_command_has_no_http_route(api_env: Any) -> None:
-    """Holds design §7: `python -m app.core.auth.recover` only. A route that
-    imported it, or a path that named it, would turn shell access into an
-    HTTP request."""
+    """Holds design §7: `python -m app.core.auth.recover` only -- a recovery
+    link is ISSUED by shell access to the server and by nothing over HTTP.
+    Three things together make an HTTP route that issues one impossible, and
+    each assertion goes red without its own: no route's endpoint lives in the
+    command's module; nothing in `app/` imports that module; and the only call
+    in `app/` that issues an action token with a purpose other than an
+    invitation or a reset is the command's (Task 8's AST walk,
+    `_issue_calls`). The two routes whose path names `recover`,
+    `POST /api/v1/auth/recover/details` and `/accept` (Task 8), CONSUME a link
+    the command printed; a third such path is a new door and fails here."""
     recover = APP / "core" / "auth" / "recover.py"
     assert recover.exists()
     assert "APIRouter" not in recover.read_text()
@@ -40660,11 +41546,30 @@ def test_falsifier_9_the_recovery_command_has_no_http_route(api_env: Any) -> Non
         if path != recover and names_it.search(path.read_text())
     ]
     assert importers == []
-    routes = _flatten(api_env.app)
-    assert routes, "the router walk found nothing; the next assertion would be vacuous"
-    assert [
-        path for _, path in routes if "recover" in path and "recovery" not in path
-    ] == []
+    routes = flatten(api_env.app.router)
+    assert routes, "the router walk found nothing; the next assertions would be vacuous"
+    served_by_the_command = [
+        path
+        for path, route in routes
+        if getattr(getattr(route, "endpoint", None), "__module__", None) == "app.core.auth.recover"
+    ]
+    assert served_by_the_command == []
+    # `recover`, not `recovery`: `/auth/factor/recovery`, `/auth/step-up/recovery`
+    # and `/me/recovery-codes` are the recovery CODES.
+    naming_it = sorted(
+        (method, path)
+        for path, route in routes
+        if re.search(r"recover(?!y)", path)
+        for method in getattr(route, "methods", None) or ()
+    )
+    assert naming_it == [
+        ("POST", "/api/v1/auth/recover/accept"),
+        ("POST", "/api/v1/auth/recover/details"),
+    ]
+    issuers = sorted(
+        {path for path, purpose in _issue_calls() if purpose not in {"INVITE", "RESET"}}
+    )
+    assert issuers == ["core/auth/recover.py"]
 
 
 # --------------------------------------------------------------------------- #
@@ -40757,7 +41662,10 @@ Expected: FAIL. `test_the_console_bearer_opens_no_console_door` y `test_a_consol
 fallan con `assert 200 == 401` (la puerta aún admite el Bearer de consola); el resto falla porque
 `ApiEnv.headers` todavía devuelve un Bearer (`KeyError: 'Origin'` en el falsificador 7) y los Settings de
 `api_env` aún no tienen consola (un 403 `csrf` en cada escritura de `_Browser`);
-`test_require_step_up_admits_no_request_without_a_session` falla con `DID NOT RAISE`. Si alguno de los falsificadores 2, 3, 4, 5 o 9 sigue fallando
+`test_require_step_up_admits_no_request_without_a_session` falla con `DID NOT RAISE`.
+`test_falsifier_9_the_recovery_command_has_no_http_route` y `test_falsifier_4_every_passkey_check_requires_user_verification`
+no pasan por `ApiEnv.headers` ni por la puerta y ya pueden pasar aquí: lo que sostienen lo dejaron las Tasks 5 y 8.
+Si alguno de los falsificadores 2, 3, 4, 5 o 9 sigue fallando
 después de la Step 5, la protección que nombra su docstring falta en la tarea que la debía (Tasks 4, 5, 6, 7 u 8):
 se informa al coordinador, no se debilita la prueba.
 
@@ -41211,6 +42119,53 @@ async def _signed_in_as(api_env, org_id: UUID, sub: str, email: str | None = Non
     **console_headers()}`, que da 401 con `"code": "auth_required"`.
   - `tests/test_session_sockets.py` no cambia: `test_without_a_cookie_or_a_token_it_is_still_4401` sigue en 4401 por
     la línea nueva de `ui_websocket`.
+- `backend/tests/test_auth_csrf.py` (Task 6), `test_a_bearer_request_is_not_a_cookie_request`: hasta aquí escribía con
+  `await api_env.headers(...)`, que desde la Step 4 es una cookie con la cabecera y el `Origin` de la consola, así
+  que ya no probaría nada de un Bearer. Antiguo: un Bearer de consola en una escritura daba 200 (D21). Nuevo: un
+  Bearer explícito en una escritura, sin cookie, sin cabecera y sin `Origin`, no es asunto de la regla CSRF (la
+  línea `if SESSION_COOKIE not in connection.cookies and not path.startswith(SIGN_IN_PREFIX)` de `csrf.py`): lo
+  rechaza la puerta con su 401 `auth_required`, nunca el middleware con un 403 `csrf`. Pasa a:
+
+```python
+async def test_a_bearer_request_is_not_a_cookie_request(api_env: Any) -> None:
+    """A bearer is not ambient -- the browser never attaches it by itself --
+    so a write that carries one and no session cookie is not this rule's: no
+    console header, no Origin, and the answer is still not `csrf`. MCP's
+    in-process calls and the assistant's loopback are bearer requests. Since
+    own authentication Task 13 the console's old Bearer opens no door, so what
+    answers is the door's 401 `auth_required`. Drop the cookie condition from
+    `RequireConsoleRequestHeader` and this is a 403 `csrf`: red."""
+    org_id = await api_env.create_org("csrf-bearer")
+    sub = await api_env.create_user(org_id, "read-only")
+    token = api_env.idp.token(sub, await api_env.org_slug(org_id), email=f"{sub}@test.local")
+    response = await _patch(api_env, {"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401, response.text
+    assert response.json()["code"] == "auth_required"
+```
+
+- `backend/tests/test_auth_my_security.py` (Task 7), `test_my_security_needs_the_console_session`: pedía
+  `bearer = await auth_env.headers(org, sub)`, que desde la Step 4 es una sesión por cookie completa y daría 200.
+  Antiguo → nuevo: la misma afirmación (un Bearer de consola recibe 401 `auth_required` en Mi seguridad), con el
+  Bearer acuñado aquí mismo con `idp.token` (el ayudante de `tests/conftest.py`, `FakeIdp.token(sub, org_slug, *,
+  email=...)`, que se queda para MCP, D12). Ahora lo rechaza la propia puerta, antes de `_console_ctx`. Pasa a:
+
+```python
+async def test_my_security_needs_the_console_session(auth_env: Any) -> None:
+    """The token the console used to send is no way into My security: 401
+    `auth_required`. Minted here, because `auth_env.headers` makes a session
+    cookie since own authentication Task 13 (and the door, not only
+    `_console_ctx`, now refuses the token)."""
+    org = await auth_env.create_org("mysec-bearer")
+    sub = await auth_env.create_user(org, "technician")
+    token = auth_env.idp.token(sub, await auth_env.org_slug(org), email=f"{sub}@test.local")
+
+    response = await auth_env.client.get(
+        "/api/v1/me/security", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "auth_required"
+```
 - `tests/test_i18n_core_api.py:79-88` (`test_api_a_request_without_credentials`): sigue comprobando el 401 en las
   dos lenguas; `english="missing bearer token"` pasa a `english="sign in to continue"` (el texto de la Step 3; el
   de MCP no cambia), y el docstring dice «api/deps.py: the dependency every route shares, off the MCP channel».
@@ -41273,6 +42228,59 @@ con `api_env.headers`.
   `minted[0]` (con `assert minted`, para que no sea vacía). `from app.core.auth import loopback` arriba.
 - **Sin cambios:** `tests/test_ai_read_tools.py:273` (`bearer="Bearer super-secret-token-value"`, solo el `repr`),
   `tests/test_mcp_tools.py:979`, `:1009` (principal de MCP).
+- `backend/tests/test_ai_act_api.py` (como lo dejó la Task 9, su Step 9),
+  `test_the_turn_context_built_for_a_confirm_redacts_its_bearer`: su `_Request` falso no tenía sesión y esperaba
+  que `_turn_context` reenviara `"Bearer secret-token-value"`, la rama de transición que la Step 3 quita de
+  `loopback.loopback_authorization` (sin sesión, ahora un 401). Antiguo → nuevo: la misma propiedad (el `repr` del
+  contexto no lleva el token, y lleva el `X-Client-Id` pedido), con un principal de sesión real
+  (`tests/session_support.py::principal_for`, Task 9), de modo que `loopback_authorization` acuña un token interno;
+  la prueba afirma que el contexto lo lleva, que el `repr` no, y que la cabecera que trajo la petición no se
+  reenvía. Pasa a:
+
+```python
+@pytest.mark.parametrize("narrowed", [False, True], ids=["unnarrowed", "narrowed"])
+async def test_the_turn_context_built_for_a_confirm_redacts_its_bearer(
+    api_env: Any, narrowed: bool
+) -> None:
+    """The confirm path builds a `TurnContext` for its one loopback read. Its
+    repr must not carry the token: `TurnContext` is per-turn and module-private,
+    but the accident §0.1 refuses -- a token in a log file forever -- is one
+    `logger.debug(ctx)` away. It carries the request's `X-Client-Id`, which is
+    no secret (phase 3 design §5.2). Since own authentication Task 13 every
+    admitted request has a session, and the bearer is the internal token
+    minted from it (`loopback.loopback_authorization`); the `Authorization`
+    the request brought is never forwarded."""
+    from tests.ai_admin_fakes import ai_user
+    from tests.session_support import principal_for, sign_in
+
+    org_id = await api_env.create_org("confirm-redacts")
+    _, sub = await ai_user(api_env, org_id, "ai.use", "devices.read")
+    session_id = (await sign_in(api_env, org_id, sub)).session_id
+    principal = await principal_for(api_env, session_id)
+    client = uuid4() if narrowed else None
+    raw = {"Authorization": "Bearer secret-token-value"} | (
+        {} if client is None else {"X-Client-Id": str(client)}
+    )
+
+    class _Request:
+        app = api_env.app
+        # A real `Headers`: `requested_client` reads it with `getlist`.
+        headers = Headers(raw)
+        state = SimpleNamespace(session_principal=principal, via_loopback=False)
+
+    ctx = await api_module._turn_context(_Request())  # type: ignore[arg-type]
+    token = ctx.bearer.removeprefix("Bearer ")
+    claims = jwt.decode(token, options={"verify_signature": False})
+    assert (claims["aud"], claims["sid"]) == ("loopback", str(session_id))
+    assert ctx.bearer != "Bearer secret-token-value"
+    assert token not in repr(ctx)
+    assert "secret-token-value" not in repr(ctx)
+    assert ctx.deadline > time.monotonic()
+    assert ctx.requested_client == client
+```
+
+  (`test_a_confirm_signed_in_by_cookie_probes_with_its_own_token`, la otra prueba de la Task 9 en ese archivo, no
+  cambia.)
 
 - [ ] **Step 8: Grupo C, los sockets**
 
@@ -41318,15 +42326,57 @@ async def test_a_subprotocol_token_no_longer_opens_the_socket(api_env, live_api)
 - **Sin cambios:** `tests/test_error_capture_wiring.py:102` (`"Bearer not-a-real-token"` sigue siendo 401) y
   `tests/test_remote_rsp.py` (el protocolo rsp/1, no la puerta).
 
-- [ ] **Step 9: Grupo F, MCP: sin cambios, comprobado**
+- [ ] **Step 9: Grupo F, MCP: los tokens no cambian; dos pruebas vuelven a quitar la consola**
 
 Siguen acuñando tokens `aud=MCP_AUD` y no se tocan: `tests/mcp_support.py:52-53`, `:87-103`,
-`tests/test_mcp_admin_api.py:212-250`, `tests/test_mcp_channel_api.py:255-292`, `tests/test_mcp_server.py:113-239`,
-`tests/test_token_origin.py:473-533`, `:558-570`, `tests/test_mcp_tools.py`. `tests/test_mcp_channel_api.py:283`
-(token con las dos audiencias fuera del canal) sigue esperando 401.
+`tests/test_mcp_admin_api.py:212-250`, `tests/test_mcp_channel_api.py:255-292`, `tests/test_mcp_server.py:113-239`
+(salvo `:124-125`, abajo), `tests/test_token_origin.py:473-533`, `:558-570`, `tests/test_mcp_tools.py`.
+`tests/test_mcp_channel_api.py:283` (token con las dos audiencias fuera del canal) sigue esperando 401, y
+`test_every_never_exposed_route_refuses_the_channel` (`:157-168`) sigue pasando para las rutas `/auth/*` de las
+Tasks 7 y 8: el guardia de MCP es la capa exterior a la regla CSRF (Task 6, su Step 8).
+
+Dos pruebas daban por hecho que `api_env` no tiene consola, y desde la Step 4 sus Settings traen
+`public_console_url=CONSOLE`: las dos afirmaban `assert api_env.settings.public_console_url is None` y ahora fallarían
+ahí. Antiguo → nuevo: la misma afirmación (sin consola configurada, MCP responde 503), quitándole la consola a la
+prueba con `monkeypatch`, como hace `tests/test_mcp_admin_api.py:304`:
+
+- `tests/test_mcp_server.py:124-125`:
+
+```python
+async def test_without_a_console_url_mcp_and_its_metadata_are_503(api_env) -> None:
+    assert api_env.settings.public_console_url is None
+```
+
+  pasa a:
+
+```python
+async def test_without_a_console_url_mcp_and_its_metadata_are_503(api_env, monkeypatch) -> None:
+    # `api_env` has a console since own authentication Task 13 (the CSRF rule
+    # needs one); this is the deployment without it.
+    monkeypatch.setattr(api_env.settings, "public_console_url", None)
+```
+
+- `tests/test_mcp_channel_api.py:111-112`:
+
+```python
+async def test_a_marked_request_without_a_console_url_is_503(api_env) -> None:
+    assert api_env.settings.public_console_url is None
+```
+
+  pasa a:
+
+```python
+async def test_a_marked_request_without_a_console_url_is_503(api_env, monkeypatch) -> None:
+    # `api_env` has a console since own authentication Task 13 (the CSRF rule
+    # needs one); this is the deployment without it.
+    monkeypatch.setattr(api_env.settings, "public_console_url", None)
+```
+
+(`app.state.settings` es el mismo objeto que `api_env.settings`, como dice el `mcp_env` de los dos archivos; el resto
+de cada prueba no cambia.)
 
 Run: `cd backend && .venv/bin/pytest -q tests/test_mcp_server.py tests/test_mcp_channel_api.py tests/test_mcp_admin_api.py tests/test_mcp_tools.py tests/test_mcp_channel.py`
-Expected: PASS sin editar ninguno.
+Expected: PASS, con esas dos ediciones y ninguna otra.
 
 - [ ] **Step 10: Grupo E, la negativa de una ruta sin consola configurada**
 
@@ -41381,6 +42431,72 @@ Decisión (4). Antiguo → nuevo, con la misma afirmación:
   (`app/api/v1/install_link.py:211-221` llama a `msi_svc.msi_for_link(..., console=...)`). La petición sigue con
   `"Host": "itms.example.com"`; las afirmaciones (503, el texto, `store.reads == []`, sin auditoría) no cambian.
 - `tests/test_mcp_admin_api.py:304` pone `None` y solo hace un GET: sin cambios.
+- `backend/tests/test_user_lifecycle.py` (Task 8), `test_an_invitation_needs_the_console_address`: pedía
+  `bearer = await env.headers(org, admin.sub)` para que la regla CSRF no se metiera, y esperaba el 503 de
+  `user_admin.api._console_url`. Desde la Step 4 `env.headers` es una cookie, y una escritura por cookie sin
+  `public_console_url` la rechaza antes la regla CSRF (no hay origen con el que comparar): por HTTP, ese 503 ya no se
+  alcanza, y aquí no hay una función de servicio que envolver (la ruta lee los Settings ella misma). Antiguo → nuevo:
+  por HTTP, sin consola, la invitación se rechaza con 403 `csrf` y no se crea ni la persona ni ningún enlace; y la
+  negativa propia de la ruta se prueba llamando a `_console_url` directamente. La prueba pasa a:
+
+```python
+async def test_an_invitation_needs_the_console_address(
+    lifecycle_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without `ITS_PUBLIC_CONSOLE_URL` no invitation is made over HTTP. Since
+    own authentication Task 13 the CSRF rule (Task 6) refuses the cookie write
+    first -- 403 `csrf`, there is no console origin to compare with -- so the
+    route's own 503 is held directly by the next test; either way nobody and
+    no link is made."""
+    env = lifecycle_env
+    org = await env.create_org("invite-noconsole")
+    admin = await signed_in(env, org, "org-admin")
+    monkeypatch.setattr(env.app.state.settings, "public_console_url", None)
+
+    response = await _invite(env, admin.headers(), email="nobody-made@toeshee.test")
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "csrf"
+    async with AsyncSession(env.admin_engine) as session:
+        made = (
+            await session.execute(select(User.id).where(User.email == "nobody-made@toeshee.test"))
+        ).first()
+        links = (
+            await session.execute(
+                select(func.count())
+                .select_from(AuthActionToken)
+                .where(AuthActionToken.org_id == org)
+            )
+        ).scalar_one()
+    assert made is None
+    assert links == 0
+
+
+@pytest.mark.parametrize("unset", [None, ""])
+def test_the_invitation_route_refuses_to_make_a_link_without_the_console_address(
+    unset: str | None,
+) -> None:
+    """`user_admin.api._console_url`, the route's own refusal: an invitation
+    link is made from `ITS_PUBLIC_CONSOLE_URL` and never from the request's
+    Host header, so without it the route says so with a 503 before anything
+    is written. Unreachable over HTTP since Task 13 (above), so held here."""
+
+    def request(url: str | None) -> Any:
+        settings = SimpleNamespace(public_console_url=url)
+        return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(settings=settings)))
+
+    with pytest.raises(HTTPException) as refused:
+        user_admin_api._console_url(request(unset))
+    assert refused.value.status_code == 503
+    assert user_admin_api._console_url(request(CONSOLE)) == CONSOLE
+```
+
+  Imports que añadir arriba del archivo: `from types import SimpleNamespace`, `from fastapi import HTTPException`,
+  `func` en `from sqlalchemy import func, select, update`, `AuthActionToken` en
+  `from app.models.auth import AuthActionToken, AuthPassword, AuthSession, AuthTotp` y
+  `from app.modules.user_admin import api as user_admin_api`. El párrafo del plan de la Task 8 que explicaba el
+  Bearer de esta prueba («usa el Bearer (`env.headers`) porque…») ya no describe el archivo; no hay nada que
+  cambiar en el archivo por él.
 
 - [ ] **Step 11: D24 ya está hecho (Task 10): comprobarlo**
 
@@ -41820,8 +42936,9 @@ claves y el paso de la política.) El despliegue completo lo absorbe el proyecto
 - [ ] **Step 15: Verlas pasar**
 
 Run, desde `backend/`:
-`.venv/bin/pytest -q tests/test_auth_falsifiers.py tests/test_token_origin.py tests/test_domain_gate_doors.py tests/test_domain_policy.py tests/test_org_settings.py tests/test_clients_api.py tests/test_client_rbac.py tests/test_me_profile.py tests/test_me_locale.py tests/test_user_admin_api.py tests/test_i18n_core_api.py tests/test_ui_ws.py tests/test_remote_tunnel.py tests/test_remote_screen_relay.py tests/test_remote_supervise.py tests/test_agent_push_api.py tests/test_email_intake_oauth_flow.py tests/test_install_link_msi.py tests/test_console_auth_realm.py tests/test_no_vendor_names_backend.py tests/test_loopback.py tests/test_i18n_catalog.py tests/test_client_catalog.py tests/test_security.py tests/test_route_session_discipline.py tests/test_session_sockets.py tests/test_auth_session_door.py tests/test_logging_discipline.py`
-y después `.venv/bin/pytest -q $(ls tests/test_ai_*.py) tests/test_client_record_checks.py tests/test_mcp_server.py tests/test_mcp_channel_api.py tests/test_mcp_admin_api.py tests/test_mcp_tools.py`.
+`.venv/bin/pytest -q tests/test_auth_falsifiers.py tests/test_token_origin.py tests/test_domain_gate_doors.py tests/test_domain_policy.py tests/test_org_settings.py tests/test_clients_api.py tests/test_client_rbac.py tests/test_me_profile.py tests/test_me_locale.py tests/test_user_admin_api.py tests/test_i18n_core_api.py tests/test_ui_ws.py tests/test_remote_tunnel.py tests/test_remote_screen_relay.py tests/test_remote_supervise.py tests/test_agent_push_api.py tests/test_email_intake_oauth_flow.py tests/test_install_link_msi.py tests/test_console_auth_realm.py tests/test_no_vendor_names_backend.py tests/test_loopback.py tests/test_i18n_catalog.py tests/test_client_catalog.py tests/test_security.py tests/test_route_session_discipline.py tests/test_session_sockets.py tests/test_auth_session_door.py tests/test_auth_csrf.py tests/test_auth_my_security.py tests/test_user_lifecycle.py tests/test_auth_recover_command.py tests/test_logging_discipline.py`
+y después `.venv/bin/pytest -q $(ls tests/test_ai_*.py) tests/test_client_record_checks.py tests/test_mcp_server.py tests/test_mcp_channel_api.py tests/test_mcp_admin_api.py tests/test_mcp_tools.py`
+(`$(ls tests/test_ai_*.py)` incluye `tests/test_ai_act_api.py`).
 Expected: PASS.
 
 Run, desde `frontend/`: `npx vitest run src/lib/noVendorNames.test.ts`. Expected: PASS.
@@ -41832,7 +42949,7 @@ Run, desde `frontend/`: `npx vitest run src/lib/noVendorNames.test.ts`. Expected
 git add backend/app/api/deps.py backend/app/api/v1/ws.py backend/app/modules/remote/api.py backend/app/modules/remote/tunnel.py backend/app/core/security.py backend/app/core/auth/loopback.py backend/app/core/i18n/es.py backend/tests/conftest.py backend/tests/session_support.py backend/tests/test_auth_falsifiers.py backend/tests/test_route_session_discipline.py
 git rm backend/app/core/ws_auth.py
 git commit -m "feat(auth): no console door reads a bearer any more; tests sign in by cookie (own auth phase 1 Task 13)"
-git add backend/tests/test_auth_session_door.py backend/tests/test_token_origin.py backend/tests/test_domain_gate_doors.py backend/tests/test_domain_policy.py backend/tests/test_org_settings.py backend/tests/test_clients_api.py backend/tests/test_client_rbac.py backend/tests/test_me_profile.py backend/tests/test_me_locale.py backend/tests/test_user_admin_api.py backend/tests/test_i18n_core_api.py backend/tests/ai_act_fixtures.py backend/tests/ai_admin_fakes.py backend/tests/test_ai_act_confirm_authz.py backend/tests/test_ai_act_propose.py backend/tests/test_ai_admin_api.py backend/tests/test_ai_admin_boundaries.py backend/tests/test_ai_admin_egress.py backend/tests/test_ai_admin_executor.py backend/tests/test_ai_admin_executor_authz.py backend/tests/test_ai_admin_orchestrator.py backend/tests/test_ai_admin_scrub.py backend/tests/test_ai_client_narrowing.py backend/tests/test_ai_portal.py backend/tests/test_client_record_checks.py backend/tests/test_ui_ws.py backend/tests/test_remote_tunnel.py backend/tests/test_remote_screen_relay.py backend/tests/test_remote_supervise.py backend/tests/test_agent_push_api.py backend/tests/test_email_intake_oauth_flow.py backend/tests/test_install_link_msi.py
+git add backend/tests/test_auth_session_door.py backend/tests/test_auth_csrf.py backend/tests/test_auth_my_security.py backend/tests/test_user_lifecycle.py backend/tests/test_ai_act_api.py backend/tests/test_mcp_server.py backend/tests/test_mcp_channel_api.py backend/tests/test_token_origin.py backend/tests/test_domain_gate_doors.py backend/tests/test_domain_policy.py backend/tests/test_org_settings.py backend/tests/test_clients_api.py backend/tests/test_client_rbac.py backend/tests/test_me_profile.py backend/tests/test_me_locale.py backend/tests/test_user_admin_api.py backend/tests/test_i18n_core_api.py backend/tests/ai_act_fixtures.py backend/tests/ai_admin_fakes.py backend/tests/test_ai_act_confirm_authz.py backend/tests/test_ai_act_propose.py backend/tests/test_ai_admin_api.py backend/tests/test_ai_admin_boundaries.py backend/tests/test_ai_admin_egress.py backend/tests/test_ai_admin_executor.py backend/tests/test_ai_admin_executor_authz.py backend/tests/test_ai_admin_orchestrator.py backend/tests/test_ai_admin_scrub.py backend/tests/test_ai_client_narrowing.py backend/tests/test_ai_portal.py backend/tests/test_client_record_checks.py backend/tests/test_ui_ws.py backend/tests/test_remote_tunnel.py backend/tests/test_remote_screen_relay.py backend/tests/test_remote_supervise.py backend/tests/test_agent_push_api.py backend/tests/test_email_intake_oauth_flow.py backend/tests/test_install_link_msi.py
 git commit -m "test(auth): door, assistant, socket and console-address tests move to the cookie session (own auth phase 1 Task 13)"
 git add backend/tests/webauthn_uv_probe.py frontend/scripts/webauthn-uv.mjs .github/workflows/ci.yml frontend/src/lib/noVendorNames.test.ts backend/tests/test_no_vendor_names_backend.py docs/superpowers/specs/2026-08-19-invisible-identity-layer-design.md docs/modules/console-auth/spec.md docs/03-security-model.md deploy/README.md
 git commit -m "docs(auth): own authentication replaces Keycloak for the console; falsifier 4 in Chromium (own auth phase 1 Task 13)"
