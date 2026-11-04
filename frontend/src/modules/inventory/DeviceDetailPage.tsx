@@ -527,12 +527,17 @@ export function DeviceDetailPage() {
         {deviceId && device.data?.client_id ? (
           <DeviceAssignedTo deviceId={deviceId} clientId={device.data.client_id} />
         ) : null}
-        {/* ITS SITE, and the move inside its client (design §4.3). */}
+        {/* ITS SITE, and the move inside its client (design §4.3). The move
+            lists the client's sites, a `clients.read` read, so it is offered
+            only where both codes are held (phase 3 final review C, Minor). */}
         {device.data?.client_id && device.data.site_id ? (
           <DeviceSite
             device={device.data}
             canMove={(me.data?.clients ?? []).some(
-              (client) => client.id === device.data?.client_id && client.permissions.includes("assets.manage"),
+              (client) =>
+                client.id === device.data?.client_id &&
+                client.permissions.includes("assets.manage") &&
+                client.permissions.includes("clients.read"),
             )}
           />
         ) : null}

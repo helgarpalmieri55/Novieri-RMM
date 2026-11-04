@@ -48,7 +48,7 @@ export const components = {
     choose: "Choose a site",
     chooseClientFirst: "Choose the client first.",
     loading: "Loading sites…",
-    failed: "The sites could not be loaded.",
+    failed: "The sites could not be loaded. {reason}",
     none: "This client has no sites. Add one on the Clients page.",
   },
   prerequisites: {
