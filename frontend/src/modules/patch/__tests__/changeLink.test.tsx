@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -53,8 +53,11 @@ function renderBar() {
 const me = () =>
   vi.fn().mockResolvedValue({ user_id: "u", org_id: "o1", email: "", display_name: "", permissions: [] });
 
+// `client_id` as `GET /changes` sends it (phase 2): the picker offers only
+// the approval's client's changes (phase 3 final review D2).
 const APPROVED = {
   id: "c1",
+  client_id: "o1",
   type: "normal",
   title: "September patching",
   description: "",
@@ -91,6 +94,73 @@ describe("linking an approval to a change", () => {
       ring_name: "broad",
       change_id: "c1",
       client_id: "o1",
+    });
+  });
+
+  // Phase 3 final review C, Important 4: the server accepts only a change of
+  // the approval's client -- the internal client's for an approval of every
+  // client -- and answers "no such change" for any other, even one on screen.
+  describe("offers only the changes of the approval's client", () => {
+    const INTERNAL: MeClient = { ...SCOPE_INTERNAL, permissions: ["patch.approve"] };
+    const ACME: MeClient = { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ["patch.approve"] };
+    const CHANGES = [
+      APPROVED,
+      { ...APPROVED, id: "c-acme-1", client_id: "c-acme", title: "Acme patch window" },
+    ];
+
+    function stub() {
+      mockUseApi.mockReturnValue({
+        me: vi.fn().mockResolvedValue({
+          user_id: "u", org_id: "o1", email: "", display_name: "",
+          permissions: ["patch.approve"], permissions_everywhere: ["patch.approve"],
+        }),
+        listChanges: vi.fn().mockResolvedValue(CHANGES),
+        bulkApprovePatches: vi.fn(),
+      });
+    }
+
+    function offered(): (string | null)[] {
+      const picker = screen.getByRole("combobox", { name: /Change this approval implements/ });
+      return within(picker).getAllByRole("option").map((option) => option.textContent);
+    }
+
+    it("the client chosen at the top's", async () => {
+      selectClient("c-acme", [INTERNAL, ACME]);
+      stub();
+      renderBar();
+      await screen.findByRole("combobox", { name: /Change this approval implements/ });
+      expect(offered()).toEqual(["No change request", "Acme patch window"]);
+    });
+
+    it("the internal client's for an approval of every client", async () => {
+      selectClient("c-acme", [INTERNAL, ACME]);
+      stub();
+      const user = userEvent.setup();
+      renderBar();
+      await user.click(await screen.findByRole("checkbox", { name: /For every client/ }));
+      expect(offered()).toEqual(["No change request", "September patching"]);
+    });
+
+    it("none until the bar's Client field names the client, then that client's", async () => {
+      selectClient(null, [INTERNAL, ACME]);
+      stub();
+      const user = userEvent.setup();
+      renderBar();
+      const field = await screen.findByLabelText("Client");
+      expect(screen.queryByRole("combobox", { name: /Change this approval implements/ })).toBeNull();
+      await user.selectOptions(field, "c-acme");
+      expect(offered()).toEqual(["No change request", "Acme patch window"]);
+    });
+
+    it("drops a change chosen for another client, so it is never sent", async () => {
+      selectClient(null, [INTERNAL, ACME]);
+      stub();
+      const user = userEvent.setup();
+      renderBar();
+      await user.selectOptions(await screen.findByLabelText("Client"), "o1");
+      await user.selectOptions(screen.getByRole("combobox", { name: /Change this approval implements/ }), "c1");
+      await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+      expect(screen.getByRole("combobox", { name: /Change this approval implements/ })).toHaveValue("");
     });
   });
 

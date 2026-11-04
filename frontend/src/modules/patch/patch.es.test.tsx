@@ -217,7 +217,9 @@ const mockDefaults = (): Partial<ApiClient> => ({
     total: 1,
   }),
   listPatchAppSources: vi.fn().mockResolvedValue({ items: [] }),
-  listChanges: vi.fn().mockResolvedValue([{ id: "c1", title: "Ventana de octubre", state: "approved" }]),
+  // `client_id` as `GET /changes` sends it: the bar offers only the approval's
+  // client's changes (phase 3 final review D2), here the internal one chosen.
+  listChanges: vi.fn().mockResolvedValue([{ id: "c1", client_id: "o1", title: "Ventana de octubre", state: "approved" }]),
   getCurrentOrg: vi.fn().mockResolvedValue({ id: "o1", name: "Org", slug: "org", status: "active", settings: {} }),
 });
 
