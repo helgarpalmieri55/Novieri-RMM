@@ -35,6 +35,18 @@ dependencies = [
     # already; imported directly, so declared directly, at the version the
     # pinned SDK resolved.
     "jsonschema==4.26.0",
+    # Own authentication (plan 2026-11-04 Task 2). All three ship `py.typed`.
+    # argon2id with the library's DEFAULT parameters is the design (§2.1), so
+    # the major is bounded: a new major may change them, and every stored
+    # verifier would then need a rehash -- a reviewed upgrade, not a resolve.
+    "argon2-cffi>=25.1.0,<26",
+    # 2.10.0 has no protection against reusing a code; the platform keeps the
+    # last accepted step itself (design §2.2). Pinned: the cited behaviour.
+    "pyotp==2.10.0",
+    # py_webauthn. Pinned: the console's @simplewebauthn/browser 14.0.0 is
+    # paired with exactly this version (plan decision D22). Brings cbor2,
+    # pyasn1, pyasn1-modules and pyOpenSSL itself; none is imported here.
+    "webauthn==3.0.1",
 ]
 
 [project.optional-dependencies]

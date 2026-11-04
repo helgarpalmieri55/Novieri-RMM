@@ -14,6 +14,8 @@
 #   backend/app/core/signing.py  transit/sign/job-signing, transit/keys/...
 #   backend/app/core/vault.py    transit/{keys,encrypt,decrypt}/org-<uuid>
 #   backend/app/core/ca.py       pki/sign/agent, pki/ca/pem, pki/revoke
+#   backend/app/core/auth/keys.py transit/hmac/auth-pepper,
+#                                transit/{sign,keys}/auth-signing
 
 # Sign the job envelope. The private key never leaves the vault.
 path "transit/sign/job-signing" {
@@ -37,6 +39,23 @@ path "transit/encrypt/org-*" {
 
 path "transit/decrypt/org-*" {
   capabilities = ["update"]
+}
+
+# Own authentication: HMAC a password with the pepper. Nothing else on that
+# key -- no transit/keys/auth-pepper, so this policy can neither read, rotate
+# nor export it, and the key is not exportable anyway.
+path "transit/hmac/auth-pepper" {
+  capabilities = ["update"]
+}
+
+# Sign the platform's own tokens (ES256), and read the public halves that
+# /.well-known/jwks.json publishes. Read only, as for job-signing.
+path "transit/sign/auth-signing" {
+  capabilities = ["update"]
+}
+
+path "transit/keys/auth-signing" {
+  capabilities = ["read"]
 }
 
 # Agent enrollment: sign the device CSR, publish the CA, revoke on decommission.
