@@ -80,6 +80,7 @@ import { Button, Dialog, Field, Td, Th, inputClass } from "../../components/ui";
 import type {
   Device,
   DeviceGroup,
+  DeviceGroupMemberResult,
   DeviceGroupReferences,
   GroupRules,
   Me,
@@ -94,7 +95,7 @@ import { formatDateTime } from "../../lib/datetime";
 import { useFleetPrerequisite } from "../../lib/detectors";
 import { ClientField } from "../../components/ClientField";
 import { useClientScope } from "../../lib/clientScope";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { parentClientOf, requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { useClientName } from "../settings/api";
 import { PageHead, Panel, QueryState, StatusPill, TableWrap } from "../../shell/components";
 import { Icon } from "../../shell/icons";
@@ -205,6 +206,31 @@ const BLOCKERS: readonly {
 /** One blocker as a phrase, read when drawn so it follows the language. */
 function blockerLabel(key: keyof DeviceGroupReferences, n: number): string {
   return translate(`devices.groups.blockers.${key}` as MessageKey, { count: n });
+}
+
+/**
+ * The member picker's page: the route's own ceiling (`GET /devices`, `limit`
+ * at most 500), read for the group's client alone.
+ */
+const MEMBER_PICKER_LIMIT = 500;
+
+/**
+ * Why the server did not move a device into a group, in the person's words.
+ * `POST /device-groups/{id}/members` answers per device with a fixed English
+ * reason (`services/device_groups.py::add_group_members`); the three it can
+ * give are worded here, and anything else is shown as the server said it.
+ */
+function notMovedReason(reason: string): string {
+  switch (reason) {
+    case "belongs to another client":
+      return translate("devices.groups.memberDialog.reason.otherClient");
+    case "already a member":
+      return translate("devices.groups.memberDialog.reason.alreadyMember");
+    case "no such device":
+      return translate("devices.groups.memberDialog.reason.noDevice");
+    default:
+      return reason;
+  }
 }
 
 /**
@@ -486,21 +512,30 @@ export function GroupsPage() {
   const { selected } = useClientScope();
   const clientName = useClientName();
   const showClient = selected === null;
-  const [pickedClient, setPickedClient] = useState("");
 
   const groups = useQuery({
     queryKey: ["device-groups", showArchived],
     queryFn: () => api.listDeviceGroups({ include_archived: showArchived }),
   });
   const devices = useQuery({ queryKey: ["devices"], queryFn: () => api.listDevices() });
+  // THE MEMBER PICKER READS THE GROUP'S OWN CLIENT (phase 3 final review C,
+  // Important 3): a group organises one client's devices and the server moves
+  // no other's (`moved: false`), so offering every client's page offered
+  // refusals. Keyed by client under `["devices"]`, which `refresh` invalidates.
+  const memberClient = openGroup?.client_id ?? null;
+  const memberDevices = useQuery({
+    queryKey: ["devices", "of-client", memberClient],
+    queryFn: () => api.listDevices({ clientId: requireKnown(memberClient), limit: MEMBER_PICKER_LIMIT }),
+    enabled: memberClient !== null,
+  });
+  // The server's answer per device, for the ones it did not move.
+  const [notMoved, setNotMoved] = useState<readonly DeviceGroupMemberResult[]>([]);
 
   const items = useMemo(() => groups.data?.items ?? [], [groups.data]);
   const rows = useMemo(() => buildTree(items), [items]);
-  const parentClient = editor?.parentGroupId
-    ? items.find((group) => group.id === editor.parentGroupId)?.client_id
-    : undefined;
-  const target = useNewRowClient("devices.manage", parentClient);
-  const newClient = target.needsField ? pickedClient || null : target.clientId;
+  // `parentClientOf`: a parent not found YET is not "no parent".
+  const newRow = useNewRowClientField("devices.manage", parentClientOf(editor?.parentGroupId, items));
+  const newClient = newRow.clientId;
   /**
    * The parent's NAME, for the row that is drawn inside it.
    *
@@ -571,9 +606,14 @@ export function GroupsPage() {
   });
 
   const addMember = useMutation({
-    mutationFn: (payload: { groupId: string; deviceId: string }) =>
-      api.addDeviceGroupMembers(payload.groupId, [payload.deviceId]),
-    onSuccess: () => {
+    mutationFn: (payload: { groupId: string; deviceId: string }) => {
+      setNotMoved([]);
+      return api.addDeviceGroupMembers(payload.groupId, [payload.deviceId]);
+    },
+    // A 200 IS NOT "MOVED": the server answers per device, and a refused one
+    // (`moved: false`) used to clear the picker with nothing said.
+    onSuccess: ({ results }) => {
+      setNotMoved(results.filter((result) => !result.moved));
       setAddingDevice("");
       refresh();
     },
@@ -588,7 +628,7 @@ export function GroupsPage() {
   function openCreate() {
     save.reset();
     setAttempt(null);
-    setPickedClient("");
+    newRow.setPicked("");
     setEditor(blankEditor());
   }
 
@@ -681,8 +721,12 @@ export function GroupsPage() {
               ? null
               : translate("devices.groups.editor.precedenceInvalid"),
         },
+        // A new group with every client chosen and no parent deciding.
+        ...(!editor.group && newRow.needsField
+          ? [{ name: "client", label: translate("components.clientField.label") }]
+          : []),
       ],
-      values: { name: editor.name, precedence: editor.precedence },
+      values: { name: editor.name, precedence: editor.precedence, client: newClient },
     };
     setAttempt(next);
     if (attemptProblems(next).length > 0) return;
@@ -709,13 +753,18 @@ export function GroupsPage() {
       }),
     }));
 
-  const deviceRows = devices.data?.items ?? [];
+  // The group's own client's devices (`memberDevices`), never another's.
+  const deviceRows = memberDevices.data?.items ?? [];
   const members = openGroup
     ? deviceRows.filter((device) => device.device_group_id === openGroup.id)
     : [];
   const joinable = openGroup
     ? deviceRows.filter((device) => device.device_group_id !== openGroup.id)
     : [];
+  const deviceName = (id: string): string => {
+    const found = deviceRows.find((device) => device.id === id);
+    return found?.hostname ?? found?.description ?? id;
+  };
 
   return (
     <>
@@ -891,6 +940,7 @@ export function GroupsPage() {
                             onClick={() => {
                               setOpenGroup(group);
                               setAddingDevice("");
+                              setNotMoved([]);
                               addMember.reset();
                               removeMember.reset();
                             }}
@@ -994,12 +1044,12 @@ export function GroupsPage() {
               <p className="note">
                 {t("devices.groups.editor.precedenceNote")}
               </p>
+              {/* A new group's client, with every client chosen and no parent
+                  deciding (design §3.1). An edit never sends one. */}
+              {!editor.group && newRow.needsField ? <ClientField field={newRow} /> : null}
               {/* A PICKER, NEVER A TYPED UUID (closeout rec. 6). Health profile
                   resolution walks this chain upward; a deployment does not
                   descend it. */}
-              {!editor.group && target.needsField ? (
-                <ClientField code="devices.manage" value={pickedClient} onChange={setPickedClient} />
-              ) : null}
               <EntityPicker
                 label={t("devices.groups.editor.parent")}
                 options={parentOptions}
@@ -1226,15 +1276,25 @@ export function GroupsPage() {
                 {t("devices.groups.editor.clearParent")}
               </Button>
             ) : null}
-            <FormActions
-              label={editor.group ? t("devices.groups.editor.save") : t("devices.groups.editor.create")}
-              pending={save.isPending}
-              error={save.error}
-              problems={attemptProblems(attempt)}
-              failedMessage={
-                editor.group ? t("devices.groups.editor.notSaved") : t("devices.groups.editor.notCreated")
-              }
-            />
+            {/* With Unassigned chosen at the top and no parent to decide,
+                nothing new can be filed: the editor says so instead of
+                offering a create that can only fail. */}
+            {!editor.group && newRow.refused === "unassigned" ? (
+              <div className="notice" role="note">
+                <Icon name="info" size={17} />
+                <p>{t("devices.unassignedRefused")}</p>
+              </div>
+            ) : (
+              <FormActions
+                label={editor.group ? t("devices.groups.editor.save") : t("devices.groups.editor.create")}
+                pending={save.isPending}
+                error={save.error}
+                problems={attemptProblems(attempt)}
+                failedMessage={
+                  editor.group ? t("devices.groups.editor.notSaved") : t("devices.groups.editor.notCreated")
+                }
+              />
+            )}
           </Form>
         ) : null}
       </Dialog>
@@ -1314,6 +1374,17 @@ export function GroupsPage() {
             {addMember.isError || removeMember.isError ? (
               <p role="alert" className="form-error mt-3">
                 {describeSubmitError(addMember.error ?? removeMember.error)}
+              </p>
+            ) : notMoved.length > 0 ? (
+              <p role="alert" className="form-error mt-3">
+                {notMoved
+                  .map((result) =>
+                    t("devices.groups.memberDialog.notMoved", {
+                      name: deviceName(result.device_id),
+                      reason: notMovedReason(result.reason),
+                    }),
+                  )
+                  .join(" ")}
               </p>
             ) : null}
           </>

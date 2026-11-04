@@ -226,3 +226,106 @@ describe("a hand-made asset", () => {
     expect(api.createAsset).not.toHaveBeenCalled();
   });
 });
+
+// Phase 3 final review C, Important 1 (operator decision 2): the shared hook
+// brings the "Client is required" rule the group editor lacked, and with
+// Unassigned chosen at the top the forms say nothing new can be filed there
+// instead of offering a create that can only fail.
+const REFUSED = "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.";
+
+function selectUnassigned(): void {
+  mockClientScope.mockReturnValue({ selected: UNASSIGNED.id, select: vi.fn(), clients: [...CLIENTS, UNASSIGNED], ready: true });
+}
+
+describe("the new-row client, through the shared hook", () => {
+  it("a new group, with every client chosen, names the empty Client field and sends nothing", async () => {
+    selectClient(null);
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderIt(<GroupsPage />);
+    await user.click(await screen.findByRole("button", { name: "New group" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Name"), "desks");
+    await user.click(within(dialog).getByRole("button", { name: "Create group" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Client is required");
+    expect(api.createDeviceGroup).not.toHaveBeenCalled();
+  });
+
+  it("a new group, with Unassigned chosen at the top, says so and offers no create", async () => {
+    selectUnassigned();
+    stubApi({ listDeviceGroups: vi.fn().mockResolvedValue({ ...GROUPS, items: [], total: 0 }) });
+    const user = userEvent.setup();
+    renderIt(<GroupsPage />);
+    // Unassigned holds no group, so the empty state offers "New group" too: the head's is first.
+    await screen.findByText("No groups yet");
+    await user.click(screen.getAllByRole("button", { name: "New group" })[0]!);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(REFUSED)).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Create group" })).toBeNull();
+  });
+
+  it("a hand-made asset, with Unassigned chosen at the top, says so and offers no create", async () => {
+    selectUnassigned();
+    const api = stubApi();
+    renderIt(<AddAssetDialog open onClose={() => {}} />);
+    expect(await screen.findByText(REFUSED)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add asset/i })).toBeNull();
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    expect(api.listClientSites).not.toHaveBeenCalled();
+  });
+});
+
+// Phase 3 final review C, Important 3: the member picker read one unfiltered
+// page of every client's devices, and the server's per-device refusal
+// (`moved: false`, "belongs to another client") was thrown away.
+describe("a group's member picker", () => {
+  function machine(id: string, clientId: string, hostname: string, groupId: string | null = null) {
+    return { id, client_id: clientId, hostname, description: null, device_group_id: groupId };
+  }
+
+  async function openMembers(user: ReturnType<typeof userEvent.setup>, name: string): Promise<HTMLElement> {
+    const row = (await screen.findByText(name)).closest("tr") as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "Members" }));
+    return screen.getByRole("dialog", { name: `Members of ${name}` });
+  }
+
+  it("reads the devices of the group's own client, and offers only those", async () => {
+    selectClient(null);
+    const listDevices = vi.fn((params?: { clientId?: string }) =>
+      Promise.resolve(
+        params?.clientId === "c-acme"
+          ? { items: [machine("d-a", "c-acme", "acme-ws")], total: 1 }
+          : { items: [machine("d-a", "c-acme", "acme-ws"), machine("d-o", "o1", "own-ws")], total: 2 },
+      ),
+    );
+    stubApi({ listDevices });
+    const user = userEvent.setup();
+    renderIt(<GroupsPage />);
+    const dialog = await openMembers(user, "Acme desks");
+    await waitFor(() => expect(listDevices).toHaveBeenCalledWith(expect.objectContaining({ clientId: "c-acme" })));
+    await user.click(within(dialog).getByRole("combobox", { name: "Add a device" }));
+    expect(await within(dialog).findByRole("option", { name: /acme-ws/ })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("option", { name: /own-ws/ })).toBeNull();
+  });
+
+  it("says why a device was not moved, in the person's language", async () => {
+    selectClient(null);
+    const addDeviceGroupMembers = vi.fn().mockResolvedValue({
+      results: [{ device_id: "d-a", moved: false, reason: "belongs to another client" }],
+    });
+    stubApi({
+      listDevices: vi.fn().mockResolvedValue({ items: [machine("d-a", "c-acme", "acme-ws")], total: 1 }),
+      addDeviceGroupMembers,
+    });
+    const user = userEvent.setup();
+    renderIt(<GroupsPage />);
+    const dialog = await openMembers(user, "Acme desks");
+    await user.click(within(dialog).getByRole("combobox", { name: "Add a device" }));
+    await user.click(await within(dialog).findByRole("option", { name: /acme-ws/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Add to group" }));
+    await waitFor(() => expect(addDeviceGroupMembers).toHaveBeenCalledWith("g-acme", ["d-a"]));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "acme-ws was not added: it belongs to another client.",
+    );
+  });
+});

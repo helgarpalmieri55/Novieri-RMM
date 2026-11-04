@@ -2,6 +2,7 @@ import type { Shape } from "../types";
 import type { devices as en } from "../en/devices";
 
 export const devices: Shape<typeof en> = {
+  unassignedRefused: "El cliente elegido es «Sin asignar», y en él no se puede crear nada nuevo. Elige antes otro cliente.",
   page: {
     title: "Dispositivos",
     description: "Todos los equipos y dispositivos que administras, con o sin agente.",
@@ -403,11 +404,17 @@ export const devices: Shape<typeof en> = {
       none: "No hay dispositivos en este grupo.",
       remove: "Quitar",
       add: "Añadir un dispositivo",
-      addEmpty: "Todos los dispositivos del inventario ya están en este grupo.",
+      addEmpty: "Todos los dispositivos del cliente de este grupo ya están en él.",
       addToGroup: "Añadir al grupo",
       orgDefault: "predeterminado de la organización",
       otherGroup: "actualmente en otro grupo",
       fallback: "Un dispositivo que sale de un grupo no pierde su política: vuelve a la predeterminada de la organización.",
+      notMoved: "{name} no se añadió: {reason}.",
+      reason: {
+        otherClient: "pertenece a otro cliente",
+        alreadyMember: "ya es miembro",
+        noDevice: "ese dispositivo ya no existe",
+      },
     },
     archiveDialog: {
       title: "Archivar grupo de dispositivos",
