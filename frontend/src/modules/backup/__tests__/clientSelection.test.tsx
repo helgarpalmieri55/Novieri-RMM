@@ -215,3 +215,36 @@ describe("a new client-default policy", () => {
     expect(await within(dialog).findByText(/No backup repository of this policy’s client exists\./)).toBeInTheDocument();
   });
 });
+
+// Phase 3 final review B, Important 4 (operator decision 2): with Unassigned
+// chosen at the top nothing new can be filed, and the header confines the
+// request to Unassigned, so a Save could only fail; the forms say so.
+describe("with Unassigned chosen at the top", () => {
+  const REFUSED = "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.";
+
+  function selectUnassigned(): void {
+    mockClientScope.mockReturnValue({ selected: UNASSIGNED.id, select: vi.fn(), clients: [INTERNAL, ACME, UNASSIGNED], ready: true });
+  }
+
+  it("a new repository says so, and offers no Create", async () => {
+    selectUnassigned();
+    stubApi({ listBackupRepositories: vi.fn().mockResolvedValue([]) });
+    const user = userEvent.setup();
+    renderIt(<RepositoriesPage />);
+    await user.click((await screen.findAllByRole("button", { name: /new repository/i }))[0]!);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(REFUSED)).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Create" })).toBeNull();
+  });
+
+  it("a new client default says so, and offers no Save", async () => {
+    selectUnassigned();
+    stubApi({ listBackupRepositories: vi.fn().mockResolvedValue([]) });
+    const user = userEvent.setup();
+    renderIt(<BackupPolicyEditor />);
+    await user.click((await screen.findAllByRole("button", { name: /new policy/i }))[0]!);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(REFUSED)).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Save" })).toBeNull();
+  });
+});

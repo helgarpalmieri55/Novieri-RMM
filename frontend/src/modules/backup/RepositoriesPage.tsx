@@ -29,7 +29,7 @@ import { formatDateTime } from "../../lib/datetime";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { useClientScope } from "../../lib/clientScope";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { useClientName } from "../settings/api";
 import { Icon } from "../../shell/icons";
 import {
@@ -271,9 +271,8 @@ function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () 
   // up into it (MSP clients phase 2, Task 13). Nothing on this page is a row
   // to take it from, so it is the client chosen at the top, or with every
   // client the dialog's Client field (design §3.1).
-  const target = useNewRowClient("backup.policy.manage");
-  const [pickedClient, setPickedClient] = useState("");
-  const clientId = target.needsField ? pickedClient || null : target.clientId;
+  const client = useNewRowClientField("backup.policy.manage");
+  const clientId = client.clientId;
   // Populated ON SUBMIT, never while typing. Held as data (rules and values)
   // so a language switch re-words the sentences.
   const [attempt, setAttempt] = useState<Attempt | null>(null);
@@ -284,7 +283,7 @@ function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () 
     const next: Attempt = {
       rules: () => [
         ...repositoryRules(),
-        ...(target.needsField ? [{ name: "client", label: translate("backup.repositories.client") }] : []),
+        ...(client.needsField ? [{ name: "client", label: translate("backup.repositories.client") }] : []),
       ],
       values: { name, client: clientId },
     };
@@ -305,9 +304,7 @@ function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () 
     <Dialog open={open} onClose={onClose} title={t("backup.repositories.dialogTitle")}>
       {/* A real <form>, so Enter in Name creates the repository. */}
       <Form onSubmit={submit}>
-        {target.needsField ? (
-          <ClientField code="backup.policy.manage" value={pickedClient} onChange={setPickedClient} />
-        ) : null}
+        {client.needsField ? <ClientField field={client} /> : null}
         <Field label={t("backup.repositories.name")}>
           <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
@@ -325,13 +322,22 @@ function CreateRepositoryDialog({ open, onClose }: { open: boolean; onClose: () 
               The control is also no longer disabled on an empty Name; that
               disabled state was the silent no-op, and the click names the
               field now. */}
-          <FormActions
-            label={t("backup.repositories.create")}
-            pendingLabel={t("backup.repositories.creating")}
-            pending={create.isPending}
-            error={create.error}
-            problems={attemptProblems(attempt)}
-          />
+          {/* With Unassigned chosen at the top nothing new can be filed: the
+              dialog says so instead of offering a Create that can only fail. */}
+          {client.refused === "unassigned" ? (
+            <div className="notice" role="note">
+              <Icon name="info" size={17} />
+              <p>{t("backup.unassignedRefused")}</p>
+            </div>
+          ) : (
+            <FormActions
+              label={t("backup.repositories.create")}
+              pendingLabel={t("backup.repositories.creating")}
+              pending={create.isPending}
+              error={create.error}
+              problems={attemptProblems(attempt)}
+            />
+          )}
         </div>
       </Form>
     </Dialog>
