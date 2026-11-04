@@ -3383,12 +3383,25 @@ export class ApiClient {
     return this.request<ChangeGate[]>("/changes/gates");
   }
 
+  /**
+   * The gate of one group, or WITH NO GROUP the "Every device" gate: a group's
+   * gate is its group's client's, the group-less one every client's -- a
+   * global row, and so global BY ITS BODY (`RequestRoute.global`): narrowed by
+   * `X-Client-Id` the server refuses it (403, `change_mgmt/gates.py`
+   * `refuse_unless_every_client`). It still requires `change.gate.manage` on
+   * every client.
+   */
   setChangeGate(body: ChangeGateSetRequest): Promise<ChangeGate> {
-    return this.request<ChangeGate>("/changes/gates", { method: "PUT", body: JSON.stringify(body) });
+    return this.request<ChangeGate>(
+      "/changes/gates",
+      { method: "PUT", body: JSON.stringify(body) },
+      { global: body.device_group_id == null },
+    );
   }
 
-  removeChangeGate(id: string): Promise<void> {
-    return this.request<void>(`/changes/gates/${id}`, { method: "DELETE" });
+  /** `global`: the gate is the every-device one (no group); see `setChangeGate`. */
+  removeChangeGate(id: string, { global }: { global: boolean }): Promise<void> {
+    return this.request<void>(`/changes/gates/${id}`, { method: "DELETE" }, { global });
   }
 
   createChange(body: ChangeCreateRequest): Promise<ChangeRequest> {

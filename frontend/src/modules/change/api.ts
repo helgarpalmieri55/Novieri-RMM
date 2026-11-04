@@ -11,6 +11,7 @@ import type { Me } from "../../lib/api";
 import type {
   ApprovalDecisionRequest,
   ChangeCreateRequest,
+  ChangeGate,
   ChangeGateSetRequest,
   ChangeUpdateRequest,
   LinkCreateRequest,
@@ -297,7 +298,10 @@ export function useRemoveChangeGateMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.removeChangeGate(id),
+    // The every-device gate (no group) is every client's: removed without
+    // `X-Client-Id` (`ApiClient.setChangeGate`).
+    mutationFn: (gate: Pick<ChangeGate, "id" | "device_group_id">) =>
+      api.removeChangeGate(gate.id, { global: gate.device_group_id === null }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: [CHANGE_GATES_KEY] }),
   });
 }

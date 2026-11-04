@@ -73,7 +73,10 @@ export function GatesPanel({ canManage }: { canManage: boolean }) {
                           label={t("change.gates.remove")}
                           icon="trash"
                           small
-                          onClick={() => remove.mutate(gate.id)}
+                          onClick={() => {
+                            remove.reset();
+                            remove.mutate(gate);
+                          }}
                         />
                       </div>
                     )}
@@ -83,6 +86,13 @@ export function GatesPanel({ canManage }: { canManage: boolean }) {
             </tbody>
           </Table>
         </QueryState>
+        {/* A refused remove leaves the gate in the list; without this it was
+            refused in silence (phase 3 last fix round, item 1). */}
+        {remove.error ? (
+          <p role="alert" className="form-error px-4.5 pt-3">
+            {describeSubmitError(remove.error)}
+          </p>
+        ) : null}
         {canManage && (
           <form
             className="grid gap-3 px-4.5 py-3"
