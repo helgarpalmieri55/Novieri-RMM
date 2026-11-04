@@ -6,6 +6,18 @@ repository key, or anything derived from a private key (invariant 3): the
 secret is accepted once, sealed in the vault, and only the replication worker
 ever decrypts it. Testing a target therefore happens in the worker; this API
 only asks for it.
+
+EVERY WRITE OF A TARGET OR A KEY NEEDS A SCOPE OF EVERY CLIENT
+(`require_permission_on_every_client`, phase 3 final review A7). Both tables
+are O, but nothing here writes a client on either or changes one, so each row
+is global, which only the every-client scope may write. The flush guard
+(`app.core.global_rows`) refused most of these writes under a narrowed scope
+already, but only at a flush, once the handler had run (a changed secret was
+already re-sealed by then), and never a wrong `prove` answer, which writes
+only its audit row. The gate refuses them before the body is read, and they
+are listed in `GLOBAL_WRITES`, so the console sends them without
+`X-Client-Id`. Pointing a repository at a target stays per client: a
+repository is one client's.
 """
 
 from datetime import UTC, datetime
@@ -17,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_on_every_client
 from app.core.audit import audit_service
 from app.core.i18n import tr
 from app.core.tenancy import org_session
@@ -248,7 +260,7 @@ async def list_targets(
 async def create_target_route(
     body: TargetCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("backup.offsite.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("backup.offsite.manage")),
 ) -> TargetOut:
     state = request.app.state
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
@@ -277,7 +289,7 @@ async def update_target_route(
     target_id: UUID,
     body: TargetUpdate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("backup.offsite.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("backup.offsite.manage")),
 ) -> TargetOut:
     if (body.access_key_id is None) != (body.secret_access_key is None):
         raise HTTPException(
@@ -315,7 +327,7 @@ async def update_target_route(
 async def test_target_route(
     target_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("backup.offsite.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("backup.offsite.manage")),
 ) -> TargetOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -415,7 +427,7 @@ async def list_keys(
 async def register_key(
     body: RecoveryKeyCreate,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("backup.recovery.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("backup.recovery.manage")),
 ) -> RecoveryKeyChallengeOut:
     if not body.stored_confirmed:
         raise HTTPException(
@@ -460,7 +472,7 @@ async def _key_or_404(session: Any, org_id: UUID, key_id: UUID) -> BackupRecover
 async def new_challenge(
     key_id: UUID,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("backup.recovery.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("backup.recovery.manage")),
 ) -> RecoveryKeyChallengeOut:
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
@@ -478,7 +490,7 @@ async def prove_key(
     key_id: UUID,
     body: RecoveryKeyProve,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("backup.recovery.manage")),
+    ctx: AuthContext = Depends(require_permission_on_every_client("backup.recovery.manage")),
 ) -> RecoveryKeyOut:
     # The failure is audited inside `prove_recovery_key`; commit it before
     # answering 422, so a wrong answer leaves its record.

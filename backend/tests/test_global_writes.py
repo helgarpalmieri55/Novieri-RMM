@@ -32,9 +32,15 @@ directions.
 
 NOT HERE, deliberately: the O-class rows that may be global OR one client's
 (patch/backup/remote policies, health profile assignments, SLA policies,
-credentials, the documentation family, backup offsite targets and recovery
-keys, change gates, the software ignore list). Task 6's O-table RLS governs
-them -- a row with no client is writable only under an every-client scope.
+credentials, the documentation family, change gates, the software ignore
+list). Task 6's O-table RLS governs them -- a row with no client is writable
+only under an every-client scope.
+
+Backup off-site targets and recovery keys were on that list until the phase 3
+final review (A7). Their tables are O, but no route writes a client on either
+or changes one, so every row is global: each write is a write of every client,
+and they are listed above. A route that files a target or key under a client
+would make them O-class in fact, and move them back here.
 """
 
 from typing import Any
@@ -177,6 +183,16 @@ GLOBAL_WRITES: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/email-intake/oauth/complete"): "email_intake.admin",
     ("POST", "/api/v1/email-intake/oauth/abandon"): "email_intake.admin",
     ("PUT", "/api/v1/email-intake/oauth-app"): "email_intake.admin",
+    # backup off-site targets and recovery keys: O tables, but no route writes
+    # or changes a client on either, so every row is global and every write
+    # of one is a write of every client (final review A7; proved row by row,
+    # wrong-answer `prove` included, in tests/test_backup_offsite_api.py)
+    ("POST", "/api/v1/backup/offsite-targets"): "backup.offsite.manage",
+    ("PUT", "/api/v1/backup/offsite-targets/{target_id}"): "backup.offsite.manage",
+    ("POST", "/api/v1/backup/offsite-targets/{target_id}/test"): "backup.offsite.manage",
+    ("POST", "/api/v1/backup/recovery-keys"): "backup.recovery.manage",
+    ("POST", "/api/v1/backup/recovery-keys/{key_id}/challenge"): "backup.recovery.manage",
+    ("POST", "/api/v1/backup/recovery-keys/{key_id}/prove"): "backup.recovery.manage",
 }
 
 #: (method, path) -> code: READS of a table that holds every client's data
@@ -224,6 +240,9 @@ NOT_GLOBAL: dict[tuple[str, str], str] = {
     # `mcp.use` gates a person's own revocation; revoking an app for EVERYONE
     # is global and is refused inside the handler (tested below).
     ("POST", "/api/v1/mcp/connections/{client_id}/revoke"): "personal, or global by body",
+    # A repository is one client's; the target it names must be global or
+    # that client's (`backup.offsite.set_repository_target`).
+    ("PUT", "/api/v1/backup/repositories/{repository_id}/offsite"): "C: backup_repository",
 }
 
 
