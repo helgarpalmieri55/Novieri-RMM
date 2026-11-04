@@ -3049,11 +3049,19 @@ export class ApiClient {
     return this.request<PatchPolicy[]>("/patch/policies");
   }
 
+  /**
+   * One group's policy, or WITH NO GROUP the organisation default: a group's
+   * policy is its group's client's, the default every client's -- a global
+   * row, and so global BY ITS BODY (`RequestRoute.global`): narrowed by
+   * `X-Client-Id` the server refuses it (403, `patch/api.py`
+   * `upsert_policy`). It still requires `patch.policy.manage` on every client.
+   */
   upsertPatchPolicy(body: PatchPolicyInput): Promise<PatchPolicy> {
-    return this.request<PatchPolicy>("/patch/policies", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
+    return this.request<PatchPolicy>(
+      "/patch/policies",
+      { method: "PUT", body: JSON.stringify(body) },
+      { global: body.device_group_id == null },
+    );
   }
 
   getPatchFleetReport(): Promise<FleetReport> {
