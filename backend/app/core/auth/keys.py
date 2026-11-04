@@ -264,7 +264,11 @@ class OpenBaoAuthKeys:
             )
             response.raise_for_status()
             data: dict[str, Any] = response.json()["data"]
-        except (httpx.HTTPError, KeyError, ValueError) as exc:
+            if not isinstance(data, dict):
+                raise TypeError(  # i18n-exempt: caught below, becomes AuthKeysUnavailable
+                    "transit answered a data member that is not an object"
+                )
+        except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
             raise AuthKeysUnavailable(  # i18n-exempt: mapped to a translated 503 by the caller
                 f"OpenBao refused {path}"
             ) from exc
@@ -281,7 +285,7 @@ class OpenBaoAuthKeys:
         try:
             used, mac = _versioned(str(answer["hmac"]))
             return base64.b64decode(mac), used
-        except (KeyError, ValueError) as exc:
+        except (KeyError, ValueError, TypeError, AttributeError) as exc:
             raise AuthKeysUnavailable(  # i18n-exempt: mapped to a translated 503 by the caller
                 "OpenBao answered an HMAC this module cannot read"
             ) from exc
@@ -299,7 +303,7 @@ class OpenBaoAuthKeys:
             prefix_version, encoded = _versioned(str(answer["signature"]))
             version = int(answer.get("key_version", prefix_version))
             signature = _b64url_decode(encoded)
-        except (KeyError, ValueError) as exc:
+        except (KeyError, ValueError, TypeError, AttributeError) as exc:
             raise AuthKeysUnavailable(  # i18n-exempt: mapped to a translated 503 by the caller
                 "OpenBao answered a signature this module cannot read"
             ) from exc
@@ -410,6 +414,10 @@ async def sign_jwt(claims: Mapping[str, Any], *, typ: str = "JWT") -> str:
     backend = _current()
     for _attempt in range(2):
         keys = await backend.public_keys()
+        if not keys:
+            raise AuthKeysUnavailable(  # i18n-exempt: mapped to a translated 503 by the caller
+                "the signing key has no public half to name in a token"
+            )
         kid = thumbprint(keys[max(keys)])
         signing_input = f"{_segment({'alg': 'ES256', 'kid': kid, 'typ': typ})}.{_segment(claims)}"
         signature, used = await sign_es256(signing_input.encode("ascii"))

@@ -303,6 +303,40 @@ async def test_openbao_failing_is_unavailable_never_a_guess(call: str, installed
             await keys.jwks()
 
 
+@pytest.mark.parametrize("answer", [{"data": None}, [], {"data": ["x"]}, {"data": {"hmac": None}}])
+@pytest.mark.parametrize("call", ["hmac", "sign", "jwks", "jwt"])
+async def test_an_unreadable_200_is_unavailable_not_a_500(
+    call: str, answer: Any, installed: Any
+) -> None:
+    def odd(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=answer)
+
+    installed(
+        OpenBaoAuthKeys(
+            "https://bao.test", "t", client=httpx.AsyncClient(transport=httpx.MockTransport(odd))
+        )
+    )
+    with pytest.raises(AuthKeysUnavailable):
+        if call == "hmac":
+            await keys.pepper_hmac(uuid4(), b"x")
+        elif call == "sign":
+            await keys.sign_es256(b"x")
+        elif call == "jwks":
+            await keys.jwks()
+        else:
+            await keys.sign_jwt({"sub": "u-1"})
+
+
+async def test_an_empty_key_set_cannot_sign_a_token(installed: Any) -> None:
+    class Empty(LocalAuthKeys):
+        async def public_keys(self, *, refresh: bool = False) -> dict[int, Any]:
+            return {}
+
+    installed(Empty.generate())
+    with pytest.raises(AuthKeysUnavailable):
+        await keys.sign_jwt({"sub": "u-1"})
+
+
 def _settings(tmp_path: Path, **overrides: Any) -> Settings:
     base: dict[str, Any] = dict(
         database_url="postgresql+asyncpg://x:x@l/x",

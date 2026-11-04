@@ -36,9 +36,11 @@ dependencies = [
     # pinned SDK resolved.
     "jsonschema==4.26.0",
     # Own authentication (plan 2026-11-04 Task 2). All three ship `py.typed`.
-    # argon2id with the library's DEFAULT parameters is the design (§2.1), so
-    # the major is bounded: a new major may change them, and every stored
-    # verifier would then need a rehash -- a reviewed upgrade, not a resolve.
+    # argon2id with the library's DEFAULT parameters is the design (§2.1).
+    # argon2-cffi is CalVer and every Argon2 hash carries its own parameters,
+    # so an upgrade never breaks a stored verifier; the bound makes a new
+    # year's release a reviewed change before it is taken. The parameters are
+    # pinned by test_the_verifier_is_argon2id_with_the_library_defaults.
     "argon2-cffi>=25.1.0,<26",
     # 2.10.0 has no protection against reusing a code; the platform keeps the
     # last accepted step itself (design §2.2). Pinned: the cited behaviour.

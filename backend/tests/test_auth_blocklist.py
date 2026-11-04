@@ -87,18 +87,19 @@ def test_the_build_does_what_the_provenance_says(tmp_path: Path) -> None:
         "Short1",  # under 12
         "PasswordPassword",  # lower-cased ...
         "passwordpassword",  # ... and then a duplicate
-        "Cafécafécafé",  # NFC: 12 code points, not 15
+        "Cafe\u0301cafe\u0301cafe\u0301",  # decomposed: 15 code points, NFC makes it 12
         "x" * (MAX_ENTRY_LENGTH + 1),  # over 128
         "",
     ]
     words = script.entries(source)
-    assert words == ["cafécafécafé", "passwordpassword"]
+    assert words == ["caf\u00e9caf\u00e9caf\u00e9", "passwordpassword"]
 
     first, second = tmp_path / "a.gz", tmp_path / "b.gz"
     script.write(first, words)
     script.write(second, words)
     assert first.read_bytes() == second.read_bytes()  # no name, no timestamp
-    assert gzip.decompress(first.read_bytes()) == "cafécafécafé\npasswordpassword\n".encode()
+    expected = "caf\u00e9caf\u00e9caf\u00e9\npasswordpassword\n"
+    assert gzip.decompress(first.read_bytes()) == expected.encode()
 
 
 def test_a_listed_password_is_found_whole_and_in_any_case() -> None:

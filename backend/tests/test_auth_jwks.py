@@ -42,9 +42,12 @@ async def test_an_unreachable_openbao_is_a_503(api_env: Any) -> None:
             client=httpx.AsyncClient(transport=httpx.MockTransport(sealed)),
         )
     )
-    response = await api_env.client.get(
-        "/.well-known/jwks.json", headers={"Accept-Language": "es"}
-    )
+    try:
+        response = await api_env.client.get(
+            "/.well-known/jwks.json", headers={"Accept-Language": "es"}
+        )
+    finally:
+        keys.set_backend(None)  # process-wide: never leave it installed
     assert response.status_code == 503
     assert response.json()["detail"] == (
         "Las claves de firma no están disponibles ahora mismo; vuelve a intentarlo en un "

@@ -21,7 +21,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from app.core.auth import keys
+from app.core.auth import keys, passwords
 from app.core.auth.keys import LocalAuthKeys
 from app.core.auth.passwords import (
     MAX_LENGTH,
@@ -94,12 +94,25 @@ async def test_the_stored_pepper_version_is_honoured_after_a_rotation(local: Any
 async def test_composed_and_decomposed_accents_are_one_password(local: Any) -> None:
     """NIST §3.1.1.2: NFC before hashing."""
     org = uuid4()
-    stored, version = await hash_password(org, "Café de la mañana")
-    assert await verify_password(org, "Café de la mañana", stored, version)
+    # Escapes, so no tool can re-normalise what the test means: e + U+0301 is
+    # the decomposed form, U+00E9 the composed one.
+    decomposed = "Cafe\u0301 de la man\u0303ana"
+    composed = "Caf\u00e9 de la ma\u00f1ana"
+    assert decomposed != composed
+    stored, version = await hash_password(org, decomposed)
+    assert await verify_password(org, composed, stored, version)
+    stored, version = await hash_password(org, composed)
+    assert await verify_password(org, decomposed, stored, version)
 
 
 @pytest.mark.parametrize(
-    "stored", ["not-a-hash", "$argon2id$v=19$m=65536,t=3,p=4$garbage", ""]
+    "stored",
+    [
+        "not-a-hash",
+        "$argon2id$v=19$m=65536,t=3,p=4$garbage",
+        "$argon2id$v=19$m=65536,t=3,p=4$garbag\u00e9",  # non-ASCII: argon2-cffi encodes as ASCII
+        "",
+    ],
 )
 async def test_a_corrupt_verifier_is_false_not_an_error(stored: str, local: Any) -> None:
     assert not await verify_password(uuid4(), "una frase larga de prueba", stored, 1)
@@ -109,15 +122,25 @@ async def test_verifying_against_nobody_does_the_work_and_is_false(
     local: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[int | None] = []
+    verifies: list[str] = []
     real = keys.pepper_hmac
+    real_matches = passwords._matches
+
+    def spy(stored: str, mac: bytes) -> bool:
+        verifies.append(stored)
+        return real_matches(stored, mac)
 
     async def counted(org_id: Any, data: bytes, *, version: int | None = None) -> Any:
         calls.append(version)
         return await real(org_id, data, version=version)
 
     monkeypatch.setattr(keys, "pepper_hmac", counted)
+    monkeypatch.setattr(passwords, "_matches", spy)
     assert await verify_against_nobody(uuid4(), "una frase larga de prueba") is False
     assert calls == [None]
+    # The ~50 ms argon2 verify is what makes an unknown address cost as much
+    # as a real one (design §2.3): exactly one, against a real argon2id hash.
+    assert len(verifies) == 1 and verifies[0].startswith("$argon2id$v=19$m=65536,t=3,p=4$")
 
 
 def _reason(plain: str, *, minimum: int = STAFF_MINIMUM, context: tuple[str, ...] = ()) -> str:
@@ -145,7 +168,8 @@ def test_a_password_that_breaks_no_rule_is_accepted(plain: str) -> None:
 def test_length_is_counted_in_code_points_after_nfc() -> None:
     assert _reason("\U0001f511" * (STAFF_MINIMUM - 1)) == "too_short"
     # Twelve code points decomposed, eleven composed: NFC decides.
-    assert _reason("é" + "x" * 10) == "too_short"
+    assert len("e\u0301" + "x" * 10) == STAFF_MINIMUM
+    assert _reason("e\u0301" + "x" * 10) == "too_short"
     assert _reason("zq7-lamp-orbit", minimum=15) == "too_short"
     assert _reason("a" * (MAX_LENGTH + 1)) == "too_long"
 

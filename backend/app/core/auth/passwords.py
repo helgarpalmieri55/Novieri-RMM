@@ -143,9 +143,11 @@ async def hash_password(org_id: UUID, plain: str) -> tuple[str, int]:
 def _matches(stored: str, mac: bytes) -> bool:
     try:
         return _HASHER.verify(stored, mac)
-    except (InvalidHashError, VerificationError):
+    except (InvalidHashError, VerificationError, ValueError):
         # VerifyMismatchError, the ordinary wrong password, is a
-        # VerificationError; a corrupt verifier is no match either.
+        # VerificationError; a corrupt verifier is no match either. So is a
+        # non-ASCII one: argon2-cffi encodes the hash as ASCII before parsing
+        # and raises UnicodeEncodeError, a ValueError.
         return False
 
 
