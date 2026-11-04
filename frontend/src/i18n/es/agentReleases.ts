@@ -26,6 +26,7 @@ export const agentReleases: Shape<typeof en> = {
     hideOlder: "Ocultar las versiones anteriores",
   },
   where: { title: "Dónde van las máquinas nuevas", subtitle: "La sede en la que inscriben máquinas una instrucción de instalación, el enlace de instalación y un despliegue gestionado." },
+  unassignedRefused: "El cliente elegido es «Sin asignar», y en él no se puede crear nada nuevo. Elige antes otro cliente.",
   empty: {
     headline: "Aún no hay paquetes del agente publicados.",
     body: "Aquí no ha fallado nada. <strong>La plataforma nunca compila, descarga ni envía el agente.</strong> Lo sube quien publica, y entonces aparece aquí.",
