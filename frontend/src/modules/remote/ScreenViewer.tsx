@@ -9,8 +9,8 @@ import { FIXTURE_MODE } from "../../fixtures/mode";
 import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
 import { lazyLabels } from "../../i18n/lazy";
-import { accessToken } from "../../lib/auth";
 import { useApi } from "../../lib/ApiContext";
+import { isSessionEnded } from "../../lib/sessionEnd";
 import { Btn, PageHead, Panel, StatusPill } from "../../shell/components";
 import { Facts, type Kind } from "../../shell/viz";
 import {
@@ -34,7 +34,7 @@ import { CanvasRenderer } from "./screenCanvas";
 import { SHORTCUTS, HeldKeys, buttonsMask, sendableCode, textChunks, toRemote, wheelUnits } from "./screenInput";
 import { Assembler, INITIAL_STATUS, nextStatus, type Phase, type ScreenEvent } from "./screenModel";
 import { consentModeLabel } from "./sessionState";
-import { canOpenTunnel, screenProtocols, screenUrl } from "./tunnel";
+import { screenUrl } from "./tunnel";
 
 // Accessors over the catalogue: the label is read when it is shown, so a
 // language switch re-words it.
@@ -173,15 +173,18 @@ export function ScreenViewer() {
       dispatch({ kind: "open" });
       return;
     }
-    const token = accessToken();
-    if (!canOpenTunnel(token)) {
+    // NO SESSION, NO SOCKET. The session cookie is the stream's credential
+    // (own-auth design §6.5); once this tab has seen a 401 the handshake
+    // would be refused before `accept()`, the browser would report a bare
+    // 1006, and the page would blame the device for it.
+    if (isSessionEnded()) {
       dispatch({ kind: "failed", messageKey: "remote.screen.noCredential" });
       return;
     }
     const canvas = canvasRef.current;
     if (canvas) rendererRef.current = new CanvasRenderer(canvas);
     const assembler = new Assembler();
-    const ws = new WebSocket(screenUrl(sessionId, window.location), screenProtocols(token));
+    const ws = new WebSocket(screenUrl(sessionId, window.location));
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
     seqRef.current = 0;

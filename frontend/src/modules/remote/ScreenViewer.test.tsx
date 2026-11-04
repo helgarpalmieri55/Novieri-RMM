@@ -8,8 +8,11 @@ import { T, decode, encode, encodeKey, jsonBody, type Frame } from "./rsp";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
-const mockAccessToken = vi.fn<() => string | null>(() => "test-token");
-vi.mock("../../lib/auth", () => ({ accessToken: () => mockAccessToken() }));
+// RE-POINTED (own-auth Task 10): this mocked `lib/auth`'s `accessToken`, the
+// token the stream's handshake carried. The session cookie is the credential
+// now; what the page can know is whether this tab's session has ended.
+const mockSessionEnded = vi.fn<() => boolean>(() => false);
+vi.mock("../../lib/sessionEnd", () => ({ isSessionEnded: () => mockSessionEnded() }));
 
 /** A WebSocket the test drives: it records what the page sends. */
 class FakeSocket {
@@ -130,17 +133,18 @@ describe("ScreenViewer", () => {
     vi.stubGlobal("WebSocket", FakeSocket);
     // jsdom has no canvas; the renderer draws nothing and still acknowledges.
     HTMLCanvasElement.prototype.getContext = vi.fn(() => null) as unknown as HTMLCanvasElement["getContext"];
-    mockAccessToken.mockReturnValue("test-token");
+    mockSessionEnded.mockReturnValue(false);
   });
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("opens the session's screen stream with the console's token", async () => {
+  it("opens the session's screen stream on the session cookie, with no token in the handshake", async () => {
     renderViewer();
     expect(socket().url).toBe(`ws://${window.location.host}/api/v1/remote/sessions/s1/screen`);
-    // The token rides in the subprotocol header, never the URL an access log records.
-    expect(socket().protocols).toEqual(["bearer", "test-token"]);
+    // RE-POINTED: was `["bearer", "test-token"]`. The browser sends the
+    // session cookie with the upgrade; nothing else carries a credential.
+    expect(socket().protocols).toBeUndefined();
     expect(socket().binaryType).toBe("arraybuffer");
     expect(await screen.findByText("Connecting")).toBeInTheDocument();
   });
@@ -289,11 +293,11 @@ describe("ScreenViewer", () => {
     expect(await screen.findByText(/already open in another window/)).toBeInTheDocument();
   });
 
-  it("opens no socket without a credential and says why", async () => {
-    mockAccessToken.mockReturnValue(null);
+  it("opens no socket once the session has ended, and says why", async () => {
+    mockSessionEnded.mockReturnValue(true);
     renderViewer();
     expect(FakeSocket.last).toBeNull();
-    expect(await screen.findByText(/holds no access token/)).toBeInTheDocument();
+    expect(await screen.findByText(/session in this console has ended/)).toBeInTheDocument();
   });
 
   it("drops frames that travel the wrong way", async () => {
