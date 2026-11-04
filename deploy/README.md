@@ -328,7 +328,7 @@ shipped and mounted into the container:
 
 | policy | file | who uses it | what it may do |
 |---|---|---|---|
-| `its-app` | `/bao/its-app.hcl` | api, gateway, worker (`ITS_OPENBAO_TOKEN`) | sign jobs, seal/unseal org secrets, sign agent CSRs |
+| `its-app` | `/bao/its-app.hcl` | api, gateway, worker (`ITS_OPENBAO_TOKEN`) | sign jobs, seal/unseal org secrets, sign agent CSRs, HMAC passwords with the sign-in pepper, sign the platform's own tokens |
 | `gateway-issuer` | `/bao/gateway-issuer.hcl` | `scripts/issue-gateway-cert.py` (step 6) | `update` on `pki/issue/gateway`, and nothing else |
 
 > **Do not paste the root token onto a command line.** `docker compose exec -e

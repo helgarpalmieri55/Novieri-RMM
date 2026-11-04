@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     audit_hmac_key_path: Path | None = None
     vault_backend: Literal["local", "openbao"] = "local"
     vault_root_key_path: Path | None = None
+    # Own authentication's key material (`app/core/auth/keys.py`): the password
+    # pepper (transit HMAC key `auth-pepper`) and the token signing key (transit
+    # `auth-signing`, ECDSA P-256). "openbao" in production -- neither private
+    # half ever leaves OpenBao. "local" keeps two files in `auth_keys_dir`
+    # (default `ca_dir`) for development and tests, and in production refuses
+    # to start rather than invent a pepper no stored password was made with.
+    auth_keys_backend: Literal["local", "openbao"] = "local"
+    auth_keys_dir: Path | None = None
     openbao_addr: str | None = None
     openbao_token: str | None = None
 

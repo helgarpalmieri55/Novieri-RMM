@@ -208,6 +208,11 @@ def create_app(
     app.state.ca = get_ca(settings)
     app.state.signer = get_signer(settings)
     app.state.vault = get_vault(settings)
+    # Own authentication (plan 2026-11-04 Task 2): the password pepper and the
+    # token signing key, process-wide like the audit HMAC key above.
+    from app.core.auth import keys as auth_keys
+
+    auth_keys.configure(settings)
     # Object store for large artifacts / remote-recording bytes. Built lazily on
     # first use (see app.modules.remote.api._object_store): its constructor
     # ensures the bucket exists, which would otherwise force S3 I/O at every app
@@ -356,6 +361,11 @@ def create_app(
     mcp = build_mcp(app)
     app.state.mcp = mcp
     app.include_router(mcp.metadata_router)
+    # The platform's token signing keys (`app/api/well_known.py`): public,
+    # outside `/api/v1`, like the metadata above.
+    from app.api.well_known import router as well_known_router
+
+    app.include_router(well_known_router)
     app.router.routes.extend(mcp.routes())
     # The console's side of it: Settings → AI connections (`app/mcp/api.py`).
     from app.mcp.api import router as mcp_admin_router

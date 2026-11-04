@@ -4951,4 +4951,21 @@ CATALOG: dict[str, str] = {
         "se ocultaron los detalles del error porque contenían un campo que parece secreto"
     ),
     "this tool cannot reach that route": "esta herramienta no puede llegar a esa ruta",
+    # --- core/auth: contraseñas y claves (autenticación propia, Task 2) ---
+    "Use at least {minimum} characters.": "Usa al menos {minimum} caracteres.",
+    "Use at most {maximum} characters.": "Usa como máximo {maximum} caracteres.",
+    "This password is on a list of common or leaked passwords. Choose another one: "
+    "several unrelated words together work well.": (
+        "Esta contraseña está en una lista de contraseñas comunes o filtradas. Elige otra: "
+        "varias palabras sin relación entre sí funcionan bien."
+    ),
+    "This password is too close to your email address or to the platform's name. "
+    "Choose one that does not build on them.": (
+        "Esta contraseña se parece demasiado a tu correo o al nombre de la plataforma. "
+        "Elige una que no parta de ellos."
+    ),
+    "The signing keys are not available right now; try again in a moment.": (
+        "Las claves de firma no están disponibles ahora mismo; vuelve a intentarlo en un "
+        "momento."
+    ),
 }
