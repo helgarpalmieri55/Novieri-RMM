@@ -158,7 +158,7 @@ PART_D: dict[str, str] = {
     # --- device-groups ---
     "GET /api/v1/device-groups": (
         "Lists device groups in precedence order with device counts, plus the number of ungrouped "
-        "devices. Archived groups are excluded unless requested."
+        "devices, optionally for one client only. Archived groups are excluded unless requested."
     ),
     "POST /api/v1/device-groups": (
         "Creates a device group, optionally with a parent, precedence and dynamic membership "
