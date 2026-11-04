@@ -1,6 +1,10 @@
 __pycache__/
 *.pyc
 .venv/
+# A parallel worktree links the main checkout's environment and modules in as
+# SYMLINKS, which a pattern ending in '/' (a directory) does not match.
+backend/.venv
+frontend/node_modules
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
