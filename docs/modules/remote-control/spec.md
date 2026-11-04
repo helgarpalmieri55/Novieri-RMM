@@ -323,6 +323,17 @@ credential use are privileged actions and therefore mandatory audit points
 Amended 2026-10-31 (phase 3 design §5.3): `remote.session.ended` carries the
 session's client, and its actor is the person who stopped the session (it
 named the owner even when another person stopped it).
+Amended 2026-11-04 (phase 3 final review A1): the same holds when the session
+ends because its viewer closed. The viewer is the person the screen WebSocket
+admitted — the owner, or a supervisor who joined — and both writers of that
+end (the api's end of the viewer leg and the gateway's) name them, as do
+`remote.session.input_enabled` / `input_disabled`; the api names the viewer to
+the gateway in the viewer leg's AUTH (`viewer`,
+`docs/kernel/wire-protocol/remote-screen-protocol.md`), which no agent frame
+carries. Every `remote.session.*` record — `requested`, `credential_used`,
+`started`, `denied`, the relayed events and `ended` — now carries the
+session's client, and so does a relay refusal whenever the server's own
+registration names the session.
 
 ## 13. Frontend (`frontend/src/modules/remote/`)
 

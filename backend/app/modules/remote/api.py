@@ -471,7 +471,9 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
     state = websocket.app.state
     token = token_from_subprotocols(websocket)
     try:
-        org_id, _user_id, _clients = await authorize_tunnel(
+        # The person admitted is the viewer, whose closing the viewer is
+        # their own act (phase 3 design §5.3): the owner, or a supervisor.
+        org_id, viewer_id, _clients = await authorize_tunnel(
             token=token,
             session_id=session_id,
             settings=state.settings,
@@ -510,6 +512,7 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
             browser_recv=browser_recv,
             session_id=session_id,
             org_id=org_id,
+            viewer_id=viewer_id,
             service=service,
             store=lambda: _object_store(websocket),
             app_engine=state.app_engine,

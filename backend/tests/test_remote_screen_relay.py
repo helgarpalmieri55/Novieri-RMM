@@ -38,7 +38,6 @@ from app.modules.remote import rsp
 from app.modules.remote.relay import registration_key
 from tests.test_gateway_mtls import _client_ssl, _enroll_device
 
-REDIS_URL = "redis://localhost:6379/9"
 TIMEOUT = 10
 
 
@@ -50,8 +49,12 @@ def _free_port() -> int:
 
 @pytest.fixture()
 async def stack(api_env, tmp_path: Path):
-    """A gateway with its internal relay listener, sharing Redis with the api."""
-    redis = aioredis.from_url(REDIS_URL, decode_responses=True)
+    """A gateway with its internal relay listener, sharing Redis with the api.
+
+    The api's own URL, not a fixed database: the api writes the relay
+    registration where `ITS_TEST_REDIS_URL` points, and a gateway reading a
+    different database refuses every leg as `no_registration`."""
+    redis = aioredis.from_url(api_env.settings.redis_url, decode_responses=True)
     ca = LocalCA(api_env.settings.ca_dir)
     key_pem, cert_pem = ca.issue_server_cert(["localhost"])
     (tmp_path / "gw.key").write_text(key_pem)

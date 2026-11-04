@@ -78,6 +78,7 @@ async def run_screen_tunnel(
     browser_recv: Callable[[], Awaitable[bytes | None]],
     session_id: UUID,
     org_id: UUID,
+    viewer_id: UUID,
     service: RemoteSessionService,
     store: StoreFactory,
     app_engine: AsyncEngine,
@@ -86,6 +87,11 @@ async def run_screen_tunnel(
     dial: Dial = websockets.connect,
 ) -> None:
     """Drive the viewer leg from browser open to close.
+
+    ``viewer_id`` is the person ``authorize_tunnel`` admitted: the session's
+    owner, or a supervisor who joined it. Closing the viewer is their act,
+    so this side's end of the session names them, and the leg's AUTH names
+    them to the gateway for its own writes (phase 3 design §5.3).
 
     Returns without touching the session when this process holds no viewer
     ticket for it (not a screen session, already viewed, or ended).
@@ -110,7 +116,12 @@ async def run_screen_tunnel(
             open_timeout=AUTH_TIMEOUT_S,
         ) as gateway:
             await gateway.send(
-                rsp.auth_frame(session_id=str(session_id), secret_field="ticket", secret=ticket)
+                rsp.auth_frame(
+                    session_id=str(session_id),
+                    secret_field="ticket",
+                    secret=ticket,
+                    viewer=str(viewer_id),
+                )
             )
             first = await asyncio.wait_for(gateway.recv(), timeout=AUTH_TIMEOUT_S)
             if not isinstance(first, bytes) or rsp.decode(first).type != rsp.AUTH_OK:
@@ -125,6 +136,7 @@ async def run_screen_tunnel(
             app_engine,
             org_id=org_id,
             session_id=session_id,
+            viewer_id=viewer_id,
             recording=recording,
         )
 
@@ -182,16 +194,21 @@ async def _finish(
     *,
     org_id: UUID,
     session_id: UUID,
+    viewer_id: UUID,
     recording: _Recording | None,
 ) -> None:
     """Upload the recording, then end the session, in separate transactions
     so an upload failure can never leave the session open.
 
-    A SYSTEM ACT, under ``ClientScope.all()``, not the viewer's scope. The
-    recording is evidence and ending the session is cleanup; neither may fail
-    because the viewer's grants changed while the session ran (MSP clients
-    spec §2.3, reviewed in ``ALL_SCOPE_ALLOWLIST``). The viewer's own scope
-    already admitted them at the door (``authorize_tunnel``)."""
+    UNDER ``ClientScope.all()``, not the viewer's scope. The recording is
+    evidence and ending the session is cleanup; neither may fail because the
+    viewer's grants changed while the session ran (MSP clients spec §2.3,
+    reviewed in ``ALL_SCOPE_ALLOWLIST``). The viewer's own scope already
+    admitted them at the door (``authorize_tunnel``).
+
+    The scope is the system's; the act is not. The end is audited as the
+    viewer's (``viewer_id``), who closed it: the owner, or a supervisor who
+    joined -- it named the owner whoever held the viewer."""
     if recording is not None:
         recording.close()
         try:
@@ -216,7 +233,9 @@ async def _finish(
             recording.discard()
     try:
         async with org_session(org_id, engine=app_engine, clients=ClientScope.all()) as s:
-            await service.end_session(s, session_id=session_id, reason="completed")
+            await service.end_session(
+                s, session_id=session_id, reason="completed", actor_id=viewer_id
+            )
     except InvalidSessionState:
         pass  # the gateway (or a stop) ended it first, with the real reason
     except Exception:  # noqa: BLE001 - cleanup must not raise

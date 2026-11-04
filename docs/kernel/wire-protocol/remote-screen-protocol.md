@@ -76,12 +76,23 @@ agent. `HELLO` lists what the agent understands.
 
 | Type | Name | Body |
 |---|---|---|
-| `0xF0` | AUTH | UTF-8 JSON object. Agent leg: `{"session_id", "token"}`. Viewer leg: `{"session_id", "ticket"}`. |
+| `0xF0` | AUTH | UTF-8 JSON object. Agent leg: `{"session_id", "token"}`. Viewer leg: `{"session_id", "ticket", "viewer"}`. |
 | `0xF1` | AUTH_OK | UTF-8 JSON object `{"session_id"}`. |
 
 AUTH must be the first message on a leg, within 10 s. The gateway answers
 AUTH_OK or closes the leg (see close codes). JSON members not listed are
 ignored.
+
+`viewer` (added 2026-11-04, additive) is the user id of the person the api
+admitted to the session's screen: its owner, or a supervisor who joined it.
+The gateway audits that person's acts on the leg as theirs — closing it
+(`remote.session.ended`) and switching control
+(`remote.session.input_enabled` / `input_disabled`). It is trusted as the
+api's word because only the api holds the ticket. A value that is not a user
+id closes the leg with 4400; an AUTH without it, from an older api, is read as
+the session's owner, as every viewer was before. The viewer leg runs api to
+gateway only, so the member is server-internal: **nothing the agent sends or
+reads changes**, and the agent leg's AUTH is untouched.
 
 The agent leg is admitted only when **all** hold (spec §3.2): the certificate
 resolves to a non-revoked, unexpired agent; the session's registration still
