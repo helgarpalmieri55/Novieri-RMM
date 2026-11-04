@@ -85,6 +85,15 @@ export interface AppShellProps {
    * there is none -- its own tests and `/__preview`.
    */
   clientSelector?: ReactNode;
+  /**
+   * The client chosen in the top bar, for a phone (operator decision 4,
+   * 2026-11-02): there the selector is in the drawer, so the drawer toggle
+   * carries the client's initials (`short`) and says its `name` in full.
+   * Absent with every client chosen -- the toggle is then the plain icon --
+   * and ignored wider than a handset, where the selector is in the bar. A
+   * slot filled by `Shell` (`useClientMark`), for the selector's reason.
+   */
+  clientMark?: { short: string; name: string };
   children: ReactNode;
 }
 
@@ -226,6 +235,7 @@ export function AppShell({
   searchHint,
   onAsk,
   clientSelector,
+  clientMark,
   children,
 }: AppShellProps) {
   const t = useT();
@@ -269,6 +279,12 @@ export function AppShell({
   const paletteField = useRef<HTMLInputElement>(null);
   const navToggleRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
+  // THE CHOSEN CLIENT ON A PHONE, in the one control the bar has room for:
+  // the drawer toggle, which already opens the drawer the selector heads.
+  const marked = handset ? clientMark : undefined;
+  const navToggleName = marked
+    ? t(navOpen ? "shell.app.closeNavigationClient" : "shell.app.openNavigationClient", { client: marked.name })
+    : t(navOpen ? "shell.app.closeNavigation" : "shell.app.openNavigation");
 
   const closePalette = useCallback((reason: PaletteCloseReason) => {
     const opener = paletteOpener.current;
@@ -449,16 +465,28 @@ export function AppShell({
               44x44 target rather than the 30x30 chevron the audit measured.
               Hidden by the stylesheet at desktop widths, where the sidebar is
               always on screen and a second control for it would be noise. */}
+          {/* ON A PHONE, WITH A CLIENT CHOSEN, IT ALSO SAYS WHICH (operator
+              decision 4): the selector is in the drawer there, so this is
+              the one place in the bar the client can be seen. Its initials
+              are a picture of the name -- `aria-hidden` -- and the name
+              itself is in the button's name and `title` (SC 2.5.3). With
+              every client, or wider than a handset, it is today's icon. */}
           <button
             type="button"
             className="nav-toggle"
             ref={navToggleRef}
-            aria-label={navOpen ? t("shell.app.closeNavigation") : t("shell.app.openNavigation")}
+            aria-label={navToggleName}
+            title={marked ? navToggleName : undefined}
             aria-expanded={navOpen}
             aria-controls="sidebar"
             onClick={() => setNavOpen((open) => !open)}
           >
             <Icon name={navOpen ? "x" : "menu-2"} size={18} />
+            {marked ? (
+              <span className="client-mark" aria-hidden="true">
+                {marked.short}
+              </span>
+            ) : null}
           </button>
 
           {/* THE BREADCRUMB AND THE PAGE TITLE ARE NOT IN THE BAR ANY MORE.

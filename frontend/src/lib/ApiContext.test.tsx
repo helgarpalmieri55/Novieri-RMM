@@ -6,9 +6,10 @@
  * (`backend/app/api/deps.py`), so a choice it cannot read would leave the
  * console unable even to learn that it should drop it. A real choice is
  * always an id from `/me`; what this boundary refuses is a value that was
- * never a client's -- a fixture id (`cli-logistics`) outside fixture mode, a
- * bug. Fixture mode never builds an `ApiClient` (it answers from a proxy), so
- * its ids are untouched by this.
+ * never a client's -- a fixture-style id (`cli-logistics`, as the fixtures'
+ * customer was until harmony had to choose it) outside fixture mode, a bug.
+ * Fixture mode never builds an `ApiClient` (it answers from a proxy), so its
+ * ids are untouched by this.
  */
 
 import { render } from "@testing-library/react";

@@ -3261,6 +3261,8 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
   const MY_CLIENTS: MeClient[] = [{ id: "o1", name: "Novieri", kind: "internal", enabled_modules: [], permissions: ME.permissions }, { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ME.permissions }];
   /** `ME` with `clients.read`: the console can name a client. */
   const READS_CLIENTS: Me = { ...ME, permissions: [...ME.permissions, "clients.read"], clients: MY_CLIENTS };
+  /** The top bar lists the clients /me does, and a row's client is named from that list. */
+  const listMyClients = () => selectClient(SCOPE_INTERNAL.id, MY_CLIENTS);
 
   const CLIENTS = [
     {
@@ -3369,6 +3371,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
   }
 
   it("files an approval from a customer's machine under that customer, and says its reach", async () => {
+    listMyClients();
     const user = userEvent.setup();
     const bulkApprovePatches = vi.fn().mockResolvedValue(bulkResult(["p1"], "test"));
     api = customerMachine({
@@ -3421,6 +3424,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
   });
 
   it("names the machine's own client in the hint on a customer's drill-down", async () => {
+    listMyClients();
     const user = userEvent.setup();
     api = customerMachine({
       me: vi.fn().mockResolvedValue(READS_CLIENTS),
@@ -3437,6 +3441,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
   });
 
   it("names the customer from /me, without reading the clients list", async () => {
+    listMyClients();
     const user = userEvent.setup();
     const listClients = vi.fn();
     api = customerMachine({ me: vi.fn().mockResolvedValue({ ...ME, clients: MY_CLIENTS }), listClients });
@@ -3498,6 +3503,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     });
 
   it("tells a global approval from a client's approval of the same update and ring", async () => {
+    listMyClients();
     api = twinApprovals();
     renderWithProviders(<FleetPatchPage />);
 
@@ -3518,6 +3524,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
   });
 
   it("names the client from /me in the list, without clients.read", async () => {
+    listMyClients();
     api = twinApprovals({ me: vi.fn().mockResolvedValue({ ...ME, clients: MY_CLIENTS }) });
     renderWithProviders(<FleetPatchPage />);
 
@@ -3526,6 +3533,7 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
   });
 
   it("says whose machines stop when each one is revoked", async () => {
+    listMyClients();
     const user = userEvent.setup();
     api = twinApprovals();
     renderWithProviders(<FleetPatchPage />);

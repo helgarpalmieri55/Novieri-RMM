@@ -16,7 +16,7 @@ import { AreaPage } from "./shell/AreaPage";
 import { searchPrompt, useRecordSearch } from "./shell/recordSearch";
 import { ApiProvider, useApi } from "./lib/ApiContext";
 import { ClientScopeProvider, useEnabledModules } from "./lib/clientScope";
-import { ClientSelector } from "./shell/ClientSelector";
+import { ClientSelector, useClientMark } from "./shell/ClientSelector";
 import { I18nProvider, readStoredLanguage, useLanguage, useT } from "./i18n/context";
 import { setActiveLanguage, subscribe, translate } from "./i18n/core";
 import { resolveLanguage } from "./i18n/resolve";
@@ -216,6 +216,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
   });
   const permissions = me.data?.permissions ?? [];
   const modules = useEnabledModules();
+  // The client chosen, for the phone's drawer toggle (operator decision 4).
+  const clientMark = useClientMark();
   const navigate = useNavigate();
 
   // The saved language arrives with `/me`, after the provider has rendered, so
@@ -332,6 +334,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       permissions={permissions}
       modules={modules}
       clientSelector={<ClientSelector />}
+      clientMark={clientMark}
       searchItems={searchItems}
       onSearchQueryChange={setSearchQuery}
       searchPending={records.pending}

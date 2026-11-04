@@ -1064,7 +1064,8 @@ describe("ComplianceDashboard", () => {
   // spare seats. Each row says whose it is -- with every client chosen, the
   // only choice under which two clients' rows are listed (design §3.4).
   it("shows a product once per client, each row naming its client", async () => {
-    selectClient(null);
+    // The top bar lists the clients /me does: names are read from that list.
+    selectClient(null, ME_READS_CLIENTS.clients ?? []);
     api.me = vi.fn().mockResolvedValue(ME_READS_CLIENTS);
     api.listClients = vi.fn().mockResolvedValue([clientOut("o1", "Novieri"), clientOut("c2", "Globex")]);
     api.licenseCompliance = vi.fn().mockResolvedValue([
@@ -1085,8 +1086,9 @@ describe("ComplianceDashboard", () => {
   });
 
   it("names a row's client /me does not list as all clients, and never reads the clients list", async () => {
-    // The Client column is there with every client chosen (design §3.4).
-    selectClient(null);
+    // The Client column is there with every client chosen (design §3.4). /me
+    // (`ME`) lists no client, so neither does the top bar.
+    selectClient(null, []);
     api.listClients = vi.fn();
     api.licenseCompliance = vi.fn().mockResolvedValue([ROW]);
     renderWithProviders(<ComplianceDashboard />);
@@ -1157,7 +1159,8 @@ describe("RenewalCalendar (licenses)", () => {
 
   // With every client chosen: the only choice that lists two clients' rows.
   it("names each renewal's client (MSP clients phase 2)", async () => {
-    selectClient(null);
+    // The top bar lists the clients /me does: names are read from that list.
+    selectClient(null, ME_READS_CLIENTS.clients ?? []);
     api.me = vi.fn().mockResolvedValue(ME_READS_CLIENTS);
     api.listClients = vi.fn().mockResolvedValue([clientOut("o1", "Novieri"), clientOut("c2", "Globex")]);
     api.licenseRenewals = vi.fn().mockResolvedValue([ROW, { ...ROW, license_id: "l9", client_id: "c2" }]);

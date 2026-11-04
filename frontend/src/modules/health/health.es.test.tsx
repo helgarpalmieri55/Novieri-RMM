@@ -997,6 +997,14 @@ describe("the settings panel, in Spanish", () => {
     renderUi(<HealthSettingsPanel canAdmin={false} />);
     expect(await screen.findByText("No tienes permiso para cambiar la configuración de salud.")).toBeInTheDocument();
   });
+
+  it("words the every-client reason for someone holding health.admin on only some clients", async () => {
+    stubApi({ me: vi.fn().mockResolvedValue({ ...ME, permissions_everywhere: ["health.read"] }) });
+    renderUi(<HealthSettingsPanel canAdmin={false} />);
+    expect(
+      await screen.findByText(/requiere el permiso health\.admin en todos los clientes/),
+    ).toBeInTheDocument();
+  });
 });
 
 // ------------------------------------------------------------ device panel

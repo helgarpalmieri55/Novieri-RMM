@@ -348,6 +348,8 @@ describe("a subnet, an address and a scan authorization", () => {
 // --------------------------------------------------------------------------
 
 const ME_WITH_CLIENTS = { ...ME, permissions: [...ME.permissions, "clients.read"] };
+/** What the top bar lists -- /me's clients -- and so what a row's client is named from. */
+const LISTED = ME.clients as MeClient[];
 const CLIENT_ROWS = [
   { id: "o1", name: "Novieri", kind: "internal", status: "active" },
   { id: "c-x", name: "Acme", kind: "customer", status: "active" },
@@ -387,6 +389,7 @@ describe("pickers follow the row's client", () => {
   });
 
   it("registers a subnet with the sites of the chosen VRF's client", async () => {
+    selectClient(SCOPE_INTERNAL.id, LISTED);
     const api = stubApi({
       me: vi.fn().mockResolvedValue(ME_WITH_CLIENTS),
       listClients: vi.fn().mockResolvedValue(CLIENT_ROWS),
@@ -408,6 +411,7 @@ describe("pickers follow the row's client", () => {
   });
 
   it("names each VRF's client in the scan authorization's picker and the registry", async () => {
+    selectClient(SCOPE_INTERNAL.id, LISTED);
     stubApi({
       me: vi.fn().mockResolvedValue(ME_WITH_CLIENTS),
       listClients: vi.fn().mockResolvedValue(CLIENT_ROWS),
@@ -596,6 +600,7 @@ describe("an apply goes where its preview read, whatever the list says by then",
   it("applies into the previewed VRF when a re-read moves the default", async () => {
     // A technician sees X's VRF alone; the preview reads it. Then the list is
     // read again and Y's `global` sorts first: the default would now be Y's.
+    selectClient(SCOPE_INTERNAL.id, LISTED);
     const listIpamVrfs = vi.fn().mockResolvedValue([X_GLOBAL]);
     const { queryClient, user, previewIpamImport, applyIpamImport } = await previewHeld(listIpamVrfs);
     expect(previewIpamImport.mock.calls[0]?.[2]).toEqual({ vrfId: "vrf-x" });

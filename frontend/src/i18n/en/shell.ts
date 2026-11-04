@@ -83,7 +83,6 @@ export const shell = {
       pushInstall: "Which networks may receive a pushed install, and with which credential.",
       deviceGroups: "Groups that policies, deployments and access are aimed at.",
       siteServers: "Devices that sweep and wake machines on their own network.",
-      imaging: "Operating system images and build profiles.",
       aiAutomation: "How much the assistant may do on its own.",
       jobHistory: "Every job sent to a device, and what came back.",
       credentials: "Stored passwords for unattended sessions and imaging.",
@@ -117,6 +116,10 @@ export const shell = {
     dismissNavigation: "Dismiss navigation",
     closeNavigation: "Close navigation",
     openNavigation: "Open navigation",
+    // The drawer toggle on a phone while a client is chosen: it carries the
+    // client's initials, and its name says the client in full.
+    openNavigationClient: "Open navigation — client: {client}",
+    closeNavigationClient: "Close navigation — client: {client}",
     addComputer: "Add a computer",
     askAssistant: "Ask the Assistant",
     // The Assistant as the object of "Ask …" in the search panel.

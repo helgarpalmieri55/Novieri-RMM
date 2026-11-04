@@ -7,6 +7,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { FixtureMissing, fixtureClient, fixtureRegistry } from "./client";
+import { CUSTOMER_ID } from "./core";
 import { FIXTURE_MODE } from "./mode";
 
 afterEach(() => {
@@ -93,9 +94,12 @@ describe("fixtureRegistry", () => {
     expect(me.permissions_everywhere).toEqual(me.permissions);
     expect((me.clients ?? []).map((client) => [client.id, client.kind])).toEqual([
       ["org-toeshee", "internal"],
-      ["cli-logistics", "customer"],
+      // A UUID: the one client the harmony gate can choose (`harmony-client.test.ts`).
+      [CUSTOMER_ID, "customer"],
       ["cli-unassigned", "unassigned"],
     ]);
+    const listed = await fixtureClient().listClients();
+    expect(listed.map((client) => client.id)).toEqual((me.clients ?? []).map((client) => client.id));
   });
 });
 

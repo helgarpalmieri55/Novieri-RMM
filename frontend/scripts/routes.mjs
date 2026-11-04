@@ -19,6 +19,13 @@
  * import it under `strict`.
  */
 
+/**
+ * THE CLIENT HARMONY CHOOSES IN THE TOP BAR for its passes with a client
+ * chosen: Andes Logistics, `src/fixtures/core.ts`'s `CUSTOMER_ID`. A UUID,
+ * because the console reads back nothing else from `itms.client`.
+ */
+export const CHOSEN_CLIENT = "5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57";
+
 /** Sample ids for every `:param` in `App.tsx`. Same value in every fixture. */
 export const PARAMS = Object.freeze({
   deviceId: "dev-1",
@@ -36,7 +43,7 @@ export const PARAMS = Object.freeze({
   actionId: "act-1",
   subnetId: "subnet-1",
   sessionId: "sess-1",
-  clientId: "cli-logistics",
+  clientId: CHOSEN_CLIENT,
 });
 
 export const EXCLUDED = new Set([
@@ -158,7 +165,7 @@ export const ROUTES = [
   "/discovered",
   "/agent-packages",
   "/clients",
-  "/clients/cli-logistics",
+  "/clients/5e0c3a7d-2b9f-4d61-8a4e-6f1b0c9d2e57",
   "/settings",
   // A QUERY VARIANT: `/settings` opens Organization, so no other tab is ever
   // measured. A variant is `<a route listed here>?<query>`; the guard checks

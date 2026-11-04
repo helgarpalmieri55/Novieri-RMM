@@ -833,10 +833,11 @@ jobs:
     # §1.6 makes harmony a measured property, and §5 says what is measured --
     # every route in `scripts/routes.mjs` (a vitest guard fails when `App.tsx`
     # mounts one the list lacks), rendered over `?__fixtures` so no backend is
-    # needed, at 1440x900 and 390x844: every computed font-size, radius and
+    # needed, at 1440x900 and 390x844, and again at 390x844 and 641x900 with
+    # a client chosen in the top bar: every computed font-size, radius and
     # colour diffed against the tokens read from `src/index.css` at run time,
-    # horizontal overflow, axe, and the `ApiClient` methods the page called
-    # that no fixture answered.
+    # horizontal overflow, the top bar's edges, axe, and the `ApiClient`
+    # methods the page called that no fixture answered.
     #
     # `--strict-fixtures` makes a fixture miss a failure. A page that draws
     # its error state because a module never wrote its `fixtures.ts` is a

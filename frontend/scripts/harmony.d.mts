@@ -7,6 +7,24 @@ export interface Allowlist {
   colors: Rgba[];
   colorNames: Map<string, string>;
 }
+export interface Viewport {
+  width: number;
+  height: number;
+  coarse: boolean;
+  /** Walked with a client chosen in the top bar (`CHOSEN_CLIENT` in `itms.client`). */
+  client: boolean;
+}
+/** What `CHROME_IN_PAGE` reads of the top bar. */
+export interface ChromeProbe {
+  toggle: { width: number; height: number } | null;
+  profileRight: number | null;
+  innerWidth: number;
+  topbar?: boolean;
+  selected?: string | null;
+}
+export declare const VIEWPORTS: Viewport[];
+export declare function viewportLabel(vp: Viewport): string;
+export declare function chromeProblems(probe: ChromeProbe): string[];
 export declare function parseColor(text: string): Rgba | null;
 export declare function readTokens(css: string): Map<string, string>;
 export declare function buildAllowlist(css: string): Allowlist;

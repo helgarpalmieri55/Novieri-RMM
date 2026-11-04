@@ -126,6 +126,15 @@ export function NewTicketDialog({
     onClose();
   }
 
+  // A DEVICE DECIDES THE CLIENT, so it changes which fields this form asks for:
+  // the last Save's refusals were checked against the old set ("Client is
+  // required" about a field no longer on screen). They go; the next Save
+  // checks the form as it is.
+  function changeDevice(next: string) {
+    if (next !== deviceId) setAttempt(null);
+    setDeviceId(next);
+  }
+
   function submit() {
     const askClient = newRow.needsField;
     const next: Attempt = {
@@ -272,7 +281,7 @@ export function NewTicketDialog({
             emptyHint={devicePickerEmptyHint()}
             placeholder={t("serviceDesk.common.searchHostnames")}
             value={deviceId}
-            onChange={setDeviceId}
+            onChange={changeDevice}
           />
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
