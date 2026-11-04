@@ -76,7 +76,7 @@ agent. `HELLO` lists what the agent understands.
 
 | Type | Name | Body |
 |---|---|---|
-| `0xF0` | AUTH | UTF-8 JSON object. Agent leg: `{"session_id", "token"}`. Viewer leg: `{"session_id", "ticket", "viewer"}`. |
+| `0xF0` | AUTH | UTF-8 JSON object. Agent leg: `{"session_id", "token"}`. Viewer leg: `{"session_id", "ticket", "viewer"}`, `viewer` optional (below). |
 | `0xF1` | AUTH_OK | UTF-8 JSON object `{"session_id"}`. |
 
 AUTH must be the first message on a leg, within 10 s. The gateway answers
