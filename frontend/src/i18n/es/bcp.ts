@@ -19,6 +19,9 @@ export const bcp: Shape<typeof en> = {
       "Todavía no hay grupos de dispositivos a los que acotar este plan; también puede que no tengas permiso para listarlos.",
     procedureEmptyHint:
       "Todavía no hay artículos de documentación a los que hacer referencia; también puede que no tengas permiso para listar artículos.",
+    deviceChooseClient: "Elige primero el cliente: aquí se listan sus equipos.",
+    groupChooseClient: "Elige primero el cliente: aquí se listan sus grupos de dispositivos.",
+    procedureChooseClient: "Elige primero el cliente: aquí se listan sus artículos de documentación.",
     noAgent: "sin agente",
     agentOnline: "en línea",
     agentOffline: "sin conexión",

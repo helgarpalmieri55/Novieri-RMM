@@ -1683,10 +1683,14 @@ export class ApiClient {
    * `localeCompare` can disagree with the evaluator about which rule claims a
    * device -- which is the console answering a question the server decides
    * differently.
+   *
+   * `client_id` asks for one client's groups (phase 3 final review A6): it
+   * only narrows, and a client outside the caller's scope is an empty list.
    */
-  listDeviceGroups(params: { include_archived?: boolean } = {}): Promise<DeviceGroupPage> {
+  listDeviceGroups(params: { include_archived?: boolean; client_id?: string } = {}): Promise<DeviceGroupPage> {
     const query = new URLSearchParams();
     if (params.include_archived) query.set("include_archived", "true");
+    if (params.client_id) query.set("client_id", params.client_id);
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.request<DeviceGroupPage>(`/device-groups${suffix}`);
   }
@@ -2322,11 +2326,17 @@ export class ApiClient {
     return this.request<SecurityEventDetail>(`/security-events/${id}`);
   }
 
+  /**
+   * `client_id` asks for that client's articles AND every client's -- what a
+   * record of that client may link (phase 3 final review A6). It only
+   * narrows: a client outside the caller's scope is an empty list.
+   */
   listArticles(params: {
     category?: string;
     target_type?: string;
     target_id?: string;
     include_archived?: boolean;
+    client_id?: string;
   } = {}): Promise<Page<DocArticleListItem>> {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {

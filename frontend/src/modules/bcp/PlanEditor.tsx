@@ -188,11 +188,14 @@ export function PlanEditor({
   // makes a procedure reference possible at all.
   const open = plan != null;
   const zone = useUserTimezone();
-  // The plan's client's devices, asked of the server: nothing before the
-  // client is known (see ./api).
+  // The plan's client's devices, groups and articles, asked of the server:
+  // nothing before the client is known (see ./api).
   const devices = useScopeDevices(open, planClient);
-  const groups = useScopeGroups(open);
-  const articles = useProcedureArticles(open);
+  const groups = useScopeGroups(open, planClient);
+  const articles = useProcedureArticles(open, planClient);
+  // Before the client is chosen an empty picker is not "nothing to scope to
+  // yet": it says what to do first (phase 3 final review C, minor).
+  const awaitingClient = planClient === null;
   // Built at render, never memoised: the sublabels hold translated words.
   // Only the plan's client's devices, groups and articles may be named
   // (§3.3); an article for every client may too, and says so.
@@ -393,7 +396,7 @@ export function PlanEditor({
                     label={t("bcp.editor.scopeDevice", { n: index + 1 })}
                     options={deviceOptions}
                     loading={devices.isLoading}
-                    emptyHint={scopeDevicePickerEmptyHint()}
+                    emptyHint={awaitingClient ? t("bcp.picker.deviceChooseClient") : scopeDevicePickerEmptyHint()}
                     placeholder={t("bcp.editor.searchDevices")}
                     value={row.id}
                     onChange={(id) => updateScopeRow(index, { id })}
@@ -403,7 +406,7 @@ export function PlanEditor({
                     label={t("bcp.editor.scopeGroup", { n: index + 1 })}
                     options={groupOptions}
                     loading={groups.isLoading}
-                    emptyHint={scopeGroupPickerEmptyHint()}
+                    emptyHint={awaitingClient ? t("bcp.picker.groupChooseClient") : scopeGroupPickerEmptyHint()}
                     placeholder={t("bcp.editor.searchGroups")}
                     value={row.id}
                     onChange={(id) => updateScopeRow(index, { id })}
@@ -498,7 +501,7 @@ export function PlanEditor({
               label={t("bcp.editor.addProcedure")}
               options={articleOptions.filter((option) => !procedureRefs.includes(option.id))}
               loading={articles.isLoading}
-              emptyHint={procedurePickerEmptyHint()}
+              emptyHint={awaitingClient ? t("bcp.picker.procedureChooseClient") : procedurePickerEmptyHint()}
               placeholder={t("bcp.editor.searchDocs")}
               value={procedurePick}
               onChange={(id) => {
