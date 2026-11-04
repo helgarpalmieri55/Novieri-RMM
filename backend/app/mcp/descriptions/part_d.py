@@ -450,9 +450,9 @@ PART_D: dict[str, str] = {
         "type. Never returns a password or secret, only whether one is configured."
     ),
     "PUT /api/v1/settings/email": (
-        "Saves the outgoing mail relay settings in the identity provider and returns what it then "
-        "holds. The relay is shared by all organizations. Replaces the whole relay block; the "
-        "audit log records changed field names only."
+        "Saves this organization's outgoing mail relay settings and returns what is then stored. "
+        "A password or client secret goes to the vault and is never returned. The audit log "
+        "records changed field names only."
     ),
     "POST /api/v1/settings/email/test": (
         "Sends a test email through the saved relay to the given address, or the sender address by "

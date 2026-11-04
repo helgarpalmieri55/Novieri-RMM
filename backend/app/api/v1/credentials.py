@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import AuthContext, require_permission
 from app.core.audit import audit_service
 from app.core.i18n import tr, tr_marked
+from app.core.mail import ACCOUNT_MAIL_CREDENTIAL_TYPE
 from app.core.tenancy import org_session
 from app.models import Credential, DeviceGroup
 from app.models.clients import CLIENT_KIND_UNASSIGNED
@@ -253,6 +254,17 @@ async def checkout_credential(
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
                 tr("This credential is used only by the backup service and cannot be revealed."),
+            )
+        # Account email's relay sign-in (`app/core/mail.py`): opened by the
+        # sender at the moment of sending and by no person. Settings -> Email
+        # replaces it; nothing reads it back.
+        if credential.type == ACCOUNT_MAIL_CREDENTIAL_TYPE:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                tr(
+                    "This credential is used only to send this organization's account email "
+                    "and cannot be revealed."
+                ),
             )
         secret = await state.vault.checkout(
             session, org_id=ctx.org_id, credential_id=credential_id
