@@ -175,7 +175,12 @@ there is, because a platform with zero users has no audit chain either. Static
 templates, variables in `extra`, and the install code never appears in any of
 them.
 
-**NOW 107, MSP clients phase 2 final review.** One static WARNING in
+**NOW 108, own authentication phase 1 (Task 4).** One static WARNING in
+`app/core/auth/totp.py::_open`, when a person's sealed TOTP secret does not
+open for their row (moved from another row, or damaged) and the code is
+refused. Nothing in `extra`: never the seal, the code or the person.
+
+**BEFORE THAT, 107, MSP clients phase 2 final review.** One static WARNING in
 `app/worker.py::deploy_window_sweep_all_orgs`, when a deployment's own data
 (any `DeployValidationError`: a stored window the parser cannot read, a
 package whose artifact was never uploaded) stops it and the sweep goes on with
