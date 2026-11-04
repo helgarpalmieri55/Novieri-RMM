@@ -1625,7 +1625,12 @@ describe("ReviewQueue: Ignore asks first", () => {
     expect(dialog).toHaveTextContent(/cannot be brought back from the console/i);
   });
 
-  it("ignores the title once the confirmation is accepted", async () => {
+  // CORRECTED (phase 3 final review D2): this pinned `{ name }` alone, which
+  // is a GLOBAL ignore -- every client's computers -- whoever was chosen at the
+  // top (review B, Critical 1; the comment it pinned said "Ignoring is not
+  // global"). Design §3.1 rule 2: the client chosen at the top, here the
+  // internal one.
+  it("ignores the title once the confirmation is accepted, for the client chosen at the top", async () => {
     const user = userEvent.setup();
     renderWithProviders(<ReviewQueue />);
 
@@ -1633,7 +1638,66 @@ describe("ReviewQueue: Ignore asks first", () => {
     await user.click(screen.getByRole("button", { name: "Ignore" }));
     await confirmWith(user, "Ignore title");
 
-    expect(api.ignoreSoftware).toHaveBeenCalledWith({ name: "Unknown PDF Editor" });
+    expect(api.ignoreSoftware).toHaveBeenCalledWith({ name: "Unknown PDF Editor", client_id: "o1" });
+  });
+
+  // Phase 3 final review D, Important 1: "o1" is the organisation's own id,
+  // where phases 1-2 filed every row; only another client tells the rules apart.
+  it("ignores it for the client chosen at the top, which is not the organisation's own, and says whose", async () => {
+    selectClient("c-acme", [SCOPE_INTERNAL, { ...SCOPE_INTERNAL, id: "c-acme", name: "Acme", kind: "customer" }]);
+    const user = userEvent.setup();
+    renderWithProviders(<ReviewQueue />);
+
+    await screen.findByText("Unknown PDF Editor");
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Ignore" }));
+    const dialog = await screen.findByRole("dialog", { name: /Ignore this software title/i });
+    expect(dialog).toHaveTextContent("on every device of Acme that reports it");
+    await confirmWith(user, "Ignore title");
+
+    expect(api.ignoreSoftware).toHaveBeenCalledWith({ name: "Unknown PDF Editor", client_id: "c-acme" });
+  });
+
+  it("with every client chosen, asks for the client: Ignore names the empty field, then sends the one chosen", async () => {
+    const manager: MeClient = { ...SCOPE_INTERNAL, permissions: ["licenses.read", "licenses.manage"] };
+    const acme: MeClient = { ...manager, id: "c-acme", name: "Acme", kind: "customer" };
+    const reader: MeClient = { ...manager, id: "c-beta", name: "Beta", kind: "customer", permissions: ["licenses.read"] };
+    const unassigned: MeClient = { ...manager, id: "c-unassigned", name: "Unassigned", kind: "unassigned" };
+    selectClient(null, [manager, acme, reader, unassigned]);
+    const user = userEvent.setup();
+    renderWithProviders(<ReviewQueue />);
+
+    await screen.findByText("Unknown PDF Editor");
+    const field = screen.getByLabelText("Client");
+    expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Choose a client",
+      "Novieri",
+      "Acme",
+    ]);
+    await user.click(screen.getByRole("button", { name: "Ignore" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    await user.selectOptions(field, "c-acme");
+    expect(screen.queryByRole("alert")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Ignore" }));
+    await confirmWith(user, "Ignore title");
+    expect(api.ignoreSoftware).toHaveBeenCalledWith({ name: "Unknown PDF Editor", client_id: "c-acme" });
+  });
+
+  // Phase 3 final review B, Important 4: nothing new is filed under Unassigned.
+  it("with Unassigned chosen at the top, says so and offers no Ignore", async () => {
+    const unassigned: MeClient = { ...SCOPE_INTERNAL, id: "c-unassigned", name: "Unassigned", kind: "unassigned" };
+    selectClient(unassigned.id, [SCOPE_INTERNAL, unassigned]);
+    renderWithProviders(<ReviewQueue />);
+
+    await screen.findByText("Unknown PDF Editor");
+    expect(
+      screen.getByText(
+        "Unassigned is chosen in the top bar, and nothing new can be filed under it. Choose another client, or All my clients, to save this.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ignore" })).toBeNull();
   });
 
   it("ignores nothing when the confirmation is dismissed", async () => {

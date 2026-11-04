@@ -231,7 +231,7 @@ export const licenses = {
     ignoreTitle: "Ignore this software title",
     ignoreSubject: { one: "{name} ({count} device)", other: "{name} ({count} devices)" },
     ignoreBody:
-      "It stops being reconciled against purchased entitlements, on every device that reports it. An ignored title cannot be brought back from the console.",
+      "It stops being reconciled against purchased entitlements, on every device of {client} that reports it. An ignored title cannot be brought back from the console.",
     ignoreConfirm: "Ignore title",
     mapTitle: "Map \"{name}\"",
     mapping: "Mapping…",

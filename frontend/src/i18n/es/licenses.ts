@@ -226,7 +226,7 @@ export const licenses: Shape<typeof en> = {
     ignoreTitle: "Ignorar este título de software",
     ignoreSubject: { one: "{name} ({count} dispositivo)", other: "{name} ({count} dispositivos)" },
     ignoreBody:
-      "Deja de conciliarse con los derechos de uso adquiridos, en todos los dispositivos que lo informan. Un título ignorado no se puede recuperar desde la consola.",
+      "Deja de conciliarse con los derechos de uso adquiridos, en todos los dispositivos de {client} que lo informan. Un título ignorado no se puede recuperar desde la consola.",
     ignoreConfirm: "Ignorar título",
     mapTitle: "Asociar «{name}»",
     mapping: "Asociando…",
