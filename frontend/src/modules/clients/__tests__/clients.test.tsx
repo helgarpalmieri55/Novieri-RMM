@@ -4,7 +4,7 @@
  * is asserted is what it OFFERS, from `/me` -- the server checks every route.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +14,7 @@ import type {
   ApiClient,
   ClientOut,
   ClientSiteOut,
+  ClientUpdate,
   ContactOut,
   InstallLinkSettings,
   Me,
@@ -468,6 +469,54 @@ describe("a client's Modules", () => {
     await waitFor(() =>
       expect(updateClient).toHaveBeenCalledWith("c-andes", { enabled_modules: ["budget", "change"] }),
     );
+  });
+
+  it("builds a quick second switch on the first one's saved answer, not on the record before it", async () => {
+    // The record is asked again after a save, and here that answer is slow:
+    // the switches come back as soon as the save is answered, and the next
+    // one must start from what the server saved, not from the old record.
+    let server: ClientOut = ANDES;
+    const saves: Array<() => void> = [];
+    const refetches: Array<() => void> = [];
+    const getClientRecord = vi
+      .fn()
+      .mockResolvedValueOnce(ANDES)
+      .mockImplementation(() => {
+        const answer = server;
+        return new Promise<ClientOut>((resolve) => refetches.push(() => resolve(answer)));
+      });
+    const updateClient = vi.fn(
+      (_clientId: string, body: ClientUpdate) =>
+        new Promise<ClientOut>((resolve) =>
+          saves.push(() => {
+            server = { ...server, enabled_modules: body.enabled_modules ?? server.enabled_modules };
+            resolve(server);
+          }),
+        ),
+    );
+    mockUseApi.mockReturnValue(api({ getClientRecord, updateClient }));
+    const user = userEvent.setup();
+    renderAt("/clients/c-andes?tab=modules");
+
+    await user.click(await screen.findByRole("switch", { name: "Changes" }));
+    const continuity = screen.getByRole("switch", { name: "Continuity" });
+    await waitFor(() => expect(continuity).toBeDisabled());
+    await act(async () => saves[0]?.());
+    await waitFor(() => expect(continuity).toBeEnabled());
+    // The first switch shows what was saved, while the record is asked again.
+    expect.soft(screen.getByRole("switch", { name: "Changes" })).toHaveAttribute("aria-checked", "true");
+    await user.click(continuity);
+    await waitFor(() => expect(updateClient).toHaveBeenCalledTimes(2));
+    expect(updateClient).toHaveBeenNthCalledWith(1, "c-andes", { enabled_modules: ["budget", "change"] });
+    expect(updateClient).toHaveBeenNthCalledWith(2, "c-andes", { enabled_modules: ["budget", "bcp", "change"] });
+    // The second save answered, then the slow reads, the older last: the
+    // page ends on the last saved answer, never on an older read.
+    await act(async () => saves[1]?.());
+    await act(async () => refetches.reverse().forEach((answer) => answer()));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Continuity" })).toBeEnabled());
+    expect(screen.getByRole("switch", { name: "Changes" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "Continuity" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "IT budget" })).toHaveAttribute("aria-checked", "true");
   });
 
   it("offers no switch to a person without clients.manage on the client", async () => {

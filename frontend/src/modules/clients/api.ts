@@ -84,12 +84,23 @@ export function useCreateClientMutation() {
   });
 }
 
+/**
+ * THE SAVED ANSWER IS THE RECORD AT ONCE. The save is answered before the
+ * record is asked again, and the form re-enables on that answer: a page
+ * still drawing the record from before would build the next change on it --
+ * the Modules tab's second switch sent the old `enabled_modules` and undid
+ * the first on the server. So the server's answer goes into the record's
+ * cache before anything is refreshed.
+ */
 export function useUpdateClientMutation(clientId: string) {
   const api = useApi();
   const queryClient = useQueryClient();
   return useMutation<ClientOut, ApiError, ClientUpdate>({
     mutationFn: (body) => api.updateClient(clientId, body),
-    onSuccess: () => afterClientChange(queryClient, clientId),
+    onSuccess: (saved) => {
+      queryClient.setQueryData<ClientOut>([CLIENT_KEY, clientId], saved);
+      afterClientChange(queryClient, clientId);
+    },
   });
 }
 
