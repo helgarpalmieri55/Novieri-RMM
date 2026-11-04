@@ -108,15 +108,20 @@ describe("linking an approval to a change", () => {
       { ...APPROVED, id: "c-acme-1", client_id: "c-acme", title: "Acme patch window" },
     ];
 
-    function stub() {
+    /** The API, and its `bulkApprovePatches` for a test that sends. */
+    function stub(): ReturnType<typeof vi.fn> {
+      const bulkApprovePatches = vi
+        .fn()
+        .mockResolvedValue({ items: [], total: 1, newly_approved: 1, already_in_force: 0 });
       mockUseApi.mockReturnValue({
         me: vi.fn().mockResolvedValue({
           user_id: "u", org_id: "o1", email: "", display_name: "",
           permissions: ["patch.approve"], permissions_everywhere: ["patch.approve"],
         }),
         listChanges: vi.fn().mockResolvedValue(CHANGES),
-        bulkApprovePatches: vi.fn(),
+        bulkApprovePatches,
       });
+      return bulkApprovePatches;
     }
 
     function offered(): (string | null)[] {
@@ -154,13 +159,25 @@ describe("linking an approval to a change", () => {
 
     it("drops a change chosen for another client, so it is never sent", async () => {
       selectClient(null, [INTERNAL, ACME]);
-      stub();
+      const bulkApprovePatches = stub();
       const user = userEvent.setup();
       renderBar();
       await user.selectOptions(await screen.findByLabelText("Client"), "o1");
       await user.selectOptions(screen.getByRole("combobox", { name: /Change this approval implements/ }), "c1");
       await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
       expect(screen.getByRole("combobox", { name: /Change this approval implements/ })).toHaveValue("");
+      // ...and what is SENT, not only what the picker shows (phase 3 last fix
+      // round, item 6): the approval goes to Acme with no `change_id`, though
+      // the bar still holds the internal client's change it was given.
+      await user.click(screen.getByRole("button", { name: /^Approve 1 update/ }));
+      await user.click(await screen.findByRole("button", { name: "Approve" }));
+      await waitFor(() => expect(bulkApprovePatches).toHaveBeenCalledTimes(1));
+      expect(bulkApprovePatches.mock.calls[0]?.[0]).toEqual({
+        patch_ids: ["p1"],
+        ring_name: "broad",
+        client_id: "c-acme",
+      });
+      expect(bulkApprovePatches.mock.calls[0]?.[0]).not.toHaveProperty("change_id");
     });
   });
 
