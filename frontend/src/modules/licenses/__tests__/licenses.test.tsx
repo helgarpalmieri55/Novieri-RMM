@@ -684,6 +684,23 @@ describe("LicensesPage", () => {
     await waitFor(() => expect(api.createLicense).toHaveBeenCalledWith(expect.objectContaining({ client_id: "c-acme" })));
   });
 
+  // Phase 3 final review D (T11): "Client is required" had only its not-ready
+  // twin under test. With every client chosen and the field left empty, Save
+  // names the Client field -- before anything is built -- and sends nothing.
+  it("with every client chosen, names the empty Client field on Save and sends nothing", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ["licenses.read", "licenses.manage"] },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: [], permissions: ["licenses.read", "licenses.manage"] },
+    ]);
+    const user = await openNewLicense();
+    await pick(user, "Product", /Acme Office Suite/);
+    expect(screen.getByLabelText("Client")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(api.createLicense).not.toHaveBeenCalled();
+  });
+
   // Phase 3 final review D, Important 2: the field offers only the clients
   // where the person may MANAGE licenses, not every one they can read.
   it("with every client chosen, offers only the clients holding licenses.manage, never Unassigned", async () => {

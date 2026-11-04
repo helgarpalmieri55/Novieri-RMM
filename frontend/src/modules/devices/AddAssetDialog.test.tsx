@@ -157,6 +157,29 @@ describe("AddAssetDialog", () => {
     expect(createAsset).not.toHaveBeenCalled();
   });
 
+  it("sends nothing, reads no site and asks for no client, while the account has not loaded", async () => {
+    // RESTORED (phase 3 final review D, Minor 5). Phase 3 re-pointed the "/me
+    // not loaded" case above to "the client has no sites", and the not-ready
+    // path went untested. Before `/me` answers the scope is not ready: the
+    // client chosen at the top is not known to be one of the person's, so no
+    // site is listed for it, nothing is filed, and no Client field is shown.
+    mockClientScope.mockReturnValue({ selected: SCOPE_INTERNAL.id, select: vi.fn(), clients: [], ready: false });
+    const listClientSites = vi.fn().mockResolvedValue([PRINCIPAL]);
+    mockUseApi.mockReturnValue({ createAsset, me: () => new Promise(() => {}), listClientSites } as unknown as ApiClient);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <AddAssetDialog open onClose={() => {}} />
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByLabelText("Client")).toBeNull();
+    await userEvent.type(screen.getByLabelText(/description/i), "boxed laptop, PO 4471");
+    await userEvent.click(screen.getByRole("button", { name: /add asset/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Site is required");
+    expect(createAsset).not.toHaveBeenCalled();
+    expect(listClientSites).not.toHaveBeenCalled();
+  });
+
   it("records the DNS name, OS and processor a push needs, and says why", async () => {
     // Windows push is Kerberos only: a ticket is issued for a NAME, never an
     // address, so a machine that has never run the agent needs its DNS name

@@ -277,6 +277,40 @@ describe("who may set a client's default", () => {
     expect(screen.queryByRole("button", { name: "Remove: Organisation default" })).toBeNull();
   });
 
+  // Phase 3 final review D (T14 3): a device's or a group's assignment is
+  // removable where the person holds health.admin in ITS client -- the delete
+  // route's own check -- and nowhere else. Nothing read that branch.
+  it("removes a device's or a group's assignment in a client where the person holds health.admin, and no other", async () => {
+    const XOCHI_DEVICE: AssignmentOut = { ...ORG_DEFAULT, id: "ha-xd", client_id: "c-x", level: "device", device_id: "dev-x" };
+    const XOCHI_GROUP: AssignmentOut = { ...ORG_DEFAULT, id: "ha-xg", client_id: "c-x", level: "group", device_group_id: "grp-x" };
+    const YUMA_DEVICE: AssignmentOut = { ...ORG_DEFAULT, id: "ha-yd", client_id: "c-y", level: "device", device_id: "dev-y" };
+    const YUMA_GROUP: AssignmentOut = { ...ORG_DEFAULT, id: "ha-yg", client_id: "c-y", level: "group", device_group_id: "grp-y" };
+    const deleteHealthAssignment = vi.fn().mockResolvedValue(undefined);
+    renderPanel(
+      {
+        listHealthAssignments: vi.fn().mockResolvedValue([XOCHI_DEVICE, XOCHI_GROUP, YUMA_DEVICE, YUMA_GROUP]),
+        deleteHealthAssignment,
+      },
+      [],
+      ONLY_IN_XOCHI,
+    );
+    expect(await screen.findByRole("button", { name: "Remove: Device dev-x" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove: Device group grp-x" })).toBeInTheDocument();
+    expect(screen.getByText("Device dev-y")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove: Device dev-y" })).toBeNull();
+    expect(screen.getByText("Device group grp-y")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove: Device group grp-y" })).toBeNull();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Remove: Device group grp-x" }));
+    await user.click(
+      within(await screen.findByRole("dialog", { name: "Remove this assignment" })).getByRole("button", {
+        name: "Remove",
+      }),
+    );
+    expect(deleteHealthAssignment).toHaveBeenCalledExactlyOnceWith("ha-xg");
+  });
+
   it("does not offer the default of the client chosen above where the person lacks health.admin", async () => {
     state.selected = "c-y";
     renderPanel({ listHealthAssignments: vi.fn().mockResolvedValue([YUMA_DEFAULT]) }, [], ONLY_IN_XOCHI);

@@ -47,17 +47,19 @@ vi.mock("../../lib/clientScope", async (importOriginal) => ({
 }));
 // The Task 9 pickers, as plain selects: what is pinned is what the page does
 // with the choice, not how the picker draws. Their contract: `""` is none.
+// What decides their options -- the Client field's `code`, the Site field's
+// `clientId` -- is rendered, so it is asserted (phase 3 final review D, Minor 6).
 vi.mock("../../components/ClientField", () => ({
-  ClientField: ({ onChange }: { onChange: (id: string) => void }) => (
-    <select aria-label="Client" defaultValue="" onChange={(event) => onChange(event.target.value)}>
+  ClientField: ({ code, onChange }: { code: string; onChange: (id: string) => void }) => (
+    <select aria-label="Client" data-code={code} defaultValue="" onChange={(event) => onChange(event.target.value)}>
       <option value="" />
       <option value="c-andes">Andes Logistics</option>
     </select>
   ),
 }));
 vi.mock("../../components/SiteField", () => ({
-  SiteField: ({ value, onChange }: { value: string; onChange: (id: string) => void }) => (
-    <select aria-label="Site" value={value} onChange={(event) => onChange(event.target.value)}>
+  SiteField: ({ clientId, value, onChange }: { clientId: string | null; value: string; onChange: (id: string) => void }) => (
+    <select aria-label="Site" data-client={clientId ?? ""} value={value} onChange={(event) => onChange(event.target.value)}>
       <option value="" />
       <option value="s-main">Principal</option>
       <option value="s-north">Bodega norte</option>
@@ -316,7 +318,10 @@ describe("the client and the site come first (MSP clients phase 3, design §4.4)
   it("asks for the client with every client chosen, and choosing one makes the console work on it", async () => {
     const user = userEvent.setup();
     renderPage();
-    await user.selectOptions(await screen.findByRole("combobox", { name: "Client" }), "c-andes");
+    const field = await screen.findByRole("combobox", { name: "Client" });
+    // The clients offered are those where the person may see devices.
+    expect(field).toHaveAttribute("data-code", "devices.read");
+    await user.selectOptions(field, "c-andes");
     expect(clientScope.select).toHaveBeenCalledWith("c-andes");
     // Nothing chosen yet, so the links carry nothing.
     const link = await screen.findByRole("link", { name: /Open IP Address Management/i });
@@ -346,6 +351,8 @@ describe("the client and the site come first (MSP clients phase 3, design §4.4)
     const user = userEvent.setup();
     renderPage({ sites: [MAIN, NORTH] });
     const site = await screen.findByRole("combobox", { name: "Site" });
+    // The sites offered are the chosen client's.
+    expect(site).toHaveAttribute("data-client", "c-andes");
     expect(screen.getByRole("link", { name: /Get the installer/i }).getAttribute("href")).toBe("/agent-packages");
     await user.selectOptions(site, "s-north");
     await waitFor(() =>

@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../lib/api";
 import type { ApiClient, Me, MeClient } from "../../../lib/api";
+import { ClientNotChosen } from "../../../lib/clientSelection";
 import { ApprovalQueue } from "../ApprovalQueue";
 import { ChangeCalendar } from "../ChangeCalendar";
 import { availableChangeActions } from "../changeActions";
@@ -468,6 +469,25 @@ describe("ChangeRequestForm", () => {
     );
   });
 
+  // Phase 3 final review D (T11): "Client is required" had only its not-ready
+  // twin under test. With every client chosen and the field left empty, Save
+  // names the Client field -- before anything is built -- and sends nothing.
+  it("with every client chosen, names the empty Client field on Save and sends nothing", async () => {
+    selectClient(null, [
+      { ...SCOPE_INTERNAL, permissions: ME.permissions },
+      { id: "c-acme", name: "Acme", kind: "customer", enabled_modules: ["change"], permissions: ME.permissions },
+    ]);
+    const user = userEvent.setup();
+    renderNew();
+    await user.type(screen.getByLabelText("Title *"), "Upgrade switch firmware");
+    await user.type(screen.getByLabelText("Description *"), "Roll out firmware 2.1.");
+    expect(screen.getByLabelText("Client")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(api.createChange).not.toHaveBeenCalled();
+  });
+
   // Phase 3 final review D, Important 2: the field offers only the clients
   // where the person may REQUEST a change, not every one they can read.
   it("with every client chosen, offers only the clients holding change.request, never Unassigned", async () => {
@@ -499,7 +519,8 @@ describe("ChangeRequestForm", () => {
     await user.type(screen.getByLabelText("Description *"), "Roll out firmware 2.1.");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/nothing was sent/i);
+    // The shared sentence, exactly (phase 3 final review D, Minor 4).
+    expect(await screen.findByRole("alert")).toHaveTextContent(new ClientNotChosen().message);
     expect(api.createChange).not.toHaveBeenCalled();
   });
 

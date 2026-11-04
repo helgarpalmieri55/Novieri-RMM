@@ -3360,6 +3360,30 @@ describe("FleetPatchPage — an approval reaches its owner's machines, and says 
     ]);
   });
 
+  // Plan Task 11 D11.3 (`patch.decision.chosenClient`), which no test read:
+  // with every client chosen and the bar's Client field still empty, the
+  // approval is "the client you choose" -- not the organisation's own, and not
+  // "All clients" -- until a client is picked, and then that client by name.
+  it("names the approval's owner as the client you choose until the bar's field names one", async () => {
+    selectClient(null, MY_CLIENTS);
+    const user = userEvent.setup();
+    api = { me: vi.fn().mockResolvedValue({ ...ME, clients: MY_CLIENTS }) };
+    renderWithProviders(<FleetPatchPage />);
+    await screen.findByText("2023-10 Cumulative Update");
+    await user.click(screen.getByRole("checkbox", { name: "Select KB5031354" }));
+
+    const toggle = screen.getByRole("checkbox", { name: /For every client/ });
+    expect(screen.getByLabelText("Client")).toHaveValue("");
+    expect(toggle.closest("label")).toHaveTextContent(
+      "Ticked, these updates become installable on every client's machines in the test ring. Unticked, only on the machines of the client you choose.",
+    );
+
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    expect(toggle.closest("label")).toHaveTextContent(
+      "Ticked, these updates become installable on every client's machines in the test ring. Unticked, only on the machines of Acme.",
+    );
+  });
+
   it("states the selected client's machines by default, and every client's when asked", async () => {
     const user = userEvent.setup();
     const bulkApprovePatches = vi.fn().mockResolvedValue(bulkResult(["p1"], "test"));
