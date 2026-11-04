@@ -69,6 +69,10 @@ function renderDialog(onClose: () => void = () => {}, sites: ClientSiteOut[] = [
     listClientSites: () => Promise.resolve(sites),
   } as unknown as ApiClient);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // LOAD ROBUSTNESS, NOT A CHANGE OF WHAT IS ASSERTED (phase 3 final review
+  // C5): the Site field's read is in the cache before the first render, so
+  // it picks the only site at once rather than one async hop later.
+  queryClient.setQueryData(["client-sites", SCOPE_INTERNAL.id], sites);
   const ui = (open: boolean) => (
     <QueryClientProvider client={queryClient}>
       <AddAssetDialog open={open} onClose={onClose} />

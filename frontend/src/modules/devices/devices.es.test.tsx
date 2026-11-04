@@ -282,17 +282,19 @@ describe("the asset and push dialogs in Spanish", () => {
     const user = userEvent.setup();
     const createAsset = vi.fn().mockRejectedValue(new ApiError(500, ""));
     const site = "00000000-0000-4000-8000-0000000000aa";
+    const principal = { id: site, client_id: "o1", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 };
     mockUseApi.mockReturnValue({
       createAsset,
       me: () =>
         Promise.resolve({ user_id: "u1", org_id: "o1", email: "a@b.c", display_name: "A", permissions: ["assets.manage"] }),
-      listClientSites: () =>
-        Promise.resolve([
-          { id: site, client_id: "o1", name: "Principal", address: "", description: "", egress_networks: [], archived_at: null, device_count: 0 },
-        ]),
+      listClientSites: () => Promise.resolve([principal]),
     } as unknown as ApiClient);
+    const queryClient = client();
+    // LOAD ROBUSTNESS, NOT A CHANGE OF WHAT IS ASSERTED (phase 3 final review
+    // C5): the Site field's read is in the cache before the first render.
+    queryClient.setQueryData(["client-sites", SCOPE_INTERNAL.id], [principal]);
     const { baseElement } = renderInSpanish(
-      <QueryClientProvider client={client()}>
+      <QueryClientProvider client={queryClient}>
         <AddAssetDialog open onClose={() => {}} />
       </QueryClientProvider>,
     );
