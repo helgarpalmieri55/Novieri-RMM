@@ -11,7 +11,7 @@
  * permission, and a page that said "you cannot see this" during the first
  * paint would be wrong for every administrator on every visit.
  *
- * TWO LISTS SINCE PHASE 3. `useMePermissions` is the codes held in at least one
+ * TWO LISTS, since phase 3. `useMePermissions` is the codes held in at least one
  * client of the request's scope -- what a page draws its controls for;
  * `useEverywherePermissions` the codes held on every client -- what a write to
  * configuration every client shares is offered for.
@@ -70,9 +70,9 @@ export function useMePermissions(): MePermissions {
  * 403 (`backend/tests/test_global_writes.py`); this saves the person a
  * control that can only answer that.
  *
- * AN API OLDER THAN PHASE 3 SENDS NO `permissions_everywhere`, and then
- * `permissions` IS this set: before phase 3, `/me` returned only the codes
- * held on every client.
+ * AN OLDER API SENDS NO `permissions_everywhere` (one from before phase 3),
+ * and then `permissions` IS this set: before phase 3, `/me` returned only the
+ * codes held on every client.
  */
 export function useEverywherePermissions(): MePermissions {
   const me = useMeQuery();

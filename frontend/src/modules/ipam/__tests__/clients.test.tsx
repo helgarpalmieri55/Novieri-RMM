@@ -181,6 +181,19 @@ describe("the registry names the client where nothing above a row does", () => {
     expect(body).not.toHaveProperty("client_id");
   });
 
+  it("sends a person who reads clients to the Clients page to manage the sites", async () => {
+    stubApi({ me: vi.fn().mockResolvedValue({ ...ME, permissions: [...ME.permissions, "clients.read"] }) });
+    const { unmount } = renderWithProviders(<RegistryPage />, "/ipam/registry");
+    expect(await screen.findByRole("link", { name: "Manage sites" })).toHaveAttribute("href", "/clients");
+    unmount();
+
+    const api = stubApi();
+    renderWithProviders(<RegistryPage />, "/ipam/registry");
+    expect((await screen.findAllByText("Medellín")).length).toBeGreaterThan(0);
+    await waitFor(() => expect(api.me).toHaveBeenCalled());
+    expect(screen.queryByRole("link", { name: "Manage sites" })).toBeNull();
+  });
+
   it("files a VLAN with no site under the client chosen at the top", async () => {
     const createIpamVlan = vi.fn().mockResolvedValue(vlan({}));
     stubApi({ createIpamVlan });

@@ -54,10 +54,12 @@ export const shell: Shape<typeof en> = {
       platformStatus: "Estado de la plataforma",
       errorMonitor: "Monitor de errores",
       settings: "Configuración",
+      clients: "Clientes",
       myTickets: "Mis tickets",
       newTicket: "Nuevo ticket",
     },
     section: {
+      organization: "Organización",
       serviceDesk: "Mesa de ayuda",
       computers: "Equipos",
       automation: "Automatización",
@@ -91,6 +93,7 @@ export const shell: Shape<typeof en> = {
       platformStatus: "Si los servicios propios de este servidor están en buen estado.",
       errorMonitor: "Errores que han producido la consola y su servidor.",
       settings: "Organización, usuarios, roles, correo y valores predeterminados.",
+      clients: "Las empresas a las que das servicio, sus sedes, contactos y módulos.",
     },
     adminDescription: "Configura cómo funciona la consola para tu organización.",
     page: {

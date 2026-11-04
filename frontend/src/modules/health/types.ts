@@ -60,7 +60,7 @@ export type Autonomy = "suggest" | "require_approval" | "autonomous";
 export type ValueKind = "numeric" | "boolean" | "enum";
 export type Cadence = "tick" | "posture";
 export type EvaluatedBy = "agent" | "server";
-export type ResolutionLevel = "device" | "group" | "org";
+export type ResolutionLevel = "device" | "group" | "client" | "org";
 
 // `device_health_check_state.state` is `ok|breaching|unavailable`; `unknown` is
 // what api.py reports for a check the device has NEVER answered. Four values,
@@ -190,6 +190,8 @@ export interface AssignmentCreate {
   profile_id: string;
   device_id?: string | null;
   device_group_id?: string | null;
+  /** A client's default (MSP clients phase 3, design §5.1): with no device and no group. */
+  client_id?: string | null;
 }
 
 export interface AssignmentOut {
@@ -198,6 +200,13 @@ export interface AssignmentOut {
   profile_name: string;
   device_id: string | null;
   device_group_id: string | null;
+  /**
+   * The client the assignment is for: the client of a client default, the
+   * device's or the group's otherwise, and `null` on the organisation default
+   * (MSP clients phase 3, design §5.1). OPTIONAL because additive: an API
+   * from before phase 3 does not send it.
+   */
+  client_id?: string | null;
   // Spec §0.2's resolution level, decided server-side. The console never infers
   // it from which id happens to be null.
   level: ResolutionLevel;
