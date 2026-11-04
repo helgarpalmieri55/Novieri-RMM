@@ -425,13 +425,21 @@ async def test_the_session_settings_default_and_stay_in_bounds(
     admin_engine: AsyncEngine,
 ) -> None:
     org, _ = await _org(admin_engine)
-    row = AuthOrgSettings(org_id=org)
-    await _add(admin_engine, row)
-    assert (
-        row.staff_idle_minutes, row.staff_max_hours, row.remember_device_enabled,
-        row.remember_device_days, row.remembered_max_hours, row.contact_idle_minutes,
-        row.contact_max_days,
-    ) == (30, 12, True, 15, 168, 60, 7)
+    # A raw INSERT, so the values come from the migration's server_defaults
+    # and not from the ORM's `default=`.
+    async with admin_engine.begin() as conn:
+        got = (
+            await conn.execute(
+                text(
+                    "INSERT INTO auth_org_settings (org_id) VALUES (:o) RETURNING "
+                    "staff_idle_minutes, staff_max_hours, remember_device_enabled, "
+                    "remember_device_days, remembered_max_hours, contact_idle_minutes, "
+                    "contact_max_days"
+                ),
+                {"o": org},
+            )
+        ).one()
+    assert tuple(got) == (30, 12, True, 15, 168, 60, 7)
 
 
 @pytest.mark.parametrize(
@@ -529,6 +537,56 @@ async def test_a_session_cannot_name_another_persons_device(admin_engine: AsyncE
             "ck_auth_recovery_codes_code_hash",
         ),
         (
+            lambda org, user: AuthRecoveryCode(
+                org_id=org, user_id=user, code_hash=b"\x00" * 257
+            ),
+            "ck_auth_recovery_codes_code_hash",
+        ),
+        (
+            lambda org, user: AuthPassword(
+                org_id=org, user_id=user, hash="$argon2id$x", pepper_version=0
+            ),
+            "ck_auth_passwords_pepper_version",
+        ),
+        *[
+            (
+                lambda org, user, bad=bad: AuthPasskey(
+                    **({
+                        "org_id": org, "user_id": user,
+                        "credential_id": secrets.token_bytes(16), "public_key": b"cose",
+                        "backup_eligible": True, "backup_state": False, "name": "Llave",
+                    } | bad)
+                ),
+                constraint,
+            )
+            for bad, constraint in (
+                ({"name": ""}, "ck_auth_passkeys_name"),
+                ({"name": "x" * 101}, "ck_auth_passkeys_name"),
+                ({"sign_count": -1}, "ck_auth_passkeys_sign_count"),
+            )
+        ],
+        (
+            lambda org, user: AuthFailure(
+                org_id=org, user_id=user, factor="password", consecutive=-1,
+                last_failed_at=datetime.now(UTC),
+            ),
+            "ck_auth_failures_consecutive",
+        ),
+        (
+            lambda org, user: AuthActionToken(
+                org_id=org, user_id=user, purpose="reset", token_hash=_digest(),
+                expires_at=datetime.now(UTC) - timedelta(hours=1),
+            ),
+            "ck_auth_action_tokens_expiry",
+        ),
+        (
+            lambda org, user: AuthWebauthnChallenge(
+                org_id=org, user_id=user, purpose="login", challenge=secrets.token_bytes(32),
+                expires_at=_later(),
+            ),
+            "ck_auth_webauthn_challenges_purpose",
+        ),
+        (
             lambda org, user: AuthWebauthnChallenge(
                 org_id=org, user_id=user, purpose="register", challenge=b"\x00" * 15,
                 expires_at=_later(),
@@ -575,6 +633,66 @@ async def test_a_row_of_the_wrong_shape_is_refused(
     user = await _person(admin_engine, org, f"t-{uuid4().hex[:8]}@acme.test")
     with pytest.raises(IntegrityError, match=constraint):
         await _add(admin_engine, make(org, user))
+
+
+@pytest.mark.parametrize(
+    ("make", "constraint"),
+    [
+        (
+            lambda org, user, h: AuthSession(
+                org_id=org, user_id=user, token_hash=h, kind="staff", expires_at=_later()
+            ),
+            "uq_auth_sessions_token_hash",
+        ),
+        (
+            lambda org, user, h: AuthTrustedDevice(
+                org_id=org, user_id=user, token_hash=h, expires_at=_later()
+            ),
+            "uq_auth_trusted_devices_token_hash",
+        ),
+        (
+            lambda org, user, h: AuthActionToken(
+                org_id=org, user_id=user, purpose="reset", token_hash=h, expires_at=_later()
+            ),
+            "uq_auth_action_tokens_token_hash",
+        ),
+    ],
+)
+async def test_a_second_row_with_the_same_token_hash_is_refused(
+    make: Any, constraint: str, admin_engine: AsyncEngine
+) -> None:
+    """The door finds these rows by hash before the organization is known, so
+    the hash is unique across the whole platform, not per organization."""
+    org_a, _ = await _org(admin_engine)
+    org_b, _ = await _org(admin_engine)
+    user_a = await _person(admin_engine, org_a, f"a-{uuid4().hex[:8]}@acme.test")
+    user_b = await _person(admin_engine, org_b, f"b-{uuid4().hex[:8]}@acme.test")
+    digest = _digest()
+    await _add(admin_engine, make(org_a, user_a, digest))
+    with pytest.raises(IntegrityError, match=constraint):
+        await _add(admin_engine, make(org_b, user_b, digest))
+
+
+async def test_a_passkey_credential_id_is_registered_once_on_the_platform(
+    admin_engine: AsyncEngine,
+) -> None:
+    """W3C WebAuthn §7.1: a credential id already registered to anyone is
+    refused, whatever the organization or person."""
+    org_a, _ = await _org(admin_engine)
+    org_b, _ = await _org(admin_engine)
+    user_a = await _person(admin_engine, org_a, f"a-{uuid4().hex[:8]}@acme.test")
+    user_b = await _person(admin_engine, org_b, f"b-{uuid4().hex[:8]}@acme.test")
+    credential = secrets.token_bytes(16)
+
+    def passkey(org: UUID, user: UUID) -> AuthPasskey:
+        return AuthPasskey(
+            org_id=org, user_id=user, credential_id=credential, public_key=b"cose",
+            backup_eligible=True, backup_state=False, name="Llave",
+        )
+
+    await _add(admin_engine, passkey(org_a, user_a))
+    with pytest.raises(IntegrityError, match="uq_auth_passkeys_credential_id"):
+        await _add(admin_engine, passkey(org_b, user_b))
 
 
 async def test_signing_in_may_start_before_the_person_is_known(

@@ -485,7 +485,8 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
         ),
         sa.Column(
-            "updated_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True
+            "updated_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
         ),
         sa.CheckConstraint("length(host) BETWEEN 1 AND 253", name="ck_account_mail_host"),
         sa.CheckConstraint("port BETWEEN 1 AND 65535", name="ck_account_mail_port"),

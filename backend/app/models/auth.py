@@ -404,7 +404,9 @@ class AccountMailSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    updated_by: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"), default=None)
+    updated_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
 
 
 __all__ = [

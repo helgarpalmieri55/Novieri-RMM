@@ -1089,7 +1089,6 @@ async def test_a_sender_matching_two_users_is_quarantined(email_env) -> None:
     """Spec §8 row 7. Two users in one org may legitimately share an address;
     the module must NEVER guess which human sent it. Covered at the
     `resolve_sender` level in Task 4 -- this pins that it is reachable
-
     through `process_message` and produces a row and no ticket. Since
     migration 0245 the two are a contact and a technician created after it:
     two technicians of one org never share an address."""
