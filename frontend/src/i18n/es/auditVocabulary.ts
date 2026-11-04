@@ -60,6 +60,7 @@ export const auditActions: Shape<typeof enActions> = {
   asset_updated: "Activo actualizado",
   auth_admission_refused: "Admisión rechazada",
   auth_email_changed: "Correo electrónico modificado",
+  auth_factor_disabled: "Factor de autenticación desactivado",
   auth_identity_linked: "Identidad vinculada",
   auth_identity_unlinked: "Identidad desvinculada",
   auth_login: "Sesión iniciada",
