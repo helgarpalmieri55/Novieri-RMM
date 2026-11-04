@@ -18,10 +18,11 @@ import time
 from typing import Any
 from uuid import UUID, uuid4
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ai.executor_portal import invoke_portal_tool
-from app.core.ai.executor_staff import ToolError, invoke_tool
+from app.core.ai.executor_staff import LOOPBACK_BASE_URL, ToolError, invoke_tool
 from app.core.ai.providers import TextBlock, ToolCallBlock
 from app.core.ai.tools import REGISTRY, ToolResult
 from app.core.ai.types import TurnContext
@@ -249,3 +250,38 @@ async def test_the_portal_executor_refuses_a_client_selection_and_sends_nothing(
     )
     assert isinstance(outcome, ToolError)
     assert (outcome.kind, spy.requests) == ("forbidden", [])
+
+
+async def test_the_portal_executor_sends_exactly_one_header_of_its_own(
+    api_env: Any, monkeypatch: Any
+) -> None:
+    """`docs/modules/ai-admin/spec.md` §4 promises a contact's turn "still
+    carries exactly one header": the portal principal's own bearer, and no
+    `X-Client-Id` or anything else. Asserted as an equality with what a bare
+    client sends for the same GET, so a second header -- or a default
+    overridden -- fails here (final review A4, F3T4-1).
+    FALSIFIER: any header but `Authorization` on the `client.get` in
+    `app/core/ai/executor_portal.py`, or default headers on its client."""
+    spy = RecordingTransport(api_env.app)
+    install_portal_spy(monkeypatch, spy)
+    org_id = await api_env.create_org("portal-one-header")
+    sub = await api_env.create_user(org_id, "requester")
+    bearer = (await api_env.headers(org_id, sub))["Authorization"]
+
+    outcome = await invoke_portal_tool(
+        tool_name="portal.categories",
+        raw_args={},
+        app=api_env.app,
+        bearer=bearer,
+        deadline=_deadline(),
+        registry=RESOLVER_PROFILE.tools,
+    )
+
+    assert isinstance(outcome, ToolResult), outcome
+    sent = spy.only
+    async with httpx.AsyncClient(base_url=LOOPBACK_BASE_URL) as bare:
+        defaults = bare.build_request("GET", sent.url).headers
+    assert {k.lower(): v for k, v in sent.headers.items()} == {
+        **{k.lower(): v for k, v in defaults.items()},
+        "authorization": bearer,
+    }

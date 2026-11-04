@@ -16,7 +16,10 @@ was edited by hand, or reordered).
 """
 
 import json
+import re
+from typing import Any
 
+from app.core.router_inspect import flatten
 from tests.export_console_global_routes import (
     API_PREFIX,
     CONSOLE_ROUTES_JSON,
@@ -25,6 +28,9 @@ from tests.export_console_global_routes import (
     render,
 )
 from tests.test_global_writes import GLOBAL_READS, GLOBAL_WRITES, WRITE_METHODS
+
+#: A `{param}` segment, as `frontend/src/lib/globalRoutes.ts` reads one.
+_PARAM = re.compile(r"^\{[^/{}]+\}$")
 
 
 def _key(route: dict[str, str]) -> tuple[str, str]:
@@ -60,3 +66,45 @@ def test_the_export_is_every_declared_route_relative_to_the_api() -> None:
     assert all(r["path"].startswith("/") and not r["path"].startswith(API_PREFIX) for r in routes)
     assert {r["method"] for r in routes} <= WRITE_METHODS | {"GET"}
     assert routes == sorted(routes, key=lambda r: (r["path"], r["method"]))
+
+
+def _may_meet(template: str, route_path: str) -> bool:
+    """Could one request path match both the console's global `template`
+    and the router's `route_path`? The console's rule (`globalRoutes.ts`):
+    same number of segments, a `{param}` is one non-empty segment. A router
+    `{param}` takes any value, so it can also meet a literal of the template."""
+    wanted, served = template.split("/"), route_path.split("/")
+    return len(wanted) == len(served) and all(
+        bool(_PARAM.match(w)) or bool(_PARAM.match(s)) or w == s
+        for w, s in zip(wanted, served, strict=True)
+    )
+
+
+def test_no_other_route_looks_global_to_the_console(api_env: Any) -> None:
+    """The console drops `X-Client-Id` on any request that matches a global
+    template, and the server then runs it under the person's whole scope
+    instead of the client they chose. So no route outside the list may be
+    reachable by a path a global template also matches (final review A4,
+    F3T2 item 2: none today, out of 561).
+    FALSIFIER: a route such as `DELETE /agent/releases/stale` beside the
+    global `DELETE /agent/releases/{release_id}`, or a global template whose
+    literal a non-global route's `{param}` can fill."""
+    templates = [(r["method"], r["path"]) for r in console_global_routes()]
+    served = sorted(
+        (method, path.removeprefix(API_PREFIX))
+        for path, route in flatten(api_env.app.router)
+        if path.startswith(API_PREFIX + "/")
+        for method in (getattr(route, "methods", None) or set()) - {"HEAD", "OPTIONS"}
+    )
+    # Non-vacuity: the walk found the router, and the rule finds every
+    # global route under its own template.
+    assert len(served) > len(templates) > 0
+    assert set(templates) <= set(served)
+    looks_global = [
+        f"{method} {path} meets {template}"
+        for method, path in served
+        if (method, path) not in set(templates)
+        for t_method, template in templates
+        if t_method == method and _may_meet(template, path)
+    ]
+    assert looks_global == []

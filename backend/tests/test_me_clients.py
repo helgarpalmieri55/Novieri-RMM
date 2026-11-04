@@ -235,6 +235,17 @@ async def test_an_archived_client_is_left_out(api_env: Any) -> None:
     assert me["permissions"] == sorted(await _codes_of(env, "read-only"))
     assert str(c["Acme"]) not in {x["id"] for x in (await _me(env, everywhere))["clients"]}
 
+    # A header naming the archived client is a client outside the map, even
+    # for a person who still holds a role there (on it, or on every client):
+    # no code at all, not the role's codes (final review A4, F3T1-4).
+    # FALSIFIER: `OwnProfile.codes_in` (`own_profile.py`) short-cutting an
+    # all-clients grant ("it counts everywhere") instead of counting only
+    # the clients in the map -- every other test here still passes then.
+    for holder in (limited, everywhere):
+        narrowed = await _me(env, {**holder, "X-Client-Id": str(c["Acme"])})
+        assert narrowed["permissions"] == []
+        assert str(c["Acme"]) not in {x["id"] for x in narrowed["clients"]}
+
 
 async def test_the_map_needs_no_clients_read(api_env: Any) -> None:
     """The names come from the person's own grants, not from `GET /clients`:
