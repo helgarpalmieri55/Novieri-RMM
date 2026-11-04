@@ -13,7 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 import { setActiveLanguage } from "../i18n/core";
 import type { ApiClient, Me, MeClient } from "../lib/api";
 import { CLIENT_STORAGE_KEY, selectedClient, setSelectedClient } from "../lib/clientChoice";
-import { ClientScopeProvider } from "../lib/clientScope";
+import { ClientScopeProvider, useClientScope } from "../lib/clientScope";
 import { ClientSelector, useClientMark } from "./ClientSelector";
 
 const mockUseApi = vi.fn();
@@ -232,19 +232,24 @@ describe("useClientMark", () => {
     const me = vi.fn().mockResolvedValueOnce(ME).mockReturnValue(new Promise<Me>(() => {}));
     mockUseApi.mockReturnValue({ me } as unknown as ApiClient);
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const { result } = renderHook(() => useClientMark(), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={queryClient}>
-          <ClientScopeProvider>{children}</ClientScopeProvider>
-        </QueryClientProvider>
-      ),
-    });
-    await waitFor(() => expect(me).toHaveBeenCalledTimes(1));
+    const { result } = renderHook(
+      () => ({ mark: useClientMark(), listed: useClientScope().clients.length }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={queryClient}>
+            <ClientScopeProvider>{children}</ClientScopeProvider>
+          </QueryClientProvider>
+        ),
+      },
+    );
+    // The first /me ANSWERED, not merely asked: until it has, there is no list
+    // for the provider to keep, and the change below would test nothing.
+    await waitFor(() => expect(result.current.listed).toBeGreaterThan(0));
     await act(async () => undefined);
 
     act(() => setSelectedClient(ZETA));
 
     await waitFor(() => expect(me).toHaveBeenCalledTimes(2));
-    expect(result.current).toEqual({ short: "ZF", name: "Zeta Foods" });
+    expect(result.current.mark).toEqual({ short: "ZF", name: "Zeta Foods" });
   });
 });
