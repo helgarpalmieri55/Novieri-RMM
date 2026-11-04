@@ -284,3 +284,148 @@ describe("an import with no VRF listed names a client", () => {
     expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
   });
 });
+
+// Phase 3 final review C, Important 1 (operator decision 2): the shared hook
+// `useNewRowClientField` brings the "Client is required" rule these forms
+// lacked -- they sent nothing and said only "the client this is for has not
+// been chosen" -- and, with Unassigned chosen at the top, they say that nothing
+// new can be filed there instead of offering a create that can only fail.
+const UNASSIGNED: MeClient = { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: CODES };
+const REFUSED = "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.";
+
+function selectUnassigned(): void {
+  mockClientScope.mockReturnValue({ selected: UNASSIGNED.id, select: vi.fn(), clients: [...CLIENTS, UNASSIGNED], ready: true });
+}
+
+describe("with every client chosen, an empty Client field is named on create", () => {
+  it("a VRF", async () => {
+    selectClient(null);
+    const createIpamVrf = vi.fn().mockResolvedValue(ACME_VRF);
+    stubApi({ createIpamVrf });
+    const user = userEvent.setup();
+    renderAt(<RegistryPage />, "/ipam/registry");
+    await user.type((await screen.findAllByLabelText("Name"))[0]!, "lan");
+    await user.click(screen.getByRole("button", { name: "Add VRF" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(createIpamVrf).not.toHaveBeenCalled();
+  });
+
+  it("a VLAN", async () => {
+    selectClient(null);
+    const createIpamVlan = vi.fn().mockResolvedValue({} as VlanOut);
+    stubApi({ createIpamVlan });
+    const user = userEvent.setup();
+    renderAt(<RegistryPage />, "/ipam/registry");
+    await user.type(await screen.findByLabelText("VID"), "40");
+    await user.click(screen.getByRole("button", { name: "Add VLAN" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(createIpamVlan).not.toHaveBeenCalled();
+  });
+
+  it("a subnet with no VRF", async () => {
+    selectClient(null);
+    const createIpamSubnet = vi.fn().mockResolvedValue(subnet());
+    stubApi({ createIpamSubnet });
+    const user = userEvent.setup();
+    renderAt(<SubnetTreePage />, "/ipam");
+    await user.click(await screen.findByRole("button", { name: "New subnet" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
+    await user.click(within(dialog).getByRole("button", { name: "Register" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Client is required");
+    expect(createIpamSubnet).not.toHaveBeenCalled();
+  });
+
+  it("a scan authorization with no VRF", async () => {
+    selectClient(null);
+    const createIpamScanAuthorization = vi.fn().mockResolvedValue({});
+    stubApi({ createIpamScanAuthorization });
+    const user = userEvent.setup();
+    renderAt(<ScanAuthorizationsPage />, "/ipam/scan-authorizations");
+    await user.click(await screen.findByRole("button", { name: "Authorize a subnet" }));
+    await user.type(await screen.findByLabelText("Prefix"), "10.4.7.0/24");
+    await user.click(screen.getByRole("button", { name: "Authorize" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(createIpamScanAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("an import with no VRF listed", async () => {
+    selectClient(null);
+    const previewIpamImport = vi.fn();
+    stubApi({ previewIpamImport, listIpamVrfs: vi.fn().mockResolvedValue([]) });
+    const user = userEvent.setup();
+    renderAt(<ImportPage />, "/ipam/import");
+    const input = (await screen.findByLabelText("CSV file")) as HTMLInputElement;
+    await user.upload(input, new File(["address\n10.4.7.9\n"], "plan.csv", { type: "text/csv" }));
+    await user.selectOptions(await screen.findByLabelText("address"), "address");
+    await screen.findByLabelText("Client");
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(previewIpamImport).not.toHaveBeenCalled();
+  });
+});
+
+describe("with Unassigned chosen at the top, nothing new is offered and the page says why", () => {
+  it("the VRF and VLAN add rows", async () => {
+    selectUnassigned();
+    stubApi({ listIpamVrfs: vi.fn().mockResolvedValue([]) });
+    renderAt(<RegistryPage />, "/ipam/registry");
+    expect(await screen.findAllByText(REFUSED)).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Add VRF" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add VLAN" })).toBeNull();
+    expect(screen.queryByLabelText("Client")).toBeNull();
+  });
+
+  it("a subnet, until a VRF names its client", async () => {
+    selectUnassigned();
+    stubApi();
+    const user = userEvent.setup();
+    renderAt(<SubnetTreePage />, "/ipam");
+    await user.click(await screen.findByRole("button", { name: "New subnet" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(REFUSED)).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Register" })).toBeNull();
+    // A VRF is a parent: the subnet is its client's, whatever the top bar says.
+    await user.selectOptions(within(dialog).getByLabelText("VRF"), "vrf-a");
+    expect(within(dialog).queryByText(REFUSED)).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "Register" })).toBeInTheDocument();
+  });
+
+  it("a scan authorization, until a VRF names its client", async () => {
+    selectUnassigned();
+    stubApi();
+    const user = userEvent.setup();
+    renderAt(<ScanAuthorizationsPage />, "/ipam/scan-authorizations");
+    await user.click(await screen.findByRole("button", { name: "Authorize a subnet" }));
+    expect(await screen.findByText(REFUSED)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Authorize" })).toBeNull();
+    await user.selectOptions(screen.getByLabelText("VRF"), "vrf-a");
+    expect(screen.queryByText(REFUSED)).toBeNull();
+    expect(screen.getByRole("button", { name: "Authorize" })).toBeInTheDocument();
+  });
+
+  it("an import with no VRF listed", async () => {
+    selectUnassigned();
+    const previewIpamImport = vi.fn();
+    stubApi({ previewIpamImport, listIpamVrfs: vi.fn().mockResolvedValue([]) });
+    renderAt(<ImportPage />, "/ipam/import");
+    expect(await screen.findByText(REFUSED)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+  });
+});
+
+describe("the site directory beside the VRFs", () => {
+  it("is loading, not empty, while the VRFs and VLANs that name its clients load", async () => {
+    // Phase 3 final review C, Minor (`ipam/api.ts` `useIpamSiteDirectory`):
+    // with every client chosen the clients come from the VRF and VLAN reads,
+    // and before they answered the panel said "no sites".
+    selectClient(null);
+    stubApi({
+      listIpamVrfs: vi.fn(() => new Promise(() => {})),
+      listIpamVlans: vi.fn(() => new Promise(() => {})),
+    });
+    renderAt(<RegistryPage />, "/ipam/registry");
+    await screen.findByText("Sites");
+    expect(screen.queryByText("This client has no sites yet.")).toBeNull();
+  });
+});

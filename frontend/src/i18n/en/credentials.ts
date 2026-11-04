@@ -1,4 +1,6 @@
 export const credentials = {
+  // The create dialog with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
+  unassignedRefused: "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.",
   page: {
     title: "Credentials",
     description: "Passwords and keys for remote sessions and provisioning, stored encrypted.",
@@ -84,6 +86,8 @@ export const credentials = {
     caCertificate: "CA certificate (optional PEM, for HTTPS/5986 trust)",
     cancel: "Cancel",
     store: "Store",
+    // The "For every client" switch (components/forEveryClient.tsx), for a type that is not a push type.
+    forEveryClientHint: "Every client's technicians may check it out, and only someone with access to every client may delete it. Unticked, it belongs to the client this form files it under.",
   },
   types: {
     windows_admin: {

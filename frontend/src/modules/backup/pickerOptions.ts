@@ -166,7 +166,9 @@ export function policyClient(
 /**
  * The repositories a policy of `client` may name: that client's ACTIVE ones.
  * A retired repository takes no new backups (MSP clients phase 3, design
- * §5.5), so the policy editor never offers it.
+ * §5.5), so the policy editor never offers it -- and `state` is free text
+ * server-side, so a state this console does not know is refused by default
+ * rather than offered (`=== "active"`, phase 3 final review C, Minor).
  */
 export function repositoriesOfClient(
   repositories: readonly Repository[],
@@ -174,5 +176,5 @@ export function repositoriesOfClient(
 ): Repository[] {
   return client === null
     ? []
-    : repositories.filter((repository) => repository.client_id === client && repository.state !== "retired");
+    : repositories.filter((repository) => repository.client_id === client && repository.state === "active");
 }

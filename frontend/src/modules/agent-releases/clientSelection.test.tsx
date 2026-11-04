@@ -182,3 +182,75 @@ describe("opened from the add-a-computer journey", () => {
     expect(api.getInstallLink).not.toHaveBeenCalledWith("site-a2");
   });
 });
+
+// Phase 3 final review C, Important 7: with a client chosen and more than one
+// site, "Install command" -> confirm said "...the client this is for has not
+// been chosen". The site is what is missing, and the page says so; with every
+// client and no client picked it names the Client field; with Unassigned
+// chosen at the top it says nothing new can be filed there.
+describe("an install command or a deployment token with nothing to name its site", () => {
+  const MANAGED_PACKAGE = {
+    release: RELEASE, channel: "gpo", download_url: "https://minio.test/x", download_expires_in_s: 900,
+    sha256: RELEASE.sha256, staging: [], install_command: "install", enrol_command: "enrol",
+    integrity: { sha256: RELEASE.sha256, verify_command: "verify", verified_at_install: false, notes: [] },
+  };
+
+  async function askForCommand(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await user.click(await screen.findByRole("button", { name: /install command/i }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Generate command" }));
+  }
+
+  it("names the site, not the client, when the chosen client has more than one", async () => {
+    selectClient("c-acme");
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderPage();
+    await within(await screen.findByLabelText("Site")).findByRole("option", { name: "Acme Lab" });
+    await askForCommand(user);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Site is required");
+    expect(api.generateAgentInstallCommand).not.toHaveBeenCalled();
+  });
+
+  it("names the site for a deployment token too", async () => {
+    selectClient("c-acme");
+    const api = stubApi({
+      getAgentDeploymentPackage: vi.fn().mockResolvedValue(MANAGED_PACKAGE),
+      mintAgentDeploymentToken: vi.fn(),
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await within(await screen.findByLabelText("Site")).findByRole("option", { name: "Acme Lab" });
+    await user.click(screen.getByRole("button", { name: /managed deployment/i }));
+    await user.click(await screen.findByRole("button", { name: /create a deployment token/i }));
+    const confirm = await screen.findByRole("dialog", { name: "Create a deployment token" });
+    await user.click(within(confirm).getByRole("button", { name: "Create token" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Site is required");
+    expect(api.mintAgentDeploymentToken).not.toHaveBeenCalled();
+  });
+
+  it("names the Client field with every client chosen and none picked", async () => {
+    selectClient(null);
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByLabelText("Client");
+    await askForCommand(user);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(api.generateAgentInstallCommand).not.toHaveBeenCalled();
+  });
+
+  it("with Unassigned chosen at the top, says nothing new can be filed there", async () => {
+    const UNASSIGNED: MeClient = { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: CODES };
+    mockClientScope.mockReturnValue({ selected: UNASSIGNED.id, select: vi.fn(), clients: [INTERNAL, ACME, UNASSIGNED], ready: true });
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderPage();
+    const refused = "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.";
+    expect(await screen.findByText(refused)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Site")).toBeNull();
+    await askForCommand(user);
+    expect(await screen.findByRole("alert")).toHaveTextContent(refused);
+    expect(api.generateAgentInstallCommand).not.toHaveBeenCalled();
+    expect(api.listClientSites).not.toHaveBeenCalled();
+  });
+});

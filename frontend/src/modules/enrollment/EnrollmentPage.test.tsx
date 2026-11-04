@@ -90,6 +90,9 @@ function token(overrides: Partial<EnrollmentTokenListItem> = {}): EnrollmentToke
     expires_at: FUTURE,
     max_uses: 50,
     use_count: 4,
+    // Where it enrols (MSP clients spec §1.5): the internal client's site.
+    client_id: "o",
+    site_id: "s-1",
     revoked: false,
     ...overrides,
   };

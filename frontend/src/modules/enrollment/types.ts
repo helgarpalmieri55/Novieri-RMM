@@ -1,12 +1,17 @@
 /**
  * Mirrors `backend/app/api/v1/enrollment.py`'s Pydantic models exactly.
  *
- * The list row is SIX fields. The design's token table has seven columns —
+ * The list row is EIGHT fields. The design's token table has seven columns —
  * Token, Organization, Site / group, Created by, Expires, Uses, State — and
- * four of them (the masked token value, organization, site/group, created by)
- * have nothing behind them: `TokenListItem` carries `id`, `name`, `expires_at`,
- * `max_uses`, `use_count`, `revoked`, and the plaintext exists exactly once, in
- * the creation response, and is never stored or re-served.
+ * three of them (the masked token value, organization, created by) have
+ * nothing behind them: `TokenListItem` carries `id`, `name`, `expires_at`,
+ * `max_uses`, `use_count`, `client_id`, `site_id`, `revoked`, and the
+ * plaintext exists exactly once, in the creation response, and is never
+ * stored or re-served.
+ *
+ * `client_id` and `site_id` have been sent since MSP clients phase 1; plan
+ * decision D10.5 said otherwise, and phase 3's final review (C, Important 6)
+ * found the list saying nothing about whose fleet each token enrols into.
  */
 
 export interface EnrollmentTokenListItem {
@@ -27,6 +32,10 @@ export interface EnrollmentTokenListItem {
    */
   max_uses: number | null;
   use_count: number;
+  /** Where a machine enrolled with this token lands (MSP clients spec §1.5): the client... */
+  client_id: string;
+  /** ...and the site of that client. */
+  site_id: string;
   revoked: boolean;
 }
 

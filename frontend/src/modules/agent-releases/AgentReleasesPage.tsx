@@ -13,7 +13,7 @@ import { useApi } from "../../lib/ApiContext";
 import { formatDateTime, intlLocale } from "../../lib/datetime";
 import { ClientField } from "../../components/ClientField";
 import { SiteField } from "../../components/SiteField";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { PageHead, Panel, QueryState, StatCard, StatsGrid, StatusPill } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { OsIcon } from "../../shell/viz";
@@ -24,6 +24,7 @@ import { ManagedDeploymentDialog } from "./ManagedDeploymentDialog";
 import { platformLabel, untestedCaveat } from "./platform";
 import { PublishReleaseDialog } from "./PublishReleaseDialog";
 import { ChannelPill, ReleaseChannels, compareVersions } from "./ReleaseChannels";
+import { whereMissing } from "./where";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 import { useAdoptJourneyClient, useJourneySiteState } from "../onboarding/journeyTarget";
 
@@ -208,11 +209,13 @@ export function AgentReleasesPage() {
   // command's token, the managed deployment's token and the install link each
   // belong to ONE SITE: the one chosen on this page, among the sites of the
   // client chosen at the top -- or, with every client, of the page's Client
-  // field. Empty until chosen: nothing that needs it is sent before.
-  const target = useNewRowClient(ENROLLMENT_MANAGE);
-  const [pickedClient, setPickedClient] = useState("");
-  const siteClient = target.needsField ? pickedClient || null : target.clientId;
+  // field. Empty until chosen: nothing that needs it is sent before. Another
+  // client is another set of sites.
   const [siteId, setSiteId] = useState("");
+  const client = useNewRowClientField(ENROLLMENT_MANAGE, undefined, { onPick: () => setSiteId("") });
+  const siteClient = client.clientId;
+  // What a mint would be missing, said instead of sending (`whereMissing`).
+  const siteMissing = whereMissing(client, siteId);
   // THE JOURNEY'S SITE FIRST (design §4.4): a page opened from the
   // add-a-computer journey starts on the site chosen there.
   const [journeySite] = useJourneySiteState();
@@ -227,8 +230,11 @@ export function AgentReleasesPage() {
   });
 
   const generate = useMutation({
-    mutationFn: (release: AgentRelease) =>
-      api.generateAgentInstallCommand(release.id, TOKEN_TTL_HOURS, requireKnown(siteId || null)),
+    mutationFn: (release: AgentRelease) => {
+      // The field that is missing, before `requireKnown`'s "has not been chosen".
+      if (siteMissing !== null) throw new Error(siteMissing);
+      return api.generateAgentInstallCommand(release.id, TOKEN_TTL_HOURS, requireKnown(siteId || null));
+    },
     onSuccess: (result) => {
       setCopied("idle");
       setCommand(result);
@@ -330,25 +336,26 @@ export function AgentReleasesPage() {
       {/* WHERE NEW MACHINES GO: the site the install command, the install
           link and a managed deployment are for (design §3.2). */}
       <Panel title={t("agentReleases.where.title")} subtitle={t("agentReleases.where.subtitle")}>
-        <div className="form-grid">
-          {target.needsField ? (
-            <ClientField
-              code={ENROLLMENT_MANAGE}
-              value={pickedClient}
-              onChange={(id) => {
-                setPickedClient(id);
-                // Another client is another set of sites.
-                setSiteId("");
-              }}
-            />
-          ) : null}
-          <SiteField clientId={siteClient} value={siteId} onChange={setSiteId} />
-        </div>
+        {/* With Unassigned chosen at the top there is no site to enrol into:
+            the panel says so instead of a Site field that can only be empty. */}
+        {client.refused === "unassigned" ? (
+          <div className="notice" role="note">
+            <Icon name="info" size={17} />
+            <p>{t("agentReleases.unassignedRefused")}</p>
+          </div>
+        ) : (
+          <div className="form-grid">
+            {client.needsField ? <ClientField field={client} /> : null}
+            <SiteField clientId={siteClient} value={siteId} onChange={setSiteId} />
+          </div>
+        )}
       </Panel>
 
       {/* The install link (spec 2026-09-28 §1.1): one shared link per site,
           off by default, for technicians setting up machines by hand. */}
-      {canManageLink && siteId !== "" && <InstallLinkPanel zone={zone} siteId={siteId} />}
+      {canManageLink && siteId !== "" && client.refused === null && (
+        <InstallLinkPanel zone={zone} siteId={siteId} />
+      )}
 
       {/* THE FRAGMENT TARGET IS A REAL ELEMENT. `Panel` takes no id, so the
           anchor is the wrapper; `#releases` pointing at nothing scrolls
@@ -647,6 +654,7 @@ export function AgentReleasesPage() {
         onClose={() => setManagedRelease(null)}
         timezone={zone}
         siteId={siteId || null}
+        siteMissing={siteMissing}
       />
 
       <ConfirmDialog

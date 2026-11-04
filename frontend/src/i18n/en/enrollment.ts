@@ -1,4 +1,6 @@
 export const enrollment = {
+  // The token form with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
+  unassignedRefused: "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.",
   page: {
     title: "Enrollment",
     description: "Tokens that let a new computer join, and the certificates computers hold.",
@@ -68,6 +70,10 @@ export const enrollment = {
     emptyAllRevoked: "Every enrollment token this organization has issued is revoked. Tick “Show revoked tokens” to see them.",
     emptyNone: "No enrollment tokens have been issued.",
     token: "Token",
+    // Where the token enrols (design §3.4): the Client column with every client chosen.
+    client: "Client",
+    site: "Site",
+    siteUnknown: "Site not known",
     expires: "Expires",
     uses: "Uses",
     state: "State",

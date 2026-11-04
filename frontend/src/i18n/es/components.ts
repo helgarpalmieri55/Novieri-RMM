@@ -48,7 +48,7 @@ export const components: Shape<typeof en> = {
     choose: "Elige una sede",
     chooseClientFirst: "Elige primero el cliente.",
     loading: "Cargando sedes…",
-    failed: "No se pudieron cargar las sedes.",
+    failed: "No se pudieron cargar las sedes. {reason}",
     none: "Este cliente no tiene sedes. Añade una en la página Clientes.",
   },
   prerequisites: {

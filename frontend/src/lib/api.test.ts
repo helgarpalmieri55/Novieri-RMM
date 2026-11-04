@@ -61,7 +61,7 @@ describe("ApiClient", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const client = new ApiClient(() => "t", vi.fn());
-    const result = await client.checkoutCredential("cred-1", "ticket 9");
+    const result = await client.checkoutCredential("cred-1", "ticket 9", null);
     expect(result.secret).toBe("hunter2");
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/v1/credentials/cred-1/checkout");

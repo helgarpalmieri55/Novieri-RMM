@@ -24,6 +24,8 @@ export const agentReleases = {
   },
   // The site new machines are enrolled into (MSP clients phase 3, design §3.2).
   where: { title: "Where new machines go", subtitle: "The site an install command, the install link and a managed deployment enrol machines into." },
+  // Unassigned chosen at the top (`useNewRowClientField`'s `refused`): no site to enrol into.
+  unassignedRefused: "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.",
   empty: {
     headline: "No agent packages published yet.",
     body: "Nothing here has failed. <strong>The platform never builds, fetches or pushes the agent.</strong> A publisher uploads one, and it appears here.",

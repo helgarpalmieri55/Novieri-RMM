@@ -34,7 +34,7 @@ import { translate } from "../../i18n/core";
 import type { Me } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
 import { useClientScope } from "../../lib/clientScope";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { parentClientOf, requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { useClientName } from "../settings/api";
 import { Icon } from "../../shell/icons";
 import {
@@ -324,15 +324,18 @@ function PolicyDialog({
   // being edited, or the group chosen. A new client default has no row: it is
   // the client chosen at the top, or with every client the Client field's
   // (design §3.1).
-  const groupClient = deviceGroupId
-    ? (groups.data ?? []).find((group) => group.id === deviceGroupId)?.client_id
-    : undefined;
-  const target = useNewRowClient("backup.policy.manage", groupClient);
-  const [pickedClient, setPickedClient] = useState("");
-  const newClient = target.needsField ? pickedClient || null : target.clientId;
+  // (`parentClientOf`: a group not found YET is not "no group".) Another
+  // client is another set of repositories.
+  const newRow = useNewRowClientField("backup.policy.manage", parentClientOf(deviceGroupId, groups.data), {
+    onPick: () => setRepositoryId(""),
+  });
+  const newClient = newRow.clientId;
   // A new client default with every client chosen: the Client field is shown,
   // and Save asks for it.
-  const asksClient = !existing && deviceGroupId === "" && target.needsField;
+  const asksClient = !existing && deviceGroupId === "" && newRow.needsField;
+  // A new client default with Unassigned chosen at the top: nothing new can
+  // be filed there, and the dialog says so instead of offering a Save.
+  const refused = !existing && deviceGroupId === "" && newRow.refused === "unassigned";
   const client = policyClient(existing, deviceGroupId, groups.data ?? [], newClient);
   const clientRepositories = repositoriesOfClient(repositories.data ?? [], client);
   const repositoryOptions = repositoryPickerOptions(clientRepositories);
@@ -351,7 +354,7 @@ function PolicyDialog({
   // The Repositories page files a repository only in a client where this
   // person may manage policies; for a policy of any other client the hint
   // says so, and there is no link.
-  const elsewhere = client !== null && !target.options.some((option) => option.id === client);
+  const elsewhere = client !== null && !newRow.options.some((option) => option.id === client);
   // The client default is a real, explicit choice -- not an unlabelled blank
   // -- so it is an entry in the list itself, with the id a group-less policy
   // actually carries (none, i.e. "").
@@ -416,17 +419,7 @@ function PolicyDialog({
           before: there was no <form> on this dialog at all. */}
       <Form onSubmit={submit}>
         <div className="form-grid">
-          {asksClient ? (
-            <ClientField
-              code="backup.policy.manage"
-              value={pickedClient}
-              onChange={(id) => {
-                setPickedClient(id);
-                // Another client is another set of repositories.
-                setRepositoryId("");
-              }}
-            />
-          ) : null}
+          {asksClient ? <ClientField field={newRow} /> : null}
           {/* No `emptyHint`: `groupOptions` always carries the client-default
               entry, so this list can never be empty (picker.tsx review
               finding 8). */}
@@ -510,13 +503,20 @@ function PolicyDialog({
               a sentence inside a role="alert". The Save control also no longer
               disables itself on a missing Repository: that was the silent
               no-op; the click now names the field. */}
-          <FormActions
-            label={t("backup.policyDialog.save")}
-            pendingLabel={t("backup.policyDialog.saving")}
-            pending={upsert.isPending}
-            error={upsert.error}
-            problems={attemptProblems(attempt)}
-          />
+          {refused ? (
+            <div className="notice" role="note">
+              <Icon name="info" size={17} />
+              <p>{t("backup.unassignedRefused")}</p>
+            </div>
+          ) : (
+            <FormActions
+              label={t("backup.policyDialog.save")}
+              pendingLabel={t("backup.policyDialog.saving")}
+              pending={upsert.isPending}
+              error={upsert.error}
+              problems={attemptProblems(attempt)}
+            />
+          )}
         </div>
       </Form>
     </Dialog>

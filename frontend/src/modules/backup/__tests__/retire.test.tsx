@@ -119,6 +119,14 @@ describe("retiring a repository", () => {
     expect(repositoryPickerOptions([RETIRED])[0]?.sublabel).toBe("s3://andes/primary · retired");
   });
 
+  it("offers only an ACTIVE repository, refusing by default a state it does not know", () => {
+    // Phase 3 final review C, Minor (T14-1): `state` is free text server-side,
+    // and `!== "retired"` would offer a state added later -- say one being
+    // drained -- as somewhere to send new backups.
+    const unknown = { ...ACTIVE, id: "repo-9", state: "draining" };
+    expect(repositoriesOfClient([ACTIVE, unknown], "c-andes").map((repo) => repo.id)).toEqual(["repo-1"]);
+  });
+
   it("sends the retire to its route", async () => {
     const fetchMock = vi
       .fn()

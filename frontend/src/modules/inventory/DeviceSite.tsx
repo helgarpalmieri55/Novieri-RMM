@@ -5,7 +5,9 @@
  * offers the client's own sites and the server refuses any other (422).
  *
  * OFFERED to a holder of `assets.manage` IN THE DEVICE'S CLIENT, from
- * `/me.clients`. A courtesy (invariant 6): the route checks the code.
+ * `/me.clients`, who also holds `clients.read` there: the dialog lists the
+ * client's sites, and that read is gated on it (`DeviceDetailPage`). A
+ * courtesy (invariant 6): the route checks the code.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";

@@ -141,4 +141,48 @@ describe("a push install offers only the machines' client's credentials", () => 
     expect(await screen.findByText("These machines belong to more than one client. Push to one client's machines at a time.")).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Acme key" })).toBeNull();
   });
+
+  it("says the machines' client has none, not that none is saved, when another client has one", async () => {
+    // Phase 3 final review C, Minor (PushInstallFlow.tsx:191): "No push
+    // install credential is saved" was false with Novieri's key in the vault.
+    stubApi({ listCredentials: vi.fn().mockResolvedValue([CREDENTIALS[0]]) });
+    renderIt(<PushInstallFlow machines={[machine("m1", "c-acme")]} onRemove={() => {}} onClose={() => {}} />);
+    expect(
+      await screen.findByText(/^No Push install credential is saved for these machines' client\. Another client's cannot be used here\.$/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Add one under Credentials" })).toHaveAttribute("href", "/credentials?new=push_install");
+  });
+
+  it("still says none is saved when no client has one", async () => {
+    stubApi({ listCredentials: vi.fn().mockResolvedValue([]) });
+    renderIt(<PushInstallFlow machines={[machine("m1", "c-acme")]} onRemove={() => {}} onClose={() => {}} />);
+    expect(await screen.findByText(/^No Push install credential is saved\.$/)).toBeInTheDocument();
+  });
+});
+
+// Phase 3 final review C, Important 1 (operator decision 2): the shared hook
+// brings the "Client is required" rule the grant form lacked, and with
+// Unassigned chosen at the top the form says nothing new can be filed there.
+describe("the grant form's client, through the shared hook", () => {
+  it("with every client chosen, names the empty Client field and sends nothing", async () => {
+    selectClient(null);
+    const api = stubApi();
+    const user = userEvent.setup();
+    renderIt(<PushAuthorizationsPage />);
+    await user.type(await screen.findByPlaceholderText("10.4.7.0/24"), "10.4.7.0/24");
+    await user.click(screen.getByRole("button", { name: "Authorize" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(api.createPushAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("with Unassigned chosen at the top, says so and offers no Authorize", async () => {
+    selectClient(UNASSIGNED.id);
+    stubApi();
+    renderIt(<PushAuthorizationsPage />);
+    expect(
+      await screen.findByText("Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Authorize" })).toBeNull();
+    expect(screen.queryByPlaceholderText("10.4.7.0/24")).toBeNull();
+  });
 });

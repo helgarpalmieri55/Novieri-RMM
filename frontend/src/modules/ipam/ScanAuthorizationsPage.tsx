@@ -2,12 +2,13 @@ import { useState } from "react";
 import { ClientField } from "../../components/ClientField";
 import { ConfirmDialog } from "../../components/confirm";
 import { NoValue } from "../../components/emptystate";
+import { attemptProblems, type Attempt } from "../../components/form";
 import { RowMenu } from "../../components/rowmenu";
 import { Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
 import { useClientScope } from "../../lib/clientScope";
-import { useNewRowClient } from "../../lib/clientSelection";
+import { parentClientOf, useNewRowClientField } from "../../lib/clientSelection";
 import { useClientName } from "../settings/api";
 import {
   useCreateIpamScanAuthorizationMutation,
@@ -20,6 +21,7 @@ import {
 } from "./api";
 import { ErrorLine } from "./ErrorLine";
 import { IpamNav } from "./IpamNav";
+import { clientRule, ProblemLine, UnassignedRefused } from "./NewRowClient";
 import {
   describeScope,
   formatAge,
@@ -331,10 +333,10 @@ function GrantForm({ subnets }: { subnets: SubnetOut[] }) {
   const [expiresAt, setExpiresAt] = useState("");
   // The VRF decides the grant's client; with none, the client chosen at the
   // top or the Client field's, whose `global` VRF it is for.
-  const vrfClient = vrfId ? vrfs.data?.find((vrf) => vrf.id === vrfId)?.client_id : undefined;
-  const target = useNewRowClient(IPAM_SCOPE_MANAGE, vrfClient);
-  const [pickedClient, setPickedClient] = useState("");
-  const client = vrfId ? (vrfClient ?? null) : target.needsField ? pickedClient || null : target.clientId;
+  const newRow = useNewRowClientField(IPAM_SCOPE_MANAGE, parentClientOf(vrfId, vrfs.data));
+  const client = newRow.clientId;
+  // Populated on Authorize, never while typing (the form kernel's rule).
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
 
   const parsed = parsePrefix(prefix);
   // Which registered subnet, if any, the Prefix currently names, so the picker
@@ -417,9 +419,7 @@ function GrantForm({ subnets }: { subnets: SubnetOut[] }) {
             ))}
           </select>
         </Field>
-        {!vrfId && target.needsField ? (
-          <ClientField code={IPAM_SCOPE_MANAGE} value={pickedClient} onChange={setPickedClient} />
-        ) : null}
+        {newRow.needsField ? <ClientField field={newRow} /> : null}
         <Field label={t("ipam.scans.noteWhy")}>
           <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
@@ -481,46 +481,59 @@ function GrantForm({ subnets }: { subnets: SubnetOut[] }) {
         </p>
       )}
 
-      <div className="form-actions">
-        <Btn
-          label={t("ipam.scans.authorize")}
-          icon="shield-check"
-          variant="primary"
-          disabled={create.isPending || parsed === null}
-          onClick={() =>
-            create.mutate(
-              {
-                prefix,
-                vrf_id: vrfId || null,
-                client_id: client,
-                note,
-                // THE FIELD IS A WALL CLOCK; the API stores an instant.
-                // `new Date("2026-08-25").toISOString()` reads it as UTC
-                // midnight, so an operator at UTC-5 gets a grant that expires
-                // five hours before the date they typed begins. This one is
-                // security-critical in the other direction too: east of UTC
-                // the same arithmetic EXTENDS the window past the date on the
-                // screen, and a scan authorization is deny-by-default
-                // precisely so that nobody has to guess when it lapses.
-                expires_at: expiresAt === "" ? null : toInstant(`${expiresAt}T00:00`, zone),
-              },
-              {
-                onSuccess: () => {
-                  setPrefix("");
-                  setNote("");
-                  setExpiresAt("");
+      {/* With Unassigned chosen at the top and no VRF to decide, nothing new
+          can be filed: the form says so instead (a VRF still can). */}
+      {newRow.refused === "unassigned" ? (
+        <UnassignedRefused />
+      ) : (
+        <div className="form-actions">
+          <Btn
+            label={t("ipam.scans.authorize")}
+            icon="shield-check"
+            variant="primary"
+            disabled={create.isPending || parsed === null}
+            onClick={() => {
+              const next: Attempt = { rules: () => clientRule(newRow), values: { client } };
+              setAttempt(next);
+              if (attemptProblems(next).length > 0) {
+                create.reset();
+                return;
+              }
+              create.mutate(
+                {
+                  prefix,
+                  vrf_id: vrfId || null,
+                  client_id: client,
+                  note,
+                  // THE FIELD IS A WALL CLOCK; the API stores an instant.
+                  // `new Date("2026-08-25").toISOString()` reads it as UTC
+                  // midnight, so an operator at UTC-5 gets a grant that expires
+                  // five hours before the date they typed begins. This one is
+                  // security-critical in the other direction too: east of UTC
+                  // the same arithmetic EXTENDS the window past the date on the
+                  // screen, and a scan authorization is deny-by-default
+                  // precisely so that nobody has to guess when it lapses.
+                  expires_at: expiresAt === "" ? null : toInstant(`${expiresAt}T00:00`, zone),
                 },
-              },
-            )
-          }
-        />
-        {create.isSuccess && (
-          <span className="form-saved" role="status">
-            {t("ipam.scans.authorized")}
-          </span>
-        )}
-        {create.isError && <ErrorLine error={create.error} />}
-      </div>
+                {
+                  onSuccess: () => {
+                    setPrefix("");
+                    setNote("");
+                    setExpiresAt("");
+                  },
+                },
+              );
+            }}
+          />
+          {create.isSuccess && (
+            <span className="form-saved" role="status">
+              {t("ipam.scans.authorized")}
+            </span>
+          )}
+          <ProblemLine problems={attemptProblems(attempt)} />
+          {create.isError && <ErrorLine error={create.error} />}
+        </div>
+      )}
     </div>
   );
 }

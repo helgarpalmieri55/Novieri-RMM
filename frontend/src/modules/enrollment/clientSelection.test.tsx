@@ -198,3 +198,89 @@ describe("a tab clicked on a page opened from the journey (design §4.4)", () =>
     expect(select).not.toHaveBeenCalled();
   });
 });
+
+describe("with Unassigned chosen at the top", () => {
+  it("the token form says nothing new can be filed there, and offers no Issue", async () => {
+    // Phase 3 final review C, Important 1 / review B, Important 4: the shared
+    // hook's `refused` -- a token's site would be Unassigned's, which has none
+    // and files nothing new.
+    const UNASSIGNED: MeClient = { id: "c-unassigned", name: "Unassigned", kind: "unassigned", enabled_modules: [], permissions: CODES };
+    mockClientScope.mockReturnValue({ selected: UNASSIGNED.id, select: vi.fn(), clients: [INTERNAL, ACME, UNASSIGNED], ready: true });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "Create token" }));
+    expect(
+      await screen.findByText("Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Issue token…" })).toBeNull();
+    expect(screen.queryByLabelText("Site")).toBeNull();
+  });
+});
+
+// Phase 3 final review C, Important 6 (design §3.4): the token list said
+// nothing about whose fleet each bootstrap credential enrols into, although
+// the API has sent `client_id` and `site_id` since phase 1.
+describe("the token list says where each token enrols", () => {
+  const READER = [...CODES, "clients.read"];
+  function token(id: string, clientId: string, siteId: string, name: string) {
+    return {
+      id, name, expires_at: "2099-01-01T00:00:00Z", max_uses: 5, use_count: 0, revoked: false,
+      client_id: clientId, site_id: siteId,
+    };
+  }
+
+  function renderList(selected: string | null) {
+    mockClientScope.mockReturnValue({ selected, select: vi.fn(), clients: [INTERNAL, ACME], ready: true });
+    listEnrollmentTokens.mockResolvedValue({
+      items: [token("t-o", "o", "site-o", "own-lab"), token("t-a", "c-acme", "site-a2", "acme-lab")],
+      total: 2, revoked_count: 0, unlimited_count: 0,
+    });
+    const listClientSites = vi.fn((clientId: string) =>
+      Promise.resolve(
+        clientId === "c-acme"
+          ? [site("site-a1", "c-acme", "Acme HQ"), site("site-a2", "c-acme", "Acme Lab")]
+          : [site("site-o", "o", "Principal")],
+      ),
+    );
+    mockUseApi.mockReturnValue({
+      me: () =>
+        Promise.resolve({
+          user_id: "u", org_id: "o", email: "a@b.c", display_name: "A", permissions: READER, timezone: null,
+          clients: [{ ...INTERNAL, permissions: READER }, { ...ACME, permissions: READER }],
+        }),
+      listDevices: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+      listClientSites,
+    } as unknown as ApiClient);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/enrollment"]}>
+          <EnrollmentPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    return { listClientSites };
+  }
+
+  it("with every client chosen, names each token's client and site", async () => {
+    renderList(null);
+    const row = (await screen.findByText("acme-lab")).closest("tr") as HTMLElement;
+    const table = row.closest("table") as HTMLElement;
+    expect(within(table).getByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: "Site" })).toBeInTheDocument();
+    expect(within(row).getByText("Acme")).toBeInTheDocument();
+    expect(await within(row).findByText("Acme Lab")).toBeInTheDocument();
+    const own = screen.getByText("own-lab").closest("tr") as HTMLElement;
+    expect(within(own).getByText("Novieri")).toBeInTheDocument();
+    expect(await within(own).findByText("Principal")).toBeInTheDocument();
+  });
+
+  it("with one client chosen, hides the Client column and keeps the Site", async () => {
+    renderList("c-acme");
+    const row = (await screen.findByText("acme-lab")).closest("tr") as HTMLElement;
+    const table = row.closest("table") as HTMLElement;
+    expect(within(table).queryByRole("columnheader", { name: "Client" })).toBeNull();
+    expect(within(table).getByRole("columnheader", { name: "Site" })).toBeInTheDocument();
+    expect(await within(row).findByText("Acme Lab")).toBeInTheDocument();
+  });
+});

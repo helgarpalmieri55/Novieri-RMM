@@ -191,4 +191,17 @@ describe("the device's site (MSP clients phase 3, design §4.3)", () => {
     expect(await screen.findByText("Site: Principal")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Change site" })).toBeNull();
   });
+
+  it("offers no move without clients.read on the device's client, whose sites the move lists", async () => {
+    // Phase 3 final review C, Minor: the dialog's Site field reads
+    // `GET /clients/{id}/sites`, gated on `clients.read`, so with
+    // `assets.manage` alone it could only answer 403.
+    const listClientSites = vi.fn().mockResolvedValue(SITES);
+    renderPage(asset({ client_id: "c-andes", site_id: "s-main" }), {
+      me: andes(["assets.manage"]) as Partial<Me>,
+      listClientSites,
+    });
+    await screen.findByText(/no agent on this asset/i);
+    expect(screen.queryByRole("button", { name: "Change site" })).toBeNull();
+  });
 });

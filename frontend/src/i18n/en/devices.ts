@@ -1,4 +1,6 @@
 export const devices = {
+  // A create form with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
+  unassignedRefused: "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.",
   page: {
     title: "Devices",
     description: "Every computer and device you manage, with or without an agent.",
@@ -402,11 +404,18 @@ export const devices = {
       none: "No devices in this group.",
       remove: "Remove",
       add: "Add a device",
-      addEmpty: "Every device the inventory holds is already in this group.",
+      addEmpty: "Every device of this group's client is already in it.",
       addToGroup: "Add to group",
       orgDefault: "organisation default",
       otherGroup: "currently in another group",
       fallback: "A device leaving a group does not lose policy: it falls back to the organisation default.",
+      // The server answers per device (`moved: false` and its reason).
+      notMoved: "{name} was not added: {reason}.",
+      reason: {
+        otherClient: "it belongs to another client",
+        alreadyMember: "it is already a member",
+        noDevice: "that device no longer exists",
+      },
     },
     archiveDialog: {
       title: "Archive device group",

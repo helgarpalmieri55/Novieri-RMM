@@ -11,6 +11,7 @@ export const ipam: Shape<typeof en> = {
     scanAuthorizations: "Autorizaciones de escaneo",
     importExport: "Importar / exportar",
   },
+  unassignedRefused: "El cliente elegido es «Sin asignar», y en él no se puede crear nada nuevo. Elige antes otro cliente.",
   fields: {
     name: "Nombre",
     site: "Sede",

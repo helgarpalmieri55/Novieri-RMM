@@ -244,7 +244,11 @@ export function useIpamSiteDirectory(): {
   return {
     sites,
     siteName: (siteId) => (siteId === null ? "" : (names.get(siteId) ?? siteId)),
-    isLoading: reads.some((read) => read.isLoading),
+    // With every client chosen the clients come from the VRF and VLAN reads:
+    // until they answer there is no site read to wait on, and "no sites"
+    // would be said about clients nobody has named yet (phase 3 final review C).
+    isLoading:
+      reads.some((read) => read.isLoading) || (selected === null && (vrfs.isLoading || vlans.isLoading)),
     error: reads.find((read) => read.error != null)?.error ?? null,
   };
 }
