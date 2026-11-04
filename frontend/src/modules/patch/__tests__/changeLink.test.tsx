@@ -199,7 +199,7 @@ describe("linking an approval to a change", () => {
 
   it("sends nothing before /me has answered, and says why", async () => {
     // Until `/me` has answered the selector is not ready and no client is
-    // known (`useNewRowClient`); without one the body would be a global
+    // known (`useNewRowClientField`); without one the body would be a global
     // approval nobody chose (MSP clients plan 2026-10-26 Task 14).
     mockClientScope.mockReturnValue({ selected: SCOPE_INTERNAL.id, select: vi.fn(), clients: [], ready: false });
     const user = userEvent.setup();

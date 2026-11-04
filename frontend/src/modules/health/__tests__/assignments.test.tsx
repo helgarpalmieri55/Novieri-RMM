@@ -34,7 +34,7 @@ vi.mock("../../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 const state = vi.hoisted(() => ({
   selected: null as string | null,
   clients: [] as MeClient[],
-  // `null`: the real `useNewRowClient` and `ClientField`.
+  // `null`: the real `useNewRowClientField` and `ClientField`.
   newRow: { clientId: null, needsField: true, options: [] } as NewRowClient | null,
 }));
 vi.mock("../../../lib/clientScope", async (importOriginal) => ({
@@ -187,7 +187,7 @@ describe("assigning a profile as a client's default", () => {
 
   it("uses the client chosen above without asking, and offers no organisation default", async () => {
     state.selected = "c-andes";
-    // What `useNewRowClient` answers: the client above, and Andes among the
+    // What `useNewRowClientField` answers: the client above, and Andes among the
     // clients holding health.admin.
     state.newRow = { clientId: "c-andes", needsField: false, options: [ANDES] };
     const createHealthAssignment = vi.fn().mockResolvedValue(ANDES_DEFAULT);
@@ -250,7 +250,7 @@ describe("assigning a profile as the organisation default", () => {
 });
 
 describe("who may set a client's default", () => {
-  // The REAL `useNewRowClient` and `ClientField`. Since Task 8 `canAdmin` is
+  // The REAL `useNewRowClientField` and `ClientField`. Since Task 8 `canAdmin` is
   // health.admin on EVERY client; a client's default is a write in THAT
   // client (backend Task 3), so health.admin there is enough.
   const XOCHI: MeClient = { ...ANDES, id: "c-x", name: "Xochi Foods", permissions: ["health.admin", "health.read"] };

@@ -18,8 +18,8 @@
  * client, whether to ask, the field's value and options, and Unassigned
  * chosen at the top (`refused`) -- so no form keeps its own copy of the glue
  * (operator decision 2, 2026-11-02). Forms use `useNewRowClientField`;
- * `useNewRowClient` is the decision alone, kept exported for that hook and its
- * tests.
+ * `useNewRowClient` is the decision alone, which `useNewRowClientField` calls
+ * for it; kept exported for that hook and its tests.
  *
  * Phases 1 and 2 filed every new row under the organisation's internal client,
  * whoever was working; this module replaced that helper in phase 3, and
@@ -89,6 +89,9 @@ export function clientsHolding(clients: readonly MeClient[], code: string): MeCl
  * `parentClientId`: absent for a row that hangs from nothing; `null` for one
  * whose parent's client is not known yet (still loading) -- nothing is asked
  * and nothing can be sent until it is; an id, that client.
+ *
+ * The decision `useNewRowClientField` makes its own: a form uses that hook,
+ * which adds the field's state and Unassigned chosen at the top.
  */
 export function useNewRowClient(code: string, parentClientId?: string | null): NewRowClient {
   const { selected, clients, ready } = useClientScope();
@@ -121,8 +124,11 @@ export function useNewRowClientField(
   parentClientId?: string | null,
   opts?: { onPick?: (clientId: string) => void },
 ): NewRowClientField {
-  const { selected, clients, ready } = useClientScope();
-  const options = useMemo(() => clientsHolding(clients, code), [clients, code]);
+  // THE DECISION IS `useNewRowClient`'s (steps 1, 2, 4 and 5's "ask"); this
+  // hook adds the field's state and step 3, Unassigned at the top.
+  const decision = useNewRowClient(code, parentClientId);
+  const { clients, ready } = useClientScope();
+  const { options } = decision;
   const [picked, setPickedState] = useState("");
 
   // THE LATEST CALLBACK, read when the pick changes: a form passes an inline
@@ -141,17 +147,19 @@ export function useNewRowClientField(
   }, []);
 
   const base = { picked, setPicked, options, ready };
-  if (parentClientId !== undefined) {
-    return { ...base, clientId: parentClientId, needsField: false, refused: null };
+  if (decision.needsField) {
+    // 5. Ask: the pick is the client only while it is offered.
+    const listed = options.some((client) => client.id === picked);
+    return { ...base, clientId: listed ? picked : null, needsField: true, refused: null };
   }
-  if (!ready) return { ...base, clientId: null, needsField: false, refused: null };
-  if (selected !== null) {
-    const unassigned = clients.some((client) => client.id === selected && client.kind === "unassigned");
-    if (unassigned) return { ...base, clientId: null, needsField: false, refused: "unassigned" };
-    return { ...base, clientId: selected, needsField: false, refused: null };
+  // 3. The client chosen at the top is Unassigned: refused. Only a client the
+  //    top bar decided -- a parent's client decides whatever the top says.
+  const fromTop = parentClientId === undefined ? decision.clientId : null;
+  if (fromTop !== null && clients.some((client) => client.id === fromTop && client.kind === "unassigned")) {
+    return { ...base, clientId: null, needsField: false, refused: "unassigned" };
   }
-  const listed = options.some((client) => client.id === picked);
-  return { ...base, clientId: listed ? picked : null, needsField: true, refused: null };
+  // 1, 2 and 4: the parent's, none yet, or the top bar's.
+  return { ...base, clientId: decision.clientId, needsField: false, refused: null };
 }
 
 /**

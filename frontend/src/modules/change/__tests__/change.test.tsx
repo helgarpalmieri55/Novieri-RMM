@@ -527,7 +527,7 @@ describe("ChangeRequestForm", () => {
   it("sends nothing while it cannot name the client", async () => {
     const user = userEvent.setup();
     // `/me` has not answered, so the selector is not ready and no client is
-    // known yet (`useNewRowClient`).
+    // known yet (`useNewRowClientField`).
     api.me = vi.fn(() => new Promise<Me>(() => {}));
     mockClientScope.mockReturnValue({ selected: SCOPE_INTERNAL.id, select: vi.fn(), clients: [], ready: false });
     mockUseApi.mockReturnValue(api as ApiClient);

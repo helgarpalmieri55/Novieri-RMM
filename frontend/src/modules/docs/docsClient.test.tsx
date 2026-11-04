@@ -96,7 +96,8 @@ function renderDocs(api: Partial<Record<keyof ApiClient, unknown>>, me: Me = MAN
 // is EVERY client's (`backend/app/modules/documentation/api.py`), so a body
 // sent with the Client field still empty would file a global article, record
 // or document for a person who only forgot to pick one. With every client
-// chosen and the field empty, Save says nothing was sent, and nothing is.
+// chosen and the field empty, Save names the field -- "Client is required" --
+// and nothing is sent.
 
 // Phase 3 final review D, Important 1: `MANAGER.org_id` is "o1", where
 // phases 1-2 filed every new row whoever was chosen, so a test that chooses
