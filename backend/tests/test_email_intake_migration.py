@@ -357,6 +357,32 @@ async def _seed_user(api_env, org_id: UUID, email: str | None = None) -> UUID:
         return user.id
 
 
+async def _seed_contact(api_env, org_id: UUID, email: str) -> UUID:
+    """A contact of a new customer client of `org_id`, holding `email`.
+
+    Since migration 0245 two TECHNICIANS of one organization never share an
+    address (`ux_users_org_lower_email_staff`), and 0232's
+    `its_contact_email_unique` refuses a contact whose address another user
+    already holds. The one pair that can still share one is a contact and a
+    technician created AFTER it -- so a caller seeds the contact first."""
+    from app.models import Client, User
+
+    async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
+        client = Client(org_id=org_id, name=f"Cliente {uuid4().hex[:6]}", kind="customer")
+        session.add(client)
+        await session.flush()
+        user = User(
+            org_id=org_id,
+            external_subject=f"contact-{uuid4().hex[:10]}",
+            email=email,
+            kind="contact",
+            client_id=client.id,
+        )
+        session.add(user)
+        await session.commit()
+        return user.id
+
+
 async def _seed_category(api_env, org_id: UUID) -> UUID:
     """Seed a `TicketQueue` + `TicketCategory` for `org_id` and return the
     category's id.

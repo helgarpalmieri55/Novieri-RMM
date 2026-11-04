@@ -8,7 +8,7 @@ from app.modules.email_intake.identity import (
     resolve_sender,
     resolve_ticket_by_token,
 )
-from tests.test_email_intake_migration import _seed_user
+from tests.test_email_intake_migration import _seed_contact, _seed_user
 
 
 async def test_exactly_one_matching_user_resolves(api_env) -> None:
@@ -76,12 +76,13 @@ async def test_the_sender_org_predicate_is_load_bearing(api_env) -> None:
 
 
 async def test_an_ambiguous_sender_does_not_resolve(api_env) -> None:
-    """Spec §5.1: `users` is unique on (org_id, external_subject), NOT on
-    email, so two users in one org can legitimately share an address.
-    Picking one would attribute a person's ticket to a colleague, and the
-    resulting ticket would look entirely normal."""
+    """Spec §5.1: two users in one org can still share an address. Not two
+    technicians any more (migration 0245), but a technician created after a
+    contact of a client holding the same one. Picking one would attribute a
+    person's ticket to a colleague, and the resulting ticket would look
+    entirely normal."""
     org_id = await api_env.create_org()
-    await _seed_user(api_env, org_id, email="shared@acme.test")
+    await _seed_contact(api_env, org_id, "shared@acme.test")
     await _seed_user(api_env, org_id, email="shared@acme.test")
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await resolve_sender(session, org_id, "shared@acme.test")
@@ -271,10 +272,11 @@ async def test_a_disabled_or_deleted_sender_does_not_resolve(api_env) -> None:
 async def test_an_active_user_is_not_shadowed_by_an_inactive_one(api_env) -> None:
     """Only active users take part, ambiguity included: a disabled account
     sharing an address with an active one does not quarantine the active
-    one's mail."""
+    one's mail. The pair that can share one since migration 0245: a contact,
+    and a technician created after it."""
     org_id = await api_env.create_org()
+    inactive = await _seed_contact(api_env, org_id, "shared@acme.test")
     active = await _seed_user(api_env, org_id, email="shared@acme.test")
-    inactive = await _seed_user(api_env, org_id, email="shared@acme.test")
     await _set_status(api_env, inactive, "disabled")
     async with org_session(org_id, engine=api_env.app_engine, clients=ClientScope.all()) as session:
         result = await resolve_sender(session, org_id, "Shared@Acme.test")
