@@ -1215,7 +1215,7 @@ describe("the registry page in Spanish", () => {
     expect(screen.getByText("Cada subred lleva una; una registrada sin VRF cae en la global del cliente.")).toBeInTheDocument();
     expect(screen.getByText("Una VLAN sin sede es de todo el cliente, no una a la que le falta la sede.")).toBeInTheDocument();
     // The client's sites, read-only: IPAM no longer keeps or creates sites (MSP clients phase 2).
-    expect(screen.getByText("Las oficinas del cliente. Las VLAN y las subredes las nombran; hasta que la consola pueda gestionar un cliente, se crean y se editan mediante la API o una conexión de IA (MCP).")).toBeInTheDocument();
+    expect(screen.getByText("Las oficinas del cliente. Las VLAN y las subredes las nombran; se crean y se editan en la página Clientes.")).toBeInTheDocument();
     expect((await screen.findAllByText("Lisbon")).length).toBeGreaterThan(0);
     expect(api.listClientSites).toHaveBeenCalledWith("o1");
     expect(await screen.findByText("65000:20")).toBeInTheDocument();

@@ -125,6 +125,8 @@ import { AgentReleasesPage } from "./modules/agent-releases/AgentReleasesPage";
 import { EnrollmentPage } from "./modules/enrollment/EnrollmentPage";
 import { ProfilePage } from "./modules/profile/ProfilePage";
 import { SettingsPage } from "./modules/settings/SettingsPage";
+import { ClientDetailPage } from "./modules/clients/ClientDetailPage";
+import { ClientsPage } from "./modules/clients/ClientsPage";
 import { SetupPage, fetchSetupStatus } from "./modules/setup/SetupPage";
 import { MyTicketsPage } from "./modules/portal/MyTicketsPage";
 import { NewTicketPage } from "./modules/portal/NewTicketPage";
@@ -1381,6 +1383,23 @@ export default function App() {
               element={
                 <RequireAuth>
                   <AgentReleasesPage />
+                </RequireAuth>
+              }
+            />
+            {/* Clients (MSP clients phase 3, design §4.1). */}
+            <Route
+              path="/clients"
+              element={
+                <RequireAuth>
+                  <ClientsPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/clients/:clientId"
+              element={
+                <RequireAuth>
+                  <ClientDetailPage />
                 </RequireAuth>
               }
             />

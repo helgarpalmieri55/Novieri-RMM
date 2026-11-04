@@ -1220,7 +1220,7 @@ describe("backup state vocabulary", () => {
 
   it("maps real backend backup_repositories states to non-default badge variants", () => {
     expect(repositoryStateVariant("active")).toBe("success");
-    expect(repositoryStateVariant("disabled")).toBe("muted");
+    expect(repositoryStateVariant("retired")).toBe("muted");
     expect(repositoryStateVariant("not_a_real_state")).toBe("muted");
   });
 });
@@ -1955,16 +1955,16 @@ describe("every backup tile opens the rows it counted", () => {
     expectLiveTiles([
       "/backup/repositories",
       "/backup/repositories?state=active",
-      "/backup/repositories?state=disabled",
+      "/backup/repositories?state=retired",
     ]);
   });
 
   it("narrows the repository table to the state the tile counted", async () => {
     api.listBackupRepositories = vi.fn().mockResolvedValue([
       REPOSITORIES[0] as Repository,
-      { ...(REPOSITORIES[0] as Repository), id: "repo2", name: "cold-vault", state: "disabled" },
+      { ...(REPOSITORIES[0] as Repository), id: "repo2", name: "cold-vault", state: "retired" },
     ]);
-    renderWithProviders(<RepositoriesPage />, "/backup/repositories?state=disabled");
+    renderWithProviders(<RepositoriesPage />, "/backup/repositories?state=retired");
 
     expect(await screen.findByText("cold-vault")).toBeInTheDocument();
     expect(screen.queryByText("primary-vault")).not.toBeInTheDocument();

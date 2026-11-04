@@ -36,6 +36,7 @@ import {
 import { UtilizationBar } from "./UtilizationBar";
 import type { SubnetFilters, SubnetKind, SubnetOut } from "./types";
 import { IPAM_MANAGE, SUBNET_KINDS } from "./types";
+import { useAdoptJourneyClient } from "../onboarding/journeyTarget";
 import { Btn, FilterBar, PageHead, Panel, QueryState, SearchField, StatCard, StatsGrid, StatusPill } from "../../shell/components";
 
 // The subnet tree (spec §12): the DERIVED hierarchy, per-node utilisation,
@@ -101,6 +102,8 @@ const VIEWS: ReadonlyArray<{ key: string; label: MessageKey }> = [
 ];
 
 export function SubnetTreePage() {
+  // Opened from the add-a-computer journey: its client (design §4.4).
+  useAdoptJourneyClient();
   const t = useT();
   const permissions = useIpamPermissions();
   const [filters, setFilters] = useState<SubnetFilters>({});

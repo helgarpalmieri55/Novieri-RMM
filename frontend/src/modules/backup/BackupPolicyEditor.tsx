@@ -338,7 +338,8 @@ function PolicyDialog({
   const repositoryOptions = repositoryPickerOptions(clientRepositories);
   // A repository of another client is not this policy's to name -- one a
   // stored policy kept from before the rule, or one picked before the group
-  // changed -- so it is not selected, and Save asks for one of this client's.
+  // changed -- and neither is a retired one (design §5.5), so it is not
+  // selected, and Save asks for an active one of this client's.
   const chosenRepository = clientRepositories.some((repo) => repo.id === repositoryId)
     ? repositoryId
     : "";
@@ -444,8 +445,9 @@ function PolicyDialog({
               nothing is being backed up at all. `EntityPicker` renders
               `emptyHint` in place of the empty list and the link names the
               surface that fills it; the sublabel carries the storage ref and
-              state, because two repositories differ by the bucket they write to
-              and a `disabled` one is a schedule that writes nowhere. */}
+              state, because two repositories differ by the bucket they write to.
+              A `retired` one would be a schedule that writes nowhere, so it is
+              not offered at all (`repositoriesOfClient`, design §5.5). */}
           <EntityPicker
             label={t("backup.policyDialog.repository")}
             options={repositoryOptions}

@@ -64,7 +64,7 @@ const REPOSITORIES: Repository[] = [
     client_id: ORG_ID,
     name: "Legacy NAS",
     storage_ref: "s3://nas-archive/",
-    state: "disabled",
+    state: "retired",
     dedup_params: {},
     created_at: ago(400 * DAY),
   },
@@ -199,6 +199,26 @@ const createBackupRepository: FixtureMap["createBackupRepository"] = (body) => (
   created_at: ago(0),
 });
 
+// Refused as the route refuses (phase 3 design §5.5): while an ENABLED policy
+// names the repository, or once it is retired. Nothing here unretires one.
+const retireBackupRepository: FixtureMap["retireBackupRepository"] = (repositoryId) => {
+  const found = REPOSITORIES.find((r) => r.id === repositoryId);
+  if (!found) throw notFound("repository");
+  if (found.state === "retired") {
+    throw new ApiError(409, JSON.stringify({ detail: "this repository is already retired" }));
+  }
+  if (POLICIES.some((p) => p.enabled && p.repository_id === repositoryId)) {
+    throw new ApiError(
+      409,
+      JSON.stringify({
+        detail:
+          "an enabled backup policy still uses this repository; switch it off or point it at another repository first",
+      }),
+    );
+  }
+  return { ...found, state: "retired" };
+};
+
 const listBackupPolicies: FixtureMap["listBackupPolicies"] = () => POLICIES;
 
 const upsertBackupPolicy: FixtureMap["upsertBackupPolicy"] = (body) => {
@@ -328,6 +348,7 @@ export const fixtures: FixtureMap = {
   listRecoveryKeys,
   listBackupRepositories,
   createBackupRepository,
+  retireBackupRepository,
   listBackupPolicies,
   upsertBackupPolicy,
   listBackupPoints,

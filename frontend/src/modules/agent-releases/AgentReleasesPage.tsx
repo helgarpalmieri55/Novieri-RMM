@@ -25,6 +25,7 @@ import { platformLabel, untestedCaveat } from "./platform";
 import { PublishReleaseDialog } from "./PublishReleaseDialog";
 import { ChannelPill, ReleaseChannels, compareVersions } from "./ReleaseChannels";
 import { useEverywherePermissions } from "../../lib/mePermissions";
+import { useAdoptJourneyClient, useJourneySiteState } from "../onboarding/journeyTarget";
 
 /** The lifetime this page asks for, in hours. Stated in the confirmation
  *  because "how long is this credential alive" is the thing the operator is
@@ -158,6 +159,8 @@ function EmptyCatalogue({ canPublish }: { canPublish: boolean }) {
 }
 
 export function AgentReleasesPage() {
+  // Opened from the add-a-computer journey: its client (design §4.4).
+  useAdoptJourneyClient();
   const t = useT();
   const api = useApi();
   const [command, setCommand] = useState<AgentInstallCommand | null>(null);
@@ -210,6 +213,13 @@ export function AgentReleasesPage() {
   const [pickedClient, setPickedClient] = useState("");
   const siteClient = target.needsField ? pickedClient || null : target.clientId;
   const [siteId, setSiteId] = useState("");
+  // THE JOURNEY'S SITE FIRST (design §4.4): a page opened from the
+  // add-a-computer journey starts on the site chosen there.
+  const [journeySite] = useJourneySiteState();
+  useEffect(() => {
+    if (journeySite !== null && siteId === "") setSiteId(journeySite);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seeds once from the journey
+  }, [journeySite]);
 
   const releases = useQuery({
     queryKey: ["agent-releases"],

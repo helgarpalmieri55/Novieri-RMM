@@ -65,6 +65,10 @@ import type {
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
+vi.mock("../../lib/clientScope", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/clientScope")>()),
+  useClientScope: () => ({ selected: null, select: vi.fn(), clients: [], ready: true }),
+}));
 
 // ------------------------------------------------------------------ fixtures
 

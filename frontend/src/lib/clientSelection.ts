@@ -14,9 +14,9 @@
  * The body is still built INSIDE the mutation (`requireKnown`): nothing is
  * sent before the client is known.
  *
- * Replaces `lib/internalClient.ts`, which filed every new row under the
- * organisation's internal client until this phase. Its callers move here in
- * Tasks 10 and 11, and Task 12 deletes it.
+ * Phases 1 and 2 filed every new row under the organisation's internal client,
+ * whoever was working; this module replaced that helper in phase 3, and
+ * `lib/noPhase3.test.ts` keeps it from coming back.
  *
  * INVARIANT 6: THIS GATES NOTHING. The server refuses a client outside the
  * request's scope, or one where the person lacks the code, whatever a form

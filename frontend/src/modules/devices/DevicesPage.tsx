@@ -13,11 +13,12 @@
  * `fleet` (the stat tiles); NOTHING on this page recomputes any of them.
  *
  * WHAT THE DESIGN ASKS FOR THAT THE API DOES NOT SERVE. The prototype's
- * Devices table has eight columns; four of them — Site, Patch %, Backup, Risk
- * — have no field behind them. The same is true of two of its four stat
- * cards: "At risk" has no definition anywhere in the backend, and every
- * card's "↑ 12 vs last 7 days" delta needs a previous value no endpoint
- * serves.
+ * Devices table has eight columns; three of them — Patch %, Backup, Risk —
+ * have no field behind them. (Site has one since the MSP clients model: it is
+ * a column, with the device's client beside it while every client is shown,
+ * design 2026-10-31 §4.3.) The same is true of two of its four stat cards:
+ * "At risk" has no definition anywhere in the backend, and every card's
+ * "↑ 12 vs last 7 days" delta needs a previous value no endpoint serves.
  *
  * Those columns are OMITTED, not faked. Hardcoding the mock's numbers would
  * produce a screen that looks finished and lies — and it would lie most
@@ -37,7 +38,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { useT } from "../../i18n/context";
@@ -49,6 +50,9 @@ import { useApi } from "../../lib/ApiContext";
 import { RelTime } from "../../components/reltime";
 import { saveBlob } from "../../lib/download";
 import { useLiveEvents } from "../../lib/ws";
+import { useClientScope } from "../../lib/clientScope";
+import { useClientName } from "../settings/api";
+import { useSitesOf } from "./siteNames";
 import { Btn, FilterBar, PageHead, Panel, QueryState, ResultCount, SearchField, StatCard, StatsGrid, StatusPill, TableFoot, TableWrap, Tabs, type Kind } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { ADD_COMPUTER_TO } from "../../shell/nav";
@@ -240,6 +244,17 @@ export function DevicesPage() {
   // "the eleven machines nobody vouched for" is a thing one technician sends
   // another, and a filter that lives in component state cannot be sent.
   const provenance = params.get("provenance") ?? "";
+  // THE SITE FILTER (design §4.3), in the URL like every filter here. Sites are
+  // one client's, so it applies only with a client chosen above, and only to
+  // one of THAT client's sites (`siteFilter` below).
+  const site = params.get("site") ?? "";
+  const { selected: chosenClient } = useClientScope();
+  const clientName = useClientName();
+  // The chosen client's sites: the filter's options, and what a `?site=` is
+  // checked against. `undefined` while they load, or when the person may not
+  // read them (`useSitesOf`).
+  const chosenSiteNames = useSitesOf(chosenClient !== null ? [chosenClient] : []);
+  const chosenSites = chosenClient !== null ? chosenSiteNames.sitesOf(chosenClient) : undefined;
   // IN THE URL for the same reason as everything else here, plus one of its
   // own: an operator who found a machine on page four and followed the row to
   // its detail page has to come BACK to page four.
@@ -261,6 +276,28 @@ export function DevicesPage() {
   // an empty table is the one answer this page must never give by accident.
   const setTab = (key: string) => update({ state: key === "all" ? "" : key, offset: "" });
   const setProvenance = (value: string) => update({ provenance: value, offset: "" });
+  const setSite = (value: string) => update({ site: value, offset: "" });
+  /**
+   * A SITE IS SENT ONLY WHEN IT IS ONE OF THE CHOSEN CLIENT'S. Another client
+   * chosen above drops the filter (plan decision) -- and the change itself is
+   * never seen here: it starts this page again (`lib/clientScope.tsx`'s keyed
+   * fragment) while the URL keeps its `?site=`, so what the new page finds is
+   * a site its client does not have. Sending that would answer an empty fleet
+   * for a filter nobody set on this client. With every client chosen there is
+   * no site filter at all. Either way the stale `?site=` (and the offset it
+   * paged) leaves the URL; until the client's sites are known nothing is
+   * sent, so a bookmarked filter applies once they arrive.
+   */
+  const siteFilter =
+    site !== "" && (chosenSites ?? []).some((item) => item.id === site) ? site : "";
+  const staleSite =
+    site !== "" &&
+    (chosenClient === null ||
+      (chosenSites !== undefined && !chosenSites.some((item) => item.id === site)));
+  useEffect(() => {
+    if (staleSite) update({ site: "", offset: "" }, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a stale site clears it
+  }, [staleSite]);
   const setSearch = (value: string) => update({ q: value, offset: "" }, true);
   const setOffset = (next: number) => update({ offset: next === 0 ? "" : String(next) });
 
@@ -287,6 +324,7 @@ export function DevicesPage() {
     // unrecognised value is refused by the route's own pattern, which is the
     // right place for it -- the console never gates anything.
     provenance: (provenance || undefined) as Device["provenance"] | undefined,
+    siteId: siteFilter || undefined,
     limit: DEVICES_PAGE_SIZE,
     offset,
   };
@@ -361,6 +399,15 @@ export function DevicesPage() {
   // that already has one, and the two only ever agree while the page is the
   // whole set -- which is the assumption this change exists to remove.
   const items = devices.data?.items ?? [];
+  // THE COLUMNS OF MSP CLIENTS (design §3.4, §4.3): Client while every client
+  // is shown (the same column in every module), Site always. The names come
+  // from each row's client's sites, one read per client, shared by key.
+  const showClient = chosenClient === null;
+  const sites = useSitesOf(
+    chosenClient !== null
+      ? [chosenClient]
+      : items.map((device) => device.client_id).filter((id): id is string => Boolean(id)),
+  );
   // The stat cards stay FLEET-WIDE on purpose: "Managed endpoints" is a fact
   // about the estate, and a number that shrank as somebody typed in a search
   // box would be a different -- and much worse -- version of the same defect.
@@ -591,6 +638,23 @@ export function DevicesPage() {
               </option>
             ))}
           </select>
+          {/* BY SITE, with a client chosen above and a choice to make: more
+              than one site, or a site already chosen (so it can be undone). */}
+          {chosenClient !== null && ((chosenSites?.length ?? 0) > 1 || siteFilter !== "") ? (
+            <select
+              className="select-field"
+              value={siteFilter}
+              onChange={(event) => setSite(event.target.value)}
+              aria-label={t("devices.filters.siteAria")}
+            >
+              <option value="">{t("devices.filters.siteAny")}</option>
+              {(chosenSites ?? []).map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <span className="filter-spacer" />
         </FilterBar>
 
@@ -671,6 +735,8 @@ export function DevicesPage() {
                   <th scope="col">{t("devices.table.device")}</th>
                   <th scope="col">{t("devices.table.agent")}</th>
                   <th scope="col">{t("devices.table.lastSeen")}</th>
+                  {showClient ? <th scope="col">{t("devices.table.client")}</th> : null}
+                  <th scope="col">{t("devices.table.site")}</th>
                   {/* WHO HOLDS IT (operator decision 2026-09-23: People folded
                       into Devices). Only for a `people.read` holder, which is
                       also the only caller the server sends `assigned_to` to:
@@ -776,6 +842,12 @@ export function DevicesPage() {
                       <td className="whitespace-nowrap">
                         <RelTime iso={device.last_seen_at} zone={zone} now={now} />
                       </td>
+                      {showClient ? (
+                        <td>
+                          {device.client_id ? clientName(device.client_id) : <NoValue label={t("devices.row.noClient")} />}
+                        </td>
+                      ) : null}
+                      <td>{sites.siteName(device.site_id) ?? <NoValue label={t("devices.row.noSite")} />}</td>
                       {canReadPeople ? (
                         <td>
                           {device.assigned_to ? (

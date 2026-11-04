@@ -316,7 +316,7 @@ describe("Settings — Users tab", () => {
     expect(within(panel).queryByText("auditor")).not.toBeInTheDocument();
   });
 
-  it("shows effective permissions annotated with the role that granted each and its scope", async () => {
+  it("shows effective permissions grouped by client, with the role that granted each", async () => {
     const user = await openUsers();
     await user.click(
       await screen.findByRole("button", { name: "Effective permissions for operator@example.com" }),
@@ -327,25 +327,22 @@ describe("Settings — Users tab", () => {
     await waitFor(() =>
       expect(calls.getUserEffectivePermissions).toHaveBeenCalledWith(OPERATOR_USER.id),
     );
-    const orgWide = await within(panel).findByRole("row", { name: /devices\.read/ });
-    // Re-pointed: "Granted by" now reads the humanized role name, same
-    // transform as the directory chip (`roleDisplayName`, `./types.ts`) --
-    // it used to stop at the chip and leave this column on the raw wire
-    // value "technician", which is the language-sweep gap this pins shut.
+    // RE-POINTED (MSP clients phase 3, design §4.2): the "Applies to" column
+    // became the group a grant sits in -- every client first, then each client.
+    // "Granted by" still reads the humanized role name (`roleDisplayName`,
+    // `./types.ts`), never the raw wire value; and the client is named from
+    // `GET /clients`, never by its id.
+    const every = await within(panel).findByRole("table", { name: "Every client" });
+    const orgWide = within(every).getByRole("row", { name: /devices\.read/ });
     expect(within(orgWide).getByText("Technician")).toBeInTheDocument();
-    // Re-pointed: `docs/design/settings-language.md` glossary renders an
-    // org-wide grant as "everywhere", never "organization-wide".
-    expect(within(orgWide).getByText(/everywhere/i)).toBeInTheDocument();
-
-    const scoped = within(panel).getByRole("row", { name: /devices\.manage/ });
-    // Re-pointed for the same reason: "warehouse-technician" -> "Warehouse
-    // technician".
+    const warehouse = within(panel).getByRole("table", { name: "Warehouse" });
+    const scoped = within(warehouse).getByRole("row", { name: /devices\.manage/ });
     expect(within(scoped).getByText("Warehouse technician")).toBeInTheDocument();
-    // CYCLE 9. The scope now names the GROUP, resolved from the same list
-    // the picker offers -- the raw id was the finding, not the fix.
-    // RE-POINTED: the scope is a CLIENT now, named from `GET /clients`.
-    expect(within(scoped).getByText(/limited to Warehouse/i)).toBeInTheDocument();
-    expect(within(scoped).queryByText(/44444444-4444-4444-8444-444444444444/)).not.toBeInTheDocument();
+    expect(within(panel).getAllByRole("table").map((table) => table.getAttribute("aria-label"))).toEqual([
+      "Every client",
+      "Warehouse",
+    ]);
+    expect(within(panel).queryByText(/44444444-4444-4444-8444-444444444444/)).not.toBeInTheDocument();
   });
 
   /**

@@ -36,9 +36,10 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from app.models import Agent, Device, Organization
+from app.models import Agent, Device, Organization, Site
 from app.services.cert_renewal import EXPIRING_REMAINING_DAYS, cert_state
 from app.services.device_list import device_page
+from tests.client_scope_support import client_with_site, everything_on
 
 NOW = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
 
@@ -434,6 +435,54 @@ async def test_the_route_serves_the_page_the_strip_and_the_tiles(api_env) -> Non
     plain = (await api_env.client.get("/api/v1/devices", headers=headers)).json()
     assert plain["total"] == 4
     assert plain["state_counts"]["all"] == plain["fleet"]["total"] == 4
+
+
+async def test_the_route_filters_by_site_and_never_widens(api_env) -> None:
+    """`GET /devices?site_id=` (MSP clients phase 3, design §4.3): one site's
+    machines, its counts obeying the filter like any other and the tiles
+    obeying none. A site of a client outside the scope answers an empty page,
+    never a widening: RLS decides what the caller sees, the filter only narrows
+    it. A malformed id is a 422, not an unfiltered page."""
+    org_id = await api_env.create_org("dl-site")
+    x, x_main = await client_with_site(api_env, org_id)
+    async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as session:
+        north = Site(org_id=org_id, client_id=x, name="Bodega norte")
+        session.add(north)
+        await session.flush()
+        session.add_all(
+            [
+                Device(org_id=org_id, hostname="principal-1", client_id=x, site_id=x_main),
+                Device(org_id=org_id, hostname="norte-1", client_id=x, site_id=north.id),
+                Device(org_id=org_id, hostname="norte-2", client_id=x, site_id=north.id),
+                Device(org_id=org_id, hostname="interno-1", client_id=org_id, site_id=org_id),
+            ]
+        )
+        await session.commit()
+        north_id = north.id
+
+    every = await api_env.headers(org_id, await api_env.create_user(org_id, "read-only"))
+    body = (
+        await api_env.client.get(
+            "/api/v1/devices", params={"site_id": str(north_id)}, headers=every
+        )
+    ).json()
+    assert sorted(item["hostname"] for item in body["items"]) == ["norte-1", "norte-2"]
+    assert {item["site_id"] for item in body["items"]} == {str(north_id)}
+    assert body["total"] == 2
+    assert body["state_counts"]["all"] == 2
+    assert body["fleet"]["total"] == 4
+
+    internal_only = await everything_on(api_env, org_id, org_id)
+    hidden = (
+        await api_env.client.get(
+            "/api/v1/devices", params={"site_id": str(north_id)}, headers=internal_only
+        )
+    ).json()
+    assert hidden["items"] == []
+    assert hidden["total"] == 0
+
+    bad = await api_env.client.get("/api/v1/devices", params={"site_id": "north"}, headers=every)
+    assert bad.status_code == 422, bad.text
 
 
 # --------------------------------------------------------------------------- #

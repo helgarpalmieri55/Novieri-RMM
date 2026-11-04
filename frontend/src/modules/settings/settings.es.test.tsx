@@ -582,11 +582,13 @@ describe("the users tab in Spanish", () => {
     const section = await screen.findByRole("region", { name: "Permisos efectivos de operator@example.com" });
     expect(await within(section).findByText("devices.manage")).toBeInTheDocument();
     expect(within(section).getByText("Todos los códigos que tiene esta persona y el rol del que proceden")).toBeInTheDocument();
-    for (const header of ["Permiso", "Concedido por", "Se aplica a"]) {
-      expect(within(section).getByRole("columnheader", { name: header })).toBeInTheDocument();
+    // RE-POINTED (MSP clients phase 3, design §4.2): one table per client,
+    // every client first; "Se aplica a" became the group a grant sits in.
+    for (const header of ["Permiso", "Concedido por"]) {
+      expect(within(section).getAllByRole("columnheader", { name: header })).toHaveLength(2);
     }
-    expect(within(section).getByText("en todas partes")).toBeInTheDocument();
-    expect(within(section).getByText("limitado a Warehouse")).toBeInTheDocument();
+    expect(within(section).getByRole("table", { name: "Todos los clientes" })).toBeInTheDocument();
+    expect(within(section).getByRole("table", { name: "Warehouse" })).toBeInTheDocument();
     expectNoEnglish(container, RECORDED);
   });
 

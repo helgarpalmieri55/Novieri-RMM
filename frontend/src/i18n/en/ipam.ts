@@ -776,9 +776,9 @@ export const ipam = {
     routeDistinguisher: "Route distinguisher",
     addVrf: "Add VRF",
     sitesTitle: "Sites",
-    // No console page manages a client's sites yet (phase 3) -- final review E.
     sitesSubtitle:
-      "The client's offices. VLANs and subnets name them; until the console can manage a client, they are added and edited through the API or an AI connection (MCP).",
+      "The client's offices. VLANs and subnets name them; they are added and edited on the Clients page.",
+    manageSites: "Manage sites",
     sitesEmpty: "This client has no sites yet.",
     vlansTitle: "VLANs",
     vlansSubtitle: "A VLAN with no site is the whole client's, not one whose site is missing.",

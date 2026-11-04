@@ -527,6 +527,8 @@ export interface DeviceListParams {
   osFamily?: Device["os_family"];
   /** One client's machines (`?client_id=`): what IPAM's sweeper picker lists. */
   clientId?: string;
+  /** One site's machines (`?site_id=`): the fleet list's site filter (MSP clients phase 3). */
+  siteId?: string;
   limit?: number;
   offset?: number;
 }
@@ -926,6 +928,49 @@ export interface ContactUpdate {
   display_name?: string;
   phone?: string | null;
   status?: "active" | "disabled";
+}
+
+/** `POST /clients` (`ClientCreate`): a customer client, born with a site called Principal. */
+export interface ClientCreate {
+  name: string;
+  email_domains: string[];
+  phone: string;
+  address: string;
+  website: string;
+  notes: string;
+  enabled_modules: ("budget" | "bcp" | "change")[];
+}
+
+/** `PATCH /clients/{id}` (`ClientUpdate`): only the fields present are written. */
+export interface ClientUpdate {
+  name?: string;
+  email_domains?: string[];
+  phone?: string;
+  address?: string;
+  website?: string;
+  notes?: string;
+  enabled_modules?: ("budget" | "bcp" | "change")[];
+}
+
+/** `POST /clients/{id}/sites` (`SiteCreate`). */
+export interface SiteCreate {
+  name: string;
+  address: string;
+  description: string;
+}
+
+/** `PATCH /sites/{id}` (`SiteUpdate`): name, address and description only. */
+export interface SiteUpdate {
+  name?: string;
+  address?: string;
+  description?: string;
+}
+
+/** `POST /clients/{id}/contacts` (`ContactCreate`). A contact cannot sign in to the console. */
+export interface ContactCreate {
+  email: string;
+  display_name: string;
+  phone: string | null;
 }
 
 /**
@@ -1736,8 +1781,9 @@ export class ApiClient {
   }
 
   /**
-   * The clients of the request's scope, archived ones left out
-   * (`clients.read`). The Users tab's grant scope picks from these.
+   * The clients of the request's scope, archived ones left out unless asked
+   * (`clients.read`). The Users tab's grant scope and the Clients page read
+   * these.
    */
   listClients(params: { include_archived?: boolean } = {}): Promise<ClientOut[]> {
     return this.request<ClientOut[]>(
@@ -1745,9 +1791,74 @@ export class ApiClient {
     );
   }
 
-  /** A client's sites, archived ones left out (`clients.read`): IPAM's site pickers. */
-  listClientSites(clientId: string): Promise<ClientSiteOut[]> {
-    return this.request<ClientSiteOut[]>(`/clients/${encodeURIComponent(clientId)}/sites`);
+  /**
+   * A client's sites (`clients.read`): archived ones left out unless
+   * `include_archived` -- the Clients page's Sites tab asks for them; the site
+   * pickers (IPAM, `SiteField`) call it with one argument.
+   */
+  listClientSites(
+    clientId: string,
+    params: { include_archived?: boolean } = {},
+  ): Promise<ClientSiteOut[]> {
+    const suffix = params.include_archived ? "?include_archived=true" : "";
+    return this.request<ClientSiteOut[]>(`/clients/${encodeURIComponent(clientId)}/sites${suffix}`);
+  }
+
+  /** One client of the request's scope, archived or not (`clients.read`). */
+  getClientRecord(clientId: string): Promise<ClientOut> {
+    return this.request<ClientOut>(`/clients/${encodeURIComponent(clientId)}`);
+  }
+
+  /**
+   * A new customer client and its Principal site. `clients.manage` on EVERY
+   * client: a global route (`lib/globalRoutes.json`), so it never carries
+   * `X-Client-Id`.
+   */
+  createClient(body: ClientCreate): Promise<ClientOut> {
+    return this.request<ClientOut>("/clients", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  /** `clients.manage` on that client. An email domain another client holds is a 409. */
+  updateClient(clientId: string, body: ClientUpdate): Promise<ClientOut> {
+    return this.request<ClientOut>(`/clients/${encodeURIComponent(clientId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * Archive a customer client. `clients.manage` on EVERY client (a global
+   * route). 409 while it has active devices, and always for the internal and
+   * unassigned clients; the server's sentence says which.
+   */
+  archiveClient(clientId: string): Promise<ClientOut> {
+    return this.request<ClientOut>(`/clients/${encodeURIComponent(clientId)}/archive`, {
+      method: "POST",
+    });
+  }
+
+  /** `sites.manage` on that client. The unassigned client has no sites (422). */
+  createClientSite(clientId: string, body: SiteCreate): Promise<ClientSiteOut> {
+    return this.request<ClientSiteOut>(`/clients/${encodeURIComponent(clientId)}/sites`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** `sites.manage` on the site's client. */
+  updateSite(siteId: string, body: SiteUpdate): Promise<ClientSiteOut> {
+    return this.request<ClientSiteOut>(`/sites/${encodeURIComponent(siteId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * Archive a site (`DELETE /sites/{id}`, never a hard delete; `sites.manage`).
+   * 409 while it holds devices, and for the internal client's Principal site.
+   */
+  archiveSite(siteId: string): Promise<ClientSiteOut> {
+    return this.request<ClientSiteOut>(`/sites/${encodeURIComponent(siteId)}`, { method: "DELETE" });
   }
 
   /**
@@ -1899,6 +2010,19 @@ export class ApiClient {
     });
   }
 
+  /** A client's contacts, disabled ones included (`clients.read`). */
+  listContacts(clientId: string): Promise<ContactOut[]> {
+    return this.request<ContactOut[]>(`/clients/${encodeURIComponent(clientId)}/contacts`);
+  }
+
+  /** `clients.manage` on that client. One email address per organisation (409). */
+  createContact(clientId: string, body: ContactCreate): Promise<ContactOut> {
+    return this.request<ContactOut>(`/clients/${encodeURIComponent(clientId)}/contacts`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
   /**
    * Edit a client's contact, or switch it off and on (`PATCH /contacts/{id}`,
    * `clients.manage`). `/users` is staff-only: a contact's sign-in is turned
@@ -1953,6 +2077,7 @@ export class ApiClient {
     if (params.provenance) query.set("provenance", params.provenance);
     if (params.osFamily) query.set("os_family", params.osFamily);
     if (params.clientId) query.set("client_id", params.clientId);
+    if (params.siteId) query.set("site_id", params.siteId);
     if (params.limit != null) query.set("limit", String(params.limit));
     if (params.offset) query.set("offset", String(params.offset));
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
@@ -2036,6 +2161,19 @@ export class ApiClient {
     return this.request<Device>(`/devices/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * Move a device to another site of ITS client (`PATCH /devices/{id}` with
+   * `site_id`, `assets.manage`; MSP clients phase 3, design §4.3). Another
+   * client's site is a 422, an archived one a 409, one the request cannot see
+   * a 404. Audited `device.site_changed`. A device never changes client.
+   */
+  changeDeviceSite(deviceId: string, siteId: string): Promise<Device> {
+    return this.request<Device>(`/devices/${deviceId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ site_id: siteId }),
     });
   }
 
@@ -2987,6 +3125,19 @@ export class ApiClient {
     return this.request<Repository>("/backup/repositories", {
       method: "POST",
       body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * Retire a repository (`POST /backup/repositories/{id}/retire`,
+   * `backup.policy.manage` in the repository's client; MSP clients phase 3,
+   * design §5.5). Refused (409) while an active policy names it. A retired
+   * repository takes no new backups; its points stay and can be restored, so
+   * the space stays used. There is no way back to active.
+   */
+  retireBackupRepository(repositoryId: string): Promise<Repository> {
+    return this.request<Repository>(`/backup/repositories/${encodeURIComponent(repositoryId)}/retire`, {
+      method: "POST",
     });
   }
 

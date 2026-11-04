@@ -53,10 +53,12 @@ export const shell = {
       platformStatus: "Platform status",
       errorMonitor: "Error monitor",
       settings: "Settings",
+      clients: "Clients",
       myTickets: "My tickets",
       newTicket: "New ticket",
     },
     section: {
+      organization: "Organization",
       serviceDesk: "Service desk",
       computers: "Computers",
       automation: "Automation",
@@ -90,6 +92,7 @@ export const shell = {
       platformStatus: "Whether this server's own services are healthy.",
       errorMonitor: "Errors the console and its server have raised.",
       settings: "Organization, users, roles, email and defaults.",
+      clients: "The companies you serve, their sites, contacts and modules.",
     },
     adminDescription: "Set up how the console works for your organization.",
     // Real routes that no rail entry lists, named for the breadcrumb and the tab title.

@@ -39,7 +39,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
@@ -53,7 +53,20 @@ import { Td, Th } from "../../components/ui";
 import { useIpamScanAuthorizations, useIpamSubnets, useIpamSweepRuns } from "../ipam/api";
 import { formatAge } from "../ipam/ipamState";
 import type { SubnetOut } from "../ipam/types";
-import { currentStep, journeySteps, type JourneyStep, type StepState } from "./journey";
+import { ClientField } from "../../components/ClientField";
+import { SiteField } from "../../components/SiteField";
+import { useClientScope } from "../../lib/clientScope";
+import { useSitesOf } from "../devices/siteNames";
+import {
+  currentStep,
+  JOURNEY_SITE_PARAM,
+  journeyQuery,
+  journeySteps,
+  withJourney,
+  type JourneyStep,
+  type StepState,
+} from "./journey";
+import { useAdoptJourneyClient } from "./journeyTarget";
 
 /** The state as a pill kind. `unknown` is deliberately the quietest: a query
  *  that has not answered must not look like a verdict. */
@@ -97,11 +110,36 @@ function rung(step: JourneyStep): Kind | undefined {
   return step.state === "partial" || step.state === "blocked" ? KIND[step.state] : undefined;
 }
 
+/** Adding a computer is offered on the clients whose devices the person can see. */
+const ONBOARD_CODE = "devices.read";
+
 export function OnboardPage() {
   const t = useT();
   const api = useApi();
   const me = useQuery<Me>({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
   const permissions = me.data?.permissions ?? [];
+
+  // CLIENT AND SITE FIRST (design §4.4). The client is the console's: chosen
+  // above, or chosen here, which switches the console to it (plan decision).
+  // With one site nothing is asked; the pair then rides on every link below.
+  // A `?site=` left by another client (a change of client starts this page
+  // again on the same URL) is not one of this client's, so it is not used.
+  useAdoptJourneyClient();
+  const { selected: chosenClient, select, clients } = useClientScope();
+  const [params, setParams] = useSearchParams();
+  const sites = useSitesOf(chosenClient !== null ? [chosenClient] : []);
+  const siteList = chosenClient !== null ? (sites.sitesOf(chosenClient) ?? []) : [];
+  const onlySite = siteList.length === 1 ? (siteList[0] ?? null) : null;
+  const askedSite = params.get(JOURNEY_SITE_PARAM);
+  const site = onlySite?.id ?? (siteList.some((item) => item.id === askedSite) ? askedSite : null);
+  const linkQuery = chosenClient !== null && site !== null ? journeyQuery(chosenClient, site) : "";
+
+  function chooseSite(id: string) {
+    const next = new URLSearchParams(params);
+    if (id) next.set(JOURNEY_SITE_PARAM, id);
+    else next.delete(JOURNEY_SITE_PARAM);
+    setParams(next, { replace: true });
+  }
 
   const subnets = useIpamSubnets();
   const scopes = useIpamScanAuthorizations();
@@ -141,6 +179,7 @@ export function OnboardPage() {
     latestRun: selected == null ? null : runs.data === undefined ? undefined : (runs.data[0] ?? null),
     candidates: candidates.data,
     releases: releases.data,
+    linkQuery,
   });
   const here = currentStep(steps);
 
@@ -151,6 +190,38 @@ export function OnboardPage() {
         description={t("onboarding.page.description")}
       />
 
+      <Panel title={t("onboarding.target.title")} subtitle={t("onboarding.target.subtitle")}>
+        {chosenClient === null ? (
+          <div className="form-grid">
+            {/* Nothing is kept here: choosing switches the console to the
+                client, and the page starts again under it. */}
+            <ClientField
+              code={ONBOARD_CODE}
+              value=""
+              onChange={(id) => {
+                if (id) select(id);
+              }}
+            />
+          </div>
+        ) : (
+          <>
+            <p className="note">
+              {t("onboarding.target.client", {
+                client: clients.find((item) => item.id === chosenClient)?.name ?? chosenClient,
+              })}
+            </p>
+            {onlySite !== null ? (
+              <p className="note">{t("onboarding.target.oneSite", { site: onlySite.name })}</p>
+            ) : (
+              <div className="form-grid">
+                <SiteField clientId={chosenClient} value={site ?? ""} onChange={chooseSite} />
+              </div>
+            )}
+          </>
+        )}
+        {linkQuery === "" ? <p className="note">{t("onboarding.target.pickFirst")}</p> : null}
+      </Panel>
+
       {/* THE COMMON CASE FIRST. This page is the console's one "Add a
           computer" entry (top bar and Devices head), and most of the time the
           machine is in front of the operator: the review found this panel at
@@ -160,11 +231,11 @@ export function OnboardPage() {
         subtitle={t("onboarding.page.oneComputer.subtitle")}
         actions={
           <>
-            <Link className="btn" to="/agent-packages">
+            <Link className="btn" to={withJourney("/agent-packages", linkQuery)}>
               <Icon name="download" size={14} />
               <span>{t("onboarding.page.oneComputer.getInstaller")}</span>
             </Link>
-            <Link className="btn" to="/enrollment">
+            <Link className="btn" to={withJourney("/enrollment", linkQuery)}>
               <Icon name="certificate" size={14} />
               <span>{t("onboarding.page.oneComputer.enrollmentTokens")}</span>
             </Link>

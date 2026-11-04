@@ -13,7 +13,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ScopeOut, SubnetOut, SweepRunOut } from "../../ipam/types";
-import { currentStep, journeySteps, type JourneyInput, type StepKey } from "../journey";
+import { currentStep, journeyQuery, journeySteps, withJourney, type JourneyInput, type StepKey } from "../journey";
 
 const NOW = Date.parse("2026-08-26T12:00:00Z");
 
@@ -325,5 +325,30 @@ describe("step 5 — something to install", () => {
 
   it("says why an empty catalogue is not a fault", () => {
     expect(step({ releases: [] }, "agent").remedy).toMatch(/never builds or fetches/);
+  });
+});
+
+describe("the journey's client and site (MSP clients phase 3, design §4.4)", () => {
+  it("carries both on every step's destination", () => {
+    const steps = journeySteps(input({ linkQuery: journeyQuery("c-andes", "s-main") }));
+    const destinations = steps.map((s) => s.to).filter((to): to is string => to !== null);
+    expect(destinations.length).toBeGreaterThan(0);
+    for (const to of destinations) expect(to).toMatch(/\?client=c-andes&site=s-main$/);
+  });
+
+  it("leaves every destination alone until both are known", () => {
+    expect(journeySteps(input()).map((s) => s.to)).toEqual(
+      journeySteps(input({ linkQuery: "" })).map((s) => s.to),
+    );
+    expect(step({}, "register").to).toBe("/ipam");
+  });
+
+  it("builds the query, and keeps a fragment last", () => {
+    expect(journeyQuery("c 1", "s-main")).toBe("client=c+1&site=s-main");
+    expect(journeyQuery("c1", null)).toBe("client=c1");
+    expect(withJourney("/ipam", "client=c1&site=s1")).toBe("/ipam?client=c1&site=s1");
+    expect(withJourney("/x?a=1", "client=c1")).toBe("/x?a=1&client=c1");
+    expect(withJourney("/health#profiles", "client=c1")).toBe("/health?client=c1#profiles");
+    expect(withJourney("/ipam", "")).toBe("/ipam");
   });
 });

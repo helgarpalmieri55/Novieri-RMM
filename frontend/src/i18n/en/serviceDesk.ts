@@ -112,6 +112,7 @@ export const serviceDesk = {
   },
   table: {
     ticket: "Ticket",
+    client: "Client",
     due: "Due",
     type: "Type",
     status: "Status",

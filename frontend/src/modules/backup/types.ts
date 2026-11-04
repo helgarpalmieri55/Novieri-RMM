@@ -7,7 +7,7 @@
 //   - backup runs (BackupRun.state): pending | running | success | failed
 //   - backup points (BackupPointOut.state): complete | failed | pruned
 //   - restore jobs (restore job state): pending | running | success | failed
-//   - repositories (RepositoryOut.state): active | disabled
+//   - repositories (RepositoryOut.state): active | retired
 // See backupState.ts for the exact citations backing each vocabulary.
 
 // The vocabularies the console words, as unions: enums.coverage.test.ts reads
@@ -16,7 +16,7 @@
 // these falls back to a derived label.
 export type BackupPointState = "complete" | "failed" | "pruned";
 export type BackupRunState = "pending" | "running" | "success" | "failed" | "missed";
-export type RepositoryState = "active" | "disabled";
+export type RepositoryState = "active" | "retired";
 
 export interface Repository {
   id: string;

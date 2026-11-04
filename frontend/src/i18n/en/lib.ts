@@ -40,11 +40,6 @@ export const lib = {
     sentenceOne: "permission to {phrase}",
     sentenceMany: "permission to {first} {and} {last}",
   },
-  // The internal client the console works on until the client selector
-  // exists (lib/internalClient.ts).
-  internalClient: {
-    unknown: "Your account has not loaded yet, so this console cannot tell which client this is for. Nothing was sent. Reload the page and try again.",
-  },
   // The client selection (lib/clientScope.tsx, phase 3 design §1.1).
   clientScope: {
     gone: "The client you had chosen is no longer available to you, so the console is showing all your clients.",
