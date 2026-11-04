@@ -3,10 +3,11 @@ import { ClientField } from "../../components/ClientField";
 import { NoValue } from "../../components/emptystate";
 import { useT } from "../../i18n/context";
 import { Trans } from "../../i18n/Trans";
-import { describeSubmitError } from "../../components/form";
+import { attemptProblems, describeSubmitError, type Attempt } from "../../components/form";
 import { Button, Field, Td, Th, inputClass } from "../../components/ui";
+import { translate } from "../../i18n/core";
 import { useClientScope } from "../../lib/clientScope";
-import { requireKnown, useNewRowClient } from "../../lib/clientSelection";
+import { requireKnown, useNewRowClientField } from "../../lib/clientSelection";
 import { formatDate, toInstant } from "../../lib/datetime";
 import {
   FilterBar,
@@ -274,15 +275,37 @@ function GrantForm() {
   const create = useCreatePushAuthorizationMutation();
   // A prefix is one client's network (MSP clients phase 2, Task 12): the
   // client chosen at the top, or with every client the Client field's.
-  const target = useNewRowClient(AGENT_PUSH_SCOPE_MANAGE);
-  const [pickedClient, setPickedClient] = useState("");
-  const grantClient = target.needsField ? pickedClient || null : target.clientId;
+  const client = useNewRowClientField(AGENT_PUSH_SCOPE_MANAGE);
+  const grantClient = client.clientId;
   const zone = useUserTimezone();
   const [prefix, setPrefix] = useState("");
   const [note, setNote] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
+  // Populated on Authorize, never while typing (the form kernel's rule): the
+  // Client field with every client chosen, named rather than sent without.
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  const problems = attemptProblems(attempt);
 
   const parsed = parsePrefix(prefix);
+
+  // With Unassigned chosen at the top nothing new can be filed (a prefix is
+  // one client's network, and Unassigned files nothing): the panel says so
+  // instead of a form whose Authorize can only fail.
+  if (client.refused === "unassigned") {
+    return (
+      <div id="authorize">
+        <Panel
+          title={t("agentPush.authorizations.form.title")}
+          subtitle={t("agentPush.authorizations.form.subtitle")}
+        >
+          <div className="notice" role="note">
+            <Icon name="info" size={17} />
+            <p>{t("agentPush.unassignedRefused")}</p>
+          </div>
+        </Panel>
+      </div>
+    );
+  }
 
   return (
     // `id` is the target of the readiness panel's "Authorize a range".
@@ -292,9 +315,7 @@ function GrantForm() {
       subtitle={t("agentPush.authorizations.form.subtitle")}
     >
       <div className="form-grid">
-        {target.needsField ? (
-          <ClientField code={AGENT_PUSH_SCOPE_MANAGE} value={pickedClient} onChange={setPickedClient} />
-        ) : null}
+        {client.needsField ? <ClientField field={client} /> : null}
         <Field label={t("agentPush.shared.prefix")}>
           <input
             className={inputClass}
@@ -375,7 +396,17 @@ function GrantForm() {
 
       <div className="mt-3">
         <Button
-          onClick={() =>
+          onClick={() => {
+            const next: Attempt = {
+              rules: () =>
+                client.needsField ? [{ name: "client", label: translate("components.clientField.label") }] : [],
+              values: { client: grantClient },
+            };
+            setAttempt(next);
+            if (attemptProblems(next).length > 0) {
+              create.reset();
+              return;
+            }
             create.mutate(
               () => ({
                 // A prefix is one client's network: the grant authorizes
@@ -399,8 +430,8 @@ function GrantForm() {
                   setExpiresAt("");
                 },
               },
-            )
-          }
+            );
+          }}
           disabled={create.isPending || parsed === null}
         >
           {t("agentPush.authorizations.form.submit")}
@@ -412,11 +443,15 @@ function GrantForm() {
           is stated beside it. */}
       <p className="note mt-2">{t("agentPush.authorizations.form.separation")}</p>
 
-      {create.isError && (
+      {create.isError ? (
         <p role="alert" className="form-error mt-2">
           {describeSubmitError(create.error)}
         </p>
-      )}
+      ) : problems.length > 0 ? (
+        <p role="alert" className="form-error mt-2">
+          {problems.map((problem) => problem.message).join(". ")}.
+        </p>
+      ) : null}
     </Panel>
     </div>
   );

@@ -1,4 +1,6 @@
 export const agentPush = {
+  // The grant form with Unassigned chosen at the top (`useNewRowClientField`'s `refused`).
+  unassignedRefused: "Unassigned is the client chosen, and nothing new can be filed under it. Choose another client first.",
   nav: {
     label: "Push install",
     authorizations: "Push authorizations",
@@ -127,6 +129,8 @@ export const agentPush = {
     chooseCredential: "Choose a {kind} credential",
     cannotView: "This account cannot view credentials, so none can be offered.",
     noneSaved: "No {kind} credential is saved.",
+    // Another client has one: a push credential is one client's, and theirs is no use here.
+    noneSavedForClient: "No {kind} credential is saved for these machines' client. Another client's cannot be used here.",
     addOne: "Add one under Credentials",
   },
   subnet: {
