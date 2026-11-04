@@ -230,6 +230,12 @@ export const licenses = {
     ignore: "Ignore",
     ignoreTitle: "Ignore this software title",
     ignoreSubject: { one: "{name} ({count} device)", other: "{name} ({count} devices)" },
+    // With "All my clients" the queue's count is every client's, while the
+    // ignore is the one client's picked (ReviewQueue.tsx).
+    ignoreSubjectAllClients: {
+      one: "{name} ({count} device across all my clients)",
+      other: "{name} ({count} devices across all my clients)",
+    },
     ignoreBody:
       "It stops being reconciled against purchased entitlements, on every device of {client} that reports it. An ignored title cannot be brought back from the console.",
     ignoreConfirm: "Ignore title",

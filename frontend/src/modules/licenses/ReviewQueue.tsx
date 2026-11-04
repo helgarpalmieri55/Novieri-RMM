@@ -95,9 +95,13 @@ export function ReviewQueue() {
       )}
 
       {canManage && ignoreClient.refused !== null ? <UnassignedRefusal className="mb-3" /> : null}
-      {canManage && ignoreClient.needsField ? (
+      {canManage && (ignoreClient.needsField || attemptProblems(attempt).length > 0) ? (
         <div className="mb-3">
-          <ClientField field={ignoreClient} />
+          {ignoreClient.needsField ? <ClientField field={ignoreClient} /> : null}
+          {/* Also without the field: an Ignore with no client known -- `/me`
+              not answered yet, or the pick lost while the confirmation was
+              open -- names the rule rather than doing nothing (phase 3 last
+              fix round, item 8). */}
           {attemptProblems(attempt).length > 0 ? (
             <p role="alert" className="form-error">
               {attemptProblems(attempt)
@@ -158,9 +162,13 @@ export function ReviewQueue() {
                             disabled={ignore.isPending}
                             onClick={() => {
                               // With every client chosen the Client field is
-                              // required, and named before anything opens.
+                              // required, and named before anything opens; so
+                              // is a client not known yet (`/me` in flight).
                               const next: Attempt = {
-                                rules: () => (ignoreClient.needsField ? ignoreClientRules() : []),
+                                rules: () =>
+                                  ignoreClient.needsField || ignoreClient.clientId === null
+                                    ? ignoreClientRules()
+                                    : [],
                                 values: { client: ignoreClient.clientId },
                               };
                               setAttempt(next);
@@ -185,22 +193,40 @@ export function ReviewQueue() {
 
       {/* The subject is the discovered title AND its device count, because the
           count is what makes the difference between ignoring a stray utility
-          and ignoring something installed on four hundred endpoints. */}
+          and ignoring something installed on four hundred endpoints.
+
+          WHOSE COUNT. The queue is read in the request's scope: with a client
+          chosen at the top it is that client's, and so is the count. With
+          every client chosen it is every client's -- the queue carries no
+          count per client -- while the ignore is the one client's picked in
+          the field, so the subject says so (phase 3 last fix round, item 8). */}
       <ConfirmDialog
         open={ignoring != null}
         title={t("licenses.review.ignoreTitle")}
         subject={
-          ignoring ? t("licenses.review.ignoreSubject", { name: ignoring.name, count: ignoring.device_count }) : ""
+          ignoring
+            ? t(ignoreClient.needsField ? "licenses.review.ignoreSubjectAllClients" : "licenses.review.ignoreSubject", {
+                name: ignoring.name,
+                count: ignoring.device_count,
+              })
+            : ""
         }
         body={t("licenses.review.ignoreBody", { client: clientName(ignoreClient.clientId) })}
         confirmLabel={t("licenses.review.ignoreConfirm")}
         destructive
         onCancel={() => setIgnoring(null)}
         onConfirm={() => {
-          // The client the button checked for; never none, which is global.
-          const client = ignoreClient.clientId;
-          if (ignoring && client !== null) ignore.mutate({ name: ignoring.name, client_id: client });
+          const row = ignoring;
           setIgnoring(null);
+          // The client the button checked for; never none, which is global.
+          // Lost since (`/me` answered again without it): nothing is sent, and
+          // the rule is named, as the button names it.
+          const client = ignoreClient.clientId;
+          if (client === null) {
+            setAttempt({ rules: ignoreClientRules, values: { client: null } });
+            return;
+          }
+          if (row) ignore.mutate({ name: row.name, client_id: client });
         }}
       />
     </div>

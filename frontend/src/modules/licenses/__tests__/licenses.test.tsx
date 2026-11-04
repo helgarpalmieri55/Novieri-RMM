@@ -1685,6 +1685,76 @@ describe("ReviewQueue: Ignore asks first", () => {
     expect(api.ignoreSoftware).toHaveBeenCalledWith({ name: "Unknown PDF Editor", client_id: "c-acme" });
   });
 
+  // Phase 3 last fix round, item 8. With every client chosen the queue -- and
+  // so its device count -- is every client's, while the ignore is the one
+  // client's picked in the field: the confirmation says whose count it is.
+  it("with every client chosen, says the count is every client's while the ignore is the one picked", async () => {
+    const manager: MeClient = { ...SCOPE_INTERNAL, permissions: ["licenses.read", "licenses.manage"] };
+    const acme: MeClient = { ...manager, id: "c-acme", name: "Acme", kind: "customer" };
+    selectClient(null, [manager, acme]);
+    const user = userEvent.setup();
+    renderWithProviders(<ReviewQueue />);
+
+    await screen.findByText("Unknown PDF Editor");
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await user.click(screen.getByRole("button", { name: "Ignore" }));
+    const dialog = await screen.findByRole("dialog", { name: /Ignore this software title/i });
+    expect(dialog).toHaveTextContent("Unknown PDF Editor (12 devices across all my clients)");
+    expect(dialog).toHaveTextContent("on every device of Acme that reports it");
+  });
+
+  it("with a client chosen at the top, the count is that client's and says nothing more", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ReviewQueue />);
+
+    await screen.findByText("Unknown PDF Editor");
+    await user.click(screen.getByRole("button", { name: "Ignore" }));
+    const dialog = await screen.findByRole("dialog", { name: /Ignore this software title/i });
+    expect(dialog).toHaveTextContent("Unknown PDF Editor (12 devices)");
+    expect(dialog).not.toHaveTextContent("across all my clients");
+  });
+
+  it("before /me has answered, Ignore names the missing client instead of opening", async () => {
+    mockClientScope.mockReturnValue({ selected: SCOPE_INTERNAL.id, select: vi.fn(), clients: [], ready: false });
+    const user = userEvent.setup();
+    renderWithProviders(<ReviewQueue />);
+
+    await screen.findByText("Unknown PDF Editor");
+    await user.click(screen.getByRole("button", { name: "Ignore" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(api.ignoreSoftware).not.toHaveBeenCalled();
+  });
+
+  it("confirmed once the client is no longer known, sends nothing and says the client is required", async () => {
+    // The pick is lost while the confirmation is open: `/me` answered again
+    // and Acme no longer holds licenses.manage, so the field offers it no more.
+    const manager: MeClient = { ...SCOPE_INTERNAL, permissions: ["licenses.read", "licenses.manage"] };
+    const acme: MeClient = { ...manager, id: "c-acme", name: "Acme", kind: "customer" };
+    selectClient(null, [manager, acme]);
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = () => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ReviewQueue />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(tree());
+
+    await screen.findByText("Unknown PDF Editor");
+    await user.selectOptions(screen.getByLabelText("Client"), "c-acme");
+    await user.click(screen.getByRole("button", { name: "Ignore" }));
+    await screen.findByRole("dialog", { name: /Ignore this software title/i });
+    selectClient(null, [manager, { ...acme, permissions: ["licenses.read"] }]);
+    rerender(tree());
+    await confirmWith(user, "Ignore title");
+
+    expect(api.ignoreSoftware).not.toHaveBeenCalled();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Client is required");
+  });
+
   // Phase 3 final review B, Important 4: nothing new is filed under Unassigned.
   it("with Unassigned chosen at the top, says so and offers no Ignore", async () => {
     const unassigned: MeClient = { ...SCOPE_INTERNAL, id: "c-unassigned", name: "Unassigned", kind: "unassigned" };
