@@ -1,4 +1,4 @@
-"""There is exactly ONE place in this codebase that produces a signature.
+"""There is exactly ONE place in this codebase that signs a JOB.
 
 **A REPO-LEVEL GUARD, NOT A SITE-SERVER ONE.** `CLAUDE.md` invariant #1 says
 every job the agent executes is cryptographically signed by the server. The
@@ -27,6 +27,16 @@ not awaited. `app/core/signing.py` is the signer's own implementation. This
 walks `ast.Await` nodes whose value is a call to an attribute named `sign`,
 which is exactly the "somebody asked the signing service to sign something"
 shape and nothing else.
+
+**WHAT IS MATCHED AND ALLOWED: THE SESSION TOKEN SIGNER.** Own authentication
+(P2 phase 1, Task 2) signs the platform's own short-lived JWTs -- the
+assistant's internal loopback token now, the MCP access token in phase 3 --
+in `app/core/auth/keys.py::sign_es256`. That is an awaited `.sign(...)`, so it
+is counted, by name, below. It is not a second job signer: it signs with a
+DIFFERENT key (`auth-signing`, ecdsa-p256 in OpenBao transit, or
+`auth-signing.key` locally) that no agent trusts, over a JWT, never over a job
+envelope. `test_the_token_signer_never_holds_the_job_signing_key` pins that
+separation, so the day the two keys meet, this file goes red.
 """
 
 import ast
@@ -38,7 +48,11 @@ APP = Path(__file__).resolve().parents[1] / "app"
 #:
 #: An equality, never a subset: a subset assertion passes against the exact
 #: addition it exists to forbid.
-EXPECTED_AWAITED_SIGN_CALLS: dict[str, int] = {"app/jobs/engine.py": 1}
+EXPECTED_AWAITED_SIGN_CALLS: dict[str, int] = {
+    "app/jobs/engine.py": 1,
+    # The session token signer (module docstring): another key, never a job.
+    "app/core/auth/keys.py": 1,
+}
 
 
 def _awaited_sign_calls(path: Path) -> int:
@@ -108,3 +122,23 @@ def test_the_job_engine_signs_the_canonical_payload() -> None:
     ]
     assert len(awaited) == 1
     assert "canonical_bytes" in ast.unparse(awaited[0])
+
+
+def test_the_token_signer_never_holds_the_job_signing_key() -> None:
+    """The second awaited `.sign(...)` above is allowed only because it signs
+    with another key. Holds `app/core/auth/keys.py`'s key names apart from
+    `app/core/signing.py`'s: if the token signer were pointed at the job key
+    (or its file), a token-signing call would be a job signature the agent
+    trusts, and this goes red."""
+    import inspect
+
+    from app.core.auth import keys
+    from app.core.signing import OpenBaoTransitSigner
+
+    job_key = inspect.signature(OpenBaoTransitSigner).parameters["key_name"].default
+    assert job_key == "job-signing"
+    assert keys.SIGNING_KEY == "auth-signing"
+    assert keys.SIGNING_KEY != "job-signing"
+    assert keys.SIGNING_FILE != "job-signing.key"
+    source = (APP / "core" / "auth" / "keys.py").read_text()
+    assert "job-signing" not in source
