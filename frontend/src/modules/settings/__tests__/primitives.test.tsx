@@ -28,11 +28,6 @@ import {
 } from "./harness";
 import type { MeClient } from "../../../lib/api";
 
-vi.mock("../../../lib/auth", () => ({
-  accessToken: () => "test-token",
-  oidcAuthority: "https://id.example.test/realms/it-suite",
-}));
-
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
 
 const mockClientScope = vi.fn();

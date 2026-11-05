@@ -132,7 +132,7 @@ describe("retiring a repository", () => {
       .fn()
       .mockImplementation(() => Promise.resolve(new Response(JSON.stringify(ACTIVE), { status: 200 })));
     vi.stubGlobal("fetch", fetchMock);
-    await new ApiClient(() => "t", vi.fn(), "/api/v1", () => null).retireBackupRepository("repo 1");
+    await new ApiClient(vi.fn(), "/api/v1", () => null).retireBackupRepository("repo 1");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect([init.method, url]).toEqual(["POST", "/api/v1/backup/repositories/repo%201/retire"]);

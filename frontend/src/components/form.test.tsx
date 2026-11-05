@@ -70,6 +70,13 @@ describe("requiredProblems", () => {
 });
 
 describe("describeSubmitError", () => {
+  it("says a csrf refusal is about the request's origin, not about permission (own-auth Task 10)", () => {
+    const described = describeSubmitError(new ApiError(403, '{"code":"csrf"}'));
+    expect(described).toMatch(/console's address/);
+    expect(described).not.toMatch(/permission/i);
+    expect(describeSubmitError(new ApiError(403, '{"code":"step_up_required"}'))).toMatch(/permission/i);
+  });
+
   it("turns a bodyless 503 into a sentence — THE BLOCKER", () => {
     // Auditor A, BLOCKER: "A failed destructive API call (HTTP 503) is
     // silently swallowed — the UI shows success and the user is never told."

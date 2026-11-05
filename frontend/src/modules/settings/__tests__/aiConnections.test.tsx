@@ -20,11 +20,6 @@ import {
   renderSettings,
 } from "./harness";
 
-vi.mock("../../../lib/auth", () => ({
-  accessToken: () => "test-token",
-  oidcAuthority: "https://id.example.test/realms/it-suite",
-}));
-
 // Lazily, for the reason `assistant.test.tsx` gives.
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
 

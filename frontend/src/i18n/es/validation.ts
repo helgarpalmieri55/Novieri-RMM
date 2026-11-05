@@ -7,6 +7,7 @@ export const validation: Shape<typeof en> = {
   unexplained: "El servidor rechazó la solicitud y no dio ningún motivo. Inténtalo de nuevo.",
   unauthorized: "no autorizado",
   serviceUnavailable: "Ese servicio no está disponible en este momento. No se cambió nada: inténtalo de nuevo en breve.",
+  csrf: "Esa petición no vino de la dirección de esta consola, así que el servidor la rechazó. Revisa el ajuste de la dirección de la consola.",
   forbidden: "No tienes permiso para hacer eso.",
   notFound: "Eso ya no existe. Puede que se haya eliminado.",
   conflict: "Eso entra en conflicto con algo que ya existe.",

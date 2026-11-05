@@ -1085,6 +1085,38 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The fields of a refusal's JSON body, the door's `{"code": ...}` and
+ * FastAPI's `{"detail": {...}}` read as one -- or `{}` for anything else (an
+ * HTML error page, plain text, a network failure).
+ */
+export function errorBody(error: unknown): Record<string, unknown> {
+  if (!(error instanceof ApiError)) return {};
+  try {
+    const parsed: unknown = JSON.parse(error.message);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const top = parsed as Record<string, unknown>;
+    const detail = top.detail;
+    return detail !== null && typeof detail === "object" && !Array.isArray(detail)
+      ? { ...top, ...(detail as Record<string, unknown>) }
+      : top;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The door's refusal code (own-auth Task 6), for a caller that acts on it:
+ * `step_up_required` (403) asks for the second factor again -- the prompt is
+ * own-auth Task 12's -- and `csrf` (403) is an ordinary failure, never a
+ * reason to send anyone to sign in. `auth_required` (401) never reaches a
+ * caller: `request()` turns it into the session ending (`onUnauthorized`).
+ */
+export function apiErrorCode(error: unknown): string | null {
+  const code = errorBody(error).code;
+  return typeof code === "string" ? code : null;
+}
+
 import type {
   SegmentCheckOut,
   SiteServerCreate,
@@ -1575,7 +1607,7 @@ export interface DeviceGroupMemberResult {
 
 /**
  * Where a request goes, for the one thing `requestHeaders` decides beyond the
- * bearer and the language: whether it carries `X-Client-Id`.
+ * language and the console's request mark: whether it carries `X-Client-Id`.
  */
 export interface RequestRoute {
   /** `GET`, `POST`, … */
@@ -1597,12 +1629,29 @@ export interface RequestRoute {
 }
 
 /**
- * The one place request headers are built: bearer, language and client.
+ * The header that marks a request as the console's own (own-auth design §6.4).
+ * The server refuses a write carried by the session cookie without it (403
+ * `{"code": "csrf"}`, `backend/app/core/auth/csrf.py::CSRF_HEADER`). A page on
+ * another site can make the browser send the cookie; it cannot add a header
+ * of its own without a CORS preflight, and this platform answers none.
+ */
+export const CSRF_HEADER = "X-ITMS-Request";
+
+/**
+ * The one place request headers are built: the console's request mark,
+ * language and client.
  *
  * EVERY fetch in the console goes through this, including the raw ones that
  * bypass `request()` for binary bodies. A path that builds its own `Headers`
  * sends no `Accept-Language`, so the server answers it in English whatever the
- * person chose; `api.language.test.ts` fails the build on such a path.
+ * person chose; `api.language.test.ts` fails the build on such a path. And it
+ * sends no `X-ITMS-Request`, so the server refuses it as a forged write
+ * (`api.session.test.ts`).
+ *
+ * NO `Authorization`. The console holds no token: the session is the
+ * `__Host-itms_session` cookie, which the browser adds itself to a
+ * same-origin request (`credentials: "same-origin"`, set on every `fetch` in
+ * this file) and which no script here can read.
  *
  * `X-Client-Id` (phase 3 design §1.2) names the client chosen in the top bar,
  * EXCEPT on a route of global configuration (`globalRoutes.json`, generated
@@ -1612,13 +1661,9 @@ export interface RequestRoute {
  * `api.clientScope.test.ts` fails the build on an `ApiClient` call that does
  * not say where it goes.
  */
-export function requestHeaders(
-  token: string | null | undefined,
-  extra?: HeadersInit,
-  route?: RequestRoute,
-): Headers {
+export function requestHeaders(extra?: HeadersInit, route?: RequestRoute): Headers {
   const headers = new Headers(extra);
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  headers.set(CSRF_HEADER, "1");
   headers.set("Accept-Language", getLanguage());
   headers.delete("X-Client-Id");
   if (route?.client && route.global !== true) {
@@ -1630,7 +1675,11 @@ export function requestHeaders(
 
 export class ApiClient {
   constructor(
-    private readonly getToken: () => string | null,
+    /**
+     * Told about every 401 on a request made with the session: the session
+     * has ended (`lib/sessionEnd.ts`). Not a navigation -- the guard and the
+     * shell decide what the person sees (`lib/session.ts`).
+     */
     private readonly onUnauthorized: () => void,
     private readonly base: string = "/api/v1",
     /**
@@ -1651,15 +1700,26 @@ export class ApiClient {
     return { method: (method ?? "GET").toUpperCase(), path, client: this.getClient(), global };
   }
 
+  /**
+   * One JSON request.
+   *
+   * `anonymous`: a route of signing in or out (`/auth/*`), called with no
+   * session or with one that is not complete yet. Its 401 is that route's
+   * own answer ("this code was not accepted", "start again"), so it does not
+   * tell `onUnauthorized` the session ended, and it keeps the server's body
+   * for the page to read. It never carries `X-Client-Id`: signing in belongs
+   * to no client. Its body may be empty on a success (a 202 that says only
+   * "accepted"), which reads as `undefined`.
+   */
   private async request<T>(
     path: string,
     init: RequestInit = {},
-    { global = false }: { global?: boolean } = {},
+    { global = false, anonymous = false }: { global?: boolean; anonymous?: boolean } = {},
   ): Promise<T> {
-    const headers = requestHeaders(this.getToken(), init.headers, this.route(init.method, path, global));
+    const headers = requestHeaders(init.headers, this.route(init.method, path, global || anonymous));
     headers.set("Content-Type", "application/json");
-    const response = await fetch(`${this.base}${path}`, { ...init, headers });
-    if (response.status === 401) {
+    const response = await fetch(`${this.base}${path}`, { ...init, headers, credentials: "same-origin" });
+    if (response.status === 401 && !anonymous) {
       this.onUnauthorized();
       throw new ApiError(401, "unauthorized");
     }
@@ -1669,7 +1729,22 @@ export class ApiClient {
     if (response.status === 204) {
       return undefined as T;
     }
+    if (anonymous) {
+      const text = await response.text();
+      return (text === "" ? undefined : JSON.parse(text)) as T;
+    }
     return (await response.json()) as T;
+  }
+
+  /* --------------------------------------------------------------- session */
+
+  /**
+   * End this browser's session (`POST /auth/logout`, own-auth design §2.4).
+   * `anonymous`: a session that had already ended answers 401, which is the
+   * outcome asked for (`lib/session.ts::signOut`), not news to announce.
+   */
+  logout(): Promise<void> {
+    return this.request<void>("/auth/logout", { method: "POST" }, { anonymous: true });
   }
 
   /* ---------------------------------------------------------- device groups */
@@ -2301,8 +2376,8 @@ export class ApiClient {
    * which is precisely what the anchors this replaces produced.
    */
   private async fetchFile(path: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", path));
-    const response = await fetch(`${this.base}${path}`, { headers });
+    const headers = requestHeaders(undefined, this.route("GET", path));
+    const response = await fetch(`${this.base}${path}`, { headers, credentials: "same-origin" });
     if (response.status === 401) {
       this.onUnauthorized();
       throw new ApiError(401, "unauthorized");
@@ -2534,11 +2609,11 @@ export class ApiClient {
   // `global`: the document is every client's (see `updateArticle`); a version
   // is a row under it, refused narrowed like the document itself.
   async uploadDocumentVersion(id: string, file: File, { global }: { global: boolean }): Promise<DocDocumentVersion> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/docs/documents/${id}/versions`, global));
+    const headers = requestHeaders(undefined, this.route("POST", `/docs/documents/${id}/versions`, global));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(
       `${this.base}/docs/documents/${id}/versions?filename=${encodeURIComponent(file.name)}`,
-      { method: "POST", headers, body: file },
+      { method: "POST", headers, credentials: "same-origin", body: file },
     );
     if (response.status === 401) {
       this.onUnauthorized();
@@ -2564,10 +2639,10 @@ export class ApiClient {
   // opening the viewer writes `docs.document_downloaded` exactly as saving the
   // file does. Nothing in this console may imply otherwise.
   async downloadDocumentVersion(id: string, version: number): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/docs/documents/${id}/versions/${version}/content`));
+    const headers = requestHeaders(undefined, this.route("GET", `/docs/documents/${id}/versions/${version}/content`));
     const response = await fetch(
       `${this.base}/docs/documents/${id}/versions/${version}/content`,
-      { headers },
+      { headers, credentials: "same-origin" },
     );
     if (response.status === 401) {
       this.onUnauthorized();
@@ -2812,8 +2887,8 @@ export class ApiClient {
   // Streams the raw recording bytes; not routed through `request` since the
   // body is binary, not JSON. Never cached in query state as text.
   async getRemoteRecording(id: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/remote/sessions/${id}/recording`));
-    const response = await fetch(`${this.base}/remote/sessions/${id}/recording`, { headers });
+    const headers = requestHeaders(undefined, this.route("GET", `/remote/sessions/${id}/recording`));
+    const response = await fetch(`${this.base}/remote/sessions/${id}/recording`, { headers, credentials: "same-origin" });
     if (response.status === 401) {
       this.onUnauthorized();
       throw new ApiError(401, "unauthorized");
@@ -3089,8 +3164,8 @@ export class ApiClient {
   // Streams the CSV export; not routed through `request` since the body is
   // text/csv, not JSON. Mirrors getRemoteRecording's binary-download pattern.
   async exportPatchReport(): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", "/patch/report/export"));
-    const response = await fetch(`${this.base}/patch/report/export`, { headers });
+    const headers = requestHeaders(undefined, this.route("GET", "/patch/report/export"));
+    const response = await fetch(`${this.base}/patch/report/export`, { headers, credentials: "same-origin" });
     if (response.status === 401) {
       this.onUnauthorized();
       throw new ApiError(401, "unauthorized");
@@ -3118,11 +3193,12 @@ export class ApiClient {
   // Content-Type handling, mirroring getRemoteRecording's binary pattern but
   // for an upload instead of a download.
   async uploadPackageArtifact(packageId: string, file: File): Promise<Package> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/deploy/packages/${packageId}/artifact`));
+    const headers = requestHeaders(undefined, this.route("POST", `/deploy/packages/${packageId}/artifact`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(`${this.base}/deploy/packages/${packageId}/artifact`, {
       method: "POST",
       headers,
+      credentials: "same-origin",
       body: file,
     });
     if (response.status === 401) {
@@ -3532,11 +3608,12 @@ export class ApiClient {
   // digest of what it stored, which is what a release signature is compared
   // against before it is sent.
   async uploadAgentReleaseArtifact(releaseId: string, file: Blob): Promise<AgentRelease> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/agent/releases/${releaseId}/artifact`));
+    const headers = requestHeaders(undefined, this.route("POST", `/agent/releases/${releaseId}/artifact`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(`${this.base}/agent/releases/${releaseId}/artifact`, {
       method: "POST",
       headers,
+      credentials: "same-origin",
       body: file,
     });
     if (response.status === 401) {
@@ -3692,10 +3769,11 @@ export class ApiClient {
     siteId: string,
     body: { code: string; arch: MsiArch },
   ): Promise<InstallLinkMsi> {
-    const headers = requestHeaders(this.getToken(), { "Content-Type": "application/json" }, this.route("POST", `/sites/${siteId}/install-link/msi`));
+    const headers = requestHeaders({ "Content-Type": "application/json" }, this.route("POST", `/sites/${siteId}/install-link/msi`));
     const response = await fetch(`${this.base}/sites/${siteId}/install-link/msi`, {
       method: "POST",
       headers,
+      credentials: "same-origin",
       body: JSON.stringify(body),
     });
     if (response.status === 401) {
@@ -4364,11 +4442,11 @@ export class ApiClient {
   // uploadPackageArtifact's binary-upload pattern. `filename` is a query
   // parameter, sanitized server-side before it ever reaches the object key.
   async uploadExpenseAttachment(id: string, file: File): Promise<ExpenseOut> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/budget/expenses/${id}/attachment`));
+    const headers = requestHeaders(undefined, this.route("POST", `/budget/expenses/${id}/attachment`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(
       `${this.base}/budget/expenses/${id}/attachment?filename=${encodeURIComponent(file.name)}`,
-      { method: "POST", headers, body: file },
+      { method: "POST", headers, credentials: "same-origin", body: file },
     );
     if (response.status === 401) {
       this.onUnauthorized();
@@ -4384,8 +4462,8 @@ export class ApiClient {
   // body is binary, not JSON. Mirrors getRemoteRecording's binary-download
   // pattern.
   async downloadExpenseAttachment(id: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/budget/expenses/${id}/attachment`));
-    const response = await fetch(`${this.base}/budget/expenses/${id}/attachment`, { headers });
+    const headers = requestHeaders(undefined, this.route("GET", `/budget/expenses/${id}/attachment`));
+    const response = await fetch(`${this.base}/budget/expenses/${id}/attachment`, { headers, credentials: "same-origin" });
     if (response.status === 401) {
       this.onUnauthorized();
       throw new ApiError(401, "unauthorized");
@@ -4581,11 +4659,11 @@ export class ApiClient {
   // `uploadExpenseAttachment`'s binary-upload pattern. `filename` is a query
   // parameter, sanitized server-side before it ever reaches the object key.
   async uploadTicketAttachment(id: string, file: File): Promise<AttachmentOut> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/service-desk/tickets/${id}/attachments`));
+    const headers = requestHeaders(undefined, this.route("POST", `/service-desk/tickets/${id}/attachments`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(
       `${this.base}/service-desk/tickets/${id}/attachments?filename=${encodeURIComponent(file.name)}`,
-      { method: "POST", headers, body: file },
+      { method: "POST", headers, credentials: "same-origin", body: file },
     );
     if (response.status === 401) {
       this.onUnauthorized();
@@ -4602,9 +4680,10 @@ export class ApiClient {
   // Note the route is keyed by ATTACHMENT id, not ticket id (api.py's
   // `GET /service-desk/attachments/{attachment_id}`).
   async downloadTicketAttachment(attachmentId: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/service-desk/attachments/${attachmentId}`));
+    const headers = requestHeaders(undefined, this.route("GET", `/service-desk/attachments/${attachmentId}`));
     const response = await fetch(`${this.base}/service-desk/attachments/${attachmentId}`, {
       headers,
+      credentials: "same-origin",
     });
     if (response.status === 401) {
       this.onUnauthorized();
@@ -4870,11 +4949,11 @@ export class ApiClient {
   // is a query parameter, sanitized server-side before it ever reaches the
   // object key.
   async uploadPortalAttachment(id: string, file: File): Promise<PortalAttachmentOut> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", `/portal/tickets/${id}/attachments`));
+    const headers = requestHeaders(undefined, this.route("POST", `/portal/tickets/${id}/attachments`));
     headers.set("Content-Type", "application/octet-stream");
     const response = await fetch(
       `${this.base}/portal/tickets/${id}/attachments?filename=${encodeURIComponent(file.name)}`,
-      { method: "POST", headers, body: file },
+      { method: "POST", headers, credentials: "same-origin", body: file },
     );
     if (response.status === 401) {
       this.onUnauthorized();
@@ -4894,10 +4973,10 @@ export class ApiClient {
   // ownership check is scoped through the ticket (module docstring:
   // `_load_my_ticket_row`).
   async downloadPortalAttachment(ticketId: string, attachmentId: string): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/portal/tickets/${ticketId}/attachments/${attachmentId}`));
+    const headers = requestHeaders(undefined, this.route("GET", `/portal/tickets/${ticketId}/attachments/${attachmentId}`));
     const response = await fetch(
       `${this.base}/portal/tickets/${ticketId}/attachments/${attachmentId}`,
-      { headers },
+      { headers, credentials: "same-origin" },
     );
     if (response.status === 401) {
       this.onUnauthorized();
@@ -5523,9 +5602,9 @@ export class ApiClient {
   // as multipart: this codebase has no multipart parser and the shipped route
   // takes raw bytes, mirroring uploadExpenseAttachment's pattern.
   private async ipamImportRequest<T>(path: string, file: File): Promise<T> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("POST", path));
+    const headers = requestHeaders(undefined, this.route("POST", path));
     headers.set("Content-Type", "text/csv");
-    const response = await fetch(`${this.base}${path}`, { method: "POST", headers, body: file });
+    const response = await fetch(`${this.base}${path}`, { method: "POST", headers, credentials: "same-origin", body: file });
     if (response.status === 401) {
       this.onUnauthorized();
       throw new ApiError(401, "unauthorized");
@@ -5564,8 +5643,8 @@ export class ApiClient {
   // text/csv, not JSON — bypasses `request<T>` for the same reason the binary
   // downloads above do.
   private async ipamCsv(path: string): Promise<string> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", path));
-    const response = await fetch(`${this.base}${path}`, { headers });
+    const headers = requestHeaders(undefined, this.route("GET", path));
+    const response = await fetch(`${this.base}${path}`, { headers, credentials: "same-origin" });
     if (response.status === 401) {
       this.onUnauthorized();
       throw new ApiError(401, "unauthorized");
@@ -5755,11 +5834,11 @@ export class ApiClient {
   // bare `<a href>` to the export path would send no bearer token at all and
   // land on a 401, which is why this is a fetch and not a link.
   async exportReport(key: string, params: ReportParams = {}): Promise<Blob> {
-    const headers = requestHeaders(this.getToken(), undefined, this.route("GET", `/reports/${key}/export.csv`));
+    const headers = requestHeaders(undefined, this.route("GET", `/reports/${key}/export.csv`));
     const query = new URLSearchParams(params).toString();
     const response = await fetch(
       `${this.base}/reports/${key}/export.csv${query ? `?${query}` : ""}`,
-      { headers },
+      { headers, credentials: "same-origin" },
     );
     if (response.status === 401) {
       this.onUnauthorized();

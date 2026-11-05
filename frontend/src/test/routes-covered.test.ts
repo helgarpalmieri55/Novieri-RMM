@@ -42,10 +42,11 @@ describe("scripts/routes.mjs covers App.tsx", () => {
   });
 
   it("excludes exactly the routes the gate cannot or must not walk", () => {
+    // `/auth/callback` was here until own-auth Task 10: it consumed the OIDC
+    // code `oidc-client-ts` brought back, and the console has no OIDC client.
     expect([...EXCLUDED].sort()).toEqual([
       "*",
       "/__preview",
-      "/auth/callback",
       "/settings/email-intake/oauth/callback",
     ]);
     for (const excluded of EXCLUDED) expect(patterns).toContain(excluded);

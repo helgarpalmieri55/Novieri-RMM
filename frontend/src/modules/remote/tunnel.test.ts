@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { canOpenTunnel, screenProtocols, screenUrl } from "./tunnel";
+import * as tunnel from "./tunnel";
+import { screenUrl } from "./tunnel";
 
 describe("screenUrl", () => {
   it("addresses the session's screen stream on the console's own origin", () => {
@@ -26,21 +27,16 @@ describe("screenUrl", () => {
   });
 });
 
-describe("screenProtocols", () => {
-  it("carries the token as the second subprotocol, after bearer", () => {
-    expect(screenProtocols("tok-1")).toEqual(["bearer", "tok-1"]);
-  });
-});
-
-describe("canOpenTunnel", () => {
-  it("refuses a missing or blank credential", () => {
-    expect(canOpenTunnel(null)).toBe(false);
-    expect(canOpenTunnel(undefined)).toBe(false);
-    expect(canOpenTunnel("")).toBe(false);
-    expect(canOpenTunnel("   ")).toBe(false);
-  });
-
-  it("accepts a real one", () => {
-    expect(canOpenTunnel("tok-1")).toBe(true);
+/**
+ * RE-POINTED (own-auth Task 10). `screenProtocols` put the bearer token in the
+ * subprotocol list and `canOpenTunnel` refused to open without one. The
+ * session cookie is the stream's credential now, sent by the browser with the
+ * upgrade, so this module has no token to place and none to check:
+ * `ScreenViewer.test.tsx` holds the viewer to opening with no subprotocol and
+ * to opening nothing once the session has ended.
+ */
+describe("the stream's credential", () => {
+  it("is nobody's to place: the module offers the address and nothing else", () => {
+    expect(Object.keys(tunnel).sort()).toEqual(["screenUrl"]);
   });
 });

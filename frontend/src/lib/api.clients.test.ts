@@ -28,7 +28,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("the Clients page's routes", () => {
   it("names each route and sends each body as the API declares it", async () => {
     const fetchMock = recorder();
-    const client = new ApiClient(() => "t", vi.fn(), "/api/v1", () => null);
+    const client = new ApiClient(vi.fn(), "/api/v1", () => null);
     await client.getClientRecord("c 1");
     await client.createClient({
       name: "Andes",
@@ -75,7 +75,7 @@ describe("the Clients page's routes", () => {
 
   it("keeps the one-argument sites read that the site pickers use", async () => {
     const fetchMock = recorder([]);
-    await new ApiClient(() => "t", vi.fn(), "/api/v1", () => null).listClientSites("c1");
+    await new ApiClient(vi.fn(), "/api/v1", () => null).listClientSites("c1");
     expect(sent(fetchMock)).toEqual([["GET", "/api/v1/clients/c1/sites", undefined]]);
   });
 });

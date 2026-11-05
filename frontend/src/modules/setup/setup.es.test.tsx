@@ -10,13 +10,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderInSpanish, expectNoEnglish } from "../../i18n/test-utils";
 
-const signIn = vi.fn();
-vi.mock("../../lib/auth", () => ({
-  signIn: () => signIn(),
-  accessToken: () => null,
-}));
-
+const { navigation } = await import("../../lib/session");
 const { SetupPage } = await import("./SetupPage");
+
+let assign: ReturnType<typeof vi.spyOn>;
 
 type Reply = { status: number; body: unknown };
 let claimReply: Reply;
@@ -31,12 +28,13 @@ function respond({ status, body }: Reply): Response {
 }
 
 beforeEach(() => {
-  signIn.mockReset().mockResolvedValue(undefined);
+  assign = vi.spyOn(navigation, "assign").mockImplementation(() => {});
   vi.stubGlobal("fetch", vi.fn(async () => respond(claimReply)));
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 async function fillTheForm(user: ReturnType<typeof userEvent.setup>) {
@@ -85,9 +83,12 @@ describe("the setup screen in Spanish", () => {
     expectNoEnglish(container);
   });
 
-  it("shows the completed screen in Spanish, with the sign-in failure and a failed invitation", async () => {
+  // RE-POINTED (own-auth Task 10): the second alert, "No se pudo iniciar
+  // sesión", was a redirect to Keycloak that failed before it left. The
+  // console's own sign-in page needs nothing fetched first, so the button
+  // goes and the failed invitation is the one alert left.
+  it("shows the completed screen in Spanish, with a failed invitation, and goes to sign in", async () => {
     const user = userEvent.setup();
-    signIn.mockRejectedValue(new Error("proveedor caído"));
     claimReply = { status: 201, body: { ...CLAIMED, invitation_sent: false, invitation_error: null } };
     const { container } = renderInSpanish(<SetupPage />);
     await fillTheForm(user);
@@ -98,8 +99,8 @@ describe("the setup screen in Spanish", () => {
     expect(screen.getByText(/No se pudo enviar el correo de invitación/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Ir a iniciar sesión" }));
-    await vi.waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
-    expect(screen.getByText(/No se pudo iniciar sesión\. .*proveedor caído/)).toBeInTheDocument();
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
     expectNoEnglish(container);
   });
 

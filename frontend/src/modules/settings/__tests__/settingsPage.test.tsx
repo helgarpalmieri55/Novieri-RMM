@@ -37,14 +37,6 @@ import type { MeClient } from "../../../lib/api";
 // The OIDC client is not under test and constructs a UserManager (with a
 // silent-renew timer) at import time. `../api.ts`'s org request only needs the
 // bearer token, so the token source is stubbed.
-vi.mock("../../../lib/auth", () => ({
-  accessToken: () => "test-token",
-  // A factory mock is a strict namespace: a missing export throws. This one
-  // stayed after Profile moved to its own route, because other tabs still
-  // reach for the authority when they name the identity provider.
-  oidcAuthority: "https://id.example.test/realms/it-suite",
-}));
-
 // `apiClient` is referenced LAZILY — inside the returned closure, never while
 // the factory runs. Importing the harness from within the factory instead
 // deadlocks: the harness imports `SettingsPage`, which imports the very module

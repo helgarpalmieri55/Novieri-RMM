@@ -15,20 +15,8 @@ export const profile = {
   },
   security: {
     title: "Sign-in and security",
-    subtitle: "Passwords and keys, handled where they belong",
-    note: "Each of these runs one step on the sign-in pages and returns you to ITMS. Passwords, second factors and passkeys are never handled by this platform.",
-    startFailed: "That step could not be started, so nothing about your sign-in was changed. {reason}",
-    changePassword: {
-      label: "Change password",
-      hint: "You will be asked for your current password first. This platform never sees either one.",
-    },
-    manageMfa: {
-      label: "Manage MFA device",
-      hint: "Add, replace or remove your second factor.",
-    },
-    addPasskey: {
-      label: "Add a passkey",
-      hint: "A passwordless credential bound to this device.",
-    },
+    subtitle: "Your password, your second factors and the computers you trust",
+    note: "Your password, passkeys, authenticator app and recovery codes have a page of their own. Every change there asks you to confirm your second factor first.",
+    open: "Manage sign-in and security",
   },
 } as const;

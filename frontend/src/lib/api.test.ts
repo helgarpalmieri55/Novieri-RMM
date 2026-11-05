@@ -6,16 +6,22 @@ describe("ApiClient", () => {
     vi.restoreAllMocks();
   });
 
-  it("sends the bearer token on requests", async () => {
+  // RE-POINTED (own-auth Task 10): this pinned `Authorization: Bearer
+  // tok-123`. The console holds no token now; the session is a cookie the
+  // browser adds to a same-origin request, and every request says it is the
+  // console's own.
+  it("sends the console's request mark and the session cookie, and no bearer token", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ items: [], total: 0 }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "tok-123", vi.fn());
+    const client = new ApiClient(vi.fn());
     await client.listDevices();
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/v1/devices");
-    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer tok-123");
+    expect(new Headers(init.headers).has("Authorization")).toBe(false);
+    expect(new Headers(init.headers).get("X-ITMS-Request")).toBe("1");
+    expect(init.credentials).toBe("same-origin");
   });
 
   it("maps 401 to the unauthorized handler and throws ApiError", async () => {
@@ -24,7 +30,7 @@ describe("ApiClient", () => {
       vi.fn().mockResolvedValue(new Response("{}", { status: 401 })),
     );
     const onUnauthorized = vi.fn();
-    const client = new ApiClient(() => null, onUnauthorized);
+    const client = new ApiClient(onUnauthorized);
     await expect(client.me()).rejects.toBeInstanceOf(ApiError);
     expect(onUnauthorized).toHaveBeenCalledOnce();
   });
@@ -36,7 +42,7 @@ describe("ApiClient", () => {
       new Response(JSON.stringify({ revoked: true, keycloak_failures: 0 }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     const result = await client.revokeMcpConnection("my app/1?x", "everyone");
     expect(result).toEqual({ revoked: true, keycloak_failures: 0 });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -50,7 +56,7 @@ describe("ApiClient", () => {
       new Response(JSON.stringify({ enabled: false, address: null, apps: [] }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     expect(await client.getMcpConnections()).toEqual({ enabled: false, address: null, apps: [] });
     expect((fetchMock.mock.calls[0] as [string])[0]).toBe("/api/v1/mcp/connections");
   });
@@ -60,7 +66,7 @@ describe("ApiClient", () => {
       new Response(JSON.stringify({ secret: "hunter2" }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     const result = await client.checkoutCredential("cred-1", "ticket 9", null);
     expect(result.secret).toBe("hunter2");
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -73,7 +79,7 @@ describe("ApiClient", () => {
       new Response(JSON.stringify({ id: "j1", status: "queued" }), { status: 201 }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     await client.dispatchJob({ type: "hello", device_id: "d1", params: { message: "hi" } });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/v1/jobs");
@@ -97,7 +103,7 @@ describe("ApiClient", () => {
       new Response(JSON.stringify({ items: [], total: 0 }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     await client.listJobs({ limit: 25, offset: 50, order: "oldest" });
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(url).toBe("/api/v1/jobs?limit=25&offset=50&order=oldest");
@@ -108,7 +114,7 @@ describe("ApiClient", () => {
       new Response(JSON.stringify({ items: [], total: 0 }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     await client.listJobs();
     expect((fetchMock.mock.calls[0] as [string])[0]).toBe("/api/v1/jobs");
   });
@@ -118,7 +124,7 @@ describe("ApiClient", () => {
       new Response(JSON.stringify({ items: [{ id: "t1" }], total: 412 }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     const page = await client.listTickets({ limit: 200 });
     expect(page.total).toBe(412);
     expect(page.items).toHaveLength(1);
@@ -135,7 +141,7 @@ describe("ApiClient", () => {
       () => Promise.resolve(new Response(JSON.stringify({ enabled: false, url: null }), { status: 200 })),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     await client.getInstallLink("site-1");
     await client.saveInstallLink("site-1", {
       enabled: true, networks: ["10.20.0.0/16"], disable_at: null, hourly_limit: 50,
@@ -157,7 +163,7 @@ describe("ApiClient", () => {
       () => Promise.resolve(new Response(JSON.stringify({}), { status: 200 })),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     await client.approveDevice("d1");
     await client.rejectDevice("d1");
     await client.listDevices({ state: "review", limit: 1 });
@@ -172,7 +178,7 @@ describe("ApiClient", () => {
   it("acknowledges a manual removal on its own route, and a 204 is success", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     await expect(client.acknowledgeDeviceRemoval("d1")).resolves.toBeUndefined();
     const calls = fetchMock.mock.calls as [string, RequestInit][];
     expect(calls.map(([url, init]) => [url, init.method ?? "GET"])).toEqual([
@@ -191,7 +197,7 @@ describe("ApiClient", () => {
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     const code = "AbCdEfGhIjKlMnOpQrStUvWxYz012_-9";
     const msi = await client.downloadInstallLinkMsi("site-1", { code, arch: "amd64" });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -201,7 +207,10 @@ describe("ApiClient", () => {
     expect(url).not.toContain(code);
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({ code, arch: "amd64" });
-    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer t");
+    // RE-POINTED (own-auth Task 10): was `Authorization: Bearer t`.
+    expect(new Headers(init.headers).has("Authorization")).toBe(false);
+    expect(new Headers(init.headers).get("X-ITMS-Request")).toBe("1");
+    expect(init.credentials).toBe("same-origin");
     expect(msi.filename).toBe("ITMS-Agent-itms.example.com-amd64.msi");
     expect(msi.sha256).toBe("ab".repeat(32));
     expect(await msi.blob.text()).toBe("MSI");
@@ -214,7 +223,7 @@ describe("ApiClient", () => {
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     await client.approveAllDevices({ device_ids: ["d1"], list_digest: "f".repeat(64) });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/v1/devices/review/approve-all");
@@ -233,7 +242,7 @@ describe("ApiClient", () => {
       () => Promise.resolve(new Response(JSON.stringify({}), { status: 200 })),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     await client.createEnrollmentToken({
       name: "Bogota", expires_in_hours: 72, max_uses: 1, site_id: "site-1",
     });
@@ -257,7 +266,7 @@ describe("ApiClient", () => {
       () => Promise.resolve(new Response(JSON.stringify({}), { status: 200 })),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     const rules = { all: [{ fact: "os_family", op: "eq" as const, value: "linux" }] };
     await client.createAsset({ site_id: "site-1", description: "boxed laptop" });
     await client.createDeviceGroup({ name: "servers", client_id: "client-1" });
@@ -281,7 +290,7 @@ describe("ApiClient", () => {
       () => Promise.resolve(new Response(JSON.stringify([]), { status: 200 })),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     await client.assignUserRole("u1", { role_id: "r1", client_id: "client-1" });
     await client.assignUserRole("u1", { role_id: "r1", client_id: null });
     await client.listClients();
@@ -301,7 +310,7 @@ describe("ApiClient", () => {
       new Response(JSON.stringify({ id: "t1", client_id: "c2" }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     expect((await client.moveTicket("t1", "c2")).client_id).toBe("c2");
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect([url, init.method]).toEqual(["/api/v1/service-desk/tickets/t1/move", "POST"]);
@@ -315,7 +324,7 @@ describe("ApiClient", () => {
       .fn()
       .mockImplementation(() => Promise.resolve(new Response("[]", { status: 200 })));
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     await client.listPushRunPrefixes("c 1");
     expect((fetchMock.mock.calls[0] as [string])[0]).toBe(
       "/api/v1/agent-push/runs/prefixes?credential_id=c+1",
@@ -330,7 +339,7 @@ describe("ApiClient", () => {
       () => Promise.resolve(new Response(JSON.stringify({}), { status: 200 })),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const client = new ApiClient(() => "t", vi.fn());
+    const client = new ApiClient(vi.fn());
     const file = new File(["address\n"], "plan.csv", { type: "text/csv" });
     await client.previewIpamImport(file, { IP: "address" }, { clientId: "c-x" });
     await client.applyIpamImport(file, { IP: "address" }, "d".repeat(64), { vrfId: "v-x" });

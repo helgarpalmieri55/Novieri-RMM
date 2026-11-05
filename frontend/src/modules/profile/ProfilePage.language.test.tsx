@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getLanguage, setActiveLanguage } from "../../i18n/core";
 import { ALL_PERMISSIONS, ME_FIXTURE, apiClient, calls, installDefaults, renderProfilePage } from "../settings/__tests__/harness";
 
-vi.mock("../../lib/auth", () => ({ accessToken: () => "test-token", startAccountAction: vi.fn() }));
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
 
 beforeEach(() => {

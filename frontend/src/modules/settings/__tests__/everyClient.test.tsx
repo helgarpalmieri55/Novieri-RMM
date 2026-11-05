@@ -11,11 +11,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ALL_PERMISSIONS, ME_FIXTURE, apiClient, calls, installDefaults, renderSettings } from "./harness";
 
-vi.mock("../../../lib/auth", () => ({
-  accessToken: () => "test-token",
-  oidcAuthority: "https://id.example.test/realms/it-suite",
-}));
-
 // Referenced lazily, inside the closure -- see `organization.test.tsx`.
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
 

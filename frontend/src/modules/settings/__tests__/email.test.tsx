@@ -47,11 +47,6 @@ import {
 // The OIDC client is not under test and builds a UserManager (with a
 // silent-renew timer) at import. Only the token source and the in-flow
 // credential action are needed here.
-vi.mock("../../../lib/auth", () => ({
-  accessToken: () => "test-token",
-  startAccountAction: vi.fn(),
-}));
-
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
 
 beforeEach(() => {

@@ -21,6 +21,5 @@ export const setup: Shape<typeof en> = {
     checkInbox: "Revisa esa bandeja de entrada: encontrarás un enlace para elegir una contraseña. Después, inicia sesión.",
     invitationFailed: "No se pudo enviar el correo de invitación, así que no ha llegado ningún enlace de inicio de sesión.",
     goToSignIn: "Ir a iniciar sesión",
-    signInFailed: "No se pudo iniciar sesión. {reason}",
   },
 };

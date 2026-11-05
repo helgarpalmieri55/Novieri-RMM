@@ -1,107 +1,44 @@
-// Your profile — `GET/PATCH /api/v1/me`, plus the three credential steps.
+// Your profile — `GET/PATCH /api/v1/me`.
 //
-// A PAGE AT `/profile`, NOT A TAB IN SETTINGS, since 2026-08-20, and the move
-// fixes a defect rather than only tidying the navigation. The credential steps
-// below leave ITMS for the sign-in pages and come back; `startAccountAction`
-// records where to return in the OIDC `state`, and that value is a URL. The
-// Settings tab was NOT in the URL -- `SettingsPage` keeps it in React state --
-// so every credential step returned the user to `/settings` and its DEFAULT
-// tab, Organization. From the operator's chair that is indistinguishable from
-// the action having done nothing at all, which is exactly how it was reported:
-// "when I click it just refreshes and goes back to organization".
+// A PAGE AT `/profile`, NOT A TAB IN SETTINGS, since 2026-08-20: a profile
+// reached from the account menu behind your own avatar, which is where every
+// other product puts it, and a URL that a link can land on.
 //
-// With its own route the return is exact, and the operator's other request is
-// satisfied at the same time: a profile reached from the account menu behind
-// your own avatar, which is where every other product puts it.
+// THE SPLIT CHANGED WITH THE PLATFORM'S OWN SIGN-IN (own-auth design §1.1,
+// §2). The identity provider used to own the password, the second factor and
+// the passkeys, and the three buttons that stood here sent the person to its
+// pages for one step each. The platform verifies all of them itself now, so
+// they are managed on a page of their own -- Sign-in and security,
+// `/profile/security` -- where every change asks for a recent second factor
+// first (design §2.5). This page links there and does nothing else with a
+// credential:
 //
-// THE SPLIT IS THE WHOLE DESIGN (spec §7.1):
+//   this page        display name, phone, timezone, locale
+//   /profile/security password, passkeys, authenticator app, recovery codes,
+//                     trusted computers, sessions
 //
-//   Keycloak owns  password, MFA device, passkeys, and the EMAIL ADDRESS
-//   ITMS owns      display name, phone, timezone, locale
-//
-// So this page has no password field, no MFA control and no email box, and it
-// is not going to grow one. `console-auth` §1 exists precisely so that the
-// password field is not in this application, and invariant 3 forbids a
-// credential in an API response — a "change password" form here would need
-// both.
-//
-// WHAT THE CREDENTIAL BUTTONS DO NOW, AND WHAT THEY USED TO DO. They used to
-// be ANCHORS to Keycloak's account console, in a new tab, labelled "(opens the
-// account console)". That is a second application: different chrome, different
-// navigation, the vendor's name on it. The operator hit exactly this in
-// production, and it is the seam
-// `docs/superpowers/specs/2026-08-19-invisible-identity-layer-design.md` §1.1
-// exists to remove: a buyer does not know what Keycloak is and must never need
-// to.
-//
-// They are now BUTTONS calling `startAccountAction`, which is an
-// APPLICATION-INITIATED ACTION: a normal OIDC authorization redirect carrying
-// `kc_action`, so the identity provider runs exactly one step — set a
-// password, enrol a second factor, register a passkey — on the same themed
-// pages the user signed in on, then redirects back into ITMS. One tab, one
-// look, no second product.
-//
-// THE SECURITY PROPERTY IS UNCHANGED, WHICH IS THE POINT. The credential is
-// still handed to the identity provider by the user's own re-authenticated
-// session; ITMS neither sees it nor proxies it. Rejected — iframing the
-// account console: Keycloak denies framing by default, so it would mean
-// loosening `frame-ancestors` on exactly the pages where a hijacked click
-// drops an MFA device. Rejected — proxying the actions through the
-// provisioning credential: it keeps the buttons in ITMS but routes a
-// SELF-SERVICE action through `manage-users` rather than the user's own
-// session, which makes ITMS the thing that can reset anybody's MFA.
-// Self-service should need the user's own session; that is the point of
-// self-service.
-//
-// NOT VERIFIABLE IN CI, AND SAID SO IN THE SPEC (§1.1, falsifier 7): that each
-// of the three actions completes and round-trips under the committed theme
-// needs a live realm. The tests here pin which action each button asks for and
-// that no link out survives; they cannot pin what the identity provider does
-// with it.
+// So this page still has no password field and no email box. The address a
+// person signs in with is not changed here: that needs the re-authentication
+// and verification this page does not perform.
 //
 // THE PAGE IS v3's `profile` SCREEN: the head, then one untitled panel of
-// fields with the primary Save under them. v3 draws the sign-in state as two
-// pills in a field; this console has three real controls there instead, and
-// they get a panel of their own so the Save above them is unambiguously the
-// profile's and not theirs.
+// fields with the primary Save under them, then the sign-in panel, kept apart
+// so the Save is unambiguously the profile's.
 
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { describeSubmitError } from "../../components/form";
 import type { Problem } from "../../components/form";
 import { Field, inputClass } from "../../components/ui";
 import { useLanguage, useT } from "../../i18n/context";
-import type { MessageKey } from "../../i18n/core";
 import { resolveLanguage } from "../../i18n/resolve";
-import { startAccountAction } from "../../lib/auth";
-import type { AccountAction } from "../../lib/auth";
-import { Btn, KIND_ICON, PageHead, Panel } from "../../shell/components";
+import { KIND_ICON, PageHead, Panel } from "../../shell/components";
 import { Icon } from "../../shell/icons";
 import { useMe, useUpdateMeMutation } from "../settings/api";
 import { SaveBar } from "../settings/SaveBar";
 import { isDirty } from "../settings/settingsState";
 import type { MeProfileUpdate } from "../settings/types";
-
-const CREDENTIAL_ACTIONS: readonly { label: MessageKey; hint: MessageKey; action: AccountAction; icon: string }[] = [
-  {
-    label: "profile.security.changePassword.label",
-    action: "UPDATE_PASSWORD",
-    icon: "lock",
-    hint: "profile.security.changePassword.hint",
-  },
-  {
-    label: "profile.security.manageMfa.label",
-    action: "CONFIGURE_TOTP",
-    icon: "shield",
-    hint: "profile.security.manageMfa.hint",
-  },
-  {
-    label: "profile.security.addPasskey.label",
-    action: "webauthn-register-passwordless",
-    icon: "certificate",
-    hint: "profile.security.addPasskey.hint",
-  },
-] as const;
 
 type ProfileForm = {
   display_name: string;
@@ -145,17 +82,6 @@ export function ProfilePage() {
   const t = useT();
   const { language, setLanguage } = useLanguage();
   const [languagePicked, setLanguagePicked] = useState(false);
-
-  /**
-   * A credential step that could not even be STARTED.
-   *
-   * `void startAccountAction(...)` discarded the rejection: `signinRedirect`
-   * fetches the provider's discovery document before it navigates, so an
-   * identity provider that is down produced a button that did nothing at all
-   * — which is precisely the report this page was rewritten to fix ("when I
-   * click it just refreshes"), arriving through a second door.
-   */
-  const [actionError, setActionError] = useState<string | null>(null);
 
   // An ABSENT field is an empty box, never the string "undefined": a server
   // that predates migration 0066 serves no `phone`, and typing over the word
@@ -339,36 +265,16 @@ export function ProfilePage() {
         <p className="note">
           {t("profile.security.note")}
         </p>
-        <ul style={{ listStyle: "none", margin: "12px 0 0", padding: 0, display: "grid", gap: 12 }}>
-          {CREDENTIAL_ACTIONS.map((item) => (
-            <li key={item.action}>
-              {/* THESE ARE ACTIONS, so they are buttons. Each one leaves the
-                  console for a sign-in flow that changes a credential; drawn as
-                  underlined text they read as prose, and they got none of the
-                  design's height, weight, hover or focus ring. Secondary rather
-                  than primary: the accent is held for the one control on a
-                  screen that commits, and this panel has three peers. */}
-              <Btn
-                label={t(item.label)}
-                icon={item.icon}
-                small
-                onClick={() => {
-                  setActionError(null);
-                  startAccountAction(item.action).catch((cause: unknown) =>
-                    setActionError(describeSubmitError(cause)),
-                  );
-                }}
-              />
-              <div className="note" style={{ marginTop: 4 }}>{t(item.hint)}</div>
-            </li>
-          ))}
-        </ul>
-        {actionError ? (
-          <p role="alert" className="notice red" style={{ marginTop: 12 }}>
-            <Icon name={KIND_ICON.crit} size={16} />
-            <span>{t("profile.security.startFailed", { reason: actionError })}</span>
-          </p>
-        ) : null}
+        {/* A LINK, BECAUSE IT GOES SOMEWHERE: a page of its own, not an
+            action that runs here. Drawn as the kit's small button so it has
+            the design's height, focus ring and hover, like the three buttons
+            it replaces. */}
+        <div style={{ marginTop: 12 }}>
+          <Link className="btn small" to="/profile/security">
+            <Icon name="lock" size={14} />
+            <span>{t("profile.security.open")}</span>
+          </Link>
+        </div>
       </Panel>
     </>
   );

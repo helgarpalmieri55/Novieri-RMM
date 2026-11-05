@@ -5,6 +5,7 @@ export const validation = {
   unexplained: "The server refused this and gave no reason. Please try again.",
   unauthorized: "unauthorized",
   serviceUnavailable: "That service is unavailable right now. Nothing was changed — try again shortly.",
+  csrf: "That request did not come from this console's address, so the server refused it. Check the console address setting.",
   forbidden: "You do not have permission to do that.",
   notFound: "That no longer exists. It may have been deleted.",
   conflict: "That conflicts with something that already exists.",

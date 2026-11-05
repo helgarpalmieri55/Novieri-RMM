@@ -96,7 +96,7 @@ export const remote = {
     quality: { auto: "Automatic", low: "Low", medium: "Medium", high: "High" },
     qualityOption: "Quality: {label}",
     noCredential:
-      "This console holds no access token, so the screen was not opened and nothing was asked of the device. Signing in again restores it.",
+      "Your session in this console has ended, so the screen was not opened and nothing was asked of the device. Signing in again restores it.",
     titleFallback: "Remote session",
     description: "The device's screen, live.",
     ending: "Ending…",

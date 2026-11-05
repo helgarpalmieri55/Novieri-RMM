@@ -32,7 +32,7 @@ function sent(fetchMock: ReturnType<typeof vi.fn>, call = 0): Headers {
 }
 
 function narrowedTo(client: string | null): ApiClient {
-  return new ApiClient(() => "t", vi.fn(), "/api/v1", () => client);
+  return new ApiClient(vi.fn(), "/api/v1", () => client);
 }
 
 afterEach(() => {
@@ -55,7 +55,7 @@ describe("X-Client-Id", () => {
   it("is read on every request, not when the client was built", async () => {
     const fetchMock = stubFetch();
     let chosen: string | null = null;
-    const api = new ApiClient(() => "t", vi.fn(), "/api/v1", () => chosen);
+    const api = new ApiClient(vi.fn(), "/api/v1", () => chosen);
     await api.me();
     chosen = ACME;
     await api.me();
@@ -87,12 +87,12 @@ describe("X-Client-Id", () => {
   it("is decided by the builder alone, whatever a caller put in", () => {
     const own = { "X-Client-Id": "a-caller's-own" };
     expect(
-      requestHeaders("t", own, { method: "GET", path: "/audit?limit=5", client: ACME }).has("X-Client-Id"),
+      requestHeaders(own, { method: "GET", path: "/audit?limit=5", client: ACME }).has("X-Client-Id"),
     ).toBe(false);
     expect(
-      requestHeaders("t", own, { method: "GET", path: "/devices", client: ACME }).get("X-Client-Id"),
+      requestHeaders(own, { method: "GET", path: "/devices", client: ACME }).get("X-Client-Id"),
     ).toBe(ACME);
-    expect(requestHeaders("t", own).has("X-Client-Id")).toBe(false);
+    expect(requestHeaders(own).has("X-Client-Id")).toBe(false);
   });
 
   it("is decided on every request ApiClient builds headers for", () => {
@@ -122,7 +122,7 @@ describe("X-Client-Id on a route global by its body", () => {
     const fetchMock = stubFetch();
     setSelectedClient(ACME);
     // Wired as `ApiContext.tsx` wires it: the top bar's choice, read per request.
-    const api = new ApiClient(() => "t", vi.fn(), "/api/v1", selectedClient);
+    const api = new ApiClient(vi.fn(), "/api/v1", selectedClient);
 
     await api.revokeMcpConnection("some-ai-app", "everyone");
     await api.revokeMcpConnection("some-ai-app", "me");
@@ -134,7 +134,7 @@ describe("X-Client-Id on a route global by its body", () => {
   it("is dropped by the builder for a route marked global, whatever its path", () => {
     const own = { "X-Client-Id": "a-caller's-own" };
     expect(
-      requestHeaders("t", own, {
+      requestHeaders(own, {
         method: "POST",
         path: "/mcp/connections/some-ai-app/revoke",
         client: ACME,
@@ -142,7 +142,7 @@ describe("X-Client-Id on a route global by its body", () => {
       }).has("X-Client-Id"),
     ).toBe(false);
     expect(
-      requestHeaders("t", own, {
+      requestHeaders(own, {
         method: "POST",
         path: "/mcp/connections/some-ai-app/revoke",
         client: ACME,

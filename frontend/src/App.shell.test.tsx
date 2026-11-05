@@ -11,21 +11,6 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./lib/auth", () => ({
-  safeReturnTo: () => "/",
-  signIn: () => Promise.resolve(),
-  completeSignIn: () => Promise.resolve(null),
-  isAuthenticated: () => true,
-  initAuth: () => Promise.resolve(null),
-  signOut: () => Promise.resolve(),
-  accessToken: () => null,
-  oidcAuthority: "https://itms.example/realms/it-suite",
-  isSessionExpiring: () => false,
-  onSessionExpiring: () => () => {},
-  startAccountAction: () => Promise.resolve(),
-  userManager: { events: { addUserLoaded: () => {}, addUserUnloaded: () => {} } },
-}));
-
 const apiRef = vi.hoisted(() => ({ current: undefined as unknown }));
 vi.mock("./lib/ApiContext", () => ({
   useApi: () => apiRef.current,

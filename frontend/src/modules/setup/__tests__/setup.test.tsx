@@ -2,11 +2,13 @@
  * First boot — the screen a buyer sees before the platform has an owner.
  *
  * WHY THE GATE IS ABOVE THE AUTH GATE, AND WHY THAT IS A TEST RATHER THAN A
- * COMMENT. `RequireAuth` redirects an unauthenticated visitor straight to the
- * identity provider. On an installation with zero users that redirect is a dead
- * end: there is no account to sign in as, no way back, and nothing on screen
- * that says so. So the setup check has to happen BEFORE anything can trigger a
- * redirect, and the assertion that proves it is `signIn` never being called.
+ * COMMENT. `RequireAuth` sends a visitor with no session straight to the
+ * sign-in page. On an installation with zero users that is a dead end: there
+ * is no account to sign in as, no way back, and nothing on screen that says
+ * so. So the setup check has to happen BEFORE anything can send the visitor
+ * away, and the assertion that proves it is no navigation ever starting.
+ * (RE-POINTED, own-auth Task 10: the seam was `lib/auth.ts`'s `signIn`, a
+ * redirect to Keycloak; it is `lib/session.ts`'s `navigation` now.)
  *
  * The four cases below are the ones the plan names (Task 10), and each of them
  * is a way the screen has failed in products that shipped it:
@@ -21,22 +23,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const signIn = vi.fn();
-
-vi.mock("../../../lib/auth", () => ({
-  signIn: () => signIn(),
-  completeSignIn: () => Promise.resolve(),
-  isAuthenticated: () => false,
-  initAuth: () => Promise.resolve(null),
-  signOut: () => Promise.resolve(),
-  accessToken: () => null,
-  startAccountAction: () => Promise.resolve(),
-  oidcAuthority: "https://itms.example/realms/it-suite",
-  userManager: { events: { addUserLoaded: () => {}, addUserUnloaded: () => {} } },
-}));
-
+const { navigation } = await import("../../../lib/session");
 const { SetupPage } = await import("../SetupPage");
 const { default: App, queryClient } = await import("../../../App");
+
+/** Every whole-document navigation the console started: to sign in, here. */
+let assign: ReturnType<typeof vi.spyOn>;
 
 /** Every claim the stub received, as the page actually sent it. */
 const claims: { code: string; email: string; display_name: string; organization_name: string }[] =
@@ -66,7 +58,7 @@ beforeEach(() => {
   // answers from the FIRST test's cache and the fetch stub below is never
   // consulted.
   queryClient.clear();
-  signIn.mockReset().mockResolvedValue(undefined);
+  assign = vi.spyOn(navigation, "assign").mockImplementation(() => {});
   claims.length = 0;
   statusReply = { status: 200, body: { needed: false } };
   claimPending = new Promise<Reply>((resolve) => {
@@ -78,6 +70,8 @@ beforeEach(() => {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/api/v1/setup/status")) return respond(statusReply);
+      // No session: the guard's question, once the platform has an owner.
+      if (url.endsWith("/api/v1/me")) return respond({ status: 401, body: { code: "auth_required" } });
       if (url.endsWith("/api/v1/setup/claim")) {
         // NOT `JSON.parse(init?.body ?? "{}")`: a page that sent no body at all
         // would be recorded as an empty claim and every field assertion below
@@ -92,6 +86,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 async function fillTheForm(user: ReturnType<typeof userEvent.setup>, code: string) {
@@ -109,14 +104,15 @@ describe("the setup screen", () => {
     expect(await screen.findByLabelText("Install code")).toBeInTheDocument();
     // The whole point of checking before the auth gate. A redirect here would
     // land on a sign-in page for a platform with no accounts in it.
-    expect(signIn).not.toHaveBeenCalled();
+    expect(assign).not.toHaveBeenCalled();
   });
 
   it("stays out of the way once the platform has an owner", async () => {
     statusReply = { status: 200, body: { needed: false } };
     render(<App />);
 
-    await waitFor(() => expect(signIn).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+    expect(assign).toHaveBeenCalledWith("/sign-in");
     expect(screen.queryByLabelText("Install code")).not.toBeInTheDocument();
   });
 
@@ -126,7 +122,7 @@ describe("the setup screen", () => {
     statusReply = { status: 500, body: { detail: "boom" } };
     render(<App />);
 
-    await waitFor(() => expect(signIn).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
     expect(screen.queryByLabelText("Install code")).not.toBeInTheDocument();
   });
 
@@ -234,13 +230,14 @@ describe("the setup screen", () => {
     expect(alert.textContent).not.toContain('"loc"');
   });
 
-  it("says so when sign-in cannot even be started, rather than doing nothing", async () => {
-    // A FAILURE SWALLOWED WHOLE: `onClick={() => void signIn()}` discarded the
-    // rejection. `signinRedirect` fetches the provider's discovery document
-    // before it navigates, so an identity provider that is not up yet -- the
-    // likeliest state of a freshly installed appliance -- produced a button
-    // that visibly did nothing, on the last screen of an installation.
-    signIn.mockRejectedValue(new Error("Failed to fetch the OIDC metadata"));
+  // RE-POINTED (own-auth Task 10). This was "says so when sign-in cannot even
+  // be started": `signinRedirect` fetched the identity provider's discovery
+  // document before it navigated, and on a fresh appliance that failed and
+  // the button did nothing. The sign-in page is this console's own and
+  // nothing is fetched first, so the property left is that the button GOES --
+  // in one whole-document load, so the setup check is asked again and finds
+  // the installation claimed.
+  it("goes to this console's sign-in page in one load, with nothing to fail first", async () => {
     const user = userEvent.setup();
     render(<SetupPage />);
     await fillTheForm(user, "install-code");
@@ -258,9 +255,9 @@ describe("the setup screen", () => {
     await user.click(screen.getByRole("button", { name: /finish setup/i }));
     await user.click(await screen.findByRole("button", { name: /go to sign in/i }));
 
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/could not be started/i);
-    expect(alert).toHaveTextContent(/Failed to fetch the OIDC metadata/);
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(assign).toHaveBeenCalledWith("/sign-in");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("says plainly when the invitation could not be sent", async () => {

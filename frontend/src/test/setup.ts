@@ -59,6 +59,7 @@ import { cleanup } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
 import { setActiveLanguage } from "../i18n/core";
 import { setSelectedClient } from "../lib/clientChoice";
+import { resetSessionEnd } from "../lib/sessionEnd";
 import { takeSelectorChange } from "../shell/selectorChange";
 
 let calls: unknown[][] = [];
@@ -75,6 +76,9 @@ beforeEach(() => {
   // (`shell/selectorChange.ts`).
   setSelectedClient(null);
   takeSelectorChange();
+  // ...and with a session that has not ended, so one test's 401 can never
+  // send the next test's guard to sign in (`lib/sessionEnd.ts`).
+  resetSessionEnd();
   calls = [];
   original = console.error;
   console.error = (...args: unknown[]) => {
