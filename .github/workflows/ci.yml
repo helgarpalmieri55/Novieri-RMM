@@ -953,7 +953,12 @@ jobs:
 
       - name: Install Playwright and Chromium
         working-directory: frontend
-        run: npm i -g playwright && npx playwright install --with-deps chromium
+        # PINNED to the version the check was verified against (Playwright
+        # 1.56.1, its CDP WebAuthn domain and its Chromium build), so a red
+        # run means the falsifier and not a library or browser upgrade.
+        # Raising it is a deliberate change, re-verified with the probe's
+        # `require_user_verification=False` mutation (Task 13 report).
+        run: npm i -g playwright@1.56.1 && npx --yes playwright@1.56.1 install --with-deps chromium
 
       - name: a passkey without user verification is refused
         working-directory: frontend
