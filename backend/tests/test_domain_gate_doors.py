@@ -57,11 +57,12 @@ from app.core.client_scope import ClientScope
 from app.core.identity.policy import OVERRIDE_ENV_VAR
 from app.models import Client, Device, RemoteSession, User
 from app.models.auth import AuthSession
-from app.modules.remote.tunnel import TunnelAuthError, authorize_tunnel_session
+from app.modules.remote.tunnel import TunnelAuthError
 from tests.mcp_support import MCP_AUD, MCP_BASE, marked_client
 from tests.session_support import (
     CONSOLE,
     SignedIn,
+    authorize_tunnel_session,
     console_headers,
     cookie_header,
     sign_in,

@@ -40,6 +40,7 @@ from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import User
 from app.models.auth import AuthSession
+from app.modules.remote.tunnel import admit_tunnel_session
 
 CONSOLE = "https://itms.test"
 
@@ -183,6 +184,26 @@ def ws_cookie(token: str, *, origin: str = CONSOLE) -> dict[str, Any]:
     console's Origin on the handshake, as a browser sends them (D15), and no
     subprotocol."""
     return {"additional_headers": {"Cookie": cookie_header(token)}, "origin": origin}
+
+
+async def authorize_tunnel_session(
+    *,
+    connection: HTTPConnection,
+    session_id: UUID,
+    settings: Any,
+    app_engine: Any,
+) -> tuple[UUID, UUID, ClientScope]:
+    """`tunnel.admit_tunnel_session` without the session it was admitted by:
+    ``(org_id, viewer_id, clients)``, for the door tests that only ask
+    "admitted, or which close code". TEST ONLY (final review B-M6), as Task
+    13 did with `read_door_identity`: in `app/` it was an admission with no
+    watchdog, and a route that picked it up would open a screen that
+    outlives its sign-in. `session_screen` admits with `admit_tunnel_session`
+    and keeps the principal for `watch_tunnel_session`."""
+    admitted = await admit_tunnel_session(
+        connection=connection, session_id=session_id, settings=settings, app_engine=app_engine
+    )
+    return admitted.org_id, admitted.viewer_id, admitted.clients
 
 
 def socket_connection(env: Any, token: str, *, origin: str = CONSOLE) -> HTTPConnection:

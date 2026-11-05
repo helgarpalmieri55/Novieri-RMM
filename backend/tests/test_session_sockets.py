@@ -24,7 +24,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.api.v1.ws as ws_module
@@ -33,7 +33,7 @@ import app.modules.remote.tunnel as tunnel_module
 from app.core.auth.sessions import end
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
-from app.models import Device, RemoteSession
+from app.models import Device, RemoteSession, UserRole
 from app.models.auth import AuthSession
 from app.modules.remote.service import SCREEN
 from tests.session_support import CONSOLE, cookie_header, sign_in, use_console
@@ -381,6 +381,54 @@ async def test_the_screen_closes_when_its_session_ends(
     sent = await task
     assert _accepted(sent)
     assert _closes(sent) == [4401]
+    assert seen["cancelled"] is True
+
+
+async def test_the_screen_closes_when_its_remote_control_grant_is_revoked(
+    api_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Final review B-M5: the watchdog re-checks the DOOR, not only the
+    session. A `remote.control` grant revoked while the screen is open
+    leaves the session alive, so the session check alone keeps the desktop
+    open; the door's re-read (`read_session_identity` with the screen's
+    code) finds an empty scope and the screen closes 4403, as the door would
+    refuse it. Re-check only the session and this stays open: red."""
+    monkeypatch.setattr(tunnel_module, "RECHECK_INTERVAL_S", 0.2)
+    org_id, signed = await _technician(api_env)
+    sid = await _screen_session(api_env, org_id, signed.user_id)
+    seen = _live_screen(api_env, monkeypatch, sid, hold=True)
+    task = await _open_screen(api_env, sid, signed.token, seen)
+
+    async with AsyncSession(api_env.admin_engine) as s:
+        await s.execute(delete(UserRole).where(UserRole.user_id == signed.user_id))
+        await s.commit()
+    sent = await task
+
+    assert _accepted(sent)
+    assert _closes(sent) == [4403]
+    assert seen["cancelled"] is True
+    async with AsyncSession(api_env.admin_engine) as s:
+        alive = (
+            await s.execute(select(AuthSession.ended_at).where(AuthSession.id == signed.session_id))
+        ).scalar_one()
+    assert alive is None  # the console session itself was not touched
+
+
+async def test_the_screen_closes_when_the_domain_rule_refuses_its_viewer(
+    api_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B-M5, the domain rule: switched on while a screen is open, it closes
+    the screen with the door's 4403."""
+    monkeypatch.setattr(tunnel_module, "RECHECK_INTERVAL_S", 0.2)
+    org_id, signed = await _technician(api_env)
+    sid = await _screen_session(api_env, org_id, signed.user_id)
+    seen = _live_screen(api_env, monkeypatch, sid, hold=True)
+    task = await _open_screen(api_env, sid, signed.token, seen)
+
+    monkeypatch.setattr(api_env.app.state.settings, "console_email_domain", "elsewhere.example")
+    sent = await task
+
+    assert _closes(sent) == [4403]
     assert seen["cancelled"] is True
 
 

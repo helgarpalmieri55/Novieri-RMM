@@ -47,10 +47,17 @@ from app.core.security import (
 )
 from app.models import User
 from app.models.auth import AuthSession
-from app.modules.remote.tunnel import TunnelAuthError, authorize_tunnel_session
+from app.modules.remote.tunnel import TunnelAuthError
 from tests.fake_idp import CONSOLE_CLIENT_ID, ISSUER, JWKS_URL, FakeIdp, jwks_client
 from tests.mcp_support import MCP_AUD, mcp_client, mcp_token, running_mcp
-from tests.session_support import CONSOLE, refusal_code, sign_in, socket_connection, ws_cookie
+from tests.session_support import (
+    CONSOLE,
+    authorize_tunnel_session,
+    refusal_code,
+    sign_in,
+    socket_connection,
+    ws_cookie,
+)
 
 NOT_ACCESS_EN = "this token is not an access token"
 NOT_ACCESS_ES = "este token no es un token de acceso"
