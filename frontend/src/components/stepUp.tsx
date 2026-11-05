@@ -37,7 +37,7 @@ import { useT } from "../i18n/context";
 import { translate } from "../i18n/core";
 import { ApiError } from "../lib/api";
 import { useApi } from "../lib/ApiContext";
-import { describePasskeyError, signWithPasskey } from "../modules/auth/passkey";
+import { canUsePasskeys, describePasskeyError, passkeyHiddenAdvice, signWithPasskey } from "../modules/auth/passkey";
 import type { MySecurity } from "../modules/profile/types";
 import { Btn } from "../shell/components";
 import { Icon } from "../shell/icons";
@@ -188,9 +188,17 @@ function StepUpDialog({
   }
 
   const data = security.data;
-  const hasPasskey = (data?.passkeys.length ?? 0) > 0;
   const hasTotp = data?.has_totp === true;
   const codesLeft = data?.recovery_codes_left ?? 0;
+  // A PASSKEY THIS BROWSER CANNOT USE IS NOT OFFERED (final review D1, Minor
+  // 6): the click would only fail with advice about an app the person may
+  // not have. The dialog says why it is missing, and what is left.
+  const ownsPasskey = (data?.passkeys.length ?? 0) > 0;
+  const hasPasskey = ownsPasskey && canUsePasskeys();
+  const hiddenAdvice =
+    ownsPasskey && !hasPasskey
+      ? (passkeyHiddenAdvice({ totp: hasTotp, recovery: codesLeft > 0 }) ?? "components.stepUp.passkeyOnly")
+      : null;
 
   return (
     <Dialog open={open} onClose={onCancel} title={t("components.stepUp.title")}>
@@ -202,6 +210,7 @@ function StepUpDialog({
           <span>{describeSubmitError(security.error)}</span>
         </p>
       ) : null}
+      {hiddenAdvice ? <p className="note">{t(hiddenAdvice)}</p> : null}
       {hasPasskey ? (
         <div className="form-actions">
           <Btn
@@ -250,8 +259,11 @@ function StepUpDialog({
           <Form onSubmit={() => void attempt(() => api.stepUpRecovery(recovery.trim()))}>
             <div className="form-grid">
               <Field label={t("components.stepUp.recoveryCode")} help={t("components.stepUp.recoveryHelp", { count: codesLeft })}>
+                {/* `data-secret`: a single-use code typed in clear, never
+                    kept when the session ends (`lib/unsavedText.ts`). */}
                 <input
                   className={inputClass}
+                  data-secret
                   value={recovery}
                   autoComplete="off"
                   spellCheck={false}
@@ -270,7 +282,7 @@ function StepUpDialog({
           </Form>
         </details>
       ) : null}
-      {data && !hasPasskey && !hasTotp && codesLeft === 0 ? (
+      {data && !ownsPasskey && !hasTotp && codesLeft === 0 ? (
         <p className="note">{t("components.stepUp.noMethod")}</p>
       ) : null}
       {failure ? (

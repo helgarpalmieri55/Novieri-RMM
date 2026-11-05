@@ -66,7 +66,7 @@ import { createServer as createNetServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CHOSEN_CLIENT, ROUTES, patternOf } from "./routes.mjs";
+import { CHOSEN_CLIENT, OPEN_DISCLOSURES, ROUTES, patternOf } from "./routes.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FRONTEND = resolve(HERE, "..");
@@ -674,6 +674,17 @@ async function walkApp(args, browser, server, allow) {
         // React Query settles synchronously against the fixture proxy, but the
         // render behind it is a frame away; give the page a beat.
         await page.waitForTimeout(600);
+        // What a route keeps behind a disclosure is measured open
+        // (`OPEN_DISCLOSURES`, `./routes.mjs`).
+        if (OPEN_DISCLOSURES.has(route)) {
+          const opened = await page.evaluate(() => {
+            const all = [...document.querySelectorAll("details")];
+            for (const disclosure of all) disclosure.open = true;
+            return all.length;
+          });
+          if (opened === 0) throw new Error("OPEN_DISCLOSURES names this route, and it drew no <details> to open");
+          await page.waitForTimeout(150);
+        }
         await page.evaluate(() => window.scrollTo(0, 0));
         // NON-VACUITY: a Spanish walk that rendered English would measure
         // nothing it claims to. <html lang> follows the active language.

@@ -34,12 +34,16 @@ export function RecoverPage() {
   const token = useLinkToken();
   // Asked even with no token, as `InvitePage` is: the server's 410 decides, and
   // fixture mode still draws the page for the harmony gate.
+  // ASKED ONCE, AND THE TOKEN IS NOT KEPT, for `InvitePage`'s reasons (final
+  // review D1, Minor 4): every ask spends the per-IP limit the accept step
+  // shares, a language switch invalidates every query but a static one, and
+  // the token stays out of the key and the answer leaves with the page.
   const recovery = useQuery({
-    queryKey: ["auth", "recover", token],
+    queryKey: ["auth", "recover"],
     queryFn: () => api.getRecovery(token),
     retry: false,
-    // Asked once: every ask spends the per-IP limit the accept step shares.
-    staleTime: Infinity,
+    staleTime: "static",
+    gcTime: 0,
     refetchOnWindowFocus: false,
   });
   const [dead, setDead] = useState(false);

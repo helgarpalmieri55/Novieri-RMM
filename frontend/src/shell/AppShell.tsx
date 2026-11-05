@@ -63,9 +63,6 @@ export interface AppShellProps {
   health?: HealthReading;
   user: { name: string; email?: string; role: string };
   onSignOut: () => void;
-  /** True once a silent renewal has failed: the session is genuinely ending. */
-  sessionExpiring?: boolean;
-  onSignIn?: () => void;
   /** What the palette can jump to. Supplied by the app, never invented here. */
   searchItems?: readonly CommandPaletteItem[];
   /** Told each query so the app can look records up for it. */
@@ -226,8 +223,6 @@ export function AppShell({
   health,
   user,
   onSignOut,
-  sessionExpiring = false,
-  onSignIn,
   searchItems = [],
   onSearchQueryChange,
   searchPending,
@@ -599,27 +594,12 @@ export function AppShell({
           </div>
         </header>
 
-        {/* SAY IT BEFORE THE USER FINDS OUT BY LOSING SOMETHING. The console
-            learns that a silent renewal failed about a minute before the next
-            request 401s; until this existed it kept that to itself, and the
-            audit's finding is the consequence -- "the session drops mid-task
-            during continuous active use, with no warning, no expiry notice,
-            and total loss of context."
-
-            A BANNER, NOT A DIALOG, and not an automatic redirect. Interrupting
-            someone mid-form to announce that they are about to be interrupted
-            is the same defect in politer clothing, and a redirect would throw
-            away the unsaved work this warning exists to save. `role="status"`
-            is polite by definition: assistive technology announces it at the
-            next pause rather than cutting across what the user is doing. */}
-        {sessionExpiring ? (
-          <div className="session-notice" role="status">
-            <span>{t("shell.app.sessionExpired")}</span>
-            <button type="button" className="session-notice-action" onClick={onSignIn}>
-              {t("shell.app.signInAgain")}
-            </button>
-          </div>
-        ) : null}
+        {/* NO SESSION BANNER HERE ANY MORE. It said "your session has
+            expired" over the page and left the page drawn. A session that
+            ends now takes the shell with it: the guard empties the cache and
+            draws `SessionEnded` in its place, with what the person had typed
+            kept to copy (`App.tsx`'s `RequireAuth`, operator decision 3,
+            2026-11-05). */}
 
         {/* The skip link's target, and `tabIndex={-1}` is what makes it work:
             without it the browser moves the viewport but not the focus, so a

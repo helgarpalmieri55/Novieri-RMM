@@ -2,7 +2,10 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { FIXTURE_MODE } from "../fixtures/mode";
 import { ApiClient } from "./api";
 import { isClientId, selectedClient } from "./clientChoice";
+import { watchPersonInput } from "./personInput";
+import { confirmSessionEnded } from "./sessionCheck";
 import { sessionEnded } from "./sessionEnd";
+import { hearOtherTabs } from "./sessionTabs";
 
 const ApiContext = createContext<ApiClient | null>(null);
 
@@ -42,14 +45,16 @@ export function ApiProvider({ children }: { children: ReactNode }) {
       FIXTURE_MODE
         ? fixture
         : new ApiClient(
-            // A 401 IS THE SESSION ENDING, NOT A NAVIGATION (own-auth design
-            // §2.4). `lib/auth.ts`'s `signIn()` used to redirect from here, on
-            // any 401, from any page -- including a sign-in page whose own
-            // language save answered 401, which is a loop (plan decision
-            // D20). The flag is read by the guard, which sends a tab that
-            // never had a session to sign in, and by the shell, which keeps a
-            // page whose session ended mid-task and says so.
-            sessionEnded,
+            // A 401 MAY BE THE SESSION ENDING, AND IS NEVER A NAVIGATION
+            // (own-auth design §2.4). `lib/auth.ts`'s `signIn()` used to
+            // redirect from here, on any 401, from any page -- including a
+            // sign-in page whose own language save answered 401, which is a
+            // loop (plan decision D20). Now one `/me` confirms it first
+            // (`./sessionCheck.ts`, final re-review I1): a request that left
+            // with the cookie a password change just rotated is answered 401
+            // while the session lives on. A confirmed end is read by the
+            // guard, which hides the page and empties the cache.
+            () => void confirmSessionEnded("/api/v1"),
             "/api/v1",
             // The top bar's choice, read on every request (`X-Client-Id`) --
             // and sent ONLY AS A CLIENT ID. The server answers a malformed
@@ -68,6 +73,31 @@ export function ApiProvider({ children }: { children: ReactNode }) {
           ),
     [fixture],
   );
+  // A PERSON WHO IS WORKING STAYS SIGNED IN (`./personInput.ts`, final
+  // re-review P1): while they give input and no request without the
+  // background header went out for 60 s, a plain `GET /me` does.
+  useEffect(() => {
+    if (!client) return undefined;
+    return watchPersonInput(window, () => {
+      client.me().catch(() => {
+        // A 401 is the session's business (`onUnauthorized`); an outage is
+        // the next request's.
+      });
+    });
+  }, [client]);
+
+  // ANOTHER TAB'S END (`./sessionTabs.ts`, final re-review M1): a sign-out
+  // ends this tab too; any other end is confirmed here by this tab's own
+  // `/me`, which the shared cookie answers.
+  useEffect(
+    () =>
+      hearOtherTabs(window, (notice) => {
+        if (notice === "signed_out") sessionEnded();
+        else void confirmSessionEnded("/api/v1");
+      }),
+    [],
+  );
+
   // Nothing renders until the fixture client is here: a page mounted against
   // a null client would throw from `useApi`, and the gate would screenshot
   // the error boundary instead of the page.

@@ -65,6 +65,12 @@ export const auth = {
     passkeyRejected: "That passkey was not accepted. Try again, or use an authenticator app.",
     factorSaved: "Your second factor is saved. The recovery codes could not be made yet.",
     retryFinish: "Try again",
+    // `enroll/finish` answered 409 `already_signed_in`: its first answer was lost after it succeeded.
+    alreadySignedIn:
+      "You are already signed in: the first answer was lost on its way. Your recovery codes were made but cannot be shown again; make new ones in Your security.",
+    // `enroll/finish` answered 409 `enroll_required`: more than 15 minutes since the factor was saved.
+    finishExpired:
+      "The time to finish this step has run out. Start again from the sign-in page: you will sign in with the second factor you just added, and can make recovery codes in Your security.",
   },
   codes: {
     title: "Save your recovery codes",
@@ -119,6 +125,15 @@ export const auth = {
   },
   passkey: {
     unsupported: "This browser cannot use passkeys. Use an authenticator app instead.",
+    // The account has a passkey this browser cannot use, so the option is not
+    // shown (`passkey.ts::passkeyHiddenAdvice`): why, and what is left.
+    hiddenUseAppOrCode:
+      "This browser cannot use passkeys, so your passkey is not offered here. Use your authenticator app or one of your recovery codes.",
+    hiddenUseApp: "This browser cannot use passkeys, so your passkey is not offered here. Use your authenticator app.",
+    hiddenUseCode:
+      "This browser cannot use passkeys, so your passkey is not offered here. Use one of your recovery codes, or a browser that supports passkeys.",
+    hiddenNoOther:
+      "This browser cannot use passkeys, and your account has no other second factor. Sign in from a browser that supports passkeys, or ask an administrator to reset your second factors.",
     cancelled: "The passkey prompt was closed or timed out, so nothing was used.",
     alreadyRegistered: "This device already holds a passkey for your account.",
     noUserVerification:

@@ -227,6 +227,8 @@ export const settings = {
     enableAria: "Enable {email}",
     resetFactors: "Reset second factors",
     resetFactorsAria: "Reset second factors for {email}",
+    // On the caller's own row, where the server refuses a reset.
+    resetOwnFactors: "Your own second factors are changed in <link>Your security</link>.",
     endSessions: "Sign out everywhere",
     endSessionsAria: "Sign out {email} everywhere",
     resend: "Resend invitation",
@@ -309,7 +311,8 @@ export const settings = {
         title: "Reset second factors",
         question: "Reset the second factors of {email}?",
         action: "Reset second factors for {email}",
-        body: "Their passkeys, authenticator app and recovery codes stop working and their remembered devices are forgotten; at their next sign-in they register a new second factor. You may be asked for your own second factor first.",
+        // `service.reset_factors` also ends every open session (`end_all_for_user`, final review D2, Minor 3).
+        body: "Their passkeys, authenticator app and recovery codes stop working, their remembered devices are forgotten, and every session they have open is signed out now; at their next sign-in they register a new second factor. You may be asked for your own second factor first.",
       },
       endSessions: {
         title: "Sign out everywhere",
@@ -321,7 +324,10 @@ export const settings = {
         title: "Cancel invitation",
         question: "Cancel the invitation to {email}?",
         action: "Cancel the invitation to {email}",
-        body: "The link stops working at once. You can invite them again later.",
+        // The server marks the account deleted and the address stays taken
+        // (`service.cancel_invite`; C18, review C Minor 4): it said "You can
+        // invite them again later".
+        body: "The link stops working at once. This address cannot be invited again: a cancelled invitation keeps it for good.",
       },
       revoke: {
         title: "Remove a role",

@@ -230,6 +230,7 @@ const GRANTS: Map<string, RoleAssignmentOut[]> = new Map([
   ["usr-lf", [{ assignment_id: "ur-6", role_id: "role-service-desk", role_name: "service-desk", client_id: null }]],
   ["usr-ic", [{ assignment_id: "ur-7", role_id: "role-finance", role_name: "finance", client_id: null }]],
   ["usr-rs", [{ assignment_id: "ur-8", role_id: "role-auditor", role_name: "auditor", client_id: null }]],
+  ["usr-invited-seed", [{ assignment_id: "ur-9", role_id: "role-technician", role_name: "technician", client_id: null }]],
 ]);
 
 const roles = new Map<string, RoleSeed>(ROLE_SEEDS.map((seed) => [seed.id, seed]));
@@ -346,7 +347,9 @@ const resendInvite: FixtureMap["resendInvite"] = (userId) => {
 };
 
 const cancelInvite: FixtureMap["cancelInvite"] = (userId) => {
-  if (!userId.startsWith("usr-invited-")) throw notFound("invitation");
+  // The server's 409, as for a resend (`service._require_pending_invitation`;
+  // final review D2, Minor 4): it was a 404 here.
+  if (!userId.startsWith("usr-invited-")) throw conflict("this person has no pending invitation");
   GRANTS.delete(userId);
   return undefined;
 };

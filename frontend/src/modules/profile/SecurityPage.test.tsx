@@ -343,6 +343,28 @@ describe("Your security", () => {
     await waitFor(() => expect(calls.revokeTrustedDevice).toHaveBeenCalledExactlyOnceWith("td-2"));
   });
 
+  // FINAL REVIEW D2, MINOR 3: forgetting a device also ends the sessions it
+  // started (`devices.revoke`), and on "This device" that is the session in use.
+  it("says forgetting another device signs out the sessions it started", async () => {
+    const user = userEvent.setup();
+    renderSecurityPage();
+    await user.click(await screen.findByRole("button", { name: "Forget Safari on macOS" }));
+    const dialog = await screen.findByRole("dialog", { name: "Forget device" });
+    expect(dialog).toHaveTextContent(
+      "The next sign-in from it asks for your second factor again, and the sessions it started are signed out.",
+    );
+  });
+
+  it("says forgetting This device signs you out now", async () => {
+    const user = userEvent.setup();
+    renderSecurityPage();
+    await user.click(await screen.findByRole("button", { name: "Forget Firefox on Windows" }));
+    const dialog = await screen.findByRole("dialog", { name: "Forget device" });
+    expect(dialog).toHaveTextContent(
+      "This is the device you are using: forgetting it signs you out here, now. The next sign-in from it asks for your second factor again.",
+    );
+  });
+
   it("signs out another session", async () => {
     const user = userEvent.setup();
     renderSecurityPage();

@@ -967,6 +967,8 @@ export function UploadDocumentDialog({
           <Field label={t("docs.documents.dialog.title")}>
             <input
               className={inputClass}
+              // `data-keep`: prose a person would retype, kept if the session ends (`lib/unsavedText.ts`).
+              data-keep
               maxLength={TITLE_MAX}
               value={title}
               onChange={(event) => {
@@ -1176,6 +1178,8 @@ function EditDocumentDialog({
           <Field label={t("docs.documents.dialog.title")}>
             <input
               className={inputClass}
+              // `data-keep`: prose a person would retype, kept if the session ends (`lib/unsavedText.ts`).
+              data-keep
               maxLength={TITLE_MAX}
               value={title}
               onChange={(event) => {

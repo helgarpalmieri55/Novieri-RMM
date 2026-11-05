@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { UnassignedRefusal } from "../../components/UnassignedRefusal";
@@ -28,6 +28,7 @@ import { ChannelPill, ReleaseChannels, compareVersions } from "./ReleaseChannels
 import { whereMissing } from "./where";
 import { useEverywherePermissions } from "../../lib/mePermissions";
 import { useAdoptJourneyClient, useJourneySiteState } from "../onboarding/journeyTarget";
+import { useSecretMutation } from "../../lib/secretMutation";
 
 /** The lifetime this page asks for, in hours. Stated in the confirmation
  *  because "how long is this credential alive" is the thing the operator is
@@ -230,7 +231,8 @@ export function AgentReleasesPage() {
     queryFn: () => api.listAgentReleases(),
   });
 
-  const generate = useMutation({
+  // A secret in its answer: `useSecretMutation` drops it once the page holds it (`lib/secretMutation.ts`).
+  const generate = useSecretMutation({
     mutationFn: (release: AgentRelease) => {
       // The field that is missing, before `requireKnown`'s "has not been chosen".
       if (siteMissing !== null) throw new Error(siteMissing);

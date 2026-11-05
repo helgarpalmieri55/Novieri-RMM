@@ -2,6 +2,7 @@
 
 import { getLanguage } from "../i18n/core";
 import { isGlobalRoute } from "./globalRoutes";
+import { backgroundRequest } from "./personInput";
 import type {
   DashboardLayoutResponse,
   WidgetPlacement,
@@ -853,7 +854,7 @@ export interface Me {
  * The caller's own organization (`GET /orgs/current`).
  *
  * There is no by-id variant and there is not going to be one: the backend
- * resolves the org from the bearer token, so the client cannot name a target.
+ * resolves the org from the session, so the client cannot name a target.
  */
 export interface CurrentOrg {
   id: string;
@@ -1649,6 +1650,15 @@ export interface RequestRoute {
 export const CSRF_HEADER = "X-ITMS-Request";
 
 /**
+ * The header that marks a request NO PERSON CAUSED: a poll, a refetch on
+ * focus or on a language switch, a socket's re-check -- anything made when
+ * nobody gave input in the last 60 s (`./personInput.ts`). The server does
+ * not renew the session for it, so a console left open goes idle (final
+ * re-review, P1; NIST SP 800-63B-4 §5.2).
+ */
+export const BACKGROUND_HEADER = "X-ITMS-Background";
+
+/**
  * The one place request headers are built: the console's request mark,
  * language and client.
  *
@@ -1671,11 +1681,17 @@ export const CSRF_HEADER = "X-ITMS-Request";
  * because a second copy is a 400 and one on a global route a 403.
  * `api.clientScope.test.ts` fails the build on an `ApiClient` call that does
  * not say where it goes.
+ *
+ * `X-ITMS-Background: 1` (`BACKGROUND_HEADER`) on every request made when no
+ * person gave input in the last 60 s: the server does not renew the session
+ * for it. Decided here too, so no fetch can forget it.
  */
 export function requestHeaders(extra?: HeadersInit, route?: RequestRoute): Headers {
   const headers = new Headers(extra);
   headers.set(CSRF_HEADER, "1");
   headers.set("Accept-Language", getLanguage());
+  if (backgroundRequest()) headers.set(BACKGROUND_HEADER, "1");
+  else headers.delete(BACKGROUND_HEADER);
   headers.delete("X-Client-Id");
   if (route?.client && route.global !== true) {
     const path = route.path.split("?")[0] ?? route.path;
@@ -2615,10 +2631,12 @@ export class ApiClient {
    * NOT ROUTED THROUGH `request` -- the body is a binary `.xlsx`, not JSON --
    * and A FETCH RATHER THAN A LINK, which is the entire point of the method.
    * Both export buttons in this console were `<a href="/api/v1/export/…"
-   * download>`, and a browser following a link of its own accord sends no
-   * `Authorization` header: the route answered 401 and the browser saved the
-   * refusal body under the name the URL ended in. "Export inventory exports a
-   * .json instead of an .xlsx" is that, reported from the deployed console.
+   * download>`, and under the bearer token a browser following a link of its
+   * own accord sent none: the route answered 401 and the browser saved the
+   * refusal body under the name the URL ended in ("Export inventory exports a
+   * .json instead of an .xlsx", reported from the deployed console). A link
+   * would carry the session cookie now, but still not `X-Client-Id`, so it
+   * would export every client instead of the one chosen (`lib/download.ts`).
    *
    * Mirrors `exportPatchReport`/`exportReport`, which had already reached the
    * same conclusion on their own routes.
@@ -6110,10 +6128,12 @@ export class ApiClient {
   }
 
   // Streams the CSV export. Not routed through `request` (the body is
-  // text/csv, not JSON), and it CARRIES THE SAME `Authorization` HEADER as
-  // every other call -- mirrors `exportPatchReport`/`getRemoteRecording`. A
-  // bare `<a href>` to the export path would send no bearer token at all and
-  // land on a 401, which is why this is a fetch and not a link.
+  // text/csv, not JSON), and it CARRIES THE SAME HEADERS as every other call
+  // (`requestHeaders`: `X-Client-Id`, `Accept-Language`, the CSRF header) --
+  // mirrors `exportPatchReport`/`getRemoteRecording`. A bare `<a href>` to the
+  // export path would carry the session cookie but none of those, so it
+  // would export every client rather than the one chosen, and a 401 would be
+  // saved as a file instead of ending the session: a fetch, not a link.
   async exportReport(key: string, params: ReportParams = {}): Promise<Blob> {
     const headers = requestHeaders(undefined, this.route("GET", `/reports/${key}/export.csv`));
     const query = new URLSearchParams(params).toString();

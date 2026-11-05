@@ -71,6 +71,15 @@ export function patternOf(route) {
   return out;
 }
 
+/**
+ * ROUTES WHOSE `<details>` THE WALK OPENS BEFORE IT MEASURES. A closed
+ * disclosure's controls are in the DOM but drawn nowhere, so axe, the token
+ * diff and the overflow probe never see them. The Users tab keeps every
+ * row's Disable, Reset, Sign out everywhere, Resend, Cancel and Delete behind
+ * one (final review D2, Minor 5).
+ */
+export const OPEN_DISCLOSURES = new Set(["/settings?tab=users"]);
+
 export const ROUTES = [
   // The pages reached without a session (own-auth Task 11). No top bar, so
   // harmony measures their tokens, overflow and axe, and skips the bar.
@@ -188,6 +197,11 @@ export const ROUTES = [
   // Settings -> Sessions (own authentication design §2.4) is walked for the
   // same reason: `/settings` alone never opens it.
   "/settings?tab=sessions",
+  // Settings -> Users (final review D2, Minor 5): the screen own
+  // authentication changed most -- the invite form, the shown-once link,
+  // and the row's actions, with Resend and Cancel for the fixtures' open
+  // invitation (`usr-invited-seed`).
+  "/settings?tab=users",
   "/admin",
   "/governance",
   "/assets",

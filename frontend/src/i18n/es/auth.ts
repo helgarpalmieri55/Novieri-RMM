@@ -70,6 +70,10 @@ export const auth: Shape<typeof en> = {
     passkeyRejected: "No se aceptó esa clave de acceso. Inténtalo de nuevo o usa una aplicación de autenticación.",
     factorSaved: "Tu segundo factor está guardado. Aún no se pudieron generar los códigos de recuperación.",
     retryFinish: "Reintentar",
+    alreadySignedIn:
+      "Ya iniciaste sesión: la primera respuesta se perdió por el camino. Tus códigos de recuperación se generaron, pero no se pueden volver a mostrar; genera otros nuevos en Tu seguridad.",
+    finishExpired:
+      "Se acabó el tiempo para terminar este paso. Empieza de nuevo desde la página de inicio de sesión: entrarás con el segundo factor que acabas de añadir y podrás generar códigos de recuperación en Tu seguridad.",
   },
   codes: {
     title: "Guarda tus códigos de recuperación",
@@ -125,6 +129,14 @@ export const auth: Shape<typeof en> = {
   },
   passkey: {
     unsupported: "Este navegador no puede usar claves de acceso. Usa una aplicación de autenticación.",
+    hiddenUseAppOrCode:
+      "Este navegador no puede usar claves de acceso, así que aquí no se ofrece la tuya. Usa tu aplicación de autenticación o uno de tus códigos de recuperación.",
+    hiddenUseApp:
+      "Este navegador no puede usar claves de acceso, así que aquí no se ofrece la tuya. Usa tu aplicación de autenticación.",
+    hiddenUseCode:
+      "Este navegador no puede usar claves de acceso, así que aquí no se ofrece la tuya. Usa uno de tus códigos de recuperación, o un navegador que admita claves de acceso.",
+    hiddenNoOther:
+      "Este navegador no puede usar claves de acceso, y tu cuenta no tiene otro segundo factor. Inicia sesión desde un navegador que admita claves de acceso, o pide a un administrador que restablezca tus segundos factores.",
     cancelled: "La ventana de la clave de acceso se cerró o caducó, así que no se usó nada.",
     alreadyRegistered: "Este dispositivo ya tiene una clave de acceso para tu cuenta.",
     noUserVerification:

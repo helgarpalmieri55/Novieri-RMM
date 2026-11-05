@@ -84,8 +84,14 @@ const CODES = [
 const getMySecurity: FixtureMap["getMySecurity"] = () => security;
 
 const changePassword: FixtureMap["changePassword"] = () => {
-  // A changed password forgets every remembered device (design §2.6).
-  security = { ...security, trusted_devices: [] };
+  // A changed password forgets every remembered device and ends the other
+  // sessions (design §2.6, `account.change_password`; final review D2,
+  // Minor 4: the other sessions were kept here).
+  security = {
+    ...security,
+    trusted_devices: [],
+    sessions: security.sessions.filter((session) => session.current),
+  };
 };
 
 const removePasskey: FixtureMap["removePasskey"] = (passkeyId) => {

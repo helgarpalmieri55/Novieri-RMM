@@ -708,7 +708,7 @@ function DevicesPanel({ security, run, zone }: { security: MySecurity; run: Step
       <ConfirmDialog
         open={forgetting !== null}
         title={t("profile.securityPage.confirm.device.title")}
-        body={t("profile.securityPage.confirm.device.body")}
+        body={t(forgetting?.current ? "profile.securityPage.confirm.device.bodyCurrent" : "profile.securityPage.confirm.device.body")}
         subject={forgetting ? label(forgetting) : ""}
         confirmLabel={t("profile.securityPage.confirm.device.action")}
         destructive

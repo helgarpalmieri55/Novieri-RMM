@@ -220,6 +220,7 @@ export const settings: Shape<typeof en> = {
     enableAria: "Habilitar a {email}",
     resetFactors: "Restablecer segundos factores",
     resetFactorsAria: "Restablecer los segundos factores de {email}",
+    resetOwnFactors: "Tus propios segundos factores se cambian en <link>Tu seguridad</link>.",
     endSessions: "Cerrar todas sus sesiones",
     endSessionsAria: "Cerrar todas las sesiones de {email}",
     resend: "Reenviar invitación",
@@ -300,7 +301,7 @@ export const settings: Shape<typeof en> = {
         title: "Restablecer segundos factores",
         question: "¿Restablecer los segundos factores de {email}?",
         action: "Restablecer los segundos factores de {email}",
-        body: "Sus claves de acceso, su aplicación de autenticación y sus códigos de recuperación dejan de funcionar y se olvidan sus equipos recordados; la próxima vez que inicie sesión registrará un segundo factor nuevo. Puede que antes se te pida tu propio segundo factor.",
+        body: "Sus claves de acceso, su aplicación de autenticación y sus códigos de recuperación dejan de funcionar, se olvidan sus equipos recordados y se cierran ahora todas sus sesiones abiertas; la próxima vez que inicie sesión registrará un segundo factor nuevo. Puede que antes se te pida tu propio segundo factor.",
       },
       endSessions: {
         title: "Cerrar todas sus sesiones",
@@ -312,7 +313,7 @@ export const settings: Shape<typeof en> = {
         title: "Cancelar invitación",
         question: "¿Cancelar la invitación a {email}?",
         action: "Cancelar la invitación a {email}",
-        body: "El enlace deja de funcionar al instante. Puedes volver a invitarla más tarde.",
+        body: "El enlace deja de funcionar al instante. Esta dirección no se puede volver a invitar: una invitación cancelada la conserva para siempre.",
       },
       revoke: {
         title: "Quitar un rol",

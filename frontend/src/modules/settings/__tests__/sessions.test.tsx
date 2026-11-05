@@ -97,6 +97,27 @@ describe("Settings — Sessions tab", () => {
     });
   });
 
+  it("does not count a value typed out of range and then switched off: Save works, and sends what was saved (D2, Minor 6)", async () => {
+    const user = await openSessions();
+    const days = await screen.findByLabelText("Remember a device for");
+    await user.clear(days);
+    await user.type(days, "999");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+
+    await user.click(screen.getByRole("switch", { name: REMEMBER }));
+
+    expect(screen.queryByText("Each value has to be within the range shown under it.")).not.toBeInTheDocument();
+    const save = screen.getByRole("button", { name: "Save changes" });
+    expect(save).toBeEnabled();
+    await user.click(save);
+    await waitFor(() => expect(calls.putSessionSettings).toHaveBeenCalledTimes(1));
+    // The value it holds, not the one typed and hidden: the server would refuse 999.
+    expect(calls.putSessionSettings.mock.calls[0]?.[0]).toMatchObject({
+      remember_device_enabled: false,
+      remember_device_days: 15,
+    });
+  });
+
   it("says the trade a remembered device makes, where it is switched on", async () => {
     await openSessions();
     expect(await screen.findByText(/^On a remembered device the second factor is not asked/)).toBeInTheDocument();

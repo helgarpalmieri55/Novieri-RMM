@@ -316,6 +316,19 @@ export const CASEY_USER = {
 export const USERS_FIXTURE = { users: [OPERATOR_USER, CASEY_USER] };
 
 /**
+ * An active person who is NOT the caller: the server refuses the caller's
+ * own row for a second-factor reset (`service._refuse_self`), so a test of
+ * resetting someone's factors needs someone else (final review D2, Minor 2).
+ */
+export const DANA_USER = {
+  id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+  email: "dana@example.com",
+  display_name: "Dana Okafor",
+  status: "active",
+  roles: [],
+};
+
+/**
  * The clients a grant's scope can name (`GET /api/v1/clients`), for the
  * picker that used to offer device groups: a grant is scoped to ONE CLIENT or
  * to every client now, and device groups no longer scope grants (MSP clients
@@ -441,7 +454,9 @@ export const RECOVERY_CODES_FIXTURE = [
 
 /** The server's refusal of a change whose second factor is not fresh (own authentication design §2.5). */
 export function stepUpRequired(): ApiError {
-  return new ApiError(403, JSON.stringify({ detail: { code: "step_up_required" } }));
+  // The server's own shape (`core/auth/refusals.py::auth_refusal_handler`):
+  // a sentence in `detail`, the code beside it (final review D2, Minor 4).
+  return new ApiError(403, JSON.stringify({ detail: "confirm your second factor again to do this", code: "step_up_required" }));
 }
 
 /** `GET /api/v1/settings/sessions`, at the defaults (design §2.4, §2.6, §3). */

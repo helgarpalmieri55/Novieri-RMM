@@ -28,7 +28,16 @@ import {
   safeNext,
   signInPath,
 } from "./session";
-import { isSessionEnded, resetSessionEnd, sessionEnded, subscribeSessionEnd } from "./sessionEnd";
+import {
+  hadSession,
+  isSessionEnded,
+  resetSessionEnd,
+  sessionEndReason,
+  sessionEnded,
+  sessionPerson,
+  sessionSignedOut,
+  subscribeSessionEnd,
+} from "./sessionEnd";
 
 describe("the sign-in address", () => {
   it("is a path on the console's own origin, never a host and never a port", () => {
@@ -141,6 +150,48 @@ describe("the session-ended flag", () => {
     expect(heard).toHaveBeenCalledTimes(1);
     stop();
     resetSessionEnd();
+    expect(isSessionEnded()).toBe(false);
+  });
+
+  it("says whether it ended or the person signed out, and the first word stands", () => {
+    sessionSignedOut();
+    sessionEnded();
+    expect(sessionEndReason()).toBe("signed_out");
+    resetSessionEnd();
+    expect(sessionEndReason()).toBeNull();
+    sessionEnded();
+    sessionSignedOut();
+    expect(sessionEndReason()).toBe("ended");
+  });
+});
+
+describe("the person this tab signed in as (C3: one rule for HTTP and the socket)", () => {
+  it("is the first `/me` answer, and the same person again changes nothing", () => {
+    expect(hadSession()).toBe(false);
+    sessionPerson("u-1");
+    sessionPerson("u-1");
+    expect(hadSession()).toBe(true);
+    expect(isSessionEnded()).toBe(false);
+  });
+
+  it("ends the session when `/me` names somebody else: someone signed in on this browser in another tab", () => {
+    const heard = vi.fn();
+    const stop = subscribeSessionEnd(heard);
+    sessionPerson("u-1");
+    sessionPerson("u-2");
+    expect(isSessionEnded()).toBe(true);
+    // RE-POINTED (final re-review, M4): its own reason, so the guard keeps
+    // none of the previous person's text for the next one.
+    expect(sessionEndReason()).toBe("replaced");
+    expect(heard).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it("is forgotten with the flag, so the next test starts with nobody", () => {
+    sessionPerson("u-1");
+    resetSessionEnd();
+    expect(hadSession()).toBe(false);
+    sessionPerson("u-2");
     expect(isSessionEnded()).toBe(false);
   });
 });

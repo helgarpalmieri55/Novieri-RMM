@@ -33,7 +33,12 @@ vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 // token the stream's handshake carried. The session cookie is the credential
 // now; what the page can know is whether this tab's session has ended.
 const mockSessionEnded = vi.fn<() => boolean>(() => false);
-vi.mock("../../lib/sessionEnd", () => ({ isSessionEnded: () => mockSessionEnded() }));
+// The viewer also listens for the end (final review D1, Minor 2); nothing
+// here ends a session while a screen is open.
+vi.mock("../../lib/sessionEnd", () => ({
+  isSessionEnded: () => mockSessionEnded(),
+  subscribeSessionEnd: () => () => {},
+}));
 
 // ---------------------------------------------------------------- the engine
 

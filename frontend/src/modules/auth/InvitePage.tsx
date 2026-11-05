@@ -37,12 +37,21 @@ export function InvitePage() {
   // Asked even with no token: the server answers an empty one as it answers
   // any unknown link (410), and fixture mode -- which cannot add a fragment --
   // still draws the form for the harmony gate.
-  // Asked once: every ask spends the per-IP limit the accept step shares (Task 7, `_LINK`).
+  //
+  // ASKED ONCE, AND THE TOKEN IS NOT KEPT (final review D1, Minor 4). Every
+  // ask spends the per-IP limit the accept step shares (Task 7, `_LINK`), so
+  // `staleTime: "static"`: TanStack skips a static query when anything
+  // invalidates it, and `LanguageBridge` invalidates every query but `me` on
+  // a language switch -- `Infinity` did not stop that, and a refused refetch
+  // replaced the form with an error. The token lives in the `queryFn` only,
+  // never in the key (it was `["auth", "invite", token]`), and `gcTime: 0`
+  // drops the answer as soon as the page unmounts.
   const invite = useQuery({
-    queryKey: ["auth", "invite", token],
+    queryKey: ["auth", "invite"],
     queryFn: () => api.getInvite(token),
     retry: false,
-    staleTime: Infinity,
+    staleTime: "static",
+    gcTime: 0,
     refetchOnWindowFocus: false,
   });
   const [password, setPassword] = useState("");

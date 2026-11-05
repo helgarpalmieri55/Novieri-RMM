@@ -79,11 +79,14 @@ function LocationProbe() {
   return null;
 }
 
-/** The eight pages, at `path` (fragment included), with router `state` when a step hands one over. */
-export function renderAuth(path: string, state?: unknown): RenderResult {
+/**
+ * The eight pages, at `path` (fragment included), with router `state` when a
+ * step hands one over -- and the query client, for what a page leaves in it.
+ */
+export function renderAuth(path: string, state?: unknown): RenderResult & { queryClient: QueryClient } {
   const url = new URL(path, "https://itms.example");
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[{ pathname: url.pathname, search: url.search, hash: url.hash, state }]}>
         <Routes>
@@ -100,5 +103,16 @@ export function renderAuth(path: string, state?: unknown): RenderResult {
         <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
+  );
+  return { ...rendered, queryClient };
+}
+
+/** Every query key and answer in the cache, as text. */
+export function queryCacheText(queryClient: QueryClient): string {
+  return JSON.stringify(
+    queryClient
+      .getQueryCache()
+      .getAll()
+      .map((query) => [query.queryKey, query.state.data]),
   );
 }

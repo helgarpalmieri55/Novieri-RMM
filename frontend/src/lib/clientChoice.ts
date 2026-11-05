@@ -82,6 +82,19 @@ export function setSelectedClient(id: string | null): void {
   apply(id);
 }
 
+/**
+ * Forget the stored choice: signing out (`./session.ts::signOut`), so the next
+ * person on a shared computer does not open the console on the previous
+ * person's client. Only storage: the document is about to be replaced.
+ */
+export function forgetStoredClient(): void {
+  try {
+    window.localStorage.removeItem(CLIENT_STORAGE_KEY);
+  } catch {
+    // Storage blocked: nothing was kept.
+  }
+}
+
 /** Take what another tab stored (the browser's `storage` event), without writing it back. */
 export function adoptStoredClient(): void {
   apply(readStoredClient());

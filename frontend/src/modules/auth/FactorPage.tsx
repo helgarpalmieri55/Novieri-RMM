@@ -36,7 +36,7 @@ import { Btn } from "../../shell/components";
 import { AuthAlert, AuthCard, AuthSection } from "./AuthCard";
 import { describeAuthError } from "./errors";
 import { carryNext, digitsOf, recoveryCodeOf, useNext } from "./flow";
-import { canUsePasskeys, describePasskeyError, signWithPasskey } from "./passkey";
+import { canUsePasskeys, describePasskeyError, passkeyHiddenAdvice, signWithPasskey } from "./passkey";
 import type { FactorMethod, SignedIn } from "./types";
 
 const EVERY_METHOD: readonly FactorMethod[] = ["passkey", "totp", "recovery"];
@@ -63,6 +63,13 @@ export function FactorPage() {
   const passkey = methods.includes("passkey") && canUsePasskeys();
   const totp = methods.includes("totp");
   const recovery = methods.includes("recovery");
+  // THE ACCOUNT HAS A PASSKEY THIS BROWSER CANNOT USE (final review D1, Minor
+  // 6): the option is not drawn, and the page says why and what is left --
+  // the app, a recovery code, or, with neither, another browser or an
+  // administrator. "Use an authenticator app" was said to accounts that had
+  // none.
+  const passkeyHidden = methods.includes("passkey") && !passkey;
+  const hiddenAdvice = passkeyHidden ? (passkeyHiddenAdvice({ totp, recovery }) ?? "auth.passkey.hiddenNoOther") : null;
   const [showRecovery, setShowRecovery] = useState(!passkey && !totp);
   const [remember, setRemember] = useState(false);
   const [code, setCode] = useState("");
@@ -101,6 +108,12 @@ export function FactorPage() {
             {t("auth.factor.rememberHint")}
           </p>
         </div>
+      ) : null}
+
+      {hiddenAdvice ? (
+        <p className="note" style={{ margin: 0 }}>
+          {t(hiddenAdvice)}
+        </p>
       ) : null}
 
       {passkey ? (
@@ -189,11 +202,6 @@ export function FactorPage() {
         </AuthSection>
       ) : null}
 
-      {!passkey && !totp && !recovery ? (
-        <p className="note" style={{ margin: 0 }}>
-          {t("auth.passkey.unsupported")}
-        </p>
-      ) : null}
       <AuthAlert text={error} />
       <p className="note" style={{ margin: 0 }}>
         <Link to={carryNext("/sign-in", next)}>{t("auth.common.startOver")}</Link>

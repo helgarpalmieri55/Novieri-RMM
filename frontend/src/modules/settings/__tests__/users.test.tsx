@@ -20,6 +20,7 @@ import {
   AUDITOR_ROLE,
   CASEY_USER,
   CLIENTS_FIXTURE,
+  DANA_USER,
   INVITED_USER,
   OPERATOR_USER,
   PLANTED_SECRET,
@@ -471,15 +472,18 @@ describe("Settings — Users tab", () => {
   });
 
   it.each([
-    ["Disable operator@example.com", "Disable", () => calls.setUserEnabled],
+    ["Disable operator@example.com", "Disable", () => calls.setUserEnabled, "operator@example.com"],
     // RE-POINTED (design §7): the password reset by email is the person's own
-    // now (§2.8); an administrator resets the second factors.
-    ["Reset second factors for operator@example.com", "Reset second factors for", () => calls.resetUserFactors],
-    ["Sign out operator@example.com everywhere", "Sign out", () => calls.endUserSessions],
-    ["Delete operator@example.com", "Delete", () => calls.deleteUser],
-  ])("%s confirms first, and the confirmation names the person", async (trigger, verb, mock) => {
+    // now (§2.8); an administrator resets the second factors. RE-POINTED
+    // again (final review D2, Minor 2): at SOMEONE ELSE -- the caller's own
+    // row offers no reset, because the server refuses it.
+    ["Reset second factors for dana@example.com", "Reset second factors for", () => calls.resetUserFactors, "dana@example.com"],
+    ["Sign out operator@example.com everywhere", "Sign out", () => calls.endUserSessions, "operator@example.com"],
+    ["Delete operator@example.com", "Delete", () => calls.deleteUser, "operator@example.com"],
+  ])("%s confirms first, and the confirmation names the person", async (trigger, verb, mock, email) => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, CASEY_USER, DANA_USER] });
     const user = await openUsers();
-    const row = await screen.findByRole("row", { name: /operator@example\.com/ });
+    const row = await screen.findByRole("row", { name: new RegExp(email.replace(/\./g, "\\.")) });
     await openMoreActions(user, row);
     await user.click(within(row).getByRole("button", { name: trigger }));
     const dialog = await screen.findByRole("dialog");
@@ -488,13 +492,13 @@ describe("Settings — Users tab", () => {
     // a dialog reading "Disable this user?" over a button that happens to
     // carry the address, which is not the same screen at all.
     expect(
-      within(dialog).getByText(/operator@example\.com\?/),
+      within(dialog).getByText(new RegExp(`${email.replace(/\./g, "\\.")}\\?`)),
       "the confirmation sentence must name the person",
     ).toBeInTheDocument();
-    expect(dialog).toHaveTextContent("operator@example.com");
+    expect(dialog).toHaveTextContent(email);
     expect(mock()).not.toHaveBeenCalled();
 
-    await user.click(within(dialog).getByRole("button", { name: `${verb} operator@example.com` }));
+    await user.click(within(dialog).getByRole("button", { name: `${verb} ${email}` }));
     await waitFor(() => expect(mock()).toHaveBeenCalled());
   });
 
@@ -594,6 +598,21 @@ describe("Settings — Users tab", () => {
     await waitFor(() => expect(calls.cancelInvite).toHaveBeenCalledWith(INVITED_USER.id));
   });
 
+  it("says, before cancelling, that the address can never be invited again (C18, review C, Minor 4)", async () => {
+    // The server marks the account deleted, and the address stays taken
+    // (`ux_users_org_lower_email_staff` covers deleted rows): it said "You
+    // can invite them again later".
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /invitee@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Cancel the invitation to invitee@example.com" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Cancel invitation" });
+    expect(dialog).toHaveTextContent("This address cannot be invited again");
+    expect(dialog).not.toHaveTextContent(/invite them again later/);
+  });
+
   /**
    * FIX ROUND (Task 12 review, Minor 4). The server answers 409 for anyone
    * without a pending invitation, with a translated `detail` and NO `code`
@@ -630,33 +649,105 @@ describe("Settings — Users tab", () => {
     expect(screen.getAllByText("this person has no pending invitation")).toHaveLength(1);
   });
 
+  // RE-POINTED (final review D2, Minor 2): these two targeted the caller's
+  // own row (`ME_FIXTURE.user_id === OPERATOR_USER.id`) and expected the
+  // reset to succeed -- an outcome the real server refuses
+  // (`service._refuse_self`), after a step-up that may have spent a
+  // single-use recovery code. They reset someone else now.
   it("resetting someone's second factors asks for your own when the server says it is stale", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, DANA_USER] });
     calls.resetUserFactors.mockRejectedValueOnce(stepUpRequired()).mockResolvedValueOnce(undefined);
     const user = await openUsers();
-    const row = await screen.findByRole("row", { name: /operator@example\.com/ });
+    const row = await screen.findByRole("row", { name: /dana@example\.com/ });
     await openMoreActions(user, row);
-    await user.click(within(row).getByRole("button", { name: "Reset second factors for operator@example.com" }));
+    await user.click(within(row).getByRole("button", { name: "Reset second factors for dana@example.com" }));
     const confirm = await screen.findByRole("dialog", { name: "Reset second factors" });
-    await user.click(within(confirm).getByRole("button", { name: "Reset second factors for operator@example.com" }));
+    await user.click(within(confirm).getByRole("button", { name: "Reset second factors for dana@example.com" }));
 
     const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
     await user.type(await within(stepUp).findByLabelText("Code from your authenticator app"), "123456");
     await user.click(within(stepUp).getByRole("button", { name: "Confirm" }));
 
     await waitFor(() => expect(calls.resetUserFactors).toHaveBeenCalledTimes(2));
+    expect(calls.resetUserFactors).toHaveBeenLastCalledWith(DANA_USER.id);
     expect(calls.stepUpTotp).toHaveBeenCalledExactlyOnceWith("123456");
-    expect(await screen.findByRole("status")).toHaveTextContent("The second factors of operator@example.com were reset.");
+    expect(await screen.findByRole("status")).toHaveTextContent("The second factors of dana@example.com were reset.");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("shows the server's own sentence for a reset that needs the recovery command, keeps the dialog open, and does not retry", async () => {
+    // Operator decision, 2026-11-05: `reset_factors` answers 409
+    // `reset_needs_recovery` when the password was set from an emailed reset
+    // link and no second factor has been used since. The server's real body
+    // (`{detail, code}`, as C14 asks of every double).
+    const sentence =
+      "This person's password was set with an emailed reset link, and no second factor has been used since. Resetting their sign-in methods now would hand the account to whoever holds that mailbox. Use the server's recovery command instead, and hand the link to the person directly.";
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, DANA_USER] });
+    calls.resetUserFactors.mockRejectedValue(
+      new ApiError(409, JSON.stringify({ detail: sentence, code: "reset_needs_recovery" })),
+    );
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /dana@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Reset second factors for dana@example.com" }));
+    const confirm = await screen.findByRole("dialog", { name: "Reset second factors" });
+    await user.click(within(confirm).getByRole("button", { name: "Reset second factors for dana@example.com" }));
+
+    expect(await within(confirm).findByRole("alert")).toHaveTextContent(sentence);
+    expect(confirm).not.toHaveTextContent(/something went wrong|went wrong/i);
+    // Still open, nothing more sent, and no second-factor prompt: a 409 is not a stale step-up.
+    expect(screen.getByRole("dialog", { name: "Reset second factors" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Confirm it's you" })).not.toBeInTheDocument();
+    expect(calls.resetUserFactors).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("The second factors of dana@example.com were reset.")).not.toBeInTheDocument();
+
+    // The person closes it.
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Reset second factors" })).not.toBeInTheDocument();
+    expect(calls.resetUserFactors).toHaveBeenCalledTimes(1);
+  });
+
+  it("says, before the reset, that it signs the person out everywhere now (D2, Minor 3)", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, DANA_USER] });
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /dana@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Reset second factors for dana@example.com" }));
+    const confirm = await screen.findByRole("dialog", { name: "Reset second factors" });
+    expect(confirm).toHaveTextContent(/every session they have open is signed out now/);
+    expect(calls.resetUserFactors).not.toHaveBeenCalled();
+  });
+
+  it("does not offer to reset your own second factors, and points at Your security instead", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, DANA_USER] });
+    const user = await openUsers();
+    const own = await screen.findByRole("row", { name: /operator@example\.com/ });
+    await openMoreActions(user, own);
+
+    const reset = within(own).getByRole("button", { name: "Reset second factors for operator@example.com" });
+    expect(reset).toBeDisabled();
+    expect(reset).toHaveAccessibleDescription("Your own second factors are changed in Your security.");
+    expect(within(own).getByRole("link", { name: "Your security" })).toHaveAttribute("href", "/profile/security");
+    await user.click(reset);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(calls.resetUserFactors).not.toHaveBeenCalled();
+
+    // Someone else's row still offers it.
+    const other = screen.getByRole("row", { name: /dana@example\.com/ });
+    await openMoreActions(user, other);
+    expect(within(other).getByRole("button", { name: "Reset second factors for dana@example.com" })).toBeEnabled();
+    expect(within(other).queryByRole("link", { name: "Your security" })).not.toBeInTheDocument();
+  });
+
   it("resets nothing when the confirmation is closed, and says so inside the dialog", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, DANA_USER] });
     calls.resetUserFactors.mockRejectedValue(stepUpRequired());
     const user = await openUsers();
-    const row = await screen.findByRole("row", { name: /operator@example\.com/ });
+    const row = await screen.findByRole("row", { name: /dana@example\.com/ });
     await openMoreActions(user, row);
-    await user.click(within(row).getByRole("button", { name: "Reset second factors for operator@example.com" }));
+    await user.click(within(row).getByRole("button", { name: "Reset second factors for dana@example.com" }));
     const confirm = await screen.findByRole("dialog", { name: "Reset second factors" });
-    await user.click(within(confirm).getByRole("button", { name: "Reset second factors for operator@example.com" }));
+    await user.click(within(confirm).getByRole("button", { name: "Reset second factors for dana@example.com" }));
 
     const stepUp = await screen.findByRole("dialog", { name: "Confirm it's you" });
     await user.click(within(stepUp).getByRole("button", { name: "Cancel" }));

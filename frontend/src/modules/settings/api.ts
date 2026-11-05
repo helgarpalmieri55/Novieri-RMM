@@ -78,6 +78,7 @@ import type {
   UserOut,
 } from "./types";
 import type { StepUpRun } from "../../components/stepUp";
+import { useSecretMutation } from "../../lib/secretMutation";
 
 // A 403 is an answer, not a fault: retrying a permission wall changes nothing
 // and delays the "you do not hold this" message the operator needs.
@@ -270,7 +271,8 @@ export function useNotificationChannels(enabled: boolean) {
 export function useCreateChannelMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<ChannelOut, ApiError, ChannelCreate>({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation<ChannelOut, ApiError, ChannelCreate>({
     mutationFn: (body) => api.createNotificationChannel(body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [CHANNELS_KEY] });
@@ -281,7 +283,8 @@ export function useCreateChannelMutation() {
 export function useUpdateChannelMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<ChannelOut, ApiError, { id: string; body: ChannelUpdate }>({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation<ChannelOut, ApiError, { id: string; body: ChannelUpdate }>({
     mutationFn: ({ id, body }) => api.updateNotificationChannel(id, body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [CHANNELS_KEY] });
@@ -485,7 +488,8 @@ export function useEmailSettings(enabled: boolean) {
 export function useUpdateEmailSettingsMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<EmailSettingsOut, ApiError, EmailSettingsUpdate>({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation<EmailSettingsOut, ApiError, EmailSettingsUpdate>({
     mutationFn: (body) => api.updateEmailSettings(body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [EMAIL_SETTINGS_KEY] });

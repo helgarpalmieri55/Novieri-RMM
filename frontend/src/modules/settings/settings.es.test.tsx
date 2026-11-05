@@ -24,6 +24,8 @@ import {
   apiClient,
   BUDGET_SETTINGS_FIXTURE,
   CASEY_USER,
+  DANA_USER,
+  INVITED_USER,
   CATEGORY_FIXTURE,
   CLIENTS_FIXTURE,
   CHANNEL_FIXTURE,
@@ -629,6 +631,7 @@ describe("the users tab in Spanish", () => {
   });
 
   it("confirms each action in Spanish, with the question carrying the address", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, CASEY_USER, DANA_USER] });
     const user = userEvent.setup();
     await openIn("users");
     await user.click(await screen.findByRole("button", { name: "Deshabilitar a operator@example.com" }));
@@ -638,19 +641,32 @@ describe("the users tab in Spanish", () => {
     await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
 
     // RE-POINTED (design §7): the password reset by email is the person's own
-    // now; an administrator resets the second factors.
-    await user.click(screen.getByRole("button", { name: "Restablecer los segundos factores de operator@example.com" }));
+    // now; an administrator resets the second factors -- of SOMEONE ELSE
+    // (final review D2, Minor 2): the caller's own row offers no reset.
+    expect(screen.getByRole("button", { name: "Restablecer los segundos factores de operator@example.com" })).toBeDisabled();
+    expect(screen.getByRole("link", { name: "Tu seguridad" })).toHaveAttribute("href", "/profile/security");
+    await user.click(screen.getByRole("button", { name: "Restablecer los segundos factores de dana@example.com" }));
     dialog = await screen.findByRole("dialog", { name: "Restablecer segundos factores" });
     expect(
-      within(dialog).getByText(/^¿Restablecer los segundos factores de operator@example\.com\? Sus claves de acceso/),
+      within(dialog).getByText(/^¿Restablecer los segundos factores de dana@example\.com\? Sus claves de acceso/),
     ).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Restablecer los segundos factores de operator@example.com" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Restablecer los segundos factores de dana@example.com" })).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
 
     await user.click(screen.getByRole("button", { name: "Eliminar a casey@example.com" }));
     dialog = await screen.findByRole("dialog", { name: "Eliminar usuario" });
     expect(within(dialog).getByText(/^¿Eliminar a casey@example\.com\? Se elimina su identidad de inicio de sesión\./)).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+  });
+
+  it("says in Spanish that a cancelled invitation's address cannot be invited again (C18)", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    const user = userEvent.setup();
+    await openIn("users");
+    await user.click(await screen.findByRole("button", { name: "Cancelar la invitación a invitee@example.com" }));
+    const dialog = await screen.findByRole("dialog", { name: "Cancelar invitación" });
+    expect(dialog).toHaveTextContent("Esta dirección no se puede volver a invitar");
+    expect(dialog).not.toHaveTextContent(/volver a invitarla más tarde/);
   });
 
   it("confirms removing a role, and holds a refusal inside the dialog", async () => {

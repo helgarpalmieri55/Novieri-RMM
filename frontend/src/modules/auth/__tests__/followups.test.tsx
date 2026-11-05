@@ -91,6 +91,65 @@ describe("a factor accepted but the recovery codes not made", () => {
     await waitFor(() => expect(where.location?.pathname).toBe("/sign-in/recovery-codes"));
     expect(calls.enrollPasskey).toHaveBeenCalledTimes(1);
   });
+
+  // FINAL REVIEW D1, MINOR 5: three refusals of `enroll/finish` never change
+  // on a retry, and the card offered only "Try again".
+  async function passkeyThenFinish(refusal: ApiError) {
+    calls.enrollFinish.mockRejectedValue(refusal);
+    const user = userEvent.setup();
+    renderAuth("/sign-in/enroll?next=%2Fdevices");
+    await user.click(screen.getByRole("button", { name: "Create a passkey" }));
+    await screen.findByRole("alert");
+    return user;
+  }
+
+  it("always offers a way back to the sign-in page", async () => {
+    await passkeyThenFinish(new ApiError(503, ""));
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start again" })).toHaveAttribute("href", "/sign-in?next=%2Fdevices");
+  });
+
+  it("409 already_signed_in: the first answer was lost after success, so it offers the console, not a retry", async () => {
+    const user = await passkeyThenFinish(
+      new ApiError(409, JSON.stringify({ code: "already_signed_in", detail: "you are already signed in" })),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "You are already signed in: the first answer was lost on its way. Your recovery codes were made but cannot be shown again; make new ones in Your security.",
+    );
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Continue to the console" }));
+    expect(navigation.replace).toHaveBeenCalledExactlyOnceWith("/devices");
+    expect(calls.enrollFinish).toHaveBeenCalledTimes(1);
+  });
+
+  it("409 enroll_required: the time to finish ran out, so it offers only to start again", async () => {
+    await passkeyThenFinish(
+      new ApiError(409, JSON.stringify({ code: "enroll_required", detail: "set up a passkey or an authenticator app first" })),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/The time to finish this step has run out\. Start again from the sign-in page/);
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start again" })).toHaveAttribute("href", "/sign-in?next=%2Fdevices");
+  });
+
+  it("401 auth_required: the sign-in timed out, so it offers only to start again", async () => {
+    await passkeyThenFinish(new ApiError(401, JSON.stringify({ code: "auth_required", detail: "sign in to do this" })));
+    expect(screen.getByRole("alert")).toHaveTextContent("This sign-in has timed out. Start again from the sign-in page.");
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start again" })).toBeInTheDocument();
+  });
+
+  it("says the dead ends in Spanish", async () => {
+    setActiveLanguage("es");
+    calls.enrollFinish.mockRejectedValue(
+      new ApiError(409, JSON.stringify({ code: "already_signed_in", detail: "ya iniciaste sesión" })),
+    );
+    const user = userEvent.setup();
+    const { container } = renderAuth("/sign-in/enroll");
+    await user.click(screen.getByRole("button", { name: "Crear una clave de acceso" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Ya iniciaste sesión/);
+    expect(screen.getByRole("button", { name: "Continuar a la consola" })).toBeInTheDocument();
+    expectNoEnglish(container);
+  });
 });
 
 describe("a passkey the server refused", () => {
@@ -141,9 +200,43 @@ describe.each([
 
 describe("a passkey-only account on a browser without passkeys", () => {
   it("is told so instead of being left with only 'Start again'", () => {
+    // RE-POINTED (final review D1, Minor 6): it was told to "use an
+    // authenticator app instead" -- which this account does not have.
     webauthn.supported = false;
     renderAuth("/sign-in/factor", { methods: ["passkey"], rememberDays: null });
-    expect(screen.getByText("This browser cannot use passkeys. Use an authenticator app instead.")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This browser cannot use passkeys, and your account has no other second factor. Sign in from a browser that supports passkeys, or ask an administrator to reset your second factors.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/authenticator app/)).not.toBeInTheDocument();
+  });
+});
+
+describe("a passkey the browser cannot use, with other methods left (final review D1, Minor 6)", () => {
+  it.each([
+    [["passkey", "recovery"], "Use one of your recovery codes, or a browser that supports passkeys."],
+    [["passkey", "totp"], "Use your authenticator app."],
+    [["passkey", "totp", "recovery"], "Use your authenticator app or one of your recovery codes."],
+  ])("with %j, says why the passkey is missing and what to use", (methods, advice) => {
+    webauthn.supported = false;
+    renderAuth("/sign-in/factor", { methods, rememberDays: null });
+    expect(screen.getByText(`This browser cannot use passkeys, so your passkey is not offered here. ${advice}`)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use a passkey" })).not.toBeInTheDocument();
+  });
+
+  it("says nothing about passkeys where the account has none", () => {
+    webauthn.supported = false;
+    renderAuth("/sign-in/factor", { methods: ["totp", "recovery"], rememberDays: null });
+    expect(screen.queryByText(/cannot use passkeys/)).not.toBeInTheDocument();
+  });
+
+  it("says it in Spanish", () => {
+    setActiveLanguage("es");
+    webauthn.supported = false;
+    const { container } = renderAuth("/sign-in/factor", { methods: ["passkey", "recovery"], rememberDays: null });
+    expect(screen.getByText(/Este navegador no puede usar claves de acceso, así que aquí no se ofrece la tuya/)).toBeInTheDocument();
+    expectNoEnglish(container);
   });
 });
 

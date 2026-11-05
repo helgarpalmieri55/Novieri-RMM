@@ -141,6 +141,18 @@ export const USERS: UserOut[] = [
     status: "disabled",
     roles: [roleGrant("sd-8", "role-auditor", "auditor")],
   },
+  {
+    // AN OPEN INVITATION (own authentication design §7), so the Users tab
+    // draws its Resend and Cancel controls in the harmony and a11y walks
+    // (final review D2, Minor 5). `usr-invited-` is the prefix the settings
+    // fixtures' resend and cancel accept.
+    id: "usr-invited-seed",
+    email: "noor.haddad@toeshee.example",
+    display_name: "Noor Haddad",
+    status: "active",
+    roles: [roleGrant("sd-9", "role-technician", "technician")],
+    invite_pending: true,
+  },
 ];
 
 /* ------------------------------------------------------------------ queues */

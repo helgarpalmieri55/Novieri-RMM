@@ -28,17 +28,28 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("../lib/ApiContext", () => ({ useApi: () => api }));
 
-const { startAuthentication } = vi.hoisted(() => ({ startAuthentication: vi.fn() }));
-// The real module but for the ceremony: Task 11's `modules/auth/passkey.ts`,
-// which this hook signs through, also reads `WebAuthnError` from it.
+const { startAuthentication, webauthn } = vi.hoisted(() => ({
+  startAuthentication: vi.fn(),
+  webauthn: { supported: true },
+}));
+// The real module but for the ceremony and the browser's support: Task 11's
+// `modules/auth/passkey.ts`, which this hook signs through, also reads
+// `WebAuthnError` from it. jsdom has no WebAuthn, so support is the test's to
+// say (final review D1, Minor 6: the dialog offers a passkey only where the
+// browser can use one).
 vi.mock("@simplewebauthn/browser", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@simplewebauthn/browser")>()),
+  browserSupportsWebAuthn: () => webauthn.supported,
   startAuthentication,
   startRegistration: vi.fn(),
 }));
 
-/** The server's answer to a change whose second factor is not fresh (Task 6). */
-const REFUSED = () => new ApiError(403, JSON.stringify({ detail: { code: "step_up_required" } }));
+/**
+ * The server's answer to a change whose second factor is not fresh (Task 6),
+ * in its own shape (`core/auth/refusals.py::auth_refusal_handler`): a sentence
+ * in `detail`, the code beside it (final review D2, Minor 4).
+ */
+const REFUSED = () => new ApiError(403, JSON.stringify({ detail: "confirm your second factor again to do this", code: "step_up_required" }));
 const WRONG_CODE = () =>
   new ApiError(400, JSON.stringify({ detail: "That code is not right, or it was already used." }));
 const OPTIONS = { challenge: "Y2hhbGxlbmdl", rpId: "itms.example.test", allowCredentials: [], userVerification: "required" };
@@ -103,6 +114,7 @@ async function openConfirmation(user: ReturnType<typeof userEvent.setup>): Promi
 
 beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset();
+  webauthn.supported = true;
   startAuthentication.mockReset();
   api.getMySecurity.mockResolvedValue(EVERYTHING);
   api.stepUpTotp.mockResolvedValue(undefined);
@@ -114,8 +126,11 @@ beforeEach(() => {
 
 describe("isStepUpRequired", () => {
   it("is the server's 403 step_up_required, in either body shape", () => {
+    // The server's own: a sentence in `detail`, the code beside it.
     expect(isStepUpRequired(REFUSED())).toBe(true);
     expect(isStepUpRequired(new ApiError(403, JSON.stringify({ code: "step_up_required" })))).toBe(true);
+    // The code inside `detail`, which `run` also reads.
+    expect(isStepUpRequired(new ApiError(403, JSON.stringify({ detail: { code: "step_up_required" } })))).toBe(true);
   });
 
   it("is no other refusal", () => {
@@ -277,5 +292,60 @@ describe("useStepUp", () => {
     dialog = await openConfirmation(user);
     expect(await within(dialog).findByLabelText<HTMLInputElement>("Code from your authenticator app")).toHaveValue("");
     expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+describe("useStepUp on a browser that cannot use passkeys (final review D1, Minor 6)", () => {
+  beforeEach(() => {
+    webauthn.supported = false;
+  });
+
+  it("offers no passkey button, and says why and what to use instead", async () => {
+    const user = renderProbe(vi.fn().mockRejectedValueOnce(REFUSED()).mockResolvedValueOnce("saved"));
+    const dialog = await openConfirmation(user);
+
+    expect(
+      await within(dialog).findByText(
+        "This browser cannot use passkeys, so your passkey is not offered here. Use your authenticator app or one of your recovery codes.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Use a passkey" })).not.toBeInTheDocument();
+    // The app is the way now, and the primary button.
+    await user.type(within(dialog).getByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(dialog).getByRole("button", { name: "Confirm" }));
+    expect(await screen.findByText("done: saved")).toBeInTheDocument();
+    expect(startAuthentication).not.toHaveBeenCalled();
+  });
+
+  it("points a person with only a passkey and recovery codes at a code", async () => {
+    api.getMySecurity.mockResolvedValue({ ...EVERYTHING, has_totp: false });
+    const user = renderProbe(vi.fn().mockRejectedValue(REFUSED()));
+    const dialog = await openConfirmation(user);
+    expect(
+      await within(dialog).findByText(
+        "This browser cannot use passkeys, so your passkey is not offered here. Use one of your recovery codes, or a browser that supports passkeys.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("Use a recovery code instead")).toBeInTheDocument();
+  });
+
+  it("tells a person with only a passkey to come back from a browser that supports one", async () => {
+    api.getMySecurity.mockResolvedValue({ ...EVERYTHING, has_totp: false, recovery_codes_left: 0 });
+    const user = renderProbe(vi.fn().mockRejectedValue(REFUSED()));
+    const dialog = await openConfirmation(user);
+    expect(
+      await within(dialog).findByText(
+        "This browser cannot use passkeys, and you have no other second factor to confirm with. Do this from a browser that supports passkeys.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Use a passkey" })).not.toBeInTheDocument();
+  });
+
+  it("says nothing about passkeys to a person who has none", async () => {
+    api.getMySecurity.mockResolvedValue({ ...EVERYTHING, passkeys: [] });
+    const user = renderProbe(vi.fn().mockRejectedValue(REFUSED()));
+    const dialog = await openConfirmation(user);
+    await within(dialog).findByLabelText("Code from your authenticator app");
+    expect(within(dialog).queryByText(/cannot use passkeys/)).not.toBeInTheDocument();
   });
 });

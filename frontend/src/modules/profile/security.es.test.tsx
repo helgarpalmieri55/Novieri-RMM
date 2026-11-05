@@ -15,6 +15,9 @@ import { apiClient, calls, installDefaults, renderSecurityPage, stepUpRequired }
 
 vi.mock("@simplewebauthn/browser", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@simplewebauthn/browser")>()),
+  // A browser that can use passkeys: the recent confirmation offers one only
+  // there (final review D1, Minor 6), and jsdom has no WebAuthn.
+  browserSupportsWebAuthn: () => true,
   startRegistration: vi.fn(),
   startAuthentication: vi.fn(),
 }));
@@ -96,5 +99,14 @@ describe("your security in Spanish", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Se cambió tu contraseña. Se cerraron tus otras sesiones y los equipos que tenías recordados vuelven a pedir tu segundo factor.",
     );
+  });
+
+  it("says, in Spanish, that forgetting este equipo signs you out now (D2, Minor 3)", async () => {
+    const user = userEvent.setup();
+    const { container } = renderSecurityPage();
+    await user.click(await screen.findByRole("button", { name: "Olvidar Firefox on Windows" }));
+    const dialog = await screen.findByRole("dialog", { name: "Olvidar equipo" });
+    expect(dialog).toHaveTextContent("Es el equipo que estás usando: al olvidarlo se cierra tu sesión aquí, ahora.");
+    expectNoEnglish(container, RECORDED);
   });
 });

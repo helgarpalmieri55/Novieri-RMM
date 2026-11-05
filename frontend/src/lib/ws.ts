@@ -13,11 +13,15 @@
 //    what it keeps fresh from them.
 // 2. A 4401 SAYS THE SESSION THE SOCKET WAS CHECKED AGAINST IS NOT THE ONE IN
 //    THE COOKIE ANY MORE. Either it ended -- inactivity, the maximum, a
-//    sign-out elsewhere, an administrator -- or its identifier rotated when
-//    the person confirmed their second factor (design §2.4). So the console
-//    asks `/me` again: a 401 there ends the session in this tab
-//    (`./sessionEnd`) and no socket opens again; an answer means the cookie
-//    holds a live session, and the socket reopens at once on it.
+//    sign-out elsewhere, an administrator -- or its identifier rotated: the
+//    person changed their password, which gives the caller's own session a
+//    new token (final review B, Important 1). A step-up does not rotate it,
+//    and the sign-in's own rotation (`mark_factor`) happens before any socket
+//    opens. So the console asks `/me` again: a 401 there ends the session in
+//    this tab (`./sessionEnd`) and no socket opens again; an answer naming the
+//    same person means the cookie holds a live session, and the socket
+//    reopens at once on it; an answer naming anybody else is this session
+//    ending too (`sessionPerson`: the same rule the guard's `/me` applies).
 // 3. Any other unplanned close keeps the doubling backoff (2 s, 4 s ... 30 s).
 // 4. THE CHOSEN CLIENT (phase 3 design §1.5) travels as `?client=<id>` -- a
 //    UUID, not a credential, so the query string is the right place for it --
@@ -51,7 +55,7 @@ import { FIXTURE_MODE } from "../fixtures/mode";
 import { selectedClient, subscribeClient } from "./clientChoice";
 import { RESYNC_KIND } from "./resync";
 import type { Me } from "./api";
-import { isSessionEnded, sessionEnded, subscribeSessionEnd } from "./sessionEnd";
+import { isSessionEnded, sessionPerson, subscribeSessionEnd } from "./sessionEnd";
 
 export interface UiEvent {
   kind: string;
@@ -130,14 +134,19 @@ export function useLiveEvents(onEvent: (event: UiEvent) => void): void {
       // WHO THE TAB WAS BEFORE: a cookie that now holds ANOTHER person's
       // session (someone signed in on this browser in another tab) is this
       // session ending, not a rotation -- reconnecting would stream the new
-      // person's events into the previous person's cache.
+      // person's events into the previous person's cache. ONE RULE for this
+      // and the guard's own `/me` (`./sessionEnd.ts::sessionPerson`, final
+      // review D1, Minor 3), checked here before reconnecting: the guard
+      // hears the refetch only after TanStack's next tick.
       const before = queryClient.getQueryData<Me>(["me"])?.user_id;
+      if (before !== undefined) sessionPerson(before);
       await queryClient.invalidateQueries({ queryKey: ["me"] });
       if (disposed) return;
-      if (before !== undefined && queryClient.getQueryData<Me>(["me"])?.user_id !== before) {
-        sessionEnded();
-        return;
-      }
+      const after = queryClient.getQueryData<Me>(["me"])?.user_id;
+      if (after !== undefined) sessionPerson(after);
+      // A 401 from `/me`, or another person: either way the session ended,
+      // and the cache was emptied with it.
+      if (isSessionEnded()) return;
       if (rechecked) {
         backoff();
         return;

@@ -19,6 +19,7 @@ import type {
   OAuthAppOut,
   OAuthAppUpdate,
 } from "./types";
+import { useSecretMutation } from "../../lib/secretMutation";
 
 // --------------------------------------------------------------------------
 // Mailboxes
@@ -38,7 +39,8 @@ export function useEmailMailboxes() {
 export function useCreateEmailMailboxMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation({
     mutationFn: (body: MailboxCreate) => api.createEmailMailbox(body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["email-intake-mailboxes"] });
@@ -49,7 +51,8 @@ export function useCreateEmailMailboxMutation() {
 export function useUpdateEmailMailboxMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation({
     mutationFn: ({ id, body }: { id: string; body: MailboxUpdate }) =>
       api.updateEmailMailbox(id, body),
     onSuccess: () => {
@@ -127,7 +130,8 @@ export function useEmailOAuthApp() {
 export function useSaveEmailOAuthAppMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation({
     mutationFn: (body: OAuthAppUpdate) => api.saveEmailOAuthApp(body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: OAUTH_APP_KEY });
@@ -145,7 +149,8 @@ export function useStartMailboxOAuthMutation() {
 export function useCompleteMailboxOAuthMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation({
     mutationFn: (body: { state: string; code: string }) => api.completeMailboxOAuth(body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: MAILBOXES_KEY });

@@ -153,6 +153,7 @@ import type {
 } from "./types";
 import { EnrollmentPrerequisites } from "./EnrollmentPrerequisites";
 import { useAdoptJourneyClient, useJourneySiteState } from "../onboarding/journeyTarget";
+import { useSecretMutation } from "../../lib/secretMutation";
 
 /** The codes `shell/nav.ts` uses, and the codes the routes enforce server-side. */
 const DEVICES_READ = "devices.read";
@@ -423,7 +424,8 @@ export function EnrollmentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- seeds once from the journey
   }, [journeySite]);
 
-  const create = useMutation({
+  // A secret in its answer: `useSecretMutation` drops it once the page holds it (`lib/secretMutation.ts`).
+  const create = useSecretMutation({
     mutationFn: (body: TokenDraft) =>
       createEnrollmentToken(api, {
         ...body,

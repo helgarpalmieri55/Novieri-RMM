@@ -16,6 +16,7 @@ import {
   calls,
   describeControl,
   installDefaults,
+  mutationCacheText,
   renderSettings,
 } from "./harness";
 
@@ -222,6 +223,20 @@ describe("Settings — Notifications tab", () => {
       active: true,
       secret: "new-token",
     });
+  });
+
+  it("keeps no replacement credential in the mutation cache once the save settles (D2, Minor 1)", async () => {
+    const user = userEvent.setup();
+    calls.listNotificationChannels.mockResolvedValue([WEBHOOK_CHANNEL_FIXTURE]);
+    const { queryClient } = renderSettings();
+    await openTab();
+
+    const secret = await screen.findByLabelText<HTMLInputElement>("New token for Ops chat");
+    await user.type(secret, "new-token-xyz");
+    await user.click(within(secret.closest("tr") as HTMLElement).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(calls.updateNotificationChannel).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("new-token-xyz"));
   });
 
   it("a failed save is unmistakable: the server's error is shown and success is not claimed", async () => {

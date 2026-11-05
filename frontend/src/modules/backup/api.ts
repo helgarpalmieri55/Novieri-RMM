@@ -15,6 +15,7 @@ import type {
   RepositoryCreateRequest,
   RestoreRequest,
 } from "./types";
+import { useSecretMutation } from "../../lib/secretMutation";
 
 /**
  * The endpoints a backup can be targeted at (cycle 6).
@@ -192,7 +193,8 @@ export function useOffsiteTargets() {
 export function useCreateOffsiteTargetMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation({
     mutationFn: (body: OffsiteTargetCreate) => api.createOffsiteTarget(body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["backup-offsite-targets"] });
@@ -203,7 +205,8 @@ export function useCreateOffsiteTargetMutation() {
 export function useUpdateOffsiteTargetMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation({
     mutationFn: ({ id, body }: { id: string; body: OffsiteTargetUpdate }) =>
       api.updateOffsiteTarget(id, body),
     onSuccess: () => {

@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { EXCLUDED, PARAMS, ROUTES, fillPath } from "../../scripts/routes.mjs";
+import { EXCLUDED, OPEN_DISCLOSURES, PARAMS, ROUTES, fillPath } from "../../scripts/routes.mjs";
 
 const APP = readFileSync(resolve(import.meta.dirname, "../App.tsx"), "utf8");
 
@@ -81,6 +81,15 @@ describe("scripts/routes.mjs covers App.tsx", () => {
     for (const route of ROUTES.filter((r) => r.includes("?"))) {
       expect(ROUTES, `${route} has no plain route beside it`).toContain(route.split("?")[0]);
     }
+  });
+
+  it("walks Settings -> Users with an open invitation in the fixtures, so Resend and Cancel are measured (D2, Minor 5)", async () => {
+    expect(ROUTES).toContain("/settings?tab=users");
+    // Measured OPEN: the row's actions sit behind a `<details>`.
+    expect(OPEN_DISCLOSURES.has("/settings?tab=users")).toBe(true);
+    expect([...OPEN_DISCLOSURES].filter((route) => !ROUTES.includes(route))).toEqual([]);
+    const { USERS } = await import("../modules/service-desk/fixtures");
+    expect(USERS.filter((user) => user.invite_pending === true).map((user) => user.id)).toEqual(["usr-invited-seed"]);
   });
 
   it("walks Settings -> AI connections, which /settings alone never opens", () => {
