@@ -9,8 +9,16 @@ phase 1 the console signs in on the platform's own screens, and §1 below is
 amended as stated there.
 
 **Which falsifiers have tests.** 1, 2 (by proxy), 4 and 7 are in
-`backend/tests/test_console_auth_realm.py`; 5 and 6 are in
-`frontend/src/App.auth.test.tsx`. **Falsifier 3 is not tested** — asserting
+`backend/tests/test_console_auth_realm.py`. 5 and 6 -- the OIDC authority
+error and the `/auth/callback` loop -- were in `frontend/src/App.auth.test.tsx`
+as written. Since own authentication phase 1 the console has no OIDC client
+and no `/auth/callback`, so neither can happen as stated; own authentication's
+Task 10 re-pointed that file to the cookie session, where it holds the same two
+promises on the new path: a server that cannot say whether there is a session
+shows a screen with the reason instead of a redirect (5), and a visitor with no
+session is sent to the sign-in page once, never in a loop (6). The open-
+redirect refusal moved to `frontend/src/lib/session.test.ts` (`safeNext`).
+**Falsifier 3 is not tested** — asserting
 that a federated token carries the `org` claim needs a real Entra tenant and a
 real browser. The mapper is asserted as committed; the claim is not observed.
 `deploy/README.md` used to give the operator a devtools one-liner that decoded
