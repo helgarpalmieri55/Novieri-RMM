@@ -41,6 +41,7 @@ import {
   calls,
   describeControl,
   installDefaults,
+  mutationCacheText,
   renderSettings,
 } from "./harness";
 
@@ -202,6 +203,32 @@ describe("Settings — Email tab", () => {
     expect(calls.updateEmailSettings.mock.calls[0]?.[0]).toMatchObject({
       password: "new-relay-secret",
     });
+  });
+
+  it("keeps no password in the mutation cache once the save settles, and still says Saved (D2, Minor 1)", async () => {
+    // The tab stays mounted: `update.variables` kept the password after the
+    // box was emptied, and for five minutes after the tab was left.
+    const user = userEvent.setup();
+    const { queryClient } = renderSettings();
+    await user.click(await screen.findByRole("tab", { name: /^Email/ }));
+    await user.type(await screen.findByLabelText("Password"), "new-relay-secret");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/Saved\./);
+    expect(screen.getByLabelText("Password")).toHaveValue("");
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("new-relay-secret"));
+  });
+
+  it("keeps no password in the mutation cache when the server refuses it, and still says why", async () => {
+    calls.updateEmailSettings.mockRejectedValue(new ApiError(400, JSON.stringify({ detail: "The relay refused that password." })));
+    const user = userEvent.setup();
+    const { queryClient } = renderSettings();
+    await user.click(await screen.findByRole("tab", { name: /^Email/ }));
+    await user.type(await screen.findByLabelText("Password"), "new-relay-secret");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("The relay refused that password.")).toBeInTheDocument();
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("new-relay-secret"));
   });
 
   it("refuses to save a password with no sign-in username", async () => {

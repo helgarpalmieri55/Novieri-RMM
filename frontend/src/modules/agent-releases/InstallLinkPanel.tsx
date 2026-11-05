@@ -21,7 +21,7 @@
  * `enrollment.link.manage`. Every route checks the permission itself.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { ConfirmDialog } from "../../components/confirm";
@@ -35,6 +35,7 @@ import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
 import { Btn, Panel, QueryState, Toggle } from "../../shell/components";
 import { MsiDownload } from "./MsiDownload";
+import { useSecretMutation } from "../../lib/secretMutation";
 
 export const INSTALL_LINK_KEY = ["install-link"] as const;
 export const LINK_MANAGE = "enrollment.link.manage";
@@ -137,11 +138,12 @@ export function InstallLinkPanel({ zone, siteId }: { zone?: string | null; siteI
       setCopied("idle");
     }
   };
-  const save = useMutation({
+  // A secret in its answer: `useSecretMutation` drops it once the page holds it (`lib/secretMutation.ts`).
+  const save = useSecretMutation({
     mutationFn: (body: InstallLinkUpdate) => api.saveInstallLink(siteId, body),
     onSuccess: onSaved,
   });
-  const regenerate = useMutation({
+  const regenerate = useSecretMutation({
     mutationFn: () => api.regenerateInstallLink(siteId),
     onSuccess: onSaved,
   });

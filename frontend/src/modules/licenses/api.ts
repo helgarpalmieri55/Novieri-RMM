@@ -23,6 +23,7 @@ import type {
   VendorCreate,
   VendorUpdate,
 } from "./types";
+import { useSecretMutation } from "../../lib/secretMutation";
 
 export function useVendors() {
   const api = useApi();
@@ -106,7 +107,8 @@ export function useLicenses() {
 export function useCreateLicenseMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation({
     // The body is BUILT HERE, inside the mutation, not before it: a body that
     // cannot name its client yet throws `ClientNotChosen`
     // (`lib/clientSelection.ts`), which then fails the mutation -- so the
@@ -131,7 +133,8 @@ export function useLicense(id: string | undefined) {
 export function useUpdateLicenseMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation({
+  // A secret in its body: `useSecretMutation` drops it once it settles (`lib/secretMutation.ts`).
+  return useSecretMutation({
     mutationFn: ({ id, body }: { id: string; body: LicenseUpdate }) => api.updateLicense(id, body),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: ["licenses"] });
@@ -156,7 +159,8 @@ export function useDeleteLicenseMutation() {
 // Deliberately a mutation, not a query -- see this file's module docstring.
 export function useRevealLicenseKeyMutation() {
   const api = useApi();
-  return useMutation({ mutationFn: (id: string) => api.revealLicenseKey(id) });
+  // A secret in its answer: `useSecretMutation` drops it once the page holds it (`lib/secretMutation.ts`).
+  return useSecretMutation({ mutationFn: (id: string) => api.revealLicenseKey(id) });
 }
 
 // The org directory, for naming the person behind a user allocation. Same

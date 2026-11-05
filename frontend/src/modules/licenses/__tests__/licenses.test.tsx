@@ -57,10 +57,21 @@ beforeEach(() => selectClient(SCOPE_INTERNAL.id));
 
 function renderWithProviders(ui: ReactElement, initialEntries: string[] = ["/"]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>
     </QueryClientProvider>,
+  );
+  return { ...rendered, queryClient };
+}
+
+/** What the mutation cache holds, as the console's own harness reads it. */
+function mutationCacheText(queryClient: QueryClient): string {
+  return JSON.stringify(
+    queryClient
+      .getMutationCache()
+      .getAll()
+      .map((mutation) => ({ data: mutation.state.data, variables: mutation.state.variables })),
   );
 }
 
@@ -972,6 +983,18 @@ describe("LicenseDetail", () => {
     // "2025-01-01" through America/Los_Angeles (-8) would read 31 Dec 2024.
     expect(await screen.findByText(/01 Jan 2025/)).toBeInTheDocument();
     expect(screen.queryByText(/31 Dec 2024/)).not.toBeInTheDocument();
+  });
+
+  it("shows the revealed key from the page's own state, and keeps none of it in the mutation cache (D2, Minor 1)", async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderDetail();
+
+    await screen.findByText("Acme Office Suite");
+    await user.click(screen.getByRole("button", { name: "Reveal key" }));
+
+    expect(await screen.findByText("ABCD-1234")).toBeInTheDocument();
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("ABCD-1234"));
+    expect(screen.getByText("ABCD-1234")).toBeInTheDocument();
   });
 
   // Cycle 4. Revealing a key is an audited, privileged call; a refusal that

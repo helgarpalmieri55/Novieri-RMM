@@ -28,7 +28,7 @@
  * the panel says so instead of showing the same green line everywhere.
  */
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { ConfirmDialog } from "../../components/confirm";
@@ -46,6 +46,7 @@ import { useApi } from "../../lib/ApiContext";
 import { formatDateTime } from "../../lib/datetime";
 import { requireKnown } from "../../lib/clientSelection";
 import { platformLabel } from "./platform";
+import { useSecretMutation } from "../../lib/secretMutation";
 
 // Catalogue keys, worded when drawn.
 const CHANNELS: { value: AgentDeploymentChannel; label: MessageKey; blurb: MessageKey }[] = [
@@ -133,7 +134,8 @@ export function ManagedDeploymentDialog({
     enabled: release != null,
   });
 
-  const mint = useMutation({
+  // A secret in its answer: `useSecretMutation` drops it once the page holds it (`lib/secretMutation.ts`).
+  const mint = useSecretMutation({
     mutationFn: () => {
       if (siteMissing) throw new Error(siteMissing);
       return api.mintAgentDeploymentToken(release?.id ?? "", {

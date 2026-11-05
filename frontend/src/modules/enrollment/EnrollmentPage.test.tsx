@@ -219,7 +219,7 @@ function renderPage(options: {
       </MemoryRouter>
     </QueryClientProvider>
   );
-  return render(ui);
+  return { ...render(ui), queryClient };
 }
 
 /** The three deliberate steps, as a helper, so each test can assert about the
@@ -432,6 +432,28 @@ describe("EnrollmentPage", () => {
       // site of the client chosen at the top.
       site_id: "s-1",
     });
+  });
+
+  it("shows the token once, from the page's own state, and keeps none of it in the mutation cache (D2, Minor 1)", async () => {
+    createEnrollmentToken.mockResolvedValue({
+      id: "new",
+      token: "ENR-SECRET-VALUE",
+      name: "Bogota rollout",
+      expires_at: FUTURE,
+      max_uses: 1,
+    });
+    const { queryClient } = renderPage();
+    await screen.findByText("Bogota HQ workstations");
+    await issueToken({ name: "Bogota rollout" });
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Issue token" }));
+
+    expect(await screen.findByText("ENR-SECRET-VALUE")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        JSON.stringify(queryClient.getMutationCache().getAll().map((m) => [m.state.data, m.state.variables])),
+      ).not.toContain("ENR-SECRET-VALUE"),
+    );
+    expect(screen.getByText("ENR-SECRET-VALUE")).toBeInTheDocument();
   });
 
   it("issues nothing when the confirmation is cancelled", async () => {
