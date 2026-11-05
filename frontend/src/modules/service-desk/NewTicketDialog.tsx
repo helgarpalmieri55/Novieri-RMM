@@ -235,6 +235,8 @@ export function NewTicketDialog({
           <Field label={t("serviceDesk.common.subject")} full>
             <input
               className={inputClass}
+              // `data-keep`: prose a person would retype, kept if the session ends (`lib/unsavedText.ts`).
+              data-keep
               required
               value={subject}
               onChange={(e) => setSubject(e.target.value)}

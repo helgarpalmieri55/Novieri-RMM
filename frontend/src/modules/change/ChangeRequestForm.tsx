@@ -239,6 +239,8 @@ export function ChangeRequestForm({
           <Field label={t("change.form.titleRequired")} full>
             <input
               className={inputClass}
+              // `data-keep`: prose a person would retype, kept if the session ends (`lib/unsavedText.ts`).
+              data-keep
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}

@@ -139,7 +139,8 @@ export const shell: Shape<typeof en> = {
     bodyKept:
       "La página en la que estabas se cerró y sus datos se borraron, para que nadie más pueda leerlos en este equipo. Lo que habías escrito está abajo: copia lo que quieras conservar y vuelve a iniciar sesión.",
     keptTitle: "Lo que estabas escribiendo",
-    keptHint: "Solo lectura y sin guardar en ningún sitio: desaparece cuando sales de esta página. Las contraseñas y los códigos nunca se conservan.",
+    keptHint:
+      "Solo lectura y sin guardar en ningún sitio: desaparece cuando sales de esta página. Solo se conserva el texto más largo, como respuestas y notas; nunca una contraseña ni un código.",
     keptField: "Texto {n}",
   },
   health: {

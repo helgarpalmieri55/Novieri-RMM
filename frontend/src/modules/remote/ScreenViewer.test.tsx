@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient, Device, Page, RemoteSession } from "../../lib/api";
 import { T, decode, encode, encodeKey, jsonBody, type Frame } from "./rsp";
 import { personActive, watchPersonInput } from "../../lib/personInput";
+import { watchTyping } from "../../lib/unsavedText";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -201,6 +202,19 @@ describe("ScreenViewer", () => {
     expect(p).toBeDefined();
     const v = new DataView(p!.body.buffer, p!.body.byteOffset);
     expect([v.getUint16(0), v.getUint16(2), v.getUint8(4)]).toEqual([960, 540, 1]);
+  });
+
+  it("never keeps the text typed for the device when the session ends: it can be a password (final re-review, I3)", async () => {
+    const user = userEvent.setup();
+    const watch = watchTyping(document);
+    try {
+      renderViewer();
+      await goLive(socket());
+      await user.type(await screen.findByLabelText("Text to type on the device"), "Adm1n!Passw0rd");
+      expect(watch.keep()).toEqual([]);
+    } finally {
+      watch.stop();
+    }
   });
 
   it("counts keys and pointer moves over the remote screen as a person at the console (final re-review, P1)", async () => {

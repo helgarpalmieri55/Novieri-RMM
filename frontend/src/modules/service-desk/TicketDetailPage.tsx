@@ -926,6 +926,8 @@ function EditTicketPanel({
           <Field label={t("serviceDesk.common.subject")}>
             <input
               className={inputClass}
+              // `data-keep`: prose a person would retype, kept if the session ends (`lib/unsavedText.ts`).
+              data-keep
               value={subject}
               disabled={frozen}
               onChange={(e) => setSubject(e.target.value)}

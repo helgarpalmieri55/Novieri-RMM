@@ -7,6 +7,13 @@
  * Driven through `userEvent`, which fires the browser's `input` events: a
  * field filled by the page itself (a seed from the server, a programmatic
  * value) was not typed by anyone and is never kept.
+ *
+ * DENY BY DEFAULT (final re-review, I3 and concern 4; coordinator decision):
+ * only a `<textarea>`, or an input marked `data-keep`, is ever kept. Every
+ * other single-line box -- the remote screen's "Text to type on the device",
+ * through which a technician sends a device's admin password, among them --
+ * is not, whoever forgot to mark it. RE-POINTED: the plain inputs these tests
+ * keep are marked `data-keep` now.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -25,12 +32,12 @@ afterEach(() => {
   watch = null;
 });
 
-function Controlled({ label, initial = "", type }: { label: string; initial?: string; type?: string }) {
+function Controlled({ label, initial = "", type, keep = false }: { label: string; initial?: string; type?: string; keep?: boolean }) {
   const [value, setValue] = useState(initial);
   return (
     <label>
       <span>{label}</span>
-      <input type={type} value={value} onChange={(event) => setValue(event.target.value)} />
+      <input type={type} data-keep={keep || undefined} value={value} onChange={(event) => setValue(event.target.value)} />
     </label>
   );
 }
@@ -61,7 +68,7 @@ describe("the text a person typed", () => {
           <span>Reply</span>
           <textarea defaultValue="" />
         </label>
-        <Controlled label="Subject" />
+        <Controlled label="Subject" keep />
       </form>,
     );
     watch = watchTyping(document);
@@ -78,8 +85,8 @@ describe("the text a person typed", () => {
     const user = userEvent.setup();
     render(
       <>
-        <Controlled label="Hostname" initial="laptop-7.corp.example" />
-        <Controlled label="Note" />
+        <Controlled label="Hostname" initial="laptop-7.corp.example" keep />
+        <Controlled label="Note" keep />
       </>,
     );
     watch = watchTyping(document);
@@ -93,7 +100,7 @@ describe("the text a person typed", () => {
     const user = userEvent.setup();
     render(
       <>
-        <input aria-label="Search the fleet" />
+        <input aria-label="Search the fleet" data-keep />
         <textarea />
       </>,
     );
@@ -109,7 +116,7 @@ describe("the text a person typed", () => {
 
   it("is nothing from before the watch started, or after it stopped", async () => {
     const user = userEvent.setup();
-    render(<Controlled label="Note" />);
+    render(<Controlled label="Note" keep />);
     await user.type(screen.getByLabelText("Note"), "before");
     watch = watchTyping(document);
     expect(watch.keep()).toEqual([]);
@@ -119,13 +126,62 @@ describe("the text a person typed", () => {
   });
 });
 
+describe("deny by default (final re-review, I3)", () => {
+  it("keeps a textarea and an input marked data-keep, and no other box", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <Controlled label="Ticket subject" keep />
+        <Controlled label="Text to type on the device" />
+        <Controlled label="Search" type="search" />
+        <label>
+          <span>Reply</span>
+          <textarea />
+        </label>
+      </>,
+    );
+    watch = watchTyping(document);
+    await user.type(screen.getByLabelText("Ticket subject"), "Printer offline");
+    await user.type(screen.getByLabelText("Text to type on the device"), "Adm1n!Passw0rd");
+    await user.type(screen.getByLabelText("Search"), "dc01");
+    await user.type(screen.getByLabelText("Reply"), "Restarted it.");
+
+    const kept = watch.keep();
+    expect(kept).toEqual([
+      { label: "Ticket subject", text: "Printer offline" },
+      { label: "Reply", text: "Restarted it." },
+    ]);
+    expect(JSON.stringify(kept)).not.toContain("Adm1n");
+  });
+
+  it("never keeps a secret, even marked data-keep or typed into a textarea", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <label>
+          <span>Private key</span>
+          <textarea data-secret />
+        </label>
+        <label>
+          <span>Code</span>
+          <input data-keep autoComplete="one-time-code" />
+        </label>
+      </>,
+    );
+    watch = watchTyping(document);
+    await user.type(screen.getByLabelText("Private key"), "-----BEGIN");
+    await user.type(screen.getByLabelText("Code"), "123456");
+    expect(watch.keep()).toEqual([]);
+  });
+});
+
 describe("a secret typed into the page", () => {
   it("is never kept from a password box", async () => {
     const user = userEvent.setup();
     render(
       <>
-        <Controlled label="Account" />
-        <Controlled label="Password" type="password" />
+        <Controlled label="Account" keep />
+        <Controlled label="Password" type="password" keep />
       </>,
     );
     watch = watchTyping(document);
@@ -226,6 +282,15 @@ describe("the secrets the console lets a person type in clear", () => {
     const box = panel.indexOf("value={link}");
     expect(panel.lastIndexOf("<input", box)).toBeGreaterThan(-1);
     expect(panel.lastIndexOf("data-secret", box)).toBeGreaterThan(panel.lastIndexOf("<input", box));
+  });
+
+  it("include the remote screen's text to type on the device (final re-review, I3)", () => {
+    const viewer = source("modules/remote/ScreenViewer.tsx");
+    const box = viewer.indexOf("value={text}");
+    const input = viewer.lastIndexOf("<input", box);
+    expect(input).toBeGreaterThan(-1);
+    expect(viewer.slice(input, box)).toContain("data-secret");
+    expect(viewer.slice(input, box)).toContain('autoComplete="off"');
   });
 
   it("include the step-up's recovery code", () => {

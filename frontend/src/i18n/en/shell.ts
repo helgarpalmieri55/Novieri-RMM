@@ -145,7 +145,8 @@ export const shell = {
     bodyKept:
       "The page you were on was closed and its data cleared, so nobody else can read it on this computer. What you had typed is below: copy what you want to keep, then sign in again.",
     keptTitle: "What you were typing",
-    keptHint: "Read-only, and not saved anywhere: it is gone when you leave this page. Passwords and codes are never kept.",
+    keptHint:
+      "Read-only, and not saved anywhere: it is gone when you leave this page. Only longer text, such as replies and notes, is kept; never a password or a code.",
     keptField: "Text {n}",
   },
   health: {

@@ -51,7 +51,9 @@ describe("SessionEnded", () => {
     expect(reply).toHaveValue("Restarted the spooler.\nAsk Bob to try again.");
     expect(reply).toHaveAttribute("readonly");
     expect(within(region).getByRole("textbox", { name: "Text 2" })).toHaveValue("a box with no label");
-    expect(region).toHaveTextContent(/Passwords and codes are never kept/);
+    // RE-POINTED (final re-review, I3): only longer text is kept now, and the
+    // promise says so; it still promises no password and no code.
+    expect(region).toHaveTextContent(/Only longer text, such as replies and notes, is kept; never a password or a code\./);
   });
 
   it("says all of it in Spanish", () => {

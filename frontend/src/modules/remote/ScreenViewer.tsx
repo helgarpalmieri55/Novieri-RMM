@@ -536,8 +536,15 @@ export function ScreenViewer() {
               <Btn key={name} label={t("remote.screen.sendShortcut", { label: s.label })} small onClick={() => sendShortcut(name)} />
             ))}
             <form onSubmit={typeText} className="flex flex-wrap items-center gap-2">
+              {/* A SECRET TYPED IN CLEAR: with no clipboard (screen-share
+                  spec §3.8) this box is how a technician gets their own
+                  characters onto the device, a password among them. Never
+                  kept when the session ends (`lib/unsavedText.ts`), never
+                  offered back by the browser (final re-review, I3). */}
               <input
                 className={inputClass}
+                data-secret
+                autoComplete="off"
                 aria-label={t("remote.screen.textLabel")}
                 placeholder={t("remote.screen.textPlaceholder")}
                 value={text}

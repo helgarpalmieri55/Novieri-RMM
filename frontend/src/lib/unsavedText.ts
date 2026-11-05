@@ -9,15 +9,24 @@
  * context"), so the text a person typed is read out of the page before it
  * goes and shown, read-only, on the notice.
  *
- * WHAT COUNTS AS TYPED. A text box the person typed, pasted or dropped into:
- * the browser fires `input` for each of those, and never for a value the page
- * set itself. So a field the page filled from the server and nobody touched
- * is not kept, and a box typed into and emptied again keeps nothing. This
- * cannot know whether a value was saved since -- an edit form left open after
- * Save still holds what was typed -- and showing a person their own words
- * again costs nothing.
+ * ONLY PROSE, BY DEFAULT (final re-review I3 and concern 4; coordinator
+ * decision): a `<textarea>`, or an input marked `data-keep` -- a ticket's
+ * subject, a change's title. No other box is kept, whoever forgot to mark it:
+ * the remote screen's "Text to type on the device" carried a device's admin
+ * password onto the notice when every typed box was kept unless marked.
+ * Replies, notes and descriptions are textareas; a short field is cheap to
+ * type again.
  *
- * PASSWORD INPUTS ARE NEVER KEPT, and neither is any other secret:
+ * WHAT COUNTS AS TYPED. A keepable box the person typed, pasted or dropped
+ * into: the browser fires `input` for each of those, and never for a value
+ * the page set itself. So a field the page filled from the server and nobody
+ * touched is not kept, and a box typed into and emptied again keeps nothing.
+ * This cannot know whether a value was saved since -- an edit form left open
+ * after Save still holds what was typed -- and showing a person their own
+ * words again costs nothing.
+ *
+ * PASSWORD INPUTS ARE NEVER KEPT, and neither is any other secret, even in a
+ * textarea or marked `data-keep`:
  *
  *   - a box that is `type="password"`, or WAS one when it was typed into or
  *     focused -- a "Show" toggle that turns it into text afterwards does not
@@ -50,9 +59,10 @@ type TextField = HTMLInputElement | HTMLTextAreaElement;
 const TEXT_TYPES = new Set(["text", "search", "email", "url", "tel", "number"]);
 const SECRET_AUTOCOMPLETE = /\b(?:current-password|new-password|one-time-code)\b/i;
 
+/** A box whose text may be kept: a textarea, or a text input marked `data-keep`. */
 function isTextField(target: EventTarget | null): target is TextField {
   if (target instanceof HTMLTextAreaElement) return true;
-  return target instanceof HTMLInputElement && TEXT_TYPES.has(target.type);
+  return target instanceof HTMLInputElement && TEXT_TYPES.has(target.type) && target.hasAttribute("data-keep");
 }
 
 function looksSecret(field: Element): boolean {
