@@ -511,7 +511,7 @@ async def read_email_settings(
         values = await get_smtp(_provisioning(config))
     except httpx.HTTPStatusError as exc:
         raise _upstream(exc) from exc
-    return _as_settings(values, ctx.claims.email)
+    return _as_settings(values, ctx.email)
 
 
 @router.put("/email", response_model=EmailSettingsOut)
@@ -561,7 +561,7 @@ async def write_email_settings(
         values = await get_smtp(provisioning)
     except httpx.HTTPStatusError as exc:
         raise _upstream(exc) from exc
-    return _as_settings(values, ctx.claims.email)
+    return _as_settings(values, ctx.email)
 
 
 @router.post("/email/test", response_model=TestSendOut)
@@ -594,7 +594,7 @@ async def send_test_message(
             recipient = await send_test_email(
                 provisioning,
                 body.recipient if body else None,
-                caller_email=ctx.claims.email,
+                caller_email=ctx.email,
                 org_domain=await resolve_console_domain(
                     session, ctx.org_id, request.app.state.settings
                 ),

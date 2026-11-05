@@ -607,7 +607,7 @@ async def update_current_org(
                         platform_default=request.app.state.settings.console_email_domain,
                         env={},
                     ),
-                    caller_email=ctx.claims.email,
+                    caller_email=ctx.email,
                 )
                 if lockout is not None:
                     # Raised INSIDE the tenant transaction, so the UPDATE and
@@ -781,6 +781,6 @@ async def preview_console_domain(
         ],
         blocking=sum(1 for row in refused if row.active),
         truncated=len(refused) > MAX_PREVIEWED_USERS,
-        would_refuse_you=self_lockout_refusal(domain, caller_email=ctx.claims.email)
+        would_refuse_you=self_lockout_refusal(domain, caller_email=ctx.email)
         is not None,
     )

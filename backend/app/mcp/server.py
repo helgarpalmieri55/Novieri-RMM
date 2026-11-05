@@ -246,7 +246,10 @@ async def _gate(fastapi_app: FastAPI, ctx: AuthContext) -> tuple[int, str] | Non
     three allow the call. Checked on EVERY request (design §6): turning the
     switch off, removing the permission or revoking the app stops the next
     call, not the next sign-in."""
-    issued_at = datetime.fromtimestamp(ctx.claims.iat, UTC)
+    claims = ctx.claims
+    if claims is None:  # never: `admit` reads no session cookie on this channel
+        return 401, tr("missing bearer token")
+    issued_at = datetime.fromtimestamp(claims.iat, UTC)
     async with org_session(
         ctx.org_id, engine=fastapi_app.state.app_engine, clients=ctx.clients
     ) as session:
@@ -275,7 +278,7 @@ async def _gate(fastapi_app: FastAPI, ctx: AuthContext) -> tuple[int, str] | Non
                 select(
                     exists().where(
                         McpRevocation.org_id == ctx.org_id,
-                        McpRevocation.client_id == ctx.claims.azp,
+                        McpRevocation.client_id == claims.azp,
                         or_(
                             McpRevocation.user_id.is_(None),
                             McpRevocation.user_id == ctx.user_id,
@@ -351,7 +354,8 @@ class McpAsgi:
             if exc.status_code == 401:
                 return await _unauthorised(send, resource, detail=str(exc.detail))
             return await _json(send, exc.status_code, {"detail": exc.detail})
-        if ctx.claims.azp != label:
+        claims = ctx.claims
+        if claims is None or claims.azp != label:
             return await _unauthorised(
                 send, resource, detail=tr("the MCP channel marker is malformed")
             )
@@ -386,7 +390,7 @@ class McpAsgi:
         scope.setdefault("state", {})[PRINCIPAL_KEY] = McpPrincipal(
             org_id=ctx.org_id,
             user_id=ctx.user_id,
-            claims=ctx.claims,
+            claims=claims,
             bearer=authorization,
             areas=areas or None,
             accept_language=request.headers.get("accept-language", ""),

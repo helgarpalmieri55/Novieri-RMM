@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import AuthContext, require_permission
+from app.api.deps import AuthContext, require_permission, require_permission_with_step_up
 from app.core.audit import audit_service
 from app.core.i18n import tr, tr_marked
 from app.core.tenancy import org_session
@@ -239,12 +239,15 @@ async def checkout_credential(
     credential_id: UUID,
     body: CheckoutRequest,
     request: Request,
-    ctx: AuthContext = Depends(require_permission("credentials.checkout")),
+    ctx: AuthContext = Depends(require_permission_with_step_up("credentials.checkout")),
 ) -> CheckoutResponse:
     """Audited decrypt-at-use: returns the plaintext once and records the access.
 
     Requires credentials.checkout — a distinct privilege from credentials.read
-    (metadata), so a read-only auditor cannot exfiltrate plaintext secrets."""
+    (metadata), so a read-only auditor cannot exfiltrate plaintext secrets --
+    and, on a console session, a second factor verified in the last 10
+    minutes (P2 design §2.5): `403 {"code": "step_up_required"}` otherwise,
+    on a remembered device too."""
     state = request.app.state
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         credential = await _get(session, ctx.org_id, credential_id)

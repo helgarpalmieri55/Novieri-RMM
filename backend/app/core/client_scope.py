@@ -102,6 +102,10 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "client, so it is read and touched under every client, after its_auth_session gave "
         "the organisation (P2 design §6.2, §6.5)"
     ),
+    "app/api/deps.py::_admit_session": (
+        "door 1 for a console session (P2 design §6.5): the person's row and grants, read "
+        "before the scope they define exists, as admit reads them for a token"
+    ),
     "app/core/identity/door.py::person_scope": (
         "an admitted person's grants for one code (require_permission, the portal's gate, "
         "MCP): read before the scope they define exists, and only ever intersected with "

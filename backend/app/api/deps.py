@@ -23,6 +23,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
+from app.core.auth.refusals import AUTH_REQUIRED, STEP_UP_REQUIRED, AuthRefusal
+from app.core.auth.sessions import SessionPrincipal, resolve, step_up_fresh
 from app.core.client_scope import ClientScope, parse_client_header
 from app.core.i18n import N_, tr, tr_marked
 from app.core.identity import (
@@ -58,13 +60,27 @@ from app.models import Organization, User
 class AuthContext:
     org_id: UUID
     user_id: UUID
-    claims: TokenClaims
+    # HOW THE PERSON GOT IN -- exactly one of the two (P2 design §6.5). The
+    # console's own session (`principal`, the `__Host-itms_session` cookie), or
+    # a bearer token's claims (`claims`: MCP, and the console's Keycloak token
+    # until Task 13 of P2 phase 1 removes that path; coordinator D21). Read
+    # the person's address through `email`, which works for both (D14).
+    claims: TokenClaims | None
     # The request's client scope (MSP clients spec §2.2), already narrowed by
     # X-Client-Id. `bound_auth_context`: every client the person holds any
     # role in. `require_permission(code)`: every client they hold `code` in.
     # Routes pass it to `org_session(..., clients=ctx.clients)`, and RLS does
     # the rest: a record of a client outside it does not exist for the request.
     clients: ClientScope
+    principal: SessionPrincipal | None = None
+
+    @property
+    def email(self) -> str:
+        """The person's address: the `users` row's for a session, the token's
+        claim for a bearer (what that path has always checked)."""
+        if self.principal is not None:
+            return self.principal.email
+        return "" if self.claims is None else self.claims.email
 
 
 @dataclass(frozen=True)
@@ -79,9 +95,10 @@ class Admission:
 
     org_id: UUID
     user_id: UUID
-    claims: TokenClaims
+    claims: TokenClaims | None
     clients: ClientScope
     requested_client: UUID | None
+    principal: SessionPrincipal | None = None
 
 
 #: The 403 for global configuration -- an O-table row with no client, which
@@ -155,6 +172,7 @@ async def auth_context(request: Request) -> AuthContext:
         user_id=person.user_id,
         claims=person.claims,
         clients=person.clients.narrow(person.requested_client),
+        principal=person.principal,
     )
 
 
@@ -189,9 +207,19 @@ async def admit(request: Request, *, contacts: bool) -> Admission:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, tr("this action is never available to an AI app")
             )
+    # THE CONSOLE'S OWN SESSION FIRST (P2 design §6.5), and never on the MCP
+    # channel: a cookie the browser holds is not a grant an AI app was given
+    # (invariant 1c(a)). Without a live session the bearer path below decides,
+    # as before (coordinator D21: until Task 13 removes the console's token).
+    if call is None:
+        principal = await resolve(request)
+        if principal is not None:
+            return await _admit_session(request, principal, contacts=contacts)
     authorization = request.headers.get("Authorization", "")
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, tr("missing bearer token"))
+        raise AuthRefusal(
+            status.HTTP_401_UNAUTHORIZED, code=AUTH_REQUIRED, detail=tr("missing bearer token")
+        )
     try:
         claims = await validate_token(
             authorization.removeprefix("Bearer "),
@@ -420,6 +448,105 @@ async def admit(request: Request, *, contacts: bool) -> Admission:
         clients=scope,
         requested_client=requested,
     )
+
+
+async def _admit_session(
+    request: Request, principal: SessionPrincipal, *, contacts: bool
+) -> Admission:
+    """Door 1 for a console session: `admit`'s rules, read from the person's
+    own row instead of a token (P2 design §6.5).
+
+    A session that has not finished its second factor is not signed in: 401,
+    and the sign-in routes (Task 7) are the only ones that accept it. Then, in
+    the order the bearer path uses: the console's email-domain rule (staff
+    only -- it says who may use the CONSOLE; a contact, from phase 2, uses the
+    portal), `users.status`, a contact refused unless `contacts`, and the
+    person's scope. Nothing is written and nothing is self-provisioned: a
+    session exists only for a person the platform already has."""
+    if not principal.factor_done:
+        raise AuthRefusal(
+            status.HTTP_401_UNAUTHORIZED,
+            code=AUTH_REQUIRED,
+            detail=tr("finish signing in: confirm your second factor first"),
+        )
+    requested = requested_client(request)
+    settings = request.app.state.settings
+    async with org_session(
+        principal.org_id, engine=request.app.state.app_engine, clients=ClientScope.all()
+    ) as session:
+        user = (
+            await session.execute(select(User).where(User.id == principal.user_id))
+        ).scalar_one_or_none()
+        if user is None:
+            raise AuthRefusal(
+                status.HTTP_401_UNAUTHORIZED,
+                code=AUTH_REQUIRED,
+                detail=tr("your session has ended; sign in again"),
+            )
+        who = f"user:{user.id}"
+        reasons = [
+            None
+            if user.kind == CONTACT_KIND
+            else domain_refusal(
+                user.email, await resolve_console_domain(session, principal.org_id, settings)
+            ),
+            status_refusal(user.status),
+            None if contacts else contact_refusal(user.kind),
+        ]
+        for reason in reasons:
+            if reason is not None:
+                log_admission_refusal("session", sub=who, email=user.email, reason=reason)
+                raise HTTPException(status.HTTP_403_FORBIDDEN, tr_marked(reason))
+        if user.kind == CONTACT_KIND:
+            scope = ClientScope.only([] if user.client_id is None else [user.client_id])
+        else:
+            scope = await clients_holding(session, user.id, None)
+    # The capture middleware's copy, as `admit` stashes it (its comment says why).
+    request.state.org_id = str(principal.org_id)
+    request.state.user_id = str(principal.user_id)
+    return Admission(
+        org_id=principal.org_id,
+        user_id=principal.user_id,
+        claims=None,
+        clients=scope,
+        requested_client=requested,
+        principal=principal,
+    )
+
+
+def require_step_up(ctx: AuthContext, *, now: datetime | None = None) -> None:
+    """Refuse unless a second factor was verified in this session in the last
+    10 minutes (P2 design §2.5): `403 {"code": "step_up_required"}`, which the
+    console answers by asking for it (`/auth/step-up/*`, Task 7).
+
+    A session on a remembered device starts without one, so the vault keeps
+    asking there (design §2.6, falsifier 5). A bearer token has no session to
+    confirm and passes, as it did before this existed: the console's token goes
+    with Task 13 of P2 phase 1, and the MCP channel never reaches these acts
+    (`MCP_FORBIDDEN_CODES`, the never-exposed table)."""
+    if ctx.principal is None:
+        return
+    if not step_up_fresh(ctx.principal, now or datetime.now(UTC)):
+        raise AuthRefusal(
+            status.HTTP_403_FORBIDDEN,
+            code=STEP_UP_REQUIRED,
+            detail=tr("confirm your second factor again to do this"),
+        )
+
+
+def require_permission_with_step_up(
+    code: str,
+) -> Callable[..., Coroutine[Any, Any, AuthContext]]:
+    """`require_permission(code)`, then `require_step_up`: a dependency, so the
+    refusal comes before the body is read. `route_permission` still recovers
+    `code` by walking into `gate`, as for `require_permission_on_every_client`."""
+    gate = require_permission(code)
+
+    async def with_step_up(ctx: AuthContext = Depends(gate)) -> AuthContext:
+        require_step_up(ctx)
+        return ctx
+
+    return with_step_up
 
 
 async def bound_auth_context(request: Request) -> AsyncIterator[AuthContext]:

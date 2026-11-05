@@ -4972,4 +4972,11 @@ CATALOG: dict[str, str] = {
     "this request was refused because it did not come from the console": (
         "se rechazó esta petición porque no vino de la consola"
     ),
+    "finish signing in: confirm your second factor first": (
+        "termina de iniciar sesión: confirma primero tu segundo factor"
+    ),
+    "your session has ended; sign in again": "tu sesión terminó; inicia sesión de nuevo",
+    "confirm your second factor again to do this": (
+        "confirma de nuevo tu segundo factor para hacer esto"
+    ),
 }

@@ -289,6 +289,12 @@ def create_app(
 
     app.add_exception_handler(ModuleNotEnabled, _module_off)
 
+    # The sign-in refusals the console acts on carry a `code` beside the
+    # `detail` (`app/core/auth/refusals.py`).
+    from app.core.auth.refusals import AuthRefusal, auth_refusal_handler
+
+    app.add_exception_handler(AuthRefusal, auth_refusal_handler)
+
     from app.api.probes import build_registry
     from app.api.probes import router as probes_router
 
