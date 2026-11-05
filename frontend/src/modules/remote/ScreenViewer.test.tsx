@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient, Device, Page, RemoteSession } from "../../lib/api";
 import { T, decode, encode, encodeKey, jsonBody, type Frame } from "./rsp";
+import { personActive, watchPersonInput } from "../../lib/personInput";
 
 const mockUseApi = vi.fn();
 vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
@@ -200,6 +201,24 @@ describe("ScreenViewer", () => {
     expect(p).toBeDefined();
     const v = new DataView(p!.body.buffer, p!.body.byteOffset);
     expect([v.getUint16(0), v.getUint16(2), v.getUint8(4)]).toEqual([960, 540, 1]);
+  });
+
+  it("counts keys and pointer moves over the remote screen as a person at the console (final re-review, P1)", async () => {
+    // A technician at a remote desktop sends no HTTP of their own, and the
+    // viewer keeps the keys it forwards from the page: the console still
+    // has to know they are there, or the session idles out under them.
+    const stopWatching = watchPersonInput(window, () => {});
+    try {
+      renderViewer();
+      await goLive(socket());
+      const stage = screen.getByTestId("screen-stage");
+      stage.focus();
+      expect(personActive()).toBe(false);
+      fireEvent.keyDown(stage, { code: "KeyA", key: "a" });
+      expect(personActive()).toBe(true);
+    } finally {
+      stopWatching();
+    }
   });
 
   it("sends physical keys only while the screen has focus, and lets go of them on blur", async () => {

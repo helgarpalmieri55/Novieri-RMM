@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { FIXTURE_MODE } from "../fixtures/mode";
 import { ApiClient } from "./api";
 import { isClientId, selectedClient } from "./clientChoice";
+import { watchPersonInput } from "./personInput";
 import { sessionEnded } from "./sessionEnd";
 
 const ApiContext = createContext<ApiClient | null>(null);
@@ -68,6 +69,19 @@ export function ApiProvider({ children }: { children: ReactNode }) {
           ),
     [fixture],
   );
+  // A PERSON WHO IS WORKING STAYS SIGNED IN (`./personInput.ts`, final
+  // re-review P1): while they give input and no request without the
+  // background header went out for 60 s, a plain `GET /me` does.
+  useEffect(() => {
+    if (!client) return undefined;
+    return watchPersonInput(window, () => {
+      client.me().catch(() => {
+        // A 401 is the session's business (`onUnauthorized`); an outage is
+        // the next request's.
+      });
+    });
+  }, [client]);
+
   // Nothing renders until the fixture client is here: a page mounted against
   // a null client would throw from `useApi`, and the gate would screenshot
   // the error boundary instead of the page.
