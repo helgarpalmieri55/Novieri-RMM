@@ -494,9 +494,7 @@ async def test_the_mailbox_alone_does_not_reach_the_console_after_a_factor_reset
     assert (await auth_env.client.get("/api/v1/me", headers=victim.headers())).status_code == 200
 
 
-async def test_with_redis_down_the_per_address_cap_sends_nothing(
-    auth_env: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_with_redis_down_the_per_address_cap_sends_nothing(auth_env: Any) -> None:
     """Final review A-M1: the per-address cap of three links an hour FAILS
     CLOSED. Nothing else caps the mails one address can be sent, and each
     one spends the link before it; failing open, an anonymous caller could
@@ -518,13 +516,22 @@ async def test_with_redis_down_the_per_address_cap_sends_nothing(
         async def expire(self, key: str, seconds: int) -> bool:
             raise RedisConnectionError("Connection refused.")
 
+    # A plain assignment restored in `finally`, NOT `monkeypatch.setattr`
+    # twice: since pytest 9.2.0, `setattr` on an object with no data
+    # descriptor records the old value from the instance `__dict__`, and
+    # Starlette's `State` keeps its values in `_state` instead. So each
+    # patch records "absent", teardown deletes the attribute once per patch,
+    # and the second delete is a `KeyError` (CI on 859b273). The real client
+    # is also back in place for `api_env`'s teardown to close.
     real = auth_env.app.state.redis
-    monkeypatch.setattr(auth_env.app.state, "redis", _Down())
-    down = await _forgot(auth_env, who.email)
+    auth_env.app.state.redis = _Down()
+    try:
+        down = await _forgot(auth_env, who.email)
+    finally:
+        auth_env.app.state.redis = real
     assert (down.status_code, down.content) == (202, b"")
     assert [m for m in _reset_links(auth_env) if m.to == who.email] == []
 
-    monkeypatch.setattr(auth_env.app.state, "redis", real)
     up = await _forgot(auth_env, who.email)
     assert (up.status_code, up.content) == (202, b"")
     assert len([m for m in _reset_links(auth_env) if m.to == who.email]) == 1
