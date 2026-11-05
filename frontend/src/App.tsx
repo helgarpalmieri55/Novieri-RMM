@@ -163,7 +163,18 @@ export const queryClient = new QueryClient({
   // No retry in fixture mode: a `FixtureMissing` rejects the same way on the
   // second attempt, and the harmony walk should reach the page's error state
   // in one step rather than after a back-off.
-  defaultOptions: { queries: { retry: FIXTURE_MODE ? false : 1, staleTime: 5000 } },
+  //
+  // NO MUTATION OUTLIVES ITS PAGE (fix round 1 re-review, R1-M4): TanStack
+  // keeps a settled mutation's body and answer for five minutes after the
+  // page that ran it unmounts. Nothing in the console reads one back, and a
+  // secret the source guard (`test/secretMutations.test.ts`) did not
+  // recognise by name still leaves the cache with its page. A page that needs
+  // a mutation's state reads it from its own `useMutation`, which keeps it
+  // while mounted.
+  defaultOptions: {
+    queries: { retry: FIXTURE_MODE ? false : 1, staleTime: 5000 },
+    mutations: { gcTime: 0 },
+  },
 });
 
 /**
