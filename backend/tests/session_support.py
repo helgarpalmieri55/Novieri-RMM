@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+import httpx
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,10 +26,17 @@ from starlette.requests import Request
 
 from app.core.auth.csrf import CSRF_HEADER
 from app.core.auth.devices import remember
-from app.core.auth.sessions import DEVICE_COOKIE, SESSION_COOKIE, start_session
+from app.core.auth.sessions import (
+    DEVICE_COOKIE,
+    SESSION_COOKIE,
+    SessionPrincipal,
+    mark_step_up,
+    start_session,
+)
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import User
+from app.models.auth import AuthSession
 
 CONSOLE = "https://itms.test"
 
@@ -92,8 +100,17 @@ async def sign_in(
     *,
     factor_done: bool = True,
     trusted_device_id: UUID | None = None,
+    step_up: bool = False,
 ) -> SignedIn:
-    """A session for the user `ApiEnv.create_user` returned `sub` for."""
+    """A session for the user `ApiEnv.create_user` returned `sub` for.
+
+    `step_up=True` also confirms the second factor now (design §2.5), in the
+    same transaction: what a person who has just signed in WITH their factor
+    has, and what the vault asks for (Task 6). A session started with
+    `factor_done` and no remembered device already has it (`start_session`);
+    on a remembered device it does not, and this adds it. Only for a session
+    whose factor is done; anything else is the test's mistake."""
+    assert factor_done or not step_up, "a session without its factor has nothing to confirm"
     user_id = await user_id_of(env, sub)
     async with org_session(org_id, engine=env.app_engine, clients=ClientScope.all()) as s:
         user = (await s.execute(select(User).where(User.id == user_id))).scalar_one()
@@ -106,6 +123,9 @@ async def sign_in(
             trusted_device_id=trusted_device_id,
         )
         session_id = row.id
+        if step_up:
+            await s.flush()
+            await mark_step_up(s, session_id)
     headers = {"Cookie": cookie_header(token), **console_headers()}
     return SignedIn(session_id=session_id, user_id=user_id, token=token, headers=headers)
 
@@ -120,3 +140,43 @@ async def remembered_device(env: Any, org_id: UUID, sub: str) -> UUID:
         device, _token = await remember(s, user, http_request(env))
         device_id: UUID = device.id
     return device_id
+
+
+async def principal_for(env: Any, session_id: UUID) -> SessionPrincipal:
+    """The principal `resolve` would build for that session, read from its rows
+    (for tests that mint the assistant's token without a request)."""
+    async with AsyncSession(env.admin_engine) as session:
+        row = await session.get(AuthSession, session_id)
+        assert row is not None
+        user = await session.get(User, row.user_id)
+        assert user is not None
+        return SessionPrincipal(
+            session_id=row.id,
+            user_id=row.user_id,
+            org_id=row.org_id,
+            kind=row.kind,
+            factor_done=row.factor_at is not None,
+            step_up_at=row.step_up_at,
+            email=user.email,
+            display_name=user.display_name,
+            expires_at=row.expires_at,
+        )
+
+
+def refusal_code(response: httpx.Response) -> str | None:
+    """The `code` of a refusal (`auth_required`, `csrf`, `step_up_required`):
+    top level, as `auth_refusal_handler` writes it (Task 6), or under `detail`."""
+    body = response.json()
+    if isinstance(body, dict) and isinstance(body.get("code"), str):
+        return str(body["code"])
+    detail = body.get("detail") if isinstance(body, dict) else None
+    if isinstance(detail, dict) and isinstance(detail.get("code"), str):
+        return str(detail["code"])
+    return None
+
+
+def ws_cookie(token: str, *, origin: str = CONSOLE) -> dict[str, Any]:
+    """`websockets.connect(url, **ws_cookie(token))`: the session cookie and the
+    console's Origin on the handshake, as a browser sends them (D15), and no
+    subprotocol."""
+    return {"additional_headers": {"Cookie": cookie_header(token)}, "origin": origin}

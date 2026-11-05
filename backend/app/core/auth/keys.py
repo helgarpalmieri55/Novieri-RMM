@@ -428,9 +428,14 @@ async def sign_jwt(claims: Mapping[str, Any], *, typ: str = "JWT") -> str:
     )
 
 
-async def jwks() -> dict[str, Any]:
-    """The JWK Set: the current signing key and the one before, newest first."""
-    keys = await _current().public_keys()
+async def jwks(*, refresh: bool = False) -> dict[str, Any]:
+    """The JWK Set: the current signing key and the one before, newest first.
+
+    `refresh` reads the public keys again rather than from this process's copy
+    (up to `PUBLIC_KEYS_TTL_S` old): what a verifier does, once, on meeting a
+    `kid` that copy lacks -- a token signed just after a rotation, by another
+    process (`app.core.auth.loopback`)."""
+    keys = await _current().public_keys(refresh=refresh)
     newest = sorted(keys, reverse=True)[:2]
     return {
         "keys": [

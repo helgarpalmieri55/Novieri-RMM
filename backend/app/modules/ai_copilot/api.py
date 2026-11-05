@@ -77,6 +77,7 @@ from app.core.ai.providers import (
 )
 from app.core.ai.settings import get_settings
 from app.core.ai.store import create_session, load_session, persist_turn
+from app.core.auth.loopback import loopback_authorization
 from app.core.i18n import tr
 from app.core.rbac import codes_held_anywhere, user_permission_codes
 from app.core.tenancy import org_session
@@ -326,12 +327,16 @@ async def create_copilot_turn(
             taint=_tainted,
         )
 
+    # The turn's own internal token, minted from THIS request's session
+    # (autenticación propia design §5.6). Only a request the console's
+    # Keycloak bearer admitted still forwards that header, until Task 13 (D21).
+    bearer = await loopback_authorization(request)
     try:
         await run_turn(
             provider=provider,
             profile=COPILOT_PROFILE,
             app=request.app,
-            bearer=request.headers.get("Authorization", ""),
+            bearer=bearer,
             messages=history,
             allowed_tools=tools_for_permissions(codes, registry=COPILOT_PROFILE.tools),
             outcome=outcome,

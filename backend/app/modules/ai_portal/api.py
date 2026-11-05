@@ -48,6 +48,7 @@ from app.core.ai.providers import (
     get_provider,
 )
 from app.core.ai.store import create_session, load_session, persist_turn
+from app.core.auth.loopback import loopback_authorization
 from app.core.i18n import tr
 from app.core.tenancy import org_session
 from app.models import AiSession
@@ -193,12 +194,18 @@ async def create_resolver_turn(
 
     started = time.monotonic()
     outcome = TurnOutcome(model_id=getattr(provider, "id", ""))
+    # The turn's own internal token, minted from the portal principal's
+    # session (autenticación propia design §5.6): `PortalContext` carries no
+    # principal, so `admit()` left it on `request.state`. Only a request the
+    # console's Keycloak bearer admitted still forwards that header, until
+    # Task 13 (D21).
+    bearer = await loopback_authorization(request)
     try:
         await run_turn(
             provider=provider,
             profile=RESOLVER_PROFILE,
             app=request.app,
-            bearer=request.headers.get("Authorization", ""),
+            bearer=bearer,
             messages=history,
             # NO PREFILTER BY PERMISSION CODE. All three tools are gated
             # `portal.ticket.read`, which `require_portal_permission` already

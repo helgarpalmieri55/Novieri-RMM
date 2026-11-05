@@ -125,6 +125,11 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "scope. Only intersected, never used as a session's scope (the report catalogue, "
         "plan 2026-10-26 Task 14 review)"
     ),
+    "app/core/auth/loopback.py::_live_session": (
+        "the assistant's internal token (autenticación propia design §5.6): the session it "
+        "names and its person, read by id before their scope exists -- the org comes from a "
+        "token this platform signed, and the scope is then computed by admit() as for a cookie"
+    ),
     # -- (d) personal: the caller's own row, which belongs to no client --------
     **_reviewed(
         "app/core/identity/own_profile.py",

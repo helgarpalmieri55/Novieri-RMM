@@ -54,6 +54,7 @@ from pydantic import ValidationError
 
 from app.core.ai.scrub import Blocked, scrub
 from app.core.ai.types import ReadTool, ToolResult
+from app.core.auth.loopback import LoopbackMarked, loopback_app, loopback_headers
 
 logger = logging.getLogger("its.ai.executor")
 
@@ -115,10 +116,11 @@ def _failed(tool_name: str, exc: Exception, phase: str) -> ToolError:
     )
 
 
-def _transport(app: FastAPI) -> httpx.AsyncBaseTransport:
+def _transport(app: FastAPI | LoopbackMarked) -> httpx.AsyncBaseTransport:
     """The in-process transport. A named seam so tests can wrap it with a spy
     that records the exact request this module built -- method, full URL, and
-    the complete header set -- rather than inferring it from a response."""
+    the complete header set -- rather than inferring it from a response. It is
+    handed the app already marked as the assistant's own call (`loopback_app`)."""
     return httpx.ASGITransport(app=app)
 
 
@@ -284,17 +286,21 @@ async def invoke_tool(
             tool=tool_name, kind="timeout", message="The turn ran out of time before this call."
         )
     timeout = min(MAX_TOOL_CALL_SECONDS, remaining)
-    headers = {"Authorization": bearer}
+    headers = loopback_headers(bearer)
     if requested_client is not None:
         headers["X-Client-Id"] = str(requested_client)
 
-    # 5. Issue it. The caller's own token, unmodified, so `auth_context` and
-    #    `require_permission` re-run exactly as they would for the human --
-    #    and, when the turn's request was narrowed by the console's selector,
-    #    its `X-Client-Id`, so the route sees the clients the turn saw and no
-    #    other (phase 3 design §5.2; `app.mcp.invoke` forwards it the same
-    #    way). Never wider: the route narrows by it, it does not grant. Those
-    #    two headers and nothing else; the model sets neither.
+    # 5. Issue it. The turn's own internal token (autenticación propia design
+    #    §5.6), minted from the caller's session by the route, so `admit()` and
+    #    `require_permission` re-run exactly as they would for the human -- it
+    #    names the person and carries no permission of its own -- plus
+    #    `X-ITMS-Loopback: 1` and the in-process mark (`loopback_app`), without
+    #    which the door does not take it. And, when the turn's request was
+    #    narrowed by the console's selector, its `X-Client-Id`, so the route sees
+    #    the clients the turn saw and no other (phase 3 design §5.2;
+    #    `app.mcp.invoke` forwards it the same way). Never wider: the route
+    #    narrows by it, it does not grant. Those headers and nothing else; the
+    #    model sets none of them.
     #
     #    **THE BROAD `except Exception` IS LOAD-BEARING, NOT LAZY.** The loopback
     #    is an `ASGITransport`, which calls the app object directly and therefore
@@ -312,7 +318,7 @@ async def invoke_tool(
     #    request still unwinds.
     try:
         async with httpx.AsyncClient(
-            transport=_transport(app), base_url=LOOPBACK_BASE_URL, timeout=timeout
+            transport=_transport(loopback_app(app)), base_url=LOOPBACK_BASE_URL, timeout=timeout
         ) as client:
             response = await client.get(url, params=query, headers=headers)
     except httpx.TimeoutException:
