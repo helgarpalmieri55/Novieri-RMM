@@ -13,8 +13,10 @@ amended as stated there.
 `frontend/src/App.auth.test.tsx`. **Falsifier 3 is not tested** — asserting
 that a federated token carries the `org` claim needs a real Entra tenant and a
 real browser. The mapper is asserted as committed; the claim is not observed.
-`deploy/README.md` gives the operator a one-liner to decode the token, which is
-a procedure, not a test.
+`deploy/README.md` used to give the operator a devtools one-liner that decoded
+the console's token; since own authentication phase 1 the console holds no
+Keycloak token, so the claim is now carried only by the access tokens MCP
+clients obtain, and the runbook says so ("Sign in with Microsoft").
 
 **Nothing here has rendered in a running Keycloak.** The theme is FreeMarker
 executed by a Java process this suite does not run, so falsifier 2's real form
