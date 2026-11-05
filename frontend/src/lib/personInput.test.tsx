@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClient, BACKGROUND_HEADER, requestHeaders } from "./api";
 import { ACTIVE_FOR_MS, personActive, resetPersonInput, watchPersonInput } from "./personInput";
+import { sessionPerson } from "./sessionEnd";
 
 let stop: (() => void) | null = null;
 
@@ -151,6 +152,10 @@ describe("the keep-alive", () => {
 
 describe("the console's own keep-alive", () => {
   it("is a plain GET /me through the provider's client, without the header", async () => {
+    // RE-POINTED (fix round 1 re-review, R1-M3): there is a session to keep.
+    // With none, the keep-alive sends nothing (`ApiContext.test.tsx`, "the
+    // keep-alive, with no session").
+    sessionPerson("u1");
     const sent = stubFetch();
     const { ApiProvider } = await import("./ApiContext");
     render(

@@ -4,7 +4,7 @@ import { ApiClient } from "./api";
 import { isClientId, selectedClient } from "./clientChoice";
 import { watchPersonInput } from "./personInput";
 import { confirmSessionEnded } from "./sessionCheck";
-import { sessionEnded } from "./sessionEnd";
+import { hadSession, isSessionEnded, sessionEnded } from "./sessionEnd";
 import { hearOtherTabs } from "./sessionTabs";
 
 const ApiContext = createContext<ApiClient | null>(null);
@@ -75,10 +75,15 @@ export function ApiProvider({ children }: { children: ReactNode }) {
   );
   // A PERSON WHO IS WORKING STAYS SIGNED IN (`./personInput.ts`, final
   // re-review P1): while they give input and no request without the
-  // background header went out for 60 s, a plain `GET /me` does.
+  // background header went out for 60 s, a plain `GET /me` does. ONLY WHILE
+  // THERE IS A SESSION TO KEEP (fix round 1 re-review, R1-M3): this watch is
+  // at the app's root, so it hears the sign-in, invite and recover pages and
+  // the session-ended notice too, where a `/me` can only answer 401 -- and
+  // that 401's confirmation would mark the tab ended and tell every other tab.
   useEffect(() => {
     if (!client) return undefined;
     return watchPersonInput(window, () => {
+      if (!hadSession() || isSessionEnded()) return;
       client.me().catch(() => {
         // A 401 is the session's business (`onUnauthorized`); an outage is
         // the next request's.
