@@ -534,7 +534,7 @@ class ScreenRelayHub:
             auth = rsp.decode(raw)
             sid_text, ticket = rsp.parse_auth(auth, secret_field="ticket")
             session_id = UUID(sid_text)
-            # Who the api admitted to this leg (`authorize_tunnel`). Trusted
+            # Who the api admitted to this leg (`admit_tunnel_session`). Trusted
             # as the api's word because only the api holds the ticket checked
             # below; a value that is not a user id is a malformed AUTH.
             named = rsp.parse_viewer(auth)

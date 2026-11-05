@@ -94,8 +94,10 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "before the scope exists (spec §2.2)"
     ),
     "app/core/identity/door.py::read_door_identity": (
-        "doors 2 and 3 (console WebSocket, remote tunnel): the domain rule, users.status and "
-        "users.kind, and the grants the scope is computed from (spec §2.2, §2.6)"
+        "a token door's identity read, as doors 2 and 3 (console WebSocket, remote tunnel) "
+        "made it until own authentication Task 13 -- no door calls it since: the domain rule, "
+        "users.status and users.kind, and the grants the scope is computed from "
+        "(spec §2.2, §2.6)"
     ),
     "app/core/auth/sessions.py::resolve": (
         "a session cookie names a row before anybody knows whose: a staff session has no "

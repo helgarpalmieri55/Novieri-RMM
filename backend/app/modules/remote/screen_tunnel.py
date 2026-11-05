@@ -1,7 +1,7 @@
 """The api's side of a screen session (spec-screen-share.md §2.1, §3.9).
 
 The browser's WebSocket (``/api/v1/remote/sessions/{id}/screen``) is admitted
-by ``authorize_tunnel`` like the guacd tunnel. This module then dials the
+by ``admit_tunnel_session`` (``tunnel.py``). This module then dials the
 gateway's internal relay listener with the session's viewer ticket and pumps
 rsp/1 frames between the two, teeing agent->viewer frames into a recording
 spooled to disk. On every exit it uploads the recording (multipart) and ends
@@ -88,7 +88,7 @@ async def run_screen_tunnel(
 ) -> None:
     """Drive the viewer leg from browser open to close.
 
-    ``viewer_id`` is the person ``authorize_tunnel`` admitted: the session's
+    ``viewer_id`` is the person ``admit_tunnel_session`` admitted: the session's
     owner, or a supervisor who joined it. Closing the viewer is their act,
     so this side's end of the session names them, and the leg's AUTH names
     them to the gateway for its own writes (phase 3 design §5.3).
@@ -204,7 +204,7 @@ async def _finish(
     evidence and ending the session is cleanup; neither may fail because the
     viewer's grants changed while the session ran (MSP clients spec §2.3,
     reviewed in ``ALL_SCOPE_ALLOWLIST``). The viewer's own scope already
-    admitted them at the door (``authorize_tunnel``).
+    admitted them at the door (``admit_tunnel_session``).
 
     The scope is the system's; the act is not. The end is audited as the
     viewer's (``viewer_id``), who closed it: the owner, or a supervisor who

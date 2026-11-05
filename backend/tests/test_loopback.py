@@ -573,6 +573,34 @@ async def test_a_request_the_token_admitted_mints_no_other(console: Any) -> None
     assert refused.value.status_code == 401
 
 
+@pytest.mark.parametrize(
+    "state",
+    [
+        pytest.param(SimpleNamespace(), id="admit-never-ran"),
+        pytest.param(
+            SimpleNamespace(session_principal=None, via_loopback=False), id="no-session"
+        ),
+    ],
+)
+async def test_a_turn_with_no_session_forwards_nothing(state: Any) -> None:
+    """FAIL CLOSED (own authentication Task 13, which removed D21's transition
+    branch). A request `admit()` never admitted by a session -- or never ran
+    for at all -- gets no `Authorization` for its loopback calls: a 401, and
+    never the header the request brought. Put the old
+    `return request.headers.get("Authorization", "")` back and the person's
+    own header is forwarded again: red."""
+    request = SimpleNamespace(
+        state=state,
+        headers=httpx.Headers({"Authorization": "Bearer the-persons-own-header"}),
+    )
+    forwarded: str | None = None
+    with pytest.raises(HTTPException) as refused:
+        forwarded = await loopback.loopback_authorization(request)  # type: ignore[arg-type]
+    assert refused.value.status_code == 401
+    assert forwarded is None
+    assert "the-persons-own-header" not in str(refused.value.detail)
+
+
 # --------------------------------------------------------------------------- #
 # The executors and the turns
 # --------------------------------------------------------------------------- #

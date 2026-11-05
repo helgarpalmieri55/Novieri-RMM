@@ -1,18 +1,24 @@
-"""What a token door reads about a person before any client scope exists.
+"""What a door reads about a person before any client scope exists.
 
 Doors 2 and 3 -- the console WebSocket (``app/api/v1/ws.py``) and the
-remote-control tunnel (``app/modules/remote/tunnel.py``) -- turn a validated
-token into a person by the same two admission reads: the org's email-domain
-rule and the ``users`` row's status. Both reads happen BEFORE the person's
-client scope can be known, because that scope is computed from the very rows
-being read (MSP clients spec §2.2), so they run under ``ClientScope.all()``.
-That makes this module, not the doors, the reviewed place that does it
-(``ALL_SCOPE_ALLOWLIST``, spec §2.3): a route file never holds the "every
-client" scope itself.
+remote-control tunnel (``app/modules/remote/tunnel.py``) -- turn a console
+session into a person by the same two admission reads
+(``read_session_identity``): the org's email-domain rule and the ``users``
+row's status. Both reads happen BEFORE the person's client scope can be known,
+because that scope is computed from the very rows being read (MSP clients spec
+§2.2), so they run under ``ClientScope.all()``. That makes this module, not the
+doors, the reviewed place that does it (``ALL_SCOPE_ALLOWLIST``, spec §2.3): a
+route file never holds the "every client" scope itself.
 
-Door 1 (``app/api/deps.py::admit``) does the same reads inline, because it
+``read_door_identity`` is the same reads for a validated TOKEN, which those two
+doors took until own authentication phase 1 (Task 13) removed the console's
+bearer from them. No door calls it since; ``tests/test_client_rbac.py`` still
+holds its rules.
+
+Door 1 (``app/api/deps.py::admit``) does the same reads inline -- for a
+session in ``_admit_session``, and on the MCP channel for a token, where it
 also self-heals a missing ``users`` row and records the first-seen
-``auth.login`` -- neither of which the other two doors do.
+``auth.login``, which no other door does.
 
 A CONTACT IS REFUSED HERE TOO (spec §1.3): both doors are the console's, and a
 contact never enters the console. Read with ``users.status``, from the same row.

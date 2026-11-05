@@ -32,8 +32,9 @@ ALL of these hold, and refuses with one 401 otherwise:
    the organisation's limit, second factor done.
 
 A request that says it is the assistant's call (the header) is admitted here
-or by nothing: it never falls through to the cookie or the bearer
-(`app.api.deps._session_principal`).
+or by nothing: it never falls through to the cookie
+(`app.api.deps._session_principal`), and on the MCP channel it is refused
+(`app.api.deps.admit`).
 
 The principal it yields never carries a recent confirmation (`step_up_at`
 is None): §2.5's actions belong to the person, never to the assistant. And a
@@ -96,6 +97,7 @@ RefusalReason = Literal[
     "the token does not verify",
     "the session is not live",
     "a loopback call mints no loopback token",
+    "an assistant turn with no session",
 ]
 
 
@@ -326,16 +328,19 @@ async def verify_loopback(request: Request) -> SessionPrincipal:
 
 
 async def loopback_authorization(request: Request) -> str:
-    """The `Authorization` value an assistant turn's loopback calls carry.
+    """The `Authorization` value an assistant turn's loopback calls carry: a
+    token minted from the session that admitted the turn's own request
+    (`admit()` leaves it on `request.state`). The assistant's routes are not
+    MCP tools (`app/mcp/exclusions.py`), so that request always came with a
+    session.
 
-    TRANSITION (plan decision D21), removed by Task 13: a request the
-    console's Keycloak bearer admitted has no session, and its own header is
-    forwarded as before. Every other admitted request has a session principal
-    (`admit()` leaves it on `request.state`) and gets a token of its own --
-    the request's own `Authorization`, if it brought one, is never read."""
+    FAIL CLOSED (own authentication Task 13, which removed D21's transition
+    branch): a request with no session principal -- one `admit()` never ran
+    for -- is refused, and the request's own `Authorization`, if it brought
+    one, is never read, let alone forwarded."""
     principal: SessionPrincipal | None = getattr(request.state, "session_principal", None)
     if principal is None:
-        return request.headers.get("Authorization", "")
+        raise _refused(reason="an assistant turn with no session")
     if getattr(request.state, "via_loopback", False):
         # A turn route reached by the assistant itself: no chains.
         raise _refused(reason="a loopback call mints no loopback token")

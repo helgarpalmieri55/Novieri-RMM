@@ -44,7 +44,6 @@ from app.core.global_rows import refuse_unless_every_client
 from app.core.i18n import tr
 from app.core.storage import ObjectStore
 from app.core.tenancy import org_session
-from app.core.ws_auth import AUTH_SUBPROTOCOL, token_from_subprotocols
 from app.models import Device, RemotePolicy, RemoteSession
 from app.modules.remote.models import RECORDING_MAX_BYTES
 from app.modules.remote.screen_tunnel import run_screen_tunnel
@@ -52,7 +51,6 @@ from app.modules.remote.service import SCREEN, InvalidSessionState, ScreenUnavai
 from app.modules.remote.tunnel import (
     TunnelAuthError,
     admit_tunnel_session,
-    authorize_tunnel,
     owner_or_admin,
     watch_tunnel_session,
 )
@@ -478,44 +476,35 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
     """Browser-facing rsp/1 stream for a screen session.
 
     Admission: the console's session cookie with the console's ``Origin``
-    (P2 design §6.5), or the bearer token from the ``Sec-WebSocket-Protocol``
-    header (never the query string, which access logs record); then
+    (P2 design §6.5), and nothing else since own authentication phase 1
+    (Task 13: no bearer, in the subprotocol or anywhere); then
     ``remote.control`` and owner-or-admin, all server-side. The browser sends
     and receives rsp/1 frames as binary messages; text messages are ignored.
 
-    On the session path the screen lives only as long as the console session
-    that opened it (``watch_tunnel_session``): signed out, cut, replaced,
-    disabled or past its maximum, the tunnel is cancelled and the socket
-    closes 4401. An open screen keeps that session from going idle.
+    The screen lives only as long as the console session that opened it
+    (``watch_tunnel_session``): signed out, cut, replaced, disabled or past its
+    maximum, the tunnel is cancelled and the socket closes 4401. An open
+    screen keeps that session from going idle.
     """
     state = websocket.app.state
-    token = token_from_subprotocols(websocket)
-    principal: SessionPrincipal | None = None
+    if SESSION_COOKIE not in websocket.cookies:
+        # No credential at all: 4401, as on the live socket.
+        await websocket.close(code=4401)
+        return
     try:
         # The person admitted is the viewer, whose closing the viewer is
         # their own act (phase 3 design §5.3): the owner, or a supervisor.
-        # No token offered and a session cookie present: the session door.
-        if not token and SESSION_COOKIE in websocket.cookies:
-            admitted = await admit_tunnel_session(
-                connection=websocket,
-                session_id=session_id,
-                settings=state.settings,
-                app_engine=state.app_engine,
-            )
-            org_id, viewer_id = admitted.org_id, admitted.viewer_id
-            principal = admitted.principal
-        else:
-            org_id, viewer_id, _clients = await authorize_tunnel(
-                token=token,
-                session_id=session_id,
-                settings=state.settings,
-                jwks=state.jwks,
-                admin_engine=state.admin_engine,
-                app_engine=state.app_engine,
-            )
+        admitted = await admit_tunnel_session(
+            connection=websocket,
+            session_id=session_id,
+            settings=state.settings,
+            app_engine=state.app_engine,
+        )
     except TunnelAuthError as exc:
         await websocket.close(code=exc.code)
         return
+    org_id, viewer_id = admitted.org_id, admitted.viewer_id
+    principal = admitted.principal
 
     service = state.remote_service
     params = service.connection_params(session_id)
@@ -524,8 +513,8 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
         await websocket.close(code=4409)
         return
 
-    # The subprotocol is echoed only when one was offered (the bearer path).
-    await websocket.accept(subprotocol=AUTH_SUBPROTOCOL if token else None)
+    # The console offers no subprotocol, so none is echoed.
+    await websocket.accept()
 
     async def browser_send(data: bytes) -> None:
         await websocket.send_bytes(data)
@@ -553,10 +542,7 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
     )
     close_code = 1000
     try:
-        if principal is None:
-            await tunnel
-        else:
-            close_code = await _while_signed_in(tunnel, websocket, principal)
+        close_code = await _while_signed_in(tunnel, websocket, principal)
     finally:
         try:
             await websocket.close(code=close_code)

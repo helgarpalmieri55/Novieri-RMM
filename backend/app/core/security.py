@@ -1,7 +1,8 @@
-"""Operator token validation. The API is an OIDC resource server: Keycloak (or
-any OIDC IdP) issues RS256 access tokens; we validate signature, issuer,
-audience, and expiry against the IdP's JWKS. MFA and federation live in the
-IdP, not here."""
+"""Operator token validation. The MCP door is an OIDC resource server: the
+console signs in with the platform's own session (`app.core.auth`) since own
+authentication phase 1. Keycloak (or any OIDC IdP) issues RS256 access tokens
+for MCP; we validate signature, issuer, audience, and expiry against the IdP's
+JWKS."""
 
 import asyncio
 import json
@@ -15,7 +16,6 @@ import jwt
 
 from app.core.config import Settings
 from app.core.i18n import tr
-from app.core.mcp_channel import mcp_resource
 
 
 class TokenValidationError(Exception):
@@ -187,30 +187,6 @@ async def validate_token(
         sid=str(claims.get("sid") or ""),
         exp=int(claims["exp"]),
     )
-
-
-def require_console_token(claims: TokenClaims, settings: Settings) -> None:
-    """THE CONSOLE ACCEPTS ONLY ITS OWN TOKENS. Every door that is not `/mcp`
-    (`auth_context` unmarked, the UI WebSocket, the remote tunnel) calls this
-    after `validate_token`, so the three cannot drift apart.
-
-    The audience alone does not prove the console's client obtained a token:
-    any client that can put `it-suite` in `aud` -- one an attacker registered
-    through open client registration, say -- would otherwise be the console,
-    with the person's full RBAC and none of the MCP controls. `azp` is the
-    client the token was issued to, and the console's is exactly one.
-
-    And a token that carries the MCP audience is refused even if it also
-    carries the console's: an MCP grant is consented to for an AI app, and must
-    never be replayable against the console directly -- not the API, not the
-    UI WebSocket, not a remote session."""
-    mcp_audience = mcp_resource(settings)
-    if mcp_audience is not None and mcp_audience in claims.aud:
-        raise TokenValidationError(
-            tr("this token is for the MCP server and is accepted only through it")
-        )
-    if claims.azp != settings.oidc_console_client_id:
-        raise TokenValidationError(tr("this token was not issued to the console"))
 
 
 def require_person_mcp_token(claims: TokenClaims, settings: Settings) -> None:
