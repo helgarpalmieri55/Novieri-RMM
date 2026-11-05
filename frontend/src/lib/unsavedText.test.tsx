@@ -221,6 +221,13 @@ describe("the secrets the console lets a person type in clear", () => {
     expect(page.lastIndexOf("data-secret", toggle)).toBeGreaterThan(page.lastIndexOf("<Field", toggle));
   });
 
+  it("include the install link pasted to build an MSI: its code enrols a machine", () => {
+    const panel = source("modules/agent-releases/MsiDownload.tsx");
+    const box = panel.indexOf("value={link}");
+    expect(panel.lastIndexOf("<input", box)).toBeGreaterThan(-1);
+    expect(panel.lastIndexOf("data-secret", box)).toBeGreaterThan(panel.lastIndexOf("<input", box));
+  });
+
   it("include the step-up's recovery code", () => {
     const dialog = source("components/stepUp.tsx");
     const box = dialog.indexOf("value={recovery}");
