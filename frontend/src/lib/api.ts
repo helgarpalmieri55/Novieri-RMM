@@ -1129,6 +1129,7 @@ import type {
   LoginResult,
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
+  RecoveryAccept,
   RecoveryCodes,
   RecoveryLink,
   RegistrationResponseJSON,
@@ -1899,14 +1900,11 @@ export class ApiClient {
   /**
    * `POST /auth/recover/accept`: the server removes the account's second
    * factors and recovery codes, and leaves a session that has none -- the
-   * next page is the first factor.
+   * next page is the first factor. While an emailed link set the password it
+   * needs a new one too (`password`), or answers 409 `recovery_needs_password`.
    */
-  acceptRecovery(token: string): Promise<void> {
-    return this.request<void>(
-      "/auth/recover/accept",
-      { method: "POST", body: JSON.stringify({ token }) },
-      { anonymous: true },
-    );
+  acceptRecovery(body: RecoveryAccept): Promise<void> {
+    return this.request<void>("/auth/recover/accept", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
   }
 
   /** `POST /auth/logout-everywhere`: end every session of this person, this one included. */

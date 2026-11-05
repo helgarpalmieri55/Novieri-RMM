@@ -41,7 +41,9 @@ const CASES: [string, (api: ApiClient) => Promise<unknown>, string, string, unkn
   ["acceptInvite", (api) => api.acceptInvite({ token: "t", password: "pw" }), "POST", "/api/v1/auth/invite/accept", { token: "t", password: "pw" }],
   ["logoutEverywhere", (api) => api.logoutEverywhere(), "POST", "/api/v1/auth/logout-everywhere", undefined],
   ["getRecovery", (api) => api.getRecovery("tok-1"), "POST", "/api/v1/auth/recover/details", { token: "tok-1" }],
-  ["acceptRecovery", (api) => api.acceptRecovery("tok-1"), "POST", "/api/v1/auth/recover/accept", { token: "tok-1" }],
+  ["acceptRecovery", (api) => api.acceptRecovery({ token: "tok-1" }), "POST", "/api/v1/auth/recover/accept", { token: "tok-1" }],
+  // While an emailed link set the password, the recovery asks for a new one (operator decision 2026-11-05).
+  ["acceptRecovery with a new password", (api) => api.acceptRecovery({ token: "t", password: "pw" }), "POST", "/api/v1/auth/recover/accept", { token: "t", password: "pw" }],
 ];
 
 /** The four enrol routes as My security calls them, with the full console session (`EnrollFrom`). */

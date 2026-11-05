@@ -6,19 +6,40 @@
  * one press. The press removes the account's second factors (server side) and
  * goes on to a new first factor. The token comes from the fragment, leaves the
  * address, and travels in bodies only.
+ *
+ * A PASSWORD AN EMAILED LINK SET (operator decision 2026-11-05, «Pedir
+ * contraseña nueva si hay marca»): then the server asks for a new one before
+ * the recovery finishes -- said by the details' `password_required`, or by a
+ * 409 `recovery_needs_password` when a mail reset landed after the page
+ * opened. The page asks as the invitation does, and sends it.
  */
+import type { UserEvent } from "@testing-library/user-event";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../../lib/api";
-import { authApi, calls, installDefaults, renderAuth, where } from "./harness";
+import { authApi, calls, installDefaults, mutationCacheText, renderAuth, where } from "./harness";
 
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => authApi() }));
+
+const GOOD = "a long phrase I can remember";
+/** The server's sentence, as `flows._needs_password` words it. */
+const NEEDS_PASSWORD =
+  "Your password was last set with an emailed link. Choose a new password to finish recovering your account.";
 
 beforeEach(() => {
   installDefaults();
 });
+
+async function choose(user: UserEvent, password: string, again = password) {
+  await user.type(await screen.findByLabelText("New password"), password);
+  await user.type(screen.getByLabelText("The same password again"), again);
+}
+
+function mailSetPassword() {
+  calls.getRecovery.mockResolvedValue({ email: "owner@example.test", password_required: true });
+}
 
 describe("recovering an account from the server's link", () => {
   it("names whose account it is and changes nothing until the person presses", async () => {
@@ -37,7 +58,7 @@ describe("recovering an account from the server's link", () => {
     const user = userEvent.setup();
     renderAuth("/recover#tok-recover-1");
     await user.click(await screen.findByRole("button", { name: "Recover my account" }));
-    expect(calls.acceptRecovery).toHaveBeenCalledWith("tok-recover-1");
+    expect(calls.acceptRecovery).toHaveBeenCalledWith({ token: "tok-recover-1" });
     await waitFor(() => expect(where.location?.pathname).toBe("/sign-in/enroll"));
   });
 
@@ -64,5 +85,97 @@ describe("recovering an account from the server's link", () => {
     await user.click(await screen.findByRole("button", { name: "Recover my account" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Too many attempts. Wait 30 seconds and try again.");
     expect(screen.getByRole("button", { name: "Recover my account" })).toBeInTheDocument();
+  });
+});
+
+describe("recovering an account whose password an emailed link set", () => {
+  it("asks for no password when the details say none is needed", async () => {
+    renderAuth("/recover#tok-recover-1");
+    expect(await screen.findByRole("button", { name: "Recover my account" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("New password")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("The same password again")).not.toBeInTheDocument();
+    expect(screen.queryByText(/last set with an emailed link/)).not.toBeInTheDocument();
+  });
+
+  it("asks for a new password, twice, when the details say so, and sends it with the token", async () => {
+    mailSetPassword();
+    const user = userEvent.setup();
+    renderAuth("/recover#tok-recover-1");
+    expect(await screen.findByText(/Your password was last set with an emailed link/)).toBeInTheDocument();
+    const field = screen.getByLabelText("New password");
+    // A secret: never shown, and never kept by the session-end "kept text" rule.
+    expect(field).toHaveAttribute("type", "password");
+    expect(field).not.toHaveAttribute("data-keep");
+    expect(screen.getByLabelText("The same password again")).toHaveAttribute("type", "password");
+    // For the password manager: the account the new password belongs to.
+    expect(screen.getByLabelText("Email address")).toHaveValue("owner@example.test");
+
+    await choose(user, GOOD);
+    await user.click(screen.getByRole("button", { name: "Recover my account" }));
+
+    expect(calls.acceptRecovery).toHaveBeenCalledExactlyOnceWith({ token: "tok-recover-1", password: GOOD });
+    await waitFor(() => expect(where.location?.pathname).toBe("/sign-in/enroll"));
+  });
+
+  it.each([
+    ["too short", "eleven char", "eleven char", "Use at least 12 characters."],
+    ["not the same twice", GOOD, "a different long phrase", "The two passwords are not the same."],
+  ])("refuses a password that is %s before asking, as the invitation does", async (_, password, again, sentence) => {
+    mailSetPassword();
+    const user = userEvent.setup();
+    renderAuth("/recover#tok-recover-1");
+    await choose(user, password, again);
+    await user.click(screen.getByRole("button", { name: "Recover my account" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(sentence);
+    expect(calls.acceptRecovery).not.toHaveBeenCalled();
+  });
+
+  it("asks for the password when the press meets a mail reset (409), says the server's sentence, and the retry sends it", async () => {
+    calls.acceptRecovery
+      .mockRejectedValueOnce(new ApiError(409, JSON.stringify({ detail: NEEDS_PASSWORD, code: "recovery_needs_password" })))
+      .mockResolvedValueOnce(undefined);
+    const user = userEvent.setup();
+    renderAuth("/recover#tok-recover-1");
+    await user.click(await screen.findByRole("button", { name: "Recover my account" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(NEEDS_PASSWORD);
+    expect(where.location?.pathname).toBe("/recover");
+    expect(screen.queryByText(/This recovery link has expired/)).not.toBeInTheDocument();
+
+    await choose(user, GOOD);
+    await user.click(screen.getByRole("button", { name: "Recover my account" }));
+
+    expect(calls.acceptRecovery).toHaveBeenNthCalledWith(1, { token: "tok-recover-1" });
+    expect(calls.acceptRecovery).toHaveBeenNthCalledWith(2, { token: "tok-recover-1", password: GOOD });
+    await waitFor(() => expect(where.location?.pathname).toBe("/sign-in/enroll"));
+  });
+
+  it("says the server's reason when the new password is refused, and stays", async () => {
+    const sentence = "That password contains your email address.";
+    mailSetPassword();
+    calls.acceptRecovery.mockRejectedValue(new ApiError(422, JSON.stringify({ code: "password_rejected", detail: sentence })));
+    const user = userEvent.setup();
+    renderAuth("/recover#tok-recover-1");
+    await choose(user, GOOD);
+    await user.click(screen.getByRole("button", { name: "Recover my account" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(sentence);
+    expect(where.location?.pathname).toBe("/recover");
+    expect(screen.getByLabelText("New password")).toBeInTheDocument();
+  });
+
+  it("leaves neither the password nor the token in the mutation cache", async () => {
+    mailSetPassword();
+    calls.acceptRecovery.mockRejectedValue(
+      new ApiError(422, JSON.stringify({ code: "password_rejected", detail: "Use a longer password." })),
+    );
+    const user = userEvent.setup();
+    const { queryClient } = renderAuth("/recover#tok-recover-1");
+    await choose(user, GOOD);
+    await user.click(screen.getByRole("button", { name: "Recover my account" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Use a longer password.");
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain(GOOD));
+    expect(mutationCacheText(queryClient)).not.toContain("tok-recover-1");
   });
 });

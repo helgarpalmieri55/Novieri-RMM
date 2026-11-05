@@ -63,7 +63,7 @@ export function installDefaults(): void {
   calls.resetPassword.mockResolvedValue(undefined);
   calls.getInvite.mockResolvedValue({ email: "dana@example.test", display_name: "Dana Okafor" });
   calls.acceptInvite.mockResolvedValue(undefined);
-  calls.getRecovery.mockResolvedValue({ email: "owner@example.test" });
+  calls.getRecovery.mockResolvedValue({ email: "owner@example.test", password_required: false });
   calls.acceptRecovery.mockResolvedValue(undefined);
 }
 
@@ -114,5 +114,15 @@ export function queryCacheText(queryClient: QueryClient): string {
       .getQueryCache()
       .getAll()
       .map((query) => [query.queryKey, query.state.data]),
+  );
+}
+
+/** Every mutation's body and answer still in the cache, as text: a password sent must not be in it. */
+export function mutationCacheText(queryClient: QueryClient): string {
+  return JSON.stringify(
+    queryClient
+      .getMutationCache()
+      .getAll()
+      .map((mutation) => ({ data: mutation.state.data, variables: mutation.state.variables })),
   );
 }

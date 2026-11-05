@@ -42,6 +42,7 @@ const SRC = resolve(import.meta.dirname, "..");
 const SECRET_METHODS: Record<string, string> = {
   // A secret SENT, in the body.
   changePassword: "both passwords",
+  acceptRecovery: "the recovery link's token, and a new password while an emailed link set the current one",
   enrollTotpConfirm: "a code from the authenticator app",
   updateEmailSettings: "the relay password, or the token client secret",
   createNotificationChannel: "a webhook secret, an SMTP password or a Microsoft client secret",
@@ -129,6 +130,7 @@ const SECRET_SITES: Record<string, { reviewed?: string }> = {
   "modules/settings/api.ts inviteUser": { reviewed: "modules/settings/__tests__/users.test.tsx" },
   "modules/settings/api.ts resendInvite": { reviewed: "modules/settings/__tests__/users.test.tsx" },
   "modules/credentials/CredentialsPage.tsx checkoutCredential": { reviewed: "modules/credentials/CredentialsPage.test.tsx" },
+  "modules/auth/RecoverPage.tsx acceptRecovery": {},
   "modules/settings/api.ts updateEmailSettings": {},
   "modules/settings/api.ts createNotificationChannel": {},
   "modules/settings/api.ts updateNotificationChannel": {},
