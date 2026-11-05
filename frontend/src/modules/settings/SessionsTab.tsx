@@ -52,6 +52,9 @@ const NUMBER_KEYS: readonly SessionNumberKey[] = [
   "contact_max_days",
 ];
 
+/** The two values that mean something only while remembering a device is on. */
+const REMEMBER_KEYS: ReadonlySet<SessionNumberKey> = new Set(["remember_device_days", "remembered_max_hours"]);
+
 /** Each value's caption, and the unit its range is said in. */
 const FIELD: Readonly<Record<SessionNumberKey, { label: MessageKey; range: MessageKey }>> = {
   staff_idle_minutes: { label: "settings.sessions.staffIdle", range: "settings.sessions.rangeMinutes" },
@@ -98,7 +101,12 @@ export function SessionsTab({ canRead, canEdit }: { canRead: boolean; canEdit: b
   const forbidden = isForbidden(settings.error);
   const failed = settings.error != null && !forbidden;
   const dirty = isDirty(form, seed);
-  const invalid = NUMBER_KEYS.filter((key) => !inRange(key, form[key]));
+  // A REMEMBER VALUE IS NOT CHECKED WHILE REMEMBERING IS OFF (final review
+  // D2, Minor 6): its box is disabled, so a value typed out of range and then
+  // switched off could neither be corrected nor saved past, and Save stayed
+  // blocked. What is sent for it then is the value the server holds.
+  const hidden = (key: SessionNumberKey): boolean => !form.remember_device_enabled && REMEMBER_KEYS.has(key);
+  const invalid = NUMBER_KEYS.filter((key) => !hidden(key) && !inRange(key, form[key]));
   const editable = canEdit && settings.data != null;
 
   function set<K extends keyof SessionsForm>(key: K, value: SessionsForm[K]) {
@@ -107,7 +115,7 @@ export function SessionsTab({ canRead, canEdit }: { canRead: boolean; canEdit: b
 
   function submit() {
     if (invalid.length > 0) return;
-    const number = (key: SessionNumberKey): number => parseIntegerField(form[key]) as number;
+    const number = (key: SessionNumberKey): number => parseIntegerField(hidden(key) ? seed[key] : form[key]) as number;
     const body: SessionSettingsUpdate = {
       staff_idle_minutes: number("staff_idle_minutes"),
       staff_max_hours: number("staff_max_hours"),
