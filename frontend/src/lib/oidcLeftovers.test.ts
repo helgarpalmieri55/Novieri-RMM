@@ -14,9 +14,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { forgetOidcLeftovers } from "./oidcLeftovers";
 
 afterEach(() => {
+  // Mocks first: a test stubs the `localStorage` getter itself.
+  vi.restoreAllMocks();
   window.localStorage.clear();
   window.sessionStorage.clear();
-  vi.restoreAllMocks();
 });
 
 describe("forgetOidcLeftovers", () => {
@@ -41,6 +42,18 @@ describe("forgetOidcLeftovers", () => {
     });
     window.localStorage.setItem("oidc.user:x", "y");
     expect(() => forgetOidcLeftovers()).not.toThrow();
+  });
+
+  it("does not throw, and still sweeps the other one, where reading localStorage itself throws (final re-review, M3)", () => {
+    // Chromium with site data blocked throws SecurityError from the GETTER,
+    // before any method is called. Thrown before `createRoot`, that was a
+    // blank page instead of the sign-in page saying what is wrong.
+    window.sessionStorage.setItem("oidc.user:x", "y");
+    vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+      throw new DOMException("The operation is insecure.", "SecurityError");
+    });
+    expect(() => forgetOidcLeftovers()).not.toThrow();
+    expect(window.sessionStorage.getItem("oidc.user:x")).toBeNull();
   });
 
   it("runs at boot, before the console renders", () => {

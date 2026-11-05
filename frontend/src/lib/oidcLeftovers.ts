@@ -16,8 +16,12 @@
  * site data blocked -- held nothing to remove.
  */
 export function forgetOidcLeftovers(): void {
-  for (const storage of [window.localStorage, window.sessionStorage]) {
+  // EACH STORAGE IS READ INSIDE ITS OWN `try` (final re-review, M3): with site
+  // data blocked, Chromium throws from the `window.localStorage` GETTER, and
+  // thrown here, before `createRoot`, that was a blank page.
+  for (const pick of [() => window.localStorage, () => window.sessionStorage]) {
     try {
+      const storage = pick();
       const leftovers: string[] = [];
       for (let index = 0; index < storage.length; index += 1) {
         const key = storage.key(index);
