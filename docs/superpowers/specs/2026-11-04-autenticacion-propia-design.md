@@ -358,9 +358,11 @@ MCP valida su JWT (`iss`, `aud`, `kid`, revocación).
     rechaza, el 422 `password_rejected` de las demás rutas: en los dos casos el enlace no se gasta y la página vuelve
     a pedirla. Una contraseña aceptable se guarda con `staff_password.store` (que borra la marca) en la misma
     transacción que quita los factores, auditada `auth.password_changed` `{"via": "recover"}` y con el aviso
-    `password_changed`, como el restablecimiento por correo. La marca se lee bajo `factors.lock_person`, así que un
-    restablecimiento por correo que llega entre `details` y la pulsación se espera y se ve (409), no se lee como
-    ausente. **Sin la marca, la decisión 10 del plan sigue en pie:** quien recupera perdió los factores, no la
+    `password_changed`, como el restablecimiento por correo. Los dos rechazos llegan antes de cualquier aviso, y los
+    avisos son los últimos actos de la transacción, después de crear la sesión nueva: primero `password_changed`,
+    después `factors_reset` (ronda 3: un aviso es correo, y el correo no se deshace). La marca se lee bajo
+    `factors.lock_person` y antes de `clear_second_factors`, que la borra, así que un restablecimiento por correo que
+    llega entre `details` y la pulsación se espera y se ve (409), no se lee como ausente. **Sin la marca, la decisión 10 del plan sigue en pie:** quien recupera perdió los factores, no la
     contraseña, y la contraseña se queda; una contraseña enviada igualmente se ignora. **Por qué la marca lo cambia:**
     la marca dice que la contraseña actual pudo ponerla quien tiene el buzón, y la recuperación es el camino de vuelta
     que nombra `reset_needs_recovery`. Si la conservara, quien tiene el buzón la seguiría sabiendo después de que la

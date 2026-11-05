@@ -1105,11 +1105,17 @@ async def accept_recovery(request: Request, *, token: str, password: str | None 
       purpose, and the `password_changed` notice.
 
     Both refusals are raised inside the block, when nothing but the `consume`
-    has been written: it rolls back, and the link stays usable. The mark is
-    read under `factors.lock_person` -- the lock `reset_password` and
-    `user_admin.service.reset_factors` take -- so a mail reset that commits
-    between the details (`recovery_details`) and this press is waited for and
-    seen, never read as absent.
+    has been written and BEFORE any notice: it rolls back, the link stays
+    usable, and no mail went. The mark is read under `factors.lock_person` --
+    the lock `reset_password` and `user_admin.service.reset_factors` take --
+    and before `clear_second_factors`, which clears it; so a mail reset that
+    commits between the details (`recovery_details`) and this press is waited
+    for and seen, never read as absent.
+
+    THE NOTICES ARE THE LAST ACTS (fix round 3): a notice is mail, which does
+    not roll back. Both follow the new session's creation, the last step that
+    can fail: `password_changed` first, when this press set one, then
+    `factors_reset`.
 
     WITHOUT THE MARK A `password` IS IGNORED: decision 10 holds whatever the
     body carries. The console sends one only when the details or a 409 said
@@ -1120,6 +1126,9 @@ async def accept_recovery(request: Request, *, token: str, password: str | None 
     async with _identity_session(org_id, _engine(request)) as session:
         user = await _recovering(session, token, consume=True)
         await lock_person(session, user.id)
+        # Read HERE, under the lock and before `clear_second_factors`, which
+        # clears the mark: read after it, this branch would never run.
+        password_set = False
         if await set_by_mail(session, user.id):
             if not password:
                 raise _needs_password()
@@ -1132,16 +1141,19 @@ async def accept_recovery(request: Request, *, token: str, password: str | None 
             )
             await staff_password.store(session, org_id=org_id, user_id=user.id, plain=password)
             await _audit(session, user, "auth.password_changed", {"via": action_tokens.RECOVER})
-            await notices.tell(
-                session, user, "password_changed", vault=_vault(request), actor_id=None
-            )
+            password_set = True
         await clear_second_factors(session, user.id)
         await end_all_for_user(session, user.id, "factors_reset")
         await revoke_all_for_user(session, user.id)
         await _audit(session, user, "user.recovery_link_used", {"email": user.email})
         started = await _started(session, request, user, state="enroll_required")
-        # The last act (fix round 3): after the new session is made, so a
+        # The last acts (fix round 3): after the new session is made, so a
         # failure there cannot leave a mail -- and a relay checkout whose
-        # audit row rolled back -- for a recovery that did not happen.
+        # audit row rolled back -- for a recovery that did not happen. The
+        # password first, in the order the acts were done, then the factors.
+        if password_set:
+            await notices.tell(
+                session, user, "password_changed", vault=_vault(request), actor_id=None
+            )
         await notices.tell(session, user, "factors_reset", vault=_vault(request), actor_id=None)
         return started

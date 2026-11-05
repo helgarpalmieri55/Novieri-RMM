@@ -43,6 +43,7 @@ from app.models import AuditEvent
 from app.models.auth import AuthRecoveryCode
 from tests.auth_support import Staff, browser, console_ready, cookie, login, signed_in
 from tests.session_support import cookie_header, http_request
+from tests.test_auth_reset_needs_recovery import _mark, _set_mark
 
 RELAY = MailSettingsInput(
     host="smtp.relay.test",
@@ -284,4 +285,109 @@ async def test_a_recovery_link_tells_only_once_its_session_is_made(
     assert [m["Subject"] for m in _Relay.sent[issued:]] == [
         "Your Novieri sign-in methods were reset"
     ]
+    await _assert_mail_and_checkout_paired(relay_env, org)
+
+
+# --- the recovery link's new password (operator decision 2026-11-05,
+# «Pedir contraseña nueva si hay marca»): while an emailed link set the
+# password, the recovery asks for a new one. Its refusals come before any
+# notice, and its "password changed" notice is told last, with the
+# factors' reset, after the new session is made.
+
+RECOVERED = "Saffron-Harbour-Quartz-4127"
+
+
+async def _recovery_token(env: Any, org: UUID, who: Staff) -> str:
+    """A recovery link's token as the server's command issues it, without the
+    command's own notice (it opens the vault through its own client)."""
+    from app.core.auth import action_tokens
+
+    async with org_session(org, engine=env.app_engine, clients=ClientScope.all()) as s:
+        return await action_tokens.issue(
+            s,
+            org_id=org,
+            user_id=who.user_id,
+            purpose=action_tokens.RECOVER,
+            ttl=action_tokens.RECOVER_TTL,
+            created_by=None,
+        )
+
+
+@pytest.mark.parametrize(
+    ("password", "answer"),
+    [(None, (409, "recovery_needs_password")), ("tiny-pass", (422, "password_rejected"))],
+    ids=["no-password", "weak-password"],
+)
+async def test_a_recovery_refused_for_its_password_sends_nothing(
+    relay_env: Any, password: str | None, answer: tuple[int, str]
+) -> None:
+    """With the mark set, no password (409) and a weak one (422) are refused
+    before any notice: no mail, no relay checkout, nothing recorded, the
+    factors in place, and the link still usable. Raise either after a
+    `notices.tell` and the mail goes for a recovery that rolled back, its
+    checkout's audit row with it: red on the mail and on the pairing."""
+    org, who = await _setup(relay_env, f"notice-recover-refused-{answer[0]}")
+    await _set_mark(relay_env, who)
+    token = await _recovery_token(relay_env, org, who)
+    before = len(_Relay.sent)
+    body = {"token": token} if password is None else {"token": token, "password": password}
+
+    refused = await relay_env.client.post(
+        "/api/v1/auth/recover/accept", headers=browser(), json=body
+    )
+
+    assert (refused.status_code, refused.json()["code"]) == answer, refused.text
+    assert _Relay.sent[before:] == []
+    assert await _count(relay_env, org, "auth.password_changed") == 0
+    assert await _count(relay_env, org, "user.recovery_link_used") == 0
+    assert await _unused(relay_env, who) == 10
+    await _assert_mail_and_checkout_paired(relay_env, org)
+    details = await relay_env.client.post(
+        "/api/v1/auth/recover/details", headers=browser(), json={"token": token}
+    )
+    assert details.json() == {"email": who.email, "password_required": True}, details.text
+
+
+async def test_a_recovery_that_sets_a_password_tells_only_once_its_session_is_made(
+    relay_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the mark set and a good password, both notices -- "password
+    changed", then "sign-in methods reset" -- follow the new session's
+    creation, the last step that can fail. Make that step fail and neither
+    mail goes, and the password, the mark, the factors and the records are
+    as they were; tell the password change where it is stored and its mail
+    goes for a recovery that rolled back: red. Then the real press: the two
+    mails in that order, each with its checkout recorded."""
+    org, who = await _setup(relay_env, "notice-recover-password")
+    await _set_mark(relay_env, who)
+    token = await _recovery_token(relay_env, org, who)
+    issued = len(_Relay.sent)
+    real_started = flows._started
+
+    async def failing(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("the session could not be made")
+
+    monkeypatch.setattr(flows, "_started", failing)
+    with pytest.raises(RuntimeError):
+        await flows.accept_recovery(http_request(relay_env), token=token, password=RECOVERED)
+    assert _Relay.sent[issued:] == []
+    assert await _mark(relay_env, who) is not None
+    assert await _count(relay_env, org, "auth.password_changed") == 0
+    assert await _count(relay_env, org, "user.recovery_link_used") == 0
+    assert await _unused(relay_env, who) == 10
+    await _assert_mail_and_checkout_paired(relay_env, org)
+
+    monkeypatch.setattr(flows, "_started", real_started)
+    accepted = await relay_env.client.post(
+        "/api/v1/auth/recover/accept",
+        headers=browser(),
+        json={"token": token, "password": RECOVERED},
+    )
+    assert accepted.json() == {"state": "enroll_required"}, accepted.text
+    assert await _mark(relay_env, who) is None
+    assert [m["Subject"] for m in _Relay.sent[issued:]] == [
+        "Your Novieri password was changed",
+        "Your Novieri sign-in methods were reset",
+    ]
+    assert await _count(relay_env, org, "auth.password_changed") == 1
     await _assert_mail_and_checkout_paired(relay_env, org)
