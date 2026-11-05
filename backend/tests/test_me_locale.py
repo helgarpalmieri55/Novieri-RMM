@@ -134,8 +134,7 @@ async def env(api_env: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setattr(
         KeycloakAdminConfig, "from_settings", classmethod(lambda cls, settings: CONFIG)
     )
-    slug = await api_env.org_slug(org_id)
-    headers = {"Authorization": f"Bearer {api_env.idp.token(sub, slug, email=f'{sub}@test.local')}"}
+    headers = await api_env.headers(org_id, sub)
     return SimpleNamespace(api=api_env, org_id=org_id, sub=sub, kc=kc, headers=headers)
 
 

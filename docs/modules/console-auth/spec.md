@@ -3,14 +3,20 @@
 **Status:** **built**, 2026-08-18, to the plan at
 `docs/superpowers/plans/2026-08-18-console-auth.md`. Approved 2026-08-18
 (operator chose "brand Keycloak, skip the launcher").
+**Superseded in part on 2026-11-04** by own authentication
+(`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`): from its
+phase 1 the console signs in on the platform's own screens, and §1 below is
+amended as stated there.
 
 **Which falsifiers have tests.** 1, 2 (by proxy), 4 and 7 are in
 `backend/tests/test_console_auth_realm.py`; 5 and 6 are in
 `frontend/src/App.auth.test.tsx`. **Falsifier 3 is not tested** — asserting
 that a federated token carries the `org` claim needs a real Entra tenant and a
 real browser. The mapper is asserted as committed; the claim is not observed.
-`deploy/README.md` gives the operator a one-liner to decode the token, which is
-a procedure, not a test.
+`deploy/README.md` used to give the operator a devtools one-liner that decoded
+the console's token; since own authentication phase 1 the console holds no
+Keycloak token, so the claim is now carried only by the access tokens MCP
+clients obtain, and the runbook says so ("Sign in with Microsoft").
 
 **Nothing here has rendered in a running Keycloak.** The theme is FreeMarker
 executed by a Java process this suite does not run, so falsifier 2's real form
@@ -60,6 +66,29 @@ correct, and this module does not change it.
 So the form lives on **Keycloak's** login page, and the work is to make that page
 look like ITMS and offer everything the reference screen offers. That costs
 nothing visually: Keycloak themes are HTML/CSS.
+
+### §1 as amended on 2026-11-04 (own authentication, phase 1)
+
+This section said the password field must not live in ITMS. From own
+authentication phase 1 it does: passwords enter the platform and are verified
+here. The prohibition it quoted is still kept -- the platform does not use the
+OAuth password grant, and a correct password alone admits nothing: it yields a
+session without its second factor, which reaches only the second-factor and
+enrolment routes (design §2.2). The balance, stated rather than implied:
+
+- **What the platform now holds.** Password verifiers (argon2id with the
+  `argon2-cffi` defaults, a 16-byte salt and an HMAC with a versioned pepper
+  that never leaves OpenBao) and TOTP secrets (sealed by the vault, bound to
+  their row). A compromise of the platform exposes those verifiers and
+  secrets; the pepper makes an offline attack on a stolen database need
+  OpenBao as well, and passkeys expose no secret at all.
+- **What it no longer runs.** A second service with its own administration
+  console, its own database, its own upgrade path and its own audit trail
+  outside the hash chain. Every sign-in, factor change and lockout is now an
+  event in the platform's own chain (invariant 4).
+
+MCP keeps signing in at Keycloak until own authentication phase 3, and the
+realm is removed in phase 4.
 
 ---
 

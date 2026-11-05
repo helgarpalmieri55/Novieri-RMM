@@ -36,6 +36,7 @@ from app.jobs.engine import JobEngine
 from app.models import Agent, AuditEvent, Job, RemoteSession
 from app.modules.remote import rsp
 from app.modules.remote.relay import registration_key
+from tests.session_support import sign_in, ws_cookie
 from tests.test_gateway_mtls import _client_ssl, _enroll_device
 
 TIMEOUT = 10
@@ -248,12 +249,12 @@ async def test_signed_job_to_frames_to_end_through_the_browser_route(stack) -> N
         serve_task = asyncio.create_task(server.serve())
         await _eventually(lambda: asyncio.sleep(0, server.started))
         try:
-            token = api_env.idp.token(
-                stack.sub, await api_env.org_slug(org_id), email=f"{stack.sub}@test.local"
-            )
+            # The console's session cookie, from the console's Origin (own
+            # authentication Task 13: the screen reads no bearer any more).
+            cookie = (await sign_in(api_env, org_id, stack.sub)).token
             browser = await websockets.connect(
                 f"ws://127.0.0.1:{http_port}/api/v1/remote/sessions/{sid}/screen",
-                subprotocols=["bearer", token],  # type: ignore[list-item]
+                **ws_cookie(cookie),
             )
             async with stack.agent(enrolled) as agent:
                 await _auth_agent(agent, sid, params["relay_token"])

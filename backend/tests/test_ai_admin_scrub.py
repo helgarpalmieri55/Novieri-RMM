@@ -452,7 +452,7 @@ async def test_a_blocked_value_never_reaches_the_provider(api_env: Any, monkeypa
 
     org = await seed_org(api_env, "aiscrub")
     _, sub = await ai_user(api_env, org.org_id, "ai.use", "health.read")
-    bearer = (await api_env.headers(org.org_id, sub))["Authorization"]
+    bearer = await api_env.loopback_bearer(org.org_id, sub)
 
     leaked = "S3CR3T-VALUE-THAT-MUST-NOT-TRAVEL"
     install_spy(

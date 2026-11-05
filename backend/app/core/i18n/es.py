@@ -159,7 +159,6 @@ CATALOG: dict[str, str] = {
     "no JWKS key for kid {kid}": "no hay clave JWKS para el kid {kid}",
     "token has no kid header": "el token no tiene encabezado kid",
     "this token is not an access token": "este token no es un token de acceso",
-    "this token was not issued to the console": "este token no se emitió para la consola",
     "token missing required {oidc_org_claim} claim in multi-tenant mode": (
         "al token le falta el claim obligatorio {oidc_org_claim} en el modo multiorganización"
     ),
@@ -5026,9 +5025,6 @@ CATALOG: dict[str, str] = {
     "MCP access must be granted by a person signing in": (
         "el acceso por MCP debe concederlo una persona al iniciar sesión"
     ),
-    "this token is for the MCP server and is accepted only through it": (
-        "este token es para el servidor MCP y solo se acepta a través de él"
-    ),
     # MCP server (app/mcp/server.py)
     "MCP is turned off for this organization. An org-admin turns it on in "
     "Settings → AI connections.": (
@@ -5118,6 +5114,8 @@ CATALOG: dict[str, str] = {
     "finish signing in: confirm your second factor first": (
         "termina de iniciar sesión: confirma primero tu segundo factor"
     ),
+    # The console's door with no session (own authentication Task 13).
+    "sign in to continue": "inicia sesión para continuar",
     "your session has ended; sign in again": "tu sesión terminó; inicia sesión de nuevo",
     "confirm your second factor again to do this": (
         "confirma de nuevo tu segundo factor para hacer esto"

@@ -45,7 +45,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
@@ -288,16 +288,21 @@ async def _admin(env: Any, org: UUID) -> tuple[str, dict[str, str], UUID]:
 
 
 async def _headers_claiming(env: Any, org: UUID, sub: str, email: str) -> dict[str, str]:
-    """Auth headers whose token asserts a particular email claim.
+    """The console's session for a person whose row holds `email`.
 
     Needed by the domain test and by nothing else: switching
     `console_email_domain` on makes `app/api/deps.py`'s own admission gate
-    (door 1 of 3) refuse the CALLER too if their token's address does not pass.
+    (door 1 of 3) refuse the CALLER too if their address does not pass.
     That is spec §3.3's lockout reproduced in miniature -- and it is why the
     preflight is a required step in `deploy/README.md` rather than a suggestion.
+    Since own authentication phase 1 the gate (and the lockout preflight)
+    read the row's address, which is the one the session carries, so the
+    address is written there before the session is made.
     """
-    slug = await env.org_slug(org)
-    return {"Authorization": f"Bearer {env.idp.token(sub, slug, email=email)}"}
+    async with AsyncSession(env.admin_engine) as session:
+        await session.execute(update(User).where(User.external_subject == sub).values(email=email))
+        await session.commit()
+    return await env.headers(org, sub)
 
 
 def _listed(body: dict[str, Any], user_id: UUID) -> dict[str, Any] | None:
@@ -735,7 +740,7 @@ async def test_an_invite_refuses_an_email_outside_the_configured_domain(
     """RULE 4, with the SAME helper the doors use (spec §3.2)."""
     org = await users_env.create_org("invite-domain")
     sub, _headers, _id = await _admin(users_env, org)
-    # The CALLER's own token has to pass the rule too, or `deps.py` refuses this
+    # The CALLER's own address has to pass the rule too, or `deps.py` refuses this
     # request at the door and the 403 would look like the invite being refused.
     headers = await _headers_claiming(users_env, org, sub, "admin@toeshee.com")
     users_env.app.state.settings.console_email_domain = "toeshee.com"

@@ -136,7 +136,7 @@ def test_the_construction_guard_is_not_vacuous() -> None:
 # The functions that answer with a person's UN-NARROWED scope: X-Client-Id has
 # not been applied to what they return. A door combines them with the
 # request's own scope (`deps.admit`, `require_permission`, the portal's
-# principal and gate, `read_door_identity`); anything else calling them could
+# principal and gate, `read_session_identity`); anything else calling them could
 # hand a route a scope wider than the one its request asked for.
 #
 # `own_profile.py` is the one reader that is not a door (MSP clients phase 3

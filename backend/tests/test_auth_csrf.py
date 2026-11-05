@@ -121,13 +121,20 @@ async def test_the_sign_in_routes_are_held_to_it_without_a_cookie(
 
 
 async def test_a_bearer_request_is_not_a_cookie_request(api_env: Any) -> None:
-    """Until P2 Task 13 the console's bearer token is admitted (D21), and a
-    bearer is not ambient: the browser never attaches it by itself. MCP's
-    in-process calls and the assistant's loopback are bearer requests too."""
+    """A bearer is not ambient -- the browser never attaches it by itself --
+    so a write that carries one and no session cookie is not this rule's: no
+    console header, no Origin, and the answer is still not `csrf`. MCP's
+    in-process calls and the assistant's loopback are bearer requests. Since
+    own authentication Task 13 the console's old Bearer opens no door, so what
+    answers is the door's 401 `auth_required` (it was a 200 while D21 let the
+    console's token in). Drop the cookie condition from
+    `RequireConsoleRequestHeader` and this is a 403 `csrf`: red."""
     org_id = await api_env.create_org("csrf-bearer")
     sub = await api_env.create_user(org_id, "read-only")
-    response = await _patch(api_env, await api_env.headers(org_id, sub))
-    assert response.status_code == 200, response.text
+    token = api_env.idp.token(sub, await api_env.org_slug(org_id), email=f"{sub}@test.local")
+    response = await _patch(api_env, {"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401, response.text
+    assert response.json()["code"] == "auth_required"
 
 
 async def test_the_refusal_is_in_the_requests_language(api_env: Any, signed: Any) -> None:

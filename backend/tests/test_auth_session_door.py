@@ -1,10 +1,10 @@
 """Door 1 admits the console's session cookie (P2 design §6.5; coordinator D21, D14).
 
-`app/api/deps.py::admit` tries the session first, off the MCP channel, and
-falls back to the bearer path that still serves the console's Keycloak token
-until Task 13. These tests hold what the session path must do the same way --
-and the two things only it does: a session without its second factor is not
-signed in, and the acts of design §2.5 ask for a recent second factor.
+`app/api/deps.py::admit` admits off the MCP channel by the session and by
+nothing else since Task 13, which removed the console's Keycloak bearer path
+(D21). These tests hold what the session path must do the way the bearer path
+did -- and the things only it does: a session without its second factor is
+not signed in, and the acts of design §2.5 ask for a recent second factor.
 
 FALSIFIER 1 (design §10): "Una sesión de una organización no lee nada de otra;
 una sesión de contacto no pasa la puerta de la consola" --
@@ -27,7 +27,7 @@ from app.core.tenancy import org_session
 from app.models import Client, Device, User
 from app.models.auth import AuthSession
 from tests.mcp_support import marked_client
-from tests.session_support import remembered_device, sign_in, use_console
+from tests.session_support import console_headers, remembered_device, sign_in, use_console
 
 
 @pytest.fixture(autouse=True)
@@ -62,7 +62,7 @@ async def test_a_session_without_its_second_factor_is_not_signed_in(api_env: Any
 async def test_no_credential_is_a_401_the_console_recognises(api_env: Any) -> None:
     response = await _me(api_env, {})
     assert response.status_code == 401
-    assert response.json() == {"detail": "missing bearer token", "code": "auth_required"}
+    assert response.json() == {"detail": "sign in to continue", "code": "auth_required"}
 
 
 async def test_an_ended_session_is_not_admitted(api_env: Any) -> None:
@@ -77,12 +77,14 @@ async def test_an_ended_session_is_not_admitted(api_env: Any) -> None:
 
 async def test_the_session_wins_over_a_bearer_token(api_env: Any) -> None:
     """Cookie first (interfaces, Task 6): a request that carries both is the
-    session's person."""
+    session's person. Bob's console token is minted here: `api_env.headers`
+    is another session cookie since Task 13, which would win by coming last."""
     org_id = await api_env.create_org("door")
     alice = await api_env.create_user(org_id, "read-only")
     bob = await api_env.create_user(org_id, "read-only")
     signed = await sign_in(api_env, org_id, alice)
-    response = await _me(api_env, {**signed.headers, **await api_env.headers(org_id, bob)})
+    bob_token = api_env.idp.token(bob, await api_env.org_slug(org_id), email=f"{bob}@test.local")
+    response = await _me(api_env, {**signed.headers, "Authorization": f"Bearer {bob_token}"})
     assert response.json()["user_id"] == str(signed.user_id)
 
 
@@ -257,12 +259,20 @@ async def test_a_second_factor_from_sign_in_counts_for_ten_minutes(api_env: Any)
     assert stale.status_code == 403 and stale.json()["code"] == "step_up_required"
 
 
-async def test_a_bearer_token_is_not_asked_for_a_session_it_does_not_have(
-    api_env: Any,
-) -> None:
-    """D21: until Task 13, the console's bearer path checks out as before."""
+async def test_a_console_bearer_is_no_way_into_the_vault(api_env: Any) -> None:
+    """Was `test_a_bearer_token_is_not_asked_for_a_session_it_does_not_have`
+    (D21: until Task 13 the console's bearer checked out as before). Since
+    Task 13 the console's token is no credential at all: the checkout it asks
+    for is a 401 `auth_required`, never the secret."""
     org_id = await api_env.create_org("door-vault")
     sub = await api_env.create_user(org_id, "org-admin")
     headers = await api_env.headers(org_id, sub)
     credential_id = await _credential(api_env, headers)
-    assert (await _checkout(api_env, credential_id, headers)).status_code == 200
+    slug = await api_env.org_slug(org_id)
+    token = api_env.idp.token(sub, slug, email=f"{sub}@test.local")
+    refused = await _checkout(
+        api_env, credential_id, {"Authorization": f"Bearer {token}", **console_headers()}
+    )
+    assert refused.status_code == 401
+    assert refused.json()["code"] == "auth_required"
+    assert "secret" not in refused.json()

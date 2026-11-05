@@ -8,9 +8,11 @@ actor, in the session's client; it named the owner, whoever stopped it.
 
 The rail is one predicate (`app/modules/remote/tunnel.py::owner_or_admin`)
 behind two doors, the stop route and the screen tunnel's admission
-(`authorize_tunnel`). The rail tests call the stop route over HTTP and
-`authorize_tunnel` directly -- the function the screen WebSocket runs first --
-not the predicate alone; they do not open the WebSocket itself.
+(`admit_tunnel_session`). The rail tests call the stop route over HTTP and
+the admission directly (`authorize_tunnel_session`, through
+`tests/test_remote_tunnel.py::_authorize`, with the person's session cookie)
+-- the gate the screen WebSocket runs first -- not the predicate alone; they
+do not open the WebSocket itself.
 
 Joining is viewing, and the viewer's own acts are audited as theirs (final
 review A1): closing the viewer ends the session, and switching control writes
@@ -44,6 +46,7 @@ from app.modules.remote.service import RemoteSessionService, end_session_from_re
 from app.modules.remote.tunnel import TunnelAuthError
 from tests.client_scope_support import client_with_site
 from tests.conftest import ApiEnv
+from tests.session_support import ws_cookie
 from tests.test_client_record_checks import REMOTE, _device, _holder, _remote_session, _user
 from tests.test_remote_screen_relay import (
     _auth_agent,
@@ -59,8 +62,9 @@ from tests.test_remote_tunnel import _authorize
 NOT_OWNER = "requires the session owner or remote.supervise"
 
 
-def _bearer(headers: dict[str, str]) -> str:
-    return headers["Authorization"].removeprefix("Bearer ")
+def _cookie(headers: dict[str, str]) -> str:
+    """The session token in the `Cookie` header `ApiEnv.headers` built."""
+    return headers["Cookie"].split("=", 1)[1]
 
 
 async def _state(env: ApiEnv, session_id: UUID) -> str:
@@ -105,7 +109,7 @@ async def test_orgs_manage_alone_no_longer_stops_or_joins_another_s_session(
     assert await _state(api_env, session) == "awaiting_consent"
     assert await _ended(api_env, session) == []
     with pytest.raises(TunnelAuthError) as door:
-        await _authorize(api_env, _bearer(admin_of_x), session)
+        await _authorize(api_env, _cookie(admin_of_x), session)
     assert door.value.code == 4403
 
 
@@ -133,10 +137,10 @@ async def test_remote_supervise_on_x_stops_and_joins_x_s_sessions_and_not_y_s(
     assert (refused.status_code, refused.json()) == (403, {"detail": NOT_OWNER}), refused.text
     assert await _state(api_env, on_y) == "awaiting_consent"
     with pytest.raises(TunnelAuthError) as door:
-        await _authorize(api_env, _bearer(supervisor), on_y)
+        await _authorize(api_env, _cookie(supervisor), on_y)
     assert door.value.code == 4403
 
-    admitted_org, admitted_user, _ = await _authorize(api_env, _bearer(supervisor), on_x)
+    admitted_org, admitted_user, _ = await _authorize(api_env, _cookie(supervisor), on_x)
     assert (admitted_org, admitted_user) == (org, supervisor_id)
     stopped = await api_env.client.post(f"{REMOTE}/{on_x}/stop", headers=supervisor)
     assert stopped.status_code == 200, stopped.text
@@ -244,7 +248,7 @@ async def test_a_supervisor_who_joins_then_closes_the_viewer_is_its_actor(stack)
     client; both named the owner. The rest of the trail keeps its own
     actors, and every row of it is filed in the session's client.
     FALSIFIER: `session_screen` (`api.py`) dropping the viewer's id that
-    `authorize_tunnel` returns -- whichever of the two writers wins the
+    `admit_tunnel_session` returns -- whichever of the two writers wins the
     race then names the owner."""
     api_env = stack.api_env
     enrolled = await stack.device()
@@ -263,7 +267,7 @@ async def test_a_supervisor_who_joins_then_closes_the_viewer_is_its_actor(stack)
     async with _serving(api_env.app) as port:
         browser = await websockets.connect(
             f"ws://127.0.0.1:{port}/api/v1/remote/sessions/{sid}/screen",
-            subprotocols=["bearer", _bearer(supervisor)],  # type: ignore[list-item]
+            **ws_cookie(_cookie(supervisor)),
         )
         async with stack.agent(enrolled) as agent:
             await _auth_agent(agent, sid, params["relay_token"])

@@ -175,9 +175,19 @@ async def test_without_its_public_console_url_there_is_no_msi_whatever_the_host_
 ) -> None:
     """The MSI goes to every computer in the domain, so its console address
     comes from configuration and never from the request (CLAUDE.md 2a(b)'s
-    spirit): a forged Host header must not be able to aim a fleet."""
+    spirit): a forged Host header must not be able to aim a fleet.
+
+    The address is taken from the MSI builder only, not from the Settings:
+    since own authentication Task 13 the request is a cookie write, which the
+    CSRF rule refuses outright when no console is configured. What reaches the
+    builder is what the route reads from the setting -- here, nothing."""
     org_id, code, _, store, admin, url = await _setup(api_env, monkeypatch)
-    monkeypatch.setattr(api_env.app.state.settings, "public_console_url", None)
+    real_msi = msi_svc.msi_for_link
+
+    async def _without_a_console(*args: Any, **kwargs: Any) -> Any:
+        return await real_msi(*args, **{**kwargs, "console": None})
+
+    monkeypatch.setattr(msi_svc, "msi_for_link", _without_a_console)
     response = await api_env.client.post(
         url,
         json={"code": code, "arch": "amd64"},

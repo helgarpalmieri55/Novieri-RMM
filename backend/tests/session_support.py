@@ -11,7 +11,10 @@ a cookie jar, and it will not send a `Secure` cookie -- every `__Host-` one is
 is exactly what the browser puts on the wire.
 
 `use_console` sets `ITS_PUBLIC_CONSOLE_URL` for the test: without it there is
-no console origin, and every write on a session is refused.
+no console origin, and every write on a session is refused. Since own
+authentication Task 13 the `api_env` fixture's Settings carry that value
+already, and `ApiEnv.headers` is `sign_in(..., step_up=True).headers`; the
+calls to `use_console` that remain say what the test relies on.
 """
 
 from dataclasses import dataclass
@@ -22,7 +25,7 @@ import httpx
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.requests import Request
+from starlette.requests import HTTPConnection, Request
 
 from app.core.auth.csrf import CSRF_HEADER
 from app.core.auth.devices import remember
@@ -180,3 +183,21 @@ def ws_cookie(token: str, *, origin: str = CONSOLE) -> dict[str, Any]:
     console's Origin on the handshake, as a browser sends them (D15), and no
     subprotocol."""
     return {"additional_headers": {"Cookie": cookie_header(token)}, "origin": origin}
+
+
+def socket_connection(env: Any, token: str, *, origin: str = CONSOLE) -> HTTPConnection:
+    """A socket handshake carrying the session cookie, for the tests that call
+    `authorize_tunnel_session` directly rather than through a socket. `app` is
+    in the scope because `sessions.resolve` reads `connection.app.state`."""
+    return HTTPConnection(
+        {
+            "type": "websocket",
+            "app": env.app,
+            "path": "/api/v1/remote/sessions/x/screen",
+            "query_string": b"",
+            "headers": [
+                (b"cookie", cookie_header(token).encode()),
+                (b"origin", origin.encode()),
+            ],
+        }
+    )

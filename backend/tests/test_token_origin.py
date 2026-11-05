@@ -14,9 +14,8 @@ So, pinned here:
 - `validate_token` admits only access tokens: `typ` exactly "Bearer", as
   Keycloak issues every access token. ID, refresh, offline and logout tokens,
   and a token with no `typ`, are refused on every door;
-- every non-MCP door (`auth_context`, the UI WebSocket, the remote tunnel)
-  admits only a token the console's own client obtained
-  (`azp == Settings.oidc_console_client_id`);
+- no non-MCP door reads a bearer at all: the console signs in by cookie since
+  own authentication phase 1 (Task 13);
 - `/mcp` refuses a token the console's client obtained, and any service-account
   token, before admission provisions anything: an MCP session is a token issued
   to a person after their own sign-in (invariant 1c, MCP server design §9).
@@ -25,6 +24,7 @@ So, pinned here:
 import ast
 import asyncio
 import socket
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -33,33 +33,30 @@ import pytest
 import uvicorn
 import websockets
 from mcp.types import LATEST_PROTOCOL_VERSION
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.ws import AUTH_SUBPROTOCOL
 from app.core.client_scope import ClientScope
 from app.core.config import Settings
 from app.core.security import (
     JwksCache,
     TokenClaims,
     TokenValidationError,
-    require_console_token,
     require_person_mcp_token,
     validate_token,
 )
 from app.models import User
-from app.modules.remote.tunnel import TunnelAuthError, authorize_tunnel
+from app.models.auth import AuthSession
+from app.modules.remote.tunnel import TunnelAuthError, authorize_tunnel_session
 from tests.fake_idp import CONSOLE_CLIENT_ID, ISSUER, JWKS_URL, FakeIdp, jwks_client
 from tests.mcp_support import MCP_AUD, mcp_client, mcp_token, running_mcp
+from tests.session_support import CONSOLE, refusal_code, sign_in, socket_connection, ws_cookie
 
 NOT_ACCESS_EN = "this token is not an access token"
 NOT_ACCESS_ES = "este token no es un token de acceso"
-NOT_CONSOLE_EN = "this token was not issued to the console"
-NOT_CONSOLE_ES = "este token no se emitió para la consola"
 CONSOLE_OVER_MCP_EN = "this token was issued to the console and is not accepted over MCP"
 NOT_A_PERSON_EN = "MCP access must be granted by a person signing in"
 NOT_A_PERSON_ES = "el acceso por MCP debe concederlo una persona al iniciar sesión"
-MCP_ONLY_EN = "this token is for the MCP server and is accepted only through it"
 
 METADATA_URL = "https://itms.example.com/.well-known/oauth-protected-resource/mcp"
 REFUSED_CHALLENGE = f'Bearer resource_metadata="{METADATA_URL}", error="invalid_token"'
@@ -165,19 +162,18 @@ def _claims(**kw: Any) -> TokenClaims:
     return TokenClaims(sub="s", email="", name="", org_slug="o", **kw)
 
 
-def test_require_console_token_admits_only_the_console_client() -> None:
-    require_console_token(_claims(azp="it-suite-web"), _settings())
-    for azp in ("it-suite", "attacker", "claude", ""):
-        with pytest.raises(TokenValidationError) as exc:
-            require_console_token(_claims(azp=azp), _settings())
-        assert str(exc.value) == NOT_CONSOLE_EN, azp
-
-
-def test_require_console_token_follows_the_setting() -> None:
-    settings = _settings(oidc_console_client_id="other-spa")
-    require_console_token(_claims(azp="other-spa"), settings)
-    with pytest.raises(TokenValidationError):
-        require_console_token(_claims(azp="it-suite-web"), settings)
+@pytest.mark.parametrize("azp", ["it-suite-web", "other-spa"])
+async def test_no_client_s_token_is_a_console_credential(api_env, azp: str) -> None:
+    """Was: the console-token origin rule admitted only `oidc_console_client_id`
+    (two tests: the default client, and the client the setting names). Now no
+    access token is a console credential, whoever obtained it and whatever the
+    setting names."""
+    api_env.settings.oidc_console_client_id = azp
+    _, slug, sub = await _person(api_env)
+    token = api_env.idp.token(sub, slug, azp=azp, email=f"{sub}@test.local")
+    resp = await api_env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 401
+    assert refusal_code(resp) == "auth_required"
 
 
 def test_require_person_mcp_token() -> None:
@@ -198,17 +194,15 @@ def test_require_person_mcp_token() -> None:
         assert str(exc.value) == NOT_A_PERSON_EN
 
 
-def test_require_console_token_refuses_the_mcp_audience() -> None:
-    """One rule for all three console doors: a token naming the MCP resource
-    is an MCP grant even when it also names the console and the console's
-    client obtained it, and is never replayable against the console."""
-    settings = _settings(public_console_url="https://itms.example.com")
-    require_console_token(_claims(azp="it-suite-web", aud=("it-suite",)), settings)
-    with pytest.raises(TokenValidationError) as exc:
-        require_console_token(_claims(azp="it-suite-web", aud=("it-suite", MCP_AUD)), settings)
-    assert str(exc.value) == MCP_ONLY_EN
-    # With no public console URL there is no MCP resource, so nothing to refuse.
-    require_console_token(_claims(azp="it-suite-web", aud=("it-suite", MCP_AUD)), _settings())
+async def test_an_mcp_token_off_the_channel_is_no_credential(mcp_env) -> None:
+    """Was: the console-token origin rule refused the MCP audience. Off the channel
+    no bearer is read at all, so an MCP grant is still never replayable
+    against the console."""
+    _, slug, sub = await _person(mcp_env)
+    token = mcp_env.idp.token(sub, slug, aud=MCP_AUD, azp="claude", email=f"{sub}@test.local")
+    resp = await mcp_env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 401
+    assert refusal_code(resp) == "auth_required"
 
 
 async def test_the_legacy_client_id_claim_marks_a_service_account() -> None:
@@ -237,7 +231,7 @@ async def test_the_legacy_client_id_claim_marks_a_service_account() -> None:
 # --------------------------------------------------------------------------- #
 
 APP = Path(__file__).resolve().parents[1] / "app"
-ORIGIN_RULES = frozenset({"require_console_token", "require_person_mcp_token"})
+ORIGIN_RULES = frozenset({"require_person_mcp_token"})
 
 
 def _called(node: ast.AST) -> str | None:
@@ -272,7 +266,7 @@ def test_the_sweep_catches_a_validation_with_no_origin_rule() -> None:
     bad = "async def door(t):\n    claims = await validate_token(t)\n    return claims\n"
     good = (
         "async def door(t, s):\n    claims = await validate_token(t)\n"
-        "    require_console_token(claims, s)\n"
+        "    require_person_mcp_token(claims, s)\n"
     )
     assert _unruled_validations(bad) == [2]
     assert _unruled_validations(good) == []
@@ -290,9 +284,14 @@ def test_every_validate_token_call_in_app_is_followed_by_an_origin_rule() -> Non
         sites += source.count("validate_token(")
         rel = path.relative_to(APP.parent)
         offenders += [f"{rel}:{line}" for line in _unruled_validations(source)]
-    assert sites >= 3, "the sweep found no doors; it is looking in the wrong place"
+    # Exactly one since own authentication phase 1 (Task 13), which took the
+    # console's bearer out of the API, the UI WebSocket and the remote tunnel.
+    assert sites == 1, (
+        f"{sites}: the MCP branch of admit() is the only door that validates a "
+        "token; a second one is a decision"
+    )
     assert offenders == [], (
-        "validate_token( with no require_console_token( / require_person_mcp_token( "
+        "validate_token( with no require_person_mcp_token( "
         f"after it in the same function: {offenders}"
     )
 
@@ -308,23 +307,32 @@ async def _person(env: Any, role: str = "org-admin") -> tuple[UUID, str, str]:
     return org_id, await env.org_slug(org_id), sub
 
 
-async def test_a_console_token_reaches_api_me(api_env) -> None:
-    _, slug, sub = await _person(api_env)
+async def test_a_console_token_no_longer_reaches_api_me(api_env) -> None:
+    """Own authentication phase 1: the console signs in by cookie, and the
+    token it used to send is no credential at /api/v1."""
+    org_id, slug, sub = await _person(api_env)
     token = api_env.idp.token(sub, slug, email=f"{sub}@test.local")
     resp = await api_env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 401
+    assert refusal_code(resp) == "auth_required"
+    resp = await api_env.client.get("/api/v1/me", headers=await api_env.headers(org_id, sub))
     assert resp.status_code == 200, resp.text
 
 
 async def test_an_id_token_is_refused_on_api_me(api_env) -> None:
+    """Still a 401 in both languages; since own authentication Task 13 the
+    door refuses before reading any bearer (`auth_required`), where it used to
+    refuse the token as no access token."""
     _, slug, sub = await _person(api_env)
     token = _id_token(api_env.idp, sub, slug, email=f"{sub}@test.local")
     resp = await api_env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 401
-    assert resp.json()["detail"] == NOT_ACCESS_EN
+    assert refusal_code(resp) == "auth_required"
     resp = await api_env.client.get(
         "/api/v1/me", headers={"Authorization": f"Bearer {token}", "Accept-Language": "es"}
     )
-    assert resp.json()["detail"] == NOT_ACCESS_ES
+    assert resp.status_code == 401
+    assert refusal_code(resp) == "auth_required"
 
 
 @pytest.mark.parametrize("azp", ["attacker", "it-suite", None])
@@ -335,11 +343,12 @@ async def test_an_access_token_another_client_obtained_is_refused_on_api(
     token = api_env.idp.token(sub, slug, azp=azp, email=f"{sub}@test.local")
     resp = await api_env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 401
-    assert resp.json()["detail"] == NOT_CONSOLE_EN
+    assert refusal_code(resp) == "auth_required"
     resp = await api_env.client.get(
         "/api/v1/me", headers={"Authorization": f"Bearer {token}", "Accept-Language": "es"}
     )
-    assert resp.json()["detail"] == NOT_CONSOLE_ES
+    assert resp.status_code == 401
+    assert refusal_code(resp) == "auth_required"
 
 
 async def test_a_refused_origin_provisions_nobody(api_env) -> None:
@@ -392,11 +401,19 @@ async def live_api(api_env):
     await task
 
 
-async def _ws_admits(port: int, token: str) -> bool:
+async def _ws_admits(
+    port: int, *, token: str | None = None, cookie: str | None = None, origin: str = CONSOLE
+) -> bool:
+    """Whether `/api/v1/ws` stays open for a handshake offering `token` the way
+    the console used to (the `bearer` subprotocol) or carrying `cookie`."""
+    url = f"ws://127.0.0.1:{port}/api/v1/ws"
+    offered: dict[str, Any] = (
+        {"subprotocols": ["bearer", token]}
+        if token is not None
+        else ws_cookie(cookie or "", origin=origin)
+    )
     try:
-        async with websockets.connect(
-            f"ws://127.0.0.1:{port}/api/v1/ws", subprotocols=[AUTH_SUBPROTOCOL, token]
-        ) as ws:
+        async with websockets.connect(url, **offered) as ws:
             # The door closes a refused token before or right after the
             # handshake; one that is admitted stays open.
             try:
@@ -408,22 +425,36 @@ async def _ws_admits(port: int, token: str) -> bool:
         return False
 
 
-async def test_the_ui_websocket_admits_only_console_access_tokens(api_env, live_api) -> None:
-    _, slug, sub = await _person(api_env, "read-only")
-    assert await _ws_admits(live_api, api_env.idp.token(sub, slug)) is True
-    assert await _ws_admits(live_api, _id_token(api_env.idp, sub, slug)) is False
-    assert await _ws_admits(live_api, api_env.idp.token(sub, slug, azp="attacker")) is False
-    assert await _ws_admits(live_api, api_env.idp.token(sub, slug, typ=None)) is False
+async def test_the_ui_websocket_admits_no_token_at_all(api_env, live_api) -> None:
+    """Was `..._admits_only_console_access_tokens`, where the console's own
+    token opened the socket. Since own authentication Task 13 none does --
+    that one included -- and the person's session cookie is the control."""
+    org_id, slug, sub = await _person(api_env, "read-only")
+    for token in (
+        api_env.idp.token(sub, slug),
+        _id_token(api_env.idp, sub, slug),
+        api_env.idp.token(sub, slug, azp="attacker"),
+        api_env.idp.token(sub, slug, typ=None),
+    ):
+        assert await _ws_admits(live_api, token=token) is False
+    signed = await sign_in(api_env, org_id, sub)
+    assert await _ws_admits(live_api, cookie=signed.token) is True
 
 
 async def test_the_ui_websocket_refuses_a_token_carrying_the_mcp_audience(
     api_env, live_api
 ) -> None:
+    """With an MCP resource configured, a token naming it opens nothing; the
+    person's session from the configured console is the control."""
     api_env.settings.public_console_url = "https://itms.example.com"
-    _, slug, sub = await _person(api_env, "read-only")
-    assert await _ws_admits(live_api, api_env.idp.token(sub, slug)) is True
+    org_id, slug, sub = await _person(api_env, "read-only")
+    signed = await sign_in(api_env, org_id, sub)
+    assert (
+        await _ws_admits(live_api, cookie=signed.token, origin="https://itms.example.com")
+        is True
+    )
     both = api_env.idp.token(sub, slug, extra={"aud": ["it-suite", MCP_AUD]})
-    assert await _ws_admits(live_api, both) is False
+    assert await _ws_admits(live_api, token=both) is False
 
 
 # --------------------------------------------------------------------------- #
@@ -431,32 +462,29 @@ async def test_the_ui_websocket_refuses_a_token_carrying_the_mcp_audience(
 # --------------------------------------------------------------------------- #
 
 
-async def _authorize(env: Any, token: str) -> tuple[UUID, UUID, ClientScope]:
-    return await authorize_tunnel(
-        token=token,
+async def _authorize(env: Any, cookie: str) -> tuple[UUID, UUID, ClientScope]:
+    return await authorize_tunnel_session(
+        connection=socket_connection(env, cookie),
         session_id=uuid4(),
         settings=env.settings,
-        jwks=env.app.state.jwks,
-        admin_engine=env.admin_engine,
         app_engine=env.app_engine,
     )
 
 
-async def test_the_remote_tunnel_admits_only_console_access_tokens(api_env) -> None:
-    _, slug, sub = await _person(api_env, "technician")
+async def test_the_remote_tunnel_admits_only_a_live_session(api_env) -> None:
+    """Was `..._admits_only_console_access_tokens`: the genuine console token
+    passed and three other tokens did not. The tunnel reads no token since own
+    authentication Task 13; a cookie that names no session is what is refused."""
+    org_id, _, sub = await _person(api_env, "technician")
     # Genuine: authenticated, then 4404 for a session that does not exist --
-    # past the token check, which is what this control shows.
+    # past the credential check, which is what this control shows.
     with pytest.raises(TunnelAuthError) as exc:
-        await _authorize(api_env, api_env.idp.token(sub, slug))
+        await _authorize(api_env, (await sign_in(api_env, org_id, sub)).token)
     assert exc.value.code == 4404
-    for token in (
-        _id_token(api_env.idp, sub, slug),
-        api_env.idp.token(sub, slug, azp="attacker"),
-        api_env.idp.token(sub, slug, typ=None),
-    ):
+    for cookie in ("garbage", "A" * 43, ""):
         with pytest.raises(TunnelAuthError) as exc:
-            await _authorize(api_env, token)
-        assert exc.value.code == 4401
+            await _authorize(api_env, cookie)
+        assert exc.value.code == 4401, cookie
 
 
 # --------------------------------------------------------------------------- #
@@ -533,15 +561,25 @@ async def test_a_token_no_person_signed_in_for_is_refused_at_mcp(
     assert await _users_with_sub(mcp_env, sub) == 0
 
 
-async def test_the_remote_tunnel_refuses_a_token_carrying_the_mcp_audience(api_env) -> None:
-    api_env.settings.public_console_url = "https://itms.example.com"
-    _, slug, sub = await _person(api_env, "technician")
+async def test_the_remote_tunnel_refuses_an_ended_session(api_env) -> None:
+    """Was `..._refuses_a_token_carrying_the_mcp_audience`: the tunnel reads no
+    token since own authentication Task 13, so the both-audiences token is no
+    case any more. The same shape holds for the credential it does read: live,
+    past the door (4404 for no such remote session); ended, 4401."""
+    org_id, _, sub = await _person(api_env, "technician")
+    signed = await sign_in(api_env, org_id, sub)
     with pytest.raises(TunnelAuthError) as exc:
-        await _authorize(api_env, api_env.idp.token(sub, slug))
+        await _authorize(api_env, signed.token)
     assert exc.value.code == 4404
-    both = api_env.idp.token(sub, slug, extra={"aud": ["it-suite", MCP_AUD]})
+    async with AsyncSession(api_env.admin_engine) as session:
+        await session.execute(
+            update(AuthSession)
+            .where(AuthSession.id == signed.session_id)
+            .values(ended_at=datetime.now(UTC), ended_reason="signed_out")
+        )
+        await session.commit()
     with pytest.raises(TunnelAuthError) as exc:
-        await _authorize(api_env, both)
+        await _authorize(api_env, signed.token)
     assert exc.value.code == 4401
 
 
@@ -552,7 +590,7 @@ async def test_the_api_refuses_a_console_token_carrying_the_mcp_audience(mcp_env
     )
     resp = await mcp_env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {both}"})
     assert resp.status_code == 401
-    assert resp.json()["detail"] == MCP_ONLY_EN
+    assert refusal_code(resp) == "auth_required"
 
 
 async def test_a_legacy_client_id_claim_is_refused_at_mcp(mcp_env) -> None:

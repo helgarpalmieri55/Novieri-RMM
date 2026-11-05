@@ -9,13 +9,14 @@ question "is this identity one we let in", and it has two rules:
 * the email-domain allowlist (:mod:`app.core.identity.email_domain`);
 * the account's ``users.status``, below.
 
-Both are enforced at every door that turns a token into a principal --
-``app/api/deps.py`` (HTTP), ``app/api/v1/ws.py`` (console WebSocket) and
-``app/modules/remote/tunnel.py`` (remote-control tunnel). There are exactly
-three, verified with ``grep -rn "validate_token" app/``; the agent gateway is
-not a fourth (it identifies agents by TLS peer-certificate fingerprint and
-carries no bearer token). An allowlist enforced at one of three doors is not
-an allowlist.
+Both are enforced at every door that turns a credential into a principal --
+``app/api/deps.py`` (HTTP: the console's session, and on the MCP channel an
+OAuth token), ``app/api/v1/ws.py`` (console WebSocket) and
+``app/modules/remote/tunnel.py`` (remote-control tunnel), the last two by the
+console's session only since own authentication phase 1. There are exactly
+three; the agent gateway is not a fourth (it identifies agents by TLS
+peer-certificate fingerprint and carries no bearer token). An allowlist
+enforced at one of three doors is not an allowlist.
 
 WHY A REFUSAL IS AUDITED ONCE AND LOGGED TWICE, AND WHY THAT ASYMMETRY IS THE
 HONEST ANSWER RATHER THAN AN OVERSIGHT

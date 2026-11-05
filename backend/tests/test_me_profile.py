@@ -5,7 +5,9 @@ falsifiers 11-14.
 
 TWO CLAIMS, ONE FILE, BECAUSE THEY ARE THE SAME CLAIM SEEN FROM TWO SIDES.
 `PATCH /api/v1/me` gives ITMS a writable `display_name`; `app/api/deps.py`
-refreshes `email` from the token claim on every admission. The asymmetry is
+refreshes `email` from the token claim on every admission -- on the MCP
+channel, the only one that still carries a token since own authentication
+phase 1 (Task 13), so the refresh tests below go through it. The asymmetry is
 the design (§7.2): Keycloak is authoritative for the identity fact, ITMS for
 the presentation preference. A test suite that checked only one of them would
 pass on an implementation that refreshed both -- which would silently undo the
@@ -27,10 +29,12 @@ future field cannot be added without this file failing.
 from typing import Any
 from uuid import UUID
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.models import AuditEvent, User
+from tests.mcp_support import MCP_AUD, MCP_BASE, marked_client
 
 
 async def _row(engine: AsyncEngine, sub: str) -> User:
@@ -53,18 +57,23 @@ async def _audit(engine: AsyncEngine, org_id: UUID, action: str) -> list[AuditEv
         )
 
 
-async def _headers(env: Any, org_id: UUID, sub: str, *, email: str | None = None) -> dict[str, str]:
-    """Auth headers whose email claim MATCHES the seeded row by default.
+async def _headers(env: Any, org_id: UUID, sub: str) -> dict[str, str]:
+    """The console's session for the seeded user (`ApiEnv.headers`). It
+    carries no claim -- the row's address is the only one -- so the profile
+    tests are not entangled with the §7.2 refresh; the staleness tests below
+    reach it with an MCP token (`_mcp_me`)."""
+    return await env.headers(org_id, sub)
 
-    `ApiEnv.headers` issues the fake IdP's default address, which now differs
-    from the row `create_user` seeds -- so every request through it would
-    exercise the §7.2 refresh. Correct behaviour, but it would entangle the
-    profile tests with the staleness tests; those below pass the address
-    explicitly when the mismatch IS the subject.
-    """
+
+async def _mcp_me(env: Any, org_id: UUID, sub: str, *, email: str) -> httpx.Response:
+    """`GET /api/v1/me` on the MCP channel with a token whose email claim is
+    `email`: the door that still refreshes `users.email` from a claim."""
+    # The MCP resource is `MCP_AUD` there (tests/mcp_support.py).
+    env.settings.public_console_url = MCP_BASE
     slug = await env.org_slug(org_id)
-    token = env.idp.token(sub, slug, email=email or f"{sub}@test.local")
-    return {"Authorization": f"Bearer {token}"}
+    token = env.idp.token(sub, slug, aud=MCP_AUD, azp="claude", email=email)
+    async with marked_client(env) as client:
+        return await client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
 
 
 # --------------------------------------------------------------------------- #
@@ -324,10 +333,7 @@ async def test_a_changed_email_claim_updates_the_row(api_env) -> None:
     sub = await api_env.create_user(org_id, "technician")
     assert (await _row(api_env.admin_engine, sub)).email == f"{sub}@test.local"
 
-    response = await api_env.client.get(
-        "/api/v1/me",
-        headers=await _headers(api_env, org_id, sub, email="ada.new@toeshee.com"),
-    )
+    response = await _mcp_me(api_env, org_id, sub, email="ada.new@toeshee.com")
     assert response.status_code == 200
     assert response.json()["email"] == "ada.new@toeshee.com"
     assert (await _row(api_env.admin_engine, sub)).email == "ada.new@toeshee.com"
@@ -338,9 +344,7 @@ async def test_a_changed_email_claim_is_audited_with_both_values(api_env) -> Non
     sub = await api_env.create_user(org_id, "technician")
     old = f"{sub}@test.local"
 
-    await api_env.client.get(
-        "/api/v1/me", headers=await _headers(api_env, org_id, sub, email="ada.new@toeshee.com")
-    )
+    await _mcp_me(api_env, org_id, sub, email="ada.new@toeshee.com")
 
     events = await _audit(api_env.admin_engine, org_id, "auth.email_changed")
     assert len(events) == 1
@@ -354,10 +358,9 @@ async def test_an_unchanged_email_claim_writes_nothing(api_env) -> None:
     append an audit event per HTTP call and fill the chain with noise."""
     org_id = await api_env.create_org("stale")
     sub = await api_env.create_user(org_id, "technician")
-    headers = await _headers(api_env, org_id, sub, email="ada.new@toeshee.com")
 
     for _ in range(3):
-        await api_env.client.get("/api/v1/me", headers=headers)
+        await _mcp_me(api_env, org_id, sub, email="ada.new@toeshee.com")
 
     events = await _audit(api_env.admin_engine, org_id, "auth.email_changed")
     assert len(events) == 1
@@ -377,8 +380,7 @@ async def test_a_display_name_set_in_itms_survives_the_next_sign_in(api_env) -> 
 
     # A later sign-in, with a token whose `name` claim says something else --
     # which is what Keycloak sends for everybody by default.
-    later = await _headers(api_env, org_id, sub, email="ada.new@toeshee.com")
-    body = (await api_env.client.get("/api/v1/me", headers=later)).json()
+    body = (await _mcp_me(api_env, org_id, sub, email="ada.new@toeshee.com")).json()
 
     assert body["display_name"] == "Ada L."
     assert (await _row(api_env.admin_engine, sub)).display_name == "Ada L."
@@ -412,15 +414,8 @@ async def test_a_token_with_no_email_claim_does_not_blank_the_stored_address(
     stored = f"{sub}@test.local"
     assert (await _row(api_env.admin_engine, sub)).email == stored
 
-    # NOT via `_headers`: its `email or <default>` makes "" falsy and
-    # substitutes the seeded address, so routing this through the helper
-    # produces a test that passes without ever sending an empty claim. Minted
-    # directly for that reason.
-    slug = await api_env.org_slug(org_id)
-    token = api_env.idp.token(sub, slug, email="")
-    response = await api_env.client.get(
-        "/api/v1/me", headers={"Authorization": f"Bearer {token}"}
-    )
+    # An EMPTY claim, sent as one (`_mcp_me` passes `email` through as is).
+    response = await _mcp_me(api_env, org_id, sub, email="")
 
     assert response.status_code == 200
     assert (await _row(api_env.admin_engine, sub)).email == stored, (

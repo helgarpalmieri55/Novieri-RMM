@@ -1,7 +1,7 @@
 """The console's two WebSockets admit its session cookie (P2 design §6.5; coordinator D15).
 
 `/api/v1/ws` (live status) and `/api/v1/remote/sessions/{id}/screen` (remote
-screen) take the session cookie when no bearer subprotocol is offered, and only
+screen) take the session cookie -- and, since Task 13, nothing else -- and only
 from the console's `Origin`: a WebSocket handshake is not subject to CORS, so
 without that check any page the person opens could ride on their cookie
 (cross-site WebSocket hijacking). Driven as raw ASGI, as
@@ -183,8 +183,10 @@ async def test_the_live_socket_closes_when_its_session_ends(
 
 
 async def test_without_a_cookie_or_a_token_it_is_still_4401(api_env: Any) -> None:
-    """No credential at all goes down the bearer path with "" -- 4401, as
-    before, not a 4403 for the missing Origin."""
+    """No credential at all is 4401, as before -- the `SESSION_COOKIE not in
+    websocket.cookies` line of `ui_websocket` since Task 13 (it went down the
+    bearer path with "" until then) -- and not a 4403 for the missing
+    Origin."""
     sent = await _messages(api_env, "/api/v1/ws", cookie="", origin=None, disconnect_after=True)
     assert _closes(sent) == [4401]
 
@@ -239,7 +241,7 @@ async def test_the_screen_admits_its_owners_session(api_env: Any) -> None:
 
 
 async def test_the_screen_refuses_another_origin(api_env: Any) -> None:
-    """Protects `origin_allowed` in `tunnel.py::authorize_tunnel_session`."""
+    """Protects `origin_allowed` in `tunnel.py::admit_tunnel_session`."""
     org_id, signed = await _technician(api_env)
     sid = await _screen_session(api_env, org_id, signed.user_id)
     sent = await _messages(
@@ -343,7 +345,7 @@ async def _open_screen(
 async def test_the_screen_accepts_a_session_without_a_subprotocol(
     api_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Protects `AUTH_SUBPROTOCOL if token else None` in `session_screen`: the
+    """Protects `websocket.accept()` (no subprotocol) in `session_screen`: the
     browser offered none, and a handshake that names one fails there."""
     org_id, signed = await _technician(api_env)
     sid = await _screen_session(api_env, org_id, signed.user_id)

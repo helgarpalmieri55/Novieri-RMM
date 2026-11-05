@@ -924,6 +924,46 @@ jobs:
       - name: both languages passed
         run: test "${{ needs.harmony.result }}" = success
 
+  webauthn-uv:
+    # Falsifier 4 of the own-authentication design (§10), in a real browser: a
+    # passkey created without user verification is refused. Chromium's virtual
+    # authenticator (DevTools protocol, WebAuthn domain) makes the response;
+    # py_webauthn, called as the platform calls it, judges it. The server half
+    # -- the platform always asks for UV and always requires it -- is pytest's
+    # (tests/test_auth_falsifiers.py).
+    name: webauthn-uv (Chromium virtual authenticator)
+    runs-on: ${{ vars.CI_RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -e '.[dev]'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Playwright and Chromium
+        working-directory: frontend
+        # PINNED to the version the check was verified against (Playwright
+        # 1.56.1, its CDP WebAuthn domain and its Chromium build), so a red
+        # run means the falsifier and not a library or browser upgrade.
+        # Raising it is a deliberate change, re-verified with the probe's
+        # `require_user_verification=False` mutation (Task 13 report).
+        run: npm i -g playwright@1.56.1 && npx --yes playwright@1.56.1 install --with-deps chromium
+
+      - name: a passkey without user verification is refused
+        working-directory: frontend
+        run: node scripts/webauthn-uv.mjs
+
   agent:
     # The Go agent lives in-tree (CLAUDE.md a32cead) but is its own module, so
     # nothing above compiles, vets or runs a line of it: a green `backend` job

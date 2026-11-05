@@ -33,13 +33,13 @@ class Settings(BaseSettings):
     oidc_audience: str = "it-suite"
     oidc_jwks_url: str
     oidc_org_claim: str = "org"
-    # The OIDC client the console's own SPA signs in with: every non-MCP door
-    # admits only a token whose `azp` is this client
-    # (`app.core.security.require_console_token`), and `/mcp` refuses one that
-    # is. Optional: the default is the frontend's own default client id
-    # (`VITE_OIDC_CLIENT_ID ?? "it-suite-web"` in frontend/src/lib/auth.ts),
-    # and nothing under deploy/ overrides either, so no `.env` change is needed.
-    # Set ITS_OIDC_CONSOLE_CLIENT_ID only alongside a changed VITE_OIDC_CLIENT_ID.
+    # The OIDC client the console's SPA signed in with at Keycloak until own
+    # authentication phase 1: `/mcp` refuses a token whose `azp` is this client
+    # (`app.core.security.require_person_mcp_token`), so a grant consented to
+    # for the console is never an MCP one. No non-MCP door reads a bearer at
+    # all since phase 1's Task 13 -- the console signs in with the platform's
+    # own session. Optional: nothing under deploy/ overrides the default, so
+    # no `.env` change is needed.
     oidc_console_client_id: str = "it-suite-web"
     default_org_slug: str | None = None  # single-org on-prem fallback when the claim is absent
     # When true (multi-tenant deployments), a token missing the org claim is

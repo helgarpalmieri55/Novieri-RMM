@@ -196,9 +196,9 @@ async def create_resolver_turn(
     outcome = TurnOutcome(model_id=getattr(provider, "id", ""))
     # The turn's own internal token, minted from the portal principal's
     # session (autenticación propia design §5.6): `PortalContext` carries no
-    # principal, so `admit()` left it on `request.state`. Only a request the
-    # console's Keycloak bearer admitted still forwards that header, until
-    # Task 13 (D21).
+    # principal, so `admit()` left it on `request.state`. A request with no
+    # session gets none: `loopback_authorization` refuses it (own
+    # authentication Task 13).
     bearer = await loopback_authorization(request)
     try:
         await run_turn(

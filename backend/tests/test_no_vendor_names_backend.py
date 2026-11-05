@@ -165,6 +165,13 @@ def _python_files() -> list[Path]:
     return sorted(p for p in APP.rglob("*.py") if "__pycache__" not in p.parts)
 
 
+def test_the_walk_reaches_the_platforms_own_sign_in() -> None:
+    """Own authentication design §10.10: the sign-in's own refusals are text a
+    buyer reads, so the guard must be seen to read them."""
+    files = {path.relative_to(APP).as_posix() for path in _python_files()}
+    assert {"api/v1/auth.py", "core/auth/sessions.py", "core/auth/loopback.py"} <= files
+
+
 # --------------------------------------------------------------------------- #
 # the extractor the guard is built on
 # --------------------------------------------------------------------------- #

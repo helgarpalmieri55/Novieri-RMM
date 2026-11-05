@@ -41,11 +41,12 @@ to raise out of the executor, out of the loop and out of this route, so a turn
 that had read real estate data through the agent produced a 500 and NO `ai.query`
 event at all.
 
-**THE BEARER TOKEN IS READ FROM THIS REQUEST'S OWN HEADERS AND PASSED AS AN
-ARGUMENT** (§0.1). It is never put on `AuthContext` -- that dataclass reaches
-every module, and a token on it is one careless `logger.debug(ctx)` from living
-in a log file forever -- never stored on a row, never logged, and never given to
-the model.
+**THE TURN'S TOKEN IS MINTED FROM THIS REQUEST'S OWN SESSION AND PASSED AS AN
+ARGUMENT** (§0.1; `loopback_authorization`, autenticación propia design §5.6 --
+the request's own headers are never forwarded). It is never put on
+`AuthContext` -- that dataclass reaches every module, and a token on it is one
+careless `logger.debug(ctx)` from living in a log file forever -- never stored
+on a row, never logged, and never given to the model.
 
 **§0.9's 409 NEEDS A CROSS-ORG LOOK, AND THIS IS THE ONLY ONE IN THE MODULE.**
 A conversation is pinned to one org at creation and a mismatch is a 409, never a
@@ -681,8 +682,8 @@ async def create_turn(
     # 6. Run the turn. NO DATABASE SESSION IS HELD PAST THIS LINE.
     history.append(Message(role="user", content=(TextBlock(text=body.question),)))
     # The turn's own internal token, minted from THIS request's session
-    # (autenticación propia design §5.6). Only a request the console's
-    # Keycloak bearer admitted still forwards that header, until Task 13 (D21).
+    # (autenticación propia design §5.6). A request with no session gets
+    # none: `loopback_authorization` refuses it (own authentication Task 13).
     bearer = await loopback_authorization(request)
 
     channel = _channel(session_id, stream_id)

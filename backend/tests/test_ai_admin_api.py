@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.core.ai import providers as providers_module
 from app.core.ai.providers import TextBlock, ToolCallBlock, load_provider_configs
+from app.core.auth import loopback
 from app.core.rbac import route_permission
 from app.models import AiInjectionFlag, AiMessage, AiSession, AuditEvent
 from app.modules.ai_admin import api as api_module
@@ -336,13 +337,24 @@ async def test_another_users_session_in_the_same_org_is_a_404_everywhere(
 async def test_the_bearer_token_reaches_no_row_no_audit_no_model_and_no_log(
     api_env: Any, monkeypatch: Any, caplog: Any
 ) -> None:
-    """§0.1. The token is read from this request's own headers and passed as an
-    argument; it is never on `AuthContext`, never on a row, never audited, never
-    logged, and never given to the model."""
+    """§0.1. The turn's token is minted from this request's own session
+    (`loopback_authorization`) and passed as an argument; it is never on
+    `AuthContext`, never on a row, never audited, never logged, and never given
+    to the model. Since own authentication Task 13 there are two secrets to
+    look for, where there was the console's Bearer: the session cookie the
+    request brought, and the internal token the turn minted from it."""
     env = await _env(api_env, "health.read")
     provider = _install(monkeypatch, RecordingProvider("Nothing is alerting."))
     session_id = await _new_session(env)
-    token = env.headers["Authorization"]
+    cookie = env.headers["Cookie"].split("=", 1)[1]
+    minted: list[str] = []
+    real_mint = loopback.mint_loopback
+
+    async def recording_mint(principal: Any) -> str:
+        minted.append(await real_mint(principal))
+        return minted[-1]
+
+    monkeypatch.setattr(loopback, "mint_loopback", recording_mint)
 
     with caplog.at_level(logging.DEBUG):
         response = await api_env.client.post(
@@ -372,13 +384,14 @@ async def test_the_bearer_token_reaches_no_row_no_audit_no_model_and_no_log(
             .all()
         )
 
-    bare = token.removeprefix("Bearer ")
     assert rows, "the fixture stored nothing, so the row assertion would be vacuous"
-    assert all(bare not in (row.content or "") for row in rows)
-    assert all(bare not in json.dumps(row.tool_calls or []) for row in rows)
-    assert all(bare not in json.dumps(event.meta) for event in events)
-    assert bare not in json.dumps(provider.seen)
-    assert bare not in caplog.text
+    assert minted, "the turn minted no token, so the token assertions would be vacuous"
+    for bare in (cookie, minted[0]):
+        assert all(bare not in (row.content or "") for row in rows)
+        assert all(bare not in json.dumps(row.tool_calls or []) for row in rows)
+        assert all(bare not in json.dumps(event.meta) for event in events)
+        assert bare not in json.dumps(provider.seen)
+        assert bare not in caplog.text
 
 
 # --------------------------------------------------------------------------- #

@@ -22,6 +22,7 @@ Three things every test here does deliberately:
 import time
 from typing import Any, get_args
 
+import jwt
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -395,7 +396,7 @@ async def test_the_probes_success_signal_really_is_blocked(api_env: Any) -> None
         tool_name=_DEVICE_PROBE.name,
         raw_args={"device_id": str(world.device_id)},
         app=api_env.app,
-        bearer=world.headers["Authorization"],
+        bearer=await api_env.loopback_bearer(world.org_id, world.sub),
         deadline=time.monotonic() + 30.0,
         registry=_DEVICE_PROBE_REGISTRY,
     )
@@ -727,7 +728,7 @@ async def test_a_successful_tool_call_is_the_first_mutating_tool_result(
         tool_name="devices.health",
         raw_args={"device_id": str(world.device_id)},
         app=api_env.app,
-        bearer=world.headers["Authorization"],
+        bearer=await api_env.loopback_bearer(world.org_id, world.sub),
         deadline=time.monotonic() + 30.0,
         registry=__import__(
             "app.core.ai.tools", fromlist=["REGISTRY"]
@@ -768,12 +769,16 @@ async def test_a_cross_org_catalogue_key_is_not_resolvable(api_env: Any) -> None
 
 
 async def test_the_turn_context_is_the_callers_own_token(api_env: Any) -> None:
-    """A sanity pin on the fixture itself: the loopback probe carries the
-    principal under test, not a service token. If this ever stopped being true,
-    every authorization assertion in this file would be about the wrong
-    identity."""
+    """A sanity pin on the fixture itself: the loopback probe carries a token
+    naming the principal under test, not a service token. If this ever stopped
+    being true, every authorization assertion in this file would be about the
+    wrong identity. (It compared the context's bearer with the console's
+    Bearer the fixture signed in with, until own authentication Task 13: the
+    turn's token is the internal one minted from that person's session.)"""
     world = await build_world(api_env, tag="act-token")
-    assert world.ctx.bearer == world.headers["Authorization"]
+    token = world.ctx.bearer.removeprefix("Bearer ")
+    claims = jwt.decode(token, options={"verify_signature": False})
+    assert (claims["aud"], claims["sub"]) == ("loopback", str(world.user_id))
     assert isinstance(world.ctx, TurnContext)
 
 
