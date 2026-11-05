@@ -72,6 +72,17 @@ export function patternOf(route) {
 }
 
 export const ROUTES = [
+  // The pages reached without a session (own-auth Task 11). No top bar, so
+  // harmony measures their tokens, overflow and axe, and skips the bar.
+  "/sign-in",
+  "/sign-in/factor",
+  "/sign-in/enroll",
+  "/sign-in/recovery-codes",
+  "/forgot-password",
+  // The emailed links carry their token in the fragment, which harmony cannot
+  // add (`?__fixtures` would land inside it); the fixtures answer any token.
+  "/reset-password",
+  "/invite",
   "/devices",
   "/devices/onboard",
   "/devices/push-runs",
