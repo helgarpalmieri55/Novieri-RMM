@@ -231,6 +231,18 @@ async def test_resend_replaces_the_link_and_cancel_kills_it_with_the_account(
             )
         ).scalars().all()
     assert user is not None and user.status == "deleted" and grants == []
+    # The link itself is spent too, not only refused because the account is
+    # deleted: a later re-enable of the row must not bring it back to life.
+    async with AsyncSession(env.admin_engine) as session:
+        live = (
+            await session.execute(
+                select(AuthActionToken.id).where(
+                    AuthActionToken.user_id == UUID(invited["user_id"]),
+                    AuthActionToken.used_at.is_(None),
+                )
+            )
+        ).all()
+    assert live == []
     resent_events = await _audit(env, org, "user.invite_resent")
     assert [e.action for e in resent_events] == ["user.invite_resent"]
     assert len(await _audit(env, org, "user.invite_cancelled")) == 1
