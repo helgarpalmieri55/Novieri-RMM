@@ -1,7 +1,8 @@
 /**
- * First boot in Spanish: the claim form, its refusal, and the completed screen.
- * The server's own words (a refusal's `detail`, an invitation error) are shown
- * as the server sent them; everything the page owns is Spanish.
+ * First boot in Spanish: the claim form with the owner's password, its
+ * refusals, and the way on to sign in. The server's own words (a refusal's
+ * `detail`) are shown as the server sent them; everything the page owns is
+ * Spanish.
  */
 
 import { screen } from "@testing-library/react";
@@ -37,10 +38,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function fillTheForm(user: ReturnType<typeof userEvent.setup>) {
+async function fillTheForm(user: ReturnType<typeof userEvent.setup>, password = "una frase larga que recuerdo") {
   await user.type(screen.getByLabelText("Código de instalación"), "codigo");
   await user.type(screen.getByLabelText("Tu nombre"), "Dana Okafor");
   await user.type(screen.getByLabelText("Tu correo electrónico"), "dana@example.com");
+  await user.type(screen.getByLabelText("Contraseña nueva"), password);
+  await user.type(screen.getByLabelText("La misma contraseña otra vez"), password);
   await user.type(screen.getByLabelText("Nombre de la organización"), "Toeshee");
 }
 
@@ -59,7 +62,7 @@ describe("the setup screen in Spanish", () => {
     const { container } = renderInSpanish(<SetupPage />);
     expect(screen.getByRole("heading", { name: "Configura esta instalación" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Finalizar configuración" })).toBeDisabled();
-    expect(screen.getByText(/Recibirás un enlace para elegir una contraseña/)).toBeInTheDocument();
+    expect(screen.getByText(/El primer administrador inicia sesión con este correo y esta contraseña/)).toBeInTheDocument();
     expectNoEnglish(container);
 
     await fillTheForm(user);
@@ -83,34 +86,30 @@ describe("the setup screen in Spanish", () => {
     expectNoEnglish(container);
   });
 
-  // RE-POINTED (own-auth Task 10): the second alert, "No se pudo iniciar
-  // sesión", was a redirect to Keycloak that failed before it left. The
-  // console's own sign-in page needs nothing fetched first, so the button
-  // goes and the failed invitation is the one alert left.
-  it("shows the completed screen in Spanish, with a failed invitation, and goes to sign in", async () => {
-    const user = userEvent.setup();
-    claimReply = { status: 201, body: { ...CLAIMED, invitation_sent: false, invitation_error: null } };
-    const { container } = renderInSpanish(<SetupPage />);
-    await fillTheForm(user);
-    await user.click(screen.getByRole("button", { name: "Finalizar configuración" }));
-
-    expect(await screen.findByRole("heading", { name: "Configuración completada" })).toBeInTheDocument();
-    expect(screen.getByText("dana@example.com", { selector: "b" })).toBeInTheDocument();
-    expect(screen.getByText(/No se pudo enviar el correo de invitación/)).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Ir a iniciar sesión" }));
-    expect(assign).toHaveBeenCalledWith("/sign-in");
-    expect(screen.getAllByRole("alert")).toHaveLength(1);
-    expectNoEnglish(container);
-  });
-
-  it("says where to find the invitation when it was sent", async () => {
+  // RE-POINTED (own-auth Task 10, then the coordinator's Task 11 decision):
+  // the completed screen, its failed invitation and its "Ir a iniciar sesión"
+  // button are gone -- the owner has a password and goes to sign in at once.
+  it("goes to sign in once the installation is claimed", async () => {
     const user = userEvent.setup();
     claimReply = { status: 201, body: CLAIMED };
     const { container } = renderInSpanish(<SetupPage />);
     await fillTheForm(user);
     await user.click(screen.getByRole("button", { name: "Finalizar configuración" }));
-    expect(await screen.findByText(/Revisa esa bandeja de entrada/)).toBeInTheDocument();
+    await vi.waitFor(() => expect(assign).toHaveBeenCalledWith("/sign-in"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expectNoEnglish(container);
+  });
+
+  // RE-POINTED: was "says where to find the invitation when it was sent".
+  it("refuses a short password in Spanish, before claiming anything", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => respond(claimReply));
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = renderInSpanish(<SetupPage />);
+    await fillTheForm(user, "corta");
+    await user.click(screen.getByRole("button", { name: "Finalizar configuración" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Usa al menos 12 caracteres.");
+    expect(fetchMock).not.toHaveBeenCalled();
     expectNoEnglish(container);
   });
 });
