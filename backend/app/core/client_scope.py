@@ -93,12 +93,6 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "door 1 (HTTP, MCP and the portal's sign-in): resolves the user and their grants "
         "before the scope exists (spec §2.2)"
     ),
-    "app/core/identity/door.py::read_door_identity": (
-        "a token door's identity read, as doors 2 and 3 (console WebSocket, remote tunnel) "
-        "made it until own authentication Task 13 -- no door calls it since: the domain rule, "
-        "users.status and users.kind, and the grants the scope is computed from "
-        "(spec §2.2, §2.6)"
-    ),
     "app/core/auth/sessions.py::resolve": (
         "a session cookie names a row before anybody knows whose: a staff session has no "
         "client, so it is read and touched under every client, after its_auth_session gave "
@@ -109,8 +103,9 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "before the scope they define exists, as admit reads them for a token"
     ),
     "app/core/identity/door.py::read_session_identity": (
-        "doors 2 and 3 for a console session (P2 design §6.5): read_door_identity's reads, "
-        "keyed by the session's person instead of a token"
+        "doors 2 and 3 (console WebSocket, remote tunnel) for a console session (P2 design "
+        "§6.5): the domain rule, users.status and users.kind, and the grants the scope is "
+        "computed from (spec §2.2, §2.6)"
     ),
     "app/core/identity/door.py::person_scope": (
         "an admitted person's grants for one code (require_permission, the portal's gate, "

@@ -21,13 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthContext, bound_auth_context, require_permission
 from app.core.client_scope import ClientScope
-from app.core.identity.door import read_door_identity
+from app.core.identity.door import read_session_identity
 from app.core.rbac import clients_holding, has_permission
-from app.core.security import TokenClaims
 from app.core.tenancy import org_session
 from app.models import Client, Role, User, UserRole
 from app.modules.portal.principal import require_portal_permission, resolve_portal_principal
-from app.modules.remote.tunnel import TunnelAuthError, authorize_tunnel_session
+from app.modules.remote.tunnel import REMOTE_CONTROL, TunnelAuthError, authorize_tunnel_session
 from tests.session_support import sign_in, socket_connection
 
 Grants = list[tuple[str, str | None]]
@@ -298,31 +297,37 @@ async def test_a_contact_is_refused_at_the_console(api_env: Any) -> None:
 
 # --------------------------------------------------------------------------- #
 # Doors 2 and 3: the console WebSocket and the remote tunnel
+#
+# Both turn a console session into a person with `read_session_identity`, and
+# these call it with each door's own arguments: the live socket as
+# `console-ws` with no code (`ws.py::_session_scope`), the tunnel as
+# `remote-tunnel` with `remote.control` (`tunnel.py::admit_tunnel_session`).
+# Until own authentication Task 13 they read a token with
+# `read_door_identity`, which went with the console's bearer.
 # --------------------------------------------------------------------------- #
+
+
+async def _door_identity(env: Any, org: UUID, user_id: UUID, *, door: str) -> Any:
+    return await read_session_identity(
+        door=door,
+        org_id=org,
+        user_id=user_id,
+        settings=env.settings,
+        engine=env.app_engine,
+        code=REMOTE_CONTROL if door == "remote-tunnel" else None,
+    )
 
 
 async def test_the_door_identity_carries_the_persons_scope(api_env: Any) -> None:
     env = api_env
     org, user, c = await _seed(env.admin_engine, env, [("technician", "X"), ("read-only", "Z")])
-    slug = await env.org_slug(org)
 
-    async def identity(sub: str, code: str | None) -> Any:
-        claims = TokenClaims(sub=sub, email="ana@test.local", name="Ana", org_slug=slug)
-        return await read_door_identity(
-            door="test",
-            org_id=org,
-            claims=claims,
-            settings=env.settings,
-            engine=env.app_engine,
-            code=code,
-        )
-
-    ws = await identity(f"sub-{org}", None)
+    ws = await _door_identity(env, org, user, door="console-ws")
     assert (ws.refusal, ws.user_id) == (None, user)
     assert ws.clients == ClientScope.only([c["X"], c["Z"]])
-    tunnel = await identity(f"sub-{org}", "remote.control")
+    tunnel = await _door_identity(env, org, user, door="remote-tunnel")
     assert tunnel.clients == ClientScope.only([c["X"]])
-    unknown = await identity("nobody-at-all", None)
+    unknown = await _door_identity(env, org, uuid4(), door="console-ws")
     assert (unknown.user_id, unknown.clients) == (None, ClientScope.only([]))
 
 
@@ -330,13 +335,10 @@ async def test_a_contact_is_refused_at_the_websocket_and_tunnel_doors(api_env: A
     env = api_env
     org, user, c = await _seed(env.admin_engine, env, [("technician", None)])
     await _make_contact(env, org, user, c["X"])
-    slug = await env.org_slug(org)
-    claims = TokenClaims(sub=f"sub-{org}", email="ana@test.local", name="Ana", org_slug=slug)
-    identity = await read_door_identity(
-        door="test", org_id=org, claims=claims, settings=env.settings, engine=env.app_engine
-    )
-    assert identity.refusal == "this account can only use the portal"
-    assert identity.clients == ClientScope.only([])
+    for door in ("console-ws", "remote-tunnel"):
+        identity = await _door_identity(env, org, user, door=door)
+        assert identity.refusal == "this account can only use the portal", door
+        assert identity.clients == ClientScope.only([]), door
 
 
 async def _tunnel(env: Any, org: UUID) -> tuple[UUID, UUID, ClientScope]:
