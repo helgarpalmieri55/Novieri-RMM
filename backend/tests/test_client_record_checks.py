@@ -615,7 +615,10 @@ async def _remote_session(env: ApiEnv, org: UUID, device: UUID, technician: UUID
 
 async def _user(env: ApiEnv, org: UUID) -> UUID:
     async with AsyncSession(env.admin_engine, expire_on_commit=False) as s:
-        u = User(org_id=org, external_subject=f"u-{uuid4().hex[:8]}", email="u@x.y")
+        # A technician's address is unique in an organisation (0245,
+        # ux_users_org_lower_email_staff), so each person gets their own.
+        tag = uuid4().hex[:8]
+        u = User(org_id=org, external_subject=f"u-{tag}", email=f"u-{tag}@x.y")
         s.add(u)
         await s.commit()
         return u.id
