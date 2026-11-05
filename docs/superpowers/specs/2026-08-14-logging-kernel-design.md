@@ -175,7 +175,14 @@ there is, because a platform with zero users has no audit chain either. Static
 templates, variables in `extra`, and the install code never appears in any of
 them.
 
-**NOW 110, own authentication phase 1 (Task 9).** One static WARNING in
+**NOW 105, P2 phase 1 Task 8.** Five WARNINGs go with the identity provider's
+calls they described -- `user_admin/service.py::_translating`, the language
+mirror (`app/api/v1/me.py::_mirror_locale`), and three on the first-boot path
+(`setup.py::_provisioning`, `_refusal_detail`, `_invitation_error`). The
+claim's refusals left are about the request and answer it; the recovery
+command prints to the operator's terminal and logs nothing.
+
+**BEFORE THAT, 110, own authentication phase 1 (Task 9).** One static WARNING in
 `app/core/auth/loopback.py::_refused`, when the door refuses the assistant's
 internal token. `extra` = the reason, a fixed phrase of that module; never the
 token, the session id or the person.

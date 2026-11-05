@@ -196,12 +196,6 @@ async def read_own_profile(*, org_id: UUID, user_id: UUID, engine: AsyncEngine) 
     return _profile(user, grants, clients)
 
 
-async def read_own_locale(*, org_id: UUID, user_id: UUID, engine: AsyncEngine) -> str | None:
-    """The caller's saved language, read again after a mirror (`PATCH /me`)."""
-    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
-        return (await _own_row(session, user_id)).locale
-
-
 async def update_own_profile(
     *,
     org_id: UUID,

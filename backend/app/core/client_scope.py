@@ -138,7 +138,6 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "person with no grant has the empty scope, which 0231 hides staff rows from "
         "(Task 6b)",
         "read_own_profile",
-        "read_own_locale",
         "update_own_profile",
     ),
     # -- (e) the platform's own sign-in (P2 phase 1): a technician's auth rows
@@ -155,6 +154,10 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
     "app/core/auth/account.py::_own_session": (
         "My security is personal, like /me: the caller's OWN auth rows, by the user id of the "
         "session the door admitted (P2 phase 1 design §2.4-§2.6)"
+    ),
+    "app/core/auth/recover.py::issue_recovery_link": (
+        "the server's own recovery command, never HTTP: one technician's recovery link, "
+        "issued by whoever holds the server (P2 phase 1 design §7)"
     ),
     # -- (a) processes with no person behind them --------------------------
     **_reviewed(

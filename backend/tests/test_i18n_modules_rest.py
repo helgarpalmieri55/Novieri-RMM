@@ -13,7 +13,6 @@ tests below.
 from typing import Any
 from uuid import UUID, uuid4
 
-import httpx
 import pytest
 from moto import mock_aws
 from sqlalchemy import select
@@ -23,6 +22,7 @@ from app.core.i18n import CATALOG_ES, use_locale
 from app.core.router_inspect import flatten
 from app.core.storage import ObjectStore
 from app.models import User
+from tests.auth_support import CONSOLE, staff
 
 
 async def _detail(
@@ -75,17 +75,11 @@ async def admin(api_env: Any) -> tuple[Any, dict[str, str]]:
 async def users_env(
     api_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[Any, dict[str, str], UUID]:
-    """The user-lifecycle router with a provisioning config and no real identity
-    provider: every call below is refused before one is made."""
-    from app.modules.user_admin.api import keycloak_config
+    """The user-lifecycle router: every call below is refused before it acts."""
     from app.modules.user_admin.api import router as users_router
-    from app.modules.user_admin.kc_client import KeycloakAdminConfig
 
     if "/api/v1/users" not in {path for path, _route in flatten(api_env.app.router)}:
         api_env.app.include_router(users_router, prefix="/api/v1")
-    api_env.app.dependency_overrides[keycloak_config] = lambda: KeycloakAdminConfig(
-        base_url="https://idp.test", realm="it-suite", client_id="c", client_secret="s"
-    )
     org = await api_env.create_org("i18n-users")
     sub = await api_env.create_user(org, "org-admin")
     headers = await api_env.headers(org, sub)
@@ -93,8 +87,7 @@ async def users_env(
         me = (
             await session.execute(select(User.id).where(User.external_subject == sub))
         ).scalar_one()
-    yield api_env, headers, me
-    api_env.app.dependency_overrides.pop(keycloak_config, None)
+    return api_env, headers, me
 
 
 async def test_user_admin_a_user_that_does_not_exist(
@@ -165,25 +158,41 @@ async def test_user_admin_the_super_admin_rail_names_the_role_and_every_conditio
     )
 
 
-def test_user_admin_the_provider_failure_names_the_action_in_the_consoles_words() -> None:
-    """user_admin/words.py via wire_words.say: the action a refused identity-provider
-    call was attempting, said inside the sentence."""
-    from app.modules.user_admin.service import UserAdminError, _translating
-
-    def failure() -> str:
-        with pytest.raises(UserAdminError) as caught, _translating("send the enrolment email"):
-            raise httpx.ConnectError("down")
-        return caught.value.detail
-
-    assert failure() == (
-        "the identity provider was unreachable while trying to send the enrolment email "
-        "(ConnectError)"
+async def test_user_admin_a_resend_after_acceptance_is_refused_in_both_languages(
+    users_env: tuple[Any, dict[str, str], UUID],
+) -> None:
+    """user_admin/service.py `resend_invite`: an invitation already accepted
+    (the person has a password) is a 409, in both languages."""
+    env, headers, me = users_env
+    env.settings.public_console_url = CONSOLE
+    async with AsyncSession(env.admin_engine) as session:
+        org = (await session.execute(select(User.org_id).where(User.id == me))).scalar_one()
+    member = await staff(env, org, "technician")
+    await _both_languages(
+        env,
+        "POST",
+        f"/api/v1/users/{member.user_id}/invite/resend",
+        headers,
+        status=409,
+        english="this person has already accepted their invitation",
     )
-    with use_locale("es"):
-        assert failure() == (
-            "no se pudo contactar con el proveedor de identidad al intentar enviar el correo "
-            "de invitación (ConnectError)"
-        )
+
+
+async def test_user_admin_resetting_your_own_factors_is_refused_in_the_consoles_words(
+    users_env: tuple[Any, dict[str, str], UUID],
+) -> None:
+    """user_admin/words.py via wire_words.say: the new verb of the self rail
+    (`RESET_FACTORS`), said inside the sentence in both languages."""
+    env, headers, me = users_env
+    await _both_languages(
+        env,
+        "POST",
+        f"/api/v1/users/{me}/factors/reset",
+        headers,
+        status=403,
+        english="you cannot reset the sign-in methods of your own account",
+        spanish="no puedes restablecer los métodos de inicio de sesión de tu propia cuenta",
+    )
 
 
 async def test_user_admin_the_lockout_rails_keep_every_condition_in_spanish(
@@ -195,81 +204,73 @@ async def test_user_admin_the_lockout_rails_keep_every_condition_in_spanish(
     and the way out each survive in Spanish, and English is what it was.
     `_refuse_self` has its own test above."""
     from app.models import Role, UserRole
-    from app.modules.user_admin.api import keycloak_config
     from app.modules.user_admin.api import router as users_router
-    from app.modules.user_admin.kc_client import KeycloakAdminConfig
     from tests.ai_admin_fakes import ai_user
 
     if "/api/v1/users" not in {path for path, _route in flatten(api_env.app.router)}:
         api_env.app.include_router(users_router, prefix="/api/v1")
-    api_env.app.dependency_overrides[keycloak_config] = lambda: KeycloakAdminConfig(
-        base_url="https://idp.test", realm="it-suite", client_id="c", client_secret="s"
-    )
-    try:
-        org = await api_env.create_org("i18n-lockout")
-        only_admin = await api_env.create_user(org, "org-admin")
-        other = await api_env.create_user(org)
-        _actor_id, actor_sub = await ai_user(api_env, org, "users.manage")
-        headers = await api_env.headers(org, actor_sub)
-        async with AsyncSession(api_env.admin_engine) as session:
-            admin_id = (
-                await session.execute(select(User.id).where(User.external_subject == only_admin))
-            ).scalar_one()
-            other_id = (
-                await session.execute(select(User.id).where(User.external_subject == other))
-            ).scalar_one()
-            admin_assignment = (
-                await session.execute(
-                    select(UserRole.id)
-                    .join(Role, Role.id == UserRole.role_id)
-                    .where(UserRole.user_id == admin_id, Role.name == "org-admin")
-                )
-            ).scalar_one()
-            super_admin_role = (
-                await session.execute(
-                    select(Role.id).where(Role.name == "super-admin", Role.org_id.is_(None))
-                )
-            ).scalar_one()
-            session.add(UserRole(org_id=org, user_id=other_id, role_id=super_admin_role))
-            await session.commit()
+    org = await api_env.create_org("i18n-lockout")
+    only_admin = await api_env.create_user(org, "org-admin")
+    other = await api_env.create_user(org)
+    _actor_id, actor_sub = await ai_user(api_env, org, "users.manage")
+    headers = await api_env.headers(org, actor_sub)
+    async with AsyncSession(api_env.admin_engine) as session:
+        admin_id = (
+            await session.execute(select(User.id).where(User.external_subject == only_admin))
+        ).scalar_one()
+        other_id = (
+            await session.execute(select(User.id).where(User.external_subject == other))
+        ).scalar_one()
+        admin_assignment = (
+            await session.execute(
+                select(UserRole.id)
+                .join(Role, Role.id == UserRole.role_id)
+                .where(UserRole.user_id == admin_id, Role.name == "org-admin")
+            )
+        ).scalar_one()
+        super_admin_role = (
+            await session.execute(
+                select(Role.id).where(Role.name == "super-admin", Role.org_id.is_(None))
+            )
+        ).scalar_one()
+        session.add(UserRole(org_id=org, user_id=other_id, role_id=super_admin_role))
+        await session.commit()
 
-        stranding = (
-            "this is the organization's last active org-admin and cannot be {verb}; "
-            "grant org-admin to somebody else first"
-        )
-        stranding_es = (
-            "esta cuenta es el último org-admin activo de la organización y no se puede "
-            "{verb}; concede org-admin a otra persona primero"
-        )
-        await _both_languages(
-            api_env, "POST", f"/api/v1/users/{admin_id}/disable", headers, status=403,
-            english=stranding.format(verb="disabled"),
-            spanish=stranding_es.format(verb="deshabilitar"),
-        )
-        await _both_languages(
-            api_env, "DELETE", f"/api/v1/users/{admin_id}", headers, status=403,
-            english=stranding.format(verb="deleted"),
-            spanish=stranding_es.format(verb="eliminar"),
-        )
-        await _both_languages(
-            api_env, "DELETE", f"/api/v1/users/{admin_id}/roles/{admin_assignment}", headers,
-            status=403,
-            english=stranding.format(verb="stripped of the role"),
-            spanish=stranding_es.format(verb="dejar sin ese rol"),
-        )
-        await _both_languages(
-            api_env, "POST", f"/api/v1/users/{other_id}/disable", headers, status=403,
-            english=(
-                "this account holds super-admin, which no console surface can grant back, "
-                "so it cannot be disabled from here"
-            ),
-            spanish=(
-                "esta cuenta tiene super-admin, que ninguna pantalla de la consola puede "
-                "volver a conceder, así que no se puede deshabilitar desde aquí"
-            ),
-        )
-    finally:
-        api_env.app.dependency_overrides.pop(keycloak_config, None)
+    stranding = (
+        "this is the organization's last active org-admin and cannot be {verb}; "
+        "grant org-admin to somebody else first"
+    )
+    stranding_es = (
+        "esta cuenta es el último org-admin activo de la organización y no se puede "
+        "{verb}; concede org-admin a otra persona primero"
+    )
+    await _both_languages(
+        api_env, "POST", f"/api/v1/users/{admin_id}/disable", headers, status=403,
+        english=stranding.format(verb="disabled"),
+        spanish=stranding_es.format(verb="deshabilitar"),
+    )
+    await _both_languages(
+        api_env, "DELETE", f"/api/v1/users/{admin_id}", headers, status=403,
+        english=stranding.format(verb="deleted"),
+        spanish=stranding_es.format(verb="eliminar"),
+    )
+    await _both_languages(
+        api_env, "DELETE", f"/api/v1/users/{admin_id}/roles/{admin_assignment}", headers,
+        status=403,
+        english=stranding.format(verb="stripped of the role"),
+        spanish=stranding_es.format(verb="dejar sin ese rol"),
+    )
+    await _both_languages(
+        api_env, "POST", f"/api/v1/users/{other_id}/disable", headers, status=403,
+        english=(
+            "this account holds super-admin, which no console surface can grant back, "
+            "so it cannot be disabled from here"
+        ),
+        spanish=(
+            "esta cuenta tiene super-admin, que ninguna pantalla de la consola puede "
+            "volver a conceder, así que no se puede deshabilitar desde aquí"
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- #

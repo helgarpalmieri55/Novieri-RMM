@@ -1242,33 +1242,10 @@ CATALOG: dict[str, str] = {
     "no fields supplied; send name and/or description": (
         "no se indicó ningún campo; envía name y/o description"
     ),
-    "the identity provider could not create the first administrator. Nothing was created; the "
-    "server log has the detail.": (
-        "el proveedor de identidad no pudo crear al primer administrador. No se creó nada; el "
-        "registro del servidor tiene el detalle."
-    ),
-    "The invitation email could not be sent, so no sign-in link has arrived. Email delivery is "
-    "most likely not set up on this installation yet.": (
-        "No se pudo enviar el correo de invitación, así que no ha llegado ningún enlace de "
-        "acceso. Lo más probable es que el envío de correo aún no esté configurado en esta "
-        "instalación."
-    ),
     "that install code is not correct. It is printed in the server log at first start and "
     "stored beside this installation's other secrets.": (
         "ese código de instalación no es correcto. Se imprime en el registro del servidor en "
         "el primer arranque y se guarda junto a los demás secretos de esta instalación."
-    ),
-    "this installation cannot create accounts yet: its identity provisioning is not "
-    "configured. That is a server setting, not something this screen can fix.": (
-        "esta instalación todavía no puede crear cuentas: su aprovisionamiento de identidad no "
-        "está configurado. Es un ajuste del servidor, no algo que esta pantalla pueda arreglar."
-    ),
-    "this installation is still starting up, so it cannot create accounts yet. Wait a moment "
-    "and try again. If it says this for more than a few minutes, the installation did not "
-    "finish preparing itself and needs attention from whoever set it up.": (
-        "esta instalación todavía se está iniciando, así que aún no puede crear cuentas. "
-        "Espera un momento e inténtalo de nuevo. Si sigue diciendo esto pasados unos minutos, "
-        "la instalación no terminó de prepararse y necesita la atención de quien la configuró."
     ),
     "this installation has already been set up. Sign in, or ask one of its administrators to "
     "add you.": (
@@ -4599,14 +4576,24 @@ CATALOG: dict[str, str] = {
         "para iniciar sesión.\n{link}\n\nSi no fuiste tú, ignora este mensaje: tu contraseña no "
         "ha cambiado."
     ),
+    "A recovery link was issued for your {product} account": (
+        "Se emitió un enlace de recuperación para tu cuenta de {product}"
+    ),
+    "On {when} someone with access to the server issued a one-time recovery link for your "
+    "account. It works for 15 minutes.\n\nIf you did not ask for this, tell whoever runs this "
+    "installation now.": (
+        "El {when} alguien con acceso al servidor emitió un enlace de recuperación de un solo uso "
+        "para tu cuenta. Sirve durante 15 minutos.\n\nSi no lo pediste, avisa ahora a quien "
+        "administra esta instalación."
+    ),
+    "You are invited to {product}": "Te invitaron a {product}",
+    "{inviter} invited you to {product}.\n\nOpen this link within 72 hours to choose a password "
+    "and set up your second factor:\n{link}\n\nIf you did not expect this, ignore this message.": (
+        "{inviter} te invitó a {product}.\n\nAbre este enlace en las próximas 72 horas para "
+        "elegir una contraseña y configurar tu segundo factor:\n{link}\n\nSi no lo esperabas, "
+        "ignora este mensaje."
+    ),
     # --- user_admin ---
-    "the identity provider refused to {what} (HTTP {status_code})": (
-        "el proveedor de identidad se negó a {what} (HTTP {status_code})"
-    ),
-    "the identity provider could not {what}": "el proveedor de identidad no pudo {what}",
-    "the identity provider was unreachable while trying to {what} ({error_type})": (
-        "no se pudo contactar con el proveedor de identidad al intentar {what} ({error_type})"
-    ),
     "{role} is cross-org platform administration and cannot be granted from an organization": (
         "{role} es administración de la plataforma entre organizaciones y no se puede conceder "
         "desde una organización"
@@ -4629,9 +4616,6 @@ CATALOG: dict[str, str] = {
     "a user with that email address already exists here": (
         "aquí ya existe un usuario con esa dirección de correo electrónico"
     ),
-    "the identity was created but the local record conflicts with an existing one": (
-        "la identidad se creó, pero el registro local entra en conflicto con uno existente"
-    ),
     "this user already holds that role at that scope": (
         "este usuario ya tiene ese rol en ese ámbito"
     ),
@@ -4643,11 +4627,16 @@ CATALOG: dict[str, str] = {
         "{role} es administración de la plataforma entre organizaciones; no se puede conceder "
         "desde una organización y por eso tampoco se revoca desde una"
     ),
-    "this installation cannot manage accounts yet: its identity provisioning is not "
-    "configured. That is a server setting, not something this screen can fix.": (
-        "esta instalación todavía no puede administrar cuentas: su aprovisionamiento de "
-        "identidad no está configurado. Es un ajuste del servidor, no algo que esta pantalla "
-        "pueda arreglar."
+    "this person has already accepted their invitation": "esta persona ya aceptó su invitación",
+    "this person has no pending invitation": "esta persona no tiene ninguna invitación pendiente",
+    "the same role is listed twice for the same client": (
+        "el mismo rol aparece dos veces para el mismo cliente"
+    ),
+    "this installation's console address is not configured, so an invitation link cannot be "
+    "made. That is a server setting, not something this screen can fix.": (
+        "la dirección de la consola de esta instalación no está configurada, así que no se puede "
+        "crear un enlace de invitación. Es un ajuste del servidor, no algo que esta pantalla pueda "
+        "arreglar."
     ),
     "the identity provider did not return this platform's service account, so a test message "
     "has no sender to go out as": (
@@ -4679,16 +4668,13 @@ CATALOG: dict[str, str] = {
     ),
     "user admin, you cannot ... your own account: disable": "deshabilitar",
     "user admin, you cannot ... your own account: delete": "eliminar",
+    "user admin, you cannot ... your own account: reset the sign-in methods of": (
+        "restablecer los métodos de inicio de sesión de"
+    ),
     "user admin, cannot be ...: disabled": "deshabilitar",
     "user admin, cannot be ...: deleted": "eliminar",
     "user admin, cannot be ...: stripped of the role": "dejar sin ese rol",
-    "identity provider action: create the user": "crear el usuario",
-    "identity provider action: update the user": "actualizar el usuario",
-    "identity provider action: delete the user": "eliminar el usuario",
-    "identity provider action: send the enrolment email": "enviar el correo de invitación",
-    "identity provider action: send the password-reset email": (
-        "enviar el correo de restablecimiento de contraseña"
-    ),
+    "user admin, cannot be ...: invited": "invitar",
     # --- provisioning ---
     "no such image": "no existe esa imagen",
     "no such profile": "no existe ese perfil",

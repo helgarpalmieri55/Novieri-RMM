@@ -24,14 +24,16 @@ BOTH hold, and each is worthless alone:
 
 The refusals are ordered accordingly: the code is checked FIRST, so an
 unauthenticated caller who does not have it never reaches the database and never
-causes the provisioning secret to be read off disk.
+learns even the password rule.
 
-WHAT THIS ROUTE DOES NOT DO: create an administrator. `user_admin.service.
-create_user` does that, here exactly as on the Users tab, and the ordering it
-enforces (identity first, ITMS row second), the enrolment mail, the domain rule
-and the `user.created` audit record all come with it. A second implementation
-here would be a second set of rails to keep in step, and the one it would skip
-is the one that matters most -- see spec falsifier 6, and the test that pins it.
+WHAT THIS ROUTE DOES NOT DO: create an administrator by hand.
+`user_admin.service.create_user` makes the row, here exactly as for an
+invitation, so the domain rule, the role rails and the `user.created` record
+come with it; and the password goes through `app.core.auth.staff_password`,
+the same rule and the same store a reset uses. The first sign-in then enrols
+the second factor (P2 phase 1 design §7: "el primer factor se registra al
+entrar"). A second implementation here would be a second set of rails to keep
+in step -- see spec falsifier 6, and the test that pins it.
 
 THE ORGANIZATION AND THE FIRST USER ARE ONE TRANSACTION. An organization row
 with no members still counts as claimed by check 1 above, so a claim that
@@ -50,6 +52,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
+from app.core.auth import staff_password
 from app.core.config import Settings
 from app.core.i18n import tr
 from app.core.setup_code import ensure_setup_code, setup_code_path, verify_setup_code
@@ -57,7 +60,6 @@ from app.core.tenancy import admin_session
 from app.models import Organization, Role, User
 from app.modules.health.baseline import ensure_baseline_contained
 from app.modules.user_admin import service as user_admin
-from app.modules.user_admin.kc_client import KeycloakAdminConfig
 from app.modules.user_admin.service import ORG_ADMIN, UserAdminError
 
 router = APIRouter(tags=["setup"])
@@ -90,8 +92,8 @@ class SetupStatusOut(BaseModel):
     Every additional fact here is a fact an anonymous stranger learns about an
     installation they do not own. Whether the platform has an owner is the
     minimum the sign-in page cannot function without; the install code, the
-    organization name, and whether provisioning is configured are all things
-    they would only need if they were about to claim it.
+    organization name, and the password rule are all things they would only
+    need if they were about to claim it.
     """
 
     needed: bool = Field(
@@ -123,6 +125,12 @@ class SetupClaim(BaseModel):
     organization_name: str = Field(
         min_length=1, max_length=MAX_NAME, description="The organization being set up."
     )
+    #: No length bound here (P2 Task 7's decision 16): a field failure would
+    #: repeat the password in its 422. The rule of design §2.1 bounds it in
+    #: `staff_password.require_acceptable` (`too_short`, `too_long`).
+    password: str = Field(
+        description="The first administrator's password: 12 characters at least (design §2.1).",
+    )
 
 
 class ClaimedOut(BaseModel):
@@ -130,20 +138,10 @@ class ClaimedOut(BaseModel):
 
     organization_id: UUID = Field(description="The organization that now owns this installation.")
     organization_slug: str = Field(
-        description="Its slug -- the value a sign-in token's organization claim resolves to."
+        description="Its slug -- the organization the sign-in page signs into."
     )
     user_id: UUID = Field(description="The first administrator's ITMS user id.")
-    email: str = Field(description="The address the invitation was addressed to.")
-    invitation_sent: bool = Field(
-        description=(
-            "Whether the identity provider accepted the invitation email for delivery. "
-            "A fresh installation usually has no email configured yet, in which case "
-            "this is false and the administrator cannot sign in until it is."
-        )
-    )
-    invitation_error: str | None = Field(
-        description="What went wrong when it did not. Never a credential, never a vendor name."
-    )
+    email: str = Field(description="The address the first administrator signs in with.")
 
 
 # --------------------------------------------------------------------------- #
@@ -180,68 +178,6 @@ def _refuse_without_the_code(presented: str) -> None:
         )
 
 
-#: "The stack is younger than you are." `keycloak-init` writes the provisioning
-#: secret on every `docker compose up`, and NOTHING gates the api on it finishing
-#: -- deliberately, because making `api` depend on that job turns an init failure
-#: into a product that will not start at all. So on a cold host there is a window
-#: where the deployment is configured correctly and the file is simply not there
-#: yet, and the only useful instruction in that window is "wait".
-#:
-#: The other state, and the reason it gets its own sentence: no amount of waiting
-#: fixes it. Somebody has to set the deployment up. (Both sentences are written
-#: out where they are raised, so that each goes through `tr()`.)
-
-
-def _provisioning(settings: Settings) -> KeycloakAdminConfig:
-    """The provisioning credential, or a 503 an installer can act on.
-
-    TWO ABSENCES, TWO DIFFERENT NEXT ACTIONS, and collapsing them into one
-    message is what makes a 503 useless. `KeycloakAdminConfig.from_settings` has
-    a deliberate three-way contract and it is not weakened here -- it is READ
-    here, which is the whole difference:
-
-      returns None -> nothing is configured. Waiting will never change that.
-      RAISES       -> configured, and the secret file is missing or empty. On
-                      the lifecycle routes that means an operator who believes
-                      provisioning is running, which is why it raises rather
-                      than degrading. On THIS route, which by construction only
-                      ever runs on an installation minutes old, it overwhelmingly
-                      means the init job has not written the file yet.
-
-    Either way it is a 503 and not a 500 -- a stack trace on the first screen of
-    a new product is indistinguishable from a broken one -- and either way it is
-    raised BEFORE the first write, so the retry the message asks for actually
-    works instead of hitting "this platform is already claimed".
-    """
-    try:
-        config = KeycloakAdminConfig.from_settings(settings)
-    except (OSError, ValueError) as exc:
-        # `exc_info=`, never a %-arg: `str(exc)` on a config error can carry the
-        # path it failed to read. `tests/test_logging_discipline.py` enforces this.
-        logger.warning(
-            "setup claim refused: the provisioning credential could not be read",
-            exc_info=exc,
-        )
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            tr(
-                "this installation is still starting up, so it cannot create accounts yet. "
-                "Wait a moment and try again. If it says this for more than a few minutes, "
-                "the installation did not finish preparing itself and needs attention from "
-                "whoever set it up."
-            ),
-        ) from exc
-    if config is None:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            tr(
-                "this installation cannot create accounts yet: its identity provisioning is "
-                "not configured. That is a server setting, not something this screen can fix."
-            ),
-        )
-    return config
-
-
 def _org_slug(settings: Settings, organization_name: str) -> str:
     """The slug the first organization gets, and it is not cosmetic.
 
@@ -257,38 +193,6 @@ def _org_slug(settings: Settings, organization_name: str) -> str:
         return str(declared)
     slug = re.sub(r"[^a-z0-9]+", "-", organization_name.lower()).strip("-")[:80]
     return slug or "organization"
-
-
-def _refusal_detail(exc: UserAdminError) -> str:
-    """Translate the service's refusal for a reader who has never signed in.
-
-    The 4xx refusals are about the request -- a malformed address, an address
-    already in use -- and say so in words a setup screen can show. The 5xx ones
-    are about the deployment's own plumbing ("the identity provider was
-    unreachable while trying to create the account"), which is true, is worth
-    logging in full, and is not a sentence to hand somebody on the first screen
-    of a product they have just installed. So they are logged and replaced.
-
-    CORRECTED 2026-08-19: this docstring used to say the 5xx details "name the
-    identity vendor, which no user-visible string in this product may do". The
-    rule is right and unchanged; the fact was fixed at its source instead --
-    `user_admin.service._translating` no longer puts the word in a detail at
-    all, and `tests/test_no_vendor_names_backend.py` now guards every one of
-    them. This function is no longer the only thing standing between that word
-    and the setup screen, which is why the reason it still exists is restated
-    above rather than left as a stale claim.
-    """
-    if exc.status_code < 500:
-        return exc.detail
-    # The English cause, never `exc.detail`: that is worded in the request's
-    # language, and a log is read by whoever runs the deployment.
-    logger.warning(
-        "setup claim failed (status %s)", exc.status_code, exc_info=exc.__cause__
-    )
-    return tr(
-        "the identity provider could not create the first administrator. "
-        "Nothing was created; the server log has the detail."
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -332,19 +236,24 @@ async def claim_platform(body: SetupClaim, request: Request) -> ClaimedOut:
     THE ORDER OF THE REFUSALS IS PART OF THE DESIGN:
 
       1. the install code, before anything else -- a caller without it never
-         reaches the database and never causes the provisioning secret to be
-         read off disk;
-      2. zero users, so a leaked code cannot re-claim a running platform;
-      3. the provisioning credential, before the first write, so a deployment
-         whose init job has not finished can simply try again.
+         reaches the database and never learns even the password rule;
+      2. the password rule (design §2.1), before the first write;
+      3. zero users, so a leaked code cannot re-claim a running platform.
 
     Then one transaction: the organization, the administrator (through the same
-    service the Users tab calls), and both audit records.
+    service an invitation uses), their password, and the audit records.
     """
     settings: Settings = request.app.state.settings
     engine: AsyncEngine = request.app.state.admin_engine
 
     _refuse_without_the_code(body.code)
+    await staff_password.require_acceptable(
+        body.password,
+        email=body.email.strip().lower(),
+        display_name=body.display_name,
+        # The organization this claim is about to create (Task 2's decision 5).
+        org_name=body.organization_name.strip(),
+    )
 
     async with admin_session(engine=engine) as session:
         # SERIALIZE CLAIMS. Two requests arriving together would both read zero
@@ -361,8 +270,6 @@ async def claim_platform(body: SetupClaim, request: Request) -> ClaimedOut:
                     "administrators to add you.",
                 ),
             )
-
-        provisioning = _provisioning(settings)
 
         role_id = (
             await session.execute(
@@ -398,25 +305,38 @@ async def claim_platform(body: SetupClaim, request: Request) -> ClaimedOut:
         await ensure_baseline_contained(session, org.id)
 
         try:
-            # THE SAME FUNCTION THE USERS TAB CALLS. Everything that makes
+            # THE SAME FUNCTION AN INVITATION CALLS. Everything that makes
             # creating an account safe lives in it, and none of it is repeated
-            # here: identity first then the ITMS row, the email-domain rule, the
-            # enrolment mail, the `user.created` audit entry.
+            # here: the email-domain rule, the role rails, the `user.created`
+            # audit entry.
             created = await user_admin.create_user(
                 session,
-                provisioning,
                 org_id=org.id,
                 actor_id=NO_ACTOR_YET,
                 email=body.email,
                 display_name=body.display_name,
-                role_ids=[role_id],
+                grants=[user_admin.Grant(role_id=role_id)],
                 email_domain=settings.console_email_domain,
             )
         except UserAdminError as exc:
             # Raising here rolls the organization row back with it: the whole
-            # point of doing both in one transaction.
-            raise HTTPException(exc.status_code, _refusal_detail(exc)) from exc
+            # point of doing both in one transaction. Every refusal left is
+            # about the request (an address, a role), so it is said as it is.
+            raise HTTPException(exc.status_code, exc.detail) from exc
 
+        await staff_password.store(
+            session, org_id=org.id, user_id=created.id, plain=body.password
+        )
+        await audit_service.record(
+            session,
+            org_id=org.id,
+            actor_type="user",
+            actor_id=created.id,
+            action="auth.password_changed",
+            target_type="user",
+            target_id=str(created.id),
+            metadata={"via": "setup"},
+        )
         await audit_service.record(
             session,
             org_id=org.id,
@@ -431,41 +351,14 @@ async def claim_platform(body: SetupClaim, request: Request) -> ClaimedOut:
                 # every auditor in the organization afterwards.
                 "organization_name": org.name,
                 "organization_slug": org.slug,
-                "administrator_id": str(created.user.id),
-                "email": created.user.email,
-                "invitation_sent": created.enrolment_email_sent,
+                "administrator_id": str(created.id),
+                "email": created.email,
             },
         )
 
         return ClaimedOut(
             organization_id=org.id,
             organization_slug=org.slug,
-            user_id=created.user.id,
-            email=created.user.email,
-            invitation_sent=created.enrolment_email_sent,
-            invitation_error=_invitation_error(created),
+            user_id=created.id,
+            email=created.email,
         )
-
-
-def _invitation_error(created: user_admin.CreatedUser) -> str | None:
-    """Say that the invitation did not arrive, in the words this screen needs.
-
-    The service reports what failed at the identity provider ("the identity
-    provider could not send the enrolment email"), which is accurate and
-    logged. On the first screen of a product somebody has just installed it is
-    also not actionable: on a fresh installation the cause is almost always
-    that email has not been configured yet, and that is the sentence that has
-    to be here instead.
-
-    CORRECTED 2026-08-19: this used to say the service's wording "says
-    'Keycloak' in it". It did; it no longer does
-    (`user_admin.service._translating`), so the reason this function exists is
-    restated above rather than resting on a fact that has since been fixed.
-    """
-    if created.enrolment_email_sent:
-        return None
-    logger.warning("setup claim: invitation not sent: %s", created.enrolment_email_error)
-    return tr(
-        "The invitation email could not be sent, so no sign-in link has arrived. "
-        "Email delivery is most likely not set up on this installation yet."
-    )

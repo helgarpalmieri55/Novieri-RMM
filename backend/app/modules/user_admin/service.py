@@ -1,94 +1,101 @@
-"""User lifecycle: the decisions, separately from the HTTP and from Keycloak.
+"""User lifecycle: the decisions, separately from the HTTP.
 
-`docs/superpowers/specs/2026-08-19-rbac-and-user-lifecycle-design.md` §2.
+`docs/superpowers/specs/2026-08-19-rbac-and-user-lifecycle-design.md` §2, and
+the platform's own accounts since P2 phase 1
+(`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md` §7):
+invite, resend, cancel, reset the factors, disable, delete.
 
-Everything worth arguing about lives here rather than in `api.py`: the ordering
-of the two halves of a create, the rails that stop an administrator locking the
-organization out of itself, the tenant predicates, and the audit records. The
-route handlers open a tenant session, call one function, and translate
-`UserAdminError` into the status this module chose.
+Everything worth arguing about lives here rather than in `api.py`: the rails
+that stop an administrator locking the organization out of itself, the tenant
+predicates, and the audit records. The route handlers open a tenant session,
+call one function, and translate `UserAdminError` into the status this module
+chose.
 
 THE THREE THINGS THIS MODULE REFUSES TO DO, each stated where it is enforced
 below but collected here because they are the reason the module exists:
 
-1. **It never handles a password.** "Reset password" is `execute-actions-email`
-   with `UPDATE_PASSWORD`; Keycloak generates the token, sends the mail and
-   validates the link. There is no code path here that could produce, store or
-   return a credential, and `tests/test_user_admin_api.py` scans every response
-   body on the surface to keep it that way.
+1. **It never sees a password.** A technician chooses their own on the page a
+   one-time link opens (`app.core.auth.flows.accept_invite`,
+   `flows.reset_password`). Nothing here generates, stores, displays or
+   returns one, and `tests/test_user_admin_api.py` scans every response body
+   on the surface to keep it that way. The one secret that leaves is an
+   invitation link -- once, to the administrator who asked for it, and only
+   when no mail carried it (design §7).
 2. **It never hard-deletes a user.** 89 foreign-key columns across 21 tables
    reference `users.id` -- audit `actor_id` among them -- so deleting the row
    would either fail on the constraints or turn the audit log from evidence into
    a list of anonymous events. The row is marked `status='deleted'` and kept.
-3. **It never writes the ITMS row before the Keycloak identity exists.** See
-   `create_user`.
+3. **It never calls an identity provider.** Since P2 phase 1 the platform is
+   its own. A technician invited here has no Keycloak identity --
+   `external_subject` is a placeholder no provider issued
+   (`LOCAL_SUBJECT_PREFIX`) -- so until phase 3 moves the MCP server onto the
+   platform's own sign-in they cannot connect an AI app over MCP (plan
+   decision D5, accepted: nothing is deployed before the four projects end).
 
-WHY THE KEYCLOAK CALL SITS INSIDE THE DATABASE TRANSACTION on disable, enable
-and delete. Two systems cannot be updated atomically, so the question is only
-which half is recoverable. Writing the ITMS row first and calling Keycloak
-before the commit means a Keycloak failure raises, the transaction rolls back,
-and NOTHING happened -- which the operator can retry. The alternative leaves the
-console and Keycloak disagreeing about who is allowed to sign in, and nothing
-detects it. The residual window is a commit that fails after Keycloak succeeded;
-that is narrower than the alternative and is named here rather than hidden.
-
-WHY `create_user` IS THE EXCEPTION and calls Keycloak FIRST: see its docstring.
+DISABLE, DELETE AND A FACTOR RESET END THE PERSON'S SESSIONS AND FORGET THEIR
+REMEMBERED DEVICES in the same transaction as the change (design §2.4):
+`users.status` refuses the next admission at every door, and ending the
+sessions stops the cookie already in a browser -- at once, not at its expiry.
 """
 
-import logging
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from uuid import UUID
+from datetime import datetime
+from uuid import UUID, uuid4
 
-import httpx
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit_service
+from app.core.auth import action_tokens, notices
+from app.core.auth.devices import revoke_all_for_user
+from app.core.auth.factors import clear_second_factors
+from app.core.auth.sessions import end_all_for_user
 from app.core.i18n import tr
 from app.core.identity import STAFF_KIND, domain_refusal
+from app.core.vault import VaultService
 from app.core.wire_words import say
 from app.models import Client, Permission, Role, RolePermission, User, UserRole
+from app.models.auth import AuthActionToken, AuthPassword
 from app.models.clients import CLIENT_KIND_UNASSIGNED
-from app.modules.user_admin import kc_client
-from app.modules.user_admin.kc_client import (
-    ENROLMENT_ACTIONS,
-    PASSWORD_RESET_ACTIONS,
-    KeycloakAdminConfig,
-    KeycloakAdminError,
-)
 from app.modules.user_admin.words import (
     ACTION_WORDS,
     CANNOT_BE_DELETED,
     CANNOT_BE_DISABLED,
+    CANNOT_BE_INVITED,
     CANNOT_BE_STRIPPED,
     DELETE,
     DISABLE,
     OUTCOME_WORDS,
-    PROVIDER_ACTION_WORDS,
+    RESET_FACTORS,
 )
 
 __all__ = [
     "ACTIVE",
     "DELETED",
     "DISABLED",
+    "LOCAL_SUBJECT_PREFIX",
     "ORG_ADMIN",
     "SUPER_ADMIN",
     "CodeGrant",
-    "CreatedUser",
+    "Deliver",
+    "Grant",
+    "InvitedUser",
     "RoleAssignmentView",
     "UserAdminError",
     "UserView",
     "assign_role",
+    "cancel_invite",
     "create_user",
     "delete_user",
     "effective_permissions",
+    "end_sessions",
+    "invite_user",
     "list_users",
     "remove_role",
-    "resend_enrolment",
-    "send_password_reset",
+    "reset_factors",
+    "resend_invite",
     "set_enabled",
 ]
 
@@ -109,8 +116,9 @@ SUPER_ADMIN = "super-admin"
 # grant the role back and the fix is SQL against production.
 ORG_ADMIN = "org-admin"
 
-
-logger = logging.getLogger(__name__)
+#: The `external_subject` of a technician the platform created itself (rule 3):
+#: no identity provider issued it, so it can never match a token's `sub`.
+LOCAL_SUBJECT_PREFIX = "itms-local:"
 
 
 class UserAdminError(Exception):
@@ -151,6 +159,9 @@ class UserView:
     display_name: str
     status: str
     roles: list[RoleAssignmentView]
+    #: When the invitation this person has not accepted yet expires; None once
+    #: they chose a password, or when no invitation is open.
+    invite_expires_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -169,86 +180,28 @@ class CodeGrant:
 
 
 @dataclass(frozen=True)
-class CreatedUser:
-    """The new user, plus what happened to the enrolment mail.
+class Grant:
+    """One role to grant: on every client (`client_id` None) or on one."""
 
-    The mail outcome is part of the RESULT rather than an exception because the
-    user genuinely exists either way, and because the realm this ships against
-    has no `smtpServer` today (spec §2.3). Reporting "created" while silently
-    sending nothing produces an account nobody can ever sign into, with every
-    status green.
-    """
+    role_id: UUID
+    client_id: UUID | None = None
+
+
+@dataclass(frozen=True)
+class InvitedUser:
+    """An invitation: the person, its link, and whether a mail carried it.
+
+    The link is in the RESULT so the route can show it -- once, and only when
+    `delivered` is False (design §7). It is never stored in clear (only its
+    hash, `action_tokens`) and never audited."""
 
     user: UserView
-    enrolment_email_sent: bool
-    enrolment_email_error: str | None
+    link: str
+    delivered: bool
 
 
-# --------------------------------------------------------------------------- #
-# talking to Keycloak
-# --------------------------------------------------------------------------- #
-
-
-@contextmanager
-def _translating(what: str) -> Iterator[None]:
-    """Turn a Keycloak failure into a refusal that says what failed.
-
-    THE RESPONSE BODY IS NEVER INCLUDED, only the status. Keycloak's error
-    bodies are not under this project's control and can echo request content;
-    forwarding them to an API response is how a credential ends up somewhere it
-    was never meant to be (invariant 3). The status is what an operator needs
-    and the rest is in Keycloak's own log.
-
-    AND THE WORD ITSELF STOPS HERE, which is the second rule and a separate
-    one. These details are rendered: `api.py` turns them straight into an
-    `HTTPException`, and `create_user` copies one into
-    `CreatedUser.enrolment_email_error`, a field the Users tab prints after a
-    successful create. A buyer does not know what Keycloak is and must never
-    need to
-    (`docs/superpowers/specs/2026-08-19-invisible-identity-layer-design.md`
-    §1.3). This module's own prose still names the vendor, because it is what
-    the module talks to and pretending otherwise would be a lie; what crosses
-    into a response says "the identity provider".
-
-    `KeycloakAdminError`'S OWN WORDING IS LOGGED, NOT FORWARDED. `kc_client`
-    raises it with sentences like "Keycloak accepted the user but returned no
-    Location header" -- accurate, useful to whoever runs the deployment, and
-    the vendor's name assembled at RUNTIME, where no scan of source literals
-    could ever have caught it. So the operator gets it in the log and the
-    caller gets the same shape of answer as the other two branches.
-    `tests/test_no_vendor_names_backend.py` drives all three.
-    """
-    try:
-        yield
-    except httpx.HTTPStatusError as exc:
-        raise UserAdminError(
-            502,
-            tr(
-                "the identity provider refused to {what} (HTTP {status_code})",
-                what=say(PROVIDER_ACTION_WORDS, what),
-                status_code=exc.response.status_code,
-            ),
-        ) from exc
-    except KeycloakAdminError as exc:
-        # `exc_info=`, never a %-arg: `str(exc)` is exactly what must not be
-        # interpolated into a template (`tests/test_logging_discipline.py`).
-        logger.warning("the identity provider could not complete a user action", exc_info=exc)
-        raise UserAdminError(
-            502,
-            tr(
-                "the identity provider could not {what}",
-                what=say(PROVIDER_ACTION_WORDS, what),
-            ),
-        ) from exc
-    except httpx.HTTPError as exc:
-        raise UserAdminError(
-            502,
-            tr(
-                "the identity provider was unreachable while trying to {what} ({error_type})",
-                what=say(PROVIDER_ACTION_WORDS, what),
-                error_type=type(exc).__name__,
-            ),
-        ) from exc
+#: Hands the invitation link to the invitee; True when a mail took it.
+Deliver = Callable[[UserView, str], Awaitable[bool]]
 
 
 # --------------------------------------------------------------------------- #
@@ -270,10 +223,9 @@ async def _target(session: AsyncSession, org_id: UUID, user_id: UUID) -> User:
     STAFF ONLY (MSP clients Task 9 review 1). A contact (`users.kind =
     'contact'`, spec §1.3) is one client's person, managed from that client's
     page (`/api/v1/contacts/{id}`, `clients.manage` on the client); here it is
-    a 404 on every read and write. Its `external_subject` is a placeholder no
-    identity provider issued, so a disable, reset or delete reaching Keycloak
-    with it would act on nobody -- or, were a subject ever reused, on someone
-    else.
+    a 404 on every read and write: a contact's sessions, factors and grants
+    are its client's business, and this surface's `users.manage` on every
+    client is a technician administrator's.
     """
     user = (
         await session.execute(
@@ -485,6 +437,55 @@ async def _assignments(
     return grouped
 
 
+async def _open_invites(
+    session: AsyncSession, org_id: UUID, user_ids: Sequence[UUID]
+) -> dict[UUID, datetime]:
+    """The expiry of each person's unused invitation, for people who have not
+    chosen a password yet (plan decision 8). Read under the request's scope:
+    these are global rows (a technician's), which a pinned scope may read.
+
+    THE ONE DEFINITION OF A PENDING INVITATION: an INVITE link with `used_at`
+    still empty -- `consume`, `revoke_open` and a newer `issue` are what fill it
+    -- of somebody without a password. Expiry is NOT part of it: an expired
+    link is still an invitation to resend or cancel. `invite_pending` reads it,
+    and so do the resend and the cancel (`_require_pending_invitation`)."""
+    if not user_ids:
+        return {}
+    rows = await session.execute(
+        select(AuthActionToken.user_id, func.max(AuthActionToken.expires_at))
+        .where(
+            AuthActionToken.org_id == org_id,
+            AuthActionToken.user_id.in_(list(user_ids)),
+            AuthActionToken.purpose == action_tokens.INVITE,
+            AuthActionToken.used_at.is_(None),
+            ~exists().where(AuthPassword.user_id == AuthActionToken.user_id),
+        )
+        .group_by(AuthActionToken.user_id)
+    )
+    return {user_id: expires for user_id, expires in rows.tuples()}
+
+
+async def _accepted(session: AsyncSession, user_id: UUID) -> bool:
+    """Has this person chosen a password -- accepted their invitation?"""
+    return await session.get(AuthPassword, user_id) is not None
+
+
+async def _require_pending_invitation(session: AsyncSession, org_id: UUID, user: User) -> None:
+    """A 409 unless this person has a pending invitation (`_open_invites`).
+
+    "NO PASSWORD" IS NOT "INVITED" (Task 8 review). Every account from before
+    this phase has no password -- a super-admin's included -- and a resend that
+    asked only that handed the administrator a link to set that person's
+    password and act as them. So the resend and the cancel act only on an
+    invitation that was issued and is still open, by the same predicate that
+    shows `invite_pending`. The refusal says which of the two it is."""
+    if user.id in await _open_invites(session, org_id, [user.id]):
+        return
+    if await _accepted(session, user.id):
+        raise UserAdminError(409, tr("this person has already accepted their invitation"))
+    raise UserAdminError(409, tr("this person has no pending invitation"))
+
+
 async def list_users(session: AsyncSession, *, org_id: UUID) -> list[UserView]:
     """Every user in THIS organization, with their role assignments.
 
@@ -504,6 +505,7 @@ async def list_users(session: AsyncSession, *, org_id: UUID) -> list[UserView]:
         ).scalars()
     )
     grouped = await _assignments(session, org_id, [u.id for u in users])
+    invites = await _open_invites(session, org_id, [u.id for u in users])
     return [
         UserView(
             id=u.id,
@@ -511,6 +513,7 @@ async def list_users(session: AsyncSession, *, org_id: UUID) -> list[UserView]:
             display_name=u.display_name,
             status=u.status,
             roles=grouped.get(u.id, []),
+            invite_expires_at=invites.get(u.id),
         )
         for u in users
     ]
@@ -547,17 +550,19 @@ async def effective_permissions(
 
 async def _view(session: AsyncSession, org_id: UUID, user: User) -> UserView:
     grouped = await _assignments(session, org_id, [user.id])
+    invites = await _open_invites(session, org_id, [user.id])
     return UserView(
         id=user.id,
         email=user.email,
         display_name=user.display_name,
         status=user.status,
         roles=grouped.get(user.id, []),
+        invite_expires_at=invites.get(user.id),
     )
 
 
 # --------------------------------------------------------------------------- #
-# create -- rule 3 (ordering) and rule 5 (SMTP)
+# create and invite -- rules 1 and 3
 # --------------------------------------------------------------------------- #
 
 
@@ -577,63 +582,52 @@ def _normalise_email(email: str) -> str:
 
 async def create_user(
     session: AsyncSession,
-    config: KeycloakAdminConfig,
     *,
     org_id: UUID,
     actor_id: UUID,
     email: str,
     display_name: str,
-    role_ids: Sequence[UUID],
+    grants: Sequence[Grant],
     email_domain: str | None,
-) -> CreatedUser:
-    """Create the Keycloak identity, THEN the ITMS row. Rule 3, and the order is
-    the whole point.
+) -> UserView:
+    """The local row and its grants -- and nothing else (rules 1 and 3).
 
-    Keycloak's create returns the new user's id in `Location`, and that id IS
-    the `sub` claim the token will carry -- so the ITMS row can be written with
-    the correct `external_subject` immediately rather than waiting for a first
-    login to reconcile.
+    Shared by the invitation and the first boot (`app/api/v1/setup.py`), so
+    the domain rule, the role rails, the address check and the `user.created`
+    record are one implementation. The person gets no credential here: the
+    invitation's link (`invite_user`) or the setup form's password
+    (`staff_password.store`) gives them one.
 
-    It also fails safe in the direction that matters. If the ITMS half fails,
-    what is left is a Keycloak account holding no roles: exactly the state of
-    any federated user before their first login, which `app/api/deps.py`
-    already self-heals by provisioning a row on admission. The REVERSE order
-    strands an ITMS row holding roles that no identity can ever claim, and
-    nothing self-heals that.
-
-    Everything that can be refused is refused BEFORE the Keycloak call -- the
-    domain rule, the roles, an address already in use -- so a validation failure
-    never mints an identity that then has to be cleaned up by hand.
+    Everything that can be refused is refused before the first write.
     """
     address = _normalise_email(email)
 
     # THE DOMAIN RULE, ENFORCED HERE TOO (spec §3, rule 4). A console that
-    # refuses an address at sign-in but mints it in the create form has not
-    # enforced anything -- it has moved the lockout to the new colleague's first
-    # day.
+    # refuses an address at sign-in but invites it has not enforced anything --
+    # it has moved the lockout to the new colleague's first day.
     #
     # `domain_refusal`, NOT `is_allowed_domain` behind a truthiness test. The
-    # helper is what all three admission doors call, and it is the piece that
+    # helper is what every admission door calls, and it is the piece that
     # decides what an EMPTY or WHITESPACE-ONLY setting means:
     # `ITS_CONSOLE_EMAIL_DOMAIN=` yields `""`, not `None`, and it is read as NO
     # RESTRICTION because read as a restriction it matches no address at all and
-    # locks the whole deployment out. `if email_domain and ...` reads that same
-    # string as a restriction and refuses every create -- one setting, two
-    # answers, and the disagreement only shows up on the deployment that typed
-    # the variable and left it blank.
+    # locks the whole deployment out.
     refusal = domain_refusal(address, email_domain)
     if refusal is not None:
         raise UserAdminError(422, refusal)
 
-    roles = [await _visible_role(session, org_id, role_id) for role_id in role_ids]
+    if len({(g.role_id, g.client_id) for g in grants}) != len(grants):
+        raise UserAdminError(422, tr("the same role is listed twice for the same client"))
+    roles = [await _visible_role(session, org_id, g.role_id) for g in grants]
+    for grant in grants:
+        if grant.client_id is not None:
+            await _grantable_client(session, org_id, grant.client_id)
 
     # ANY user, contacts included and deliberately not `STAFF_KIND` alone: one
     # address is one person (MSP clients Task 9 review 1, I1), and a technician
     # created with a contact's address would make that address's inbound mail
-    # ambiguous. First-login provisioning cannot be refused this way and is
-    # not (`app/api/deps.py::admit`); this console form can, and is. LIMIT 1:
-    # a sign-in may already have made two rows share an address, and that is
-    # a 409 here, not a MultipleResultsFound.
+    # ambiguous. LIMIT 1: rows from before D2's unique index may share an
+    # address, and that is a 409 here, not a MultipleResultsFound.
     existing = (
         await session.execute(
             select(User.id).where(User.org_id == org_id, User.email == address).limit(1)
@@ -642,14 +636,9 @@ async def create_user(
     if existing is not None:
         raise UserAdminError(409, tr("a user with that email address already exists here"))
 
-    with _translating("create the user"):
-        subject = await kc_client.create_user(
-            config, email=address, display_name=display_name
-        )
-
     user = User(
         org_id=org_id,
-        external_subject=subject,
+        external_subject=f"{LOCAL_SUBJECT_PREFIX}{uuid4()}",
         email=address,
         display_name=display_name,
         status=ACTIVE,
@@ -657,40 +646,15 @@ async def create_user(
     session.add(user)
     try:
         await session.flush()
-        for role in roles:
+        for grant, role in zip(grants, roles, strict=True):
             session.add(
-                UserRole(org_id=org_id, user_id=user.id, role_id=role.id)
+                UserRole(org_id=org_id, user_id=user.id, role_id=role.id, client_id=grant.client_id)
             )
         await session.flush()
     except IntegrityError as exc:
-        # The ITMS half failed after the identity was created. Raising rolls the
-        # whole transaction back and leaves the fail-safe state described above:
-        # an account with no roles. Reported as a conflict rather than a 500
-        # because that is what it is -- a row already claims this subject or
-        # this address.
-        raise UserAdminError(
-            409,
-            tr("the identity was created but the local record conflicts with an existing one"),
-        ) from exc
-
-    # THE MAIL IS ATTEMPTED, NOT ASSUMED (rule 5, spec §2.3). A user created
-    # this way has NO credential at all, so without this mail the account cannot
-    # be signed into; and `deploy/keycloak/realm-it-suite.json` has no
-    # `smtpServer` today, so failing is the expected first experience. The
-    # failure is REPORTED and the user is KEPT -- rolling back here would delete
-    # the ITMS row while the Keycloak identity stayed, which is the one
-    # inconsistency this ordering exists to avoid, and `resend_enrolment` is
-    # what makes the account recoverable.
-    sent = True
-    error: str | None = None
-    try:
-        with _translating("send the enrolment email"):
-            await kc_client.execute_actions_email(
-                config, user_id=subject, actions=ENROLMENT_ACTIONS
-            )
-    except UserAdminError as exc:
-        sent = False
-        error = exc.detail
+        # The address in another case (`ux_users_org_lower_email_staff`, D2)
+        # or a concurrent create: raising rolls the whole transaction back.
+        raise UserAdminError(409, tr("a user with that email address already exists here")) from exc
 
     await audit_service.record(
         session,
@@ -704,13 +668,150 @@ async def create_user(
             "email": address,
             "display_name": display_name,
             "roles": sorted(r.name for r in roles),
-            "enrolment_email_sent": sent,
+            "grants": [
+                {"role": role.name, "client_id": str(g.client_id) if g.client_id else None}
+                for g, role in zip(grants, roles, strict=True)
+            ],
         },
     )
-    return CreatedUser(
-        user=await _view(session, org_id, user),
-        enrolment_email_sent=sent,
-        enrolment_email_error=error,
+    return await _view(session, org_id, user)
+
+
+async def _issue_invitation(
+    session: AsyncSession,
+    org_id: UUID,
+    actor_id: UUID,
+    user: User,
+    console_url: str,
+    deliver: Deliver,
+) -> InvitedUser:
+    """A new 72-hour link (replacing any earlier one), handed to `deliver`."""
+    token = await action_tokens.issue(
+        session,
+        org_id=org_id,
+        user_id=user.id,
+        purpose=action_tokens.INVITE,
+        ttl=action_tokens.INVITE_TTL,
+        created_by=actor_id,
+    )
+    link = action_tokens.link(console_url, "invite", token)
+    view = await _view(session, org_id, user)
+    return InvitedUser(user=view, link=link, delivered=await deliver(view, link))
+
+
+async def invite_user(
+    session: AsyncSession,
+    *,
+    org_id: UUID,
+    actor_id: UUID,
+    email: str,
+    display_name: str,
+    grants: Sequence[Grant],
+    email_domain: str | None,
+    console_url: str,
+    deliver: Deliver,
+) -> InvitedUser:
+    """Design §7: the technician, their grants, and a one-time link to choose a
+    password and set up the second factor."""
+    created = await create_user(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        email=email,
+        display_name=display_name,
+        grants=grants,
+        email_domain=email_domain,
+    )
+    user = await _target(session, org_id, created.id)
+    invited = await _issue_invitation(session, org_id, actor_id, user, console_url, deliver)
+    await audit_service.record(
+        session,
+        org_id=org_id,
+        actor_type="user",
+        actor_id=actor_id,
+        action="user.invited",
+        target_type="user",
+        target_id=str(user.id),
+        # `link_shown`, never the link: the audit log is readable by every
+        # auditor in the organization (plan decision 4).
+        metadata={"email": user.email, "link_shown": not invited.delivered},
+    )
+    return invited
+
+
+async def resend_invite(
+    session: AsyncSession,
+    *,
+    org_id: UUID,
+    actor_id: UUID,
+    user_id: UUID,
+    console_url: str,
+    deliver: Deliver,
+) -> InvitedUser:
+    """A new link for an invitation not accepted yet; the old one stops working.
+
+    Only for a pending invitation (`_require_pending_invitation`), and never
+    for a `super-admin`: an organization cannot grant that role, so it cannot
+    invite its holder either -- and the link is a password for the account."""
+    user = await _target(session, org_id, user_id)
+    _require_live(user)
+    await _require_pending_invitation(session, org_id, user)
+    await _refuse_touching_a_super_admin(session, org_id, user.id, CANNOT_BE_INVITED)
+    invited = await _issue_invitation(session, org_id, actor_id, user, console_url, deliver)
+    await audit_service.record(
+        session,
+        org_id=org_id,
+        actor_type="user",
+        actor_id=actor_id,
+        action="user.invite_resent",
+        target_type="user",
+        target_id=str(user.id),
+        metadata={"email": user.email, "link_shown": not invited.delivered},
+    )
+    return invited
+
+
+async def cancel_invite(
+    session: AsyncSession, *, org_id: UUID, actor_id: UUID, user_id: UUID
+) -> None:
+    """Plan decision 3: the link dies, the grants go, the account is marked
+    deleted -- with delete's rails, the own-account one included (it is a
+    second way to delete an account). Anything but a pending invitation is a
+    409 (`_require_pending_invitation`)."""
+    user = await _target(session, org_id, user_id)
+    _require_live(user)
+    _refuse_self(actor_id, user.id, DELETE)
+    await _require_pending_invitation(session, org_id, user)
+    await _refuse_touching_a_super_admin(session, org_id, user.id, CANNOT_BE_DELETED)
+    await _refuse_stranding_the_org(session, org_id, user.id, CANNOT_BE_DELETED)
+    await action_tokens.revoke_open(session, user_id=user.id, purpose=action_tokens.INVITE)
+    # Counted before the delete, as `delete_user` does: `Result.rowcount` is
+    # not on the type `session.execute` returns.
+    grants = list(
+        (
+            await session.execute(
+                select(UserRole.id).where(UserRole.user_id == user.id, UserRole.org_id == org_id)
+            )
+        ).scalars()
+    )
+    await session.execute(
+        delete(UserRole).where(UserRole.user_id == user.id, UserRole.org_id == org_id)
+    )
+    # Plan decision 7: no `"deleted"` reason exists; the account cannot sign
+    # in, as a disabled one cannot.
+    await end_all_for_user(session, user.id, "disabled")
+    user.status = DELETED
+    session.add(user)
+    await session.flush()
+    await audit_service.record(
+        session,
+        org_id=org_id,
+        actor_type="user",
+        actor_id=actor_id,
+        action="user.invite_cancelled",
+        target_type="user",
+        target_id=str(user.id),
+        metadata={"email": user.email, "roles_removed": len(grants)},
     )
 
 
@@ -731,9 +832,7 @@ async def assign_role(
     """Grant a role for every client (`client_id` None) or for one client
     (MSP clients spec §2.1).
 
-    NO KEYCLOAK CALL. Roles are an ITMS concept; Keycloak knows only that the
-    identity exists. Which means this route keeps working on a deployment that
-    has not configured provisioning at all.
+    Roles are an ITMS concept, held in `user_roles` and nowhere else.
     """
     user = await _target(session, org_id, user_id)
     _require_live(user)
@@ -859,21 +958,20 @@ async def remove_role(
 
 async def set_enabled(
     session: AsyncSession,
-    config: KeycloakAdminConfig,
     *,
     org_id: UUID,
     actor_id: UUID,
     user_id: UUID,
     enabled: bool,
 ) -> UserView:
-    """Turn an account off, or back on -- in BOTH systems.
+    """Turn an account off, or back on.
 
-    NEITHER HALF IS SUFFICIENT ALONE, which is the whole reason both are here.
-    Keycloak's `enabled: false` stops the NEXT token being issued and does
-    nothing to the one already sitting in the operator's browser. `users.status`
-    is what the three admission doors consult on every request, so it is what
-    closes that window (spec §3.2) -- and it is what a deployment with no
-    Keycloak provisioning would have nothing else to rely on.
+    OFF MEANS NOW (design §2.4). `users.status` refuses the next admission at
+    every door -- an AI app over MCP included -- and the person's sessions and
+    remembered devices end in this same transaction, so the cookie already in
+    a browser stops working too, and stays dead if the account is re-enabled.
+    ON restores the status only: the person signs in again, with their second
+    factor.
     """
     user = await _target(session, org_id, user_id)
     _require_live(user)
@@ -885,6 +983,9 @@ async def set_enabled(
     user.status = ACTIVE if enabled else DISABLED
     session.add(user)
     await session.flush()
+    if not enabled:
+        await end_all_for_user(session, user.id, "disabled")
+        await revoke_all_for_user(session, user.id)
     await audit_service.record(
         session,
         org_id=org_id,
@@ -895,117 +996,65 @@ async def set_enabled(
         target_id=str(user.id),
         metadata={"email": user.email, "status": user.status},
     )
-    # LAST, AND INSIDE THE TRANSACTION. A refusal here raises, the transaction
-    # rolls back, and the two systems still agree -- see the module docstring.
-    with _translating("update the user"):
-        await kc_client.set_enabled(
-            config, user_id=user.external_subject, enabled=enabled
-        )
     return await _view(session, org_id, user)
 
 
 # --------------------------------------------------------------------------- #
-# the two mails -- rule 1 and rule 5
+# the factors and the sessions of somebody else (design §2.5, §7)
 # --------------------------------------------------------------------------- #
 
 
-async def _mail(
+async def reset_factors(
     session: AsyncSession,
-    config: KeycloakAdminConfig,
     *,
     org_id: UUID,
     actor_id: UUID,
-    user: User,
-    actions: Sequence[str],
-    action_name: str,
-    what: str,
+    user_id: UUID,
+    vault: VaultService,
 ) -> None:
-    """Ask Keycloak to send one action mail, and record that we asked.
+    """Every passkey, the TOTP, the recovery codes and the failure counters
+    go; the sessions end and the remembered devices are forgotten; the person
+    is told. Their next sign-in enrols a new factor (design §7). The route
+    has already checked the administrator's own recent confirmation.
 
-    A FAILURE IS AN ERROR STATUS, not a flag in a 200 body -- the opposite of
-    `create_user`, deliberately. There the account exists whatever the mail
-    does, so the mail is one fact about a larger result. Here the mail IS the
-    entire action: there is no partial success to report, and answering 200
-    would tell the operator a link is on its way when the realm has no SMTP
-    server at all.
-
-    The audit record is written first and rolls back with the failure, so the
-    chain never claims a mail was requested that was refused.
-    """
+    No `super-admin` rail (plan decision 5): a reset removes factors and gives
+    nobody access without the password. `_refuse_self` stays: one's own
+    factors are changed under My security."""
+    user = await _target(session, org_id, user_id)
+    _require_live(user)
+    _refuse_self(actor_id, user.id, RESET_FACTORS)
+    await clear_second_factors(session, user.id)
+    await end_all_for_user(session, user.id, "factors_reset")
+    await revoke_all_for_user(session, user.id)
     await audit_service.record(
         session,
         org_id=org_id,
         actor_type="user",
         actor_id=actor_id,
-        action=action_name,
+        action="user.factors_reset",
         target_type="user",
         target_id=str(user.id),
-        metadata={"email": user.email, "actions": list(actions)},
+        metadata={"email": user.email, "via": "administrator"},
     )
-    with _translating(what):
-        await kc_client.execute_actions_email(
-            config, user_id=user.external_subject, actions=actions
-        )
+    await notices.tell(session, user, "factors_reset", vault=vault, actor_id=actor_id)
 
 
-async def send_password_reset(
-    session: AsyncSession,
-    config: KeycloakAdminConfig,
-    *,
-    org_id: UUID,
-    actor_id: UUID,
-    user_id: UUID,
+async def end_sessions(
+    session: AsyncSession, *, org_id: UUID, actor_id: UUID, user_id: UUID
 ) -> None:
-    """RULE 1, IN FULL. This is the entire implementation of "reset this
-    person's password": ask Keycloak to email them a link.
-
-    ITMS does not generate a password, does not store one, does not display one
-    and does not return one. There is no branch here that could, and there is no
-    admin API call anywhere in this module that sets a credential. The reset
-    token is minted by Keycloak, sent by Keycloak and validated by Keycloak;
-    nothing secret crosses this boundary in either direction.
-    """
+    """Every console session of the person ends; their remembered devices stay
+    (a reset or a disable forgets those)."""
     user = await _target(session, org_id, user_id)
-    _require_live(user)
-    await _mail(
+    await end_all_for_user(session, user.id, "ended_by_admin")
+    await audit_service.record(
         session,
-        config,
         org_id=org_id,
+        actor_type="user",
         actor_id=actor_id,
-        user=user,
-        actions=PASSWORD_RESET_ACTIONS,
-        action_name="user.password_reset_requested",
-        what="send the password-reset email",
-    )
-
-
-async def resend_enrolment(
-    session: AsyncSession,
-    config: KeycloakAdminConfig,
-    *,
-    org_id: UUID,
-    actor_id: UUID,
-    user_id: UUID,
-) -> None:
-    """RULE 5's other half, and the reason it is not optional.
-
-    A user created by ITMS has no credential, so the enrolment mail is the only
-    thing that makes the account usable -- and Keycloak 26 exposes no admin API
-    that returns the action link for an operator to pass on by hand. Without
-    this route, one transient mail failure leaves an account nobody can ever
-    sign into and no way to fix it short of deleting and recreating the person.
-    """
-    user = await _target(session, org_id, user_id)
-    _require_live(user)
-    await _mail(
-        session,
-        config,
-        org_id=org_id,
-        actor_id=actor_id,
-        user=user,
-        actions=ENROLMENT_ACTIONS,
-        action_name="user.enrolment_resent",
-        what="send the enrolment email",
+        action="auth.sessions_ended",
+        target_type="user",
+        target_id=str(user.id),
+        metadata={"by": "administrator", "scope": "everywhere"},
     )
 
 
@@ -1016,13 +1065,12 @@ async def resend_enrolment(
 
 async def delete_user(
     session: AsyncSession,
-    config: KeycloakAdminConfig,
     *,
     org_id: UUID,
     actor_id: UUID,
     user_id: UUID,
 ) -> None:
-    """Remove the Keycloak identity; KEEP the ITMS row, marked `deleted`.
+    """Mark the row `deleted` and end everything it could still use.
 
     RULE 2, and §0.6 is the reason: 89 foreign-key columns across 21 tables
     reference `users.id`, audit `actor_id` among them. A hard delete either
@@ -1034,6 +1082,10 @@ async def delete_user(
     grants, not history. Leaving live grants attached to an account nobody can
     authenticate as is a dormant privilege waiting for a status column to be
     flipped back by hand. Nothing in the audit chain references `user_roles`.
+
+    So do an open invitation, the sessions and the remembered devices, in the
+    same transaction (design §2.4; plan decision 7: the sessions end as
+    `"disabled"`, there being no `"deleted"` reason).
     """
     user = await _target(session, org_id, user_id)
     _require_live(user)
@@ -1053,6 +1105,9 @@ async def delete_user(
     await session.execute(
         delete(UserRole).where(UserRole.user_id == user.id, UserRole.org_id == org_id)
     )
+    await action_tokens.revoke_open(session, user_id=user.id, purpose=action_tokens.INVITE)
+    await end_all_for_user(session, user.id, "disabled")
+    await revoke_all_for_user(session, user.id)
     user.status = DELETED
     session.add(user)
     await session.flush()
@@ -1066,5 +1121,3 @@ async def delete_user(
         target_id=str(user.id),
         metadata={"email": user.email, "roles_removed": len(grants)},
     )
-    with _translating("delete the user"):
-        await kc_client.delete_user(config, user_id=user.external_subject)

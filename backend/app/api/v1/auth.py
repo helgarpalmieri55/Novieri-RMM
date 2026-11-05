@@ -16,6 +16,10 @@ design §2, §6.4).
     POST   /auth/logout, /auth/logout-everywhere
     POST   /auth/password/forgot            always 202
     POST   /auth/password/reset             a one-time link
+    POST   /auth/invite/details             who a one-time invitation is for
+    POST   /auth/invite/accept              its password -> the first factor
+    POST   /auth/recover/details            who the server's recovery link is for
+    POST   /auth/recover/accept             the factors go -> a new first factor
     GET    /me/security                     the caller's factors, devices, sessions
     PUT    /me/password
     DELETE /me/passkeys/{id}, /me/totp, /me/trusted-devices/{id}, /me/sessions/{id}
@@ -176,6 +180,36 @@ class PasswordChangeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     current: str
     new: str
+
+
+class LinkTokenIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # A one-time link's token: a secret, so no Pydantic bound, as `ResetIn`.
+    # `action_tokens.org_of` refuses any other shape, and that is the 410.
+    token: str
+
+
+class InviteAcceptIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: No Pydantic bound on either (Task 7's decision 16): a field failure
+    #: repeats its input in the 422, and both are secrets.
+    #: `action_tokens.org_of` bounds the token, `staff_password.require_acceptable`
+    #: the password.
+    token: str
+    password: str
+
+
+class InviteOut(BaseModel):
+    """Who an invitation is for, for its page."""
+
+    email: str
+    display_name: str
+
+
+class RecoveryOut(BaseModel):
+    """Who a recovery link is for, for its page."""
+
+    email: str
 
 
 class SignInOut(BaseModel):
@@ -470,6 +504,44 @@ async def reset_password(body: ResetIn, request: Request) -> Response:
     """A new password through a one-time link. Signs nobody in."""
     await flows.reset_password(request, token=body.token, password=body.password)
     return _no_content()
+
+
+@router.post("/invite/details", response_model=InviteOut, dependencies=[Depends(_LINK)])
+async def invite_details(body: LinkTokenIn, request: Request) -> InviteOut:
+    """The address and the name an invitation is for. Leaves the link unused."""
+    email, name = await flows.invite_details(request, token=body.token)
+    return InviteOut(email=email, display_name=name)
+
+
+@router.post(
+    "/invite/accept",
+    response_model=SignInOut,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(_LINK)],
+)
+async def accept_invite(body: InviteAcceptIn, request: Request, response: Response) -> SignInOut:
+    """Choose a password through an invitation; the first factor comes next."""
+    step = await flows.accept_invite(request, token=body.token, password=body.password)
+    return _answer(response, step)
+
+
+@router.post("/recover/details", response_model=RecoveryOut, dependencies=[Depends(_LINK)])
+async def recovery_details(body: LinkTokenIn, request: Request) -> RecoveryOut:
+    """The address a recovery link is for. Leaves the link unused."""
+    return RecoveryOut(email=await flows.recovery_details(request, token=body.token))
+
+
+@router.post(
+    "/recover/accept",
+    response_model=SignInOut,
+    response_model_exclude_unset=True,
+    dependencies=[Depends(_LINK)],
+)
+async def accept_recovery(body: LinkTokenIn, request: Request, response: Response) -> SignInOut:
+    """Use the server's recovery link: the second factors, remembered browsers
+    and sessions go, and a new first factor is set up next."""
+    step = await flows.accept_recovery(request, token=body.token)
+    return _answer(response, step)
 
 
 # --------------------------------------------------------------------------- #
