@@ -311,11 +311,19 @@ def upgrade() -> None:
         _when("expires_at"),
         _when("last_used_at", nullable=True),
         _when("revoked_at", nullable=True),
+        # The password's failures signed in FROM this device (design §2.3, the
+        # device-cookie counter): its own wait, apart from the account's.
+        sa.Column("password_failures", sa.Integer(), nullable=False, server_default="0"),
+        _when("password_failed_at", nullable=True),
         sa.UniqueConstraint("token_hash", name="uq_auth_trusted_devices_token_hash"),
         # The key `fk_auth_sessions_device_user` references below.
         sa.UniqueConstraint("id", "user_id", name="uq_auth_trusted_devices_id_user"),
         sa.CheckConstraint(
             "octet_length(token_hash) = 32", name="ck_auth_trusted_devices_token_hash"
+        ),
+        sa.CheckConstraint(
+            "password_failures >= 0 AND (password_failures = 0) = (password_failed_at IS NULL)",
+            name="ck_auth_trusted_devices_password_failures",
         ),
     )
     op.create_index("ix_auth_trusted_devices_user_id", "auth_trusted_devices", ["user_id"])

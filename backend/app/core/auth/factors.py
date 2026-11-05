@@ -53,17 +53,30 @@ async def clear_second_factors(session: AsyncSession, user_id: UUID) -> None:
         await reset_factor(session, user_id, factor)
 
 
-async def gate(session: AsyncSession, user_id: UUID, factor: Factor) -> None:
+async def gate(
+    session: AsyncSession, user_id: UUID, factor: Factor, *, device_id: UUID | None = None
+) -> None:
     """Refuse a factor step that is waiting or disabled (design §2.3). Said to
-    the person: they have already proved the password."""
-    state = await check_allowed(session, user_id, factor)
+    the person: they hold a session already -- a second-factor step follows a
+    proved password, and the password's own gate (`account.change_password`)
+    follows a full sign-in. `device_id`: the password's per-device counter
+    (`failures.check_allowed`)."""
+    state = await check_allowed(session, user_id, factor, device_id=device_id)
     if state.disabled:
         raise AuthRefusal(
             status.HTTP_403_FORBIDDEN,
             code="factor_disabled",
-            detail=tr(
-                "this second factor is locked after too many failed attempts; an administrator "
-                "can reset your factors"
+            detail=(
+                tr(
+                    "your password is locked after too many failed attempts; set a new one with "
+                    "the link on the sign-in page, or ask an administrator to reset your sign-in "
+                    "methods"
+                )
+                if factor == "password"
+                else tr(
+                    "this second factor is locked after too many failed attempts; an "
+                    "administrator can reset your factors"
+                )
             ),
         )
     if not state.allowed:
@@ -80,13 +93,21 @@ async def gate(session: AsyncSession, user_id: UUID, factor: Factor) -> None:
 
 
 async def count_failure(
-    session: AsyncSession, user: User, factor: Factor, *, vault: VaultService
+    session: AsyncSession,
+    user: User,
+    factor: Factor,
+    *,
+    vault: VaultService,
+    device_id: UUID | None = None,
 ) -> FactorState:
-    """One failure (Task 4 counts, disables and audits); when it was the one
-    that locked the factor, tell the person. Called only after `gate` or
+    """One failure (Task 4 counts, disables and audits) -- on the device's
+    counter with `device_id`, the password only; when it was the one that
+    locked the factor, tell the person. Called only after `gate` or
     `check_allowed` allowed the attempt, so `disabled` here means THIS
     failure disabled it."""
-    state = await record_failure(session, org_id=user.org_id, user_id=user.id, factor=factor)
+    state = await record_failure(
+        session, org_id=user.org_id, user_id=user.id, factor=factor, device_id=device_id
+    )
     if state.disabled:
         await notices.tell(
             session, user, "factor_disabled", vault=vault, actor_id=None, factor=factor

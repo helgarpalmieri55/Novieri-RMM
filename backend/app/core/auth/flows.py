@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
 from app.core.auth import action_tokens, notices, staff_password
-from app.core.auth.devices import RememberingOff, recognised, revoke_all_for_user
+from app.core.auth.devices import RememberingOff, presented, recognised, revoke_all_for_user
 from app.core.auth.devices import remember as remember_device
 from app.core.auth.factors import clear_second_factors, count_failure, gate, summary
 from app.core.auth.failures import check_allowed, record_success, reset_factor
@@ -321,19 +321,33 @@ async def login(request: Request, *, email: str, password: str) -> SignIn:
         await verify_against_nobody(found.org_id if found is not None else _NO_ORG, password)
         raise _invalid_credentials()
     outcome: SignIn | None = None
+    untried = False
     async with _identity_session(found.org_id, _engine(request)) as session:
         user = await session.get(User, found.user_id)
         stored = await session.get(AuthPassword, found.user_id)
-        state = await check_allowed(session, found.user_id, "password")
+        # The counter this browser waits and counts on (design §2.3, operator
+        # decision 2026-11-05): its device's when `recognised`'s rule accepts
+        # the cookie for THIS account, else the account's. Chosen before the
+        # password is tried, and changes no answer.
+        device = await presented(session, found.user_id, request)
+        counter = device.id if device is not None else None
+        state = await check_allowed(session, found.user_id, "password", device_id=counter)
         if user is None or stored is None or not state.allowed:
-            await verify_against_nobody(found.org_id, password)
+            untried = True
         else:
             matches = await _password_matches(found.org_id, password, stored)
             if matches is False:
-                await count_failure(session, user, "password", vault=_vault(request))
+                await count_failure(
+                    session, user, "password", vault=_vault(request), device_id=counter
+                )
             elif matches:
                 await record_success(session, user.id, "password")
                 outcome = await _after_password(session, request, user)
+    if untried:
+        # Falsifier 2: the same argon2 work as a wrong password. Done after
+        # the block, so a refused attempt does not hold the account's lock
+        # through it while the person's own browser waits its turn.
+        await verify_against_nobody(found.org_id, password)
     # The count, when there was one, is committed: refuse only now.
     if outcome is None:
         raise _invalid_credentials()

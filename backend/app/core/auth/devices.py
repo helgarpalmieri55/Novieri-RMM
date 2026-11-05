@@ -85,6 +85,20 @@ async def recognised(
     """The remembered device the request's cookie names, when it is `user_id`'s
     and still valid under every limit of the module docstring; else None. A
     recognised device's `last_used_at` is renewed."""
+    device = await presented(session, user_id, request)
+    if device is not None:
+        device.last_used_at = _now()
+        await session.flush()
+    return device
+
+
+async def presented(
+    session: AsyncSession, user_id: UUID, request: Request
+) -> AuthTrustedDevice | None:
+    """`recognised`'s answer -- the same rule, every limit -- without renewing
+    the device: what a password attempt asks BEFORE the password is proved,
+    to choose the counter it waits and counts on (`failures.check_allowed`,
+    design §2.3). A failed attempt is not a use of the device."""
     token = cookie_token(request, DEVICE_COOKIE)
     if token is None:
         return None
@@ -110,8 +124,6 @@ async def recognised(
     ).scalar_one_or_none()
     if changed_at is not None and changed_at >= device.created_at:
         return None
-    device.last_used_at = now
-    await session.flush()
     return device
 
 

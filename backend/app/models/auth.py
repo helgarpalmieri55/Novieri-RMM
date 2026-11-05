@@ -178,6 +178,10 @@ class AuthTrustedDevice(Base):
         CheckConstraint(
             "octet_length(token_hash) = 32", name="ck_auth_trusted_devices_token_hash"
         ),
+        CheckConstraint(
+            "password_failures >= 0 AND (password_failures = 0) = (password_failed_at IS NULL)",
+            name="ck_auth_trusted_devices_password_failures",
+        ),
     )
 
     id: Mapped[UUID] = uuid7_pk()
@@ -192,6 +196,12 @@ class AuthTrustedDevice(Base):
     expires_at: Mapped[datetime] = mapped_column()
     last_used_at: Mapped[datetime | None] = mapped_column(default=None)
     revoked_at: Mapped[datetime | None] = mapped_column(default=None)
+    #: The password's consecutive failures from THIS browser, and the last
+    #: one's time (design §2.3, `app.core.auth.failures`): the wait of a
+    #: sign-in carrying this device's cookie. The account's own row in
+    #: `auth_failures` holds the other browsers' count and the disabled state.
+    password_failures: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    password_failed_at: Mapped[datetime | None] = mapped_column(default=None)
 
 
 class AuthSession(Base):
