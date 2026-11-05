@@ -321,7 +321,7 @@ export const USERS_FIXTURE = { users: [OPERATOR_USER, CASEY_USER] };
  * resetting someone's factors needs someone else (final review D2, Minor 2).
  */
 export const DANA_USER = {
-  id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
   email: "dana@example.com",
   display_name: "Dana Okafor",
   status: "active",
