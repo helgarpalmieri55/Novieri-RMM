@@ -65,6 +65,12 @@ export const auth = {
     passkeyRejected: "That passkey was not accepted. Try again, or use an authenticator app.",
     factorSaved: "Your second factor is saved. The recovery codes could not be made yet.",
     retryFinish: "Try again",
+    // `enroll/finish` answered 409 `already_signed_in`: its first answer was lost after it succeeded.
+    alreadySignedIn:
+      "You are already signed in: the first answer was lost on its way. Your recovery codes were made but cannot be shown again; make new ones in Your security.",
+    // `enroll/finish` answered 409 `enroll_required`: more than 15 minutes since the factor was saved.
+    finishExpired:
+      "The time to finish this step has run out. Start again from the sign-in page: you will sign in with the second factor you just added, and can make recovery codes in Your security.",
   },
   codes: {
     title: "Save your recovery codes",

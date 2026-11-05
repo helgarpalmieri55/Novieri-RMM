@@ -70,6 +70,10 @@ export const auth: Shape<typeof en> = {
     passkeyRejected: "No se aceptó esa clave de acceso. Inténtalo de nuevo o usa una aplicación de autenticación.",
     factorSaved: "Tu segundo factor está guardado. Aún no se pudieron generar los códigos de recuperación.",
     retryFinish: "Reintentar",
+    alreadySignedIn:
+      "Ya iniciaste sesión: la primera respuesta se perdió por el camino. Tus códigos de recuperación se generaron, pero no se pueden volver a mostrar; genera otros nuevos en Tu seguridad.",
+    finishExpired:
+      "Se acabó el tiempo para terminar este paso. Empieza de nuevo desde la página de inicio de sesión: entrarás con el segundo factor que acabas de añadir y podrás generar códigos de recuperación en Tu seguridad.",
   },
   codes: {
     title: "Guarda tus códigos de recuperación",

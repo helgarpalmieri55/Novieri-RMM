@@ -30,12 +30,26 @@ import { Form } from "../../components/form";
 import { Field, inputClass } from "../../components/ui";
 import { useT } from "../../i18n/context";
 import { translate, type MessageKey } from "../../i18n/core";
+import { ApiError, apiErrorCode } from "../../lib/api";
 import { useApi } from "../../lib/ApiContext";
+import { enterConsole } from "../../lib/session";
 import { Btn } from "../../shell/components";
 import { AuthAlert, AuthCard, AuthSection } from "./AuthCard";
 import { describeAuthError } from "./errors";
 import { carryNext, digitsOf, handOverCodes, setupKeyOf, useNext } from "./flow";
 import { canUsePasskeys, createPasskey, describePasskeyError } from "./passkey";
+
+/** An `enroll/finish` refusal a retry cannot change. */
+type FinishDeadEnd = "signed_in" | "expired" | "timed_out";
+
+function finishDeadEnd(error: unknown): FinishDeadEnd | null {
+  if (!(error instanceof ApiError)) return null;
+  const code = apiErrorCode(error);
+  if (error.status === 409 && code === "already_signed_in") return "signed_in";
+  if (error.status === 409 && code === "enroll_required") return "expired";
+  if (error.status === 401) return "timed_out";
+  return null;
+}
 
 export function EnrollPage() {
   const t = useT();
@@ -52,6 +66,9 @@ export function EnrollPage() {
   // refuses the factor steps again on a pending session, so a failed
   // `enroll/finish` is retried alone.
   const [factorAccepted, setFactorAccepted] = useState(false);
+  // A refusal of `enroll/finish` that no retry can change (final review D1,
+  // Minor 5), or `null` when trying again may work.
+  const [deadEnd, setDeadEnd] = useState<FinishDeadEnd | null>(null);
   const inFlight = useRef(false);
 
   async function run(step: () => Promise<void>, rejected: MessageKey) {
@@ -73,25 +90,54 @@ export function EnrollPage() {
   /** The factor is in: make the recovery codes and show them, once. */
   async function finished() {
     setFactorAccepted(true);
-    const { recovery_codes } = await api.enrollFinish();
-    handOverCodes(recovery_codes);
-    navigate(carryNext("/sign-in/recovery-codes", next), { replace: true });
+    try {
+      const { recovery_codes } = await api.enrollFinish();
+      handOverCodes(recovery_codes);
+      navigate(carryNext("/sign-in/recovery-codes", next), { replace: true });
+    } catch (cause: unknown) {
+      setDeadEnd(finishDeadEnd(cause));
+      throw cause;
+    }
   }
 
   const setupKey = otpauthUri ? setupKeyOf(otpauthUri) : null;
 
   if (factorAccepted) {
+    // THREE REFUSALS NEVER CHANGE ON A RETRY (final review D1, Minor 5), and
+    // each gets its own way out instead of "Try again" for ever:
+    //   - 409 `already_signed_in`: the first answer was lost after success;
+    //     the session is whole, and the codes it made can be made again in
+    //     Your security -- so, the console;
+    //   - 409 `enroll_required`: more than the server's 15 minutes since the
+    //     factor was saved -- so, sign in again, with that factor;
+    //   - 401 `auth_required`: the pre-factor session is gone -- the same.
+    const signedIn = deadEnd === "signed_in";
+    const alert =
+      deadEnd === "signed_in"
+        ? t("auth.enroll.alreadySignedIn")
+        : deadEnd === "expired"
+          ? t("auth.enroll.finishExpired")
+          : error;
     return (
       <AuthCard title={t("auth.enroll.title")} intro={t("auth.enroll.factorSaved")}>
-        <AuthAlert text={error} />
+        <AuthAlert text={alert} />
         <div className="form-actions">
-          <Btn
-            variant="primary"
-            label={busy ? t("auth.common.working") : t("auth.enroll.retryFinish")}
-            disabled={busy}
-            onClick={() => void run(finished, "auth.enroll.rejected")}
-          />
+          {signedIn ? (
+            <Btn variant="primary" icon="arrow-right" label={t("auth.codes.continue")} onClick={() => enterConsole(next)} />
+          ) : deadEnd === null ? (
+            <Btn
+              variant="primary"
+              label={busy ? t("auth.common.working") : t("auth.enroll.retryFinish")}
+              disabled={busy}
+              onClick={() => void run(finished, "auth.enroll.rejected")}
+            />
+          ) : null}
         </div>
+        {signedIn ? null : (
+          <p className="note" style={{ margin: 0 }}>
+            <Link to={carryNext("/sign-in", next)}>{t("auth.common.startOver")}</Link>
+          </p>
+        )}
       </AuthCard>
     );
   }

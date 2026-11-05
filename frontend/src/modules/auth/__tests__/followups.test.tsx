@@ -91,6 +91,65 @@ describe("a factor accepted but the recovery codes not made", () => {
     await waitFor(() => expect(where.location?.pathname).toBe("/sign-in/recovery-codes"));
     expect(calls.enrollPasskey).toHaveBeenCalledTimes(1);
   });
+
+  // FINAL REVIEW D1, MINOR 5: three refusals of `enroll/finish` never change
+  // on a retry, and the card offered only "Try again".
+  async function passkeyThenFinish(refusal: ApiError) {
+    calls.enrollFinish.mockRejectedValue(refusal);
+    const user = userEvent.setup();
+    renderAuth("/sign-in/enroll?next=%2Fdevices");
+    await user.click(screen.getByRole("button", { name: "Create a passkey" }));
+    await screen.findByRole("alert");
+    return user;
+  }
+
+  it("always offers a way back to the sign-in page", async () => {
+    await passkeyThenFinish(new ApiError(503, ""));
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start again" })).toHaveAttribute("href", "/sign-in?next=%2Fdevices");
+  });
+
+  it("409 already_signed_in: the first answer was lost after success, so it offers the console, not a retry", async () => {
+    const user = await passkeyThenFinish(
+      new ApiError(409, JSON.stringify({ code: "already_signed_in", detail: "you are already signed in" })),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "You are already signed in: the first answer was lost on its way. Your recovery codes were made but cannot be shown again; make new ones in Your security.",
+    );
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Continue to the console" }));
+    expect(navigation.replace).toHaveBeenCalledExactlyOnceWith("/devices");
+    expect(calls.enrollFinish).toHaveBeenCalledTimes(1);
+  });
+
+  it("409 enroll_required: the time to finish ran out, so it offers only to start again", async () => {
+    await passkeyThenFinish(
+      new ApiError(409, JSON.stringify({ code: "enroll_required", detail: "set up a passkey or an authenticator app first" })),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/The time to finish this step has run out\. Start again from the sign-in page/);
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start again" })).toHaveAttribute("href", "/sign-in?next=%2Fdevices");
+  });
+
+  it("401 auth_required: the sign-in timed out, so it offers only to start again", async () => {
+    await passkeyThenFinish(new ApiError(401, JSON.stringify({ code: "auth_required", detail: "sign in to do this" })));
+    expect(screen.getByRole("alert")).toHaveTextContent("This sign-in has timed out. Start again from the sign-in page.");
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start again" })).toBeInTheDocument();
+  });
+
+  it("says the dead ends in Spanish", async () => {
+    setActiveLanguage("es");
+    calls.enrollFinish.mockRejectedValue(
+      new ApiError(409, JSON.stringify({ code: "already_signed_in", detail: "ya iniciaste sesión" })),
+    );
+    const user = userEvent.setup();
+    const { container } = renderAuth("/sign-in/enroll");
+    await user.click(screen.getByRole("button", { name: "Crear una clave de acceso" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Ya iniciaste sesión/);
+    expect(screen.getByRole("button", { name: "Continuar a la consola" })).toBeInTheDocument();
+    expectNoEnglish(container);
+  });
 });
 
 describe("a passkey the server refused", () => {
