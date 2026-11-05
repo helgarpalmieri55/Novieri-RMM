@@ -227,6 +227,8 @@ export const settings = {
     enableAria: "Enable {email}",
     resetFactors: "Reset second factors",
     resetFactorsAria: "Reset second factors for {email}",
+    // On the caller's own row, where the server refuses a reset.
+    resetOwnFactors: "Your own second factors are changed in <link>Your security</link>.",
     endSessions: "Sign out everywhere",
     endSessionsAria: "Sign out {email} everywhere",
     resend: "Resend invitation",

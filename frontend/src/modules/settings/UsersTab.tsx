@@ -87,6 +87,7 @@ import { describeSubmitError } from "../../components/form";
 import { useStepUp } from "../../components/stepUp";
 import { useT } from "../../i18n/context";
 import type { MessageKey } from "../../i18n/core";
+import { Trans } from "../../i18n/Trans";
 import { EntityPicker } from "../../components/picker";
 import { Badge, Button, Dialog, Field, Table, Td, Th, inputClass } from "../../components/ui";
 import { Btn, FieldGroup, KIND_ICON, Panel, QueryState } from "../../shell/components";
@@ -109,6 +110,7 @@ import {
   useRoles,
   useUsers,
   useGlobalWriteReason,
+  useMe,
 } from "./api";
 import {
   EVERY_CLIENT_CHOICE,
@@ -218,6 +220,8 @@ export function UsersTab({
 }) {
   const t = useT();
   const users = useUsers(canRead);
+  // The caller, whose own row offers no second-factor reset.
+  const selfId = useMe().data?.user_id;
   // Shares the Email tab's cache key, so saving a relay clears this banner
   // without a reload.
   const emailSettings = useEmailSettings(canReadEmail);
@@ -721,16 +725,41 @@ export function UsersTab({
                             >
                               {t("settings.users.disable")}
                             </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              aria-label={t("settings.users.resetFactorsAria", { email: user.email })}
-                              disabled={!canManage}
-                              title={canManage ? undefined : reason}
-                              onClick={() => openConfirm({ kind: "resetFactors", user })}
-                            >
-                              {t("settings.users.resetFactors")}
-                            </Button>
+                            {/* NOT ON YOUR OWN ROW (final review D2, Minor 2).
+                                The server refuses it (`_refuse_self`) -- but
+                                only after the step-up, which may spend a
+                                single-use recovery code first. One's own
+                                factors are changed in Your security. */}
+                            {user.id === selfId ? (
+                              <>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  aria-label={t("settings.users.resetFactorsAria", { email: user.email })}
+                                  aria-describedby={`own-factors-${user.id}`}
+                                  disabled
+                                >
+                                  {t("settings.users.resetFactors")}
+                                </Button>
+                                <span id={`own-factors-${user.id}`} className="note">
+                                  <Trans
+                                    k="settings.users.resetOwnFactors"
+                                    components={{ link: <Link to="/profile/security" /> }}
+                                  />
+                                </span>
+                              </>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                aria-label={t("settings.users.resetFactorsAria", { email: user.email })}
+                                disabled={!canManage}
+                                title={canManage ? undefined : reason}
+                                onClick={() => openConfirm({ kind: "resetFactors", user })}
+                              >
+                                {t("settings.users.resetFactors")}
+                              </Button>
+                            )}
                             <Button
                               type="button"
                               variant="ghost"

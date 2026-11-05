@@ -316,6 +316,19 @@ export const CASEY_USER = {
 export const USERS_FIXTURE = { users: [OPERATOR_USER, CASEY_USER] };
 
 /**
+ * An active person who is NOT the caller: the server refuses the caller's
+ * own row for a second-factor reset (`service._refuse_self`), so a test of
+ * resetting someone's factors needs someone else (final review D2, Minor 2).
+ */
+export const DANA_USER = {
+  id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  email: "dana@example.com",
+  display_name: "Dana Okafor",
+  status: "active",
+  roles: [],
+};
+
+/**
  * The clients a grant's scope can name (`GET /api/v1/clients`), for the
  * picker that used to offer device groups: a grant is scoped to ONE CLIENT or
  * to every client now, and device groups no longer scope grants (MSP clients

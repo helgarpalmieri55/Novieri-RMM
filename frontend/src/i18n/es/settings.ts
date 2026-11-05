@@ -220,6 +220,7 @@ export const settings: Shape<typeof en> = {
     enableAria: "Habilitar a {email}",
     resetFactors: "Restablecer segundos factores",
     resetFactorsAria: "Restablecer los segundos factores de {email}",
+    resetOwnFactors: "Tus propios segundos factores se cambian en <link>Tu seguridad</link>.",
     endSessions: "Cerrar todas sus sesiones",
     endSessionsAria: "Cerrar todas las sesiones de {email}",
     resend: "Reenviar invitación",
