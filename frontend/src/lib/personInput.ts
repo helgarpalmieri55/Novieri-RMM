@@ -13,10 +13,19 @@
  * specific period." A poll is not the subscriber.
  *
  * SO THE CONSOLE SAYS WHICH REQUESTS A PERSON CAUSED. A person's input -- a
- * key, a press, a touch, a wheel, a moved pointer -- marks the next 60 s as
- * theirs. Every request made outside that window carries
- * `X-ITMS-Background: 1` (`./api.ts::requestHeaders`), and the server does
- * not renew the session for it.
+ * key, a press, a touch, a wheel, a moved pointer, a click, text entered --
+ * marks the next 60 s as theirs. Every request made outside that window
+ * carries `X-ITMS-Background: 1` (`./api.ts::requestHeaders`), and the server
+ * does not renew the session for it.
+ *
+ * `click` AND `input` COUNT ON THEIR OWN (fix round 1 re-review, R1-M5;
+ * coordinator decision). A screen reader's browse-mode activation (NVDA,
+ * JAWS, VoiceOver) and voice control activate a control through the
+ * accessibility API, and the browser synthesises the `click` with no
+ * `pointerdown` it is obliged to send. Dictation enters text through `input`
+ * with no `keydown`. Without them, a person working only that way would be
+ * idled out while working. The console's own `.click()` calls (a download's
+ * anchor, a file picker) each follow a person's press.
  *
  * AND A PERSON WHO IS WORKING STAYS SIGNED IN. A page that asks nothing of its
  * own while it is used -- a remote screen, a long form -- would otherwise
@@ -24,9 +33,12 @@
  * the header goes out at least every 60 s: the page's own, or, when it made
  * none, the keep-alive (`ApiProvider`'s plain `GET /me`).
  *
- * WINDOW, CAPTURE PHASE: input over the remote screen counts, although the
- * viewer stops its keys and pointer moves from bubbling to the page. Passive
- * listeners, and pointer moves are sampled once a second.
+ * WINDOW, CAPTURE PHASE, so a component that stops an event's propagation
+ * cannot hide a person's input from this watch: the row menus, the command
+ * palette and the account menu stop Escape. (The remote screen's viewer
+ * calls only `preventDefault` on its keys and pointer moves, which hides
+ * nothing; fix round 1 re-review, R1-M6.) Passive listeners, and pointer
+ * moves are sampled once a second.
  *
  * NOTHING HERE GATES ANYTHING (invariant 6). A script on the page can say a
  * person is there; it already holds the session. The header can only ask the
@@ -38,7 +50,7 @@ export const ACTIVE_FOR_MS = 60_000;
 /** Pointer moves are sampled at most this often. */
 const MOVE_SAMPLE_MS = 1_000;
 
-const INPUTS = ["keydown", "pointerdown", "wheel", "touchstart"] as const;
+const INPUTS = ["keydown", "pointerdown", "wheel", "touchstart", "click", "input"] as const;
 
 let lastInput = Number.NEGATIVE_INFINITY;
 /** The last request that went out without the header. */
