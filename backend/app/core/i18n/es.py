@@ -1024,6 +1024,7 @@ CATALOG: dict[str, str] = {
     ),
     # --- api ---
     "missing bearer token": "falta el token de portador",
+    "the assistant's internal token was refused": "se rechazó el token interno del asistente",
     "unknown organization": "organización desconocida",
     "requires {code}": "requiere {code}",
     "X-Client-Id must be one client id": "X-Client-Id debe ser el id de un solo cliente",

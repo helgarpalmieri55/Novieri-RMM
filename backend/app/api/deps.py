@@ -23,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
+from app.core.auth import loopback
 from app.core.auth.refusals import AUTH_REQUIRED, STEP_UP_REQUIRED, AuthRefusal
 from app.core.auth.sessions import SessionPrincipal, resolve, step_up_fresh
 from app.core.client_scope import ClientScope, parse_client_header
@@ -176,6 +177,30 @@ async def auth_context(request: Request) -> AuthContext:
     )
 
 
+async def _session_principal(request: Request) -> SessionPrincipal | None:
+    """The session that admits this request, or None for the bearer path.
+
+    The assistant's internal token first (autenticación propia design §5.6): a
+    request that SAYS it is the assistant's own call (`X-ITMS-Loopback`) is
+    admitted by `loopback.verify_loopback` or refused there, and never falls
+    through to the cookie or the bearer. Otherwise the session cookie
+    (`resolve`).
+
+    The principal stays on `request.state`, a plain attribute as `org_id` and
+    `user_id` are, so an assistant route -- the portal's included, whose
+    `PortalContext` carries no principal -- can mint the next turn's token from
+    it (`loopback.loopback_authorization`) without a credential on any
+    context object."""
+    if loopback.claims_loopback(request):
+        principal: SessionPrincipal | None = await loopback.verify_loopback(request)
+        request.state.via_loopback = True
+    else:
+        principal = await resolve(request)
+        request.state.via_loopback = False
+    request.state.session_principal = principal
+    return principal
+
+
 async def admit(request: Request, *, contacts: bool) -> Admission:
     """Authenticate the token and admit the person behind it (spec §3.2).
 
@@ -209,10 +234,12 @@ async def admit(request: Request, *, contacts: bool) -> Admission:
             )
     # THE CONSOLE'S OWN SESSION FIRST (P2 design §6.5), and never on the MCP
     # channel: a cookie the browser holds is not a grant an AI app was given
-    # (invariant 1c(a)). Without a live session the bearer path below decides,
-    # as before (coordinator D21: until Task 13 removes the console's token).
+    # (invariant 1c(a)). Nor is the assistant's internal token, which
+    # `_session_principal` takes first and `verify_loopback` refuses on an MCP
+    # call anyway. Without a live session the bearer path below decides, as
+    # before (coordinator D21: until Task 13 removes the console's token).
     if call is None:
-        principal = await resolve(request)
+        principal = await _session_principal(request)
         if principal is not None:
             return await _admit_session(request, principal, contacts=contacts)
     authorization = request.headers.get("Authorization", "")

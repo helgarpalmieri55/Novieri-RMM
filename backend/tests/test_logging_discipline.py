@@ -438,7 +438,12 @@ def test_the_sweep_actually_finds_log_calls() -> None:
     `modules/agent_update/reconcile.py`, where one org's rollout tick fails
     and every other org is still ticked. It names the org and nothing else.
 
-    NOW 109, own authentication phase 1 Task 4: one static WARNING in
+    NOW 110, own authentication phase 1 Task 9: one static WARNING in
+    `app/core/auth/loopback.py::_refused`, when the door refuses the
+    assistant's internal token. `extra` = the reason, a fixed phrase of
+    that module; never the token, the session id or the person.
+
+    BEFORE THAT, 109, own authentication phase 1 Task 4: one static WARNING in
     `app/core/auth/totp.py::_open`, when a person's sealed TOTP secret does
     not open for their row (moved from another row, or damaged) and the
     code is refused. Nothing in `extra`: never the seal, the code or the
@@ -532,8 +537,8 @@ def test_the_sweep_actually_finds_log_calls() -> None:
         total += sum(
             1 for n in ast.walk(tree) if isinstance(n, ast.Call) and _is_log_call(n)
         )
-    assert total == 109, (
-        f"the AST sweep found {total} log call sites, expected 109 -- if a log "
+    assert total == 110, (
+        f"the AST sweep found {total} log call sites, expected 110 -- if a log "
         "call was legitimately added or removed, update this number AND the "
         "running count in §2.2 of docs/superpowers/specs/"
         "2026-08-14-logging-kernel-design.md, together. NOT line 13: that is "

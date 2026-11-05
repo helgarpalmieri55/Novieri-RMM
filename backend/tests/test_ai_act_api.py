@@ -14,9 +14,11 @@ happened.
 """
 
 import time
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
+import jwt
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -596,12 +598,13 @@ async def test_the_persona_profile_may_propose_and_its_tool_set_is_reads_only(
 
 
 @pytest.mark.parametrize("narrowed", [False, True], ids=["unnarrowed", "narrowed"])
-def test_the_turn_context_built_for_a_confirm_redacts_its_bearer(narrowed: bool) -> None:
+async def test_the_turn_context_built_for_a_confirm_redacts_its_bearer(narrowed: bool) -> None:
     """The confirm path builds a `TurnContext` for its one loopback read. Its
     repr must not carry the token: `TurnContext` is per-turn and module-private,
     but the accident §0.1 refuses -- a token in a log file forever -- is one
     `logger.debug(ctx)` away. It carries the request's `X-Client-Id`, which is
-    no secret (phase 3 design §5.2)."""
+    no secret (phase 3 design §5.2). A request with no session (the console's
+    bearer, until the cookie switch) forwards its own header."""
     client = uuid4() if narrowed else None
     raw = {"Authorization": "Bearer secret-token-value"} | (
         {} if client is None else {"X-Client-Id": str(client)}
@@ -611,9 +614,34 @@ def test_the_turn_context_built_for_a_confirm_redacts_its_bearer(narrowed: bool)
         app = None
         # A real `Headers`: `requested_client` reads it with `getlist`.
         headers = Headers(raw)
+        state = SimpleNamespace()
 
-    ctx = api_module._turn_context(_Request())  # type: ignore[arg-type]
+    ctx = await api_module._turn_context(_Request())  # type: ignore[arg-type]
     assert ctx.bearer == "Bearer secret-token-value"
     assert "secret-token-value" not in repr(ctx)
     assert ctx.deadline > time.monotonic()
     assert ctx.requested_client == client
+
+
+async def test_a_confirm_signed_in_by_cookie_probes_with_its_own_token(api_env: Any) -> None:
+    """The confirm's probe carries a token minted for the confirm's own
+    session, never the cookie and never a header the request brought."""
+    from tests.session_support import principal_for, sign_in
+
+    org_id = await api_env.create_org("confirm-cookie")
+    _, sub = await ai_user(api_env, org_id, "ai.use", "devices.read")
+    session_id = (await sign_in(api_env, org_id, sub)).session_id
+    # Awaited out here: a class body is not a coroutine, and `await` inside
+    # one is a SyntaxError.
+    principal = await principal_for(api_env, session_id)
+
+    class _Request:
+        app = api_env.app
+        headers = Headers({"Authorization": "Bearer the-persons-own-header"})
+        state = SimpleNamespace(session_principal=principal, via_loopback=False)
+
+    ctx = await api_module._turn_context(_Request())  # type: ignore[arg-type]
+    claims = jwt.decode(ctx.bearer.removeprefix("Bearer "), options={"verify_signature": False})
+    assert (claims["aud"], claims["sid"]) == ("loopback", str(session_id))
+    assert "the-persons-own-header" not in ctx.bearer
+    assert ctx.bearer.removeprefix("Bearer ") not in repr(ctx)

@@ -136,6 +136,7 @@ from app.core.ai.store import (
     persist_turn,
 )
 from app.core.ai.types import TurnContext
+from app.core.auth.loopback import loopback_authorization
 from app.core.i18n import tr
 from app.core.rbac import codes_held_anywhere, user_permission_codes
 from app.core.tenancy import admin_session, org_session
@@ -679,7 +680,10 @@ async def create_turn(
 
     # 6. Run the turn. NO DATABASE SESSION IS HELD PAST THIS LINE.
     history.append(Message(role="user", content=(TextBlock(text=body.question),)))
-    bearer = request.headers.get("Authorization", "")
+    # The turn's own internal token, minted from THIS request's session
+    # (autenticación propia design §5.6). Only a request the console's
+    # Keycloak bearer admitted still forwards that header, until Task 13 (D21).
+    bearer = await loopback_authorization(request)
 
     channel = _channel(session_id, stream_id)
 
@@ -1075,21 +1079,22 @@ async def list_injection_flags(
 # reach `JobEngine.create`; everything dispatched is read off the stored row.
 
 
-def _turn_context(request: Request) -> TurnContext:
+async def _turn_context(request: Request) -> TurnContext:
     """A `TurnContext` for the ONE loopback read the confirm path makes: "may
     this principal see the target device" (§9.2's third part).
 
-    The bearer comes from THIS request's own headers and is passed as an
-    argument, never put on `AuthContext` -- that dataclass reaches every module,
-    and a token on it is one careless `logger.debug(ctx)` from living in a log
-    file forever (§0.1).
+    The token is minted for THIS request's own session
+    (`loopback_authorization`, autenticación propia design §5.6) and passed as
+    an argument, never put on `AuthContext` -- that dataclass reaches every
+    module, and a token on it is one careless `logger.debug(ctx)` from living
+    in a log file forever (§0.1).
 
     The request's `X-Client-Id` goes with it, so the probe runs under the
     confirm's own client scope (phase 3 design §5.2).
     """
     return TurnContext(
         app=request.app,
-        bearer=request.headers.get("Authorization", ""),
+        bearer=await loopback_authorization(request),
         deadline=time.monotonic() + DEFAULTS.wall_clock_s,
         requested_client=requested_client(request),
     )
@@ -1232,6 +1237,9 @@ async def confirm_ai_action(
     below it.
     """
     engine = request.app.state.app_engine
+    # Minted before the transaction opens: it is a call to OpenBao, and no
+    # database session waits on one.
+    turn_ctx = await _turn_context(request)
     try:
         async with org_session(ctx.org_id, engine=engine, clients=ctx.clients) as session:
             codes = await _codes_on_action_client(session, ctx, ai_action_id)
@@ -1243,7 +1251,7 @@ async def confirm_ai_action(
                 actor_id=ctx.user_id,
                 permissions=codes,
                 job_engine=request.app.state.job_engine,
-                ctx=_turn_context(request),
+                ctx=turn_ctx,
                 executor=ADMIN_PROFILE.executor,
             )
     except (AiNotFoundError, ActConflict, ActExpired, ActForbidden) as exc:
