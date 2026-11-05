@@ -756,7 +756,9 @@ async def test_a_remembered_device_skips_the_factor_but_not_the_recent_confirmat
     changed = await auth_env.client.put("/api/v1/me/password", headers=who.headers(), json=body)
     assert changed.status_code == 204, changed.text
     # The change ends the OTHER sessions; the caller's, which the device
-    # started, is detached from it and stays (`account.change_password`).
+    # started, is detached from it and stays (`account.change_password`),
+    # under a new identifier the answer sets (final review B-I1).
+    who.session = cookie(changed, SESSION_COOKIE)
     me = await auth_env.client.get("/api/v1/me", headers=who.headers())
     assert me.status_code == 200, me.text
 

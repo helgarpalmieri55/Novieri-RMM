@@ -579,10 +579,16 @@ async def my_security(request: Request, ctx: AuthContext = Depends(_console_ctx)
 async def change_password(
     body: PasswordChangeIn, request: Request, ctx: AuthContext = Depends(_console_ctx)
 ) -> Response:
-    """The current password and a new one, after a recent confirmation."""
+    """The current password and a new one, after a recent confirmation. The
+    caller's session stays under a new cookie; every other session ends."""
     require_step_up(ctx)
-    await account.change_password(request, _me(ctx), current=body.current, new=body.new)
-    return _no_content()
+    token, expires_at = await account.change_password(
+        request, _me(ctx), current=body.current, new=body.new
+    )
+    response = _no_content()
+    # The new identifier, expiring with the session as the change capped it.
+    set_session_cookie(response, token, expires_at=expires_at)
+    return response
 
 
 @me_router.delete("/passkeys/{passkey_id}", status_code=status.HTTP_204_NO_CONTENT)

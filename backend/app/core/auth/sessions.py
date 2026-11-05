@@ -353,6 +353,29 @@ async def mark_factor(session: AsyncSession, session_id: UUID) -> str:
     return token
 
 
+async def rotate(session: AsyncSession, session_id: UUID) -> str:
+    """A NEW identifier for a live session, returned; nothing else changes --
+    not `factor_at`, `step_up_at` nor the expiry. For a password change (final
+    review B-I1): OWASP "The session ID must be renewed or regenerated ...
+    after any privilege level change" [S6], and a password change is what a
+    person does who fears their cookie was copied. NOT at a step-up: the
+    screen's watchdog re-reads the cookie of its handshake
+    (`modules/remote/tunnel.py`), and a new one there would cut the screen at
+    every vault checkout."""
+    token = new_token()
+    row = (
+        await session.execute(
+            update(AuthSession)
+            .where(AuthSession.id == session_id, AuthSession.ended_at.is_(None))
+            .values(token_hash=token_hash(token))
+            .returning(AuthSession.id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise LookupError("no live session")  # i18n-exempt: the caller answers 401
+    return token
+
+
 async def mark_step_up(session: AsyncSession, session_id: UUID) -> None:
     """A second factor was verified again (design §2.5)."""
     now = _now()
