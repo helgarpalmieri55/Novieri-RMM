@@ -425,17 +425,34 @@ async def factor_totp(
 
 async def _spend_recovery_code(
     session: AsyncSession, request: Request, user: User, code: str
-) -> bool:
+) -> int | None:
+    """Spend the code: the codes left, or None for a wrong one (counted). The
+    caller tells the person (`_tell_recovery_code_used`) only after its own
+    last check that can still refuse -- a notice is mail, and mail does not
+    roll back (fix round 3)."""
     if not await use_code(session, user.id, code):
         await count_failure(session, user, "recovery", vault=_vault(request))
-        return False
+        return None
     await record_success(session, user.id, "recovery")
     left = await remaining(session, user.id)
     await _audit(session, user, "auth.recovery_code_used", {"left": left})
+    return left
+
+
+async def _tell_recovery_code_used(
+    session: AsyncSession, request: Request, user: User, left: int
+) -> None:
+    """The LAST act of the step's transaction (fix round 3; re-review of fix
+    round 2, Important 1). `notices.tell` sends synchronously, and with a
+    relay that signs in, `mail._sign_in` checks the relay's secret out of the
+    vault and records `email.credential_used` in THIS session. Sent before a
+    refusal that rolls the block back -- the session ended meanwhile, at
+    `_stepped_up` or `mark_factor` -- it told the person of a code that was
+    not used, and left a vault checkout whose audit row rolled back
+    (invariant 4)."""
     await notices.tell(
         session, user, "recovery_code_used", vault=_vault(request), actor_id=user.id, left=left
     )
-    return True
 
 
 async def factor_recovery(
@@ -448,10 +465,14 @@ async def factor_recovery(
         if (await summary(session, user.id))[2] == 0:
             raise _unavailable()
         await gate(session, user.id, "recovery")
-        if await _spend_recovery_code(session, request, user, code):
+        left = await _spend_recovery_code(session, request, user, code)
+        if left is not None:
+            # `mark_factor` refuses inside the block when the session ended
+            # meanwhile: the notice comes after it.
             result = await _factor_done(
                 session, request, user, principal, method="recovery", remember=remember
             )
+            await _tell_recovery_code_used(session, request, user, left)
     if result is None:
         raise _factor_failed()
     return result
@@ -740,9 +761,13 @@ async def step_up_recovery(request: Request, principal: SessionPrincipal, *, cod
         if (await summary(session, user.id))[2] == 0:
             raise _unavailable()
         await gate(session, user.id, "recovery")
-        accepted = await _spend_recovery_code(session, request, user, code)
-        if accepted:
+        left = await _spend_recovery_code(session, request, user, code)
+        if left is not None:
+            # `_stepped_up` refuses inside the block when the session ended
+            # meanwhile: the notice comes after it.
             await _stepped_up(session, principal)
+            await _tell_recovery_code_used(session, request, user, left)
+            accepted = True
     if not accepted:
         raise _factor_failed(status.HTTP_400_BAD_REQUEST)
 
@@ -1114,5 +1139,9 @@ async def accept_recovery(request: Request, *, token: str, password: str | None 
         await end_all_for_user(session, user.id, "factors_reset")
         await revoke_all_for_user(session, user.id)
         await _audit(session, user, "user.recovery_link_used", {"email": user.email})
+        started = await _started(session, request, user, state="enroll_required")
+        # The last act (fix round 3): after the new session is made, so a
+        # failure there cannot leave a mail -- and a relay checkout whose
+        # audit row rolled back -- for a recovery that did not happen.
         await notices.tell(session, user, "factors_reset", vault=_vault(request), actor_id=None)
-        return await _started(session, request, user, state="enroll_required")
+        return started
