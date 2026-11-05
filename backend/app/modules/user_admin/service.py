@@ -63,6 +63,7 @@ from app.modules.user_admin.words import (
     ACTION_WORDS,
     CANNOT_BE_DELETED,
     CANNOT_BE_DISABLED,
+    CANNOT_BE_INVITED,
     CANNOT_BE_STRIPPED,
     DELETE,
     DISABLE,
@@ -441,7 +442,13 @@ async def _open_invites(
 ) -> dict[UUID, datetime]:
     """The expiry of each person's unused invitation, for people who have not
     chosen a password yet (plan decision 8). Read under the request's scope:
-    these are global rows (a technician's), which a pinned scope may read."""
+    these are global rows (a technician's), which a pinned scope may read.
+
+    THE ONE DEFINITION OF A PENDING INVITATION: an INVITE link with `used_at`
+    still empty -- `consume`, `revoke_open` and a newer `issue` are what fill it
+    -- of somebody without a password. Expiry is NOT part of it: an expired
+    link is still an invitation to resend or cancel. `invite_pending` reads it,
+    and so do the resend and the cancel (`_require_pending_invitation`)."""
     if not user_ids:
         return {}
     rows = await session.execute(
@@ -461,6 +468,22 @@ async def _open_invites(
 async def _accepted(session: AsyncSession, user_id: UUID) -> bool:
     """Has this person chosen a password -- accepted their invitation?"""
     return await session.get(AuthPassword, user_id) is not None
+
+
+async def _require_pending_invitation(session: AsyncSession, org_id: UUID, user: User) -> None:
+    """A 409 unless this person has a pending invitation (`_open_invites`).
+
+    "NO PASSWORD" IS NOT "INVITED" (Task 8 review). Every account from before
+    this phase has no password -- a super-admin's included -- and a resend that
+    asked only that handed the administrator a link to set that person's
+    password and act as them. So the resend and the cancel act only on an
+    invitation that was issued and is still open, by the same predicate that
+    shows `invite_pending`. The refusal says which of the two it is."""
+    if user.id in await _open_invites(session, org_id, [user.id]):
+        return
+    if await _accepted(session, user.id):
+        raise UserAdminError(409, tr("this person has already accepted their invitation"))
+    raise UserAdminError(409, tr("this person has no pending invitation"))
 
 
 async def list_users(session: AsyncSession, *, org_id: UUID) -> list[UserView]:
@@ -725,11 +748,15 @@ async def resend_invite(
     console_url: str,
     deliver: Deliver,
 ) -> InvitedUser:
-    """A new link for an invitation not accepted yet; the old one stops working."""
+    """A new link for an invitation not accepted yet; the old one stops working.
+
+    Only for a pending invitation (`_require_pending_invitation`), and never
+    for a `super-admin`: an organization cannot grant that role, so it cannot
+    invite its holder either -- and the link is a password for the account."""
     user = await _target(session, org_id, user_id)
     _require_live(user)
-    if await _accepted(session, user.id):
-        raise UserAdminError(409, tr("this person has already accepted their invitation"))
+    await _require_pending_invitation(session, org_id, user)
+    await _refuse_touching_a_super_admin(session, org_id, user.id, CANNOT_BE_INVITED)
     invited = await _issue_invitation(session, org_id, actor_id, user, console_url, deliver)
     await audit_service.record(
         session,
@@ -748,11 +775,13 @@ async def cancel_invite(
     session: AsyncSession, *, org_id: UUID, actor_id: UUID, user_id: UUID
 ) -> None:
     """Plan decision 3: the link dies, the grants go, the account is marked
-    deleted -- with delete's rails. An accepted invitation is a 409."""
+    deleted -- with delete's rails, the own-account one included (it is a
+    second way to delete an account). Anything but a pending invitation is a
+    409 (`_require_pending_invitation`)."""
     user = await _target(session, org_id, user_id)
     _require_live(user)
-    if await _accepted(session, user.id):
-        raise UserAdminError(409, tr("this person has already accepted their invitation"))
+    _refuse_self(actor_id, user.id, DELETE)
+    await _require_pending_invitation(session, org_id, user)
     await _refuse_touching_a_super_admin(session, org_id, user.id, CANNOT_BE_DELETED)
     await _refuse_stranding_the_org(session, org_id, user.id, CANNOT_BE_DELETED)
     await action_tokens.revoke_open(session, user_id=user.id, purpose=action_tokens.INVITE)

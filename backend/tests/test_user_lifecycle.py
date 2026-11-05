@@ -19,6 +19,7 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import action_tokens
 from app.core.auth.passwords import STAFF_MINIMUM, PasswordRejected, hash_password
 from app.core.auth.sessions import DEVICE_COOKIE, SESSION_COOKIE
 from app.models import AuditEvent, Organization, Role, User, UserRole
@@ -88,6 +89,45 @@ async def _age_step_up(env: Any, user_id: UUID) -> None:
             .values(step_up_at=datetime.now(UTC) - timedelta(minutes=11))
         )
         await session.commit()
+
+
+async def _row_of(env: Any, sub: str) -> User:
+    """A row `ApiEnv.create_user` made: no password, no invitation -- what
+    every account from before this phase looks like."""
+    async with AsyncSession(env.admin_engine) as session:
+        return (
+            await session.execute(select(User).where(User.external_subject == sub))
+        ).scalar_one()
+
+
+async def _hand_issued_invite(env: Any, org_id: UUID, user_id: UUID) -> str:
+    """A live INVITE link for a row no invitation made, written straight to
+    the database: the state a route must not trust, however it arose."""
+    async with AsyncSession(env.admin_engine) as session:
+        token = await action_tokens.issue(
+            session,
+            org_id=org_id,
+            user_id=user_id,
+            purpose=action_tokens.INVITE,
+            ttl=action_tokens.INVITE_TTL,
+            created_by=None,
+        )
+        await session.commit()
+    return token
+
+
+async def _invite_tokens(env: Any, user_id: UUID) -> list[AuthActionToken]:
+    async with AsyncSession(env.admin_engine) as session:
+        return list(
+            (
+                await session.execute(
+                    select(AuthActionToken).where(
+                        AuthActionToken.user_id == user_id,
+                        AuthActionToken.purpose == action_tokens.INVITE,
+                    )
+                )
+            ).scalars()
+        )
 
 
 async def _live_devices(env: Any, user_id: UUID) -> int:
@@ -263,6 +303,161 @@ async def test_an_accepted_invitation_is_neither_resent_nor_cancelled(lifecycle_
 
     assert resend.status_code == 409 and cancel.status_code == 409
     assert resend.json()["detail"] == "this person has already accepted their invitation"
+
+
+async def test_a_resend_needs_a_pending_invitation(lifecycle_env: Any) -> None:
+    """Task 8 review, Critical. "No password" is not "invited": every account
+    from before this phase has no password, and a resend to one used to hand
+    the administrator a link that sets that person's password. Plan decision 8's
+    pending invitation -- an unused INVITE link of somebody without a password,
+    the predicate behind `invite_pending` -- is the gate. A never-invited row
+    is a 409: no link, no mail, no token written."""
+    env = lifecycle_env
+    org = await env.create_org("resend-uninvited")
+    admin = await signed_in(env, org, "org-admin")
+    victim = await _row_of(env, await env.create_user(org, "technician"))
+    env.mail.configured = False
+
+    resent = await env.client.post(
+        f"/api/v1/users/{victim.id}/invite/resend", headers=admin.headers()
+    )
+
+    assert resent.status_code == 409, resent.text
+    assert resent.json() == {"detail": "this person has no pending invitation"}
+    assert [m for m in env.mail.sent if m.to == victim.email] == []
+    assert await _invite_tokens(env, victim.id) == []
+    assert await _audit(env, org, "user.invite_resent") == []
+
+
+async def test_a_super_admin_is_never_invited(lifecycle_env: Any) -> None:
+    """Task 8 review, Critical: the reviewer's chain (resend -> accept -> act as
+    the super-admin). Refused at the resend however it is tried -- a row with
+    no invitation is the 409 above, and one that somehow carries a live INVITE
+    link is the super-admin rail's 403 -- and refused again where the link is
+    followed: `flows._invited` answers the shared 410 for a super-admin, so the
+    hand-issued link sets no password."""
+    env = lifecycle_env
+    org = await env.create_org("resend-su")
+    admin = await signed_in(env, org, "org-admin")
+    root = await _row_of(env, await env.create_user(org, "super-admin"))
+    env.mail.configured = False
+
+    plain = await env.client.post(
+        f"/api/v1/users/{root.id}/invite/resend", headers=admin.headers()
+    )
+    token = await _hand_issued_invite(env, org, root.id)
+    railed = await env.client.post(
+        f"/api/v1/users/{root.id}/invite/resend", headers=admin.headers()
+    )
+    details = await env.client.post(
+        "/api/v1/auth/invite/details", headers=browser(), json={"token": token}
+    )
+    accepted = await env.client.post(
+        "/api/v1/auth/invite/accept",
+        headers=browser(),
+        json={"token": token, "password": "Pelican-Orbit-Lantern-58"},
+    )
+
+    assert plain.status_code == 409, plain.text
+    assert "invite_link" not in plain.json()
+    assert railed.status_code == 403, railed.text
+    assert "invite_link" not in railed.json()
+    assert (details.status_code, details.json()["code"]) == (410, "invalid_link")
+    assert (accepted.status_code, accepted.json()["code"]) == (410, "invalid_link")
+    assert cookie(accepted, SESSION_COOKIE) is None
+    async with AsyncSession(env.admin_engine) as session:
+        assert await session.get(AuthPassword, root.id) is None
+    # The hand-issued link is the only one: the refused resend issued none.
+    assert len(await _invite_tokens(env, root.id)) == 1
+    assert [m for m in env.mail.sent if m.to == root.email] == []
+
+
+async def test_an_expired_invitation_can_still_be_resent(lifecycle_env: Any) -> None:
+    """Plan decision 8: an invitation whose link has expired is still pending --
+    the console offers to resend it -- so the gate counts it. The non-vacuity
+    half of the two tests above: a gate that also demanded an unexpired link
+    would refuse this one."""
+    env = lifecycle_env
+    org = await env.create_org("resend-expired")
+    admin = await signed_in(env, org, "org-admin")
+    env.mail.configured = False
+    invited = (await _invite(env, admin.headers())).json()
+    old = invited["invite_link"].split("#", 1)[1]
+    # Issued 73 hours ago, so it expired an hour ago (`expires_at > created_at`
+    # is a CHECK of migration 0245).
+    now = datetime.now(UTC)
+    async with AsyncSession(env.admin_engine) as session:
+        await session.execute(
+            update(AuthActionToken)
+            .where(AuthActionToken.user_id == UUID(invited["user_id"]))
+            .values(created_at=now - timedelta(hours=73), expires_at=now - timedelta(hours=1))
+        )
+        await session.commit()
+
+    listed = (await env.client.get("/api/v1/users", headers=admin.headers())).json()["users"]
+    row = next(u for u in listed if u["id"] == invited["user_id"])
+    dead = await env.client.post(
+        "/api/v1/auth/invite/details", headers=browser(), json={"token": old}
+    )
+    resent = await env.client.post(
+        f"/api/v1/users/{invited['user_id']}/invite/resend", headers=admin.headers()
+    )
+
+    assert row["invite_pending"] is True
+    assert dead.status_code == 410
+    assert resent.status_code == 200, resent.text
+    fresh = resent.json()["invite_link"].split("#", 1)[1]
+    details = await env.client.post(
+        "/api/v1/auth/invite/details", headers=browser(), json={"token": fresh}
+    )
+    assert details.json() == {"email": "ana@toeshee.test", "display_name": "Ana"}
+
+
+async def test_a_cancel_needs_a_pending_invitation(lifecycle_env: Any) -> None:
+    """Task 8 review, Important: cancelling is a second way to mark an account
+    deleted, so it takes the same gate as the resend. A never-invited account
+    without a password is a 409 and stays as it was -- active, its grants
+    intact."""
+    env = lifecycle_env
+    org = await env.create_org("cancel-uninvited")
+    admin = await signed_in(env, org, "org-admin")
+    victim = await _row_of(env, await env.create_user(org, "technician"))
+
+    cancelled = await env.client.delete(
+        f"/api/v1/users/{victim.id}/invite", headers=admin.headers()
+    )
+
+    assert cancelled.status_code == 409, cancelled.text
+    assert cancelled.json() == {"detail": "this person has no pending invitation"}
+    async with AsyncSession(env.admin_engine) as session:
+        row = await session.get(User, victim.id)
+        grants = (
+            await session.execute(select(UserRole.id).where(UserRole.user_id == victim.id))
+        ).scalars().all()
+    assert row is not None and row.status == "active" and len(grants) == 1
+    assert await _audit(env, org, "user.invite_cancelled") == []
+
+
+async def test_nobody_cancels_their_own_account(lifecycle_env: Any) -> None:
+    """Task 8 review, Important: `delete_user`'s own-account rail, on the other
+    delete path. The caller has a pending invitation of their own (a live
+    INVITE link, no password) and another org-admin exists, so nothing else
+    refuses: only the rail stands between this request and a deleted caller."""
+    env = lifecycle_env
+    org = await env.create_org("cancel-self")
+    await env.create_user(org, "org-admin")
+    caller_sub = await env.create_user(org, "org-admin")
+    caller = await _row_of(env, caller_sub)
+    await _hand_issued_invite(env, org, caller.id)
+    bearer = await env.headers(org, caller_sub)
+
+    response = await env.client.delete(f"/api/v1/users/{caller.id}/invite", headers=bearer)
+
+    assert response.status_code == 403, response.text
+    assert response.json() == {"detail": "you cannot delete your own account"}
+    async with AsyncSession(env.admin_engine) as session:
+        row = await session.get(User, caller.id)
+    assert row is not None and row.status == "active"
 
 
 async def test_an_invitation_is_dead_once_the_person_has_a_password(lifecycle_env: Any) -> None:

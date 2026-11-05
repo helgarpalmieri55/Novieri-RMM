@@ -4628,6 +4628,7 @@ CATALOG: dict[str, str] = {
         "desde una organización y por eso tampoco se revoca desde una"
     ),
     "this person has already accepted their invitation": "esta persona ya aceptó su invitación",
+    "this person has no pending invitation": "esta persona no tiene ninguna invitación pendiente",
     "the same role is listed twice for the same client": (
         "el mismo rol aparece dos veces para el mismo cliente"
     ),
@@ -4673,6 +4674,7 @@ CATALOG: dict[str, str] = {
     "user admin, cannot be ...: disabled": "deshabilitar",
     "user admin, cannot be ...: deleted": "eliminar",
     "user admin, cannot be ...: stripped of the role": "dejar sin ese rol",
+    "user admin, cannot be ...: invited": "invitar",
     # --- provisioning ---
     "no such image": "no existe esa imagen",
     "no such profile": "no existe ese perfil",

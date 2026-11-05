@@ -17,14 +17,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import recover
 from app.core.auth.sessions import SESSION_COOKIE
 from app.core.router_inspect import flatten
-from app.models import AuditEvent
-from app.models.auth import AuthPasskey, AuthRecoveryCode, AuthTotp
+from app.models import AuditEvent, User
+from app.models.auth import AuthPasskey, AuthRecoveryCode, AuthTotp, AuthTrustedDevice
 from tests.auth_support import (
     CONSOLE,
     add_passkey,
@@ -36,6 +36,7 @@ from tests.auth_support import (
     login,
     signed_in,
 )
+from tests.session_support import remembered_device
 from tests.tool_surface import build_router_only_app
 
 APP = Path(__file__).resolve().parents[1] / "app"
@@ -115,12 +116,82 @@ async def test_the_link_removes_the_factors_once_and_leads_to_a_new_one(auth_env
     assert any("sign-in methods were reset" in s for s in subjects)
 
 
+async def test_the_link_forgets_every_remembered_device(auth_env: Any) -> None:
+    """Task 8 review, test gap: a remembered browser stands in for the second
+    factor (design §2.6), so a recovery that cleared the factors and left it
+    would let that browser in without one. Drop `revoke_all_for_user` from
+    `flows.accept_recovery` and `revoked_at` stays empty: red."""
+    org = await auth_env.create_org("recover-device")
+    who = await signed_in(auth_env, org, "org-admin")
+    device_id = await remembered_device(auth_env, org, who.sub)
+
+    link = await recover.issue_recovery_link(settings=auth_env.settings, email=who.email)
+    accepted = await auth_env.client.post(
+        "/api/v1/auth/recover/accept",
+        headers=browser(),
+        json={"token": link.split("#", 1)[1]},
+    )
+
+    assert accepted.status_code == 200, accepted.text
+    async with AsyncSession(auth_env.admin_engine) as session:
+        device = await session.get(AuthTrustedDevice, device_id)
+    assert device is not None and device.revoked_at is not None
+
+
+async def test_a_second_link_replaces_the_first(auth_env: Any) -> None:
+    """Running the command again supersedes the earlier link (`action_tokens.
+    issue` spends the open ones of the same purpose): only the newest works."""
+    org = await auth_env.create_org("recover-twice")
+    who = await signed_in(auth_env, org, "org-admin")
+
+    first = await recover.issue_recovery_link(settings=auth_env.settings, email=who.email)
+    second = await recover.issue_recovery_link(settings=auth_env.settings, email=who.email)
+    old = await auth_env.client.post(
+        "/api/v1/auth/recover/details", headers=browser(), json={"token": first.split("#", 1)[1]}
+    )
+    old_accept = await auth_env.client.post(
+        "/api/v1/auth/recover/accept", headers=browser(), json={"token": first.split("#", 1)[1]}
+    )
+    new = await auth_env.client.post(
+        "/api/v1/auth/recover/details", headers=browser(), json={"token": second.split("#", 1)[1]}
+    )
+
+    assert first != second
+    assert (old.status_code, old.json()["code"]) == (410, "invalid_link")
+    assert (old_accept.status_code, old_accept.json()["code"]) == (410, "invalid_link")
+    assert new.json() == {"email": who.email}
+
+
 async def test_only_an_active_technician_gets_a_link(auth_env: Any) -> None:
     org = await auth_env.create_org("recover-none")
     await signed_in(auth_env, org, "org-admin")
 
     with pytest.raises(recover.RecoveryRefused):
         await recover.issue_recovery_link(settings=auth_env.settings, email="nobody@test.local")
+
+
+async def test_a_disabled_technician_gets_no_link(auth_env: Any) -> None:
+    """Disabled is not recoverable from the server's terminal: an administrator
+    turns the account back on first. Nothing is issued, audited or mailed."""
+    org = await auth_env.create_org("recover-disabled")
+    who = await signed_in(auth_env, org, "technician")
+    async with AsyncSession(auth_env.admin_engine) as session:
+        await session.execute(update(User).where(User.id == who.user_id).values(status="disabled"))
+        await session.commit()
+    auth_env.mail.sent.clear()
+
+    with pytest.raises(recover.RecoveryRefused):
+        await recover.issue_recovery_link(settings=auth_env.settings, email=who.email)
+
+    async with AsyncSession(auth_env.admin_engine) as session:
+        issued = (
+            await session.execute(
+                select(AuditEvent.id).where(
+                    AuditEvent.org_id == org, AuditEvent.action == "user.recovery_link_issued"
+                )
+            )
+        ).all()
+    assert issued == [] and auth_env.mail.sent == []
 
 
 def test_the_command_prints_the_link_or_says_why_not(

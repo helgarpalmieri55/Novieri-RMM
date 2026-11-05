@@ -37,6 +37,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import FastAPI, Request, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
@@ -88,9 +89,10 @@ from app.core.client_scope import ClientScope
 from app.core.i18n import tr, use_locale
 from app.core.identity import ACTIVE_STATUS, STAFF_KIND
 from app.core.rate_limit import hit
+from app.core.rbac_admin import SUPER_ADMIN
 from app.core.tenancy import org_session
 from app.core.vault import VaultService
-from app.models import User
+from app.models import Role, User, UserRole
 from app.models.auth import AuthPassword, AuthSession, AuthTrustedDevice
 
 #: How long a pending session may take to finish enrolling (plan decision 6).
@@ -841,8 +843,26 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
 # --------------------------------------------------------------------------- #
 
 
+async def _holds_super_admin(session: AsyncSession, user_id: UUID) -> bool:
+    """Whether the person holds `super-admin`, by name, as every rail compares it."""
+    held = (
+        await session.execute(
+            select(UserRole.id)
+            .join(Role, Role.id == UserRole.role_id)
+            .where(UserRole.user_id == user_id, Role.name == SUPER_ADMIN)
+            .limit(1)
+        )
+    ).first()
+    return held is not None
+
+
 async def _invited(session: AsyncSession, token: str, *, consume: bool) -> User:
     """The invitee of a live, unaccepted invitation, or `invalid_link`.
+
+    NEVER A SUPER-ADMIN (Task 8 review). No organization can grant the role,
+    so none invites its holder (`user_admin.service.resend_invite` refuses it);
+    a link that names one anyway -- however it came to exist -- sets no
+    password, and answers what every dead link answers.
 
     Nothing is written before a refusal here but the `consume`, and the
     refusal rolls it back with the block: a link that names nobody usable was
@@ -858,6 +878,7 @@ async def _invited(session: AsyncSession, token: str, *, consume: bool) -> User:
         or user.kind != STAFF_KIND
         or user.status != ACTIVE_STATUS
         or await session.get(AuthPassword, user.id) is not None
+        or await _holds_super_admin(session, user.id)
     ):
         raise _invalid_link()
     return user

@@ -27,6 +27,7 @@ RESET_FACTORS = "reset the sign-in methods of"
 CANNOT_BE_DISABLED = "disabled"
 CANNOT_BE_DELETED = "deleted"
 CANNOT_BE_STRIPPED = "stripped of the role"
+CANNOT_BE_INVITED = "invited"
 
 ACTION_WORDS = {
     DISABLE: N_("user admin, you cannot ... your own account: disable"),
@@ -38,4 +39,5 @@ OUTCOME_WORDS = {
     CANNOT_BE_DISABLED: N_("user admin, cannot be ...: disabled"),
     CANNOT_BE_DELETED: N_("user admin, cannot be ...: deleted"),
     CANNOT_BE_STRIPPED: N_("user admin, cannot be ...: stripped of the role"),
+    CANNOT_BE_INVITED: N_("user admin, cannot be ...: invited"),
 }
