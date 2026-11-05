@@ -6,8 +6,11 @@ than 112 bits.
 """
 
 import asyncio
+import base64
 import re
+import threading
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -97,6 +100,9 @@ async def test_codes_are_stored_salted_and_hashed_with_argon2id(world: _World) -
     assert len(stored) == 10
     assert all(h.startswith(b"$argon2id$v=19$m=19456,t=2,p=1$") for h in stored)
     assert len({h.split(b"$")[4] for h in stored}) == 10  # ten distinct salts
+    for h in stored:  # 16-byte salt, base64 without padding
+        salt = h.split(b"$")[4]
+        assert len(base64.b64decode(salt + b"=" * (-len(salt) % 4))) == 16
     for code in codes:
         assert all(code.replace("-", "").encode() not in h for h in stored)
 
@@ -174,10 +180,24 @@ async def test_replacing_the_codes_keeps_the_failure_count(world: _World) -> Non
         ) == 3
 
 
-async def test_two_requests_with_one_code_cannot_both_win(world: _World) -> None:
+async def test_two_requests_with_one_code_cannot_both_win(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The conditional UPDATE (`used_at IS NULL`): NIST §3.1.2.2, "SHALL be
-    used successfully only once"."""
+    used successfully only once". Deterministic: `_find` runs in worker
+    threads, and a 2-party barrier after it makes both requests read the
+    unused row before either writes; without the guard the result is
+    [True, True]."""
     codes = await _replace(world)
+    barrier = threading.Barrier(2, timeout=10)
+    real_find = recovery._find
+
+    def _find_then_wait(*args: Any, **kwargs: Any) -> Any:
+        found = real_find(*args, **kwargs)
+        barrier.wait()
+        return found
+
+    monkeypatch.setattr(recovery, "_find", _find_then_wait)
 
     results = await asyncio.gather(_use(world, codes[0]), _use(world, codes[0]))
 

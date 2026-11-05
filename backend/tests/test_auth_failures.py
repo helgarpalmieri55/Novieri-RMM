@@ -222,3 +222,84 @@ async def test_concurrent_failures_are_all_counted(world: _World) -> None:
     await asyncio.gather(*[_fail(world) for _ in range(10)])
 
     assert await _consecutive(world) == 10
+
+
+async def test_a_success_clears_only_that_person_and_factor(world: _World) -> None:
+    """`record_success` is scoped by user AND factor: remove either filter and
+    the password's wait or the colleague's count disappears."""
+    _org, colleague = await _person(world.admin_engine, world.org_id)
+    await _fail(world, "totp", times=6)
+    await _fail(world, "password", times=6)
+    await _fail(world, "totp", times=3, user_id=colleague)
+
+    await _succeed(world, "totp")
+
+    assert await _consecutive(world, "totp") is None
+    assert not (await _check(world, "password")).allowed
+    async with AsyncSession(world.admin_engine) as session:
+        assert (
+            await session.scalar(
+                select(AuthFailure.consecutive).where(
+                    AuthFailure.user_id == colleague, AuthFailure.factor == "totp"
+                )
+            )
+        ) == 3
+
+
+async def test_an_administrator_reset_touches_only_that_person_and_factor(
+    world: _World,
+) -> None:
+    _org, colleague = await _person(world.admin_engine, world.org_id)
+    await _fail(world, "totp", times=failures.DISABLE_AT)
+    await _fail(world, "password", times=6)
+    await _fail(world, "totp", times=failures.DISABLE_AT, user_id=colleague)
+
+    async with org_session(
+        world.org_id, engine=world.app_engine, clients=ClientScope.all()
+    ) as session:
+        await failures.reset_factor(session, world.user_id, "totp")
+
+    assert await _check(world, "totp") == ALLOWED
+    assert not (await _check(world, "password")).allowed
+    assert (await _check(world, "totp", user_id=colleague)).disabled
+
+
+async def test_a_naive_time_is_refused(world: _World) -> None:
+    naive = datetime(2026, 11, 4, 12, 0, 0)
+    with pytest.raises(ValueError):
+        await _check(world, at=naive)
+    with pytest.raises(ValueError):
+        await _fail(world, at=naive)
+
+
+async def test_concurrent_attempts_at_99_failures_cannot_both_get_through(
+    world: _World,
+) -> None:
+    """`check_allowed` takes an advisory lock held to the commit, so check ->
+    wrong code -> record serialises: the second attempt sees the 100th
+    failure. Without the lock both pass the check before either records."""
+    await _fail(world, times=99, at=NOW - timedelta(days=1))
+    arrived = asyncio.Event()
+
+    async def attempt(first: bool) -> bool:
+        async with org_session(
+            world.org_id, engine=world.app_engine, clients=ClientScope.all()
+        ) as session:
+            if not first:
+                await arrived.wait()
+            state = await failures.check_allowed(session, world.user_id, "totp", now=NOW)
+            if first:
+                arrived.set()
+                # Hold the transaction open long enough for the other attempt
+                # to reach its own check_allowed (it must block on the lock).
+                await asyncio.sleep(0.5)
+            if state.allowed:
+                await failures.record_failure(
+                    session, org_id=world.org_id, user_id=world.user_id, factor="totp", now=NOW
+                )
+            return state.allowed
+
+    results = await asyncio.gather(attempt(True), attempt(False))
+
+    assert results == [True, False]
+    assert await _consecutive(world) == failures.DISABLE_AT

@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid4
 
@@ -270,15 +271,90 @@ async def test_a_sealed_secret_moved_to_another_person_does_not_open(world: _Wor
     assert await _verify(world, code)
 
 
-async def test_two_requests_with_one_code_cannot_both_win(world: _World) -> None:
-    """The conditional UPDATE (`last_step < step`): with a read-then-write the
-    two would both see the old step and both answer True."""
+async def test_two_requests_with_one_code_cannot_both_win(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The conditional UPDATE is THE protection (the step test is a
+    pre-filter). Deterministic: a 2-party barrier after the real read makes
+    both requests read the row before either writes. With the guard the second
+    UPDATE matches no row; with `true()` instead the result is [True, True]."""
     secret = await _enrolled(world)
     code = _code(secret, STEP)
+    barrier = asyncio.Barrier(2)
+    real_open = totp._open
+
+    async def _open_then_wait(*args: Any, **kwargs: Any) -> bytes | None:
+        opened: bytes | None = await real_open(*args, **kwargs)
+        await asyncio.wait_for(barrier.wait(), 10)
+        return opened
+
+    monkeypatch.setattr(totp, "_open", _open_then_wait)
 
     results = await asyncio.gather(_verify(world, code), _verify(world, code))
 
     assert sorted(results) == [False, True]
+
+
+def test_the_pre_filter_drops_a_step_not_newer_than_the_last_accepted() -> None:
+    assert totp._matching_step(FIXED, _code(FIXED, STEP), NOW, after=STEP) is None
+    assert totp._matching_step(FIXED, _code(FIXED, STEP), NOW, after=STEP - 1) == STEP
+    assert totp._matching_step(FIXED, _code(FIXED, STEP), NOW, after=None) == STEP
+
+
+async def test_staging_while_a_confirmation_is_in_flight_wins_over_the_old_code(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The conditional UPDATE also pins the sealed secret the code was checked
+    against: a code valid for the OLD pending secret must not confirm the NEW
+    one staged after the read."""
+    old, new = totp.new_secret(), totp.new_secret()
+    await _stage(world, old)
+    real_open = totp._open
+
+    async def _open_then_restage(*args: Any, **kwargs: Any) -> bytes | None:
+        opened: bytes | None = await real_open(*args, **kwargs)
+        monkeypatch.setattr(totp, "_open", real_open)
+        await _stage(world, new)
+        return opened
+
+    monkeypatch.setattr(totp, "_open", _open_then_restage)
+
+    assert not await _confirm(world, _code(old, STEP))
+    assert not await _has(world)
+    assert await _confirm(world, _code(new, STEP))
+
+
+async def test_the_confirmed_update_also_pins_the_sealed_secret(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same pin on the confirmed branch: if the sealed secret changes between
+    the read and the write, the code checked against the old one is refused."""
+    secret = await _enrolled(world)
+    code = _code(secret, STEP)
+    real_open = totp._open
+
+    async def _open_then_swap(*args: Any, **kwargs: Any) -> bytes | None:
+        opened: bytes | None = await real_open(*args, **kwargs)
+        async with AsyncSession(world.admin_engine) as session:
+            await session.execute(
+                update(AuthTotp)
+                .where(AuthTotp.user_id == world.user_id)
+                .values(secret_sealed=b"swapped")
+            )
+            await session.commit()
+        return opened
+
+    monkeypatch.setattr(totp, "_open", _open_then_swap)
+
+    assert not await _verify(world, code)
+
+
+@pytest.mark.parametrize(("second", "step_offset"), [(29.9, 0), (30.0, 1), (59.999, 1), (60.0, 2)])
+def test_a_step_boundary_is_floored_not_rounded(second: float, step_offset: int) -> None:
+    base = datetime(2026, 11, 4, 12, 0, 0, tzinfo=UTC)
+    now = base + timedelta(seconds=second)
+
+    assert totp.step_of(now) == int(base.timestamp()) // 30 + step_offset
 
 
 async def test_removing_the_factor(world: _World) -> None:

@@ -44,7 +44,7 @@ from math import ceil
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import case, delete, func, select
+from sqlalchemy import case, delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -85,6 +85,14 @@ class FactorState:
     disabled: bool
 
 
+def _aware(now: datetime) -> datetime:
+    if now.tzinfo is None:
+        raise ValueError(  # i18n-exempt: programming error, never reaches a person
+            "a failure check needs a timezone-aware time"
+        )
+    return now
+
+
 def backoff_s(consecutive: int) -> int:
     """Seconds the next attempt waits after `consecutive` failures in a row."""
     if consecutive < BACKOFF_FROM:
@@ -107,6 +115,18 @@ def _state(
 async def check_allowed(
     session: AsyncSession, user_id: UUID, factor: Factor, *, now: datetime | None = None
 ) -> FactorState:
+    """May the person try `factor` now?
+
+    TAKES A TRANSACTION-LEVEL ADVISORY LOCK on (user, factor), held until the
+    caller's transaction ends. The caller MUST keep check -> verify -> record
+    in ONE transaction: then concurrent attempts are serialised, and the
+    n-th sees the failures of the n-1 before it, so the back-off and the stop
+    at `DISABLE_AT` hold per attempt, not per burst."""
+    at = _aware(now) if now is not None else datetime.now(UTC)
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"auth_failures:{user_id}:{factor}"},
+    )
     row = (
         await session.execute(
             select(AuthFailure).where(AuthFailure.user_id == user_id, AuthFailure.factor == factor)
@@ -114,7 +134,7 @@ async def check_allowed(
     ).scalar_one_or_none()
     if row is None:
         return FactorState(allowed=True, wait_s=0, disabled=False)
-    return _state(row.consecutive, row.last_failed_at, row.disabled_at, now or datetime.now(UTC))
+    return _state(row.consecutive, row.last_failed_at, row.disabled_at, at)
 
 
 async def record_failure(
@@ -127,7 +147,7 @@ async def record_failure(
 ) -> FactorState:
     """Count one failure and answer the state it leaves. At `DISABLE_AT` the
     factor is disabled and the lockout is audited, exactly once."""
-    at = now or datetime.now(UTC)
+    at = _aware(now) if now is not None else datetime.now(UTC)
     upsert = (
         pg_insert(AuthFailure)
         .values(

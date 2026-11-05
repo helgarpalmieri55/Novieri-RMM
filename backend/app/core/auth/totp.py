@@ -15,8 +15,11 @@ release [S43]. NIST SP 800-63B-4 §3.1.4: "Verifiers SHALL accept a given OTP
 only once while it is valid". So this module does not call `TOTP.verify`: it
 computes the three candidate steps itself, compares each in constant time,
 and accepts a match only for a step strictly greater than
-`auth_totp.last_step` -- written with a conditional UPDATE, so two requests
-racing with one code cannot both win.
+`auth_totp.last_step`. TWO LAYERS: the step comparison in `_matching_step` is
+a pre-filter that spares a doomed UPDATE; the PROTECTION is the conditional
+UPDATE (`last_step < step`, same sealed secret), which Postgres evaluates
+against the committed row, so two requests racing with one code cannot both
+win.
 
 PENDING AND CONFIRMED. A row whose `last_step` is NULL has never accepted a
 code: it is an enrolment in progress, not a factor. `verify_totp` and
@@ -113,8 +116,9 @@ def step_of(now: datetime) -> int:
 
 def _matching_step(secret: bytes, code: str, now: datetime, after: int | None) -> int | None:
     """The newest step within the window whose code is `code` and that is newer
-    than `after`; None otherwise. Every candidate is compared, so the time taken
-    does not say which step matched."""
+    than `after`; None otherwise. The `after` test is only a pre-filter; the
+    conditional UPDATE in `_accept` is what stops a replay. Every candidate is
+    compared, so the time taken does not say which step matched."""
     otp = pyotp.TOTP(_b32(secret), digits=DIGITS, interval=STEP_S)
     current = step_of(now)
     accepted: int | None = None
@@ -193,13 +197,11 @@ async def _accept(
     del secret
     if step is None:
         return False
-    # THE GUARD IS THE REPLAY PROTECTION. Pending: still pending, and still the
-    # secret the code was checked against. Confirmed: no newer step accepted
-    # in between.
-    guard = (
-        AuthTotp.last_step < step
-        if confirmed
-        else (AuthTotp.last_step.is_(None)) & (AuthTotp.secret_sealed == row.secret_sealed)
+    # THE GUARD IS THE REPLAY PROTECTION (the step test above is a pre-filter).
+    # Both branches: still the secret the code was checked against. Pending:
+    # still pending. Confirmed: no newer step accepted in between.
+    guard = (AuthTotp.secret_sealed == row.secret_sealed) & (
+        AuthTotp.last_step < step if confirmed else AuthTotp.last_step.is_(None)
     )
     won = (
         await session.execute(
