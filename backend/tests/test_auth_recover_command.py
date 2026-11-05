@@ -214,6 +214,38 @@ def test_the_command_prints_the_link_or_says_why_not(
     assert printed.out == "" and "no active technician" in printed.err
 
 
+def test_the_command_warns_that_the_link_is_the_account(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Final review C-M3. The link asks for no password (plan decision 10), so
+    the command says so where the operator reads it -- on stderr, so stdout
+    stays the link alone for a script: hand it over directly, whoever opens it
+    in the next 15 minutes gets the account, never by email (Q5). Delete the
+    warning and this is red; a refusal prints no warning, since there is no
+    link to hand over."""
+
+    async def gives(*, settings: Any, email: str) -> str:
+        return f"{CONSOLE}/recover#abc"
+
+    monkeypatch.setattr(recover, "get_settings", lambda: None)
+    monkeypatch.setattr(recover, "issue_recovery_link", gives)
+    assert recover.main(["--email", "ada@toeshee.test"]) == 0
+    printed = capsys.readouterr()
+
+    assert printed.out.strip() == f"{CONSOLE}/recover#abc"
+    warning = printed.err.lower()
+    assert "directly" in warning
+    assert "15 minutes" in warning and "gets the account" in warning
+    assert "never send it by email" in warning
+
+    async def refuses(*, settings: Any, email: str) -> str:
+        raise recover.RecoveryRefused("no active technician has that address")
+
+    monkeypatch.setattr(recover, "issue_recovery_link", refuses)
+    assert recover.main(["--email", "ada@toeshee.test"]) == 1
+    assert "gets the account" not in capsys.readouterr().err
+
+
 def test_the_recovery_command_does_not_exist_over_http() -> None:
     """FALSIFIER 9. Each assertion fails if somebody wires the command to a route."""
     for path, route in flatten(build_router_only_app().router):

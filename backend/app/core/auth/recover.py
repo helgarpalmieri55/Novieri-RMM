@@ -14,7 +14,10 @@ holds the server (`tests/test_auth_recover_command.py`). Audited as
 `user.recovery_link_issued`, actor `system`, and the holder is told by mail
 (design §2.7: "toda recuperación avisa al titular").
 
-The link on stdout and nothing else; a refusal on stderr and exit status 1.
+The link on stdout and nothing else. On stderr, a warning that the link is
+the account -- it asks for no password, so whoever opens it in 15 minutes
+owns the account: hand it over directly, never by email (final review C-M3;
+`deploy/README.md`, "Recovery link") -- or a refusal, and exit status 1.
 In English: it is the server operator's terminal, like the server's own log.
 """
 
@@ -111,8 +114,19 @@ def main(argv: list[str] | None = None) -> int:
     except RecoveryRefused as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
+    # On stderr, so stdout stays the link alone (final review C-M3): the link
+    # asks for no password (plan decision 10), so it IS the account.
+    print(_HAND_IT_OVER, file=sys.stderr)
     print(link)
     return 0
+
+
+#: i18n-exempt: printed to the server operator's terminal, like the refusals.
+_HAND_IT_OVER = (
+    "WARNING: this link is the account. Hand it to the person directly; whoever "
+    "opens it in the next 15 minutes gets the account, without a password. "
+    "Never send it by email."
+)
 
 
 if __name__ == "__main__":
