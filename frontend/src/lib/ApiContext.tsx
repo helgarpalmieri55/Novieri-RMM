@@ -4,6 +4,8 @@ import { ApiClient } from "./api";
 import { isClientId, selectedClient } from "./clientChoice";
 import { watchPersonInput } from "./personInput";
 import { confirmSessionEnded } from "./sessionCheck";
+import { sessionEnded } from "./sessionEnd";
+import { hearOtherTabs } from "./sessionTabs";
 
 const ApiContext = createContext<ApiClient | null>(null);
 
@@ -83,6 +85,18 @@ export function ApiProvider({ children }: { children: ReactNode }) {
       });
     });
   }, [client]);
+
+  // ANOTHER TAB'S END (`./sessionTabs.ts`, final re-review M1): a sign-out
+  // ends this tab too; any other end is confirmed here by this tab's own
+  // `/me`, which the shared cookie answers.
+  useEffect(
+    () =>
+      hearOtherTabs(window, (notice) => {
+        if (notice === "signed_out") sessionEnded();
+        else void confirmSessionEnded("/api/v1");
+      }),
+    [],
+  );
 
   // Nothing renders until the fixture client is here: a page mounted against
   // a null client would throw from `useApi`, and the gate would screenshot

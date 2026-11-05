@@ -29,11 +29,15 @@
  * starts this module at "not ended" with nobody known; a test starts there
  * through `resetSessionEnd` (`src/test/setup.ts`).
  *
+ * AND THE OTHER TABS ARE TOLD (`./sessionTabs.ts`, final re-review M1): a
+ * sign-out ends them, any other end makes them ask `/me` themselves.
+ *
  * APART FROM `./session.ts` because `ApiContext.tsx` writes this and
  * `./session.ts` reads `useApi` from `ApiContext.tsx`: one module holding
  * both would be an import cycle -- the reason `clientChoice.ts` sits apart
  * from `clientScope.tsx`.
  */
+import { tellOtherTabs } from "./sessionTabs";
 
 /**
  * How the session ended: under the person (`ended`); because somebody else's
@@ -52,6 +56,8 @@ function end(why: SessionEndReason): void {
   if (reason !== null) return;
   reason = why;
   for (const listener of listeners) listener();
+  // The other tabs share the cookie (`./sessionTabs.ts`, final re-review M1).
+  tellOtherTabs(why === "signed_out" ? "signed_out" : "ended");
 }
 
 /** The session this tab used is gone. Listeners hear it once, synchronously, before React renders again. */
