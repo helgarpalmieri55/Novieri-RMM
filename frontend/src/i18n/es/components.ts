@@ -93,7 +93,7 @@ export const components: Shape<typeof en> = {
   },
   stepUp: {
     title: "Confirma que eres tú",
-    body: "Este cambio necesita otra vez tu segundo factor: lo confirmaste por última vez hace más de 10 minutos.",
+    body: "Confirma tu segundo factor para continuar.",
     loading: "Cargando tus segundos factores…",
     usePasskey: "Usar una clave de acceso",
     code: "Código de tu aplicación de autenticación",

@@ -94,7 +94,7 @@ export const components = {
   // The recent confirmation of the second factor (`components/stepUp.tsx`).
   stepUp: {
     title: "Confirm it's you",
-    body: "This change needs your second factor again: you last confirmed it more than 10 minutes ago.",
+    body: "Confirm your second factor to continue.",
     loading: "Loading your second factors…",
     usePasskey: "Use a passkey",
     code: "Code from your authenticator app",

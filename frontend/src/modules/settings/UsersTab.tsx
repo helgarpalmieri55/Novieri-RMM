@@ -43,9 +43,9 @@
 // a screen. `users.test.tsx` plants a secret in the directory fixture and
 // asserts the DOM never contains it. The one value this tab shows that opens
 // an account -- an invitation link, when no mail is configured -- is held in
-// this component's state only, never in the query cache (the mutation that
-// brought it is emptied at once), and is gone when the operator says it was
-// passed on.
+// this component's state only: the mutation that brought it is reset at once
+// and, with `gcTime: 0` (`./api.ts`), dropped from the mutation cache with it,
+// and the link is gone when the operator says it was passed on.
 //
 // AN ACCOUNT STARTS AS AN INVITATION (own authentication design §7). The form
 // names the person and what they may reach on which client -- the same

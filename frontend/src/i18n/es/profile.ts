@@ -36,7 +36,7 @@ export const profile: Shape<typeof en> = {
       missingCurrent: "Escribe tu contraseña actual.",
       submit: "Cambiar contraseña",
       changing: "Cambiando…",
-      changed: "Se cambió tu contraseña. Los equipos que tenías recordados vuelven a pedir tu segundo factor.",
+      changed: "Se cambió tu contraseña. Se cerraron tus otras sesiones y los equipos que tenías recordados vuelven a pedir tu segundo factor.",
     },
     passkeys: {
       title: "Claves de acceso",
@@ -52,6 +52,10 @@ export const profile: Shape<typeof en> = {
       namePlaceholder: "p. ej., Portátil del trabajo",
       add: "Añadir una clave de acceso",
       adding: "Esperando a tu navegador…",
+      // Tras la confirmación reciente: un navegador solo crea una clave de acceso desde un clic.
+      confirmed: "Tu segundo factor está confirmado. Pulsa Crear la clave de acceso para crearla.",
+      createNow: "Crear la clave de acceso",
+      retry: "No se creó la clave de acceso. Pulsa Crear la clave de acceso para intentarlo de nuevo.",
       onlyFactor: "Es tu único segundo factor. Añade otro antes de quitarlo.",
     },
     totp: {

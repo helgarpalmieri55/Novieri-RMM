@@ -24,7 +24,9 @@ import {
   RECOVERY_CODES_FIXTURE,
   apiClient,
   calls,
+  currentLocation,
   installDefaults,
+  mutationCacheText,
   renderSecurityPage,
   stepUpRequired,
 } from "../settings/__tests__/harness";
@@ -362,6 +364,123 @@ describe("Your security", () => {
 
     expect(await within(passkeys).findByRole("alert")).toHaveTextContent("Nothing was changed: the confirmation was closed.");
     expect(calls.removePasskey).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * FIX ROUND (Task 12 review, Important 1). `reset()` only detaches the
+ * mutation from the page: TanStack keeps the detached mutation -- its answer
+ * and the body it was sent -- in the mutation cache until its `gcTime`, five
+ * minutes by default, and a mutation never reset keeps them for as long as
+ * the panel lives. So a value shown once is checked where it would linger,
+ * the mutation cache, once the person has it.
+ */
+describe("what the mutation cache keeps of a value shown once", () => {
+  it("keeps no authenticator key and no code once the app is on", async () => {
+    calls.getMySecurity.mockResolvedValue({ ...MY_SECURITY_FIXTURE, has_totp: false });
+    const user = userEvent.setup();
+    const { queryClient } = renderSecurityPage();
+    const app = await panel("Authenticator app");
+    await user.click(within(app).getByRole("button", { name: "Set up the app" }));
+    await within(app).findByText("JBSW Y3DP EHPK 3PXP");
+    await user.type(within(app).getByLabelText("Code the app shows now"), "123 456");
+    await user.click(within(app).getByRole("button", { name: "Turn it on" }));
+    await waitFor(() => expect(within(app).queryByText("JBSW Y3DP EHPK 3PXP")).not.toBeInTheDocument());
+
+    await waitFor(() => {
+      const cached = mutationCacheText(queryClient);
+      expect(cached).not.toContain("otpauth://");
+      expect(cached).not.toContain("JBSWY3DPEHPK3PXP");
+      expect(cached).not.toContain("123456");
+    });
+  });
+
+  it("keeps no authenticator key once the set-up is cancelled", async () => {
+    calls.getMySecurity.mockResolvedValue({ ...MY_SECURITY_FIXTURE, has_totp: false });
+    const user = userEvent.setup();
+    const { queryClient } = renderSecurityPage();
+    const app = await panel("Authenticator app");
+    await user.click(within(app).getByRole("button", { name: "Set up the app" }));
+    await within(app).findByText("JBSW Y3DP EHPK 3PXP");
+    await user.click(within(app).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("otpauth://"));
+  });
+
+  it("keeps no recovery code once the person says they have them", async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderSecurityPage();
+    const codes = await panel("Recovery codes");
+    await user.click(within(codes).getByRole("button", { name: "Make new codes" }));
+    await user.click(
+      within(await screen.findByRole("dialog", { name: "Make new recovery codes" })).getByRole("button", {
+        name: "Make new codes",
+      }),
+    );
+    await within(codes).findByText(RECOVERY_CODES_FIXTURE[0] as string);
+    await user.click(within(codes).getByRole("button", { name: "I have saved them" }));
+
+    await waitFor(() => {
+      const cached = mutationCacheText(queryClient);
+      for (const code of RECOVERY_CODES_FIXTURE) expect(cached).not.toContain(code);
+    });
+  });
+
+  it("keeps neither password once the server changed it", async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderSecurityPage();
+    const password = await panel("Password");
+    await typePassword(user, password);
+    expect(await within(password).findByRole("status")).toHaveTextContent("Your password was changed.");
+
+    await waitFor(() => {
+      const cached = mutationCacheText(queryClient);
+      expect(cached).not.toContain(PASSWORD.current);
+      expect(cached).not.toContain(PASSWORD.new);
+    });
+    // The status line is the page's own record of the answer, not the mutation's.
+    expect(within(password).getByRole("status")).toHaveTextContent("Your password was changed.");
+  });
+
+  it("keeps neither password once the server refused the change, and still says why", async () => {
+    calls.changePassword.mockRejectedValue(
+      new ApiError(403, JSON.stringify({ detail: "the current password is not right", code: "invalid_credentials" })),
+    );
+    const user = userEvent.setup();
+    const { queryClient } = renderSecurityPage();
+    const password = await panel("Password");
+    await typePassword(user, password);
+    expect(await within(password).findByRole("alert")).toHaveTextContent("the current password is not right");
+
+    await waitFor(() => {
+      const cached = mutationCacheText(queryClient);
+      expect(cached).not.toContain(PASSWORD.current);
+      expect(cached).not.toContain(PASSWORD.new);
+    });
+    expect(within(password).getByRole("alert")).toHaveTextContent("the current password is not right");
+  });
+});
+
+/**
+ * FIX ROUND (Task 12 review, Minor 3). A password change KEEPS THIS SESSION
+ * (own-auth Task 7): the server ends the person's other sessions and forgets
+ * their remembered devices, and this one stays signed in. So a 204 re-reads
+ * the page and stays on it; nothing goes to sign-in.
+ */
+describe("after a password change", () => {
+  it("re-reads your security, stays on this page, and says what the server ended", async () => {
+    const user = userEvent.setup();
+    renderSecurityPage();
+    const password = await panel("Password");
+    expect(calls.getMySecurity).toHaveBeenCalledTimes(1);
+    await typePassword(user, password);
+
+    expect(await within(password).findByRole("status")).toHaveTextContent(
+      "Your password was changed. Your other sessions were signed out, and devices you had remembered ask for your second factor again.",
+    );
+    await waitFor(() => expect(calls.getMySecurity).toHaveBeenCalledTimes(2));
+    expect(currentLocation.value?.pathname).toBe("/profile/security");
+    expect(screen.getByRole("heading", { name: "Your security" })).toBeInTheDocument();
   });
 });
 

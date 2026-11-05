@@ -15,6 +15,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "../../../lib/api";
 import {
   AUDITOR_ROLE,
   CASEY_USER,
@@ -29,6 +30,7 @@ import {
   apiClient,
   calls,
   installDefaults,
+  mutationCacheText,
   renderSettings,
   stepUpRequired,
 } from "./harness";
@@ -161,6 +163,38 @@ describe("Settings — Users tab", () => {
     await user.click(within(shown).getByRole("button", { name: "Done, I have passed it on" }));
     expect(screen.queryByRole("region", { name: /Invitation link/ })).not.toBeInTheDocument();
     expect(document.body.innerHTML).not.toContain("one-time-token");
+  });
+
+  it("keeps no invitation link in the mutation cache once it is passed on", async () => {
+    // FIX ROUND (Task 12 review, Important 1): `reset()` only detaches the
+    // mutation; TanStack keeps a detached one, link and all, for its `gcTime`.
+    calls.inviteUser.mockResolvedValue({
+      user_id: INVITED_USER.id,
+      invite_link: "https://itms.example.test/invite#one-time-token",
+    });
+    const user = userEvent.setup();
+    const { queryClient } = renderSettings("/settings?tab=users");
+    const invite = await screen.findByRole("region", { name: "Invite a person" });
+    await user.type(within(invite).getByLabelText("Email"), "newbie@example.com");
+    await user.click(within(invite).getByRole("button", { name: "Send invitation" }));
+    const shown = await screen.findByRole("region", { name: "Invitation link for newbie@example.com" });
+    await user.click(within(shown).getByRole("button", { name: "Done, I have passed it on" }));
+
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("one-time-token"));
+  });
+
+  it("keeps no resent invitation link in the mutation cache once it is passed on", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    calls.resendInvite.mockResolvedValue({ invite_link: "https://itms.example.test/invite#fresh-token" });
+    const user = userEvent.setup();
+    const { queryClient } = renderSettings("/settings?tab=users");
+    const row = await screen.findByRole("row", { name: /invitee@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Resend the invitation to invitee@example.com" }));
+    const shown = await screen.findByRole("region", { name: "Invitation link for invitee@example.com" });
+    await user.click(within(shown).getByRole("button", { name: "Done, I have passed it on" }));
+
+    await waitFor(() => expect(mutationCacheText(queryClient)).not.toContain("fresh-token"));
   });
 
   it("does not send an access chosen and not added", async () => {
@@ -558,6 +592,42 @@ describe("Settings — Users tab", () => {
     expect(calls.cancelInvite).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole("button", { name: "Cancel the invitation to invitee@example.com" }));
     await waitFor(() => expect(calls.cancelInvite).toHaveBeenCalledWith(INVITED_USER.id));
+  });
+
+  /**
+   * FIX ROUND (Task 12 review, Minor 4). The server answers 409 for anyone
+   * without a pending invitation, with a translated `detail` and NO `code`
+   * (plan decision 8): the console says that sentence, once.
+   */
+  it("says the server's own sentence, once, when a resend is refused with 409", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    calls.resendInvite.mockRejectedValue(
+      new ApiError(409, JSON.stringify({ detail: "this person has no pending invitation" })),
+    );
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /invitee@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Resend the invitation to invitee@example.com" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("this person has no pending invitation");
+    expect(screen.getAllByText("this person has no pending invitation")).toHaveLength(1);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("says the server's own sentence, once, inside the dialog when a cancel is refused with 409", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    calls.cancelInvite.mockRejectedValue(
+      new ApiError(409, JSON.stringify({ detail: "this person has no pending invitation" })),
+    );
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /invitee@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Cancel the invitation to invitee@example.com" }));
+    const dialog = await screen.findByRole("dialog", { name: "Cancel invitation" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel the invitation to invitee@example.com" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("this person has no pending invitation");
+    expect(screen.getAllByText("this person has no pending invitation")).toHaveLength(1);
   });
 
   it("resetting someone's second factors asks for your own when the server says it is stale", async () => {

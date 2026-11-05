@@ -654,18 +654,41 @@ export function renderProfilePage(): RenderResult {
   );
 }
 
+/** A render, and the QueryClient it ran against, for asserting what the caches still hold. */
+export type HarnessRender = RenderResult & { queryClient: QueryClient };
+
+/**
+ * Everything TanStack's mutation cache still holds -- each mutation's answer
+ * and the body it was sent -- as one string. A value shown once (an
+ * invitation link, an authenticator key, recovery codes, a password) must not
+ * be in it once the person has it: `reset()` only detaches the observer, and a
+ * detached mutation is collected after its `gcTime` (5 minutes by default).
+ */
+export function mutationCacheText(queryClient: QueryClient): string {
+  return JSON.stringify(
+    queryClient
+      .getMutationCache()
+      .getAll()
+      .map((mutation) => ({ data: mutation.state.data, variables: mutation.state.variables })),
+  );
+}
+
 /** Your security (`/profile/security`), with the same mocked API surface. */
-export function renderSecurityPage(): RenderResult {
+export function renderSecurityPage(): HarnessRender {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/profile/security"]}>
-        <SecurityPage />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  return {
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/profile/security"]}>
+          <SecurityPage />
+          <LocationProbe />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    ),
+    queryClient,
+  };
 }
 
 /**
@@ -683,18 +706,21 @@ function LocationProbe() {
  * The Settings page under a router, at `/settings` unless `path` says
  * otherwise (`/settings?tab=users`): the active tab lives in `?tab=`.
  */
-export function renderSettings(path = "/settings"): RenderResult {
+export function renderSettings(path = "/settings"): HarnessRender {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[path]}>
-        <SettingsPage />
-        <LocationProbe />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  return {
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[path]}>
+          <SettingsPage />
+          <LocationProbe />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    ),
+    queryClient,
+  };
 }
 
 /** The body of the nth `fetch` call, parsed. */

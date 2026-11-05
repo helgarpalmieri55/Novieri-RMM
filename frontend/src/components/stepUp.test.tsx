@@ -145,6 +145,16 @@ describe("useStepUp", () => {
     expect(action).toHaveBeenCalledTimes(1);
   });
 
+  it("asks for the second factor without claiming when it was last confirmed", async () => {
+    // FIX ROUND (Task 12 review, Minor 6): a session opened on a remembered
+    // device never confirmed a second factor, so "you last confirmed it more
+    // than 10 minutes ago" would be false exactly where the vault asks.
+    const user = renderProbe(vi.fn().mockRejectedValueOnce(REFUSED()));
+    const dialog = await openConfirmation(user);
+    expect(within(dialog).getByText("Confirm your second factor to continue.")).toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent(/minutes ago/);
+  });
+
   it("asks for a code, and sends the request again only after the server accepted it", async () => {
     const action = vi.fn().mockRejectedValueOnce(REFUSED()).mockResolvedValueOnce("saved");
     const user = renderProbe(action);

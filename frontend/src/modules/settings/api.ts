@@ -711,6 +711,11 @@ export function useEffectivePermissions(userId: string | null) {
 /**
  * The invitation (own authentication design §7). Invalidates the directory
  * (the person is listed, invited) and the roles (their holder counts moved).
+ *
+ * `gcTime: 0`: without mail its answer is the one-time link. The tab moves it
+ * into its own state and resets the mutation, and `reset()` alone only
+ * detaches it -- TanStack would keep it for five minutes (Task 12 review,
+ * Important 1).
  */
 export function useInviteUserMutation() {
   const api = useApi();
@@ -721,6 +726,7 @@ export function useInviteUserMutation() {
       void queryClient.invalidateQueries({ queryKey: [USERS_KEY] });
       void queryClient.invalidateQueries({ queryKey: [ROLES_KEY] });
     },
+    gcTime: 0,
   });
 }
 
@@ -764,12 +770,13 @@ export function useSetUserEnabledMutation() {
 /**
  * A fresh invitation link, emailed or shown once without mail. Writes no row
  * this page reads, so it invalidates nothing; its result is rendered where it
- * was triggered.
+ * was triggered. `gcTime: 0` for the link, as for the invitation.
  */
 export function useResendInviteMutation() {
   const api = useApi();
   return useMutation<InviteLinkOut, ApiError, string>({
     mutationFn: (userId) => api.resendInvite(userId),
+    gcTime: 0,
   });
 }
 

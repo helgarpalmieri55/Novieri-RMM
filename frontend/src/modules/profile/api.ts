@@ -8,9 +8,14 @@
  * CHANGES WHAT THE PAGE SHOWS re-reads `GET /me/security`: the page shows what
  * the server holds after the write, never what was typed.
  *
- * The answers that carry a value shown once (the authenticator key, new
- * recovery codes) are not cached here: the page moves them into its own state
- * and empties the mutation.
+ * EVERY MUTATION THAT CARRIES A SECRET SETS `gcTime: 0` -- the authenticator
+ * key and the code that turns it on, new recovery codes, both passwords. The
+ * page moves a value shown once into its own state and resets the mutation,
+ * but `reset()` only detaches a mutation from the page: TanStack keeps a
+ * detached one, its answer and the body it was sent, in the mutation cache
+ * for its `gcTime`, five minutes by default (query-core 5.101.2,
+ * `mutationObserver.ts` `reset`, `removable.ts`). With `gcTime: 0` it is
+ * dropped as soon as it is reset (Task 12 review, Important 1).
  *
  * THE FOUR ENROL CALLS SAY `{ signedIn: true }` (Task 11's `EnrollFrom`): this
  * page has the full console session, so a 401 from them is that session
@@ -42,33 +47,63 @@ function useRefetchSecurity(): () => void {
   return () => void queryClient.invalidateQueries({ queryKey: [MY_SECURITY_KEY] });
 }
 
-/** A password change also forgets the remembered devices (design §2.6), so the page re-reads. */
+/**
+ * A password change also forgets the remembered devices and ends the other
+ * sessions (design §2.6), so the page re-reads. Its body is both passwords:
+ * `gcTime: 0`, and the page resets it once it settles.
+ */
 export function useChangePasswordMutation(run: StepUpRun) {
   const api = useApi();
   const refetch = useRefetchSecurity();
   return useMutation<void, Error, PasswordChange>({
     mutationFn: (body) => run(() => api.changePassword(body)),
     onSuccess: refetch,
+    gcTime: 0,
   });
 }
 
 /**
+ * What came of "Add a passkey": `added`, or `confirmed` -- the second factor
+ * had to be confirmed on the way, and the page asks for one more click.
+ */
+export type AddPasskeyOutcome = "added" | "confirmed";
+
+/**
  * Add a passkey (design §2.2): the server's creation options -- user
  * verification required, the person's own passkeys excluded (Task 5) -- to
- * the browser, and the browser's answer back under the name given. Both
- * requests may need the recent confirmation; the browser's prompt between them
- * is the person's.
+ * the browser, and the browser's answer back under the name given.
+ *
+ * A BROWSER CREATES A PASSKEY ONLY FROM A CLICK (Task 12 review, Important 2).
+ * WebKit (https://webkit.org/blog/11312/meet-face-id-and-touch-id-for-the-web/):
+ * "Face ID and Touch ID for the web require user gestures to function", and
+ * the gesture is "not ... propagated to any async executors" except XHR and
+ * the Fetch API. When the options request needed the recent confirmation,
+ * the click that asked was spent on the confirmation dialog (a passkey there
+ * waits on Touch ID, which is no fetch), so `createPasskey` is NOT called from
+ * the confirmation's continuation: the mutation stops with `confirmed`, and
+ * the page's "Create the passkey" button runs it again, from a fresh click,
+ * where the options are fetched by that click (fetch carries the gesture) and
+ * nothing else stands before `createPasskey`. `run` sends the action once and,
+ * after a confirmation, once more: two calls are how the confirmation is seen.
  */
 export function useAddPasskeyMutation(run: StepUpRun) {
   const api = useApi();
   const refetch = useRefetchSecurity();
-  return useMutation<void, Error, { name: string }>({
+  return useMutation<AddPasskeyOutcome, Error, { name: string }>({
     mutationFn: async ({ name }) => {
-      const optionsJSON = await run(() => api.enrollPasskeyOptions({ signedIn: true }));
+      let asked = 0;
+      const optionsJSON = await run(() => {
+        asked += 1;
+        return api.enrollPasskeyOptions({ signedIn: true });
+      });
+      if (asked > 1) return "confirmed";
       const credential = await createPasskey(optionsJSON);
       await run(() => api.enrollPasskey(credential, name, { signedIn: true }));
+      return "added";
     },
-    onSuccess: refetch,
+    onSuccess: (outcome) => {
+      if (outcome === "added") refetch();
+    },
   });
 }
 
@@ -86,6 +121,8 @@ export function useStartTotpMutation(run: StepUpRun) {
   const api = useApi();
   return useMutation<{ otpauth_uri: string }, Error, void>({
     mutationFn: () => run(() => api.enrollTotpStart({ signedIn: true })),
+    // Its answer is the authenticator secret.
+    gcTime: 0,
   });
 }
 
@@ -98,6 +135,8 @@ export function useConfirmTotpMutation(run: StepUpRun) {
       await run(() => api.enrollTotpConfirm(code, { signedIn: true }));
     },
     onSuccess: refetch,
+    // Its body is a code from the app.
+    gcTime: 0,
   });
 }
 
@@ -116,6 +155,8 @@ export function useRegenerateRecoveryCodesMutation(run: StepUpRun) {
   return useMutation<RecoveryCodes, Error, void>({
     mutationFn: () => run(() => api.regenerateRecoveryCodes()),
     onSuccess: refetch,
+    // Its answer is the ten codes.
+    gcTime: 0,
   });
 }
 

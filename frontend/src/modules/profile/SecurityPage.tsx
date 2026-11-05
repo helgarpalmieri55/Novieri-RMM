@@ -29,17 +29,26 @@
 // signed in. So a 204 re-reads the page and says so; it is not a sign-out.
 //
 // NOTHING SECRET IS KEPT (invariant 3). The password boxes are emptied once the
-// server has answered. The authenticator key and new recovery codes are the
-// values a person must see once: each is held in this component's state only
-// -- the mutation that brought it is emptied at once, so it sits in no cache --
-// and is gone when the person says they have it. The page renders named
-// fields of `GET /me/security`, never the response, so a field a server should
-// not have sent is not drawn.
+// server has answered, and the mutation that sent both passwords is reset
+// when it settles: the page keeps only what came of it, a success or the
+// server's refusal. The authenticator key and new recovery codes are the
+// values a person must see once: each is held in this component's state only,
+// the mutation that brought it is reset at once, and it is gone when the
+// person says they have it. `reset()` alone only detaches a mutation --
+// TanStack keeps a detached one, its answer and its body, in the mutation
+// cache for its `gcTime`, five minutes by default -- so every mutation here
+// that carries a secret sets `gcTime: 0` (`./api.ts`) and is dropped as soon
+// as it is reset. The page renders named fields of `GET /me/security`, never
+// the response, so a field a server should not have sent is not drawn.
 //
-// A BROWSER MAY REFUSE A PASSKEY PROMPT THAT DID NOT FOLLOW A CLICK (Safari
-// can), which is what happens when the second factor had to be confirmed
-// first: the failure says the prompt was cancelled and nothing changed, and
-// clicking "Add a passkey" again works, because the confirmation is now fresh.
+// A BROWSER CREATES A PASSKEY ONLY FROM A CLICK (WebKit: "Face ID and Touch ID
+// for the web require user gestures to function", carried across only XHR and
+// fetch). When "Add a passkey" first needs the second factor confirmed, that
+// click is spent on the confirmation, so the page does not create the passkey
+// from the confirmation's continuation: it asks for one more click, "Create
+// the passkey", which fetches the options and creates the passkey itself
+// (`useAddPasskeyMutation`). A refusal there is said as "not created, try
+// again", not as a prompt the person closed.
 
 import { useState, type CSSProperties } from "react";
 
@@ -151,6 +160,9 @@ function PasswordPanel({ run }: { run: StepUpRun }) {
   // check is shown, worked out again on every render so a change of language
   // re-words it (`checkNewPassword` speaks the active language).
   const [checked, setChecked] = useState(false);
+  // What came of the last change, held here rather than in the mutation, which
+  // is reset when it settles because its body is both passwords.
+  const [outcome, setOutcome] = useState<{ kind: "changed" } | { kind: "failed"; error: unknown } | null>(null);
   // Each code point is one character, as the server counts them (design §2.1).
   const length = Array.from(next).length;
   const refusal = !checked
@@ -161,19 +173,23 @@ function PasswordPanel({ run }: { run: StepUpRun }) {
         checkNewPassword(next, repeat);
 
   function submit() {
-    change.reset();
+    setOutcome(null);
     setChecked(true);
     if (current === "" || checkNewPassword(next, repeat) !== null) return;
     change.mutate(
       { current, new: next },
       {
         // Whatever the server answered, the boxes are emptied: a password is
-        // typed again rather than kept on the page.
-        onSettled: () => {
+        // typed again rather than kept on the page. And so is the mutation:
+        // the page keeps only what came of it (`gcTime: 0` drops it from the
+        // cache once it is reset).
+        onSettled: (_data, error) => {
           setCurrent("");
           setNext("");
           setRepeat("");
           setChecked(false);
+          setOutcome(error ? { kind: "failed", error } : { kind: "changed" });
+          change.reset();
         },
       },
     );
@@ -228,13 +244,13 @@ function PasswordPanel({ run }: { run: StepUpRun }) {
               {refusal}
             </span>
           ) : null}
-          {change.error ? (
+          {outcome?.kind === "failed" ? (
             <span role="alert" className="form-error">
               <Icon name={KIND_ICON.crit} size={13} />
-              {describeSubmitError(change.error)}
+              {describeSubmitError(outcome.error)}
             </span>
           ) : null}
-          {change.isSuccess ? (
+          {outcome?.kind === "changed" ? (
             <span role="status" className="form-saved">
               <Icon name={KIND_ICON.ok} size={13} />
               {t("profile.securityPage.password.changed")}
@@ -252,12 +268,40 @@ function PasskeysPanel({ security, run, zone }: { security: MySecurity; run: Ste
   const remove = useRemovePasskeyMutation(run);
   const [name, setName] = useState("");
   const [removing, setRemoving] = useState<MyPasskey | null>(null);
+  // The second factor was confirmed on the way to "Add a passkey": that click
+  // was spent on the confirmation, and a browser creates a passkey only from a
+  // click, so the page asks for one more ("Create the passkey").
+  const [confirmed, setConfirmed] = useState(false);
   // The server refuses removing the last second factor; this only says so first.
   const onlyFactor = security.passkeys.length + (security.has_totp ? 1 : 0) <= 1;
   // The browser's refusal in Task 11's words (a passkey already on the
   // account, a closed prompt); anything else -- the server's refusal, a
-  // closed confirmation -- as `describeSubmitError` words it.
-  const addFailure = add.error ? (describePasskeyError(add.error) ?? describeSubmitError(add.error)) : null;
+  // closed confirmation -- as `describeSubmitError` words it. After the
+  // confirmation, a refusal from the browser is said as what it is to the
+  // person: not created, try again -- they may have closed nothing.
+  const refusedAfterConfirmation =
+    confirmed && add.error instanceof Error && add.error.name === "NotAllowedError";
+  const addFailure = add.error
+    ? refusedAfterConfirmation
+      ? t("profile.securityPage.passkeys.retry")
+      : (describePasskeyError(add.error) ?? describeSubmitError(add.error))
+    : null;
+
+  function addPasskey() {
+    add.mutate(
+      { name: name.trim() },
+      {
+        onSuccess: (outcome) => {
+          if (outcome === "confirmed") {
+            setConfirmed(true);
+            return;
+          }
+          setConfirmed(false);
+          setName("");
+        },
+      },
+    );
+  }
 
   return (
     <Panel title={t("profile.securityPage.passkeys.title")} subtitle={t("profile.securityPage.passkeys.subtitle")}>
@@ -305,7 +349,10 @@ function PasskeysPanel({ security, run, zone }: { security: MySecurity; run: Ste
       ) : null}
       {remove.error ? <Failure message={describeSubmitError(remove.error)} /> : null}
 
-      <Form onSubmit={() => add.mutate({ name: name.trim() }, { onSuccess: () => setName("") })}>
+      {/* ONE FORM, TWO LABELS. "Create the passkey" is the same submit, from a
+          new click: the options are fetched by that click and nothing else
+          stands before the browser's prompt (`useAddPasskeyMutation`). */}
+      <Form onSubmit={addPasskey}>
         <div className="form-grid" style={{ ...FOLDING_FORM_GRID, marginTop: 14 }}>
           <Field label={t("profile.securityPage.passkeys.name")}>
             <input
@@ -316,11 +363,23 @@ function PasskeysPanel({ security, run, zone }: { security: MySecurity; run: Ste
             />
           </Field>
         </div>
+        {confirmed ? (
+          <p className="note" role="status" style={{ marginTop: 10 }}>
+            {t("profile.securityPage.passkeys.confirmed")}
+          </p>
+        ) : null}
         <div className="form-actions">
           <Btn
             type="submit"
             icon="key"
-            label={add.isPending ? t("profile.securityPage.passkeys.adding") : t("profile.securityPage.passkeys.add")}
+            variant={confirmed ? "primary" : "secondary"}
+            label={
+              add.isPending
+                ? t("profile.securityPage.passkeys.adding")
+                : confirmed
+                  ? t("profile.securityPage.passkeys.createNow")
+                  : t("profile.securityPage.passkeys.add")
+            }
             disabled={add.isPending || name.trim() === ""}
           />
         </div>
@@ -353,11 +412,15 @@ function TotpPanel({ security, run }: { security: MySecurity; run: StepUpRun }) 
   // The `otpauth://` address while a set-up is open: the one place the key is.
   const [setupUri, setSetupUri] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  // Why the code was not accepted, held here: the mutation's body is the code,
+  // so it is reset once it settles.
+  const [confirmFailure, setConfirmFailure] = useState<unknown>(null);
   const [asking, setAsking] = useState(false);
   const onlyFactor = security.has_totp && security.passkeys.length === 0;
 
   function begin() {
     confirm.reset();
+    setConfirmFailure(null);
     start.mutate(undefined, {
       onSuccess: (out) => {
         setSetupUri(out.otpauth_uri);
@@ -369,10 +432,15 @@ function TotpPanel({ security, run }: { security: MySecurity; run: StepUpRun }) 
   }
 
   function finish() {
+    setConfirmFailure(null);
     confirm.mutate(code.replace(/\s+/g, ""), {
       onSuccess: () => {
         setSetupUri(null);
         setCode("");
+      },
+      onSettled: (_data, error) => {
+        setConfirmFailure(error ?? null);
+        confirm.reset();
       },
     });
   }
@@ -380,6 +448,7 @@ function TotpPanel({ security, run }: { security: MySecurity; run: StepUpRun }) 
   function cancel() {
     setSetupUri(null);
     setCode("");
+    setConfirmFailure(null);
     confirm.reset();
   }
 
@@ -441,7 +510,7 @@ function TotpPanel({ security, run }: { security: MySecurity; run: StepUpRun }) 
               <Btn label={t("profile.securityPage.totp.cancel")} onClick={cancel} />
             </div>
           </Form>
-          {confirm.error ? <Failure message={describeSubmitError(confirm.error)} /> : null}
+          {confirmFailure ? <Failure message={describeSubmitError(confirmFailure)} /> : null}
         </>
       ) : (
         <div className="form-actions">

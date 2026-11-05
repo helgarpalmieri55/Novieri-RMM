@@ -34,7 +34,7 @@ export const profile = {
       missingCurrent: "Enter your current password.",
       submit: "Change password",
       changing: "Changing…",
-      changed: "Your password was changed. Devices you had remembered ask for your second factor again.",
+      changed: "Your password was changed. Your other sessions were signed out, and devices you had remembered ask for your second factor again.",
     },
     passkeys: {
       title: "Passkeys",
@@ -50,6 +50,10 @@ export const profile = {
       namePlaceholder: "e.g. Work laptop",
       add: "Add a passkey",
       adding: "Waiting for your browser…",
+      // After the recent confirmation: a browser makes a passkey only from a click.
+      confirmed: "Your second factor is confirmed. Press Create the passkey to make it.",
+      createNow: "Create the passkey",
+      retry: "The passkey was not created. Press Create the passkey to try again.",
       onlyFactor: "This is your only second factor. Add another before you remove it.",
     },
     totp: {
