@@ -230,6 +230,7 @@ const GRANTS: Map<string, RoleAssignmentOut[]> = new Map([
   ["usr-lf", [{ assignment_id: "ur-6", role_id: "role-service-desk", role_name: "service-desk", client_id: null }]],
   ["usr-ic", [{ assignment_id: "ur-7", role_id: "role-finance", role_name: "finance", client_id: null }]],
   ["usr-rs", [{ assignment_id: "ur-8", role_id: "role-auditor", role_name: "auditor", client_id: null }]],
+  ["usr-invited-seed", [{ assignment_id: "ur-9", role_id: "role-technician", role_name: "technician", client_id: null }]],
 ]);
 
 const roles = new Map<string, RoleSeed>(ROLE_SEEDS.map((seed) => [seed.id, seed]));

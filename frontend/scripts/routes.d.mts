@@ -4,5 +4,7 @@ export declare const EXCLUDED: Set<string>;
 export declare function fillPath(pattern: string): string;
 export declare function patternOf(route: string): string;
 export declare const ROUTES: string[];
+/** Routes whose `<details>` the harmony walk opens before it measures. */
+export declare const OPEN_DISCLOSURES: Set<string>;
 /** The client harmony chooses in the top bar (a UUID, `src/fixtures/core.ts`'s `CUSTOMER_ID`). */
 export declare const CHOSEN_CLIENT: string;

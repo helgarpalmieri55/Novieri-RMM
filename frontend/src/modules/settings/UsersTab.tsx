@@ -744,7 +744,8 @@ export function UsersTab({
                                 <span id={`own-factors-${user.id}`} className="note">
                                   <Trans
                                     k="settings.users.resetOwnFactors"
-                                    components={{ link: <Link to="/profile/security" /> }}
+                                    // Underlined: a link inside a sentence is told apart by more than its colour (SC 1.4.1).
+                                    components={{ link: <Link className="underline" to="/profile/security" /> }}
                                   />
                                 </span>
                               </>
