@@ -83,6 +83,18 @@ export function ResetPasswordPage() {
   return (
     <AuthCard title={t("auth.reset.title")}>
       <Form onSubmit={() => void submit()}>
+        {/* So a password manager knows a password is being set for an account;
+            the reset link names none, so the field is empty and read-only. */}
+        <input
+          type="text"
+          name="username"
+          autoComplete="username"
+          value=""
+          readOnly
+          tabIndex={-1}
+          aria-hidden="true"
+          style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
+        />
         <NewPasswordFields password={password} again={again} onPassword={setPassword} onAgain={setAgain} />
         <AuthAlert text={error} />
         <div className="form-actions">

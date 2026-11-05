@@ -62,6 +62,9 @@ export const auth = {
     totpLabel: "Six-digit code the app now shows",
     confirmTotp: "Confirm code",
     rejected: "That code was not accepted. Check the time on your phone and enter the newest code.",
+    passkeyRejected: "That passkey was not accepted. Try again, or use an authenticator app.",
+    factorSaved: "Your second factor is saved. The recovery codes could not be made yet.",
+    retryFinish: "Try again",
   },
   codes: {
     title: "Save your recovery codes",
@@ -118,5 +121,9 @@ export const auth = {
     unsupported: "This browser cannot use passkeys. Use an authenticator app instead.",
     cancelled: "The passkey prompt was closed or timed out, so nothing was used.",
     alreadyRegistered: "This device already holds a passkey for your account.",
+    noUserVerification:
+      "This passkey or device cannot confirm it is you with a fingerprint, face or PIN, which is required. Use another passkey or an authenticator app.",
+    aborted: "Another passkey request replaced this one. Try again.",
+    generic: "The passkey could not be used on this device. Try again, or use another method.",
   },
 } as const;

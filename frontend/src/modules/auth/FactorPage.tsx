@@ -8,9 +8,10 @@
  *
  * THE METHODS COME FROM THE SIGN-IN STEP, in the router's state. On a page
  * opened directly -- a reload, a bookmark, the harmony gate -- there are
- * none, and all three are offered: the server refuses one the account does
- * not have exactly as it refuses a wrong code, so offering it reveals nothing
- * the password step had not already established.
+ * none, and all three are offered. A method the account lacks is refused by
+ * the server with 409 `method_unavailable`, whose `detail` sentence reaches the
+ * page through `describeSubmitError`; the password was already checked, so
+ * that reveals nothing the password step had not already established.
  *
  * "DO NOT ASK AGAIN ON THIS COMPUTER" (§2.6) is offered only when the
  * sign-in step said how long the organisation allows (`rememberDays`); absent
@@ -188,6 +189,11 @@ export function FactorPage() {
         </AuthSection>
       ) : null}
 
+      {!passkey && !totp && !recovery ? (
+        <p className="note" style={{ margin: 0 }}>
+          {t("auth.passkey.unsupported")}
+        </p>
+      ) : null}
       <AuthAlert text={error} />
       <p className="note" style={{ margin: 0 }}>
         <Link to={carryNext("/sign-in", next)}>{t("auth.common.startOver")}</Link>

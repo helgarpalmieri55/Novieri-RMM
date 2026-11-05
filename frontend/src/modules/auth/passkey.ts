@@ -54,12 +54,25 @@ export function signWithPasskey(optionsJSON: PublicKeyCredentialRequestOptionsJS
   return startAuthentication({ optionsJSON });
 }
 
-/** The sentence for a passkey the browser refused, or `null` when the refusal was not the browser's. */
+/**
+ * The sentence for a passkey the browser refused, or `null` when the refusal
+ * was not the browser's. EVERY `WebAuthnError` gets one of OUR sentences, in
+ * the active language: the library's own message is English and is never shown.
+ */
 export function describePasskeyError(error: unknown): string | null {
   if (error instanceof WebAuthnError) {
-    if (error.code === "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED") return translate("auth.passkey.alreadyRegistered");
-    if (error.name === "NotAllowedError" || error.code === "ERROR_CEREMONY_ABORTED") {
-      return translate("auth.passkey.cancelled");
+    switch (error.code) {
+      case "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED":
+        return translate("auth.passkey.alreadyRegistered");
+      case "ERROR_AUTHENTICATOR_MISSING_USER_VERIFICATION_SUPPORT":
+        return translate("auth.passkey.noUserVerification");
+      case "ERROR_CEREMONY_ABORTED":
+        return translate("auth.passkey.aborted");
+      default:
+        // The person closed the prompt or it timed out: the browser's
+        // `NotAllowedError`, carried as the error's name.
+        if (error.name === "NotAllowedError") return translate("auth.passkey.cancelled");
+        return translate("auth.passkey.generic");
     }
   }
   if (error instanceof Error && error.name === "NotAllowedError") return translate("auth.passkey.cancelled");

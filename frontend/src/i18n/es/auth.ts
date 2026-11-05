@@ -67,6 +67,9 @@ export const auth: Shape<typeof en> = {
     totpLabel: "Código de seis dígitos que muestra ahora la aplicación",
     confirmTotp: "Confirmar el código",
     rejected: "No se aceptó ese código. Comprueba la hora de tu teléfono e introduce el código más reciente.",
+    passkeyRejected: "No se aceptó esa clave de acceso. Inténtalo de nuevo o usa una aplicación de autenticación.",
+    factorSaved: "Tu segundo factor está guardado. Aún no se pudieron generar los códigos de recuperación.",
+    retryFinish: "Reintentar",
   },
   codes: {
     title: "Guarda tus códigos de recuperación",
@@ -124,5 +127,9 @@ export const auth: Shape<typeof en> = {
     unsupported: "Este navegador no puede usar claves de acceso. Usa una aplicación de autenticación.",
     cancelled: "La ventana de la clave de acceso se cerró o caducó, así que no se usó nada.",
     alreadyRegistered: "Este dispositivo ya tiene una clave de acceso para tu cuenta.",
+    noUserVerification:
+      "Esta clave de acceso o este dispositivo no puede confirmar que eres tú con huella, rostro o PIN, y es obligatorio. Usa otra clave de acceso o una aplicación de autenticación.",
+    aborted: "Otra solicitud de clave de acceso reemplazó a esta. Inténtalo de nuevo.",
+    generic: "No se pudo usar la clave de acceso en este dispositivo. Inténtalo de nuevo o usa otro método.",
   },
 };

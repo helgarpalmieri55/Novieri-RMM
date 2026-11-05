@@ -95,6 +95,8 @@ describe("resetting the password from the emailed link", () => {
     renderAuth("/reset-password#tok-reset-1");
     await waitFor(() => expect(where.location?.hash).toBe(""));
     expect(where.location?.pathname).toBe("/reset-password");
+    expect(where.location?.search).toBe("");
+    expect(where.location?.state ?? null).toBeNull();
     const user = await choose(GOOD);
     await user.click(screen.getByRole("button", { name: "Change password" }));
     expect(calls.resetPassword).toHaveBeenCalledWith({ token: "tok-reset-1", password: GOOD });

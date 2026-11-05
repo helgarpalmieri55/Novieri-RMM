@@ -48,6 +48,10 @@ export function EnrollPage() {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The factor is in; only the recovery codes are still owed. The server
+  // refuses the factor steps again on a pending session, so a failed
+  // `enroll/finish` is retried alone.
+  const [factorAccepted, setFactorAccepted] = useState(false);
   const inFlight = useRef(false);
 
   async function run(step: () => Promise<void>, rejected: MessageKey) {
@@ -68,12 +72,29 @@ export function EnrollPage() {
 
   /** The factor is in: make the recovery codes and show them, once. */
   async function finished() {
+    setFactorAccepted(true);
     const { recovery_codes } = await api.enrollFinish();
     handOverCodes(recovery_codes);
     navigate(carryNext("/sign-in/recovery-codes", next), { replace: true });
   }
 
   const setupKey = otpauthUri ? setupKeyOf(otpauthUri) : null;
+
+  if (factorAccepted) {
+    return (
+      <AuthCard title={t("auth.enroll.title")} intro={t("auth.enroll.factorSaved")}>
+        <AuthAlert text={error} />
+        <div className="form-actions">
+          <Btn
+            variant="primary"
+            label={busy ? t("auth.common.working") : t("auth.enroll.retryFinish")}
+            disabled={busy}
+            onClick={() => void run(finished, "auth.enroll.rejected")}
+          />
+        </div>
+      </AuthCard>
+    );
+  }
 
   return (
     <AuthCard title={t("auth.enroll.title")} intro={t("auth.enroll.intro")}>
@@ -86,7 +107,7 @@ export function EnrollPage() {
                 const credential = await createPasskey(options);
                 await api.enrollPasskey(credential, name.trim());
                 await finished();
-              }, "auth.enroll.rejected")
+              }, "auth.enroll.passkeyRejected")
             }
           >
             <Field label={t("auth.enroll.passkeyName")}>

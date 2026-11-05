@@ -29,6 +29,8 @@ describe("recovering an account from the server's link", () => {
     expect(screen.getByText(/removes this account's second factors and recovery codes/)).toBeInTheDocument();
     expect(calls.acceptRecovery).not.toHaveBeenCalled();
     await waitFor(() => expect(where.location?.hash).toBe(""));
+    expect(where.location?.search).toBe("");
+    expect(where.location?.state ?? null).toBeNull();
   });
 
   it("recovers on the press, with the token in the body, and goes on to a new first factor", async () => {
