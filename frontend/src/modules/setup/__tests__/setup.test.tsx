@@ -17,6 +17,12 @@
  *   3. a wrong code renders nothing                -> a typo looks like a crash;
  *   4. a double-click claims twice                 -> two organizations, one of
  *      which nobody can reach.
+ *
+ * THE OWNER'S PASSWORD IS CHOSEN HERE (own-auth design §7; coordinator decision
+ * for own-auth Task 11): the claim carries it, checked like every staff
+ * password, and the page then goes to sign in, where the first second factor
+ * is added. No invitation is mailed for the owner, so the screen that said
+ * whether one went is gone; its two tests are re-pointed below.
  */
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -31,8 +37,10 @@ const { default: App, queryClient } = await import("../../../App");
 let assign: ReturnType<typeof vi.spyOn>;
 
 /** Every claim the stub received, as the page actually sent it. */
-const claims: { code: string; email: string; display_name: string; organization_name: string }[] =
+const claims: { code: string; email: string; display_name: string; organization_name: string; password: string }[] =
   [];
+
+const PASSWORD = "a long phrase I can remember";
 
 type Reply = { status: number; body: unknown };
 
@@ -89,10 +97,16 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function fillTheForm(user: ReturnType<typeof userEvent.setup>, code: string) {
+async function fillTheForm(
+  user: ReturnType<typeof userEvent.setup>,
+  code: string,
+  { password = PASSWORD, again = password }: { password?: string; again?: string } = {},
+) {
   await user.type(await screen.findByLabelText("Install code"), code);
   await user.type(screen.getByLabelText("Your name"), "Dana Okafor");
   await user.type(screen.getByLabelText("Your email address"), "dana@example.com");
+  await user.type(screen.getByLabelText("New password"), password);
+  await user.type(screen.getByLabelText("The same password again"), again);
   await user.type(screen.getByLabelText("Organization name"), "Toeshee");
 }
 
@@ -146,6 +160,7 @@ describe("the setup screen", () => {
       email: "dana@example.com",
       display_name: "Dana Okafor",
       organization_name: "Toeshee",
+      password: PASSWORD,
     });
   });
 
@@ -174,7 +189,7 @@ describe("the setup screen", () => {
         invitation_error: null,
       },
     });
-    expect(await screen.findByText(/dana@example\.com/)).toBeInTheDocument();
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/sign-in"));
     expect(claims).toHaveLength(1);
   });
 
@@ -230,14 +245,13 @@ describe("the setup screen", () => {
     expect(alert.textContent).not.toContain('"loc"');
   });
 
-  // RE-POINTED (own-auth Task 10). This was "says so when sign-in cannot even
-  // be started": `signinRedirect` fetched the identity provider's discovery
-  // document before it navigated, and on a fresh appliance that failed and
-  // the button did nothing. The sign-in page is this console's own and
-  // nothing is fetched first, so the property left is that the button GOES --
-  // in one whole-document load, so the setup check is asked again and finds
-  // the installation claimed.
-  it("goes to this console's sign-in page in one load, with nothing to fail first", async () => {
+  // RE-POINTED (own-auth Task 10, then the coordinator's Task 11 decision).
+  // This was "says so when sign-in cannot even be started" (a redirect to
+  // Keycloak that fetched first), then a "Go to sign in" button. The owner
+  // has a password now, so the page goes to sign in by itself once the
+  // claim is accepted -- in one whole-document load, so the setup check is
+  // asked again and finds the installation claimed.
+  it("goes to this console's sign-in page in one load once the installation is claimed", async () => {
     const user = userEvent.setup();
     render(<SetupPage />);
     await fillTheForm(user, "install-code");
@@ -253,34 +267,38 @@ describe("the setup screen", () => {
       },
     });
     await user.click(screen.getByRole("button", { name: /finish setup/i }));
-    await user.click(await screen.findByRole("button", { name: /go to sign in/i }));
 
-    expect(assign).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
     expect(assign).toHaveBeenCalledWith("/sign-in");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("says plainly when the invitation could not be sent", async () => {
-    // The honest version of success: the organization exists, and the person
-    // who just claimed it has no way to sign in until email works.
+  // RE-POINTED: was "says plainly when the invitation could not be sent". The
+  // owner is no longer mailed an invitation; what can go wrong instead is the
+  // password, and it is refused before anything is claimed.
+  it.each([
+    ["short", "eleven char", "eleven char", "Use at least 12 characters."],
+    ["mismatched", PASSWORD, `${PASSWORD}!`, "The two passwords are not the same."],
+  ])("refuses a %s password before claiming anything", async (_, password, again, sentence) => {
+    const user = userEvent.setup();
+    render(<SetupPage />);
+    await fillTheForm(user, "install-code", { password, again });
+    await user.click(screen.getByRole("button", { name: /finish setup/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(sentence);
+    expect(claims).toHaveLength(0);
+  });
+
+  it("shows the server's sentence when it refuses the password, and keeps the form", async () => {
+    const sentence = "That password is on the list of passwords already exposed in breaches.";
     const user = userEvent.setup();
     render(<SetupPage />);
     await fillTheForm(user, "install-code");
-    claimReply({
-      status: 201,
-      body: {
-        organization_id: "00000000-0000-0000-0000-0000000000aa",
-        organization_slug: "toeshee",
-        user_id: "00000000-0000-0000-0000-0000000000bb",
-        email: "dana@example.com",
-        invitation_sent: false,
-        invitation_error: "The invitation email could not be sent.",
-      },
-    });
+    claimReply({ status: 400, body: { code: "password_rejected", detail: sentence } });
     await user.click(screen.getByRole("button", { name: /finish setup/i }));
 
-    expect(
-      await screen.findByText(/The invitation email could not be sent\./),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(sentence);
+    expect(screen.getByLabelText<HTMLInputElement>("Install code")).toHaveValue("install-code");
+    expect(assign).not.toHaveBeenCalled();
   });
 });

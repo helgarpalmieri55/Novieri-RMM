@@ -23,36 +23,30 @@
  * its headline and the form kernel's field and actions row: v3 draws no
  * screen for first boot, so it is composed from the kit alone.
  *
- * NO CREDENTIAL IS COLLECTED HERE. The form takes an address; the identity
- * provider mails an enrolment link and the password is set there, exactly as
- * for every account the Users tab creates. A password field on this screen
- * would be the first place a password ever entered this process, and there is
- * no such place.
+ * THE OWNER'S PASSWORD IS CHOSEN HERE (own-auth design §7: «la pantalla con el
+ * código de instalación … crea al dueño con contraseña»; own-auth Task 8). It is
+ * a staff password like any other -- 12 to 128 characters counted in code
+ * points, checked here first and then by the server against the list of
+ * common and leaked passwords, whose refusal (`password_rejected`) is shown
+ * as it says it. The second factor is added at the first sign-in, so once the
+ * claim is accepted the page goes straight to `/sign-in`: there is no
+ * invitation to mail and no screen in between.
  */
 
 import { useRef, useState, type CSSProperties } from "react";
 
 import { describeSubmitError } from "../../components/form";
 import { useT } from "../../i18n/context";
-import { Trans } from "../../i18n/Trans";
 import { Field, inputClass } from "../../components/ui";
 import { ApiError, requestHeaders } from "../../lib/api";
 import { SIGN_IN_PATH, navigation } from "../../lib/session";
 import { Btn, KIND_ICON } from "../../shell/components";
 import { Icon } from "../../shell/icons";
+import { checkNewPassword, describeAuthError } from "../auth/errors";
+import { NewPasswordFields } from "../auth/NewPasswordFields";
 
 /** `GET /api/v1/setup/status` — one bit, deliberately (see the route's docstring). */
 export type SetupStatus = { needed: boolean };
-
-/** `POST /api/v1/setup/claim`, 201. Carries no credential and no install code. */
-export type Claimed = {
-  organization_id: string;
-  organization_slug: string;
-  user_id: string;
-  email: string;
-  invitation_sent: boolean;
-  invitation_error: string | null;
-};
 
 /**
  * Ask whether this installation still needs setting up.
@@ -85,7 +79,8 @@ export async function fetchSetupStatus(): Promise<SetupStatus> {
  *
  * WHY NOT `ApiClient` ITSELF: it reads a 401 as a session that ended, and
  * this request is made before any session exists. Only the error TYPE is
- * borrowed.
+ * borrowed -- and the sign-in pages' reading of it (`describeAuthError`), so a
+ * refused password shows the server's sentence.
  */
 async function refusal(response: Response): Promise<string> {
   // `.text()` rather than `.json()`, matching how `ApiClient` builds an
@@ -97,12 +92,12 @@ async function refusal(response: Response): Promise<string> {
   } catch {
     // A body that cannot even be read leaves the status to speak.
   }
-  return describeSubmitError(new ApiError(response.status, body));
+  return describeAuthError(new ApiError(response.status, body), { canTimeOut: false });
 }
 
-type Form = { code: string; name: string; email: string; organization: string };
+type Form = { code: string; name: string; email: string; password: string; again: string; organization: string };
 
-const EMPTY: Form = { code: "", name: "", email: "", organization: "" };
+const EMPTY: Form = { code: "", name: "", email: "", password: "", again: "", organization: "" };
 
 /** The page ground and the one card on it: the pre-auth surface with room to breathe. */
 const GROUND: CSSProperties = { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", padding: 32 };
@@ -114,7 +109,6 @@ export function SetupPage() {
   const t = useT();
   const [form, setForm] = useState<Form>(EMPTY);
   const [error, setError] = useState<string | null>(null);
-  const [claimed, setClaimed] = useState<Claimed | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   /**
@@ -133,6 +127,8 @@ export function SetupPage() {
     form.code.trim() !== "" &&
     form.name.trim() !== "" &&
     form.email.trim() !== "" &&
+    form.password !== "" &&
+    form.again !== "" &&
     form.organization.trim() !== "";
 
   function set(field: keyof Form, value: string) {
@@ -142,6 +138,11 @@ export function SetupPage() {
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (inFlight.current || !complete) return;
+    const problem = checkNewPassword(form.password, form.again);
+    if (problem) {
+      setError(problem);
+      return;
+    }
     inFlight.current = true;
     setSubmitting(true);
     setError(null);
@@ -154,6 +155,8 @@ export function SetupPage() {
           email: form.email.trim(),
           display_name: form.name.trim(),
           organization_name: form.organization.trim(),
+          // Never trimmed: every character of a password is the person's.
+          password: form.password,
         }),
       });
       if (!response.ok) {
@@ -163,7 +166,12 @@ export function SetupPage() {
         setError(await refusal(response));
         return;
       }
-      setClaimed((await response.json()) as Claimed);
+      // A WHOLE-DOCUMENT LOAD, NOT A ROUTE CHANGE. `SetupGate` holds
+      // `needed: true` for the life of this tab (`staleTime: Infinity`), so a
+      // route change would land on this same screen; a fresh page asks again
+      // and finds the installation claimed. The owner signs in there and adds
+      // the first second factor.
+      navigation.assign(SIGN_IN_PATH);
     } catch (cause: unknown) {
       // `String(cause)` rendered "TypeError: Failed to fetch" at the operator.
       // The lead sentence is the load-bearing half — nothing was created — and
@@ -178,122 +186,72 @@ export function SetupPage() {
   return (
     <div style={GROUND}>
       <div className="panel" style={CARD}>
-        {claimed ? <Claim claimed={claimed} /> : null}
-        {claimed ? null : (
-          <>
-            <h1 style={HEADLINE}>{t("setup.page.title")}</h1>
-            <p className="note" style={{ marginTop: 6 }}>
-              {t("setup.page.intro")}
+        <h1 style={HEADLINE}>{t("setup.page.title")}</h1>
+        <p className="note" style={{ marginTop: 6 }}>
+          {t("setup.page.intro")}
+        </p>
+
+        <form style={{ marginTop: 20 }} onSubmit={(event) => void submit(event)}>
+          <Field label={t("setup.page.installCode")}>
+            <input
+              className={inputClass}
+              value={form.code}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => set("code", event.target.value)}
+            />
+          </Field>
+          <Field label={t("setup.page.yourName")}>
+            <input
+              className={inputClass}
+              value={form.name}
+              onChange={(event) => set("name", event.target.value)}
+            />
+          </Field>
+          <Field label={t("setup.page.yourEmail")}>
+            <input
+              className={inputClass}
+              type="email"
+              autoComplete="username"
+              value={form.email}
+              onChange={(event) => set("email", event.target.value)}
+            />
+          </Field>
+          <NewPasswordFields
+            password={form.password}
+            again={form.again}
+            onPassword={(value) => set("password", value)}
+            onAgain={(value) => set("again", value)}
+          />
+          <Field label={t("setup.page.organizationName")}>
+            <input
+              className={inputClass}
+              value={form.organization}
+              onChange={(event) => set("organization", event.target.value)}
+            />
+          </Field>
+
+          {error ? (
+            <p role="alert" className="notice red">
+              <Icon name={KIND_ICON.crit} size={16} />
+              <span>{error}</span>
             </p>
+          ) : null}
 
-            <form style={{ marginTop: 20 }} onSubmit={(event) => void submit(event)}>
-              <Field label={t("setup.page.installCode")}>
-                <input
-                  className={inputClass}
-                  value={form.code}
-                  autoComplete="off"
-                  spellCheck={false}
-                  onChange={(event) => set("code", event.target.value)}
-                />
-              </Field>
-              <Field label={t("setup.page.yourName")}>
-                <input
-                  className={inputClass}
-                  value={form.name}
-                  onChange={(event) => set("name", event.target.value)}
-                />
-              </Field>
-              <Field label={t("setup.page.yourEmail")}>
-                <input
-                  className={inputClass}
-                  type="email"
-                  value={form.email}
-                  onChange={(event) => set("email", event.target.value)}
-                />
-              </Field>
-              <Field label={t("setup.page.organizationName")}>
-                <input
-                  className={inputClass}
-                  value={form.organization}
-                  onChange={(event) => set("organization", event.target.value)}
-                />
-              </Field>
-
-              {error ? (
-                <p role="alert" className="notice red">
-                  <Icon name={KIND_ICON.crit} size={16} />
-                  <span>{error}</span>
-                </p>
-              ) : null}
-
-              <div className="form-actions">
-                <Btn
-                  type="submit"
-                  label={submitting ? t("setup.page.settingUp") : t("setup.page.finish")}
-                  icon="check"
-                  variant="primary"
-                  disabled={!complete || submitting}
-                />
-                <span className="form-hint">
-                  {t("setup.page.passwordHint")}
-                </span>
-              </div>
-            </form>
-          </>
-        )}
+          <div className="form-actions">
+            <Btn
+              type="submit"
+              label={submitting ? t("setup.page.settingUp") : t("setup.page.finish")}
+              icon="check"
+              variant="primary"
+              disabled={!complete || submitting}
+            />
+            <span className="form-hint">
+              {t("setup.page.passwordHint")}
+            </span>
+          </div>
+        </form>
       </div>
     </div>
-  );
-}
-
-/**
- * What happened, said honestly.
- *
- * A fresh installation usually has no email configured, so the invitation is
- * the step most likely to fail — and it fails AFTER the organization and the
- * administrator exist, which is the one outcome a green checkmark would
- * misrepresent. When the mail did not go, this says so and says what to do,
- * rather than sending the operator to a sign-in page that will never let them
- * in.
- */
-function Claim({ claimed }: { claimed: Claimed }) {
-  const t = useT();
-  return (
-    <>
-      <h1 style={HEADLINE}>{t("setup.claim.title")}</h1>
-      <p className="note" style={{ marginTop: 6 }}>
-        <Trans
-          k="setup.claim.belongsTo"
-          vars={{ email: claimed.email }}
-          components={{ b: <b style={{ color: "var(--ink)" }} /> }}
-        />
-      </p>
-      {claimed.invitation_sent ? (
-        <p className="note" style={{ marginTop: 14 }}>
-          {t("setup.claim.checkInbox")}
-        </p>
-      ) : (
-        <p role="alert" className="notice red" style={{ marginTop: 14 }}>
-          <Icon name={KIND_ICON.crit} size={16} />
-          <span>
-            {claimed.invitation_error ?? t("setup.claim.invitationFailed")}
-          </span>
-        </p>
-      )}
-      <div className="form-actions" style={{ marginTop: 20 }}>
-        {/* A WHOLE-DOCUMENT LOAD, NOT A ROUTE CHANGE. `SetupGate` holds
-            `needed: true` for the life of this tab (`staleTime: Infinity`),
-            so a route change would land on this same screen; a fresh page
-            asks again and finds the installation claimed. Nothing is fetched
-            first, so -- unlike the identity provider's discovery document
-            this button used to wait on -- nothing can fail before it goes. */}
-        <Btn
-          label={t("setup.claim.goToSignIn")}
-          icon="lock"
-          variant="primary"
-          onClick={() => navigation.assign(SIGN_IN_PATH)}
-        />
-      </div>
-    </>
   );
 }

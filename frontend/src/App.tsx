@@ -120,6 +120,14 @@ import { SettingsPage } from "./modules/settings/SettingsPage";
 import { ClientDetailPage } from "./modules/clients/ClientDetailPage";
 import { ClientsPage } from "./modules/clients/ClientsPage";
 import { SetupPage, fetchSetupStatus } from "./modules/setup/SetupPage";
+import { EnrollPage } from "./modules/auth/EnrollPage";
+import { FactorPage } from "./modules/auth/FactorPage";
+import { ForgotPasswordPage } from "./modules/auth/ForgotPasswordPage";
+import { InvitePage } from "./modules/auth/InvitePage";
+import { RecoverPage } from "./modules/auth/RecoverPage";
+import { RecoveryCodesPage } from "./modules/auth/RecoveryCodesPage";
+import { ResetPasswordPage } from "./modules/auth/ResetPasswordPage";
+import { SignInPage } from "./modules/auth/SignInPage";
 import { MyTicketsPage } from "./modules/portal/MyTicketsPage";
 import { NewTicketPage } from "./modules/portal/NewTicketPage";
 import { PortalTicketDetailPage } from "./modules/portal/PortalTicketDetailPage";
@@ -573,6 +581,23 @@ export default function App() {
         {import.meta.env.DEV ? (
           <Route path="/__preview" element={<PreviewPage />} />
         ) : null}
+            {/* THE PAGES REACHED WITHOUT A SESSION (own-auth Task 11), and NOT
+                inside RequireAuth: there, a person with no session would be
+                sent to sign in from the page where they sign in. They are
+                `lib/session.ts::PUBLIC_PATHS`; `modules/auth/__tests__/
+                routes.test.ts` holds the two lists, and the harmony walk,
+                together. The emailed links carry their token in the
+                fragment (`/invite#<token>`), never in the path. Still inside
+                SetupGate: an installation with no owner shows its setup
+                screen at these addresses too. */}
+            <Route path="/sign-in" element={<SignInPage />} />
+            <Route path="/sign-in/factor" element={<FactorPage />} />
+            <Route path="/sign-in/enroll" element={<EnrollPage />} />
+            <Route path="/sign-in/recovery-codes" element={<RecoveryCodesPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+            <Route path="/invite" element={<InvitePage />} />
+            <Route path="/recover" element={<RecoverPage />} />
             <Route
               path="/devices"
               element={
