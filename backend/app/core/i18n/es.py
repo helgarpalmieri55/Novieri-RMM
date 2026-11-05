@@ -4968,4 +4968,8 @@ CATALOG: dict[str, str] = {
         "Las claves de firma no están disponibles ahora mismo; vuelve a intentarlo en un "
         "momento."
     ),
+    # --- auth: sessions, cookies and recent confirmation (P2 Task 6) ---
+    "this request was refused because it did not come from the console": (
+        "se rechazó esta petición porque no vino de la consola"
+    ),
 }
