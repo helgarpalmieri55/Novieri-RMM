@@ -2,10 +2,13 @@
 
 One row per organisation in `auth_org_settings` (Task 1), with CHECK bounds;
 no row means the defaults below, which are the table's own column defaults
-(`tests/test_auth_sessions.py` holds the two together). Read on EVERY request
-by `app/core/auth/sessions.py::resolve`, with no cache, so a value saved in the
-console applies to the next request: lowering the inactivity limit signs out
-whoever has been idle longer, at once.
+(`tests/test_auth_sessions.py` holds the two together). Read with no cache,
+but not every value takes effect the same way. The inactivity limits are read
+on EVERY request (`app/core/auth/sessions.py::resolve`): lowering one signs out
+whoever has been idle longer, at once. The remember-device switch is read on
+every use of a device (`app/core/auth/devices.py::recognised`). The maxima and
+the device lifetime are read when a session or a device is created and written
+into its `expires_at`: a change governs the ones created after it.
 
 THE NUMBERS AND THEIR SOURCES. Staff: 30 minutes of inactivity, 12 hours at
 most (design §2.4, decision S2). NIST SP 800-63B-4 §2.2.3, AAL2: "The

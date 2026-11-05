@@ -1,7 +1,15 @@
 """Settings → Security → Sessions (P2 design §2.4, §2.6, §3).
 
 How long a sign-in lasts, for the whole organisation: `auth_org_settings`
-(Task 1), read by `app/core/auth/session_policy.py` on every request.
+(Task 1), read through `app/core/auth/session_policy.py`.
+
+WHAT A SAVE CHANGES, AND WHEN. The two inactivity limits are read on every
+request, so they govern every open session at its next request; the "remember
+this device" switch is read every time a device is recognised, so switching
+it off stops every remembered device at its next use. The maxima
+(`staff_max_hours`, `remembered_max_hours`, `contact_max_days`) and the device
+lifetime (`remember_device_days`) are fixed into a session or a device when it
+is created (`expires_at`): a change applies to the ones created after it.
 Configuration that serves every client, so reading it needs `orgs.manage` and
 changing it needs `orgs.manage` on EVERY client
 (`require_permission_on_every_client`, `tests/test_global_writes.py`), as for
@@ -97,8 +105,15 @@ async def write_session_settings(
     request: Request,
     ctx: AuthContext = Depends(require_permission_on_every_client("orgs.manage")),
 ) -> SessionSettingsOut:
-    """Save every value. Applies to the next request of every session; the
-    audit event records each value that changed, before and after."""
+    """Save every value; what then holds is returned. The inactivity limits
+    govern every open session from its next request, and the remember-device
+    switch every remembered device from its next use; the maxima and the
+    device lifetime apply to sessions and devices created from now on
+    (module docstring).
+
+    A save that changes nothing writes nothing: the row, its `updated_at` and
+    `updated_by` ("who last saved it") always name a save the audit event
+    recorded, with each value that changed, before and after."""
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
@@ -108,20 +123,20 @@ async def write_session_settings(
             )
         ).scalar_one_or_none()
         before = policy_of(row)
-        if row is None:
-            row = AuthOrgSettings(org_id=ctx.org_id)
-            session.add(row)
-        for name in POLICY_FIELDS:
-            setattr(row, name, getattr(body, name))
-        row.updated_at = datetime.now(UTC)
-        row.updated_by = ctx.user_id
-        await session.flush()
         changed = {
             name: [getattr(before, name), getattr(body, name)]
             for name in POLICY_FIELDS
             if getattr(before, name) != getattr(body, name)
         }
         if changed:
+            if row is None:
+                row = AuthOrgSettings(org_id=ctx.org_id)
+                session.add(row)
+            for name in POLICY_FIELDS:
+                setattr(row, name, getattr(body, name))
+            row.updated_at = datetime.now(UTC)
+            row.updated_by = ctx.user_id
+            await session.flush()
             await audit_service.record(
                 session,
                 org_id=ctx.org_id,

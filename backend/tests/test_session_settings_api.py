@@ -2,7 +2,8 @@
 
 The every-client gate of the PUT is held by `tests/test_global_writes.py`
 (listed in `GLOBAL_WRITES`); here: the defaults, the bounds, the audit event,
-and that a saved value governs the very next request of an open session.
+that a save that changes nothing writes nothing, and that a saved inactivity
+limit governs the very next request of an open session.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -13,7 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AuditEvent
-from app.models.auth import AuthSession
+from app.models.auth import AuthOrgSettings, AuthSession
 from tests.session_support import sign_in, use_console
 
 URL = "/api/v1/settings/sessions"
@@ -77,8 +78,10 @@ async def test_saving_records_each_change_before_and_after(api_env: Any) -> None
         "changed": {"staff_idle_minutes": [30, 15], "remember_device_enabled": [True, False]}
     }
 
-    again = await api_env.client.put(URL, json=body, headers=headers)
+    second_admin = await api_env.headers(org_id, await api_env.create_user(org_id, "org-admin"))
+    again = await api_env.client.put(URL, json=body, headers=second_admin)
     assert again.status_code == 200
+    assert again.json() == saved, "an unchanged save keeps who last saved it, and when"
     async with AsyncSession(api_env.admin_engine) as s:
         count = len(
             (
@@ -91,6 +94,30 @@ async def test_saving_records_each_change_before_and_after(api_env: Any) -> None
             ).all()
         )
     assert count == 1, "an unchanged save records nothing"
+
+
+async def test_saving_the_defaults_over_the_defaults_writes_nothing(api_env: Any) -> None:
+    """Protects `if changed:` around the write in `write_session_settings`:
+    `updated_at`/`updated_by` ("who last saved it") always name a save the
+    audit log recorded, so a save that changes nothing leaves no row, no
+    author and no event."""
+    org_id, headers = await _admin(api_env)
+    response = await api_env.client.put(URL, json=DEFAULTS, headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json() == {**DEFAULTS, "updated_at": None, "updated_by": None}
+    async with AsyncSession(api_env.admin_engine) as s:
+        rows = (
+            await s.execute(select(AuthOrgSettings).where(AuthOrgSettings.org_id == org_id))
+        ).all()
+        events = (
+            await s.execute(
+                select(AuditEvent.id).where(
+                    AuditEvent.org_id == org_id,
+                    AuditEvent.action == "auth.session_settings_updated",
+                )
+            )
+        ).all()
+    assert rows == [] and events == []
 
 
 @pytest.mark.parametrize(

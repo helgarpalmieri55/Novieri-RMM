@@ -163,6 +163,7 @@ async def test_the_console_domain_rule_holds_for_a_session(api_env: Any) -> None
     api_env.settings.console_email_domain = "allowed.example"
     response = await _me(api_env, signed.headers)
     assert response.status_code == 403
+    assert response.json()["detail"] == "email domain not permitted for this console"
 
 
 async def test_a_disabled_person_is_signed_out(api_env: Any) -> None:

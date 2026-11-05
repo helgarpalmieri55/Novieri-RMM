@@ -465,9 +465,10 @@ PART_D: dict[str, str] = {
         "days a device may be remembered."
     ),
     "PUT /api/v1/settings/sessions": (
-        "Saves every sign-in lifetime at once and returns what is then in force; the next request "
-        "of every open session obeys it. Needs every client. The audit log records each changed "
-        "value, before and after."
+        "Saves every sign-in lifetime and returns what is in force. Inactivity limits and the "
+        "remember-device switch apply at once; maximum lengths and the device lifetime only to "
+        "sessions and devices created later. Needs every client. The audit log records each "
+        "changed value."
     ),
     # --- software ---
     "GET /api/v1/software": (
