@@ -183,6 +183,7 @@ export const auditActions = {
   docs_record_archived: "Docs record archived",
   docs_record_created: "Docs record created",
   docs_record_updated: "Docs record updated",
+  email_credential_used: "Email credential used",
   email_settings_updated: "Email settings updated",
   email_test_requested: "Email test requested",
   email_intake_credential_used: "Email intake credential used",

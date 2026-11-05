@@ -180,6 +180,7 @@ export const auditActions: Shape<typeof enActions> = {
   docs_record_archived: "Registro archivado",
   docs_record_created: "Registro creado",
   docs_record_updated: "Registro actualizado",
+  email_credential_used: "Credencial de correo usada",
   email_settings_updated: "Configuración de correo actualizada",
   email_test_requested: "Prueba de correo solicitada",
   email_intake_credential_used: "Credencial usada por la entrada de correo",

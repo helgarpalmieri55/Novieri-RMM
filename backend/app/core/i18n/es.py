@@ -1157,15 +1157,6 @@ CATALOG: dict[str, str] = {
     "settings cannot be null; send {{}} to change nothing": (
         "settings no puede ser null; envía {{}} para no cambiar nada"
     ),
-    "The identity provider refused that (HTTP {status_code}).": (
-        "El proveedor de identidad lo rechazó (HTTP {status_code})."
-    ),
-    "email settings cannot be changed on this installation yet: its identity provisioning is "
-    "not configured. That is a server setting, not something this screen can fix.": (
-        "la configuración del correo todavía no se puede cambiar en esta instalación: su "
-        "aprovisionamiento de identidad no está configurado. Es un ajuste del servidor, no "
-        "algo que esta pantalla pueda arreglar."
-    ),
     "a relay password needs a sign-in username; leave both blank for a relay that needs no "
     "sign-in": (
         "una contraseña del servidor de correo necesita un nombre de usuario para iniciar "
@@ -1197,6 +1188,55 @@ CATALOG: dict[str, str] = {
     ),
     "the client secret may be at most {max_client_secret} characters": (
         "el secreto de cliente puede tener como máximo {max_client_secret} caracteres"
+    ),
+    "The mail relay refused the message.": "El servidor de correo rechazó el mensaje.",
+    "The mail relay refused the recipient address.": (
+        "El servidor de correo rechazó la dirección del destinatario."
+    ),
+    "The mail relay could not be reached.": "No se pudo contactar con el servidor de correo.",
+    "The mail relay's certificate could not be verified.": (
+        "No se pudo verificar el certificado del servidor de correo."
+    ),
+    "The mail relay or Microsoft 365 refused the sign-in.": (
+        "El servidor de correo o Microsoft 365 rechazó el inicio de sesión."
+    ),
+    "Microsoft 365 sign-in could not be reached.": (
+        "No se pudo contactar con el inicio de sesión de Microsoft 365."
+    ),
+    "The saved sign-in is missing or unreadable; enter it again.": (
+        "El inicio de sesión guardado falta o no se puede leer; introdúcelo de nuevo."
+    ),
+    "The message could not be built from these settings; check the sender, the display name "
+    "and the reply-to address.": (
+        "No se pudo construir el mensaje con esta configuración; revisa el remitente, el nombre "
+        "visible y la dirección de respuesta."
+    ),
+    "a Microsoft sign-in's token URL must be Microsoft's own: "
+    "https://login.microsoftonline.com/<directory>/oauth2/v2.0/token": (
+        "la URL de token de un inicio de sesión de Microsoft 365 debe ser la de Microsoft: "
+        "https://login.microsoftonline.com/<directorio>/oauth2/v2.0/token"
+    ),
+    "too many test messages for this organization; try again in a minute": (
+        "demasiados mensajes de prueba para esta organización; inténtalo de nuevo en un minuto"
+    ),
+    "ITMS test message": "Mensaje de prueba de ITMS",
+    "the relay password may only contain ASCII characters": (
+        "la contraseña del servidor de correo solo puede contener caracteres ASCII"
+    ),
+    "This credential belongs to this organization's account email; change it in Settings, "
+    "Email.": (
+        "Esta credencial pertenece al correo de cuentas de esta organización; cámbiala en "
+        "Ajustes, Correo."
+    ),
+    "This is a test message from ITMS. It reached you, so this organization's account email "
+    "(invitations and password resets) is working.": (
+        "Este es un mensaje de prueba de ITMS. Te ha llegado, así que el correo de cuentas de "
+        "esta organización (invitaciones y restablecimientos de contraseña) funciona."
+    ),
+    "This credential is used only to send this organization's account email and cannot be "
+    "revealed.": (
+        "Esta credencial solo se usa para enviar el correo de cuentas de esta organización y no "
+        "se puede revelar."
     ),
     "no fields supplied; send name and/or description": (
         "no se indicó ningún campo; envía name y/o description"

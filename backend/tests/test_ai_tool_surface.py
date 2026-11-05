@@ -628,7 +628,7 @@ EXPECTED_PASSING_SIX = frozenset(
         # Added 2026-08-20 (invisible identity layer). Eligible on all six and
         # deliberately unregistered.
         #
-        # `/settings/email` returns the realm's mail configuration — host, port,
+        # `/settings/email` returns the organization's mail configuration — host, port,
         # sender, and whether a password is set. Never the password itself
         # (`test_realm_settings_api.py` asserts the literal is absent from the
         # body), but an AI persona reading a deployment's mail relay and sender
