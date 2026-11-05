@@ -104,9 +104,38 @@ La persona no llega a la consola hasta registrar uno.
 
 - Contados por cuenta y por factor, nunca solo por IP [S5].
 - Desde el 5.º fallo, espera creciente: 1 s, duplicando hasta 15 min.
-- A los **100** fallos seguidos ese factor queda desactivado y solo un administrador lo restablece [S1 §3.2.2].
-- Un acierto borra los fallos previos de ese factor [S1].
-- Mensaje genérico, exista o no la cuenta, y mismo tiempo de respuesta [S5, S8].
+- **La contraseña lleva dos contadores** (decisión del operador del 2026-11-05, «Cookie de equipo», sobre la revisión
+  final B-I2). Un intento que llega con una cookie `__Host-itms_device` que `devices.recognised` acepta para esa
+  cuenta (§2.6: del equipo recordado de esa persona, sin revocar, sin caducar, recordado después del último cambio de
+  contraseña y con «Recordar este equipo» activado en la organización) espera y cuenta en el contador propio de ese
+  equipo (`auth_trusted_devices.password_failures`). Cualquier otro navegador espera y cuenta en el de la cuenta
+  (`auth_failures`). Quien conoce una dirección pero no tiene la cookie de esa persona solo deja esperando a los
+  navegadores que la plataforma no reconoce: OWASP, «Temporary account lockout after several failed attempts is too
+  simple of a target for DoS attacks against legitimate users» [S65]; NIST, «Additional techniques MAY be used to
+  reduce the likelihood that an attacker will lock the legitimate claimant out» [S1 §3.2.2]. La cookie de otra
+  cuenta, una revocada o caducada, o cualquier cookie con el recordatorio desactivado no da contador propio. La regla
+  vale donde se prueba la contraseña: al iniciar sesión y en «Cambiar contraseña» (Mi seguridad), para que quien
+  mantiene la espera no retenga también el remedio. Los dos contadores comparten un único bloqueo por persona y
+  factor, así que una ráfaga en paralelo no supera ningún límite.
+- **Lo que no cubre.** Una persona sin ningún equipo recordado, o en una organización con el recordatorio
+  desactivado, solo tiene el contador de la cuenta: quien conozca su dirección puede seguir manteniéndola en espera
+  desde navegadores no reconocidos. El remedio ahí sigue siendo el borde (bloquear la IP), el enlace de
+  restablecimiento (que borra ambos contadores, decisión 9 del plan) o el comando de recuperación.
+- **El segundo factor no lleva contador por equipo.** Solo se llega a él con una sesión pendiente, que abre la
+  contraseña correcta: quien no la sabe no puede fallar el segundo factor, y quien la sabe ya ha comprometido la
+  cuenta, y el remedio es cambiarla. Además, cada factor cuenta aparte (bloquear la app TOTP no bloquea la llave ni
+  los códigos), y un equipo recordado no pide segundo factor al iniciar sesión.
+- A los **100** fallos seguidos ese factor queda desactivado [S1 §3.2.2]. La parada es **por cuenta**: para la
+  contraseña suma los dos contadores (los fallos seguidos desde el último acierto, vengan del navegador que vengan),
+  y la desactivación vale para todos los navegadores y se audita una sola vez. La restablecen un administrador
+  («Restablecer factores»), el enlace de recuperación del servidor y, para la contraseña, el enlace de
+  restablecimiento.
+- Un acierto borra los fallos previos de ese factor [S1]; para la contraseña, un acierto desde cualquier navegador
+  borra los dos contadores.
+- Mensaje genérico, exista o no la cuenta, y mismo trabajo de argon2 [S5, S8]. Un navegador en espera, reconocido o
+  no, recibe el mismo 401 genérico antes de probar la contraseña: los dos contadores no añaden ningún oráculo. Queda
+  una diferencia de tiempo de unos 10-15 ms entre una dirección conocida y una desconocida (las consultas de la
+  cuenta), aceptada en la revisión final C-M2: el trabajo de argon2 es el mismo y los límites por IP la hacen débil.
 
 ### 2.4 Sesión
 
@@ -378,3 +407,6 @@ con S61–S62); se resume aquí. S61–S64 los verificó el coordinador directam
   https://learn.microsoft.com/en-us/entra/identity/authentication/howto-mfa-mfasettings
 - [S63] OWASP Cross-Site Request Forgery Prevention Cheat Sheet. https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
 - [S64] ChromeDevTools/devtools-protocol, `json/browser_protocol.json`, dominio WebAuthn. https://github.com/ChromeDevTools/devtools-protocol
+- [S65] OWASP, Slow Down Online Guessing Attacks with Device Cookies (ahora servida en community.owasp.org).
+  https://owasp.org/www-community/Slow_Down_Online_Guessing_Attacks_with_Device_Cookies. Citada en §2.3 con las
+  palabras que recoge la decisión del operador del 2026-11-05.

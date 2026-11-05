@@ -128,7 +128,17 @@ the system.
   factor** -- a passkey with user verification required, or a TOTP app --
   with ten single-use recovery codes. Failures are counted per account and per
   factor, with an increasing wait from the fifth and the factor disabled at
-  the hundredth. Sessions are server-side, carried in a `__Host-` cookie that
+  the hundredth. **The password's wait is split by browser** (operator
+  decision 2026-11-05, design §2.3, OWASP "Slow Down Online Guessing Attacks
+  with Device Cookies"): a browser carrying a remembered-device cookie that is
+  still valid for that account waits on its own counter, every other browser
+  on the account's, so whoever knows an address but not that cookie holds
+  only the unrecognised browsers in the wait. The 100-failure stop counts both
+  and is per account. A person with no remembered browser, or an organization
+  with "remember this device" off, has only the account's counter and can
+  still be held waiting by anyone who knows the address; the remedy there is
+  the edge (block the address), the reset link, or the recovery command.
+  Sessions are server-side, carried in a `__Host-` cookie that
   holds only a random identifier, with a 30-minute idle timeout and a 12-hour
   maximum by default; every write needs a custom header and a matching
   `Origin`. "Remember this device" (15 days by default) skips the second
@@ -187,6 +197,7 @@ the system.
 | Credential theft from the vault | Envelope encryption, decrypt-at-use, no plaintext in DB/logs, audited checkout |
 | Operator abuse / over-privilege | RBAC scoped to org + client (per-client grants, the client scope enforced by RLS, invariant 5a); MFA; full audit trail |
 | Stolen or guessed operator password | Mandatory second factor; shipped blocklist; per-account and per-factor failure counters with backoff and a 100-failure disable; generic answers that take the same work whether or not the account exists |
+| An operator locked out by someone who knows their address (online guessing as denial of service) | The password's wait is per remembered browser for a browser the platform recognises, so the person's own remembered browser signs in while unrecognised ones wait (design §2.3). Not covered: a person with no remembered browser, or remembering switched off -- the edge, the reset link and the recovery command are the remedy |
 | Theft of the platform database | Passwords stored only as peppered argon2id (pepper in OpenBao), TOTP secrets sealed by the vault, session and device identifiers stored only as SHA-256 |
 | Cross-tenant data leakage | `org_id` everywhere + PostgreSQL RLS + cert-bound tenant on gateway |
 | Replay of a captured job | Nonce + expiry in signed payload; agent rejects replays |
