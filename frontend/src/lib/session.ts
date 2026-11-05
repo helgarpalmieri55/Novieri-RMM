@@ -102,7 +102,20 @@ export function safeNext(raw: unknown): string {
     return DEFAULT_AFTER_SIGN_IN;
   }
   if (url.origin !== window.location.origin) return DEFAULT_AFTER_SIGN_IN;
-  if (isPublicPath(url.pathname) || isEdgePath(url.pathname)) return DEFAULT_AFTER_SIGN_IN;
+  // `URL` leaves percent-escapes of letters alone (`/%69/` stays `/%69/`),
+  // and an edge that decodes them would route `/%69/<code>/windows` to the
+  // installer. So the rules are checked on the decoded path too, and a path
+  // that does not decode is refused.
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(url.pathname);
+  } catch {
+    return DEFAULT_AFTER_SIGN_IN;
+  }
+  for (const path of [url.pathname, decoded]) {
+    if (path.startsWith("//") || path.includes("\\")) return DEFAULT_AFTER_SIGN_IN;
+    if (isPublicPath(path) || isEdgePath(path)) return DEFAULT_AFTER_SIGN_IN;
+  }
   return raw;
 }
 

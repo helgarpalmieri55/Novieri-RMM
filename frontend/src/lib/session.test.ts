@@ -82,6 +82,8 @@ describe("?next=, which anyone can write into a link", () => {
   it("returns the page asked for", () => {
     expect(safeNext("/settings?tab=profile")).toBe("/settings?tab=profile");
     expect(safeNext("/devices/dev-1#inventory")).toBe("/devices/dev-1#inventory");
+    // An encoded character in a console path is still a console page.
+    expect(safeNext("/docs/a%20b?x=1#h")).toBe("/docs/a%20b?x=1#h");
   });
 
   it("falls back to the root when there is none", () => {
@@ -114,6 +116,10 @@ describe("?next=, which anyone can write into a link", () => {
     ["/resources/x", "the identity provider's assets"],
     ["/js/x", "the identity provider's scripts"],
     ["/x/../i/abc/windows", "normalises into an edge prefix"],
+    ["/%69/abc/windows", "a percent-encoded letter the edge decodes into /i/"],
+    ["/%2Fevil.example/x", "an encoded slash"],
+    ["/%E0%A4%A", "a percent sequence that does not decode"],
+    ["/sign%2Din", "an encoded hyphen spelling a public page"],
   ])("refuses %j and lands on the root (%s)", (hostile) => {
     expect(safeNext(hostile)).toBe(DEFAULT_AFTER_SIGN_IN);
   });
