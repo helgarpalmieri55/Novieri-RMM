@@ -351,12 +351,29 @@ MCP valida su JWT (`iss`, `aud`, `kid`, revocación).
     recuperación obtenidos por métodos distintos, o un código de recuperación más la autenticación con un
     autenticador de un factor vinculado a la cuenta, o una nueva verificación de identidad. Un buzón solo no es
     ninguna de las tres.
+  - **Decisión del operador del 2026-11-05 («Pedir contraseña nueva si hay marca»).** Mientras la marca esté puesta,
+    el enlace de recuperación del servidor obliga a elegir una contraseña nueva antes de terminar, y la del buzón deja
+    de valer. `POST /auth/recover/details` dice `password_required` (deja el enlace sin usar);
+    `POST /auth/recover/accept` sin contraseña responde 409 `recovery_needs_password` y una contraseña que la regla
+    rechaza, el 422 `password_rejected` de las demás rutas: en los dos casos el enlace no se gasta y la página vuelve
+    a pedirla. Una contraseña aceptable se guarda con `staff_password.store` (que borra la marca) en la misma
+    transacción que quita los factores, auditada `auth.password_changed` `{"via": "recover"}` y con el aviso
+    `password_changed`, como el restablecimiento por correo. La marca se lee bajo `factors.lock_person`, así que un
+    restablecimiento por correo que llega entre `details` y la pulsación se espera y se ve (409), no se lee como
+    ausente. **Sin la marca, la decisión 10 del plan sigue en pie:** quien recupera perdió los factores, no la
+    contraseña, y la contraseña se queda; una contraseña enviada igualmente se ignora. **Por qué la marca lo cambia:**
+    la marca dice que la contraseña actual pudo ponerla quien tiene el buzón, y la recuperación es el camino de vuelta
+    que nombra `reset_needs_recovery`. Si la conservara, quien tiene el buzón la seguiría sabiendo después de que la
+    persona recupere la cuenta; la marca desaparece con el primer segundo factor que la persona verifique, así que un
+    restablecimiento de factores posterior (por ejemplo, uno que pida quien tiene el buzón haciéndose pasar por la
+    persona) volvería a abrir el agujero; y la persona puede no conocer siquiera su propia contraseña.
   - Un enlace de restablecimiento rechazado porque los factores ya no están se gasta (410), como cualquier enlace
     muerto: no vuelve a valer cuando la persona registra un factor nuevo (revisión final, Minor 5).
 - **Comando de recuperación** (único administrador sin factores):
   `docker compose exec api python -m app.core.auth.recover --email <correo>` imprime un enlace de un solo uso de 15 min.
-  No existe por HTTP; exige acceso al servidor; queda auditado. **El enlace es la cuenta:** no pide contraseña, así
-  que quien lo abra en esos 15 minutos se queda con ella. Se entrega a la persona en mano, nunca por correo (Q5); el
+  No existe por HTTP; exige acceso al servidor; queda auditado. **El enlace es la cuenta:** no pide la contraseña
+  actual (si la puso un enlace por correo, pide una nueva: arriba), así que quien lo abra en esos 15 minutos se queda
+  con ella. Se entrega a la persona en mano, nunca por correo (Q5); el
   comando lo advierte en stderr.
 - **Primer arranque:** la pantalla con el código de instalación (que ya existe) crea al dueño con contraseña y segundo
   factor.
