@@ -521,16 +521,40 @@ async def test_falsifier_7_a_cookie_write_without_its_proof_of_origin_is_refused
 _COMMAND = "app.core.auth.recover"
 
 
+_NAMES_THE_COMMAND = re.compile(r"\bapp\.core\.auth\.recover\b(?!y)")
+
+
+def _docstrings(tree: ast.AST) -> set[int]:
+    """The `id()` of every docstring constant: a module's, a class's or a
+    function's first statement when it is a bare string."""
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            first = node.body[0] if node.body else None
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
+                found.add(id(first.value))
+    return found
+
+
 def _imports_the_command(tree: ast.AST, path: Path) -> bool:
-    """Whether a module's CODE imports the recovery command, however spelled:
+    """Whether a module's CODE reaches the recovery command, however spelled:
     `import app.core.auth.recover`, `from app.core.auth import recover`, the
-    relative `from . import recover` inside `app/core/auth/`, or
-    `importlib.import_module("app.core.auth.recover")` / `__import__(...)`.
+    relative `from . import recover` inside `app/core/auth/` -- or any string
+    in the code that names the module, which is how
+    `importlib.import_module("app.core.auth.recover")`, `__import__(...)` and
+    the `python -m` route (`[sys.executable, "-m", "app.core.auth.recover"]`,
+    a shell command line) all spell it, the last two without importing it.
 
     Read on the AST rather than the text: a docstring that NAMES the command
-    (`app/core/auth/flows.py` says only it issues a recovery link) is not an
-    import. And `recovery`, the recovery CODES (Task 4), is another module."""
+    (`app/core/auth/flows.py` says only it issues a recovery link) is not code,
+    and neither is a comment. And `recovery`, the recovery CODES (Task 4), is
+    another module."""
     package = ".".join(("app", *path.relative_to(APP).parent.parts))
+    docstrings = _docstrings(tree)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             if any(alias.name == _COMMAND for alias in node.names):
@@ -544,13 +568,13 @@ def _imports_the_command(tree: ast.AST, path: Path) -> bool:
                 base == "app.core.auth" and any(alias.name == "recover" for alias in node.names)
             ):
                 return True
-        elif isinstance(node, ast.Call):
-            func = node.func
-            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-            if name in {"import_module", "__import__"} and any(
-                isinstance(arg, ast.Constant) and arg.value == _COMMAND for arg in node.args
-            ):
-                return True
+        elif (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+            and _NAMES_THE_COMMAND.search(node.value)
+        ):
+            return True
     return False
 
 
@@ -566,6 +590,17 @@ def test_the_import_detector_is_not_vacuous() -> None:
         ("from . import recover\n", inside),
         ("from .recover import main\n", inside),
         ("import importlib\nimportlib.import_module('app.core.auth.recover')\n", elsewhere),
+        # The `python -m` route: a route that runs the command in a subprocess
+        # issues a link over HTTP without importing anything.
+        (
+            "import subprocess, sys\n"
+            "def issue(email):\n"
+            "    subprocess.run(\n"
+            "        [sys.executable, '-m', 'app.core.auth.recover', '--email', email]\n"
+            "    )\n",
+            elsewhere,
+        ),
+        ("CMD = 'python -m app.core.auth.recover --email {email}'\n", elsewhere),
     ]
     for source, path in caught:
         assert _imports_the_command(ast.parse(source), path), source
@@ -573,6 +608,8 @@ def test_the_import_detector_is_not_vacuous() -> None:
         ("from app.core.auth.recovery import use_code\n", elsewhere),
         ("from app.core.auth import recovery\n", elsewhere),
         ('"""Only `app.core.auth.recover` issues one."""\n', elsewhere),
+        ('def f():\n    """Only `app.core.auth.recover` issues one."""\n', elsewhere),
+        ("NAME = 'app.core.auth.recovery'\n", elsewhere),
     ]
     for source, path in passed:
         assert not _imports_the_command(ast.parse(source), path), source
