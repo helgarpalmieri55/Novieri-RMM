@@ -1144,6 +1144,8 @@ import type {
   EffectivePermissionsOut,
   EmailSettingsOut,
   EmailSettingsUpdate,
+  InviteLinkOut,
+  InviteOut,
   MailResultOut,
   MeProfileUpdate,
   PermissionCatalogueOut,
@@ -1154,12 +1156,16 @@ import type {
   RoleOut,
   RolePermissionsOut,
   RoleUpdate,
+  SessionSettingsOut,
+  SessionSettingsUpdate,
   TestSendIn,
   TestSendOut,
   UserCreate,
+  UserInvite,
   UserListOut,
   UserOut,
 } from "../modules/settings/types";
+import type { MySecurity, PasswordChange } from "../modules/profile/types";
 import type { PlatformStatus } from "../modules/platform-status/types";
 import type { ErrorGroup, ErrorGroupDetail, ErrorGroupList } from "../modules/error-monitor/types";
 
@@ -2117,6 +2123,98 @@ export class ApiClient {
     return this.request<Me>("/me", { method: "PATCH", body: JSON.stringify(body) });
   }
 
+  // ----------------------------------------------------------- your security
+
+  /**
+   * Your own sign-in security (`GET /me/security`, own authentication design
+   * §2.2-§2.6): the factors you have, the recovery codes left, your
+   * remembered devices and your sessions. No secret is in it.
+   *
+   * EVERY REQUEST IN THIS SECTION GOES WITHOUT `X-Client-Id` (`global`):
+   * these are the person's own rows, not a client's, and a client chosen in
+   * the top bar says nothing about them. Like `updateMe`, none takes a user
+   * id: the server answers for the session's own person.
+   *
+   * THE ONES THAT CHANGE A FACTOR may answer 403 `step_up_required` (§2.5);
+   * callers send them through `useStepUp().run` (`components/stepUp.tsx`),
+   * which asks for the second factor and sends the request once more.
+   */
+  getMySecurity(): Promise<MySecurity> {
+    return this.request<MySecurity>("/me/security", {}, { global: true });
+  }
+
+  /** `PUT /me/password`. Both passwords travel once, in the body, and come back in nothing. */
+  changePassword(body: PasswordChange): Promise<void> {
+    return this.request<void>("/me/password", { method: "PUT", body: JSON.stringify(body) }, { global: true });
+  }
+
+  removePasskey(passkeyId: string): Promise<void> {
+    return this.request<void>(
+      `/me/passkeys/${encodeURIComponent(passkeyId)}`,
+      { method: "DELETE" },
+      { global: true },
+    );
+  }
+
+  removeTotp(): Promise<void> {
+    return this.request<void>("/me/totp", { method: "DELETE" }, { global: true });
+  }
+
+  /**
+   * Ten new codes; the old ones stop working. This answer is the one place
+   * they exist in the clear: show it once and keep it nowhere.
+   */
+  regenerateRecoveryCodes(): Promise<RecoveryCodes> {
+    return this.request<RecoveryCodes>("/me/recovery-codes", { method: "POST" }, { global: true });
+  }
+
+  revokeTrustedDevice(deviceId: string): Promise<void> {
+    return this.request<void>(
+      `/me/trusted-devices/${encodeURIComponent(deviceId)}`,
+      { method: "DELETE" },
+      { global: true },
+    );
+  }
+
+  /** Another of your sessions. The current one ends by signing out. */
+  endMySession(sessionId: string): Promise<void> {
+    return this.request<void>(
+      `/me/sessions/${encodeURIComponent(sessionId)}`,
+      { method: "DELETE" },
+      { global: true },
+    );
+  }
+
+  // ------------------------------------------------- the recent confirmation
+
+  /** `POST /auth/step-up/totp` (design §2.5): a code from your app confirms your second factor for 10 minutes. */
+  stepUpTotp(code: string): Promise<void> {
+    return this.request<void>("/auth/step-up/totp", { method: "POST", body: JSON.stringify({ code }) }, { global: true });
+  }
+
+  /** A single-use challenge for `startAuthentication`, as W3C JSON (py_webauthn's `options_to_json`). */
+  stepUpPasskeyOptions(): Promise<PublicKeyCredentialRequestOptionsJSON> {
+    return this.request<PublicKeyCredentialRequestOptionsJSON>(
+      "/auth/step-up/passkey/options",
+      { method: "POST" },
+      { global: true },
+    );
+  }
+
+  /** The browser's signed answer to that challenge, exactly as `startAuthentication` returned it. */
+  stepUpPasskey(credential: AuthenticationResponseJSON): Promise<void> {
+    return this.request<void>(
+      "/auth/step-up/passkey",
+      { method: "POST", body: JSON.stringify({ credential }) },
+      { global: true },
+    );
+  }
+
+  /** A recovery code. It works once: the server spends it. */
+  stepUpRecovery(code: string): Promise<void> {
+    return this.request<void>("/auth/step-up/recovery", { method: "POST", body: JSON.stringify({ code }) }, { global: true });
+  }
+
   // ------------------------------------------------------------------ email
 
   /**
@@ -2158,6 +2256,24 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(body),
     });
+  }
+
+  // --------------------------------------------------------------- sessions
+
+  /**
+   * How long a sign-in lasts (`GET /settings/sessions`, own authentication
+   * design §2.4, §2.6, §3): inactivity and longest session for technicians
+   * and for portal contacts, and "remember this device". The PUT needs
+   * `orgs.manage` on every client, so it is in `globalRoutes.json` and
+   * travels without `X-Client-Id`.
+   */
+  getSessionSettings(): Promise<SessionSettingsOut> {
+    return this.request<SessionSettingsOut>("/settings/sessions");
+  }
+
+  /** All seven values, never a part: the server stores what it is sent, within its CHECK bounds. */
+  putSessionSettings(body: SessionSettingsUpdate): Promise<SessionSettingsOut> {
+    return this.request<SessionSettingsOut>("/settings/sessions", { method: "PUT", body: JSON.stringify(body) });
   }
 
   // ------------------------------------------------------------------ roles
@@ -2235,11 +2351,53 @@ export class ApiClient {
     return this.request<void>(`/users/${userId}/roles/${assignmentId}`, { method: "DELETE" });
   }
 
-  /** Two routes, one method: `/disable` and `/enable` differ only in direction. */
+  /**
+   * Two routes, one method: `/disable` and `/enable` differ only in
+   * direction. Disabling ends the person's sessions and forgets their
+   * remembered devices at once (own authentication design §2.4).
+   */
   setUserEnabled(userId: string, enabled: boolean): Promise<UserOut> {
     return this.request<UserOut>(`/users/${userId}/${enabled ? "enable" : "disable"}`, {
       method: "POST",
     });
+  }
+
+  /**
+   * Invite a technician (`POST /users/invite`, own authentication design §7):
+   * the address, the name and what they may reach on which client. NO
+   * PASSWORD: the person chooses one from a single-use link that expires
+   * after 72 hours. `invite_link` is that link only when no mail is
+   * configured, in this answer only -- the caller shows it once and keeps it
+   * nowhere else.
+   */
+  inviteUser(body: UserInvite): Promise<InviteOut> {
+    return this.request<InviteOut>("/users/invite", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  /** A fresh link (the old one stops working), emailed -- or, without mail, in `invite_link`, once. */
+  resendInvite(userId: string): Promise<InviteLinkOut> {
+    return this.request<InviteLinkOut>(`/users/${encodeURIComponent(userId)}/invite/resend`, { method: "POST" });
+  }
+
+  /** The invitation's link stops working at once. */
+  cancelInvite(userId: string): Promise<void> {
+    return this.request<void>(`/users/${encodeURIComponent(userId)}/invite`, { method: "DELETE" });
+  }
+
+  /**
+   * Reset another technician's second factors (design §7): their passkeys,
+   * app and recovery codes stop working and their remembered devices are
+   * forgotten; they register a new factor at their next sign-in. The server
+   * answers 403 `step_up_required` unless YOUR OWN second factor was
+   * confirmed in the last 10 minutes (§2.5): send it through `useStepUp().run`.
+   */
+  resetUserFactors(userId: string): Promise<void> {
+    return this.request<void>(`/users/${encodeURIComponent(userId)}/factors/reset`, { method: "POST" });
+  }
+
+  /** End every session the person has open. Their account stays active. */
+  endUserSessions(userId: string): Promise<void> {
+    return this.request<void>(`/users/${encodeURIComponent(userId)}/sessions`, { method: "DELETE" });
   }
 
   /** A client's contacts, disabled ones included (`clients.read`). */
@@ -2282,7 +2440,7 @@ export class ApiClient {
     return this.request<MailResultOut>(`/users/${userId}/resend-enrolment`, { method: "POST" });
   }
 
-  /** Removes the Keycloak identity. The ITMS row is retained, marked `deleted`. */
+  /** `DELETE /users/{id}`. The row is RETAINED, marked `deleted`, so the audit log can still say who did what. */
   deleteUser(userId: string): Promise<void> {
     return this.request<void>(`/users/${userId}`, { method: "DELETE" });
   }
