@@ -19,7 +19,7 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth.passwords import STAFF_MINIMUM, PasswordRejected
+from app.core.auth.passwords import STAFF_MINIMUM, PasswordRejected, hash_password
 from app.core.auth.sessions import DEVICE_COOKIE, SESSION_COOKIE
 from app.models import AuditEvent, Organization, Role, User, UserRole
 from app.models.auth import (
@@ -251,6 +251,48 @@ async def test_an_accepted_invitation_is_neither_resent_nor_cancelled(lifecycle_
 
     assert resend.status_code == 409 and cancel.status_code == 409
     assert resend.json()["detail"] == "this person has already accepted their invitation"
+
+
+async def test_an_invitation_is_dead_once_the_person_has_a_password(lifecycle_env: Any) -> None:
+    """An invitation is for somebody who has not chosen a password
+    (`flows._invited`). Should a live link ever outlast that -- a password
+    written by another path while the link was still open -- the link must
+    not be a second way to set one: an old invitation in a mailbox would
+    otherwise overwrite the person's password. Drop the `AuthPassword` check
+    from `_invited` and both answers turn 200."""
+    env = lifecycle_env
+    org = await env.create_org("invite-haspw")
+    admin = await signed_in(env, org, "org-admin")
+    invited = await _invite(env, admin.headers())
+    token = link_token(env.mail.sent[-1].text)
+    user_id = UUID(invited.json()["user_id"])
+    digest, version = await hash_password(org, "Pelican-Orbit-Lantern-58")
+    async with AsyncSession(env.admin_engine) as session:
+        session.add(
+            AuthPassword(
+                user_id=user_id,
+                org_id=org,
+                hash=digest,
+                pepper_version=version,
+                changed_at=datetime.now(UTC),
+            )
+        )
+        await session.commit()
+
+    details = await env.client.post(
+        "/api/v1/auth/invite/details", headers=browser(), json={"token": token}
+    )
+    accepted = await env.client.post(
+        "/api/v1/auth/invite/accept",
+        headers=browser(),
+        json={"token": token, "password": "Marmalade-Quasar-Ferry-71"},
+    )
+
+    assert (details.status_code, details.json()["code"]) == (410, "invalid_link")
+    assert (accepted.status_code, accepted.json()["code"]) == (410, "invalid_link")
+    async with AsyncSession(env.admin_engine) as session:
+        stored = await session.get(AuthPassword, user_id)
+    assert stored is not None and stored.hash == digest
 
 
 async def test_a_factor_reset_needs_the_administrators_own_recent_confirmation(
