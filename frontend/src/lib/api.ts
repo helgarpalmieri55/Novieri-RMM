@@ -1134,13 +1134,11 @@ import type {
   TotpEnrollment,
 } from "../modules/auth/types";
 import type {
-  CreatedUserOut,
   EffectivePermissionsOut,
   EmailSettingsOut,
   EmailSettingsUpdate,
   InviteLinkOut,
   InviteOut,
-  MailResultOut,
   MeProfileUpdate,
   PermissionCatalogueOut,
   RoleAssign,
@@ -1154,7 +1152,6 @@ import type {
   SessionSettingsUpdate,
   TestSendIn,
   TestSendOut,
-  UserCreate,
   UserInvite,
   UserListOut,
   UserOut,
@@ -2326,13 +2323,6 @@ export class ApiClient {
     return this.request<EffectivePermissionsOut>(`/users/${userId}/effective-permissions`);
   }
 
-  createUser(body: UserCreate): Promise<CreatedUserOut> {
-    return this.request<CreatedUserOut>("/users", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  }
-
   assignUserRole(userId: string, body: RoleAssign): Promise<RoleAssignmentOut> {
     return this.request<RoleAssignmentOut>(`/users/${userId}/roles`, {
       method: "POST",
@@ -2417,21 +2407,6 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(body),
     });
-  }
-
-  /**
-   * Ask Keycloak to email an `UPDATE_PASSWORD` link.
-   *
-   * NO PASSWORD TRANSITS ITMS (invariant 3, spec §2.2). There is no argument to
-   * this method and no credential in its result — the response carries `sent`
-   * and nothing else.
-   */
-  resetUserPassword(userId: string): Promise<MailResultOut> {
-    return this.request<MailResultOut>(`/users/${userId}/reset-password`, { method: "POST" });
-  }
-
-  resendUserEnrolment(userId: string): Promise<MailResultOut> {
-    return this.request<MailResultOut>(`/users/${userId}/resend-enrolment`, { method: "POST" });
   }
 
   /** `DELETE /users/{id}`. The row is RETAINED, marked `deleted`, so the audit log can still say who did what. */

@@ -35,6 +35,7 @@ import type {
   PermissionOut,
   RoleAssignmentOut,
   RoleOut,
+  SessionSettingsOut,
 } from "./types";
 
 const MINUTE = 60_000;
@@ -316,25 +317,69 @@ const getUserEffectivePermissions: FixtureMap["getUserEffectivePermissions"] = (
   return { user_id: userId, codes: codes.sort((a, b) => a.code.localeCompare(b.code)) };
 };
 
-let createdUsers = 0;
-const createUser: FixtureMap["createUser"] = (body) => {
+/* -------------------------------------------------------------- invitation */
+
+/**
+ * The invitation (own authentication design §7): its grants are recorded as
+ * the roles panel records them. The link comes back only when no relay is
+ * configured -- the fixtures' relay is, so the answer is "emailed" unless the
+ * Email tab's form was saved empty first.
+ */
+let invited = 0;
+const inviteUser: FixtureMap["inviteUser"] = (body) => {
   if (USERS.some((u) => u.email === body.email)) throw conflict("a user with that email already exists");
-  createdUsers += 1;
-  const id = `usr-new-${createdUsers}`;
-  const grants: RoleAssignmentOut[] = body.role_ids.flatMap((roleId, at) => {
-    const role = roles.get(roleId);
-    return role ? [{ assignment_id: `ur-new-${createdUsers}-${at}`, role_id: role.id, role_name: role.name, client_id: null }] : [];
+  invited += 1;
+  const id = `usr-invited-${invited}`;
+  const grants: RoleAssignmentOut[] = body.grants.flatMap((grant, at) => {
+    const role = roles.get(grant.role_id);
+    return role
+      ? [{ assignment_id: `ur-invited-${invited}-${at}`, role_id: role.id, role_name: role.name, client_id: grant.client_id }]
+      : [];
   });
   GRANTS.set(id, grants);
-  return {
-    id,
-    email: body.email,
-    display_name: body.display_name,
-    status: "active",
-    roles: grants,
-    enrolment_email_sent: email.configured,
-    enrolment_email_error: email.configured ? null : "No mail relay is configured on this server.",
-  };
+  return { user_id: id, invite_link: email.configured ? null : `https://itms.toeshee.example/invite#fixture-${invited}` };
+};
+
+const resendInvite: FixtureMap["resendInvite"] = (userId) => {
+  if (!userId.startsWith("usr-invited-")) throw conflict("this person has no pending invitation");
+  return { invite_link: email.configured ? null : "https://itms.toeshee.example/invite#fixture-again" };
+};
+
+const cancelInvite: FixtureMap["cancelInvite"] = (userId) => {
+  if (!userId.startsWith("usr-invited-")) throw notFound("invitation");
+  GRANTS.delete(userId);
+  return undefined;
+};
+
+const resetUserFactors: FixtureMap["resetUserFactors"] = (userId) => {
+  userById(userId);
+  return undefined;
+};
+
+const endUserSessions: FixtureMap["endUserSessions"] = (userId) => {
+  userById(userId);
+  return undefined;
+};
+
+/* ---------------------------------------------------------------- sessions */
+
+/** `GET /settings/sessions` at the defaults (design §2.4, §2.6, §3), and the PUT that replaces them. */
+let sessionSettings: SessionSettingsOut = {
+  staff_idle_minutes: 30,
+  staff_max_hours: 12,
+  remember_device_enabled: true,
+  remember_device_days: 15,
+  remembered_max_hours: 168,
+  contact_idle_minutes: 60,
+  contact_max_days: 7,
+  updated_at: ago(3 * 24 * 60),
+};
+
+const getSessionSettings: FixtureMap["getSessionSettings"] = () => sessionSettings;
+
+const putSessionSettings: FixtureMap["putSessionSettings"] = (body) => {
+  sessionSettings = { ...body, updated_at: ago(0) };
+  return sessionSettings;
 };
 
 let assigned = 0;
@@ -358,16 +403,6 @@ const removeUserRole: FixtureMap["removeUserRole"] = (userId, assignmentId) => {
 const setUserEnabled: FixtureMap["setUserEnabled"] = (userId, enabled) => {
   const user = userById(userId);
   return { ...user, status: enabled ? "active" : "disabled", roles: GRANTS.get(userId) ?? [] };
-};
-
-const resetUserPassword: FixtureMap["resetUserPassword"] = (userId) => {
-  userById(userId);
-  return { sent: email.configured };
-};
-
-const resendUserEnrolment: FixtureMap["resendUserEnrolment"] = (userId) => {
-  userById(userId);
-  return { sent: email.configured };
 };
 
 const deleteUser: FixtureMap["deleteUser"] = (userId) => {
@@ -447,12 +482,16 @@ const fixtures: FixtureMap = {
   deleteRole,
   getUserEffectivePermissions,
   listClients,
-  createUser,
+  inviteUser,
+  resendInvite,
+  cancelInvite,
+  resetUserFactors,
+  endUserSessions,
+  getSessionSettings,
+  putSessionSettings,
   assignUserRole,
   removeUserRole,
   setUserEnabled,
-  resetUserPassword,
-  resendUserEnrolment,
   deleteUser,
   updateHealthSettings,
   getMcpConnections,

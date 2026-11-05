@@ -184,8 +184,10 @@ describe("SettingsPage", () => {
       await user.click(await screen.findByRole("tab", { name: new RegExp(label) }));
       const controls = document.querySelectorAll("input, select, textarea");
       expect(controls.length, `${label} must be editable`).toBeGreaterThan(0);
+      // RE-POINTED (own authentication design §7): the Users tab writes with
+      // "Send invitation" now, not "Create user".
       expect(
-        screen.getAllByRole("button", { name: /save|create/i }).length,
+        screen.getAllByRole("button", { name: /save|create|invitation/i }).length,
         `${label} must be able to write`,
       ).toBeGreaterThan(0);
     }

@@ -314,8 +314,11 @@ describe("Settings — the Users tab warns while email is unconfigured", () => {
     await openUsers();
 
     const banner = await screen.findByRole("alert", { name: /email/i });
+    // RE-POINTED (own authentication design §7): without mail an invitation
+    // still works -- its link is shown once -- so what the banner says is lost
+    // is the mail itself, and the forgotten-password reset.
     expect(
-      within(banner).getByText(/Email isn't set up, so invitations can't be sent/i),
+      within(banner).getByText(/Email isn't set up, so invitations are not emailed/i),
     ).toBeInTheDocument();
     // A link to the tab that fixes it, not a direction to go and find it.
     expect(within(banner).getByRole("link", { name: "Set up email" })).toHaveAttribute(
@@ -329,7 +332,7 @@ describe("Settings — the Users tab warns while email is unconfigured", () => {
 
     // The directory has rendered, so the email query has had its chance.
     await screen.findByText("casey@example.com");
-    expect(screen.queryByText(/invitations can't be sent/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/invitations are not emailed/i)).not.toBeInTheDocument();
   });
 });
 

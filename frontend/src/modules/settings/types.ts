@@ -587,16 +587,6 @@ export interface UserListOut {
   users: UserOut[];
 }
 
-export interface CreatedUserOut extends UserOut {
-  /**
-   * The shipped realm has no `smtpServer` (spec §2.3), so this is regularly
-   * false on a real deployment and the account is unusable until it is fixed.
-   * Rendering it as an alert is the whole reason the field exists.
-   */
-  enrolment_email_sent: boolean;
-  enrolment_email_error: string | null;
-}
-
 export interface CodeGrantOut {
   code: string;
   via_role: string;
@@ -607,12 +597,6 @@ export interface CodeGrantOut {
 export interface EffectivePermissionsOut {
   user_id: string;
   codes: CodeGrantOut[];
-}
-
-export interface UserCreate {
-  email: string;
-  display_name: string;
-  role_ids: string[];
 }
 
 /**
@@ -692,11 +676,6 @@ export const SESSION_BOUNDS: Readonly<Record<SessionNumberKey, readonly [number,
   contact_idle_minutes: [5, 480],
   contact_max_days: [1, 30],
 };
-
-/** A mail this platform asked Keycloak to send. Carries no credential. */
-export interface MailResultOut {
-  sent: boolean;
-}
 
 // ---------------------------------------------------------------------------
 // The account profile (`PATCH /api/v1/me`) — spec §7.3

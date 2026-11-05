@@ -500,12 +500,9 @@ export const calls = {
   listUsers: vi.fn(),
   listClients: vi.fn(),
   getUserEffectivePermissions: vi.fn(),
-  createUser: vi.fn(),
   assignUserRole: vi.fn(),
   removeUserRole: vi.fn(),
   setUserEnabled: vi.fn(),
-  resetUserPassword: vi.fn(),
-  resendUserEnrolment: vi.fn(),
   deleteUser: vi.fn(),
   updateMe: vi.fn(),
   getMySecurity: vi.fn(),
@@ -598,12 +595,6 @@ export function installDefaults(permissions: readonly string[] = ALL_PERMISSIONS
   calls.listUsers.mockResolvedValue(USERS_FIXTURE);
   calls.listClients.mockResolvedValue(CLIENTS_FIXTURE);
   calls.getUserEffectivePermissions.mockResolvedValue(EFFECTIVE_PERMISSIONS_FIXTURE);
-  calls.createUser.mockResolvedValue({
-    ...CASEY_USER,
-    status: "active",
-    enrolment_email_sent: true,
-    enrolment_email_error: null,
-  });
   calls.assignUserRole.mockResolvedValue({
     assignment_id: "a2222222-2222-4222-8222-222222222222",
     role_id: AUDITOR_ROLE.id,
@@ -612,8 +603,6 @@ export function installDefaults(permissions: readonly string[] = ALL_PERMISSIONS
   });
   calls.removeUserRole.mockResolvedValue(undefined);
   calls.setUserEnabled.mockResolvedValue({ ...OPERATOR_USER, status: "disabled" });
-  calls.resetUserPassword.mockResolvedValue({ sent: true });
-  calls.resendUserEnrolment.mockResolvedValue({ sent: true });
   calls.deleteUser.mockResolvedValue(undefined);
   calls.updateMe.mockResolvedValue({ ...ME_FIXTURE, permissions: [...permissions] });
   calls.getMySecurity.mockResolvedValue(MY_SECURITY_FIXTURE);
