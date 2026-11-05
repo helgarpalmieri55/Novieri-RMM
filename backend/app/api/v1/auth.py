@@ -14,7 +14,7 @@ design §2, §6.4).
     POST   /auth/step-up/passkey/options
     POST   /auth/step-up/passkey
     POST   /auth/logout, /auth/logout-everywhere
-    POST   /auth/password/forgot            always 202
+    POST   /auth/password/forgot            202 for every address (429 per IP)
     POST   /auth/password/reset             a one-time link
     POST   /auth/invite/details             who a one-time invitation is for
     POST   /auth/invite/accept              its password -> the first factor
@@ -492,8 +492,10 @@ async def logout_everywhere(request: Request) -> Response:
 async def forgot_password(
     body: ForgotIn, request: Request, background: BackgroundTasks
 ) -> Response:
-    """Always 202, at once: the link, when there is an account, goes after the
-    answer (plan decision 8)."""
+    """202 at once, the same for every address: the link, when there is an
+    account with a second factor, goes after the answer (plan decision 8).
+    Only the per-IP limit answers otherwise -- a 429, about the network,
+    never about the address."""
     background.add_task(
         flows.send_reset_link, request.app, email=body.email, locale=locale_var.get()
     )

@@ -7,8 +7,9 @@ HMAC with the OpenBao pepper (`app.core.auth.passwords`); `AuthTotp.
 secret_sealed` is sealed by the vault, bound to the user id
 (`app.core.vault.seal_bytes`); the account-mail relay's password is the
 vault secret of `AccountMailSettings.credential_id`, never a column; every
-`token_hash` is a 32-byte digest (SHA-256, or HMAC-SHA256 with the pepper) of
-a random value the person holds, and a recovery code's `code_hash` is its
+`token_hash` is the plain SHA-256 of a random 256-bit value the person holds
+(`sessions.token_hash`, `action_tokens`: a random value needs no pepper),
+and a recovery code's `code_hash` is its
 salted argon2id hash in the encoded form (NIST SP 800-63B-4 §3.1.2.2) --
 CHECKs in 0245 hold both lengths.
 

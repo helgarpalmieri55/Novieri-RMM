@@ -264,7 +264,7 @@ async def test_a_network_caller_cannot_amplify_the_refusal_warning(
         assert [a.status_code for a in answers] == [401] * 20
         (first,) = lines()
         assert first.levelno == logging.WARNING
-        assert (getattr(first, "reason"), getattr(first, "unlogged")) == (
+        assert (first.reason, first.unlogged) == (
             "not an in-process call",
             0,
         )
@@ -275,7 +275,7 @@ async def test_a_network_caller_cannot_amplify_the_refusal_warning(
             await console.client.get("/api/v1/me", headers={loopback.LOOPBACK_HEADER: "1"})
         ).status_code == 401
         (later,) = lines()
-        assert getattr(later, "unlogged") == 19
+        assert later.unlogged == 19
 
         caplog.clear()
         _, _, session_id, _ = await _signed_in(console, "devices.read")
@@ -287,7 +287,7 @@ async def test_a_network_caller_cannot_amplify_the_refusal_warning(
                     headers={"Authorization": f"Bearer {token}", loopback.LOOPBACK_HEADER: "0"},
                 )
                 assert bad.status_code == 401
-        assert [getattr(r, "reason") for r in lines()] == ["malformed loopback header"] * 2
+        assert [r.reason for r in lines()] == ["malformed loopback header"] * 2
 
 
 @pytest.mark.parametrize("value", ["0", "1, 1", ""])

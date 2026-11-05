@@ -19,9 +19,12 @@ THE LIMITS, each enforced HERE, so a caller that forgets one cannot undo it:
 - it stops at the person's next password change: a device remembered BEFORE
   `auth_passwords.changed_at` is not recognised, whether or not the caller
   remembered to call `revoke_all_for_user` (falsifier 5);
-- the person, or an administrator, revokes it (`revoke`), and so does a
-  factor reset or disabling the account (`revoke_all_for_user`, Task 8); a
-  revoked device also ends the sessions it started;
+- the person revokes it in My trusted devices (`revoke`); an administrator
+  forgets a person's devices only by resetting their factors or disabling
+  (or deleting) the account, and a password change forgets them too
+  (`revoke_all_for_user`) -- ending somebody's sessions leaves their devices
+  (`user_admin.service.end_sessions`). A revoked device also ends the
+  sessions it started;
 - the acts of design §2.5 still ask for the second factor: a session started
   on a remembered device has no `step_up_at` (`sessions.start_session`).
 

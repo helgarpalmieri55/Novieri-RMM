@@ -252,8 +252,8 @@ async def test_a_live_session_of_a_person_who_is_not_active_is_a_defect_and_logg
         assert await _resolve(api_env, forgotten.token) is None
     (line,) = [r for r in caplog.records if r.name == "its.auth.sessions"]
     assert line.levelno == logging.WARNING
-    assert getattr(line, "session_id") == forgotten.session_id
-    assert getattr(line, "status") == status
+    assert line.session_id == forgotten.session_id
+    assert line.status == status
     assert forgotten.token not in line.getMessage()
     assert forgotten.token not in repr(line.__dict__)
 

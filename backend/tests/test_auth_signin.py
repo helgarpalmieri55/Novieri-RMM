@@ -153,7 +153,10 @@ async def test_whoever_is_refused_is_refused_alike_and_in_the_same_time(
     """FALSIFIER 2. One argon2 verification per attempt whatever the account
     is (`PasswordHasher.verify`, the call inside both `verify_password` and
     `verify_against_nobody`): delete either `verify_against_nobody` call in
-    `flows.login` and the count below drops."""
+    `flows.login` and the count below drops. The 10-15 ms the known
+    address's queries add is accepted, not equalised: the argon2 work is the
+    same and the per-IP limits leave too few samples to see it
+    (`test_auth_falsifiers.py::test_falsifier_2_...`, final review C-M2)."""
     org = await auth_env.create_org("generic")
     known = await staff(auth_env, org, "technician")
     disabled = await staff(auth_env, org, "technician")

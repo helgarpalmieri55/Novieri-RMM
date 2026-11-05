@@ -27,7 +27,7 @@ the OpenBao pepper (`hash`, `pepper_version`); a TOTP secret is sealed by the
 vault (`secret_sealed`, the ASCII string `app.core.vault.seal_bytes` returns,
 bound to the user id); a
 session or device cookie and a single-use link are stored as a 32-byte digest
-(`token_hash`: SHA-256, or HMAC-SHA256 with the pepper), a recovery code as its
+(`token_hash`: the plain SHA-256 of a random 256-bit value), a recovery code as its
 salted argon2id hash (`code_hash`, the encoded form), and CHECKs hold the
 lengths. A WebAuthn challenge is not a secret
 (the browser signs it in the open) and is stored as issued.

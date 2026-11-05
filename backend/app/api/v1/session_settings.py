@@ -6,7 +6,11 @@ How long a sign-in lasts, for the whole organisation: `auth_org_settings`
 WHAT A SAVE CHANGES, AND WHEN. The two inactivity limits are read on every
 request, so they govern every open session at its next request; the "remember
 this device" switch is read every time a device is recognised, so switching
-it off stops every remembered device at its next use. The maxima
+it off stops every remembered device at its next use -- for RECOGNITION: a
+session already started on a remembered device keeps the longer maximum it
+was created with (`remembered_max_hours`, 168 h by default) and, after going
+idle, still resumes with the password alone until then; to cut those, end the
+person's sessions. The maxima
 (`staff_max_hours`, `remembered_max_hours`, `contact_max_days`) and the device
 lifetime (`remember_device_days`) are fixed into a session or a device when it
 is created (`expires_at`): a change applies to the ones created after it.

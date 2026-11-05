@@ -6,7 +6,11 @@ no row means the defaults below, which are the table's own column defaults
 but not every value takes effect the same way. The inactivity limits are read
 on EVERY request (`app/core/auth/sessions.py::resolve`): lowering one signs out
 whoever has been idle longer, at once. The remember-device switch is read on
-every use of a device (`app/core/auth/devices.py::recognised`). The maxima and
+every use of a device (`app/core/auth/devices.py::recognised`), so switching
+it off stops recognising every device at once -- but a session ALREADY
+started on a remembered device keeps the longer maximum written into its
+`expires_at` (`remembered_max_hours`) and resumes after idle with the
+password alone until then. The maxima and
 the device lifetime are read when a session or a device is created and written
 into its `expires_at`: a change governs the ones created after it.
 

@@ -2,11 +2,17 @@
 
 Spec `docs/superpowers/specs/2026-08-19-invisible-identity-layer-design.md` §2.1.
 
-WHY THIS EXISTS. Configuring email used to mean opening the identity provider's
+NOTHING CALLS THIS ANY MORE (own authentication phase 1). Settings → Email
+now stores the relay in ITMS (`app/api/v1/realm_settings.py`, the secret in
+the vault) and ITMS sends the account mail itself (`app/core/mail.py`); the
+realm is no longer written. The module is kept, uncalled, until phase 4
+removes Keycloak (plan decision 6). What follows describes it as it was.
+
+WHY THIS EXISTED. Configuring email used to mean opening the identity provider's
 admin console: a second product, a second password, a second mental model, and
 an afternoon of an operator's life spent looking for a setting that lives
-somewhere they had no reason to know about. It is now a tab in ITMS's own
-Settings, and this module is the half that talks to the realm.
+somewhere they had no reason to know about. It became a tab in ITMS's own
+Settings, and this module was the half that talked to the realm.
 
 DELIBERATELY THIN, and modelled on `kc_client.py` line for line: config from the
 same `KeycloakAdminConfig`, secret read from a file by that dataclass, one
