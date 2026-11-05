@@ -130,10 +130,10 @@ function humaniseField(name: string): string {
 /**
  * FastAPI's validation errors, as sentences.
  *
- * THE SHAPE. This backend registers no custom handler, so a 422 arrives as
- * `{"detail":[{"type","loc","msg","input","ctx"}, …]}`. Every part of that is
- * for a machine except `msg`, and `loc` -- which names the field -- is an
- * array whose first element is the request part ("body").
+ * THE SHAPE. A 422 arrives as `{"detail":[{"type","loc","msg","ctx"}, …]}`
+ * (`backend/app/core/errors/validation.py` removes Pydantic's `input`). Every
+ * part of that is for a machine except `msg`, and `loc` -- which names the
+ * field -- is an array whose first element is the request part ("body").
  *
  * `input` IS DELIBERATELY NEVER READ. It echoes the value the user submitted,
  * so a secret field that fails a length rule puts the secret in the error

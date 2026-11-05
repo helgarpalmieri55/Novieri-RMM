@@ -429,7 +429,7 @@ async def read_email_settings(
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
-        return _as_settings(await read_settings(session, ctx.org_id), ctx.claims.email)
+        return _as_settings(await read_settings(session, ctx.org_id), ctx.email)
 
 
 @router.put("/email", response_model=EmailSettingsOut)
@@ -474,7 +474,7 @@ async def write_email_settings(
         await session.flush()
 
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
-        return _as_settings(await read_settings(session, ctx.org_id), ctx.claims.email)
+        return _as_settings(await read_settings(session, ctx.org_id), ctx.email)
 
 
 @router.post("/email/test", response_model=TestSendOut)
@@ -517,7 +517,7 @@ async def send_test_message(
             recipient = pick_test_recipient(
                 body.recipient if body else None,
                 sender=saved.from_address,
-                caller_email=ctx.claims.email,
+                caller_email=ctx.email,
                 org_domain=await resolve_console_domain(session, ctx.org_id, state.settings),
             )
         except MailRecipientRefused as exc:

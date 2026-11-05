@@ -227,12 +227,21 @@ def create_app(
     from app.api.request_context import request_context_middleware
     from app.api.security_headers import security_headers_middleware
 
-    # The MCP channel's never-exposed guard (`app/mcp/guard.py`) is added
-    # FIRST, so it is the INNERMOST of these layers: the locale is set when it
-    # answers, and its refusal still carries the security headers. Its route
-    # table is filled in after `modules.register_all` below.
+    # Starlette inserts each layer at the FRONT of the stack: the one added
+    # last runs first. The console's CSRF rule (`app/core/auth/csrf.py`, P2
+    # design §6.4: a write on the session cookie carries the console's header
+    # and Origin) is added FIRST, so it is the INNERMOST layer. The MCP
+    # channel's never-exposed guard (`app/mcp/guard.py`) is added next, so it
+    # runs BEFORE the CSRF rule: an in-process MCP call to a never-exposed
+    # route -- every `/api/v1/auth/` route among them -- gets the guard's
+    # refusal, never `csrf`. Both sit inside the layers added below: the
+    # locale is set when either answers, and their refusals still carry the
+    # security headers. The guard's route table is filled in after
+    # `modules.register_all` below.
+    from app.core.auth.csrf import RequireConsoleRequestHeader
     from app.mcp.guard import McpNeverExposedGuard
 
+    app.add_middleware(RequireConsoleRequestHeader)
     app.add_middleware(McpNeverExposedGuard)
     app.middleware("http")(security_headers_middleware)
     app.middleware("http")(request_context_middleware)
@@ -274,6 +283,15 @@ def create_app(
         assert isinstance(exc, GlobalRowNotWritable)
         return JSONResponse(status_code=403, content={"detail": tr_marked(ALL_CLIENTS_REQUIRED)})
 
+    # A 422 never hands back what was submitted: Pydantic puts the failing
+    # value -- for a missing field, the whole body -- in each error's `input`,
+    # and a body can carry a password (`app/core/errors/validation.py`).
+    from fastapi.exceptions import RequestValidationError
+
+    from app.core.errors.validation import validation_error_without_input
+
+    app.add_exception_handler(RequestValidationError, validation_error_without_input)
+
     app.add_exception_handler(GlobalRowNotWritable, _global_row)
 
     # A write in an optional module (budget, BCP, change management) for a
@@ -288,6 +306,12 @@ def create_app(
         return JSONResponse(status_code=404, content={"detail": exc.detail})
 
     app.add_exception_handler(ModuleNotEnabled, _module_off)
+
+    # The sign-in refusals the console acts on carry a `code` beside the
+    # `detail` (`app/core/auth/refusals.py`).
+    from app.core.auth.refusals import AuthRefusal, auth_refusal_handler
+
+    app.add_exception_handler(AuthRefusal, auth_refusal_handler)
 
     from app.api.probes import build_registry
     from app.api.probes import router as probes_router
@@ -310,6 +334,7 @@ def create_app(
     from app.api.v1.platform import router as platform_router
     from app.api.v1.realm_settings import router as realm_settings_router
     from app.api.v1.roles import router as roles_router
+    from app.api.v1.session_settings import router as session_settings_router
     from app.api.v1.setup import router as setup_router
     from app.api.v1.ws import router as ws_router
     from app.modules.user_admin.api import router as user_admin_router
@@ -346,6 +371,7 @@ def create_app(
     app.include_router(roles_router, prefix="/api/v1")
     app.include_router(user_admin_router, prefix="/api/v1")
     app.include_router(realm_settings_router, prefix="/api/v1")
+    app.include_router(session_settings_router, prefix="/api/v1")
     # UNAUTHENTICATED BY NECESSITY: it answers before anybody can sign in.
     # What guards it is zero-users AND a one-time install code, never the
     # absence of a token — see app/api/v1/setup.py.

@@ -55,6 +55,8 @@ the token while a URL-borne one does.
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -62,8 +64,10 @@ from fastapi import APIRouter, WebSocket
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth.csrf import origin_allowed
+from app.core.auth.sessions import SESSION_COOKIE, SessionPrincipal, resolve
 from app.core.client_scope import ClientScope, parse_client_header
-from app.core.identity.door import read_door_identity
+from app.core.identity.door import read_door_identity, read_session_identity
 from app.core.security import (
     TokenClaims,
     TokenValidationError,
@@ -123,19 +127,27 @@ def _narrowed(scope: ClientScope, requested: UUID | None) -> ClientScope:
     return scope if requested is None else scope.intersect(ClientScope.only([requested]))
 
 
-@router.websocket("/ws")
-async def ui_websocket(websocket: WebSocket) -> None:
+@dataclass(frozen=True)
+class _Admitted:
+    """A socket past the door: its organisation, the person's scope before
+    `?client=`, how to re-run the door, when the credential stops, and the
+    subprotocol to echo (the bearer path's name; none for a session)."""
+
+    org_id: UUID
+    scope: ClientScope
+    recheck: Callable[[], Awaitable[ClientScope | int]]
+    deadline: float
+    subprotocol: str | None
+
+
+async def _admit_bearer(websocket: WebSocket, token: str) -> _Admitted | int:
+    """The bearer token from the subprotocol (the console's until P2 Task 13)."""
     state = websocket.app.state
-    # From the subprotocol header, NEVER from `websocket.query_params` -- see
-    # this module's docstring. A query-string token would be logged verbatim
-    # by uvicorn's access line, which no logging-side change can redact.
-    token = token_from_subprotocols(websocket)
     try:
         claims = await validate_token(token, settings=state.settings, jwks=state.jwks)
         require_console_token(claims, state.settings)
     except TokenValidationError:
-        await websocket.close(code=CLOSE_UNAUTHENTICATED)
-        return
+        return CLOSE_UNAUTHENTICATED
 
     async with AsyncSession(state.admin_engine) as session:
         org_id = (
@@ -144,8 +156,7 @@ async def ui_websocket(websocket: WebSocket) -> None:
             )
         ).scalar_one_or_none()
     if org_id is None:
-        await websocket.close(code=CLOSE_UNAUTHENTICATED)
-        return
+        return CLOSE_UNAUTHENTICATED
 
     # ADMISSION, DOOR 2 OF 3 (spec §3.2): the org's email-domain rule, then
     # `users.status` and `users.kind` (a contact never enters the console,
@@ -173,7 +184,86 @@ async def ui_websocket(websocket: WebSocket) -> None:
     # it zero rows.
     admitted = await _door_scope(websocket, org_id=org_id, claims=claims)
     if admitted is None:
-        await websocket.close(code=CLOSE_FORBIDDEN)
+        return CLOSE_FORBIDDEN
+
+    async def recheck() -> ClientScope | int:
+        current = await _door_scope(websocket, org_id=org_id, claims=claims)
+        return CLOSE_FORBIDDEN if current is None else current
+
+    return _Admitted(
+        org_id=org_id,
+        scope=admitted,
+        recheck=recheck,
+        deadline=float(claims.exp),
+        subprotocol=AUTH_SUBPROTOCOL,
+    )
+
+
+async def _session_scope(websocket: WebSocket, principal: SessionPrincipal) -> ClientScope | None:
+    """The door for a session (`read_session_identity`): None when refused."""
+    state = websocket.app.state
+    identity = await read_session_identity(
+        door="console-ws",
+        org_id=principal.org_id,
+        user_id=principal.user_id,
+        settings=state.settings,
+        engine=state.app_engine,
+    )
+    if identity.refusal is not None or identity.user_id is None:
+        return None
+    return identity.clients
+
+
+async def _admit_session(websocket: WebSocket) -> _Admitted | int:
+    """The console's session cookie (P2 design §6.5; coordinator D15).
+
+    `Origin` FIRST, before anything is read: the cookie rides on any handshake
+    the browser makes, and a WebSocket is not subject to CORS, so a page on
+    another site that opens this socket would otherwise be the person
+    (cross-site WebSocket hijacking). Not the console's origin: 4403. Then the
+    session, untouched (an open socket is not activity): none, ended, idle or
+    without its second factor, 4401. Then the same door as the bearer path."""
+    state = websocket.app.state
+    if not origin_allowed(websocket.headers.get("origin"), state.settings):
+        return CLOSE_FORBIDDEN
+    principal = await resolve(websocket, touch=False)
+    if principal is None or not principal.factor_done:
+        return CLOSE_UNAUTHENTICATED
+    admitted = await _session_scope(websocket, principal)
+    if admitted is None:
+        return CLOSE_FORBIDDEN
+
+    async def recheck() -> ClientScope | int:
+        current = await resolve(websocket, touch=False)
+        if current is None or current.session_id != principal.session_id:
+            return CLOSE_UNAUTHENTICATED
+        scope = await _session_scope(websocket, current)
+        return CLOSE_FORBIDDEN if scope is None else scope
+
+    return _Admitted(
+        org_id=principal.org_id,
+        scope=admitted,
+        recheck=recheck,
+        deadline=principal.expires_at.timestamp(),
+        subprotocol=None,
+    )
+
+
+@router.websocket("/ws")
+async def ui_websocket(websocket: WebSocket) -> None:
+    state = websocket.app.state
+    # From the subprotocol header, NEVER from `websocket.query_params` -- see
+    # this module's docstring. A query-string token would be logged verbatim
+    # by uvicorn's access line, which no logging-side change can redact.
+    # No token offered and a session cookie present: the session path. No
+    # token and no cookie: the bearer path with "", which closes 4401.
+    token = token_from_subprotocols(websocket)
+    if not token and SESSION_COOKIE in websocket.cookies:
+        admitted = await _admit_session(websocket)
+    else:
+        admitted = await _admit_bearer(websocket, token)
+    if isinstance(admitted, int):
+        await websocket.close(code=admitted)
         return
 
     # THE SCOPE (MSP clients spec §2.6): the door's, narrowed by the client
@@ -185,24 +275,24 @@ async def ui_websocket(websocket: WebSocket) -> None:
     except ValueError:
         await websocket.close(code=CLOSE_BAD_CLIENT)
         return
-    scope = _narrowed(admitted, requested)
+    scope = _narrowed(admitted.scope, requested)
     if scope.is_empty:
         await websocket.close(code=CLOSE_FORBIDDEN)
         return
 
     # Echoing the selected subprotocol is mandatory: a browser that offered
     # one and got none back fails the handshake and closes the connection.
-    # The NAME is echoed, never the token.
-    await websocket.accept(subprotocol=AUTH_SUBPROTOCOL)
+    # The NAME is echoed, never the token. A session's handshake offers none.
+    await websocket.accept(subprotocol=admitted.subprotocol)
     pubsub = state.redis.pubsub()
     if scope.is_all:
         # Every client of THIS org and its global channel; the pattern is
         # anchored on the org, so no other org's channel matches it.
-        await pubsub.psubscribe(ui_channel_pattern(org_id))
+        await pubsub.psubscribe(ui_channel_pattern(admitted.org_id))
     else:
         await pubsub.subscribe(
-            *(ui_channel(org_id, client_id) for client_id in sorted(scope.ids)),
-            ui_global_channel(org_id),
+            *(ui_channel(admitted.org_id, client_id) for client_id in sorted(scope.ids)),
+            ui_global_channel(admitted.org_id),
         )
     receive_task: asyncio.Task[Any] = asyncio.create_task(websocket.receive())
     poll_task: asyncio.Task[Any] | None = None
@@ -211,17 +301,20 @@ async def ui_websocket(websocket: WebSocket) -> None:
     close_code: int | None = None
     try:
         while True:
-            # The token first, every turn: past its `exp`, nothing more is sent.
-            if time.time() >= claims.exp:
+            # The credential first, every turn: past its end, nothing more is sent.
+            if time.time() >= admitted.deadline:
                 close_code = CLOSE_UNAUTHENTICATED
                 break
             if loop.time() >= next_check:
-                current = await _door_scope(websocket, org_id=org_id, claims=claims)
-                if current is None or _narrowed(current, requested) != scope:
+                current = await admitted.recheck()
+                if isinstance(current, int):
+                    close_code = current
+                    break
+                if _narrowed(current, requested) != scope:
                     close_code = CLOSE_FORBIDDEN
                     break
                 next_check = loop.time() + RECHECK_INTERVAL_S
-            wait = min(1.0, next_check - loop.time(), claims.exp - time.time())
+            wait = min(1.0, next_check - loop.time(), admitted.deadline - time.time())
             current_poll: asyncio.Task[Any] = asyncio.create_task(
                 pubsub.get_message(ignore_subscribe_messages=True, timeout=max(wait, 0.05))
             )

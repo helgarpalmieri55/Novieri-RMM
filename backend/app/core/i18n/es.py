@@ -5008,4 +5008,18 @@ CATALOG: dict[str, str] = {
         "Las claves de firma no están disponibles ahora mismo; vuelve a intentarlo en un "
         "momento."
     ),
+    # --- auth: sessions, cookies and recent confirmation (P2 Task 6) ---
+    "this request was refused because it did not come from the console": (
+        "se rechazó esta petición porque no vino de la consola"
+    ),
+    "finish signing in: confirm your second factor first": (
+        "termina de iniciar sesión: confirma primero tu segundo factor"
+    ),
+    "your session has ended; sign in again": "tu sesión terminó; inicia sesión de nuevo",
+    "confirm your second factor again to do this": (
+        "confirma de nuevo tu segundo factor para hacer esto"
+    ),
+    "the inactivity limit cannot be longer than the longest sign-in": (
+        "el límite de inactividad no puede ser mayor que la duración máxima de la sesión"
+    ),
 }

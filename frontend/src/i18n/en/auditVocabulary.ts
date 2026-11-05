@@ -69,6 +69,7 @@ export const auditActions = {
   auth_login: "Auth login",
   auth_passkey_registered: "Auth passkey registered",
   auth_passkey_removed: "Auth passkey removed",
+  auth_session_settings_updated: "Auth session settings updated",
   backup_dedup_refused: "Backup dedup refused",
   backup_dispatch_refused: "Backup dispatch refused",
   backup_dispatched: "Backup dispatched",

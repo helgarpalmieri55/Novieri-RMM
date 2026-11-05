@@ -9,14 +9,20 @@ tunnel that used to live here was retired with guacd (operator decision
 
 from __future__ import annotations
 
+import asyncio
+import time
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from starlette.requests import HTTPConnection
 
+from app.core.auth.csrf import origin_allowed
+from app.core.auth.sessions import SessionPrincipal, resolve
 from app.core.client_scope import ClientScope
 from app.core.config import Settings
-from app.core.identity.door import read_door_identity
+from app.core.identity.door import DoorIdentity, read_door_identity, read_session_identity
 from app.core.rbac import has_permission
 from app.core.security import (
     JwksCache,
@@ -38,6 +44,13 @@ REMOTE_CONTROL = "remote.control"
 #: The code that lets a person stop or join ANOTHER technician's session, on
 #: the session's client (phase 3 design §5.3, migration 0244).
 REMOTE_SUPERVISE = "remote.supervise"
+
+#: How often an open screen re-reads the console session that admitted its
+#: viewer (`watch_tunnel_session`). A module constant so a test can shorten it.
+RECHECK_INTERVAL_S = 60.0
+
+#: The close code when that session stops: the browser must sign in again.
+CLOSE_SESSION_ENDED = 4401
 
 
 class TunnelAuthError(Exception):
@@ -156,6 +169,115 @@ async def authorize_tunnel(
         engine=app_engine,
         code=REMOTE_CONTROL,
     )
+    return await _authorize_person(
+        org_id=org_id, identity=identity, session_id=session_id, app_engine=app_engine
+    )
+
+
+async def authorize_tunnel_session(
+    *,
+    connection: HTTPConnection,
+    session_id: UUID,
+    settings: Settings,
+    app_engine: AsyncEngine,
+) -> tuple[UUID, UUID, ClientScope]:
+    """`authorize_tunnel`'s shape for the console's session cookie:
+    `admit_tunnel_session` without the session it was admitted by."""
+    admitted = await admit_tunnel_session(
+        connection=connection, session_id=session_id, settings=settings, app_engine=app_engine
+    )
+    return admitted.org_id, admitted.viewer_id, admitted.clients
+
+
+@dataclass(frozen=True)
+class TunnelSession:
+    """A viewer the console's session cookie admitted, and that session --
+    which `watch_tunnel_session` holds the open screen to."""
+
+    org_id: UUID
+    viewer_id: UUID
+    clients: ClientScope
+    principal: SessionPrincipal
+
+
+async def admit_tunnel_session(
+    *,
+    connection: HTTPConnection,
+    session_id: UUID,
+    settings: Settings,
+    app_engine: AsyncEngine,
+) -> TunnelSession:
+    """`authorize_tunnel` for the console's session cookie (P2 design §6.5;
+    coordinator D15): the handshake's `Origin` must be the console's -- the
+    cookie rides on a handshake any page opens, and a WebSocket is not subject
+    to CORS -- else 4403; then a live, signed-in session, else 4401; then the
+    same identity, scope, session and ownership rules, in the same order and
+    with the same codes.
+
+    Opening a screen is the person's own act, so it TOUCHES the session, as
+    an HTTP request does: an open remote screen counts as activity
+    (coordinator decision, Task 6 review; `watch_tunnel_session`)."""
+    if not origin_allowed(connection.headers.get("origin"), settings):
+        raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
+            4403, "not the console's origin"
+        )
+    principal = await resolve(connection, touch=True)
+    if principal is None or not principal.factor_done:
+        raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
+            CLOSE_SESSION_ENDED, "no live session"
+        )
+    identity = await read_session_identity(
+        door="remote-tunnel",
+        org_id=principal.org_id,
+        user_id=principal.user_id,
+        settings=settings,
+        engine=app_engine,
+        code=REMOTE_CONTROL,
+    )
+    org_id, viewer_id, clients = await _authorize_person(
+        org_id=principal.org_id, identity=identity, session_id=session_id, app_engine=app_engine
+    )
+    return TunnelSession(org_id=org_id, viewer_id=viewer_id, clients=clients, principal=principal)
+
+
+async def watch_tunnel_session(connection: HTTPConnection, principal: SessionPrincipal) -> int:
+    """Wait until the console session that admitted an open screen stops, and
+    return the code to close it with (4401).
+
+    A SCREEN MUST NOT OUTLIVE ITS SIGN-IN. It is remote control of a live
+    desktop, and design §2.4 cuts a person's sessions at once when they sign
+    out, an administrator ends them, a sign-in replaces them, or the account
+    is disabled. `session_screen` runs this beside the tunnel and cancels the
+    tunnel when it returns. Every `RECHECK_INTERVAL_S` the handshake's cookie
+    is resolved again and must still name THE SAME session (`session_id`):
+    ended, replaced, its person no longer `active`, or past its maximum, it
+    stops. At the session's absolute maximum (`expires_at`) it stops on its
+    own, whenever the next re-check would fall.
+
+    AN OPEN REMOTE SCREEN COUNTS AS ACTIVITY (coordinator decision, Task 6
+    review). The re-read TOUCHES the session (`touch=True`), so the inactivity
+    limit never cuts a screen while it is open -- the person is driving a
+    desktop through it -- while everything above still does. The live-status
+    socket decides the other way (`app/api/v1/ws.py`): a tab left open there
+    is not activity."""
+    deadline = principal.expires_at.timestamp()
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return CLOSE_SESSION_ENDED
+        await asyncio.sleep(min(RECHECK_INTERVAL_S, remaining))
+        if time.time() >= deadline:
+            return CLOSE_SESSION_ENDED
+        current = await resolve(connection, touch=True)
+        if current is None or current.session_id != principal.session_id:
+            return CLOSE_SESSION_ENDED
+
+
+async def _authorize_person(
+    *, org_id: UUID, identity: DoorIdentity, session_id: UUID, app_engine: AsyncEngine
+) -> tuple[UUID, UUID, ClientScope]:
+    """The tail both doors share: refusal (4403), no person (4401), no
+    `remote.control` (4403), then the session and its owner under that scope."""
     if identity.refusal is not None:
         raise TunnelAuthError(4403, identity.refusal)
     if identity.user_id is None:
