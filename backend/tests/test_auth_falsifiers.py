@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app as app_package
 from app.api.deps import AuthContext, require_step_up
 from app.core.auth import passkeys
+from app.core.auth.loopback import LOOPBACK_HEADER
 from app.core.auth.passwords import hash_password
 from app.core.auth.refusals import AuthRefusal
 from app.core.auth.sessions import DEVICE_COOKIE, SessionPrincipal
@@ -43,7 +44,7 @@ from app.core.tenancy import org_session
 from app.models import AuditEvent, Client, User
 from app.models.auth import AuthFailure, AuthPasskey, AuthPassword, AuthSession
 from tests.health_fixtures import seed_org
-from tests.mcp_support import marked_client
+from tests.mcp_support import MCP_BASE, marked_client, mcp_token
 from tests.session_support import (
     CONSOLE,
     console_headers,
@@ -653,6 +654,29 @@ async def test_the_mcp_channel_takes_no_cookie(api_env: Any) -> None:
         me = await client.get("/api/v1/me", headers={"Cookie": cookie_header(signed.token)})
 
     assert me.status_code == 401
+
+
+async def test_the_mcp_channel_refuses_a_request_claiming_the_assistant(
+    api_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Decision (2), the other half: the two in-process channels never meet.
+    On MCP a request that SAYS it is the assistant's own call
+    (`X-ITMS-Loopback: 1`) is a 401 however genuine its MCP token -- the
+    `claims_loopback` branch of `admit()`'s MCP path. The control is the same
+    request, same token, without the claim: 200."""
+    # The MCP resource is `MCP_AUD` at this console (tests/mcp_support.py).
+    monkeypatch.setattr(api_env.settings, "public_console_url", MCP_BASE)
+    org_id = await api_env.create_org("door-mcp-loopback")
+    sub = await api_env.create_user(org_id, "org-admin")
+    bearer = {"Authorization": f"Bearer {mcp_token(api_env, await api_env.org_slug(org_id), sub)}"}
+
+    async with marked_client(api_env) as client:
+        claimed = await client.get("/api/v1/me", headers={**bearer, LOOPBACK_HEADER: "1"})
+        control = await client.get("/api/v1/me", headers=bearer)
+
+    assert claimed.status_code == 401, claimed.text
+    assert claimed.json()["detail"] == "the assistant's internal token was refused"
+    assert control.status_code == 200, control.text
 
 
 def test_require_step_up_admits_no_request_without_a_session() -> None:
