@@ -775,9 +775,27 @@ async def logout_everywhere(request: Request, principal: SessionPrincipal) -> No
 # --------------------------------------------------------------------------- #
 
 
+async def _has_second_factor(session: AsyncSession, user_id: UUID) -> bool:
+    """A passkey or a CONFIRMED authenticator app. Recovery codes alone do
+    not count: they are a fallback of a factor, not one (design §2.2)."""
+    has_passkey, has_totp, _codes = await summary(session, user_id)
+    return has_passkey or has_totp
+
+
 async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
     """Run AFTER the 202 (plan decision 8): nothing below changes the answer
-    or its time, so nothing tells whether the address has an account."""
+    or its time, so nothing tells whether the address has an account.
+
+    NEVER TO AN ACCOUNT WITHOUT A SECOND FACTOR (final review C-I1; design
+    §2.8, "después sigue pidiendo el segundo factor"; Q5, "nunca solo por
+    correo"). Such an account -- after an administrator's factor reset, an
+    invitation or a recovery link whose enrolment was abandoned, the
+    first-boot owner before their first sign-in -- would let the mailbox set
+    the password and then enrol ITS OWN factor: the mailbox alone, and a full
+    session. It is sent nothing, as an unknown address is; the person with the
+    password signs in and enrols, and one who has lost both uses the server's
+    recovery command. So the mail's "You will still need your second factor"
+    is true when it is sent."""
     with use_locale(locale):
         settings = app.state.settings
         engine: AsyncEngine = app.state.app_engine
@@ -797,7 +815,11 @@ async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
             return
         async with _identity_session(found.org_id, engine) as session:
             user = await session.get(User, found.user_id)
-            if user is None or await session.get(AuthPassword, user.id) is None:
+            if (
+                user is None
+                or await session.get(AuthPassword, user.id) is None
+                or not await _has_second_factor(session, user.id)
+            ):
                 return
             token = await action_tokens.issue(
                 session,
@@ -835,7 +857,17 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
             session, token=token, purposes=(action_tokens.RESET,)
         )
         user = await session.get(User, row.user_id) if row is not None else None
-        if row is None or user is None or user.kind != STAFF_KIND or user.status != ACTIVE_STATUS:
+        if (
+            row is None
+            or user is None
+            or user.kind != STAFF_KIND
+            or user.status != ACTIVE_STATUS
+            # A link sent while the account had a factor, used after the
+            # factors went (an administrator's reset): the same mailbox-only
+            # path as `send_reset_link`'s, refused like every dead link. The
+            # refusal rolls the `consume` back; nothing was written.
+            or not await _has_second_factor(session, user.id)
+        ):
             raise _invalid_link()
         # Raises a 422 that rolls the `consume` back: the link stays usable.
         await staff_password.require_acceptable(
