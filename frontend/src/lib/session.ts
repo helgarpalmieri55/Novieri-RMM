@@ -48,7 +48,8 @@ import {
  *   to sign in.
  * - `ended`: the session this tab had is over (inactivity, the maximum, an
  *   administrator, another person in the cookie). The guard hides the page
- *   behind its notice and never navigates by itself.
+ *   behind its notice and never navigates by itself; after another person's
+ *   sign-in it keeps no typed text (`./sessionEnd.ts`, reason `replaced`).
  * - `signing_out`: the person signed out here, and `signOut` is loading the
  *   sign-in page.
  * - `loading`: not known yet.
@@ -257,7 +258,7 @@ export function useSession(): Session {
     if (userId !== undefined) sessionPerson(userId);
   }, [userId]);
   if (ended === "signed_out") return { status: "signing_out" };
-  if (ended === "ended") return { status: hadSession() ? "ended" : "signed_out" };
+  if (ended !== null) return { status: hadSession() ? "ended" : "signed_out" };
   if (me.data !== undefined) return { status: "signed_in", me: me.data };
   if (me.error instanceof ApiError && me.error.status === 401) return { status: "signed_out" };
   if (me.error) return { status: "loading", failure: me.error };

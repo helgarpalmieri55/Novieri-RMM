@@ -180,7 +180,9 @@ describe("the person this tab signed in as (C3: one rule for HTTP and the socket
     sessionPerson("u-1");
     sessionPerson("u-2");
     expect(isSessionEnded()).toBe(true);
-    expect(sessionEndReason()).toBe("ended");
+    // RE-POINTED (final re-review, M4): its own reason, so the guard keeps
+    // none of the previous person's text for the next one.
+    expect(sessionEndReason()).toBe("replaced");
     expect(heard).toHaveBeenCalledTimes(1);
     stop();
   });

@@ -351,12 +351,27 @@ describe("a session that ends while the person is here", () => {
     const asked = fetchMock.mock.calls.length;
     await act(() => queryClient.invalidateQueries());
     expect(fetchMock.mock.calls.length).toBe(asked);
-    expect(
-      within(screen.getByRole("region", { name: "What you were typing" })).getByRole("textbox", {
-        name: "Reply to the requester",
-      }),
-    ).toHaveValue(TYPED);
+    // RE-POINTED (final re-review, M4): the person at the browser now is the
+    // one who just signed in, not the one who typed. Their text is not
+    // theirs to read.
+    expect(screen.queryByRole("region", { name: "What you were typing" })).not.toBeInTheDocument();
+    expect(everythingShown()).not.toContain(TYPED);
     expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("forgets the client chosen in the top bar at an end that is not a sign-out, too (final re-review, M5)", async () => {
+    let me: Answer = { status: 200, body: ME };
+    stubServer(() => me);
+    const { queryClient, ui } = guarded("/devices", <TenantPage />);
+    render(ui);
+    expect(await screen.findByText(TENANT_ROW)).toBeInTheDocument();
+    window.localStorage.setItem(CLIENT_STORAGE_KEY, "6b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d");
+
+    me = { status: 401, body: { code: "auth_required" } };
+    await act(() => queryClient.invalidateQueries({ queryKey: ["me"] }));
+
+    await expectEnded(queryClient);
+    expect(window.localStorage.getItem(CLIENT_STORAGE_KEY)).toBeNull();
   });
 });
 

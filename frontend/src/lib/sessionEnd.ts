@@ -35,8 +35,13 @@
  * from `clientScope.tsx`.
  */
 
-/** How the session ended: under the person (`ended`), or because they signed out (`signed_out`). */
-export type SessionEndReason = "ended" | "signed_out";
+/**
+ * How the session ended: under the person (`ended`); because somebody else's
+ * session is in the cookie now (`replaced`: the person at the browser is not
+ * the one who typed, final re-review M4); or because they signed out here
+ * (`signed_out`).
+ */
+export type SessionEndReason = "ended" | "replaced" | "signed_out";
 
 let reason: SessionEndReason | null = null;
 /** The person `/me` first named in this tab, or `null` until it has answered. */
@@ -79,7 +84,7 @@ export function sessionPerson(userId: string): void {
     person = userId;
     return;
   }
-  if (person !== userId) sessionEnded();
+  if (person !== userId) end("replaced");
 }
 
 /**

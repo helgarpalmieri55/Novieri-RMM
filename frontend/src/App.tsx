@@ -34,6 +34,7 @@ import {
   useSession,
 } from "./lib/session";
 import { sessionEndReason, subscribeSessionEnd } from "./lib/sessionEnd";
+import { forgetStoredClient } from "./lib/clientChoice";
 import { watchTyping, type KeptText } from "./lib/unsavedText";
 import { ApiError } from "./lib/api";
 import { describeSubmitError } from "./components/form";
@@ -467,6 +468,9 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const typing = watchTyping(document);
     const stop = subscribeSessionEnd(() => {
+      // Not on a sign-out (they chose to leave), and not when another
+      // person's session is in the cookie: the person at the browser now is
+      // not the one who typed (final re-review, M4).
       if (sessionEndReason() === "ended") setKept(typing.keep());
     });
     return () => {
@@ -481,9 +485,15 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   // left with an observer, and the effect by which TanStack re-reads a hook's
   // options builds the query afresh and asks the server again -- the next
   // person's `/me` landed in the emptied cache that way.
+  //
+  // THE CLIENT CHOSEN IN THE TOP BAR GOES TOO, at every end and not only a
+  // sign-out (final re-review, M5): on a shared computer the next person
+  // would open on the previous person's client.
   const over = session.status === "ended" || session.status === "signing_out";
   useLayoutEffect(() => {
-    if (over) emptyQueryCache(queryClient);
+    if (!over) return;
+    emptyQueryCache(queryClient);
+    forgetStoredClient();
   }, [over, queryClient]);
 
   if (session.status === "ended") {
