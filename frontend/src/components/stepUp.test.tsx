@@ -44,8 +44,12 @@ vi.mock("@simplewebauthn/browser", async (importOriginal) => ({
   startRegistration: vi.fn(),
 }));
 
-/** The server's answer to a change whose second factor is not fresh (Task 6). */
-const REFUSED = () => new ApiError(403, JSON.stringify({ detail: { code: "step_up_required" } }));
+/**
+ * The server's answer to a change whose second factor is not fresh (Task 6),
+ * in its own shape (`core/auth/refusals.py::auth_refusal_handler`): a sentence
+ * in `detail`, the code beside it (final review D2, Minor 4).
+ */
+const REFUSED = () => new ApiError(403, JSON.stringify({ detail: "confirm your second factor again to do this", code: "step_up_required" }));
 const WRONG_CODE = () =>
   new ApiError(400, JSON.stringify({ detail: "That code is not right, or it was already used." }));
 const OPTIONS = { challenge: "Y2hhbGxlbmdl", rpId: "itms.example.test", allowCredentials: [], userVerification: "required" };
@@ -122,8 +126,11 @@ beforeEach(() => {
 
 describe("isStepUpRequired", () => {
   it("is the server's 403 step_up_required, in either body shape", () => {
+    // The server's own: a sentence in `detail`, the code beside it.
     expect(isStepUpRequired(REFUSED())).toBe(true);
     expect(isStepUpRequired(new ApiError(403, JSON.stringify({ code: "step_up_required" })))).toBe(true);
+    // The code inside `detail`, which `run` also reads.
+    expect(isStepUpRequired(new ApiError(403, JSON.stringify({ detail: { code: "step_up_required" } })))).toBe(true);
   });
 
   it("is no other refusal", () => {

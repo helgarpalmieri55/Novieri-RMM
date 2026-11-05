@@ -1012,7 +1012,8 @@ describe("CredentialsPage — a Windows domain account", () => {
  */
 describe("CredentialsPage — a checkout asks for the second factor again when the server says so", () => {
   const SECURITY = { has_totp: true, passkeys: [], recovery_codes_left: 0, trusted_devices: [], sessions: [] };
-  const STALE = () => new ApiError(403, JSON.stringify({ detail: { code: "step_up_required" } }));
+  // The server's own shape (`core/auth/refusals.py`; final review D2, Minor 4).
+  const STALE = () => new ApiError(403, JSON.stringify({ detail: "confirm your second factor again to do this", code: "step_up_required" }));
 
   async function askToReveal(user: ReturnType<typeof userEvent.setup>) {
     await screen.findByText("Domain support admin");
@@ -1109,7 +1110,10 @@ describe("CredentialsPage — a revealed secret is in no cache", () => {
       listCredentials: () => Promise.resolve([credential()]),
       checkoutCredential: vi
         .fn()
-        .mockRejectedValueOnce(new ApiError(403, JSON.stringify({ detail: { code: "step_up_required" } })))
+        // The server's own shape (`core/auth/refusals.py`; final review D2, Minor 4).
+        .mockRejectedValueOnce(
+          new ApiError(403, JSON.stringify({ detail: "confirm your second factor again to do this", code: "step_up_required" })),
+        )
         .mockResolvedValueOnce({ secret: "sup3r-s3cr3t-value" }),
       getMySecurity: vi.fn().mockResolvedValue({ has_totp: true, passkeys: [], recovery_codes_left: 0, trusted_devices: [], sessions: [] }),
       stepUpTotp: vi.fn().mockResolvedValue(undefined),

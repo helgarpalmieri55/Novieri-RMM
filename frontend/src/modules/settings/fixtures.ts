@@ -346,7 +346,9 @@ const resendInvite: FixtureMap["resendInvite"] = (userId) => {
 };
 
 const cancelInvite: FixtureMap["cancelInvite"] = (userId) => {
-  if (!userId.startsWith("usr-invited-")) throw notFound("invitation");
+  // The server's 409, as for a resend (`service._require_pending_invitation`;
+  // final review D2, Minor 4): it was a 404 here.
+  if (!userId.startsWith("usr-invited-")) throw conflict("this person has no pending invitation");
   GRANTS.delete(userId);
   return undefined;
 };

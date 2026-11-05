@@ -454,7 +454,9 @@ export const RECOVERY_CODES_FIXTURE = [
 
 /** The server's refusal of a change whose second factor is not fresh (own authentication design §2.5). */
 export function stepUpRequired(): ApiError {
-  return new ApiError(403, JSON.stringify({ detail: { code: "step_up_required" } }));
+  // The server's own shape (`core/auth/refusals.py::auth_refusal_handler`):
+  // a sentence in `detail`, the code beside it (final review D2, Minor 4).
+  return new ApiError(403, JSON.stringify({ detail: "confirm your second factor again to do this", code: "step_up_required" }));
 }
 
 /** `GET /api/v1/settings/sessions`, at the defaults (design §2.4, §2.6, §3). */
