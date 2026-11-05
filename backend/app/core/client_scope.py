@@ -141,6 +141,21 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "read_own_locale",
         "update_own_profile",
     ),
+    # -- (e) the platform's own sign-in (P2 phase 1): a technician's auth rows
+    # (O, `users.client_id` NULL) are global rows only an every-client scope
+    # may write, and they are read before -- or regardless of -- the person's
+    # scope. Each helper opens ONE organization's session over those rows
+    # alone; the organization comes from `its_auth_principal`, the session's
+    # own row or the link, never from a request field naming it.
+    "app/core/auth/flows.py::_identity_session": (
+        "sign-in before the door admits anybody: the password, the second factor, the "
+        "enrolment, the recent confirmation, the reset link -- a technician's own auth rows "
+        "and users row only (P2 phase 1 design §6.2)"
+    ),
+    "app/core/auth/account.py::_own_session": (
+        "My security is personal, like /me: the caller's OWN auth rows, by the user id of the "
+        "session the door admitted (P2 phase 1 design §2.4-§2.6)"
+    ),
     # -- (a) processes with no person behind them --------------------------
     **_reviewed(
         "app/worker.py",

@@ -55,6 +55,34 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/setup/claim"): (
         "consumes the one-time install code and creates the first super-admin; unauthenticated"
     ),
+    # The platform's own sign-in (P2 phase 1, plan decision 10): each takes or
+    # returns a credential -- a password, a code, a TOTP secret, recovery
+    # codes, a session cookie -- and runs before or around the console session.
+    **{
+        ("POST", f"/api/v1/auth/{path}"): reason
+        for path, reason in (
+            ("login", "takes a password and mints a session cookie"),
+            ("factor/totp", "takes a second-factor code and mints a session cookie"),
+            ("factor/recovery", "takes a recovery code and mints a session cookie"),
+            ("factor/passkey/options", "issues a passkey challenge for a sign-in"),
+            ("factor/passkey", "takes a passkey assertion and mints a session cookie"),
+            ("enroll/totp/start", "returns a new authenticator-app secret"),
+            ("enroll/totp/confirm", "binds a new authenticator-app secret to the account"),
+            ("enroll/passkey/options", "issues a passkey registration challenge"),
+            ("enroll/passkey", "binds a new passkey to the account"),
+            ("enroll/finish", "returns the account's recovery codes and mints a session cookie"),
+            ("step-up/totp", "takes a second-factor code"),
+            ("step-up/recovery", "takes a recovery code"),
+            ("step-up/passkey/options", "issues a passkey challenge"),
+            ("step-up/passkey", "takes a passkey assertion"),
+            ("logout", "ends the console session the cookie names"),
+            ("logout-everywhere", "ends every console session of the person"),
+            ("password/forgot", "mails a one-time password-reset link"),
+            ("password/reset", "consumes a one-time link and sets a password"),
+        )
+    },
+    ("PUT", "/api/v1/me/password"): "takes the current password and sets a new one",
+    ("POST", "/api/v1/me/recovery-codes"): "returns new recovery codes for the account",
 }
 
 NEVER_EXPOSED: frozenset[tuple[str, str]] = frozenset(NEVER_EXPOSED_REASONS)
@@ -129,6 +157,11 @@ _CHANNEL_CONFIG = (
 )
 
 _CONNECTIONS = "connections are managed by the person in the console"
+
+_MY_SECURITY = (
+    "the person's own sign-in factors, devices and sessions; managed in the console, and "
+    "needs the console session the MCP channel never has"
+)
 
 NOT_FOR_MCP: dict[tuple[str, str], str] = {
     # Lists no token value, but maps every live bootstrap credential (names,
@@ -222,6 +255,13 @@ NOT_FOR_MCP: dict[tuple[str, str], str] = {
     # is the person's own decision made through one of the things it governs.
     ("GET", "/api/v1/mcp/connections"): _CONNECTIONS,
     ("POST", "/api/v1/mcp/connections/{client_id}/revoke"): _CONNECTIONS,
+    # My security (P2 phase 1): the person's own factors, remembered browsers
+    # and sessions; each needs the console session (`api/v1/auth.py::_console_ctx`).
+    ("GET", "/api/v1/me/security"): _MY_SECURITY,
+    ("DELETE", "/api/v1/me/passkeys/{passkey_id}"): _MY_SECURITY,
+    ("DELETE", "/api/v1/me/totp"): _MY_SECURITY,
+    ("DELETE", "/api/v1/me/trusted-devices/{device_id}"): _MY_SECURITY,
+    ("DELETE", "/api/v1/me/sessions/{session_id}"): _MY_SECURITY,
 }
 
 

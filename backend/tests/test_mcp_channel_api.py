@@ -46,6 +46,36 @@ GLOBAL_CONSTRAINTS_NEVER_EXPOSED = {
     ("POST", "/api/v1/setup/claim"),
 }
 
+# P2 phase 1 (own sign-in): every route that takes or hands back a sign-in
+# credential (plan decision 10).
+OWN_SIGN_IN_NEVER_EXPOSED = {
+    *(
+        ("POST", f"/api/v1/auth/{path}")
+        for path in (
+            "login",
+            "factor/totp",
+            "factor/recovery",
+            "factor/passkey/options",
+            "factor/passkey",
+            "enroll/totp/start",
+            "enroll/totp/confirm",
+            "enroll/passkey/options",
+            "enroll/passkey",
+            "enroll/finish",
+            "step-up/totp",
+            "step-up/recovery",
+            "step-up/passkey/options",
+            "step-up/passkey",
+            "logout",
+            "logout-everywhere",
+            "password/forgot",
+            "password/reset",
+        )
+    ),
+    ("PUT", "/api/v1/me/password"),
+    ("POST", "/api/v1/me/recovery-codes"),
+}
+
 
 @pytest.fixture()
 async def mcp_env(api_env):
@@ -139,9 +169,9 @@ async def test_a_malformed_marker_is_401(mcp_env) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_never_exposed_is_exactly_the_ten_routes_of_the_global_constraints() -> None:
-    assert len(NEVER_EXPOSED) == 10
-    assert set(NEVER_EXPOSED) == GLOBAL_CONSTRAINTS_NEVER_EXPOSED
+def test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes() -> None:
+    assert len(NEVER_EXPOSED) == 30
+    assert set(NEVER_EXPOSED) == GLOBAL_CONSTRAINTS_NEVER_EXPOSED | OWN_SIGN_IN_NEVER_EXPOSED
 
 
 def test_never_exposed_names_only_real_routes(api_env) -> None:

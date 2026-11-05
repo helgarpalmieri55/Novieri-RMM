@@ -4483,6 +4483,122 @@ CATALOG: dict[str, str] = {
         "no se pueden reducir los puestos a {seats}: ahora hay {active} puesto(s) asignado(s)"
     ),
     "no such subscription": "no existe esa suscripción",
+    # --- auth (P2 phase 1: the platform's own sign-in) ---
+    "signing in is not available right now; try again in a moment": (
+        "el inicio de sesión no está disponible ahora mismo; vuelve a intentarlo en un momento"
+    ),
+    "signing in is not set up on this installation: its console address is not configured": (
+        "el inicio de sesión no está configurado en esta instalación: falta la dirección de su "
+        "consola"
+    ),
+    "signing in is not set up on this installation: it names no organization to sign in to": (
+        "el inicio de sesión no está configurado en esta instalación: no indica en qué "
+        "organización iniciar sesión"
+    ),
+    "sign in to do this": "inicia sesión para hacer esto",
+    "you are already signed in": "ya has iniciado sesión",
+    "confirm your second factor first": "confirma primero tu segundo factor",
+    "this second factor is locked after too many failed attempts; an administrator can reset "
+    "your factors": (
+        "este segundo factor quedó bloqueado tras demasiados intentos fallidos; un administrador "
+        "puede restablecer tus factores"
+    ),
+    "too many failed attempts; try again in {seconds} seconds": (
+        "demasiados intentos fallidos; vuelve a intentarlo dentro de {seconds} segundos"
+    ),
+    "the email address or the password is not right": (
+        "la dirección de correo electrónico o la contraseña no son correctas"
+    ),
+    "the second factor was not accepted; try again": (
+        "no se aceptó el segundo factor; inténtalo de nuevo"
+    ),
+    "that sign-in method is not set up on this account": (
+        "ese método de inicio de sesión no está configurado en esta cuenta"
+    ),
+    "this link is not valid: it has expired, was already used or was replaced by a newer one": (
+        "este enlace no es válido: caducó, ya se usó o se sustituyó por uno más reciente"
+    ),
+    "the passkey was not accepted; try again": (
+        "no se aceptó la clave de acceso; inténtalo de nuevo"
+    ),
+    "set up a passkey or an authenticator app first": (
+        "configura primero una clave de acceso o una app de autenticación"
+    ),
+    "too many attempts from this network; try again in a few minutes": (
+        "demasiados intentos desde esta red; vuelve a intentarlo en unos minutos"
+    ),
+    "the current password is not right": "la contraseña actual no es correcta",
+    "this is your only second factor; add another one before removing it": (
+        "es tu único segundo factor; añade otro antes de quitarlo"
+    ),
+    "no such passkey": "no existe esa clave de acceso",
+    "no such remembered device": "no existe ese equipo recordado",
+    "a passkey": "una clave de acceso",
+    "an authenticator app": "una app de autenticación",
+    "a new set of recovery codes": "un juego nuevo de códigos de recuperación",
+    "your recovery codes": "tus códigos de recuperación",
+    "your password": "tu contraseña",
+    "Your {product} password was changed": "Se cambió la contraseña de tu cuenta de {product}",
+    "The password of your {product} account was changed on {when}.\n\nIf it was not you, tell "
+    "your administrator now.": (
+        "La contraseña de tu cuenta de {product} se cambió el {when}.\n\nSi no fuiste tú, avisa "
+        "ahora a tu administrador."
+    ),
+    "A sign-in method was added to your {product} account": (
+        "Se añadió un método de inicio de sesión a tu cuenta de {product}"
+    ),
+    "Added on {when}: {factor}.\n\nIf it was not you, tell your administrator now.": (
+        "Añadido el {when}: {factor}.\n\nSi no fuiste tú, avisa ahora a tu administrador."
+    ),
+    "A sign-in method was removed from your {product} account": (
+        "Se quitó un método de inicio de sesión de tu cuenta de {product}"
+    ),
+    "Removed on {when}: {factor}.\n\nIf it was not you, tell your administrator now.": (
+        "Quitado el {when}: {factor}.\n\nSi no fuiste tú, avisa ahora a tu administrador."
+    ),
+    "A sign-in method on your {product} account was locked": (
+        "Se bloqueó un método de inicio de sesión de tu cuenta de {product}"
+    ),
+    "After too many failed attempts, {factor} was locked on {when}. An administrator can reset "
+    "your sign-in methods.": (
+        "Tras demasiados intentos fallidos, se bloqueó {factor} el {when}. Un administrador "
+        "puede restablecer tus métodos de inicio de sesión."
+    ),
+    "A device will be remembered for your {product} account": (
+        "Se recordará un equipo para tu cuenta de {product}"
+    ),
+    "On {when} a browser was remembered: for {days} days it will not ask for your second "
+    "factor.\n\nIf it was not you, remove it under My security and tell your administrator.": (
+        "El {when} se recordó un navegador: durante {days} días no te pedirá el segundo factor."
+        "\n\nSi no fuiste tú, quítalo en Mi seguridad y avisa a tu administrador."
+    ),
+    "A recovery code was used on your {product} account": (
+        "Se usó un código de recuperación en tu cuenta de {product}"
+    ),
+    "A recovery code was used on {when}. {left} codes remain.\n\nIf it was not you, tell your "
+    "administrator now.": (
+        "Se usó un código de recuperación el {when}. Quedan {left} códigos.\n\nSi no fuiste tú, "
+        "avisa ahora a tu administrador."
+    ),
+    "Your {product} sign-in methods were reset": (
+        "Se restablecieron los métodos de inicio de sesión de tu cuenta de {product}"
+    ),
+    "Your passkeys, authenticator app and recovery codes were removed on {when}. You will set "
+    "up a new second factor the next time you sign in.\n\nIf you did not ask for this, tell "
+    "your administrator now.": (
+        "El {when} se quitaron tus claves de acceso, tu app de autenticación y tus códigos de "
+        "recuperación. La próxima vez que inicies sesión configurarás un segundo factor nuevo."
+        "\n\nSi no lo pediste, avisa ahora a tu administrador."
+    ),
+    "Reset your {product} password": "Restablece la contraseña de tu cuenta de {product}",
+    "Someone asked to reset the password of your {product} account.\n\nOpen this link within "
+    "30 minutes to choose a new one. You will still need your second factor to sign in.\n"
+    "{link}\n\nIf it was not you, ignore this message: your password has not changed.": (
+        "Alguien pidió restablecer la contraseña de tu cuenta de {product}.\n\nAbre este enlace "
+        "en los próximos 30 minutos para elegir una nueva. Seguirás necesitando tu segundo factor "
+        "para iniciar sesión.\n{link}\n\nSi no fuiste tú, ignora este mensaje: tu contraseña no "
+        "ha cambiado."
+    ),
     # --- user_admin ---
     "the identity provider refused to {what} (HTTP {status_code})": (
         "el proveedor de identidad se negó a {what} (HTTP {status_code})"
