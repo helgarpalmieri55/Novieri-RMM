@@ -399,3 +399,50 @@ async def test_a_recovery_that_sets_a_password_tells_only_once_its_session_is_ma
     ]
     assert await _count(relay_env, org, "auth.password_changed") == 1
     await _assert_mail_and_checkout_paired(relay_env, org)
+
+
+async def test_a_vault_error_in_the_second_closing_notice_lets_the_first_stand(
+    relay_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fix 3 review, Minor 2. The recovery that sets a password closes with two
+    notices; the vault does not answer at the second one's relay checkout.
+    That send fails (`mail._sign_in`: `MailSendFailed(SIGN_IN_UNAVAILABLE)`,
+    and `notices.deliver` answers False), so the transaction commits: the
+    first mail went, its checkout is recorded, the second has neither, and the
+    recovery stands -- the password set, the factors gone, both records
+    written. Let the vault's error through and it rolls the whole recovery back
+    after the first mail went, that mail's checkout row with it: red."""
+    import httpx
+
+    org, who = await _setup(relay_env, "notice-recover-vault")
+    await _set_mark(relay_env, who)
+    token = await _recovery_token(relay_env, org, who)
+    issued = len(_Relay.sent)
+    vault = relay_env.app.state.vault
+    real_checkout = vault.checkout
+    calls = 0
+
+    async def second_fails(*args: Any, **kwargs: Any) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise httpx.ConnectError("connection refused to https://openbao.internal:8200")
+        result: str = await real_checkout(*args, **kwargs)
+        return result
+
+    monkeypatch.setattr(vault, "checkout", second_fails)
+    accepted = await relay_env.client.post(
+        "/api/v1/auth/recover/accept",
+        headers=browser(),
+        json={"token": token, "password": RECOVERED},
+    )
+
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json() == {"state": "enroll_required"}
+    assert calls == 2
+    assert [m["Subject"] for m in _Relay.sent[issued:]] == ["Your Novieri password was changed"]
+    await _assert_mail_and_checkout_paired(relay_env, org)
+    assert await _count(relay_env, org, "auth.password_changed") == 1
+    assert await _count(relay_env, org, "user.recovery_link_used") == 1
+    assert await _mark(relay_env, who) is None
+    assert await _unused(relay_env, who) == 0

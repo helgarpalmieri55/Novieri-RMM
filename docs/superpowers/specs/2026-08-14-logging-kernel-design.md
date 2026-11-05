@@ -175,7 +175,18 @@ there is, because a platform with zero users has no audit chain either. Static
 templates, variables in `extra`, and the install code never appears in any of
 them.
 
-**NOW 107, own authentication phase 1, final fix wave (K4, K11).** Two sites.
+**NOW 108, own authentication phase 1, fix 3 review (Minor 2).** One site. A
+static WARNING in `app/core/mail.py::_sign_in`, "account mail not sent: the
+vault did not open the relay sign-in", when the vault's backend raises an
+`httpx.HTTPError` at the relay credential's checkout -- OpenBao refused, timed
+out, sealed (503) or forbidding (403). The send becomes `MailSendFailed(
+SIGN_IN_UNAVAILABLE)` rather than an exception out of the caller's
+transaction, so `notices.deliver` never raises for delivery and a notice can
+never roll back one sent before it. `extra` = the org id; no `exc_info`,
+because the error's text names OpenBao's address and the organization's
+transit key.
+
+**BEFORE THAT, 107, own authentication phase 1, final fix wave (K4, K11).** Two sites.
 One static WARNING in `app/core/auth/sessions.py::resolve`, for a session that
 has NOT ended but belongs to a person who is not active (Task 13 M4, final
 review B-M2, the coordinator's decision). Disabling and deleting end every
