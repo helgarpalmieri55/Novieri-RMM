@@ -37,7 +37,7 @@ import { StrictMode, useEffect, useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setSelectedClient } from "./lib/clientChoice";
+import { CLIENT_STORAGE_KEY, setSelectedClient } from "./lib/clientChoice";
 import { navigation } from "./lib/session";
 import { sessionEnded } from "./lib/sessionEnd";
 import { CLOSE_SESSION_ENDED, useLiveEvents } from "./lib/ws";
@@ -187,6 +187,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  window.localStorage.clear();
 });
 
 describe("a visitor with no session", () => {
@@ -426,6 +427,20 @@ describe("signing out", () => {
     // They chose to leave: nothing is kept, and the guard sends nobody anywhere else.
     expect(everythingShown()).not.toContain(TYPED);
     expect(assign).toHaveBeenCalledTimes(1);
+  });
+
+  it("forgets the client chosen in the top bar, for the next person on a shared computer (D1, Minor 9)", async () => {
+    stubServer(() => ({ status: 200, body: ME }));
+    const user = userEvent.setup();
+    render(guarded().ui);
+    await screen.findByText("secret");
+    window.localStorage.setItem(CLIENT_STORAGE_KEY, "6b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d");
+
+    await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/sign-in"));
+    expect(window.localStorage.getItem(CLIENT_STORAGE_KEY)).toBeNull();
   });
 
   it("asks the server, then leaves for the sign-in page", async () => {

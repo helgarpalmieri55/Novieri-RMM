@@ -18,18 +18,21 @@
  * EVERY CHANGE OF SIDE IS A WHOLE-DOCUMENT LOAD. Being sent to sign in
  * (`goToSignIn`), entering the console after signing in (`enterConsole`) and
  * signing out (`signOut`) all navigate the document. The query cache, the
- * client chosen in the top bar, the live socket and the session-ended flag of
- * whoever was here never reach the next person's console on a shared
- * computer, and nothing has to remember to clear them. A session that ends
- * WITHOUT a navigation -- inactivity, the maximum, an administrator, another
- * person in the cookie -- is hidden and emptied by the guard at once
- * (`App.tsx`'s `RequireAuth`, operator decision 3, 2026-11-05).
+ * live socket and the session-ended flag of whoever was here go with it.
+ * TWO THINGS DO NOT, and are cleared by hand: the client chosen in the top
+ * bar is in `localStorage["itms.client"]`, which `signOut` forgets so the next
+ * person on a shared computer does not open on the previous person's client
+ * (final review D1, Minor 9); and a session that ends WITHOUT a navigation --
+ * inactivity, the maximum, an administrator, another person in the cookie --
+ * is hidden and emptied by the guard at once (`App.tsx`'s `RequireAuth`,
+ * operator decision 3, 2026-11-05).
  */
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useSyncExternalStore } from "react";
 
 import { ApiError, type ApiClient, type Me } from "./api";
 import { useApi } from "./ApiContext";
+import { forgetStoredClient } from "./clientChoice";
 import {
   hadSession,
   isSessionEnded,
@@ -202,8 +205,9 @@ export function enterConsole(next: unknown): void {
  *
  * ONCE THE SERVER HAS ENDED IT, NOTHING OF THE SESSION WAITS FOR THE LOAD:
  * the guard empties the query cache and hides the page at once
- * (`sessionSignedOut`, operator decision 3) -- the browser keeps the old page
- * on screen until the sign-in page has loaded.
+ * (`sessionSignedOut`, operator decision 3), and the client chosen in the
+ * top bar is forgotten (final review D1, Minor 9) -- the browser keeps the
+ * old page on screen until the sign-in page has loaded.
  */
 export async function signOut(api: Pick<ApiClient, "logout">): Promise<void> {
   try {
@@ -211,6 +215,7 @@ export async function signOut(api: Pick<ApiClient, "logout">): Promise<void> {
   } catch (error: unknown) {
     if (!(error instanceof ApiError && error.status === 401)) throw error;
   }
+  forgetStoredClient();
   sessionSignedOut();
   navigation.assign(SIGN_IN_PATH);
 }

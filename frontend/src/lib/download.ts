@@ -2,16 +2,20 @@
  * Handing the browser a file it can save, from a response only an
  * AUTHENTICATED request could have obtained.
  *
- * WHY THIS EXISTS, AND IT IS NOT A STYLE PREFERENCE. This console
- * authenticates with a bearer token that `ApiClient` puts on every request
- * (`lib/api.ts`). A `<a href="/api/v1/…" download>` is not one of those
- * requests: the browser navigates to the URL itself and sends no
- * `Authorization` header, so the route answers 401 and the browser
- * cheerfully saves the refusal — a JSON error body under whatever name the
- * URL ended in. That is exactly what the operator reported: "export
- * inventory exports a .json instead of an .xlsx". The export had therefore
- * never worked on a deployed console, and could not have; nothing about it
- * was intermittent.
+ * WHY THIS EXISTS, AND IT IS NOT A STYLE PREFERENCE. When the console
+ * authenticated with a bearer token, a `<a href="/api/v1/…" download>` sent
+ * none: the browser navigates to the URL itself, the route answered 401, and
+ * the browser cheerfully saved the refusal — a JSON error body under whatever
+ * name the URL ended in. That is exactly what the operator reported: "export
+ * inventory exports a .json instead of an .xlsx".
+ *
+ * THE SESSION IS A COOKIE NOW (own-auth phase 1), and a link would carry it.
+ * It is still a fetch, because what a link cannot carry still matters: the
+ * client chosen in the top bar (`X-Client-Id`, `lib/api.ts::requestHeaders`),
+ * without which the export would be of every client the person can reach,
+ * and the language (`Accept-Language`). And a 401 through a link would still
+ * be saved as a file instead of ending the session (`ApiClient`'s
+ * `onUnauthorized`).
  *
  * Two anchors of that shape shipped — Devices' "Export inventory" and
  * Software's export — and the reporting module had already learned this the
