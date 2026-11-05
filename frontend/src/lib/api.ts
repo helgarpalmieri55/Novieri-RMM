@@ -1127,6 +1127,18 @@ import type {
   SiteWakeRequest,
 } from "../modules/site-servers/types";
 import type {
+  AuthenticationResponseJSON,
+  EnrollFrom,
+  InviteDetails,
+  LoginResult,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RecoveryCodes,
+  RegistrationResponseJSON,
+  SignedIn,
+  TotpEnrollment,
+} from "../modules/auth/types";
+import type {
   CreatedUserOut,
   EffectivePermissionsOut,
   EmailSettingsOut,
@@ -1745,6 +1757,124 @@ export class ApiClient {
    */
   logout(): Promise<void> {
     return this.request<void>("/auth/logout", { method: "POST" }, { anonymous: true });
+  }
+
+  /* ------------------------------------------- signing in (own-auth Task 11) */
+
+  // Every one of these is `anonymous` (`request()`): called with no session or
+  // with one that has no factor yet, so a 401 is the step's own answer -- a
+  // wrong code, a sign-in that timed out -- with the server's body kept for
+  // the page, and never a "session ended". None carries `X-Client-Id`. A
+  // secret the person types (a password, a code) or must see once (a setup
+  // key, the recovery codes) travels in a body, never in a URL.
+
+  /** `POST /auth/login`: the first step (own-auth design §2.1, §2.3). */
+  login(body: { email: string; password: string }): Promise<LoginResult> {
+    return this.request<LoginResult>("/auth/login", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /** `POST /auth/factor/totp`: a code from the authenticator app. */
+  factorTotp(body: { code: string; remember_device: boolean }): Promise<SignedIn> {
+    return this.request<SignedIn>("/auth/factor/totp", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /** `POST /auth/factor/passkey/options`: the challenge for `startAuthentication`, untouched. */
+  factorPasskeyOptions(): Promise<PublicKeyCredentialRequestOptionsJSON> {
+    return this.request<PublicKeyCredentialRequestOptionsJSON>(
+      "/auth/factor/passkey/options",
+      { method: "POST" },
+      { anonymous: true },
+    );
+  }
+
+  /** `POST /auth/factor/passkey`: the browser's answer, untouched. */
+  factorPasskey(body: { credential: AuthenticationResponseJSON; remember_device: boolean }): Promise<SignedIn> {
+    return this.request<SignedIn>("/auth/factor/passkey", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /** `POST /auth/factor/recovery`: one of the ten codes. */
+  factorRecovery(body: { code: string; remember_device: boolean }): Promise<SignedIn> {
+    return this.request<SignedIn>("/auth/factor/recovery", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  // The four enrol routes serve two sessions (`EnrollFrom`): without an
+  // argument they are the first-factor page's (`anonymous`, as above); with
+  // `{ signedIn: true }` they are My security's (own-auth Task 12), whose
+  // session is complete, so a 401 is that session ending and reaches
+  // `onUnauthorized`. `global` keeps `X-Client-Id` off either way.
+
+  /** `POST /auth/enroll/totp/start`: a new secret, once, as an `otpauth://` URI. */
+  enrollTotpStart({ signedIn = false }: EnrollFrom = {}): Promise<TotpEnrollment> {
+    return this.request<TotpEnrollment>(
+      "/auth/enroll/totp/start",
+      { method: "POST" },
+      signedIn ? { global: true } : { anonymous: true },
+    );
+  }
+
+  /** `POST /auth/enroll/totp/confirm`: the first code, which proves the app holds the secret. */
+  enrollTotpConfirm(code: string, { signedIn = false }: EnrollFrom = {}): Promise<void> {
+    return this.request<void>(
+      "/auth/enroll/totp/confirm",
+      { method: "POST", body: JSON.stringify({ code }) },
+      signedIn ? { global: true } : { anonymous: true },
+    );
+  }
+
+  /** `POST /auth/enroll/passkey/options`: the options for `startRegistration`, untouched. */
+  enrollPasskeyOptions({ signedIn = false }: EnrollFrom = {}): Promise<PublicKeyCredentialCreationOptionsJSON> {
+    return this.request<PublicKeyCredentialCreationOptionsJSON>(
+      "/auth/enroll/passkey/options",
+      { method: "POST" },
+      signedIn ? { global: true } : { anonymous: true },
+    );
+  }
+
+  /** `POST /auth/enroll/passkey`: the new credential, and the name the person gave it. */
+  enrollPasskey(
+    credential: RegistrationResponseJSON,
+    name: string,
+    { signedIn = false }: EnrollFrom = {},
+  ): Promise<void> {
+    return this.request<void>(
+      "/auth/enroll/passkey",
+      { method: "POST", body: JSON.stringify({ credential, name }) },
+      signedIn ? { global: true } : { anonymous: true },
+    );
+  }
+
+  /** `POST /auth/enroll/finish`: the ten recovery codes, the only time they exist in the clear. */
+  enrollFinish(): Promise<RecoveryCodes> {
+    return this.request<RecoveryCodes>("/auth/enroll/finish", { method: "POST" }, { anonymous: true });
+  }
+
+  /** `POST /auth/password/forgot`: always 202, whether or not the address has an account. */
+  forgotPassword(body: { email: string }): Promise<void> {
+    return this.request<void>("/auth/password/forgot", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /** `POST /auth/password/reset`: the emailed token, in the body. */
+  resetPassword(body: { token: string; password: string }): Promise<void> {
+    return this.request<void>("/auth/password/reset", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /** `POST /auth/invite/details`: who an invitation is for. The token travels in the body. */
+  getInvite(token: string): Promise<InviteDetails> {
+    return this.request<InviteDetails>(
+      "/auth/invite/details",
+      { method: "POST", body: JSON.stringify({ token }) },
+      { anonymous: true },
+    );
+  }
+
+  /** `POST /auth/invite/accept`: the password; answers `{"state": "enroll_required"}` and a session that still needs a factor. */
+  acceptInvite(body: { token: string; password: string }): Promise<void> {
+    return this.request<void>("/auth/invite/accept", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /** `POST /auth/logout-everywhere`: end every session of this person, this one included. */
+  logoutEverywhere(): Promise<void> {
+    return this.request<void>("/auth/logout-everywhere", { method: "POST" }, { anonymous: true });
   }
 
   /* ---------------------------------------------------------- device groups */
