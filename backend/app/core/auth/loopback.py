@@ -190,12 +190,64 @@ def claims_loopback(request: Request) -> bool:
     return LOOPBACK_HEADER in request.headers
 
 
+#: Seconds between two WARNINGs for "not an in-process call" (final review C-M8).
+NETWORK_REFUSAL_EVERY_S = 60.0
+
+
+def _monotonic() -> float:
+    """A named seam, so a test can move the throttle's clock."""
+    return time.monotonic()
+
+
+@dataclass
+class RefusalThrottle:
+    """At most one line per `NETWORK_REFUSAL_EVERY_S`, counting the ones held."""
+
+    next_at: float = float("-inf")
+    held: int = 0
+
+    def admit(self) -> int | None:
+        """None: stay quiet (counted). Else log now, saying how many were held."""
+        now = _monotonic()
+        if now < self.next_at:
+            self.held += 1
+            return None
+        held, self.held, self.next_at = self.held, 0, now + NETWORK_REFUSAL_EVERY_S
+        return held
+
+
+#: Per process. `asyncio` runs it on one thread; a lost increment under
+#: threads would cost a count in a log line, nothing else.
+_network_refusals = RefusalThrottle()
+
+
 def _refused(*, reason: RefusalReason) -> HTTPException:
     # One answer for every reason: the caller learns nothing about which check
     # failed. The reason -- one of `RefusalReason`'s fixed phrases, never the
     # token -- goes to the server log in `extra` (tests/test_logging_discipline.py);
     # the response carries only the translated sentence below.
-    logger.warning("loopback token refused", extra={"reason": reason})
+    #
+    # RATE-LIMITED, NOT DOWNGRADED, FOR THE ONE REASON A STRANGER CAN CAUSE
+    # (final review C-M8). "not an in-process call" is any network request
+    # that carries `X-ITMS-Loopback`, signed in or not: a line per request
+    # would let an anonymous caller write the log at request rate. INFO
+    # would not fix that -- it is written at the default level, so it moves
+    # the amplification rather than removing it -- and DEBUG would hide a
+    # probe worth seeing. So it stays a WARNING, at most one per minute per
+    # process, carrying how many went unlogged since the last. Every other
+    # reason needs the in-process mark no network client can set, and is
+    # logged every time.
+    unlogged = 0
+    if reason == "not an in-process call":
+        admitted = _network_refusals.admit()
+        if admitted is None:
+            return _refusal()
+        unlogged = admitted
+    logger.warning("loopback token refused", extra={"reason": reason, "unlogged": unlogged})
+    return _refusal()
+
+
+def _refusal() -> HTTPException:
     return HTTPException(
         status.HTTP_401_UNAUTHORIZED, tr("the assistant's internal token was refused")
     )

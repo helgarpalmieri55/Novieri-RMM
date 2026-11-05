@@ -14,6 +14,7 @@ removed; the comment on each test names the check it holds.
 
 import base64
 import json
+import logging
 import os
 import time
 from datetime import UTC, datetime, timedelta
@@ -234,6 +235,59 @@ async def test_a_network_request_claiming_the_loopback_never_falls_through(
     )
 
     assert me.status_code == 401
+
+
+async def test_a_network_caller_cannot_amplify_the_refusal_warning(
+    console: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Final review C-M8 (Task 9 M5). "not an in-process call" is the one
+    refusal ANYBODY can cause -- an anonymous request carrying
+    `X-ITMS-Loopback` -- so it is rate-limited, not downgraded: one WARNING
+    per `NETWORK_REFUSAL_EVERY_S` per process, and the next one says how many
+    went unlogged. INFO would still write a line per request at the default
+    level, so it would move the amplification, not remove it. Every request
+    is still the same 401. Log every refusal again and twenty requests are
+    twenty lines: red. The in-process reasons, which no network client can
+    reach, are still logged every time."""
+    clock = [1000.0]
+    monkeypatch.setattr(loopback, "_monotonic", lambda: clock[0])
+    monkeypatch.setattr(loopback, "_network_refusals", loopback.RefusalThrottle())
+
+    def lines() -> list[Any]:
+        return [r for r in caplog.records if r.name == "its.auth.loopback"]
+
+    with caplog.at_level(logging.INFO, logger="its.auth.loopback"):
+        answers = [
+            await console.client.get("/api/v1/me", headers={loopback.LOOPBACK_HEADER: "1"})
+            for _ in range(20)
+        ]
+        assert [a.status_code for a in answers] == [401] * 20
+        (first,) = lines()
+        assert first.levelno == logging.WARNING
+        assert (getattr(first, "reason"), getattr(first, "unlogged")) == (
+            "not an in-process call",
+            0,
+        )
+
+        clock[0] += loopback.NETWORK_REFUSAL_EVERY_S
+        caplog.clear()
+        assert (
+            await console.client.get("/api/v1/me", headers={loopback.LOOPBACK_HEADER: "1"})
+        ).status_code == 401
+        (later,) = lines()
+        assert getattr(later, "unlogged") == 19
+
+        caplog.clear()
+        _, _, session_id, _ = await _signed_in(console, "devices.read")
+        token = await _minted(console, session_id)
+        async with _in_process(console) as client:
+            for _ in range(2):
+                bad = await client.get(
+                    "/api/v1/me",
+                    headers={"Authorization": f"Bearer {token}", loopback.LOOPBACK_HEADER: "0"},
+                )
+                assert bad.status_code == 401
+        assert [getattr(r, "reason") for r in lines()] == ["malformed loopback header"] * 2
 
 
 @pytest.mark.parametrize("value", ["0", "1, 1", ""])
