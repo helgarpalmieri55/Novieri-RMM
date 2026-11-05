@@ -498,7 +498,7 @@ async def _admit_session(
 
     A session that has not finished its second factor is not signed in: 401,
     and the sign-in routes (Task 7) are the only ones that accept it. Then, in
-    the order the bearer path uses: the console's email-domain rule (staff
+    the order the MCP bearer path uses: the console's email-domain rule (staff
     only -- it says who may use the CONSOLE; a contact, from phase 2, uses the
     portal), `users.status`, a contact refused unless `contacts`, and the
     person's scope. Nothing is written and nothing is self-provisioned: a

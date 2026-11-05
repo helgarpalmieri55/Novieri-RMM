@@ -328,8 +328,8 @@ async def create_copilot_turn(
         )
 
     # The turn's own internal token, minted from THIS request's session
-    # (autenticación propia design §5.6). Only a request the console's
-    # Keycloak bearer admitted still forwards that header, until Task 13 (D21).
+    # (autenticación propia design §5.6). A request with no session gets
+    # none: `loopback_authorization` refuses it (own authentication Task 13).
     bearer = await loopback_authorization(request)
     try:
         await run_turn(

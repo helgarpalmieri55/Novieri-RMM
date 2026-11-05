@@ -21,8 +21,8 @@ not it carries a cookie, because the sign-in routes (Task 7) are where a session
 is MADE: a cross-site form that signs the victim's browser into the attacker's
 account is login CSRF, and it carries no session cookie yet. A request with a
 bearer token and no session cookie is not a browser riding on ambient
-authority (the MCP channel's in-process calls, the assistant's loopback, the
-tests until Task 13): nothing here applies to it.
+authority (the MCP channel's in-process calls, the assistant's loopback):
+nothing here applies to it.
 
 WITHOUT `ITS_PUBLIC_CONSOLE_URL` there is no console origin to compare with, so
 every such write is refused: a deployment cannot sign in with the platform's

@@ -1118,11 +1118,13 @@ def configure_logging(level: int | str = "INFO") -> None:
     headers), so uvicorn's own handshake line -- which writes the full request
     line, query string included -- put a live bearer token on stdout, JSON
     formatted and entirely unredacted. No change here could have fixed it:
-    there is no `extra=` field to match. `ws.py` now takes the token from the
-    WebSocket subprotocol header instead and refuses a query-string one, so
-    the credential never enters a URL. `tests/test_ui_ws.py` measures both
-    halves against a real uvicorn -- token absent from the log after a real
-    handshake, and still present when a URL-borne one is used as the control.
+    there is no `extra=` field to match. `ws.py` then took the token from the
+    WebSocket subprotocol header; since own authentication phase 1 (Task 13)
+    it takes only the console's session cookie, which the browser sends in the
+    `Cookie` header, and it refuses a query-string credential, so none ever
+    enters a URL. `tests/test_ui_ws.py` measures both halves against a real
+    uvicorn -- the session token absent from the log after a real handshake,
+    and present when a URL-borne one is used as the control.
 
     The general point survives the specific fix: anything uvicorn renders into
     its own message string is outside this gate, so a secret must be kept out

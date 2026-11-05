@@ -140,14 +140,15 @@ async def validate_token(
         )
     except jwt.InvalidTokenError as exc:
         raise TokenValidationError(str(exc)) from exc
-    # ACCESS TOKENS ONLY, on every door. The audience says which resource a
-    # token is for, not what kind of token it is: Keycloak signs ID, refresh,
-    # offline and logout tokens with the same realm key, and an ID token's
-    # `aud` is the client it was issued to -- so the ID token of a client
-    # registered (open registration) under the id `it-suite` passes the
-    # audience check above as a console token, with the person's `sub` and
-    # `org`. Keycloak issues every access token with `typ` "Bearer", exactly
-    # that spelling; anything else, or no `typ` at all, is refused.
+    # ACCESS TOKENS ONLY. The audience says which resource a token is for,
+    # not what kind of token it is: Keycloak signs ID, refresh, offline and
+    # logout tokens with the same realm key, and an ID token's `aud` is the
+    # client it was issued to -- so the ID token of a client registered (open
+    # registration) under the id of the audience checked above passes that
+    # check, with the person's `sub` and `org`. While the console took tokens
+    # (until own authentication phase 1) that id was `it-suite`; it is now the
+    # MCP resource's. Keycloak issues every access token with `typ` "Bearer",
+    # exactly that spelling; anything else, or no `typ` at all, is refused.
     if claims.get("typ") != "Bearer":
         raise TokenValidationError(tr("this token is not an access token"))
 
