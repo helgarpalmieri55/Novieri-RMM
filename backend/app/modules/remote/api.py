@@ -482,9 +482,10 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
     and receives rsp/1 frames as binary messages; text messages are ignored.
 
     The screen lives only as long as the console session that opened it
-    (``watch_tunnel_session``): signed out, cut, replaced, disabled or past its
-    maximum, the tunnel is cancelled and the socket closes 4401. An open
-    screen keeps that session from going idle.
+    (``watch_tunnel_session``): signed out, cut, replaced, disabled, idle or
+    past its maximum, the tunnel is cancelled and the socket closes 4401. An
+    open screen does not keep that session from going idle (fix round 2): the
+    person's input, which the console counts, does.
     """
     state = websocket.app.state
     if SESSION_COOKIE not in websocket.cookies:

@@ -128,8 +128,8 @@ async def admit_tunnel_session(
     device of a client where they lack it does not exist for them (spec §2.6).
 
     Opening a screen is the person's own act, so it TOUCHES the session, as
-    an HTTP request does: an open remote screen counts as activity
-    (coordinator decision, Task 6 review; `watch_tunnel_session`)."""
+    an HTTP request does. Keeping it open is not (fix round 2, which reverses
+    the Task 6 decision): `watch_tunnel_session` re-checks without touching."""
     if not origin_allowed(connection.headers.get("origin"), settings):
         raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
             4403, "not the console's origin"
@@ -183,12 +183,14 @@ async def watch_tunnel_session(
     screen with the code the door would refuse it with (4403, or 4404 for a
     session no longer in scope), as `/api/v1/ws` re-runs its door.
 
-    AN OPEN REMOTE SCREEN COUNTS AS ACTIVITY (coordinator decision, Task 6
-    review). The re-read TOUCHES the session (`touch=True`), so the inactivity
-    limit never cuts a screen while it is open -- the person is driving a
-    desktop through it -- while everything above still does. The live-status
-    socket decides the other way (`app/api/v1/ws.py`): a tab left open there
-    is not activity."""
+    AN OPEN REMOTE SCREEN IS NOT ACTIVITY (fix round 2, console re-review P1;
+    it reverses the Task 6 coordinator decision that it was). The re-read
+    does NOT touch the session (`touch=False`), as the live-status socket's
+    does not (`app/api/v1/ws.py`): an open screen nobody works is idle like
+    any tab, and the inactivity limit cuts it with 4401. A person driving the
+    desktop keeps the session alive through the console, which counts their
+    pointer and keyboard on the viewer page as activity and says so on its
+    next request (design §2.4; NIST SP 800-63B-4 §5.2)."""
     deadline = principal.expires_at.timestamp()
     while True:
         remaining = deadline - time.time()
@@ -197,7 +199,7 @@ async def watch_tunnel_session(
         await asyncio.sleep(min(RECHECK_INTERVAL_S, remaining))
         if time.time() >= deadline:
             return CLOSE_SESSION_ENDED
-        current = await resolve(connection, touch=True)
+        current = await resolve(connection, touch=False)
         if current is None or current.session_id != principal.session_id:
             return CLOSE_SESSION_ENDED
         identity = await read_session_identity(

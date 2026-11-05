@@ -148,6 +148,18 @@ La persona no llega a la consola hasta registrar uno.
   **15 días**) y duración máxima en un equipo recordado.
 - Tras la inactividad se pide solo la contraseña dentro de la duración máxima (lo que NIST permite en AAL2 [S1 §2.2.3]);
   al vencer la duración máxima, inicio de sesión completo.
+- **Qué cuenta como actividad** (ronda de corrección 2, revisión de la consola P1). Solo lo que hace la persona. NIST SP
+  800-63B-4 §5.2 (https://pages.nist.gov/800-63-4/sp800-63b/session/): «An inactivity timeout terminates a session
+  without activity from the subscriber for a specific period» y «Session activity SHALL reset the inactivity timeout».
+  La consola envía `X-ITMS-Background: 1` en toda petición hecha sin que la persona haya tocado el puntero o el
+  teclado en los últimos 60 s (los sondeos de cada minuto, las recargas al volver a la pestaña), y el servidor no
+  renueva la sesión con ella (`sessions.resolve`, en toda puerta HTTP). La cabecera solo puede declinar una renovación,
+  nunca concederla; cualquier otro cliente sigue igual. No son actividad: una pestaña abierta (el WebSocket de estado),
+  ni una pantalla remota abierta, cuyo vigilante tampoco renueva la sesión (esto invierte la decisión del coordinador
+  de la Tarea 6): quien trabaja en el escritorio remoto mantiene viva la sesión con su puntero y su teclado en la
+  página del visor, que la consola cuenta como cualquier otra. Así, una consola desatendida, con la pestaña visible,
+  llega al límite de inactividad. La gestión del tiempo de espera se impone en el servidor (OWASP [S6]: «Session
+  timeout management and expiration must be enforced server-side»).
 - El identificador de sesión cambia al iniciar sesión y al confirmar el segundo factor [S6].
 - Desactivar a una persona corta sus sesiones, sus tokens de IA y sus equipos recordados al instante.
 

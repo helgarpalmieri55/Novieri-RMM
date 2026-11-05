@@ -69,6 +69,10 @@ logger = logging.getLogger("its.auth.sessions")
 
 SESSION_COOKIE = "__Host-itms_session"
 DEVICE_COOKIE = "__Host-itms_device"
+#: Sent by the console, as `X-ITMS-Background: 1`, on a request no person
+#: caused in the last 60 s (a poll, a refetch): `resolve` does not renew the
+#: session for it (fix round 2; design §2.4).
+BACKGROUND_HEADER = "X-ITMS-Background"
 
 #: Random bytes behind a session or device cookie (256 bits, design §6.4).
 TOKEN_BYTES = 32
@@ -176,6 +180,13 @@ def step_up_fresh(principal: SessionPrincipal, now: datetime) -> bool:
     return principal.step_up_at is not None and now - principal.step_up_at <= STEP_UP_WINDOW
 
 
+def background(connection: HTTPConnection) -> bool:
+    """The request says no person caused it: exactly one `X-ITMS-Background`
+    header, exactly `1`. Anything else -- absent, another value, sent twice --
+    is a request like any other."""
+    return connection.headers.getlist(BACKGROUND_HEADER) == ["1"]
+
+
 async def resolve(connection: HTTPConnection, *, touch: bool = True) -> SessionPrincipal | None:
     """The live session the request's cookie names, or None.
 
@@ -184,11 +195,24 @@ async def resolve(connection: HTTPConnection, *, touch: bool = True) -> SessionP
     than the organisation's policy allows, and a person whose account is not
     `active` -- disabling somebody stops their sessions on the next request,
     whatever else forgot to end them (and a live session in that state is
-    logged once per request as the defect it is). `touch` renews
-    `last_seen_at` (at most once a minute). The console WebSocket's re-check
-    passes False, so an open tab is not activity; the remote screen's
-    watchdog passes True, so watching an open screen is (coordinator
-    decision, Task 6 review: a person at a remote desktop sends no HTTP)."""
+    logged once per request as the defect it is).
+
+    WHAT COUNTS AS ACTIVITY (design §2.4; fix round 2). `touch` renews
+    `last_seen_at` (at most once a minute) -- unless the request says no
+    person caused it: a single `X-ITMS-Background: 1` header (`background`),
+    which the console sends on its polls and refetches. NIST SP 800-63B-4
+    §5.2: "An inactivity timeout terminates a session without activity from
+    the subscriber for a specific period"; a poll is not the subscriber's.
+    THE HEADER CAN ONLY DECLINE A RENEWAL, NEVER GRANT ONE: with it a
+    `touch=True` caller does not touch, a `touch=False` caller stays so, and
+    nothing about who is admitted changes. Because the rule lives here, every
+    HTTP door honours it (`deps._admit_session`, `guards.session_of`) and no
+    door can forget it. The console WebSocket's re-check and the remote
+    screen's watchdog pass False: an open tab or an open screen is not
+    activity; the console counts the person's pointer and keyboard on the
+    page, the screen viewer's included (fix round 2 reverses the Task 6
+    decision that an open screen was)."""
+    touch = touch and not background(connection)
     token = cookie_token(connection, SESSION_COOKIE)
     if token is None:
         return None

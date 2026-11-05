@@ -28,6 +28,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.api.v1.ws as ws_module
+import app.core.auth.sessions as sessions_module
 import app.modules.remote.api as remote_api
 import app.modules.remote.tunnel as tunnel_module
 from app.core.auth.sessions import end
@@ -457,25 +458,36 @@ async def test_the_screen_closes_at_its_sessions_maximum(
     assert seen["cancelled"] is True
 
 
-async def test_an_open_screen_keeps_its_session_alive(
+async def test_an_unattended_open_screen_is_idle_ended(
     api_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """COORDINATOR DECISION (Task 6 review): an open remote screen is
-    activity, so its re-check TOUCHES the session and the inactivity limit
-    does not cut a screen in use -- unlike `/api/v1/ws`, whose open tab is not
-    activity. Protects `touch=True` in `watch_tunnel_session`."""
+    """FIX ROUND 2 (console re-review P1) REVERSES the Task 6 decision "an
+    open remote screen is activity". The watchdog's re-check no longer
+    touches the session (`touch=False` in `watch_tunnel_session`): a person
+    driving the desktop keeps the session alive through the console, which
+    counts their pointer and keyboard on the viewer page as activity. An
+    open screen nobody works is idle like any tab -- cut at the idle limit
+    with 4401, its tunnel cancelled. Touch at the re-check again and the
+    first re-check renews `last_seen_at`, the clock's two minutes never make
+    it idle, and the screen stays open: red.
+
+    Was `test_an_open_screen_keeps_its_session_alive`, which asserted the
+    opposite: `last_seen_at` renewed by the re-check, the task still open,
+    and no 4401."""
     monkeypatch.setattr(tunnel_module, "RECHECK_INTERVAL_S", 0.2)
     org_id, signed = await _technician(api_env)
     sid = await _screen_session(api_env, org_id, signed.user_id)
     seen = _live_screen(api_env, monkeypatch, sid, hold=True)
-    task = await _open_screen(api_env, sid, signed.token, seen, wait_s=3.0)
+    task = await _open_screen(api_env, sid, signed.token, seen, wait_s=6.0)
 
-    two_minutes_ago = datetime.now(UTC) - timedelta(minutes=2)
+    # 29 minutes without activity: not idle yet, and the re-checks that run
+    # now must not renew it.
+    twenty_nine_ago = datetime.now(UTC) - timedelta(minutes=29)
     async with AsyncSession(api_env.admin_engine) as s:
         await s.execute(
             update(AuthSession)
             .where(AuthSession.id == signed.session_id)
-            .values(last_seen_at=two_minutes_ago)
+            .values(last_seen_at=twenty_nine_ago)
         )
         await s.commit()
     await asyncio.sleep(0.6)
@@ -485,7 +497,14 @@ async def test_an_open_screen_keeps_its_session_alive(
                 select(AuthSession.last_seen_at).where(AuthSession.id == signed.session_id)
             )
         ).scalar_one()
-    assert seen_at > datetime.now(UTC) - timedelta(seconds=30)
-    assert not task.done(), "still open: the session is alive and nothing ended it"
-    sent = await task  # the bound ends it, closing 1000 -- never the watchdog's 4401
-    assert 4401 not in _closes(sent)
+    assert seen_at == twenty_nine_ago, "the re-check must not count as activity"
+    assert not task.done(), "not idle yet: still open"
+    # Two more minutes pass with nobody at the screen: 31 minutes idle.
+    later = datetime.now(UTC) + timedelta(minutes=2)
+    monkeypatch.setattr(sessions_module, "_now", lambda: later)
+
+    sent = await task
+
+    assert _accepted(sent)
+    assert _closes(sent) == [4401]
+    assert seen["cancelled"] is True
