@@ -29,6 +29,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ai.providers import TextBlock, ToolCallBlock
+from app.core.auth.loopback import loopback_app
 from app.core.client_scope import ClientScope
 from app.models import (
     AiAction,
@@ -193,11 +194,15 @@ class _TicketBearingTransport(httpx.AsyncBaseTransport):
 
     Everything else -- including the act tool's device-visibility probe -- goes
     to the real application, so the authorization the proposal depends on is
-    genuinely enforced.
+    genuinely enforced. Over the app marked as the assistant's in-process call
+    (`loopback_app`), as the executor builds it: `install_spy` ignores the app
+    the executor hands its seam, and without the mark the turn's internal
+    token is refused there (own authentication Task 13; the turn carried the
+    console's Bearer until then).
     """
 
     def __init__(self, app: Any, payload: Any) -> None:
-        self._inner = httpx.ASGITransport(app=app)
+        self._inner = httpx.ASGITransport(app=loopback_app(app))
         self._payload = payload
         self.requests: list[httpx.Request] = []
 

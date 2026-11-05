@@ -69,8 +69,12 @@ async def test_an_unconfigured_org_reads_as_empty(console_url: Any) -> None:
 
 
 async def test_without_a_console_address_the_redirect_uri_is_null_not_a_guess(
-    api_env: Any,
+    api_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # `api_env` has a console since own authentication Task 13 (the CSRF rule
+    # needs one); this is the deployment without it. A read: nothing here is
+    # a cookie write the rule would refuse.
+    monkeypatch.setattr(api_env.settings, "public_console_url", None)
     _, headers = await _admin(api_env)
 
     response = await api_env.client.get(PATH, headers=headers)

@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AuditEvent, Organization, User
 from app.models.mcp import McpRevocation
-from tests.mcp_support import MCP_AUD, mcp_client, mcp_token, running_mcp
+from tests.mcp_support import MCP_AUD, MCP_BASE, mcp_client, mcp_token, running_mcp
 
 METADATA_URL = "https://itms.example.com/.well-known/oauth-protected-resource/mcp"
 CHALLENGE = f'Bearer resource_metadata="{METADATA_URL}"'
@@ -121,8 +121,10 @@ def _token_issued_at(env: Any, slug: str, sub: str, iat: int, azp: str = "claude
 # --------------------------------------------------------------------------- #
 
 
-async def test_without_a_console_url_mcp_and_its_metadata_are_503(api_env) -> None:
-    assert api_env.settings.public_console_url is None
+async def test_without_a_console_url_mcp_and_its_metadata_are_503(api_env, monkeypatch) -> None:
+    # `api_env` has a console since own authentication Task 13 (the CSRF rule
+    # needs one); this is the deployment without it.
+    monkeypatch.setattr(api_env.settings, "public_console_url", None)
     for path in (
         "/.well-known/oauth-protected-resource/mcp",
         "/.well-known/oauth-protected-resource",
@@ -188,13 +190,33 @@ async def test_a_non_bearer_authorization_is_treated_as_no_token(mcp_env) -> Non
 
 
 async def test_a_console_token_is_401(mcp_env) -> None:
-    org_id, _ = await _org(mcp_env, mcp_enabled=True)
+    """The token the console's own client obtained. Minted here: since own
+    authentication Task 13 `mcp_env.headers` is a session cookie, which
+    `test_the_session_cookie_is_401` holds."""
+    org_id, slug = await _org(mcp_env, mcp_enabled=True)
     sub = await mcp_env.create_user(org_id, "org-admin")
-    console = await mcp_env.headers(org_id, sub)
+    token = mcp_env.idp.token(sub, slug, email=f"{sub}@test.local")
+    console = {"Authorization": f"Bearer {token}"}
     async with mcp_client(mcp_env) as client:
         resp = await client.post("/mcp", json=INITIALIZE, headers={**MCP_HEADERS, **console})
     assert resp.status_code == 401
     assert resp.headers["www-authenticate"] == REFUSED_CHALLENGE
+
+
+async def test_the_session_cookie_is_401(mcp_env) -> None:
+    """1c(a): on MCP only an OAuth token makes a session, so the console's
+    session cookie -- with the console's headers, sent from the console's
+    own origin as a page on it would -- is no credential: the gate sees no
+    bearer and answers with the plain challenge."""
+    org_id, _ = await _org(mcp_env, mcp_enabled=True)
+    sub = await mcp_env.create_user(org_id, "org-admin")
+    # `mcp_client` is not `api_env`'s client, so the Origin is set here to
+    # the console `mcp_env` configures (another origin is MCP's 403).
+    console = {**await mcp_env.headers(org_id, sub), "Origin": MCP_BASE}
+    async with mcp_client(mcp_env) as client:
+        resp = await client.post("/mcp", json=INITIALIZE, headers={**MCP_HEADERS, **console})
+    assert resp.status_code == 401
+    assert resp.headers["www-authenticate"] == CHALLENGE
 
 
 async def test_a_token_with_both_audiences_is_401(mcp_env) -> None:

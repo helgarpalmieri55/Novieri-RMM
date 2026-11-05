@@ -100,7 +100,6 @@ async def test_a_complete_turn_contacts_exactly_the_configured_provider_host(
     """
     org_id = await api_env.create_org("egress-org")
     _, sub = await ai_user(api_env, org_id, "ai.use", "health.read", "devices.read")
-    headers = await api_env.headers(org_id, sub)
 
     provider_app = ScriptedSseApp(
         [
@@ -144,7 +143,7 @@ async def test_a_complete_turn_contacts_exactly_the_configured_provider_host(
         profile=ADMIN_PROFILE,
         provider=_self_hosted(),
         app=api_env.app,
-        bearer=headers["Authorization"],
+        bearer=await api_env.loopback_bearer(org_id, sub),
         messages=[],
         allowed_tools=["health.alerts", "devices.health"],
         deadline=time.monotonic() + 30.0,

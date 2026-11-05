@@ -598,26 +598,41 @@ async def test_the_persona_profile_may_propose_and_its_tool_set_is_reads_only(
 
 
 @pytest.mark.parametrize("narrowed", [False, True], ids=["unnarrowed", "narrowed"])
-async def test_the_turn_context_built_for_a_confirm_redacts_its_bearer(narrowed: bool) -> None:
+async def test_the_turn_context_built_for_a_confirm_redacts_its_bearer(
+    api_env: Any, narrowed: bool
+) -> None:
     """The confirm path builds a `TurnContext` for its one loopback read. Its
     repr must not carry the token: `TurnContext` is per-turn and module-private,
     but the accident §0.1 refuses -- a token in a log file forever -- is one
     `logger.debug(ctx)` away. It carries the request's `X-Client-Id`, which is
-    no secret (phase 3 design §5.2). A request with no session (the console's
-    bearer, until the cookie switch) forwards its own header."""
+    no secret (phase 3 design §5.2). Since own authentication Task 13 every
+    admitted request has a session, and the bearer is the internal token
+    minted from it (`loopback.loopback_authorization`); the `Authorization`
+    the request brought is never forwarded. (Until then a request with no
+    session forwarded its own header, which this test asserted.)"""
+    from tests.session_support import principal_for, sign_in
+
+    org_id = await api_env.create_org("confirm-redacts")
+    _, sub = await ai_user(api_env, org_id, "ai.use", "devices.read")
+    session_id = (await sign_in(api_env, org_id, sub)).session_id
+    principal = await principal_for(api_env, session_id)
     client = uuid4() if narrowed else None
     raw = {"Authorization": "Bearer secret-token-value"} | (
         {} if client is None else {"X-Client-Id": str(client)}
     )
 
     class _Request:
-        app = None
+        app = api_env.app
         # A real `Headers`: `requested_client` reads it with `getlist`.
         headers = Headers(raw)
-        state = SimpleNamespace()
+        state = SimpleNamespace(session_principal=principal, via_loopback=False)
 
     ctx = await api_module._turn_context(_Request())  # type: ignore[arg-type]
-    assert ctx.bearer == "Bearer secret-token-value"
+    token = ctx.bearer.removeprefix("Bearer ")
+    claims = jwt.decode(token, options={"verify_signature": False})
+    assert (claims["aud"], claims["sid"]) == ("loopback", str(session_id))
+    assert ctx.bearer != "Bearer secret-token-value"
+    assert token not in repr(ctx)
     assert "secret-token-value" not in repr(ctx)
     assert ctx.deadline > time.monotonic()
     assert ctx.requested_client == client

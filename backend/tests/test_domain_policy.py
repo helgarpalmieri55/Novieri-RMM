@@ -56,6 +56,7 @@ from app.core.identity.policy import (
 )
 from app.core.tenancy import org_session
 from app.models import Organization, User
+from tests.mcp_support import MCP_AUD, MCP_BASE, marked_client
 
 BASE_DOMAIN = "toeshee.com"
 
@@ -587,7 +588,17 @@ async def test_an_unknown_org_is_401_and_a_known_org_refuses_the_domain_at_403(
 
     This test exists so the next person cannot flip it back by accident: they
     have to come here and change an assertion that says why.
+
+    ON THE MCP CHANNEL since own authentication phase 1 (Task 13): it is the
+    one door left that reads an org slug from a token. The console's session
+    names its organisation itself, so there is no unknown slug to answer.
     """
+    # The MCP resource is `MCP_AUD` there (tests/mcp_support.py).
+    api_env.settings.public_console_url = MCP_BASE
+
+    def mcp_token(sub: str, slug: str, email: str) -> str:
+        return api_env.idp.token(sub, slug, aud=MCP_AUD, azp="claude", email=email)
+
     org_id = await api_env.create_org("policy-order")
     slug = await api_env.org_slug(org_id)
     await _set_org_domain(api_env, org_id, BASE_DOMAIN)
@@ -599,16 +610,17 @@ async def test_an_unknown_org_is_401_and_a_known_org_refuses_the_domain_at_403(
     # unknown, and would answer 403 below instead of 401.
     api_env.settings.console_email_domain = BASE_DOMAIN
     try:
-        unknown = api_env.idp.token(
-            f"sub-{uuid4().hex[:10]}", f"no-such-org-{uuid4().hex[:8]}", email=stranger
+        unknown = mcp_token(
+            f"sub-{uuid4().hex[:10]}", f"no-such-org-{uuid4().hex[:8]}", stranger
         )
-        known = api_env.idp.token(f"sub-{uuid4().hex[:10]}", slug, email=stranger)
-        unknown_org = await api_env.client.get(
-            "/api/v1/orgs/current", headers={"Authorization": f"Bearer {unknown}"}
-        )
-        refused_domain = await api_env.client.get(
-            "/api/v1/orgs/current", headers={"Authorization": f"Bearer {known}"}
-        )
+        known = mcp_token(f"sub-{uuid4().hex[:10]}", slug, stranger)
+        async with marked_client(api_env) as client:
+            unknown_org = await client.get(
+                "/api/v1/orgs/current", headers={"Authorization": f"Bearer {unknown}"}
+            )
+            refused_domain = await client.get(
+                "/api/v1/orgs/current", headers={"Authorization": f"Bearer {known}"}
+            )
     finally:
         api_env.settings.console_email_domain = None
 
@@ -627,13 +639,14 @@ async def test_an_unknown_org_is_401_and_a_known_org_refuses_the_domain_at_403(
 
     # Non-vacuity: with the allowlist satisfied, the same known slug is admitted
     # -- so the 403 above is the domain rule answering and not the route.
-    admitted = await api_env.client.get(
-        "/api/v1/orgs/current",
-        headers={
-            "Authorization": f"Bearer "
-            f"{api_env.idp.token(f'sub-{uuid4().hex[:10]}', slug, email=f'ada@{BASE_DOMAIN}')}"
-        },
-    )
+    async with marked_client(api_env) as client:
+        admitted = await client.get(
+            "/api/v1/orgs/current",
+            headers={
+                "Authorization": f"Bearer "
+                f"{mcp_token(f'sub-{uuid4().hex[:10]}', slug, f'ada@{BASE_DOMAIN}')}"
+            },
+        )
     assert admitted.status_code == 200, admitted.text
 
 

@@ -48,10 +48,16 @@ def _deadline() -> float:
     return time.monotonic() + 30.0
 
 
-async def _two_clients(api_env: Any, tag: str) -> tuple[HealthOrg, UUID, UUID, str]:
+async def _two_clients(
+    api_env: Any, tag: str
+) -> tuple[HealthOrg, UUID, UUID, str, dict[str, str]]:
     """An org whose internal client and a client X each hold one machine with
     one open alert, and a person holding `ai.use` and `health.read` on every
-    client. Returns `(org, x, x_device, bearer)`."""
+    client. Returns `(org, x, x_device, bearer, headers)`: the person's
+    assistant-turn token, for a test that calls the executor itself, and the
+    console's session headers, for one that goes through the routes (since own
+    authentication Task 13 those are two credentials, where the console's
+    Bearer was both)."""
     org = await seed_org(api_env, tag)
     x, x_site = await client_with_site(api_env, org.org_id)
     async with AsyncSession(api_env.admin_engine, expire_on_commit=False) as s:
@@ -70,8 +76,8 @@ async def _two_clients(api_env: Any, tag: str) -> tuple[HealthOrg, UUID, UUID, s
             api_env, org, profile_id=profile_id, check_id=check_id, device_id=device_id
         )
     _, sub = await ai_user(api_env, org.org_id, "ai.use", "health.read")
-    bearer = (await api_env.headers(org.org_id, sub))["Authorization"]
-    return org, x, device.id, bearer
+    bearer = await api_env.loopback_bearer(org.org_id, sub)
+    return org, x, device.id, bearer, await api_env.headers(org.org_id, sub)
 
 
 def _alerted_devices(outcome: Any) -> set[str]:
@@ -85,7 +91,7 @@ async def test_the_executor_forwards_the_turn_s_client_and_the_route_sees_only_i
     """Narrowed to X: the request carries `X-Client-Id: X` and the alerts
     route answers with X's machine only. Not narrowed: no such header, and
     both machines."""
-    org, x, x_device, bearer = await _two_clients(api_env, "ai-narrow-exec")
+    org, x, x_device, bearer, _headers = await _two_clients(api_env, "ai-narrow-exec")
     spy = RecordingTransport(api_env.app)
     install_spy(monkeypatch, spy)
 
@@ -110,7 +116,7 @@ async def test_an_admin_turn_narrowed_by_the_selector_reads_only_that_client(
     request's `X-Client-Id` on the turn, the read tool's loopback carries it,
     and the turn read one alert -- X's -- where the same turn un-narrowed
     reads two."""
-    org, x, _, bearer = await _two_clients(api_env, "ai-narrow-turn")
+    org, x, _, _bearer, headers = await _two_clients(api_env, "ai-narrow-turn")
     spy = RecordingTransport(api_env.app)
     install_spy(monkeypatch, spy)
 
@@ -135,11 +141,11 @@ async def test_an_admin_turn_narrowed_by_the_selector_reads_only_that_client(
         assert r.status_code == 200, r.text
         return r.json()["tool_calls"][0]
 
-    narrowed = await turn({"Authorization": bearer, "X-Client-Id": str(x)})
+    narrowed = await turn({**headers, "X-Client-Id": str(x)})
     assert [request.headers.get("x-client-id") for request in spy.requests] == [str(x)]
     assert (narrowed["status"], narrowed["result_count"]) == ("ok", 1)
 
-    everything = await turn({"Authorization": bearer})
+    everything = await turn(headers)
     assert spy.requests[-1].headers.get("x-client-id") is None
     assert (everything["status"], everything["result_count"]) == ("ok", 2)
 
@@ -259,14 +265,18 @@ async def test_the_portal_executor_sends_exactly_one_header_of_its_own(
     carries exactly one header": the portal principal's own bearer, and no
     `X-Client-Id` or anything else. Asserted as an equality with what a bare
     client sends for the same GET, so a second header -- or a default
-    overridden -- fails here (final review A4, F3T4-1).
-    FALSIFIER: any header but `Authorization` on the `client.get` in
+    overridden -- fails here (final review A4, F3T4-1). Since own
+    authentication Task 13 the bearer is the turn's internal token, so the
+    loopback claim (`X-ITMS-Loopback: 1`, `loopback.loopback_headers`) rides
+    with it, as on the staff executor
+    (`test_ai_admin_executor.py::test_the_request_is_a_get_to_the_tools_own_path_with_only_the_turns_headers`).
+    FALSIFIER: any other header on the `client.get` in
     `app/core/ai/executor_portal.py`, or default headers on its client."""
     spy = RecordingTransport(api_env.app)
     install_portal_spy(monkeypatch, spy)
     org_id = await api_env.create_org("portal-one-header")
     sub = await api_env.create_user(org_id, "requester")
-    bearer = (await api_env.headers(org_id, sub))["Authorization"]
+    bearer = await api_env.loopback_bearer(org_id, sub)
 
     outcome = await invoke_portal_tool(
         tool_name="portal.categories",
@@ -284,4 +294,5 @@ async def test_the_portal_executor_sends_exactly_one_header_of_its_own(
     assert {k.lower(): v for k, v in sent.headers.items()} == {
         **{k.lower(): v for k, v in defaults.items()},
         "authorization": bearer,
+        "x-itms-loopback": "1",
     }

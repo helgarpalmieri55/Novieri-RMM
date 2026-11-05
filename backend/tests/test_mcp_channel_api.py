@@ -140,14 +140,21 @@ async def test_an_mcp_token_is_accepted_on_a_marked_request(mcp_env) -> None:
 
 
 async def test_a_console_token_is_refused_on_a_marked_request(mcp_env) -> None:
-    org_id, _, sub = await _org_admin(mcp_env)
+    """The token the console's own client obtained. Minted here: since own
+    authentication Task 13 `mcp_env.headers` is a session cookie, which
+    `tests/test_auth_falsifiers.py::test_the_mcp_channel_takes_no_cookie`
+    holds on the channel."""
+    _, slug, sub = await _org_admin(mcp_env)
+    token = mcp_env.idp.token(sub, slug, email=f"{sub}@test.local")
     async with marked_client(mcp_env) as client:
-        resp = await client.get("/api/v1/me", headers=await mcp_env.headers(org_id, sub))
+        resp = await client.get("/api/v1/me", headers=_bearer(token))
     assert resp.status_code == 401
 
 
-async def test_a_marked_request_without_a_console_url_is_503(api_env) -> None:
-    assert api_env.settings.public_console_url is None
+async def test_a_marked_request_without_a_console_url_is_503(api_env, monkeypatch) -> None:
+    # `api_env` has a console since own authentication Task 13 (the CSRF rule
+    # needs one); this is the deployment without it.
+    monkeypatch.setattr(api_env.settings, "public_console_url", None)
     _, slug, sub = await _org_admin(api_env)
     async with marked_client(api_env) as client:
         resp = await client.get(

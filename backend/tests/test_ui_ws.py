@@ -1,15 +1,18 @@
 """UI WebSocket: authenticated live status channel, served by a real uvicorn
 instance so the WebSocket path is exercised end-to-end in one event loop.
 
-THE TOKEN TRAVELS IN THE SUBPROTOCOL HEADER, NOT THE QUERY STRING. It used to
-be `?token=<jwt>`, which uvicorn's access line writes to stdout verbatim -- a
-live bearer token in the log, unreachable by the logging kernel's redaction
-(which matches on `extra=` field names, and uvicorn's records have none). The
-last two tests in this file are the pair that makes the fix a measurement
-rather than a claim: one asserts a real handshake leaves no token in the log
-output, and its non-vacuity control asserts that a URL-borne token DOES appear
-there -- the same capture, the same server, the exposure still demonstrable on
-the path that was removed.
+THE CREDENTIAL TRAVELS IN A HEADER, NEVER THE QUERY STRING. It used to be
+`?token=<jwt>`, which uvicorn's access line writes to stdout verbatim -- a live
+bearer token in the log, unreachable by the logging kernel's redaction (which
+matches on `extra=` field names, and uvicorn's records have none). Then the
+console's token rode in the subprotocol header; since own authentication
+phase 1 (Task 13) the credential is the session cookie, which the browser
+sends in the `Cookie` header with the console's `Origin`, and a subprotocol
+token opens nothing. The pair of log tests below makes "no credential in the
+log" a measurement rather than a claim: one asserts a real handshake leaves no
+session token in the log output, and its non-vacuity control asserts that a
+URL-borne one DOES appear there -- the same capture, the same server, the
+exposure still demonstrable on the path that was removed.
 """
 
 import asyncio
@@ -22,8 +25,8 @@ import redis.asyncio as aioredis
 import uvicorn
 import websockets
 
-from app.api.v1.ws import AUTH_SUBPROTOCOL
 from app.gateway.dispatch import publish_ui_event
+from tests.session_support import CONSOLE, cookie_header, sign_in, ws_cookie
 
 REDIS_URL = "redis://localhost:6379/9"
 
@@ -32,11 +35,6 @@ def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
-
-
-def _auth(token: str) -> list[str]:
-    """What a browser passes as `new WebSocket(url, [...])`."""
-    return [AUTH_SUBPROTOCOL, token]
 
 
 @pytest.fixture()
@@ -125,16 +123,13 @@ async def test_ui_ws_receives_org_events_with_valid_token(api_env, live_api) -> 
     port = live_api
     org_id = await api_env.create_org("ws")
     reader = await api_env.create_user(org_id, "read-only")
-    slug = await api_env.org_slug(org_id)
-    token = api_env.idp.token(reader, slug)
+    token = (await sign_in(api_env, org_id, reader)).token
 
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
-    async with websockets.connect(
-        f"ws://127.0.0.1:{port}/api/v1/ws", subprotocols=_auth(token)
-    ) as ws:
-        # The server must select the protocol it was offered, or a browser
-        # would fail the handshake outright.
-        assert ws.subprotocol == AUTH_SUBPROTOCOL
+    async with websockets.connect(f"ws://127.0.0.1:{port}/api/v1/ws", **ws_cookie(token)) as ws:
+        # The console offers no subprotocol, and none is selected: a browser
+        # that offered none fails a handshake that names one.
+        assert ws.subprotocol is None
         await asyncio.sleep(0.3)  # allow the server-side subscription to settle
         # On the org's internal client (its id is the org's): a read-only
         # role granted on every client hears every client's channel.
@@ -152,7 +147,7 @@ async def test_ui_ws_rejects_bad_token(api_env, live_api) -> None:
     errors = (websockets.exceptions.InvalidStatus, websockets.exceptions.ConnectionClosed)
     with pytest.raises(errors):
         async with websockets.connect(
-            f"ws://127.0.0.1:{port}/api/v1/ws", subprotocols=_auth("garbage")
+            f"ws://127.0.0.1:{port}/api/v1/ws", **ws_cookie("garbage")
         ) as ws:
             await asyncio.wait_for(ws.recv(), timeout=3)
 
@@ -160,16 +155,16 @@ async def test_ui_ws_rejects_bad_token(api_env, live_api) -> None:
 async def test_ui_ws_refuses_a_token_offered_in_the_query_string(api_env, live_api) -> None:
     """The removed path stays removed.
 
-    A VALID token in the query string -- the exact request the old client
-    made -- is refused, so the exposure is not merely unused by this repo's
+    A VALID credential in the query string -- the shape of the request the
+    old client made, with the session's token since own authentication
+    Task 13 -- is refused, so the exposure is not merely unused by this repo's
     frontend but unreachable. Without this, deleting the query-parameter read
     and leaving a fallback would look identical from the outside.
     """
     port = live_api
     org_id = await api_env.create_org("ws-query")
     reader = await api_env.create_user(org_id, "read-only")
-    slug = await api_env.org_slug(org_id)
-    token = api_env.idp.token(reader, slug)
+    token = (await sign_in(api_env, org_id, reader)).token
 
     errors = (websockets.exceptions.InvalidStatus, websockets.exceptions.ConnectionClosed)
     with pytest.raises(errors):
@@ -194,13 +189,10 @@ async def test_the_token_does_not_reach_the_log_but_a_url_borne_one_would(
     port, lines = live_api_logged
     org_id = await api_env.create_org("ws-log")
     reader = await api_env.create_user(org_id, "read-only")
-    slug = await api_env.org_slug(org_id)
-    token = api_env.idp.token(reader, slug)
+    token = (await sign_in(api_env, org_id, reader)).token
 
-    async with websockets.connect(
-        f"ws://127.0.0.1:{port}/api/v1/ws", subprotocols=_auth(token)
-    ) as ws:
-        assert ws.subprotocol == AUTH_SUBPROTOCOL
+    async with websockets.connect(f"ws://127.0.0.1:{port}/api/v1/ws", **ws_cookie(token)) as ws:
+        assert ws.subprotocol is None
     await asyncio.sleep(0.2)
 
     clean = list(lines)
@@ -210,7 +202,7 @@ async def test_the_token_does_not_reach_the_log_but_a_url_borne_one_would(
         f"uvicorn logged nothing about the handshake -- capture is dead: {clean}"
     )
     leaked = [line for line in clean if token in line]
-    assert leaked == [], f"the bearer token reached the log: {leaked}"
+    assert leaked == [], f"the session token reached the log: {leaked}"
 
     lines.clear()
     errors = (websockets.exceptions.InvalidStatus, websockets.exceptions.ConnectionClosed)
@@ -261,7 +253,8 @@ async def _technician_on(api_env, org_id, *client_ids) -> str:
 
 
 async def _token(api_env, org_id, sub: str) -> str:
-    return api_env.idp.token(sub, await api_env.org_slug(org_id), email=f"{sub}@test.local")
+    """The value of a new console session's cookie for `sub` (`ws_cookie`)."""
+    return (await sign_in(api_env, org_id, sub)).token
 
 
 async def _device_on(api_env, org_id, client_id, site_id, hostname: str):
@@ -340,7 +333,7 @@ async def test_a_technician_on_one_client_hears_it_and_not_another(
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
     try:
         async with websockets.connect(
-            f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=_auth(token)
+            f"ws://127.0.0.1:{live_api}/api/v1/ws", **ws_cookie(token)
         ) as ws:
             await asyncio.sleep(0.3)  # allow the server-side subscription to settle
             await handle_agent_message(
@@ -397,7 +390,7 @@ async def test_a_job_status_change_reaches_only_its_clients_technician(
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
     try:
         async with websockets.connect(
-            f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=_auth(token)
+            f"ws://127.0.0.1:{live_api}/api/v1/ws", **ws_cookie(token)
         ) as ws:
             await asyncio.sleep(0.3)
             await handle_agent_message(
@@ -451,7 +444,7 @@ async def test_a_global_event_reaches_a_narrowed_technician(api_env, live_api) -
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
     try:
         async with websockets.connect(
-            f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=_auth(token)
+            f"ws://127.0.0.1:{live_api}/api/v1/ws", **ws_cookie(token)
         ) as ws:
             await asyncio.sleep(0.3)
             await publish_global_ui_event(redis, org_id, {"kind": "settings_changed"})
@@ -473,7 +466,7 @@ async def test_the_client_parameter_narrows_an_every_client_technician(
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
     try:
         async with websockets.connect(
-            f"ws://127.0.0.1:{live_api}/api/v1/ws?client={x}", subprotocols=_auth(token)
+            f"ws://127.0.0.1:{live_api}/api/v1/ws?client={x}", **ws_cookie(token)
         ) as ws:
             await asyncio.sleep(0.3)
             await publish_ui_event(redis, org_id, y, {"kind": "for-y"})
@@ -498,7 +491,7 @@ async def test_an_every_client_technician_hears_every_client(api_env, live_api) 
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
     try:
         async with websockets.connect(
-            f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=_auth(token)
+            f"ws://127.0.0.1:{live_api}/api/v1/ws", **ws_cookie(token)
         ) as ws:
             await asyncio.sleep(0.3)
             await publish_ui_event(redis, other_org, other_org, {"kind": "other-org"})
@@ -521,6 +514,8 @@ async def test_an_every_client_technician_hears_every_client(api_env, live_api) 
 
 
 async def _ws_messages(api_env, *, token: str, query: bytes = b"") -> list:
+    """The route's messages for a handshake carrying `token` as the session
+    cookie, with the console's Origin and no subprotocol."""
     sent: list = []
     inbound = [{"type": "websocket.connect"}, {"type": "websocket.disconnect", "code": 1000}]
 
@@ -542,10 +537,14 @@ async def _ws_messages(api_env, *, token: str, query: bytes = b"") -> list:
         "raw_path": b"/api/v1/ws",
         "query_string": query,
         "root_path": "",
-        "headers": [(b"host", b"api.test")],
+        "headers": [
+            (b"host", b"api.test"),
+            (b"cookie", cookie_header(token).encode()),
+            (b"origin", CONSOLE.encode()),
+        ],
         "client": ("127.0.0.1", 41234),
         "server": ("127.0.0.1", 80),
-        "subprotocols": [AUTH_SUBPROTOCOL, token],
+        "subprotocols": [],
     }
     await api_env.app(scope, receive, send)
     return sent
@@ -605,9 +604,10 @@ async def test_a_client_outside_the_scope_closes_4403(api_env) -> None:
 # --------------------------------------------------------------------------- #
 # A scope of more than one client (Task 10 review M1), and the LIVE RE-CHECK
 # (final review, T10R-I1): the scope was evaluated once, at connect, so a
-# revoked grant, a disabled account or an expired token kept receiving that
-# client's live events -- a job's full result body among them -- for as long
-# as the socket stayed open. The door is re-run every `RECHECK_INTERVAL_S`.
+# revoked grant, a disabled account or an expired credential kept receiving
+# that client's live events -- a job's full result body among them -- for as
+# long as the socket stayed open. The door is re-run every
+# `RECHECK_INTERVAL_S`.
 # --------------------------------------------------------------------------- #
 
 
@@ -649,7 +649,7 @@ async def test_a_two_client_technician_hears_both_and_not_a_third(api_env, live_
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
     try:
         async with websockets.connect(
-            f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=_auth(token)
+            f"ws://127.0.0.1:{live_api}/api/v1/ws", **ws_cookie(token)
         ) as ws:
             await asyncio.sleep(0.3)
             await publish_ui_event(redis, org_id, z, {"kind": "for-z"})
@@ -671,7 +671,7 @@ async def test_the_client_parameter_drops_the_other_client_of_a_two_client_scope
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
     try:
         async with websockets.connect(
-            f"ws://127.0.0.1:{live_api}/api/v1/ws?client={x}", subprotocols=_auth(token)
+            f"ws://127.0.0.1:{live_api}/api/v1/ws?client={x}", **ws_cookie(token)
         ) as ws:
             await asyncio.sleep(0.3)
             await publish_ui_event(redis, org_id, y, {"kind": "for-y"})
@@ -693,7 +693,7 @@ async def test_an_unchanged_scope_keeps_the_socket_open(
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
     try:
         async with websockets.connect(
-            f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=_auth(token)
+            f"ws://127.0.0.1:{live_api}/api/v1/ws", **ws_cookie(token)
         ) as ws:
             await asyncio.sleep(1.5)  # several re-checks at 0.2 s
             await publish_ui_event(redis, org_id, y, {"kind": "for-y"})
@@ -718,7 +718,7 @@ async def test_a_revoked_grant_closes_the_socket_4403(api_env, live_api, fast_re
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
     try:
         async with websockets.connect(
-            f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=_auth(token)
+            f"ws://127.0.0.1:{live_api}/api/v1/ws", **ws_cookie(token)
         ) as ws:
             await asyncio.sleep(0.3)
             await publish_ui_event(redis, org_id, y, {"kind": "before"})
@@ -737,7 +737,11 @@ async def test_a_revoked_grant_closes_the_socket_4403(api_env, live_api, fast_re
     assert code == 4403
 
 
-async def test_a_disabled_person_is_closed_4403(api_env, live_api, fast_recheck) -> None:
+async def test_a_disabled_person_is_closed_4401(api_env, live_api, fast_recheck) -> None:
+    """Was `..._closed_4403`, when the re-check re-read a token's person and
+    refused them. Since own authentication Task 13 the re-check re-reads the
+    session, and a disabled account's sessions stop (`sessions.resolve`): the
+    socket closes 4401 -- signed out -- on the next re-check, as before."""
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -747,7 +751,7 @@ async def test_a_disabled_person_is_closed_4403(api_env, live_api, fast_recheck)
     sub = await _technician_on(api_env, org_id, x)
     token = await _token(api_env, org_id, sub)
     async with websockets.connect(
-        f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=_auth(token)
+        f"ws://127.0.0.1:{live_api}/api/v1/ws", **ws_cookie(token)
     ) as ws:
         await asyncio.sleep(0.3)
         async with AsyncSession(api_env.admin_engine) as s:
@@ -756,19 +760,77 @@ async def test_a_disabled_person_is_closed_4403(api_env, live_api, fast_recheck)
             )
             await s.commit()
         code = await _closed_with(ws)
-    assert code == 4403
+    assert code == 4401
 
 
-async def test_an_expired_token_is_closed_4401(api_env, live_api) -> None:
-    """Checked on every turn of the loop, not only at the re-check: the token
-    is what admitted the socket, and it says when it stops."""
+async def test_a_session_past_its_maximum_is_closed_4401(api_env, live_api) -> None:
+    """Was `test_an_expired_token_is_closed_4401`. Checked on every turn of the
+    loop, not only at the re-check (the interval here is the default minute,
+    longer than the test): the session is what admitted the socket, and its
+    absolute maximum (`expires_at`) says when it stops."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import update
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models.auth import AuthSession
+
     org_id, (x, _y, _z) = await _three_clients(api_env, "ws-expiry")
     sub = await _technician_on(api_env, org_id, x)
-    token = api_env.idp.token(
-        sub, await api_env.org_slug(org_id), email=f"{sub}@test.local", exp_in=2
-    )
+    signed = await sign_in(api_env, org_id, sub)
+    async with AsyncSession(api_env.admin_engine) as s:
+        await s.execute(
+            update(AuthSession)
+            .where(AuthSession.id == signed.session_id)
+            .values(expires_at=datetime.now(UTC) + timedelta(seconds=2))
+        )
+        await s.commit()
     async with websockets.connect(
-        f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=_auth(token)
+        f"ws://127.0.0.1:{live_api}/api/v1/ws", **ws_cookie(signed.token)
     ) as ws:
         code = await _closed_with(ws)
     assert code == 4401
+
+
+async def test_an_ended_session_is_closed_4401(api_env, live_api, monkeypatch) -> None:
+    """Signed out elsewhere, cut by an administrator or replaced: the next
+    re-check finds the session ended and closes the socket 4401."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.api.v1 import ws as ws_module
+    from app.models.auth import AuthSession
+
+    monkeypatch.setattr(ws_module, "RECHECK_INTERVAL_S", 0.2)
+    org_id, (x, _y, _z) = await _three_clients(api_env, "ws-ended")
+    sub = await _technician_on(api_env, org_id, x)
+    signed = await sign_in(api_env, org_id, sub)
+    async with websockets.connect(
+        f"ws://127.0.0.1:{live_api}/api/v1/ws", **ws_cookie(signed.token)
+    ) as ws:
+        await asyncio.sleep(0.3)
+        async with AsyncSession(api_env.admin_engine) as s:
+            await s.execute(
+                update(AuthSession)
+                .where(AuthSession.id == signed.session_id)
+                .values(ended_at=datetime.now(UTC), ended_reason="signed_out")
+            )
+            await s.commit()
+        code = await _closed_with(ws)
+    assert code == 4401
+
+
+async def test_a_subprotocol_token_no_longer_opens_the_socket(api_env, live_api) -> None:
+    """Own authentication phase 1: the console's old way in is no way in."""
+    org_id = await api_env.create_org("ws-bearer")
+    sub = await api_env.create_user(org_id, "read-only")
+    token = api_env.idp.token(sub, await api_env.org_slug(org_id), email=f"{sub}@test.local")
+    with pytest.raises(
+        (websockets.exceptions.InvalidStatus, websockets.exceptions.ConnectionClosed)
+    ):
+        async with websockets.connect(
+            f"ws://127.0.0.1:{live_api}/api/v1/ws", subprotocols=["bearer", token]
+        ) as ws:
+            await asyncio.wait_for(ws.recv(), timeout=2.0)

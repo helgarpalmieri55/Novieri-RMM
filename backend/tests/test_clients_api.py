@@ -28,6 +28,7 @@ from app.models import (
 from tests.client_scope_support import EVERY_CLIENT
 from tests.install_link_fixtures import FACTS as LINK_FACTS
 from tests.install_link_fixtures import link_path, make_csr_pem, peer_client
+from tests.mcp_support import MCP_AUD, MCP_BASE, marked_client
 from tests.msi_fixtures import StoreWith
 
 TOKEN_FACTS = {
@@ -926,9 +927,11 @@ async def test_a_technician_signing_in_with_a_contacts_address_is_never_refused(
     api_env,
 ) -> None:
     """I1 is ONE-DIRECTIONAL: it holds a contact's address against every other
-    user, never a staff row against a contact's. First-login provisioning
-    (`app/api/deps.py::admit`) writes whatever address the identity provider
-    asserts, and a sign-in must not fail on a contact's data."""
+    user, never a staff row against a contact's. The MCP door's first-seen
+    provisioning (`app/api/deps.py::admit`, D5) -- the only door that still
+    writes an address an identity provider asserted, since own authentication
+    phase 1 -- writes whatever address it is given, and a sign-in must not
+    fail on a contact's data."""
     env = api_env
     org, h = await _admin(env)
     x = await _create(env, h, "X")
@@ -937,8 +940,13 @@ async def test_a_technician_signing_in_with_a_contacts_address_is_never_refused(
     )
     assert contact.status_code == 201, contact.text
     slug = await env.org_slug(org)
-    token = env.idp.token("sub-new-technician", slug, email="dual@x.co")
-    me = await env.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
+    # The MCP resource is `MCP_AUD` there (tests/mcp_support.py).
+    env.settings.public_console_url = MCP_BASE
+    token = env.idp.token(
+        "sub-new-technician", slug, aud=MCP_AUD, azp="claude", email="dual@x.co"
+    )
+    async with marked_client(env) as client:
+        me = await client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
     assert me.status_code == 200, me.text
     async with AsyncSession(env.admin_engine) as s:
         kinds = sorted(

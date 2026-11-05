@@ -27,7 +27,8 @@ from app.core.security import TokenClaims
 from app.core.tenancy import org_session
 from app.models import Client, Role, User, UserRole
 from app.modules.portal.principal import require_portal_permission, resolve_portal_principal
-from app.modules.remote.tunnel import TunnelAuthError, authorize_tunnel
+from app.modules.remote.tunnel import TunnelAuthError, authorize_tunnel_session
+from tests.session_support import sign_in, socket_connection
 
 Grants = list[tuple[str, str | None]]
 
@@ -63,9 +64,7 @@ async def _seed(admin_engine: Any, env: Any, grants: Grants) -> tuple[UUID, UUID
 
 async def _headers(env: Any, org_id: UUID, **extra: str) -> dict[str, str]:
     """`_seed`'s user signs in: its sub is `sub-<org id>`."""
-    slug = await env.org_slug(org_id)
-    token = env.idp.token(f"sub-{org_id}", slug, email="ana@test.local")
-    return {"Authorization": f"Bearer {token}", **extra}
+    return {**(await env.headers(org_id, f"sub-{org_id}")), **extra}
 
 
 def _as_json(scope: ClientScope) -> dict[str, Any]:
@@ -273,13 +272,24 @@ async def test_a_contact_is_refused_at_the_console(api_env: Any) -> None:
         user = (await s.execute(select(User).where(User.external_subject == sub))).scalar_one()
         user.kind, user.client_id = "contact", org  # the internal client (id convention)
         await s.commit()
-    r = await env.client.get("/api/v1/me", headers=await env.headers(org, sub))
+    headers = await env.headers(org, sub)
+
+    async def last_login() -> Any:
+        async with AsyncSession(env.admin_engine) as s:
+            return (
+                await s.execute(select(User.last_login_at).where(User.external_subject == sub))
+            ).scalar_one()
+
+    # Since own authentication Task 13 `env.headers` is a sign-in, which
+    # records its own login when the session starts; the door's refusal must
+    # record nothing beyond it (it asserted `last_login_at is None` while the
+    # credential was a token that only the door turned into a login).
+    signed_in_at = await last_login()
+    r = await env.client.get("/api/v1/me", headers=headers)
     assert r.status_code == 403
     assert r.json()["detail"] == "this account can only use the portal"
-    # Refused inside the admission transaction: it records no login.
-    async with AsyncSession(env.admin_engine) as s:
-        user = (await s.execute(select(User).where(User.external_subject == sub))).scalar_one()
-        assert user.last_login_at is None
+    # Refused at admission, which writes nothing: it records no login.
+    assert await last_login() == signed_in_at
 
 
 # Global configuration (a per-client grant is not a grant on every client) is
@@ -330,13 +340,10 @@ async def test_a_contact_is_refused_at_the_websocket_and_tunnel_doors(api_env: A
 
 
 async def _tunnel(env: Any, org: UUID) -> tuple[UUID, UUID, ClientScope]:
-    slug = await env.org_slug(org)
-    return await authorize_tunnel(
-        token=env.idp.token(f"sub-{org}", slug, email="ana@test.local"),
+    return await authorize_tunnel_session(
+        connection=socket_connection(env, (await sign_in(env, org, f"sub-{org}")).token),
         session_id=uuid4(),
         settings=env.settings,
-        jwks=env.app.state.jwks,
-        admin_engine=env.admin_engine,
         app_engine=env.app_engine,
     )
 

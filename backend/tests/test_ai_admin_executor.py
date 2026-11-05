@@ -55,7 +55,7 @@ async def _estate(api_env: Any, alerts: int = 1) -> tuple[HealthOrg, str]:
             opened_policy_version=1,
         )
     _, sub = await ai_user(api_env, org.org_id, "ai.use", "devices.read", "health.read")
-    bearer = (await api_env.headers(org.org_id, sub))["Authorization"]
+    bearer = await api_env.loopback_bearer(org.org_id, sub)
     return org, bearer
 
 
@@ -70,8 +70,9 @@ async def test_the_request_is_a_get_to_the_tools_own_path_with_only_the_turns_he
 ) -> None:
     """The whole of §4.4 in one recorded request: the method, the path built
     from the tool's template, and the COMPLETE header set the executor added
-    -- the caller's token and, when the turn's own request carried one, its
-    `X-Client-Id` (phase 3 design §5.2). Nothing else."""
+    -- the turn's internal token, the loopback claim and, when the turn's own
+    request carried one, its `X-Client-Id` (phase 3 design §5.2). Nothing
+    else."""
     org, bearer = await _estate(api_env)
     spy = RecordingTransport(api_env.app)
     install_spy(monkeypatch, spy)
@@ -94,7 +95,7 @@ async def test_the_request_is_a_get_to_the_tools_own_path_with_only_the_turns_he
     # Only httpx's own transport headers survive beside them -- nothing else
     # this module or the model contributed.
     added = set(request.headers) - {"host", "accept", "accept-encoding", "connection", "user-agent"}
-    expected = {"authorization": bearer} | (
+    expected = {"authorization": bearer, "x-itms-loopback": "1"} | (
         {} if client is None else {"x-client-id": str(client)}
     )
     assert {name: request.headers[name] for name in added} == expected

@@ -12,11 +12,13 @@
 """
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
 import pytest
-from sqlalchemy import select, update
+from fastapi import HTTPException
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import action_tokens
@@ -30,6 +32,7 @@ from app.models.auth import (
     AuthTotp,
     AuthTrustedDevice,
 )
+from app.modules.user_admin import api as user_admin_api
 from tests.auth_support import (
     CONSOLE,
     Staff,
@@ -449,9 +452,9 @@ async def test_nobody_cancels_their_own_account(lifecycle_env: Any) -> None:
     caller_sub = await env.create_user(org, "org-admin")
     caller = await _row_of(env, caller_sub)
     await _hand_issued_invite(env, org, caller.id)
-    bearer = await env.headers(org, caller_sub)
+    headers = await env.headers(org, caller_sub)
 
-    response = await env.client.delete(f"/api/v1/users/{caller.id}/invite", headers=bearer)
+    response = await env.client.delete(f"/api/v1/users/{caller.id}/invite", headers=headers)
 
     assert response.status_code == 403, response.text
     assert response.json() == {"detail": "you cannot delete your own account"}
@@ -627,20 +630,53 @@ async def test_an_administrator_ends_a_persons_sessions(lifecycle_env: Any) -> N
 async def test_an_invitation_needs_the_console_address(
     lifecycle_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Without `ITS_PUBLIC_CONSOLE_URL` no invitation is made over HTTP. Since
+    own authentication Task 13 the CSRF rule (Task 6) refuses the cookie write
+    first -- 403 `csrf`, there is no console origin to compare with -- so the
+    route's own 503 is held directly by the next test; either way nobody and
+    no link is made. (It sent the console's Bearer, which the CSRF rule does
+    not judge, and met the route's 503, until the Bearer went.)"""
     env = lifecycle_env
     org = await env.create_org("invite-noconsole")
     admin = await signed_in(env, org, "org-admin")
     monkeypatch.setattr(env.app.state.settings, "public_console_url", None)
-    bearer = await env.headers(org, admin.sub)
 
-    response = await _invite(env, bearer, email="nobody-made@toeshee.test")
+    response = await _invite(env, admin.headers(), email="nobody-made@toeshee.test")
 
-    assert response.status_code == 503
+    assert response.status_code == 403
+    assert response.json()["code"] == "csrf"
     async with AsyncSession(env.admin_engine) as session:
         made = (
             await session.execute(select(User.id).where(User.email == "nobody-made@toeshee.test"))
         ).first()
+        links = (
+            await session.execute(
+                select(func.count())
+                .select_from(AuthActionToken)
+                .where(AuthActionToken.org_id == org)
+            )
+        ).scalar_one()
     assert made is None
+    assert links == 0
+
+
+@pytest.mark.parametrize("unset", [None, ""])
+def test_the_invitation_route_refuses_to_make_a_link_without_the_console_address(
+    unset: str | None,
+) -> None:
+    """`user_admin.api._console_url`, the route's own refusal: an invitation
+    link is made from `ITS_PUBLIC_CONSOLE_URL` and never from the request's
+    Host header, so without it the route says so with a 503 before anything
+    is written. Unreachable over HTTP since Task 13 (above), so held here."""
+
+    def request(url: str | None) -> Any:
+        settings = SimpleNamespace(public_console_url=url)
+        return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(settings=settings)))
+
+    with pytest.raises(HTTPException) as refused:
+        user_admin_api._console_url(request(unset))
+    assert refused.value.status_code == 503
+    assert user_admin_api._console_url(request(CONSOLE)) == CONSOLE
 
 
 async def test_an_invited_technician_has_a_password_row_only_after_accepting(
