@@ -41,6 +41,9 @@ const { createPasskey, signWithPasskey } = vi.hoisted(() => ({
 // stays Task 11's own.
 vi.mock("../auth/passkey", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../auth/passkey")>()),
+  // A browser that can use passkeys: the recent confirmation offers one only
+  // there (final review D1, Minor 6), and jsdom has no WebAuthn.
+  canUsePasskeys: () => true,
   createPasskey,
   signWithPasskey,
 }));

@@ -125,6 +125,15 @@ export const auth = {
   },
   passkey: {
     unsupported: "This browser cannot use passkeys. Use an authenticator app instead.",
+    // The account has a passkey this browser cannot use, so the option is not
+    // shown (`passkey.ts::passkeyHiddenAdvice`): why, and what is left.
+    hiddenUseAppOrCode:
+      "This browser cannot use passkeys, so your passkey is not offered here. Use your authenticator app or one of your recovery codes.",
+    hiddenUseApp: "This browser cannot use passkeys, so your passkey is not offered here. Use your authenticator app.",
+    hiddenUseCode:
+      "This browser cannot use passkeys, so your passkey is not offered here. Use one of your recovery codes, or a browser that supports passkeys.",
+    hiddenNoOther:
+      "This browser cannot use passkeys, and your account has no other second factor. Sign in from a browser that supports passkeys, or ask an administrator to reset your second factors.",
     cancelled: "The passkey prompt was closed or timed out, so nothing was used.",
     alreadyRegistered: "This device already holds a passkey for your account.",
     noUserVerification:

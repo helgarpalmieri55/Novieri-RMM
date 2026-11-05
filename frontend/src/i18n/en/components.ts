@@ -107,6 +107,9 @@ export const components = {
     },
     confirmRecovery: "Use this code",
     noMethod: "Your account has no second factor, so this change cannot be confirmed. Ask an administrator to reset your second factors.",
+    // A passkey is the only second factor, and this browser cannot use it.
+    passkeyOnly:
+      "This browser cannot use passkeys, and you have no other second factor to confirm with. Do this from a browser that supports passkeys.",
     cancelled: "Nothing was changed: the confirmation was closed.",
   },
 } as const;

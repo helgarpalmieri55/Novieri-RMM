@@ -200,9 +200,43 @@ describe.each([
 
 describe("a passkey-only account on a browser without passkeys", () => {
   it("is told so instead of being left with only 'Start again'", () => {
+    // RE-POINTED (final review D1, Minor 6): it was told to "use an
+    // authenticator app instead" -- which this account does not have.
     webauthn.supported = false;
     renderAuth("/sign-in/factor", { methods: ["passkey"], rememberDays: null });
-    expect(screen.getByText("This browser cannot use passkeys. Use an authenticator app instead.")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This browser cannot use passkeys, and your account has no other second factor. Sign in from a browser that supports passkeys, or ask an administrator to reset your second factors.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/authenticator app/)).not.toBeInTheDocument();
+  });
+});
+
+describe("a passkey the browser cannot use, with other methods left (final review D1, Minor 6)", () => {
+  it.each([
+    [["passkey", "recovery"], "Use one of your recovery codes, or a browser that supports passkeys."],
+    [["passkey", "totp"], "Use your authenticator app."],
+    [["passkey", "totp", "recovery"], "Use your authenticator app or one of your recovery codes."],
+  ])("with %j, says why the passkey is missing and what to use", (methods, advice) => {
+    webauthn.supported = false;
+    renderAuth("/sign-in/factor", { methods, rememberDays: null });
+    expect(screen.getByText(`This browser cannot use passkeys, so your passkey is not offered here. ${advice}`)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use a passkey" })).not.toBeInTheDocument();
+  });
+
+  it("says nothing about passkeys where the account has none", () => {
+    webauthn.supported = false;
+    renderAuth("/sign-in/factor", { methods: ["totp", "recovery"], rememberDays: null });
+    expect(screen.queryByText(/cannot use passkeys/)).not.toBeInTheDocument();
+  });
+
+  it("says it in Spanish", () => {
+    setActiveLanguage("es");
+    webauthn.supported = false;
+    const { container } = renderAuth("/sign-in/factor", { methods: ["passkey", "recovery"], rememberDays: null });
+    expect(screen.getByText(/Este navegador no puede usar claves de acceso, así que aquí no se ofrece la tuya/)).toBeInTheDocument();
+    expectNoEnglish(container);
   });
 });
 

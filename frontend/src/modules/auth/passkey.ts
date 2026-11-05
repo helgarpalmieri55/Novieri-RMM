@@ -31,7 +31,7 @@ import {
   startRegistration,
 } from "@simplewebauthn/browser";
 
-import { translate } from "../../i18n/core";
+import { translate, type MessageKey } from "../../i18n/core";
 import type {
   AuthenticationResponseJSON,
   PublicKeyCredentialCreationOptionsJSON,
@@ -42,6 +42,20 @@ import type {
 /** Whether this browser can make or use a passkey at all; the passkey option is not offered when not. */
 export function canUsePasskeys(): boolean {
   return browserSupportsWebAuthn();
+}
+
+/**
+ * What to say when the person HAS a passkey and this browser cannot use it,
+ * so the passkey option is not offered (final review D1, Minor 6): why it is
+ * missing, and the method they still have. `null` when they have no other --
+ * the page says that in its own words (signing in and confirming a change
+ * differ in what is left to do).
+ */
+export function passkeyHiddenAdvice({ totp, recovery }: { totp: boolean; recovery: boolean }): MessageKey | null {
+  if (totp && recovery) return "auth.passkey.hiddenUseAppOrCode";
+  if (totp) return "auth.passkey.hiddenUseApp";
+  if (recovery) return "auth.passkey.hiddenUseCode";
+  return null;
 }
 
 /** Make a passkey from the server's registration options. */

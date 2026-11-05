@@ -129,6 +129,14 @@ export const auth: Shape<typeof en> = {
   },
   passkey: {
     unsupported: "Este navegador no puede usar claves de acceso. Usa una aplicación de autenticación.",
+    hiddenUseAppOrCode:
+      "Este navegador no puede usar claves de acceso, así que aquí no se ofrece la tuya. Usa tu aplicación de autenticación o uno de tus códigos de recuperación.",
+    hiddenUseApp:
+      "Este navegador no puede usar claves de acceso, así que aquí no se ofrece la tuya. Usa tu aplicación de autenticación.",
+    hiddenUseCode:
+      "Este navegador no puede usar claves de acceso, así que aquí no se ofrece la tuya. Usa uno de tus códigos de recuperación, o un navegador que admita claves de acceso.",
+    hiddenNoOther:
+      "Este navegador no puede usar claves de acceso, y tu cuenta no tiene otro segundo factor. Inicia sesión desde un navegador que admita claves de acceso, o pide a un administrador que restablezca tus segundos factores.",
     cancelled: "La ventana de la clave de acceso se cerró o caducó, así que no se usó nada.",
     alreadyRegistered: "Este dispositivo ya tiene una clave de acceso para tu cuenta.",
     noUserVerification:

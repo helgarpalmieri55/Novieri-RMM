@@ -106,6 +106,8 @@ export const components: Shape<typeof en> = {
     },
     confirmRecovery: "Usar este código",
     noMethod: "Tu cuenta no tiene ningún segundo factor, así que este cambio no se puede confirmar. Pide a un administrador que restablezca tus segundos factores.",
+    passkeyOnly:
+      "Este navegador no puede usar claves de acceso, y no tienes otro segundo factor con el que confirmar. Hazlo desde un navegador que admita claves de acceso.",
     cancelled: "No se cambió nada: se cerró la confirmación.",
   },
 };

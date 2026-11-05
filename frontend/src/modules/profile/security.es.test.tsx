@@ -15,6 +15,9 @@ import { apiClient, calls, installDefaults, renderSecurityPage, stepUpRequired }
 
 vi.mock("@simplewebauthn/browser", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@simplewebauthn/browser")>()),
+  // A browser that can use passkeys: the recent confirmation offers one only
+  // there (final review D1, Minor 6), and jsdom has no WebAuthn.
+  browserSupportsWebAuthn: () => true,
   startRegistration: vi.fn(),
   startAuthentication: vi.fn(),
 }));
