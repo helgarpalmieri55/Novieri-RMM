@@ -486,14 +486,18 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   // options builds the query afresh and asks the server again -- the next
   // person's `/me` landed in the emptied cache that way.
   //
-  // THE CLIENT CHOSEN IN THE TOP BAR GOES TOO, at every end and not only a
-  // sign-out (final re-review, M5): on a shared computer the next person
-  // would open on the previous person's client.
+  // THE CLIENT CHOSEN IN THE TOP BAR GOES TOO, at an idle or revoked end and
+  // not only a sign-out (final re-review, M5): on a shared computer the next
+  // person would open on the previous person's client. NOT WHEN ANOTHER
+  // PERSON SIGNED IN (`replaced`, fix round 1 re-review, R1-I1): the value in
+  // storage is now theirs, chosen in their tab before this one noticed, and
+  // removing it fires a `storage` event that resets their choice and remounts
+  // their page.
   const over = session.status === "ended" || session.status === "signing_out";
   useLayoutEffect(() => {
     if (!over) return;
     emptyQueryCache(queryClient);
-    forgetStoredClient();
+    if (sessionEndReason() !== "replaced") forgetStoredClient();
   }, [over, queryClient]);
 
   if (session.status === "ended") {
