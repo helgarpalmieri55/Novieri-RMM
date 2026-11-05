@@ -429,8 +429,9 @@ async def test_a_password_change_on_a_remembered_device_keeps_only_the_caller_si
     sessions end, the caller's does not -- even when a remembered device
     started it. The device is still revoked (falsifier 5), so the caller's
     session is first detached from it (`account._detach_from_device`) and cut
-    to an ordinary session's lifetime from its sign-in: no session outlives the
-    trust that gave it its length. Without the detach, Task 6's
+    to an ordinary session's lifetime from the change, the moment it proved
+    the current password with a recent step-up: no session outlives the trust
+    that gave it its length. Without the detach, Task 6's
     `revoke_all_for_user` ends the caller's session with the device and the
     same cookie reads 401: red."""
     org = await auth_env.create_org("mysec-pw-device")
@@ -453,6 +454,8 @@ async def test_a_password_change_on_a_remembered_device_keeps_only_the_caller_si
         json={"code": await fresh_code(auth_env, who)},
     )
     assert confirm.status_code == 204, confirm.text
+    proved_at = (await _session_row(auth_env, mine)).factor_at
+    before = datetime.now(UTC)
 
     changed = await auth_env.client.put(
         "/api/v1/me/password",
@@ -460,13 +463,15 @@ async def test_a_password_change_on_a_remembered_device_keeps_only_the_caller_si
         json={"current": who.password, "new": "Pelican-Orbit-Lantern-58"},
     )
 
+    after = datetime.now(UTC)
     assert changed.status_code == 204, changed.text
     me = await auth_env.client.get("/api/v1/me", headers=who.headers())
     assert me.status_code == 200, me.text
     row = await _session_row(auth_env, mine)
     assert row.ended_at is None and row.trusted_device_id is None
-    assert row.factor_at is not None
-    assert row.expires_at <= row.factor_at + DEFAULT_POLICY.lifetime("staff", remembered=False)
+    assert row.factor_at == proved_at  # Task 6's record of the proof is left alone
+    ordinary = DEFAULT_POLICY.lifetime("staff", remembered=False)
+    assert before < row.expires_at <= after + ordinary
     other = await _session_row(auth_env, sibling)
     assert other.ended_at is not None
     async with AsyncSession(auth_env.admin_engine) as session:
@@ -481,3 +486,61 @@ async def test_a_password_change_on_a_remembered_device_keeps_only_the_caller_si
     # A new sign-in from that browser (its device cookie still sent): the factor.
     who.session, who.password = None, "Pelican-Orbit-Lantern-58"
     assert (await login(auth_env, who)).json()["state"] == "factor_required"
+
+
+async def test_a_password_change_keeps_a_remembered_session_older_than_an_ordinary_one(
+    auth_env: Any,
+) -> None:
+    """The cap counts from the CHANGE, not from the sign-in (coordinator
+    decision, fix round 2). A remembered-device session lives up to
+    `remembered_max_hours` (168 h by default) and an ordinary one 12 h, so a
+    browser kept on a device is usually signed in more than 12 h ago. At the
+    change this session has just proved the current password and holds a
+    recent step-up -- what a fresh sign-in would have -- so it keeps at most an
+    ordinary lifetime from now. Anchor the cap on `factor_at` and this session,
+    13 h old, gets an expiry in the past: 204, then 401 on the same cookie --
+    red. `factor_at` and `step_up_at` stay Task 6's record of the proofs."""
+    org = await auth_env.create_org("mysec-pw-device-old")
+    who = await signed_in(auth_env, org, "technician")
+    done = await _second_session(auth_env, who, remember=True)
+    who.device = cookie(done, DEVICE_COOKIE)
+    assert who.device
+    who.session = None
+    assert (await login(auth_env, who)).json() == {"state": "signed_in"}
+    mine = who.session
+    assert mine
+    # Signed in on the device 13 hours ago, and used a moment ago (so not idle).
+    signed = datetime.now(UTC) - timedelta(hours=13)
+    async with AsyncSession(auth_env.admin_engine) as session:
+        await session.execute(
+            update(AuthSession)
+            .where(AuthSession.token_hash == token_hash(mine))
+            .values(
+                created_at=signed,
+                factor_at=signed,
+                expires_at=signed + DEFAULT_POLICY.lifetime("staff", remembered=True),
+            )
+        )
+        await session.commit()
+    confirm = await auth_env.client.post(
+        "/api/v1/auth/step-up/totp",
+        headers=who.headers(),
+        json={"code": await fresh_code(auth_env, who)},
+    )
+    assert confirm.status_code == 204, confirm.text
+    stepped_up_at = (await _session_row(auth_env, mine)).step_up_at
+
+    changed = await auth_env.client.put(
+        "/api/v1/me/password",
+        headers=who.headers(),
+        json={"current": who.password, "new": "Pelican-Orbit-Lantern-58"},
+    )
+
+    now = datetime.now(UTC)
+    assert changed.status_code == 204, changed.text
+    me = await auth_env.client.get("/api/v1/me", headers=who.headers())
+    assert me.status_code == 200, me.text
+    row = await _session_row(auth_env, mine)
+    assert row.ended_at is None and row.trusted_device_id is None
+    assert now < row.expires_at <= now + DEFAULT_POLICY.lifetime("staff", remembered=False)
+    assert (row.factor_at, row.step_up_at) == (signed, stepped_up_at)

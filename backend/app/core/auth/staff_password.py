@@ -73,10 +73,19 @@ async def require_acceptable(
         ) from exc
 
 
-async def store(session: AsyncSession, *, org_id: UUID, user_id: UUID, plain: str) -> None:
-    """argon2id over the pepper's HMAC (Task 2); one row per person."""
+async def store(
+    session: AsyncSession,
+    *,
+    org_id: UUID,
+    user_id: UUID,
+    plain: str,
+    now: datetime | None = None,
+) -> None:
+    """argon2id over the pepper's HMAC (Task 2); one row per person. `now`,
+    when given, is the change's own aware moment (`account.change_password`
+    uses the same one for the caller's session)."""
     digest, version = await hash_password(org_id, plain)
-    now = datetime.now(UTC)
+    now = now or datetime.now(UTC)
     row = await session.get(AuthPassword, user_id)
     if row is None:
         session.add(

@@ -202,19 +202,26 @@ async def my_security(request: Request, principal: SessionPrincipal) -> MySecuri
     )
 
 
-async def _detach_from_device(session: AsyncSession, principal: SessionPrincipal) -> None:
+async def _detach_from_device(
+    session: AsyncSession, principal: SessionPrincipal, *, now: datetime
+) -> None:
     """The caller's own session, when a remembered device started it, stops
     depending on that device before every device is revoked: Task 6's
     `revoke_all_for_user` ends the sessions a revoked device started, and the
     caller is not one of the OTHER sessions a password change ends (design
-    §2.8, OWASP [S8]). It keeps no more than an ordinary session's lifetime
-    from its sign-in, so no session outlives the trust that gave it its length.
+    §2.8, OWASP [S8]). It keeps no more than an ordinary session's lifetime,
+    so no session outlives the trust that gave it its length.
 
-    THE ANCHOR IS `factor_at`, not `created_at`. `sessions.start_session` sets
-    a new session's `expires_at` from `now`, which is its `created_at` and, on
-    a remembered device, its `factor_at` too; a RESUMED session inherits the
-    `expires_at` and the `factor_at` of the one it resumed, so there only
-    `factor_at` still names the sign-in the lifetime was counted from."""
+    THE CAP COUNTS FROM THE CHANGE, `now` (coordinator decision, Task 7 fix
+    round 2), not from the sign-in. At this point the session has just proved
+    the current password (`change_password` verifies it) and holds a recent
+    step-up (the route's `require_step_up`, ten minutes): a fresh proof of both
+    factors, which is what a fresh sign-in would have. So it gets at most what
+    a fresh ordinary sign-in would get, an ordinary lifetime from now. Counted
+    from `factor_at`, a remembered session signed in more than 12 h ago -- the
+    usual case, as such a session may last 168 h -- would get an expiry in the
+    past: a 204, then a 401. `least` never lengthens a session; `factor_at` and
+    `step_up_at` are left alone, Task 6's record of when each was proved."""
     policy = await read_policy(session, principal.org_id)
     ordinary = policy.lifetime(principal.kind, remembered=False)
     await session.execute(
@@ -225,7 +232,7 @@ async def _detach_from_device(session: AsyncSession, principal: SessionPrincipal
         )
         .values(
             trusted_device_id=None,
-            expires_at=func.least(AuthSession.expires_at, AuthSession.factor_at + ordinary),
+            expires_at=func.least(AuthSession.expires_at, now + ordinary),
         )
     )
 
@@ -271,12 +278,17 @@ async def change_password(
                     display_name=user.display_name,
                     org_name=await staff_password.organization_name(session, user.org_id),
                 )
-                await staff_password.store(session, org_id=user.org_id, user_id=user.id, plain=new)
+                # The moment of the change: the password's `changed_at` and
+                # the start of the caller's capped lifetime.
+                now = datetime.now(UTC)
+                await staff_password.store(
+                    session, org_id=user.org_id, user_id=user.id, plain=new, now=now
+                )
                 await record_success(session, user.id, "password")
                 await end_all_for_user(
                     session, user.id, "password_changed", except_id=principal.session_id
                 )
-                await _detach_from_device(session, principal)
+                await _detach_from_device(session, principal, now=now)
                 await revoke_all_for_user(session, user.id)
                 await _record(session, user, "auth.password_changed", {"via": "self"})
                 await notices.tell(
