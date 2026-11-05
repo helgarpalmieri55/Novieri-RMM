@@ -675,6 +675,38 @@ describe("Settings — Users tab", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("shows the server's own sentence for a reset that needs the recovery command, keeps the dialog open, and does not retry", async () => {
+    // Operator decision, 2026-11-05: `reset_factors` answers 409
+    // `reset_needs_recovery` when the password was set from an emailed reset
+    // link and no second factor has been used since. The server's real body
+    // (`{detail, code}`, as C14 asks of every double).
+    const sentence =
+      "This person's password was set with an emailed reset link, and no second factor has been used since. Resetting their sign-in methods now would hand the account to whoever holds that mailbox. Use the server's recovery command instead, and hand the link to the person directly.";
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, DANA_USER] });
+    calls.resetUserFactors.mockRejectedValue(
+      new ApiError(409, JSON.stringify({ detail: sentence, code: "reset_needs_recovery" })),
+    );
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /dana@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Reset second factors for dana@example.com" }));
+    const confirm = await screen.findByRole("dialog", { name: "Reset second factors" });
+    await user.click(within(confirm).getByRole("button", { name: "Reset second factors for dana@example.com" }));
+
+    expect(await within(confirm).findByRole("alert")).toHaveTextContent(sentence);
+    expect(confirm).not.toHaveTextContent(/something went wrong|went wrong/i);
+    // Still open, nothing more sent, and no second-factor prompt: a 409 is not a stale step-up.
+    expect(screen.getByRole("dialog", { name: "Reset second factors" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Confirm it's you" })).not.toBeInTheDocument();
+    expect(calls.resetUserFactors).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("The second factors of dana@example.com were reset.")).not.toBeInTheDocument();
+
+    // The person closes it.
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Reset second factors" })).not.toBeInTheDocument();
+    expect(calls.resetUserFactors).toHaveBeenCalledTimes(1);
+  });
+
   it("says, before the reset, that it signs the person out everywhere now (D2, Minor 3)", async () => {
     calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, DANA_USER] });
     const user = await openUsers();
