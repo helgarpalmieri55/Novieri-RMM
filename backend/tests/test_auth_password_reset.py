@@ -426,6 +426,48 @@ async def test_a_link_issued_before_the_factors_went_no_longer_resets(auth_env: 
     assert (await login(auth_env, who, password="Pelican-Orbit-Lantern-58")).status_code == 401
 
 
+async def test_a_link_refused_because_the_factors_went_is_spent(auth_env: Any) -> None:
+    """Re-review Minor 5. The consume-time refusal SPENDS the link, as every
+    dead link is spent: otherwise, within its 30 minutes, the person signs in
+    with their password and enrols a new factor, `_has_second_factor` is true
+    again, and the mailbox holder's old link sets a password, ends every
+    session and forgets every device -- the residual's precondition, made by
+    the mailbox. Roll the `consume` back with the refusal and the second use
+    is a 204: red."""
+    org = await auth_env.create_org("k1-spent")
+    admin = await signed_in(auth_env, org, "org-admin")
+    who = await signed_in(auth_env, org, "technician")
+    await _forgot(auth_env, who.email)
+    token = link_token(_reset_links(auth_env)[-1].text)
+    reset = await auth_env.client.post(
+        f"/api/v1/users/{who.user_id}/factors/reset", headers=admin.headers()
+    )
+    assert reset.status_code == 204, reset.text
+    first = await _reset(auth_env, token, "Pelican-Orbit-Lantern-58")
+    assert first.status_code == 410, first.text
+
+    # The person signs in with their own password and enrols a new factor.
+    who.session, who.network = None, browser()
+    assert (await login(auth_env, who)).json() == {"state": "enroll_required"}
+    await enrol_totp(auth_env, who)
+
+    again = await _reset(auth_env, token, "Pelican-Orbit-Lantern-58")
+
+    assert again.status_code == 410, again.text
+    assert again.json()["code"] == "invalid_link"
+    assert (await auth_env.client.get("/api/v1/me", headers=who.headers())).status_code == 200
+    async with AsyncSession(auth_env.admin_engine) as session:
+        used = (
+            await session.execute(
+                select(AuthActionToken.used_at).where(
+                    AuthActionToken.user_id == who.user_id,
+                    AuthActionToken.purpose == "reset",
+                )
+            )
+        ).scalars().all()
+    assert used and all(at is not None for at in used)
+
+
 async def test_the_mailbox_alone_does_not_reach_the_console_after_a_factor_reset(
     auth_env: Any,
 ) -> None:

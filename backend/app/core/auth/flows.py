@@ -860,36 +860,41 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
     org_id = action_tokens.org_of(token)
     if org_id is None:
         raise _invalid_link()
+    spent_dead = False
     async with _identity_session(org_id, _engine(request)) as session:
         row = await action_tokens.consume(
             session, token=token, purposes=(action_tokens.RESET,)
         )
         user = await session.get(User, row.user_id) if row is not None else None
-        if (
-            row is None
-            or user is None
-            or user.kind != STAFF_KIND
-            or user.status != ACTIVE_STATUS
+        if row is None or user is None or user.kind != STAFF_KIND or user.status != ACTIVE_STATUS:
+            raise _invalid_link()
+        if not await _has_second_factor(session, user.id):
             # A link sent while the account had a factor, used after the
             # factors went (an administrator's reset): the same mailbox-only
-            # path as `send_reset_link`'s, refused like every dead link. The
-            # refusal rolls the `consume` back; nothing was written.
-            or not await _has_second_factor(session, user.id)
-        ):
-            raise _invalid_link()
-        # Raises a 422 that rolls the `consume` back: the link stays usable.
-        await staff_password.require_acceptable(
-            password,
-            email=user.email,
-            display_name=user.display_name,
-            org_name=await staff_password.organization_name(session, org_id),
-        )
-        await staff_password.store(session, org_id=org_id, user_id=user.id, plain=password)
-        await reset_factor(session, user.id, "password")
-        await end_all_for_user(session, user.id, "password_changed")
-        await revoke_all_for_user(session, user.id)
-        await _audit(session, user, "auth.password_changed", {"via": row.purpose})
-        await notices.tell(session, user, "password_changed", vault=_vault(request), actor_id=None)
+            # path as `send_reset_link`'s. It is SPENT, then refused like
+            # every dead link (re-review Minor 5): nothing else is written,
+            # the `consume` commits with the block, and the 410 is raised
+            # after it. Left live, the link would work again once the person
+            # enrols a new factor.
+            spent_dead = True
+        else:
+            # Raises a 422 that rolls the `consume` back: the link stays usable.
+            await staff_password.require_acceptable(
+                password,
+                email=user.email,
+                display_name=user.display_name,
+                org_name=await staff_password.organization_name(session, org_id),
+            )
+            await staff_password.store(session, org_id=org_id, user_id=user.id, plain=password)
+            await reset_factor(session, user.id, "password")
+            await end_all_for_user(session, user.id, "password_changed")
+            await revoke_all_for_user(session, user.id)
+            await _audit(session, user, "auth.password_changed", {"via": row.purpose})
+            await notices.tell(
+                session, user, "password_changed", vault=_vault(request), actor_id=None
+            )
+    if spent_dead:
+        raise _invalid_link()
 
 
 # --------------------------------------------------------------------------- #
