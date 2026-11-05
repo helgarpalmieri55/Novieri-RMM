@@ -256,6 +256,10 @@ def upgrade() -> None:
         sa.Column("hash", sa.Text(), nullable=False),
         sa.Column("pepper_version", sa.Integer(), nullable=False),
         _when("changed_at", now=True),
+        # Set when this password came from a mailed reset link and no second
+        # factor has been verified since: an administrator's factor reset is
+        # refused while it is (operator decision 2026-11-05).
+        _when("mail_reset_at", nullable=True),
         sa.CheckConstraint("pepper_version >= 1", name="ck_auth_passwords_pepper_version"),
     )
     op.create_table(

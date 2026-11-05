@@ -50,7 +50,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import audit_service
 from app.core.auth import action_tokens, notices
 from app.core.auth.devices import revoke_all_for_user
-from app.core.auth.factors import clear_second_factors
+from app.core.auth.factors import clear_second_factors, lock_person, set_by_mail
 from app.core.auth.sessions import end_all_for_user
 from app.core.i18n import tr
 from app.core.identity import STAFF_KIND, domain_refusal
@@ -120,6 +120,11 @@ ORG_ADMIN = "org-admin"
 #: no identity provider issued it, so it can never match a token's `sub`.
 LOCAL_SUBJECT_PREFIX = "itms-local:"
 
+#: The `code` of `reset_factors`' refusal while the mailbox chose the password
+#: (operator decision 2026-11-05). The console matches it: change it with the
+#: console's Users screen.
+RESET_NEEDS_RECOVERY = "reset_needs_recovery"
+
 
 class UserAdminError(Exception):
     """A refusal carrying the HTTP status the route should return.
@@ -130,10 +135,14 @@ class UserAdminError(Exception):
     every service failure to a single code.
     """
 
-    def __init__(self, status_code: int, detail: str) -> None:
+    def __init__(self, status_code: int, detail: str, *, code: str | None = None) -> None:
         super().__init__(detail)
         self.status_code = status_code
         self.detail = detail
+        #: A machine-readable `code` beside `detail`, for a refusal the console
+        #: acts on rather than only shows (`reset_needs_recovery`); None for
+        #: every other refusal, whose body stays `{"detail": ...}`.
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -1021,18 +1030,46 @@ async def reset_factors(
 ) -> None:
     """Every passkey, the TOTP, the recovery codes and the failure counters
     go; the sessions end and the remembered devices are forgotten; the person
-    is told. Their next sign-in enrols a new factor (design §7). The route
-    has already checked the administrator's own recent confirmation.
+    is told. Their next sign-in enrols a new factor with their password
+    (design §7). The route has already checked the administrator's own recent
+    confirmation.
+
+    REFUSED WHILE THE MAILBOX CHOSE THE PASSWORD (operator decision
+    2026-11-05, "Rechazar y usar recuperación"; design §7). A reset leaves an
+    account whoever holds the password can enrol. So it is a 409
+    `reset_needs_recovery` while the person's current password was set
+    through a mailed reset link and no second factor has been verified since
+    (`factors.set_by_mail`): that password may be the mailbox holder's, and a
+    person locked out by a mail reset asks for exactly this. The server's
+    recovery link is the way back. With K1 (no reset link to an account
+    without a second factor) the mailbox can supply a password neither after
+    a reset nor, through this rule, before one. The check runs under
+    `factors.lock_person`, the lock `flows.reset_password` takes before its
+    own factor check, so neither order of the two can slip between them.
+
+    The refusals follow this module's convention (`_refuse_self`,
+    `_require_pending_invitation`): a `UserAdminError` raised before any
+    write, inside the caller's transaction, neither audited nor logged -- the
+    attempt leaves no row.
 
     No `super-admin` rail (plan decision 5, kept by the operator on
-    2026-11-05): a reset removes factors and gives nobody access without the
-    password -- and since the final fix wave (K1) no reset link goes to an
-    account left without a second factor, so the mailbox cannot supply the
-    password either. `_refuse_self` stays: one's own factors are changed
-    under My security."""
+    2026-11-05). `_refuse_self` stays: one's own factors are changed under My
+    security."""
     user = await _target(session, org_id, user_id)
     _require_live(user)
     _refuse_self(actor_id, user.id, RESET_FACTORS)
+    await lock_person(session, user.id)
+    if await set_by_mail(session, user.id):
+        raise UserAdminError(
+            409,
+            tr(
+                "This person's password was set with an emailed reset link, and no second "
+                "factor has been used since. Resetting their sign-in methods now would hand the "
+                "account to whoever holds that mailbox. Use the server's recovery command "
+                "instead, and hand the link to the person directly."
+            ),
+            code=RESET_NEEDS_RECOVERY,
+        )
     await clear_second_factors(session, user.id)
     await end_all_for_user(session, user.id, "factors_reset")
     await revoke_all_for_user(session, user.id)

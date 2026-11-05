@@ -44,7 +44,13 @@ from app.core.audit import audit_service
 from app.core.auth import action_tokens, notices, staff_password
 from app.core.auth.devices import RememberingOff, presented, recognised, revoke_all_for_user
 from app.core.auth.devices import remember as remember_device
-from app.core.auth.factors import clear_second_factors, count_failure, gate, summary
+from app.core.auth.factors import (
+    clear_second_factors,
+    count_failure,
+    gate,
+    lock_person,
+    summary,
+)
 from app.core.auth.failures import check_allowed, record_success, reset_factor
 from app.core.auth.guards import (
     relying_party,
@@ -868,6 +874,10 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
         user = await session.get(User, row.user_id) if row is not None else None
         if row is None or user is None or user.kind != STAFF_KIND or user.status != ACTIVE_STATUS:
             raise _invalid_link()
+        # One lock with an administrator's factor reset (`factors.
+        # lock_person`, item 8): the factors read below, and the mark the store
+        # writes, cannot interleave with a reset that removes the factors.
+        await lock_person(session, user.id)
         if not await _has_second_factor(session, user.id):
             # A link sent while the account had a factor, used after the
             # factors went (an administrator's reset): the same mailbox-only
@@ -885,7 +895,12 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
                 display_name=user.display_name,
                 org_name=await staff_password.organization_name(session, org_id),
             )
-            await staff_password.store(session, org_id=org_id, user_id=user.id, plain=password)
+            # `by_mail`: the mailbox chose this password, so an administrator's
+            # factor reset is refused until a second factor is verified
+            # (operator decision 2026-11-05).
+            await staff_password.store(
+                session, org_id=org_id, user_id=user.id, plain=password, by_mail=True
+            )
             await reset_factor(session, user.id, "password")
             await end_all_for_user(session, user.id, "password_changed")
             await revoke_all_for_user(session, user.id)

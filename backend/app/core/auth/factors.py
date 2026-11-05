@@ -11,12 +11,20 @@ transaction ends (Task 4). The caller keeps `gate` -> verify ->
 `count_failure` / `record_success` in that ONE transaction and refuses after
 it commits: then concurrent attempts are serialised and the wait the n-th
 failure starts already stops the (n+1)-th, rather than the whole burst.
+
+ONE LOCK PER PERSON FOR THE ACTS THAT DECIDE WHO CAN ENROL (`lock_person`,
+final fix wave item 8). A mail reset's consume-time "has a second factor"
+check (`flows.reset_password`), an administrator's factor reset and its
+"password set by mail" check (`user_admin.service.reset_factors`), and the
+recovery link's wipe (`clear_second_factors`) all take it first, so no
+interleaving of them leaves a factor-less account whose password a mailbox
+chose.
 """
 
 from uuid import UUID
 
 from fastapi import status
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import notices
@@ -27,9 +35,30 @@ from app.core.auth.totp import has_totp, remove_totp
 from app.core.i18n import tr
 from app.core.vault import VaultService
 from app.models import User
-from app.models.auth import AuthPasskey, AuthRecoveryCode
+from app.models.auth import AuthPasskey, AuthPassword, AuthRecoveryCode
 
 _EVERY_FACTOR: tuple[Factor, ...] = ("password", "totp", "passkey", "recovery")
+
+
+async def lock_person(session: AsyncSession, user_id: UUID) -> None:
+    """A transaction-level advisory lock on one person's enrolment state, held
+    until the caller's transaction ends (module docstring). Re-entrant within
+    the transaction, so a caller that already holds it may call a helper that
+    takes it again."""
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"auth_person:{user_id}"},
+    )
+
+
+async def set_by_mail(session: AsyncSession, user_id: UUID) -> bool:
+    """Whether the person's current password came from a mailed reset link
+    and no second factor has been verified since (`AuthPassword.
+    mail_reset_at`). Read by column, after `lock_person`."""
+    mark = await session.scalar(
+        select(AuthPassword.mail_reset_at).where(AuthPassword.user_id == user_id)
+    )
+    return mark is not None
 
 
 async def summary(session: AsyncSession, user_id: UUID) -> tuple[bool, bool, int]:
@@ -45,12 +74,22 @@ async def summary(session: AsyncSession, user_id: UUID) -> tuple[bool, bool, int
 async def clear_second_factors(session: AsyncSession, user_id: UUID) -> None:
     """Every passkey, the TOTP (pending or confirmed), every recovery code and
     every failure counter -- a disabled factor's included -- of one person (a
-    recovery link here; an administrator's reset in Task 8)."""
+    recovery link here; an administrator's reset in Task 8). Under
+    `lock_person`. The "password set by mail" mark goes too: after a recovery
+    link it is the way back the refusal names, and an administrator's reset
+    reaches here only when the mark was clear."""
+    await lock_person(session, user_id)
     await session.execute(delete(AuthPasskey).where(AuthPasskey.user_id == user_id))
     await remove_totp(session, user_id)
     await session.execute(delete(AuthRecoveryCode).where(AuthRecoveryCode.user_id == user_id))
     for factor in _EVERY_FACTOR:
         await reset_factor(session, user_id, factor)
+    await session.execute(
+        update(AuthPassword)
+        .where(AuthPassword.user_id == user_id, AuthPassword.mail_reset_at.is_not(None))
+        .values(mail_reset_at=None)
+        .execution_options(synchronize_session=False)
+    )
 
 
 async def gate(

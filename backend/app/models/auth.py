@@ -92,6 +92,14 @@ class AuthPassword(Base):
     #: The transit key version of the pepper the HMAC used.
     pepper_version: Mapped[int] = mapped_column(Integer)
     changed_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    #: When this password was set through a MAILED reset link, while no second
+    #: factor has been verified since; NULL otherwise. While it is set, an
+    #: administrator's factor reset is refused (`user_admin.service.
+    #: reset_factors`, operator decision 2026-11-05): the mailbox chose this
+    #: password. Set by `flows.reset_password`; cleared by any second factor
+    #: verified (`failures.record_success`), any password not set by mail
+    #: (`staff_password.store`) and the recovery link (`flows.accept_recovery`).
+    mail_reset_at: Mapped[datetime | None] = mapped_column(default=None)
 
 
 class AuthTotp(Base):
