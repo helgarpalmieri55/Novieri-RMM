@@ -51,9 +51,9 @@ export const profile = {
       add: "Add a passkey",
       adding: "Waiting for your browser…",
       // After the recent confirmation: a browser makes a passkey only from a click.
-      confirmed: "Your second factor is confirmed. Press Create the passkey to make it.",
+      confirmed: "Your second factor is confirmed. Press “Create the passkey” to make it.",
       createNow: "Create the passkey",
-      retry: "The passkey was not created. Press Create the passkey to try again.",
+      retry: "The passkey was not created. Press “Create the passkey” to try again.",
       onlyFactor: "This is your only second factor. Add another before you remove it.",
     },
     totp: {

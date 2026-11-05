@@ -54,10 +54,12 @@ import {
 // is never written to a log, and is never returned by an ordinary API
 // response. The checkout secret below is the one deliberate exception -- the
 // operator asked for it, gave a reason that is audited server-side, and sees
-// it exactly once. It is held ONLY in local component state (`reveal`),
-// never placed in the react-query cache (which would persist it across
-// re-renders and remain inspectable in devtools), and is cleared the moment
-// the "Done" dialog closes. Nothing here calls `console.*` with it, and no
+// it exactly once. It is held ONLY in local component state (`reveal`), and
+// is cleared the moment the "Done" dialog closes. It does not stay in the
+// react-query cache (which would keep it inspectable in devtools): the
+// checkout mutation that brought it is reset as soon as it is in `reveal`,
+// and its `gcTime: 0` drops it from the mutation cache then -- `reset()`
+// alone only detaches it, and TanStack would keep it five more minutes. Nothing here calls `console.*` with it, and no
 // list/table column renders `credential.secret` -- there is no such field on
 // `Credential` (see `lib/api.ts`) because the API never sends the value back
 // on a read.
@@ -168,6 +170,8 @@ export function CredentialsPage() {
       setReason("");
       setReasonAttempt(null);
     },
+    // Its answer is the secret: dropped from the mutation cache once reset.
+    gcTime: 0,
   });
 
   function openCheckout(credential: Credential) {
@@ -186,7 +190,11 @@ export function CredentialsPage() {
       checkout.reset();
       return;
     }
-    if (reasonFor) checkout.mutate({ credential: reasonFor, reason: reason.trim() });
+    // Reset once the secret is in `reveal` (the hook's `onSuccess` above runs
+    // first): the page's state is the one place it is held.
+    if (reasonFor) {
+      checkout.mutate({ credential: reasonFor, reason: reason.trim() }, { onSuccess: () => checkout.reset() });
+    }
   }
   // AUDIT CLASS, /credentials → Delete: the mutation had NO `onError` and no
   // call site rendered `remove.error`. A refused delete -- a 403 from RBAC, a

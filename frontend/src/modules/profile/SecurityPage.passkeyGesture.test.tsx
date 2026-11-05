@@ -99,7 +99,7 @@ describe("adding a passkey after the recent confirmation", () => {
     await waitFor(() => expect(calls.stepUpPasskey).toHaveBeenCalledTimes(1));
 
     const createNow = await within(panel).findByRole("button", { name: "Create the passkey" });
-    expect(within(panel).getByText("Your second factor is confirmed. Press Create the passkey to make it.")).toBeInTheDocument();
+    expect(within(panel).getByText("Your second factor is confirmed. Press “Create the passkey” to make it.")).toBeInTheDocument();
     // The confirmation's continuation made no passkey and sent none.
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(createPasskey).not.toHaveBeenCalled();
@@ -165,7 +165,7 @@ describe("adding a passkey after the recent confirmation", () => {
     await user.click(await within(panel).findByRole("button", { name: "Create the passkey" }));
 
     const alert = await within(panel).findByRole("alert");
-    expect(alert).toHaveTextContent("The passkey was not created. Press Create the passkey to try again.");
+    expect(alert).toHaveTextContent("The passkey was not created. Press “Create the passkey” to try again.");
     expect(alert).not.toHaveTextContent(/closed or timed out/);
     // Still offered: the next click is the one that can work.
     expect(within(panel).getByRole("button", { name: "Create the passkey" })).toBeEnabled();
@@ -192,11 +192,11 @@ describe("adding a passkey after the recent confirmation", () => {
 
     const createNow = await within(panel).findByRole("button", { name: "Crear la clave de acceso" });
     expect(
-      within(panel).getByText("Tu segundo factor está confirmado. Pulsa Crear la clave de acceso para crearla."),
+      within(panel).getByText("Tu segundo factor está confirmado. Pulsa «Crear la clave de acceso» para crearla."),
     ).toBeInTheDocument();
     await user.click(createNow);
     expect(await within(panel).findByRole("alert")).toHaveTextContent(
-      "No se creó la clave de acceso. Pulsa Crear la clave de acceso para intentarlo de nuevo.",
+      "No se creó la clave de acceso. Pulsa «Crear la clave de acceso» para intentarlo de nuevo.",
     );
   });
 });

@@ -53,9 +53,9 @@ export const profile: Shape<typeof en> = {
       add: "Añadir una clave de acceso",
       adding: "Esperando a tu navegador…",
       // Tras la confirmación reciente: un navegador solo crea una clave de acceso desde un clic.
-      confirmed: "Tu segundo factor está confirmado. Pulsa Crear la clave de acceso para crearla.",
+      confirmed: "Tu segundo factor está confirmado. Pulsa «Crear la clave de acceso» para crearla.",
       createNow: "Crear la clave de acceso",
-      retry: "No se creó la clave de acceso. Pulsa Crear la clave de acceso para intentarlo de nuevo.",
+      retry: "No se creó la clave de acceso. Pulsa «Crear la clave de acceso» para intentarlo de nuevo.",
       onlyFactor: "Es tu único segundo factor. Añade otro antes de quitarlo.",
     },
     totp: {
