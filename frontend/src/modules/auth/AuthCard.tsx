@@ -31,19 +31,39 @@ const GROUND: CSSProperties = {
   background: "var(--bg)",
   padding: 16,
 };
+const EMBEDDED_GROUND: CSSProperties = { ...GROUND, minHeight: 0 };
 const CARD: CSSProperties = { width: "100%", maxWidth: 480, padding: 32, margin: 0 };
 /** The page-title rung (`.ph h1`), on a screen that has no `.ph`. */
 const HEADLINE: CSSProperties = { fontSize: "var(--t-h1)", fontWeight: 600, letterSpacing: "-.015em", margin: 0 };
 /** The panel-title rung (`.panel-h h2`), for one choice inside the card. */
 const SECTION_HEADING: CSSProperties = { fontSize: "var(--t-h2)", fontWeight: 600, margin: 0 };
 
-export function AuthCard({ title, intro, children }: { title: string; intro?: ReactNode; children: ReactNode }) {
+/**
+ * `embedded`: the same card drawn inside another page -- `/__preview`, where
+ * the browser's a11y pass measures it -- as a region named by its headline,
+ * not a second `<main>` (which axe refuses), and without the full-height ground.
+ */
+export function AuthCard({
+  title,
+  intro,
+  children,
+  embedded = false,
+}: {
+  title: string;
+  intro?: ReactNode;
+  children: ReactNode;
+  embedded?: boolean;
+}) {
   const t = useT();
   const { language, setLanguage } = useLanguage();
+  const headingId = useId();
+  const Ground = embedded ? "section" : "main";
   return (
-    <main style={GROUND}>
+    <Ground style={embedded ? EMBEDDED_GROUND : GROUND} aria-labelledby={embedded ? headingId : undefined}>
       <div className="panel" style={CARD}>
-        <h1 style={HEADLINE}>{title}</h1>
+        <h1 id={headingId} style={HEADLINE}>
+          {title}
+        </h1>
         {intro ? (
           <p className="note" style={{ marginTop: 6 }}>
             {intro}
@@ -63,7 +83,7 @@ export function AuthCard({ title, intro, children }: { title: string; intro?: Re
           ))}
         </div>
       </div>
-    </main>
+    </Ground>
   );
 }
 

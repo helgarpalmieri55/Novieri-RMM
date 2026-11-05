@@ -11,6 +11,9 @@
  * context" still does not happen. `App.auth.test.tsx` holds the guard to
  * showing it (and to the cache it empties); this file holds what it says.
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -54,6 +57,30 @@ describe("SessionEnded", () => {
     // RE-POINTED (final re-review, I3): only longer text is kept now, and the
     // promise says so; it still promises no password and no code.
     expect(region).toHaveTextContent(/Only longer text, such as replies and notes, is kept; never a password or a code\./);
+  });
+
+  it("is the page's main landmark on its own, and a named region when embedded in another page", () => {
+    const { unmount } = render(<SessionEnded kept={[]} onSignIn={vi.fn()} />);
+    expect(screen.getByRole("main")).toContainElement(screen.getByRole("heading", { name: "Your session has ended" }));
+    unmount();
+    render(
+      <main>
+        <SessionEnded kept={KEPT.slice(0, 1)} onSignIn={vi.fn()} embedded />
+      </main>,
+    );
+    expect(screen.getAllByRole("main")).toHaveLength(1);
+    expect(screen.getByRole("region", { name: "Your session has ended" })).toBeInTheDocument();
+  });
+
+  it("is on /__preview, with a kept field, so the browser's a11y pass measures it (final re-review, M2)", () => {
+    const preview = readFileSync(resolve(import.meta.dirname, "../preview/PreviewPage.tsx"), "utf8");
+    // The element itself, by its whole name, and the import that makes it this component.
+    expect(preview).toMatch(/^import \{ SessionEnded \} from "\.\.\/shell\/SessionEnded";$/m);
+    const at = preview.search(/<SessionEnded\s/);
+    expect(at).toBeGreaterThan(-1);
+    const element = preview.slice(at, preview.indexOf("/>", at));
+    expect(element).toMatch(/kept=\{/);
+    expect(element).toMatch(/\bembedded\b/);
   });
 
   it("says all of it in Spanish", () => {

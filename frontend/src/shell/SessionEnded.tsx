@@ -27,10 +27,19 @@ import { Field, inputClass } from "../components/ui";
 import type { KeptText } from "../lib/unsavedText";
 import { Btn } from "./components";
 
-export function SessionEnded({ kept, onSignIn }: { kept: readonly KeptText[]; onSignIn: () => void }) {
+export function SessionEnded({
+  kept,
+  onSignIn,
+  embedded = false,
+}: {
+  kept: readonly KeptText[];
+  onSignIn: () => void;
+  /** Drawn inside another page (`/__preview`): a named region, not the page's `<main>`. */
+  embedded?: boolean;
+}) {
   const t = useT();
   return (
-    <AuthCard title={t("shell.sessionEnded.title")}>
+    <AuthCard title={t("shell.sessionEnded.title")} embedded={embedded}>
       <p role="status" className="note" style={{ margin: 0 }}>
         {t(kept.length > 0 ? "shell.sessionEnded.bodyKept" : "shell.sessionEnded.body")}
       </p>
