@@ -598,6 +598,21 @@ describe("Settings — Users tab", () => {
     await waitFor(() => expect(calls.cancelInvite).toHaveBeenCalledWith(INVITED_USER.id));
   });
 
+  it("says, before cancelling, that the address can never be invited again (C18, review C, Minor 4)", async () => {
+    // The server marks the account deleted, and the address stays taken
+    // (`ux_users_org_lower_email_staff` covers deleted rows): it said "You
+    // can invite them again later".
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /invitee@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Cancel the invitation to invitee@example.com" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Cancel invitation" });
+    expect(dialog).toHaveTextContent("This address cannot be invited again");
+    expect(dialog).not.toHaveTextContent(/invite them again later/);
+  });
+
   /**
    * FIX ROUND (Task 12 review, Minor 4). The server answers 409 for anyone
    * without a pending invitation, with a translated `detail` and NO `code`

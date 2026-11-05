@@ -324,7 +324,10 @@ export const settings = {
         title: "Cancel invitation",
         question: "Cancel the invitation to {email}?",
         action: "Cancel the invitation to {email}",
-        body: "The link stops working at once. You can invite them again later.",
+        // The server marks the account deleted and the address stays taken
+        // (`service.cancel_invite`; C18, review C Minor 4): it said "You can
+        // invite them again later".
+        body: "The link stops working at once. This address cannot be invited again: a cancelled invitation keeps it for good.",
       },
       revoke: {
         title: "Remove a role",

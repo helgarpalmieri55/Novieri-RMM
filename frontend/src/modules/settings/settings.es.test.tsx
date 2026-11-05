@@ -25,6 +25,7 @@ import {
   BUDGET_SETTINGS_FIXTURE,
   CASEY_USER,
   DANA_USER,
+  INVITED_USER,
   CATEGORY_FIXTURE,
   CLIENTS_FIXTURE,
   CHANNEL_FIXTURE,
@@ -656,6 +657,16 @@ describe("the users tab in Spanish", () => {
     dialog = await screen.findByRole("dialog", { name: "Eliminar usuario" });
     expect(within(dialog).getByText(/^¿Eliminar a casey@example\.com\? Se elimina su identidad de inicio de sesión\./)).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+  });
+
+  it("says in Spanish that a cancelled invitation's address cannot be invited again (C18)", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, INVITED_USER] });
+    const user = userEvent.setup();
+    await openIn("users");
+    await user.click(await screen.findByRole("button", { name: "Cancelar la invitación a invitee@example.com" }));
+    const dialog = await screen.findByRole("dialog", { name: "Cancelar invitación" });
+    expect(dialog).toHaveTextContent("Esta dirección no se puede volver a invitar");
+    expect(dialog).not.toHaveTextContent(/volver a invitarla más tarde/);
   });
 
   it("confirms removing a role, and holds a refusal inside the dialog", async () => {

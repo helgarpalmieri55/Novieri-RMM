@@ -313,7 +313,7 @@ export const settings: Shape<typeof en> = {
         title: "Cancelar invitación",
         question: "¿Cancelar la invitación a {email}?",
         action: "Cancelar la invitación a {email}",
-        body: "El enlace deja de funcionar al instante. Puedes volver a invitarla más tarde.",
+        body: "El enlace deja de funcionar al instante. Esta dirección no se puede volver a invitar: una invitación cancelada la conserva para siempre.",
       },
       revoke: {
         title: "Quitar un rol",
