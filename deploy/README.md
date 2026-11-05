@@ -775,7 +775,7 @@ docker compose up keycloak-init
 **Configure email first if you can.** The screen below finishes by *emailing* the
 administrator it creates, and an installation with no working SMTP finishes it
 with a detour through the break-glass tunnel. [Keycloak
-SMTP](#keycloak-smtp--required-before-user-management-works-at-all) below is ten
+SMTP](#keycloak-smtp-before-phase-1--required-before-user-management-works-at-all) below is ten
 minutes and removes that entirely.
 
 Then:
@@ -833,7 +833,7 @@ has already been set up". Recovery is vendor-side, through the tunnel in
 console](#break-glass-the-identity-admin-console-vendor-only):
 
 - **Fix the cause, then re-send** (prefer this). Configure [Keycloak
-  SMTP](#keycloak-smtp--required-before-user-management-works-at-all), then in
+  SMTP](#keycloak-smtp-before-phase-1--required-before-user-management-works-at-all), then in
   the same console: **Users →** your account **→ Credentials → Credential
   Reset**, actions `Update Password` and `webauthn-register-passwordless`,
   **Send email**. That is the identical mail setup tried to send.
@@ -1030,9 +1030,18 @@ recovery link (design §7, Q5). Opening it removes the person's second
 factors, remembered browsers and sessions, and starts a session that sets up
 a new factor. **It asks for no password: the link alone is the account.**
 
+**It is also what to do when "Reset second factors" is refused with
+`reset_needs_recovery`** (operator decision 2026-11-05). That refusal means the
+person's current password was set with an emailed reset link and no second
+factor has been used since: that password may be whoever holds the mailbox,
+and a factor reset would hand them the account. Confirm who the person is
+yourself, then give them a recovery link the way below. Opening it also clears
+the refusal.
+
 - **Hand it to the person directly** — in person, or read out over a call to
-  someone you recognise. Whoever opens it in the next 15 minutes gets the
-  account.
+  someone you recognise. Whoever opens it before it expires gets the account;
+  the command's warning says how long that is (`RECOVER_TTL`,
+  `backend/app/core/auth/action_tokens.py`).
 - **Never send it by email**, chat or ticket: the second factor is never
   restored by mail alone (Q5, "nunca solo por correo").
 - The holder is told by mail that a link was issued, and the issue is audited
@@ -1607,7 +1616,7 @@ forwarding is running.
 
 ---
 
-## Keycloak SMTP — required before user management works at all
+## Keycloak SMTP (before phase 1) — required before user management works at all
 
 > **SUPERSEDED BY THE PRODUCT FOR EVERY DAY BUT THE FIRST.** Email is now
 > **Settings → Email** inside ITMS — host, port, TLS mode, from address,
@@ -1621,12 +1630,12 @@ forwarding is running.
 > screen sends no mail (step 8), so nothing below is needed to claim an
 > installation.
 >
-> **It still describes yours, in exactly one situation: first boot.** Settings →
-> Email is behind a sign-in, and on a brand-new installation nobody can sign in
-> until the enrolment mail arrives — which needs SMTP. Configuring it here, once,
-> before [Step 8 — Claim the installation](#step-8--claim-the-installation),
-> breaks that circle. Doing it afterwards is the recovery in
-> [Step 9](#step-9--finish-enrolment-and-sign-in).
+> **Before phase 1:** it still described yours in exactly one situation, first
+> boot. Settings → Email was behind a sign-in, and on a brand-new installation
+> nobody could sign in until the enrolment mail arrived — which needed SMTP.
+> Configuring it here, once, before [Step 8 — Claim the
+> installation](#step-8--claim-the-installation), broke that circle. Since own
+> authentication phase 1 there is no such circle (the note above).
 >
 > **VENDOR-ONLY either way.** The "Admin console →" step below runs inside the
 > SSH tunnel in [Break-glass: the identity admin

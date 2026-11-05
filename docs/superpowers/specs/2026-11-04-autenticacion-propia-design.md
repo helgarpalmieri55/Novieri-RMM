@@ -120,7 +120,11 @@ La persona no llega a la consola hasta registrar uno.
 - **Lo que no cubre.** Una persona sin ningún equipo recordado, o en una organización con el recordatorio
   desactivado, solo tiene el contador de la cuenta: quien conozca su dirección puede seguir manteniéndola en espera
   desde navegadores no reconocidos. El remedio ahí sigue siendo el borde (bloquear la IP), el enlace de
-  restablecimiento (que borra ambos contadores, decisión 9 del plan) o el comando de recuperación.
+  restablecimiento (que borra ambos contadores, decisión 9 del plan) o el comando de recuperación. Y la parada de 100
+  sigue al alcance de cualquiera: quien conozca la dirección puede llegar a ella desde navegadores no reconocidos en
+  aproximadamente un día de intentos espaciados, si la persona no entra con su contraseña entretanto; la contraseña
+  queda entonces desactivada para todos los navegadores, el recordado incluido, y la restablece el enlace de
+  restablecimiento.
 - **El segundo factor no lleva contador por equipo.** Solo se llega a él con una sesión pendiente, que abre la
   contraseña correcta: quien no la sabe no puede fallar el segundo factor, y quien la sabe ya ha comprometido la
   cuenta, y el remedio es cambiarla. Además, cada factor cuenta aparte (bloquear la app TOTP no bloquea la llave ni
@@ -310,6 +314,29 @@ MCP valida su JWT (`iss`, `aud`, `kid`, revocación).
   Después de un restablecimiento, la persona entra con su contraseña y registra un factor nuevo; el correo solo no
   basta: no se envía enlace de restablecimiento a una cuenta sin llave ni app TOTP confirmada (revisión final C-I1,
   §2.8).
+  - **El residuo de la decisión 5, y cómo se cierra.** Quien tiene el buzón puede restablecer la contraseña por correo
+    mientras la cuenta aún tiene su segundo factor (está permitido: el factor se sigue pidiendo). Si después un
+    administrador restablece los factores, la contraseña que eligió el buzón abre el registro de un factor propio, y
+    la cuenta es suya. Es la consecuencia natural: el correo de restablecimiento cierra las sesiones de la persona y
+    cambia su contraseña, ella dice «no puedo entrar», y lo esperable es que un administrador restablezca sus
+    factores. Los avisos de «contraseña cambiada» y «factores restablecidos» llegan al mismo buzón.
+  - **Decisión del operador del 2026-11-05 («Rechazar y usar recuperación»).** «Restablecer métodos de inicio de
+    sesión» (`user_admin.service.reset_factors`, la consola y MCP por igual) se rechaza con 409
+    `reset_needs_recovery` mientras la contraseña actual de la persona se haya puesto con un enlace de
+    restablecimiento enviado por correo y desde entonces no se haya verificado ningún segundo factor (una llave, una
+    app TOTP confirmada o un código de recuperación, al iniciar sesión o en una confirmación reciente). Sin ventana de
+    tiempo. No cubre las contraseñas de una invitación: eso es el alta, por diseño. La marca
+    (`auth_passwords.mail_reset_at`) la borran cualquier segundo factor verificado después, un cambio de contraseña
+    con la sesión abierta y el enlace de recuperación, que sigue siendo el camino de vuelta. La comprobación del
+    restablecimiento por correo («¿tiene segundo factor?») y la del administrador («¿la puso el buzón?») toman el
+    mismo bloqueo por persona (`factors.lock_person`), así que ningún orden de las dos deja una cuenta sin factores
+    con la contraseña del buzón. Fuente: NIST SP 800-63B-4 §4.2.2.2
+    (https://pages.nist.gov/800-63-4/sp800-63b/events/): en AAL2, la recuperación necesita dos códigos de
+    recuperación obtenidos por métodos distintos, o un código de recuperación más la autenticación con un
+    autenticador de un factor vinculado a la cuenta, o una nueva verificación de identidad. Un buzón solo no es
+    ninguna de las tres.
+  - Un enlace de restablecimiento rechazado porque los factores ya no están se gasta (410), como cualquier enlace
+    muerto: no vuelve a valer cuando la persona registra un factor nuevo (revisión final, Minor 5).
 - **Comando de recuperación** (único administrador sin factores):
   `docker compose exec api python -m app.core.auth.recover --email <correo>` imprime un enlace de un solo uso de 15 min.
   No existe por HTTP; exige acceso al servidor; queda auditado. **El enlace es la cuenta:** no pide contraseña, así
@@ -420,6 +447,4 @@ con S61–S62); se resume aquí. S61–S64 los verificó el coordinador directam
   https://learn.microsoft.com/en-us/entra/identity/authentication/howto-mfa-mfasettings
 - [S63] OWASP Cross-Site Request Forgery Prevention Cheat Sheet. https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
 - [S64] ChromeDevTools/devtools-protocol, `json/browser_protocol.json`, dominio WebAuthn. https://github.com/ChromeDevTools/devtools-protocol
-- [S65] OWASP, Slow Down Online Guessing Attacks with Device Cookies (ahora servida en community.owasp.org).
-  https://owasp.org/www-community/Slow_Down_Online_Guessing_Attacks_with_Device_Cookies. Citada en §2.3 con las
-  palabras que recoge la decisión del operador del 2026-11-05.
+- [S65] OWASP, Slow Down Online Guessing Attacks with Device Cookies. https://community.owasp.org/Slow_Down_Online_Guessing_Attacks_with_Device_Cookies (owasp.org/www-community/… redirige con 308). Cita comprobada contra la página el 2026-11-05.

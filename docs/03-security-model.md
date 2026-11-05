@@ -138,7 +138,11 @@ the system.
   with "remember this device" off, has only the account's counter and can
   still be held waiting by anyone who knows the address; the remedy there is
   the edge (block the address), the reset link, or the recovery command.
-  Sessions are server-side, carried in a `__Host-` cookie that
+  Anyone who knows the address can still reach the 100-failure stop from
+  unrecognised browsers in about a day of paced attempts, if the person does
+  not sign in with their password meanwhile; the password is then disabled
+  for every browser, the remembered one included, and the reset link restores
+  it. Sessions are server-side, carried in a `__Host-` cookie that
   holds only a random identifier, with a 30-minute idle timeout and a 12-hour
   maximum by default; every write needs a custom header and a matching
   `Origin`. "Remember this device" (15 days by default) skips the second
@@ -197,7 +201,8 @@ the system.
 | Credential theft from the vault | Envelope encryption, decrypt-at-use, no plaintext in DB/logs, audited checkout |
 | Operator abuse / over-privilege | RBAC scoped to org + client (per-client grants, the client scope enforced by RLS, invariant 5a); MFA; full audit trail |
 | Stolen or guessed operator password | Mandatory second factor; shipped blocklist; per-account and per-factor failure counters with backoff and a 100-failure disable; generic answers that take the same work whether or not the account exists |
-| An operator locked out by someone who knows their address (online guessing as denial of service) | The password's wait is per remembered browser for a browser the platform recognises, so the person's own remembered browser signs in while unrecognised ones wait (design §2.3). Not covered: a person with no remembered browser, or remembering switched off -- the edge, the reset link and the recovery command are the remedy |
+| An operator locked out by someone who knows their address (online guessing as denial of service) | The password's wait is per remembered browser for a browser the platform recognises, so the person's own remembered browser signs in while unrecognised ones wait (design §2.3). Not covered: a person with no remembered browser, or remembering switched off -- the edge, the reset link and the recovery command are the remedy. Nor the stop itself: anyone who knows the address can still reach the 100-failure stop from unrecognised browsers in about a day of paced attempts, if the person does not sign in with their password meanwhile; the password is then disabled for every browser and the reset link restores it |
+| An account taken over through its mailbox: a password reset by mail, then an administrator's factor reset | No reset link goes to an account without a second factor, and one sent before the factors went is refused and spent (design §2.8). An administrator's "Reset sign-in methods" is refused (409 `reset_needs_recovery`) while the person's password was set with an emailed link and no second factor has been used since (operator decision 2026-11-05, design §7; NIST SP 800-63B-4 §4.2.2.2): the server's recovery link, handed to the person directly, is the way back. The two checks share one per-person lock |
 | Theft of the platform database | Passwords stored only as peppered argon2id (pepper in OpenBao), TOTP secrets sealed by the vault, session and device identifiers stored only as SHA-256 |
 | Cross-tenant data leakage | `org_id` everywhere + PostgreSQL RLS + cert-bound tenant on gateway |
 | Replay of a captured job | Nonce + expiry in signed payload; agent rejects replays |
