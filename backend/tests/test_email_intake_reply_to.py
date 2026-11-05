@@ -4,10 +4,10 @@ Spec §5.2 (correction C3). Without these, `email_token` is never minted in
 production and the whole reply path is unreachable -- while every other test
 passes, because each constructs its own token.
 
-WHY THE SMTP FAKE IS `smtplib.SMTP` AND NOT `delivery._send_smtp_sync`.
-The task brief suggested monkeypatching `_send_smtp_sync` itself and
+WHY THE SMTP FAKE IS `smtplib.SMTP` AND NOT `app.core.mail.send_smtp_sync`.
+The task brief suggested monkeypatching `send_smtp_sync` itself and
 recording its kwargs. That would be strictly weaker, and weaker in exactly
-the direction this task exists to close: `_send_smtp_sync` is the function
+the direction this task exists to close: `send_smtp_sync` is the function
 that BUILDS the `Reply-To` header, so patching it out means no test ever
 observes a real header on a real `EmailMessage` -- the round-trip test below
 would round-trip a kwarg through `extract_reply_token`, not a header. So
@@ -16,13 +16,13 @@ convention (that file's module docstring: "`smtplib.SMTP` itself is
 monkeypatched to a stub that records what it was called with and never opens
 a socket"), importing that file's `_RecordingSMTP` rather than defining a
 second one. `last_message` is the real `email.message.EmailMessage` that
-`_send_smtp_sync` handed to `send_message`.
+`send_smtp_sync` handed to `send_message`.
 
 WHY THE INBOUND HALF IS DRIVEN THROUGH THE REAL `process_message`.
 `test_a_reply_to_the_published_address_lands_as_a_public_comment` is the
 first test in this module to exercise BOTH halves against each other: the
 address it feeds to `parsing`/`intake` is literally the `Reply-To` header
-`_send_smtp_sync` emitted, not a token this test minted. Two
+`send_smtp_sync` emitted, not a token this test minted. Two
 independently-correct halves that disagree on format is precisely the defect
 neither half's own suite can see.
 
@@ -109,7 +109,7 @@ class ReplyEnv:
     @property
     def messages(self) -> list[EmailMessage]:
         """Every message sent so far, in order -- one `_RecordingSMTP`
-        instance per `_send_smtp_sync` call."""
+        instance per `send_smtp_sync` call."""
         messages = []
         for instance in _RecordingSMTP.instances:
             if instance.sent is None:
@@ -773,7 +773,7 @@ async def test_a_mailbox_address_that_cannot_be_a_header_gets_no_reply_to(
     admin can store a control character in it.
 
     `email.policy.default` refuses to build a header from that, correctly,
-    but it refuses by RAISING `ValueError` out of `_send_smtp_sync`, which
+    but it refuses by RAISING `ValueError` out of `send_smtp_sync`, which
     `_send_email` does not classify. It escapes to the worker's blanket
     `except Exception`, which marks the delivery `dead` -- terminal, no
     retry. One bad character would stop EVERY ticket-subject email for the

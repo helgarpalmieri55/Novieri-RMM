@@ -1194,6 +1194,9 @@ CATALOG: dict[str, str] = {
         "El servidor de correo rechazó la dirección del destinatario."
     ),
     "The mail relay could not be reached.": "No se pudo contactar con el servidor de correo.",
+    "The mail relay's certificate could not be verified.": (
+        "No se pudo verificar el certificado del servidor de correo."
+    ),
     "The mail relay or Microsoft 365 refused the sign-in.": (
         "El servidor de correo o Microsoft 365 rechazó el inicio de sesión."
     ),
@@ -1217,6 +1220,14 @@ CATALOG: dict[str, str] = {
         "demasiados mensajes de prueba para esta organización; inténtalo de nuevo en un minuto"
     ),
     "ITMS test message": "Mensaje de prueba de ITMS",
+    "the relay password may only contain ASCII characters": (
+        "la contraseña del servidor de correo solo puede contener caracteres ASCII"
+    ),
+    "This credential belongs to this organization's account email; change it in Settings, "
+    "Email.": (
+        "Esta credencial pertenece al correo de cuentas de esta organización; cámbiala en "
+        "Ajustes, Correo."
+    ),
     "This is a test message from ITMS. It reached you, so this organization's account email "
     "(invitations and password resets) is working.": (
         "Este es un mensaje de prueba de ITMS. Te ha llegado, así que el correo de cuentas de "

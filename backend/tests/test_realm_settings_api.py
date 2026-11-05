@@ -27,6 +27,7 @@ tab always had, and the test that would notice each one breaking:
 
 import json
 import smtplib
+import ssl
 from email.message import EmailMessage
 from typing import Any
 from uuid import UUID
@@ -538,7 +539,7 @@ async def test_the_test_send_goes_through_the_saved_relay_and_is_audited(email_e
     assert client.sent["Subject"] == "ITMS test message"
     sent = [e for e in await _audit(email_env.admin_engine, org) if e.action.startswith("email.")]
     assert [e.action for e in sent] == ["email.credential_used", "email.test_requested"]
-    assert sent[1].meta == {"recipient": "itms@toeshee.com"}
+    assert sent[1].meta == {"recipient": "itms@toeshee.com", "outcome": "sent"}
 
 
 async def test_a_test_send_the_relay_refuses_is_reported_not_swallowed(email_env: Any) -> None:
@@ -553,8 +554,10 @@ async def test_a_test_send_the_relay_refuses_is_reported_not_swallowed(email_env
     assert response.status_code == 502
     assert response.json()["detail"] == "The mail relay refused the message."
     assert "relay denied" not in response.text
-    events = await _audit(email_env.admin_engine, org)
-    assert [e.action for e in events if e.action.startswith("email.")] == ["email.credential_used"]
+    events = [e for e in await _audit(email_env.admin_engine, org) if e.action.startswith("email.")]
+    # CHANGED in the review fix: a failed test is an event too, with its reason.
+    assert [e.action for e in events] == ["email.credential_used", "email.test_requested"]
+    assert events[1].meta == {"recipient": "itms@toeshee.com", "outcome": "relay_refused"}
 
 
 async def test_the_test_send_goes_to_the_address_asked_for_and_audits_it(email_env: Any) -> None:
@@ -571,7 +574,7 @@ async def test_the_test_send_goes_to_the_address_asked_for_and_audits_it(email_e
     assert email_env.smtp.instances[0].sent["To"] == tagged
     events = await _audit(email_env.admin_engine, org)
     sent = [e for e in events if e.action == "email.test_requested"]
-    assert sent[0].meta == {"recipient": tagged}
+    assert sent[0].meta == {"recipient": tagged, "outcome": "sent"}
 
 
 async def test_a_colleague_at_the_callers_domain_is_refused_without_a_sign_in_domain(
@@ -924,3 +927,145 @@ async def test_a_relay_without_a_sign_in_reads_as_password_mode(email_env: Any) 
     assert read["auth_type"] == "password"
     assert read["microsoft_client_id"] == ""
     assert read["microsoft_sign_in_url"] == ""
+
+
+# --------------------------------------------------------------------------- #
+# review fixes: one transaction, failure reasons, pinned Microsoft relay,
+# the generic credential routes
+# --------------------------------------------------------------------------- #
+
+
+class _VaultWhoseStoreFails:
+    """The real vault, except that writing a secret raises -- validation has
+    passed by then, so the failure is inside the save's own transaction."""
+
+    def __init__(self, real: Any) -> None:
+        self._real = real
+
+    async def store(self, *args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("vault store failed")
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real, name)
+
+
+async def test_a_save_and_its_record_are_one_transaction(email_env: Any) -> None:
+    """`test_a_refused_write_records_nothing` refuses before a session opens, so
+    it cannot pin "the save and its record are one transaction". This one passes
+    validation and fails INSIDE the session, after the row was added: neither the
+    audit row, the settings row nor the credential may survive. It goes red if
+    `audit_service.record` moves into its own committed session, or before
+    `save_settings`."""
+    org, _sub, headers = await _admin(email_env, "email-one-transaction")
+    real = email_env.app.state.vault
+    email_env.app.state.vault = _VaultWhoseStoreFails(real)
+    try:
+        with pytest.raises(RuntimeError, match="vault store failed"):
+            await email_env.client.put("/api/v1/settings/email", headers=headers, json=VALID_BODY)
+    finally:
+        email_env.app.state.vault = real
+
+    events = await _audit(email_env.admin_engine, org)
+    assert [e for e in events if e.action == "email.settings_updated"] == []
+    assert (await _stored(email_env, org))[0] is None
+    assert await _credentials(email_env, org) == []
+
+
+async def test_an_unverifiable_relay_certificate_has_its_own_reason(email_env: Any) -> None:
+    org, sub, headers = await _admin(email_env, "email-cert")
+    await _seed(email_env, org, sub)
+    email_env.smtp.raise_on_send = ssl.SSLCertVerificationError(1, "self-signed certificate")
+
+    response = await email_env.client.post("/api/v1/settings/email/test", headers=headers)
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "The mail relay's certificate could not be verified."
+    assert "self-signed" not in response.text
+
+
+async def test_a_non_ascii_password_is_refused_without_repeating_it(email_env: Any) -> None:
+    """smtplib encodes AUTH as ASCII: saved, it would fail every send."""
+    org, _sub, headers = await _admin(email_env, "email-non-ascii")
+    secret = "contraseña-ñ-secreta"
+
+    response = await email_env.client.put(
+        "/api/v1/settings/email", headers=headers, json={**VALID_BODY, "password": secret}
+    )
+
+    assert response.status_code == 422
+    assert secret not in response.text
+    assert (await _stored(email_env, org))[0] is None
+
+
+async def test_a_username_with_no_saved_password_does_not_sign_in_empty(email_env: Any) -> None:
+    org, sub, headers = await _admin(email_env, "email-no-secret")
+    await _seed(email_env, org, sub, password=None)
+
+    response = await email_env.client.post("/api/v1/settings/email/test", headers=headers)
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == (
+        "The saved sign-in is missing or unreadable; enter it again."
+    )
+    assert email_env.smtp.instances == []
+
+
+async def test_microsoft_mode_stores_and_reports_the_relay_it_really_uses(email_env: Any) -> None:
+    """Sending is pinned to smtp.office365.com:587 STARTTLS in this mode, so the
+    row and the answer must say that, not what was typed."""
+    org, _sub, headers = await _admin(email_env, "email-ms-pinned")
+
+    response = await email_env.client.put(
+        "/api/v1/settings/email",
+        headers=headers,
+        json={**TOKEN_BODY, "host": "smtp.elsewhere.example", "port": 25, "encryption": "none"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["host"], body["port"], body["encryption"]) == (
+        "smtp.office365.com",
+        "587",
+        "starttls",
+    )
+    row, _secret = await _stored(email_env, org)
+    assert row is not None
+    assert (row.host, row.port, row.encryption) == ("smtp.office365.com", 587, "starttls")
+
+
+async def test_the_save_record_names_the_credential_later_uses_point_at(email_env: Any) -> None:
+    org, _sub, headers = await _admin(email_env, "email-credential-id")
+
+    await email_env.client.put("/api/v1/settings/email", headers=headers, json=VALID_BODY)
+
+    (credential,) = await _credentials(email_env, org)
+    (written,) = [
+        e for e in await _audit(email_env.admin_engine, org) if e.action == "email.settings_updated"
+    ]
+    assert written.meta["credential_id"] == str(credential.id)
+    assert TYPED not in json.dumps(written.meta)
+
+
+async def test_the_relay_credential_cannot_be_rotated_or_deleted_generically(
+    email_env: Any,
+) -> None:
+    """Settings -> Email is the only way to change it: a generic rotate would
+    leave the row pointing at a secret of the wrong shape, a delete at nothing."""
+    org, sub, headers = await _admin(email_env, "email-generic-routes")
+    await _seed(email_env, org, sub)
+    (credential,) = await _credentials(email_env, org)
+
+    rotated = await email_env.client.put(
+        f"/api/v1/credentials/{credential.id}",
+        headers=headers,
+        json={"name": "renamed", "secret": "not-json-at-all"},
+    )
+    deleted = await email_env.client.delete(
+        f"/api/v1/credentials/{credential.id}", headers=headers
+    )
+
+    assert rotated.status_code == 409
+    assert deleted.status_code == 409
+    (still,) = await _credentials(email_env, org)
+    assert still.name == credential.name
+    assert (await _stored(email_env, org))[1] == {"password": STORED}

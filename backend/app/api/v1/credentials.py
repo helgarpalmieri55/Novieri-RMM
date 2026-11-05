@@ -286,6 +286,20 @@ async def checkout_credential(
     return CheckoutResponse(secret=secret)
 
 
+def _refuse_account_mail(credential: Credential) -> None:
+    """Account email's relay sign-in is changed and removed by Settings -> Email
+    alone: rotating or deleting it here would leave that row pointing at a
+    secret that no longer works (or at nothing), bypassing its audit record."""
+    if credential.type == ACCOUNT_MAIL_CREDENTIAL_TYPE:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            tr(
+                "This credential belongs to this organization's account email; change it "
+                "in Settings, Email."
+            ),
+        )
+
+
 @router.put("/{credential_id}", response_model=CredentialOut)
 async def update_credential(
     credential_id: UUID,
@@ -296,6 +310,7 @@ async def update_credential(
     state = request.app.state
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
         credential = await _get(session, ctx.org_id, credential_id)
+        _refuse_account_mail(credential)
         client_id = credential.client_id  # read before the update below expires it
         credential.name = body.name
         if body.secret is not None:
@@ -339,6 +354,7 @@ async def delete_credential(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
         credential = await _get(session, ctx.org_id, credential_id)
+        _refuse_account_mail(credential)
         await audit_service.record(
             session,
             org_id=ctx.org_id,

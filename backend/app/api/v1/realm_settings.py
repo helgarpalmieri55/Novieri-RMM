@@ -289,6 +289,13 @@ def _refuse_unusable(body: EmailSettingsIn) -> None:
                     "that needs no sign-in",
                 ),
             )
+        if not body.password.isascii():
+            # smtplib encodes AUTH as ASCII: such a password would be saved and
+            # then fail every send as "unsendable". Never echoed.
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                tr("the relay password may only contain ASCII characters"),
+            )
         if len(body.password) > MAX_PASSWORD:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -437,7 +444,7 @@ async def write_email_settings(
     state = request.app.state
     supplied = sorted(body.model_fields_set)
     async with org_session(ctx.org_id, engine=state.app_engine, clients=ctx.clients) as session:
-        await save_settings(
+        saved = await save_settings(
             session,
             state.vault,
             org_id=ctx.org_id,
@@ -456,7 +463,13 @@ async def write_email_settings(
             target_id="account_mail",
             # FIELD NAMES ONLY. `password` appearing here is a record that the
             # credential was rotated; its value never can be.
-            metadata={"fields": supplied},
+            # The id of the vault credential, so the later
+            # `email.credential_used` rows point at an id this record
+            # introduced. An id is not a secret.
+            metadata={
+                "fields": supplied,
+                "credential_id": str(saved.credential_id) if saved.credential_id else None,
+            },
         )
         await session.flush()
 
@@ -529,17 +542,21 @@ async def send_test_message(
             ) from exc
         except MailSendFailed as exc:
             failure = exc
-        else:
-            await audit_service.record(
-                session,
-                org_id=ctx.org_id,
-                actor_type="user",
-                actor_id=ctx.user_id,
-                action="email.test_requested",
-                target_type="email_settings",
-                target_id="account_mail",
-                metadata={"recipient": recipient},
-            )
+        # Recorded for a failure as well as a success: a test that reached the
+        # relay and was refused is an event, and an outcome says which.
+        await audit_service.record(
+            session,
+            org_id=ctx.org_id,
+            actor_type="user",
+            actor_id=ctx.user_id,
+            action="email.test_requested",
+            target_type="email_settings",
+            target_id="account_mail",
+            metadata={
+                "recipient": recipient,
+                "outcome": failure.reason.value if failure is not None else "sent",
+            },
+        )
         await session.flush()
     if failure is not None:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, failure_message(failure.reason))

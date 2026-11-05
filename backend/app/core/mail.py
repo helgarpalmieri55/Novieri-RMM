@@ -127,6 +127,7 @@ class MailFailure(StrEnum):
     RELAY_REFUSED = "relay_refused"
     RECIPIENT_REFUSED = "recipient_refused"
     UNREACHABLE = "unreachable"
+    CERTIFICATE_UNVERIFIED = "certificate_unverified"
     SIGN_IN_REFUSED = "sign_in_refused"
     SIGN_IN_UNAVAILABLE = "sign_in_unavailable"
     SIGN_IN_MISSING = "sign_in_missing"
@@ -153,6 +154,8 @@ def failure_message(reason: MailFailure) -> str:
         return tr("The mail relay refused the recipient address.")
     if reason is MailFailure.UNREACHABLE:
         return tr("The mail relay could not be reached.")
+    if reason is MailFailure.CERTIFICATE_UNVERIFIED:
+        return tr("The mail relay's certificate could not be verified.")
     if reason is MailFailure.SIGN_IN_REFUSED:
         return tr("The mail relay or Microsoft 365 refused the sign-in.")
     if reason is MailFailure.SIGN_IN_UNAVAILABLE:
@@ -418,6 +421,11 @@ async def save_settings(
     secret: dict[str, str] | None = None
     if row.username and values.auth_type == "token":
         row.auth_type = "token"
+        # What sending really uses (`send_account_mail` pins them): store and
+        # report the truth, not what was typed.
+        row.host = microsoft.SMTP_HOST
+        row.port = microsoft.SMTP_PORT
+        row.encryption = "starttls"
         row.token_url = values.token_url.strip()
         row.token_scope = values.token_scope.strip()
         row.token_client_id = values.token_client_id.strip()
@@ -555,6 +563,10 @@ async def send_account_mail(
         host, port, use_tls, implicit_tls = microsoft.SMTP_HOST, microsoft.SMTP_PORT, True, False
     elif signs_in:
         password = creds.get("password")
+        if password is None:
+            # A username with no saved password must not sign in with an empty
+            # one: refuse before connecting, as the Microsoft branch does.
+            raise MailSendFailed(MailFailure.SIGN_IN_MISSING)
     del creds
 
     sender = (
@@ -579,6 +591,11 @@ async def send_account_mail(
             reply_to=settings.reply_to or None,
             access_token=access_token,
         )
+    except ssl.SSLCertVerificationError:
+        # First: it is an OSError AND a ValueError, and would otherwise be
+        # reported as "unreachable" or "unsendable" -- a wrong diagnosis for
+        # a relay that answered with a certificate this platform will not trust.
+        raise MailSendFailed(MailFailure.CERTIFICATE_UNVERIFIED) from None
     except smtplib.SMTPAuthenticationError:
         raise MailSendFailed(MailFailure.SIGN_IN_REFUSED) from None
     except smtplib.SMTPRecipientsRefused:
