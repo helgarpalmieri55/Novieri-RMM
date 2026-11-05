@@ -70,3 +70,8 @@ export interface InviteDetails {
   email: string;
   display_name: string;
 }
+
+/** `POST /auth/recover/details {token}`: whose account the server's recovery link is for. */
+export interface RecoveryLink {
+  email: string;
+}

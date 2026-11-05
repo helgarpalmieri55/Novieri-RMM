@@ -14,6 +14,7 @@ import { EnrollPage } from "../EnrollPage";
 import { FactorPage } from "../FactorPage";
 import { ForgotPasswordPage } from "../ForgotPasswordPage";
 import { InvitePage } from "../InvitePage";
+import { RecoverPage } from "../RecoverPage";
 import { RecoveryCodesPage } from "../RecoveryCodesPage";
 import { ResetPasswordPage } from "../ResetPasswordPage";
 import { SignInPage } from "../SignInPage";
@@ -33,6 +34,8 @@ export const calls = {
   resetPassword: vi.fn(),
   getInvite: vi.fn(),
   acceptInvite: vi.fn(),
+  getRecovery: vi.fn(),
+  acceptRecovery: vi.fn(),
 };
 
 export const TEN_CODES = [
@@ -60,6 +63,8 @@ export function installDefaults(): void {
   calls.resetPassword.mockResolvedValue(undefined);
   calls.getInvite.mockResolvedValue({ email: "dana@example.test", display_name: "Dana Okafor" });
   calls.acceptInvite.mockResolvedValue(undefined);
+  calls.getRecovery.mockResolvedValue({ email: "owner@example.test" });
+  calls.acceptRecovery.mockResolvedValue(undefined);
 }
 
 export function authApi(): ApiClient {
@@ -74,7 +79,7 @@ function LocationProbe() {
   return null;
 }
 
-/** The seven pages, at `path` (fragment included), with router `state` when a step hands one over. */
+/** The eight pages, at `path` (fragment included), with router `state` when a step hands one over. */
 export function renderAuth(path: string, state?: unknown): RenderResult {
   const url = new URL(path, "https://itms.example");
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -89,6 +94,7 @@ export function renderAuth(path: string, state?: unknown): RenderResult {
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/invite" element={<InvitePage />} />
+          <Route path="/recover" element={<RecoverPage />} />
           <Route path="*" element={<p data-testid="elsewhere" />} />
         </Routes>
         <LocationProbe />

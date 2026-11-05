@@ -1134,6 +1134,7 @@ import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
   RecoveryCodes,
+  RecoveryLink,
   RegistrationResponseJSON,
   SignedIn,
   TotpEnrollment,
@@ -1870,6 +1871,28 @@ export class ApiClient {
   /** `POST /auth/invite/accept`: the password; answers `{"state": "enroll_required"}` and a session that still needs a factor. */
   acceptInvite(body: { token: string; password: string }): Promise<void> {
     return this.request<void>("/auth/invite/accept", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
+  }
+
+  /** `POST /auth/recover/details`: whose account the server's recovery link (`recover` command) is for. */
+  getRecovery(token: string): Promise<RecoveryLink> {
+    return this.request<RecoveryLink>(
+      "/auth/recover/details",
+      { method: "POST", body: JSON.stringify({ token }) },
+      { anonymous: true },
+    );
+  }
+
+  /**
+   * `POST /auth/recover/accept`: the server removes the account's second
+   * factors and recovery codes, and leaves a session that has none -- the
+   * next page is the first factor.
+   */
+  acceptRecovery(token: string): Promise<void> {
+    return this.request<void>(
+      "/auth/recover/accept",
+      { method: "POST", body: JSON.stringify({ token }) },
+      { anonymous: true },
+    );
   }
 
   /** `POST /auth/logout-everywhere`: end every session of this person, this one included. */

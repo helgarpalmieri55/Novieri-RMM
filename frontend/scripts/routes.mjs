@@ -83,6 +83,7 @@ export const ROUTES = [
   // add (`?__fixtures` would land inside it); the fixtures answer any token.
   "/reset-password",
   "/invite",
+  "/recover",
   "/devices",
   "/devices/onboard",
   "/devices/push-runs",

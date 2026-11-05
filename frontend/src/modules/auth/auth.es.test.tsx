@@ -88,6 +88,13 @@ describe("the sign-in pages in Spanish", () => {
     expectNoEnglish(container);
   });
 
+  it("the server's recovery link", async () => {
+    const { container } = renderAuth("/recover#tok");
+    expect(await screen.findByRole("heading", { name: "Recupera tu cuenta" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Recuperar mi cuenta" })).toBeInTheDocument();
+    expectNoEnglish(container);
+  });
+
   it("the invitation", async () => {
     const { container } = renderAuth("/invite#tok");
     expect(await screen.findByRole("heading", { name: "Te damos la bienvenida, Dana Okafor" })).toBeInTheDocument();

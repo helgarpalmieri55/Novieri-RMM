@@ -97,6 +97,15 @@ export const auth = {
     submit: "Set password and continue",
     invalid: "This invitation has expired, was already used, or was cancelled. Ask the person who invited you for a new one.",
   },
+  recover: {
+    heading: "Account recovery",
+    loading: "Opening your recovery link…",
+    title: "Recover your account",
+    intro: "This link was made on the server for <b>{email}</b>.",
+    what: "Recovering removes this account's second factors and recovery codes. You then add a new second factor and save new recovery codes before the console opens.",
+    submit: "Recover my account",
+    invalid: "This recovery link has expired or was already used. Someone with access to the server can make a new one.",
+  },
   password: {
     new: "New password",
     confirm: "The same password again",

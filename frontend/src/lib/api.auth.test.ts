@@ -40,6 +40,8 @@ const CASES: [string, (api: ApiClient) => Promise<unknown>, string, string, unkn
   ["getInvite", (api) => api.getInvite("tok-1"), "POST", "/api/v1/auth/invite/details", { token: "tok-1" }],
   ["acceptInvite", (api) => api.acceptInvite({ token: "t", password: "pw" }), "POST", "/api/v1/auth/invite/accept", { token: "t", password: "pw" }],
   ["logoutEverywhere", (api) => api.logoutEverywhere(), "POST", "/api/v1/auth/logout-everywhere", undefined],
+  ["getRecovery", (api) => api.getRecovery("tok-1"), "POST", "/api/v1/auth/recover/details", { token: "tok-1" }],
+  ["acceptRecovery", (api) => api.acceptRecovery("tok-1"), "POST", "/api/v1/auth/recover/accept", { token: "tok-1" }],
 ];
 
 /** The four enrol routes as My security calls them, with the full console session (`EnrollFrom`). */

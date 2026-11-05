@@ -44,6 +44,7 @@ const PAGES = [
   "/forgot-password",
   "/reset-password",
   "/invite",
+  "/recover",
 ];
 
 describe("the pages reached without a session", () => {

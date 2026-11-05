@@ -53,12 +53,13 @@ export const DEFAULT_AFTER_SIGN_IN = "/";
 
 /**
  * The pages a person reaches WITHOUT a session, mounted outside `RequireAuth`
- * (own-auth Task 11). Prefixes: `/sign-in/factor` is under `/sign-in`,
- * `/invite/<token>` under `/invite`. None begins with a prefix the edge sends
- * elsewhere (`/api`, `/enroll`, `/i/`, `/mcp`, `/.well-known`, `/realms`,
- * `/resources`, `/js`; plan decision D19).
+ * (own-auth Task 11). Prefixes: `/sign-in/factor` is under `/sign-in`. The
+ * emailed and server-made links (`/invite`, `/reset-password`, `/recover`)
+ * carry their token in the fragment, never in the path. None begins with a
+ * prefix the edge sends elsewhere (`/api`, `/enroll`, `/i/`, `/mcp`,
+ * `/.well-known`, `/realms`, `/resources`, `/js`; plan decision D19).
  */
-export const PUBLIC_PATHS: readonly string[] = ["/sign-in", "/forgot-password", "/reset-password", "/invite"];
+export const PUBLIC_PATHS: readonly string[] = ["/sign-in", "/forgot-password", "/reset-password", "/invite", "/recover"];
 
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));

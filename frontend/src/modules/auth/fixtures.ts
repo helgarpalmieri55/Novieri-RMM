@@ -2,8 +2,8 @@
  * Fixtures for the pages reached without a session (own-auth Task 11), for
  * the harmony gate and `?__fixtures` in development.
  *
- * Only `getInvite` is called when a page loads (`/invite`, with any token --
- * harmony cannot add a fragment); the rest
+ * Only `getInvite` and `getRecovery` are called when a page loads (`/invite`,
+ * `/recover`, with any token -- harmony cannot add a fragment); the rest
  * answer a person clicking through in fixture mode, the way the server would:
  * a password step that asks for a factor, a factor that is accepted, a setup
  * key, ten codes. The codes and the key are INVENTED and follow the shapes the
@@ -44,5 +44,7 @@ export const fixtures: FixtureMap = {
   resetPassword: () => undefined,
   getInvite: () => ({ email: "dana.okafor@toeshee.example", display_name: "Dana Okafor" }),
   acceptInvite: () => undefined,
+  getRecovery: () => ({ email: "helgar.palmieri@toeshee.example" }),
+  acceptRecovery: () => undefined,
   logoutEverywhere: () => undefined,
 };

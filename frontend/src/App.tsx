@@ -124,6 +124,7 @@ import { EnrollPage } from "./modules/auth/EnrollPage";
 import { FactorPage } from "./modules/auth/FactorPage";
 import { ForgotPasswordPage } from "./modules/auth/ForgotPasswordPage";
 import { InvitePage } from "./modules/auth/InvitePage";
+import { RecoverPage } from "./modules/auth/RecoverPage";
 import { RecoveryCodesPage } from "./modules/auth/RecoveryCodesPage";
 import { ResetPasswordPage } from "./modules/auth/ResetPasswordPage";
 import { SignInPage } from "./modules/auth/SignInPage";
@@ -596,6 +597,7 @@ export default function App() {
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/invite" element={<InvitePage />} />
+            <Route path="/recover" element={<RecoverPage />} />
             <Route
               path="/devices"
               element={
