@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClient, BACKGROUND_HEADER, requestHeaders } from "./api";
 import { ACTIVE_FOR_MS, personActive, resetPersonInput, watchPersonInput } from "./personInput";
+import { sessionPerson } from "./sessionEnd";
 
 let stop: (() => void) | null = null;
 
@@ -91,7 +92,31 @@ describe("the background header", () => {
     expect(requestHeaders().get(BACKGROUND_HEADER)).toBe("1");
   });
 
-  it("counts input over a component that stops it from bubbling -- the remote screen does", () => {
+  it("counts a click with no pointerdown, and an input with no keydown: a screen reader, voice control, dictation (fix round 1 re-review, R1-M5)", () => {
+    stop = watchPersonInput(window, () => {});
+    render(
+      <div>
+        <button type="button" onClick={(event) => event.stopPropagation()}>
+          Save
+        </button>
+        <textarea aria-label="Reply" onInput={(event) => event.stopPropagation()} />
+      </div>,
+    );
+    // Browse-mode activation (NVDA, JAWS, VoiceOver) and voice control: the
+    // browser synthesises the click alone.
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(personActive()).toBe(true);
+    // Dictation inserts text through `input`, with no key pressed.
+    resetPersonInput();
+    fireEvent.input(screen.getByRole("textbox", { name: "Reply" }), { target: { value: "ask Bob to try again" } });
+    expect(personActive()).toBe(true);
+    expect(requestHeaders().has(BACKGROUND_HEADER)).toBe(false);
+  });
+
+  it("counts input over a component that stops it from bubbling -- the row menus and the palette do, for Escape", () => {
+    // RENAMED (fix round 1 re-review, R1-M6): the remote screen's viewer only
+    // calls `preventDefault`. No component stops a working key today; this
+    // pins the capture phase for the day one does.
     stop = watchPersonInput(window, () => {});
     render(
       <div
@@ -151,6 +176,10 @@ describe("the keep-alive", () => {
 
 describe("the console's own keep-alive", () => {
   it("is a plain GET /me through the provider's client, without the header", async () => {
+    // RE-POINTED (fix round 1 re-review, R1-M3): there is a session to keep.
+    // With none, the keep-alive sends nothing (`ApiContext.test.tsx`, "the
+    // keep-alive, with no session").
+    sessionPerson("u1");
     const sent = stubFetch();
     const { ApiProvider } = await import("./ApiContext");
     render(

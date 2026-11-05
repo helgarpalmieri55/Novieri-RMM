@@ -15,25 +15,34 @@
  *   2. a secret-bearing mutation site that is not in `SECRET_SITES` -- the
  *      list below, which IS the reviewed inventory;
  *   3. a mutation of an `ApiClient` method whose body or answer has a field
- *      named like a secret BY RULE (`SECRET_FIELD`: a password, passphrase,
- *      secret, token, key, code, pin, psk or otp suffix, or `private`) that
- *      nobody has classified: it goes in `SECRET_METHODS` or, with the
- *      reason, in `NOT_SECRET`;
- *   4. a mutation whose options hand `api` to a function the scan cannot see
- *      into, or call no `ApiClient` method at all (`OPAQUE_SITES`): a secret
- *      method behind a local helper is invisible to 1 and 3;
+ *      named like a secret BY RULE (`secretField`: its words, in any case,
+ *      end in a password, passphrase, secret, token, key, code, pin, psk, otp
+ *      or credential, or begin with one, or include `private`) that nobody
+ *      has classified: it goes in `SECRET_METHODS` or, with the reason, in
+ *      `NOT_SECRET`;
+ *   4. a mutation the scan cannot follow to every method it reaches
+ *      (`OPAQUE_SITES`): one that calls no `ApiClient` method, hands `api`
+ *      on, or whose `mutationFn` calls anything but `api.<method>(`, a known
+ *      wrapper, or a reviewed call (`KNOWN_CALLS`) -- a secret method behind
+ *      a local helper or a closure is invisible to 1 and 3;
  *   5. a mutation of a method whose body the scan cannot read to the end --
  *      `Record<…>`, `unknown`, a type it finds no declaration of -- unless it
  *      is reviewed with what that body holds (`OPAQUE_BODIES`).
  *
- * The reviewer's probes that went through the earlier guard (final
- * re-review, I2) are kept as its own tests, run through the same `audit`.
+ * The reviewer's probes that went through the earlier guards (final
+ * re-review, I2; fix round 1 re-review, R1-M4) are kept as its own tests, run
+ * through the same `audit`. And BEHIND ALL FIVE, the backstop: the app's
+ * `QueryClient` defaults every mutation to `gcTime: 0`, so what no rule
+ * recognised still leaves the cache when its page unmounts.
  *
  * Read from the source, as `api.session.test.ts` and `globalWrites.test.tsx`
  * are: what is pinned is the code, before any page runs it.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { QueryClient, QueryClientProvider, useMutation } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 
 const SRC = resolve(import.meta.dirname, "..");
@@ -114,6 +123,12 @@ const NOT_SECRET: Record<string, string> = {
   proveRecoveryKey: "a PUBLIC key, and the answer to a one-time challenge that proves the private half, which never reaches the console",
   rejectAiAction: "`approved_action_key` names an approved action",
   testNotificationChannel: "`status_code` is the HTTP status a test send got back",
+  // Named like a secret by the word rule (fix round 1 re-review, R1-M4); none is one.
+  disconnectMailboxOAuth:
+    "the answer's `has_credential` and `credential_state` say whether the mailbox still holds a credential, and its state -- never the credential",
+  enrollPasskey:
+    "`credential` is the WebAuthn registration response: a public key and its attestation; the private key never leaves the authenticator",
+  remediateHealthAlert: "`actionKey` names the remediation action to dispatch",
 };
 
 /**
@@ -159,10 +174,43 @@ const SECRET_SITES: Record<string, { reviewed?: string }> = {
  * The list it replaces had to name `smtp_password`, `client_secret` and
  * `secret_access_key` one by one, and let `api_key`, `access_token`,
  * `private_key` and `passphrase` -- the commonest names for a secret --
- * through. A suffix rule on snake_case names, plural allowed, and `private`
- * anywhere.
+ * through.
+ *
+ * BY WORD, IN ANY CASE (fix round 1 re-review, R1-M4). The first rule was a
+ * suffix on snake_case, and `apiKey`, `clientSecret`, `credentials` and
+ * `secret_value` went through it. A name is split into its words --
+ * snake_case, camelCase, PascalCase, `APIKey` -- lower-cased, plurals made
+ * singular, and it reads like a secret when:
+ *
+ *   - its LAST word is a secret's (`SECRET_LAST`): `api_key`, `apiKey`,
+ *     `newPassword`, `credentials`;
+ *   - or its FIRST word is (`SECRET_FIRST`: `secret_value`, `token_value`),
+ *     unless its last word names a reference to the thing rather than the
+ *     thing (`REFERENCE_LAST`: `credential_id`, `token_expires_at`);
+ *   - or any word is `private`.
  */
-const SECRET_FIELD = /(?:^|_)(?:password|passphrase|secret|token|key|code|pin|psk|otp)s?$|(?:^|_)private(?:_|$)/;
+const SECRET_LAST = new Set(["password", "passphrase", "secret", "token", "key", "code", "pin", "psk", "otp", "credential"]);
+const SECRET_FIRST = new Set(["password", "passphrase", "secret", "token", "credential", "private"]);
+const REFERENCE_LAST = new Set(["id", "ids", "ref", "name", "label", "count", "at", "kind", "type"]);
+
+/** `newPassword`, `APIKey`, `secret_value` -> `["new", "password"]`, `["api", "key"]`, `["secret", "value"]`. */
+function words(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
+    .toLowerCase()
+    .split(/_+/)
+    .filter((word) => word !== "")
+    .map((word) => (word.length > 3 && word.endsWith("s") && !word.endsWith("ss") ? word.slice(0, -1) : word));
+}
+
+function secretField(name: string): boolean {
+  const parts = words(name);
+  const first = parts[0] ?? "";
+  const last = parts.at(-1) ?? "";
+  if (SECRET_LAST.has(last) || parts.includes("private")) return true;
+  return SECRET_FIRST.has(first) && !REFERENCE_LAST.has(last);
+}
 
 /**
  * Mutation sites whose options hand `api` to nothing the scan can follow, or
@@ -173,6 +221,155 @@ const SECRET_FIELD = /(?:^|_)(?:password|passphrase|secret|token|key|code|pin|ps
 const OPAQUE_SITES: Record<string, string> = {
   "lib/secretMutation.ts": "the wrapper itself: its options are the caller's",
 };
+
+/**
+ * WHAT A `mutationFn` MAY CALL BESIDES `api.<method>(` (fix round 1 re-review,
+ * R1-M4), reviewed: each is the language's, or a console function handed data
+ * that cannot reach `api` -- `api` comes from `useApi()` in the hook, so only
+ * an argument or a closure can carry it, and both are refused below. Any
+ * other call in a `mutationFn` fails check 4 until it is here; so does a
+ * listed name whose definition in the same file mentions `api` (a closure),
+ * and so does `api` itself handed anywhere but as a known wrapper's first
+ * argument. Also accepted without a listing: a `useState`/`useReducer` setter
+ * and a `useNavigate()` function bound in the same file.
+ */
+const KNOWN_CALLS: Record<string, string> = {
+  Number: "the language's conversion",
+  Error: "the language's error",
+  Map: "the language's map",
+  Set: "the language's set",
+  "JSON.stringify": "the language's JSON",
+  "Promise.allSettled": "the language's promises; the calls it waits on are in these options",
+  PromoteFailed: "`modules/devices/CandidatesPage.tsx`: an `Error` subclass",
+  requireKnown: "`lib/clientSelection.ts`: the chosen client's id, or a refusal",
+  namingClient: "`modules/ipam/api.ts`: the body with the client it belongs to named",
+  importTarget: "`modules/ipam/api.ts`: the VRF or client an import goes to",
+  toOrgRequest: "`modules/settings/api.ts`: the form's org settings as the request's shape",
+  toOrgOut: "`modules/settings/api.ts`: the answer's org settings as the form's shape",
+  initial: "`modules/devices/PushDetailsDialog.tsx`: the device's fields as the form started",
+  reviewListDigest: "`modules/devices/ApproveAllDialog.tsx`: a SHA-256 of the ids a person reviewed (`crypto.subtle`)",
+  toDocument: "`modules/devices/GroupsPage.tsx`: a group's condition drafts as its rules",
+  saveBlob: "`lib/download.ts`: hands a file the mutation fetched to the browser",
+  createPasskey: "`modules/auth/passkey.ts`: the browser's WebAuthn ceremony",
+  run: "the step-up runner (`components/stepUp`), handed in as a parameter: it runs the closure it is given, and that closure's `api.` call is in these options",
+  "stepUp.run": "the step-up runner (`components/stepUp`): it runs the closure it is given, and that closure's `api.` call is in these options",
+  build: "the mutation's own variable, a function that builds the body from the form",
+  body: "a function in the component that builds the body from the form's state",
+};
+
+/** Methods of the language's values (strings, arrays, maps, promises), whatever they are called on. */
+const BUILTIN_METHODS = new Set([
+  "trim", "map", "flatMap", "filter", "find", "some", "every", "forEach", "reduce", "includes", "join", "slice",
+  "concat", "push", "values", "keys", "entries", "get", "set", "has", "toLowerCase", "toUpperCase", "toString",
+  "split", "replace", "startsWith", "endsWith", "then", "catch", "finally",
+]);
+
+const KEYWORDS = new Set(["if", "for", "while", "switch", "catch", "return", "await", "async", "typeof", "function", "new"]);
+
+/** `text` with its comments removed and its string and template literals emptied. */
+function code(text: string): string {
+  return text
+    .replace(/\/\*[\s\S]*?\*\/|(^|[^:])\/\/[^\n]*/g, "$1")
+    .replace(/`(?:[^`\\]|\\.)*`|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, '""');
+}
+
+/** The value of `mutationFn` in a mutation's options (code only), or `null` where there is none to read. */
+function mutationFnOf(options: string): string | null {
+  const key = /\bmutationFn\s*(:|\()/.exec(options);
+  if (key === null) return null;
+  let index = key.index + key[0].length - (key[1] === "(" ? 1 : 0);
+  let depth = 0;
+  for (; index < options.length; index += 1) {
+    const char = options[index]!;
+    if ("([{".includes(char)) depth += 1;
+    else if (")]}".includes(char)) {
+      if (depth === 0) break;
+      depth -= 1;
+      if (depth === 0 && key[1] === "(" && char === "}") return options.slice(key.index, index + 1);
+    } else if (char === "," && depth === 0) break;
+  }
+  return options.slice(key.index, index);
+}
+
+/** The text of each definition of `name` in `text`: `const name =` to its `;`, a destructuring that binds it, `function name` to its closing line. */
+function definitions(text: string, name: string): string[] {
+  const id = name.replace(/\$/g, "\\$");
+  const found: string[] = [];
+  for (const match of text.matchAll(new RegExp(`\\b(?:const|let|var)\\s+(?:${id}\\b|[[{][^=;]*\\b${id}\\b[^=;]*[\\]}])[^=;]*=`, "g"))) {
+    let depth = 0;
+    let end = match.index + match[0].length;
+    for (; end < text.length; end += 1) {
+      if ("([{".includes(text[end]!)) depth += 1;
+      else if (")]}".includes(text[end]!)) depth -= 1;
+      else if (text[end] === ";" && depth <= 0) break;
+    }
+    found.push(text.slice(match.index, end));
+  }
+  for (const match of text.matchAll(new RegExp(`^([ \\t]*)(?:export\\s+)?(?:async\\s+)?function\\s+${id}\\b`, "gm"))) {
+    const close = new RegExp(`^${match[1]}\\}`, "m").exec(text.slice(match.index + match[0].length));
+    found.push(text.slice(match.index, close === null ? text.length : match.index + match[0].length + close.index));
+  }
+  return found;
+}
+
+/** Bound in this file by a hook whose functions cannot reach `api`: a state setter, a dispatcher, `navigate`. */
+function hookBound(text: string, name: string): boolean {
+  const id = name.replace(/\$/g, "\\$");
+  return (
+    new RegExp(`\\bconst\\s*\\[[^\\]]*\\b${id}\\s*\\]\\s*=\\s*(?:React\\.)?use(?:State|Reducer)\\b`).test(text) ||
+    new RegExp(`\\bconst\\s+${id}\\s*=\\s*useNavigate\\(\\)`).test(text)
+  );
+}
+
+/**
+ * Why the scan cannot follow a mutation's options to every `ApiClient` method
+ * they reach: each call in its `mutationFn` that is not `api.<method>(`, a
+ * known wrapper, or reviewed, and each `api` handed on. Empty when it can.
+ */
+function unfollowed(options: string, fileText: string, methods: ReadonlyMap<string, string>): string[] {
+  const plain = code(options);
+  const file = code(fileText);
+  const reasons: string[] = [];
+
+  // `api` handed anywhere: only `api.<name>(` and a known wrapper's `<method>(api, …)` are followed.
+  for (const found of plain.matchAll(/\bapi\b/g)) {
+    const after = plain.slice(found.index + 3);
+    if (/^\s*\.\s*[\w$]+\s*\(/.test(after)) continue;
+    const before = plain.slice(0, found.index);
+    const wrapper = /(?<![\w$.])([\w$]+)\s*\(\s*$/.exec(before);
+    if (wrapper !== null && methods.has(wrapper[1]!) && /^\s*[,)]/.test(after)) continue;
+    reasons.push(`\`api\` handed on: …${plain.slice(Math.max(0, found.index - 30), found.index + 12).replace(/\s+/g, " ")}…`);
+  }
+
+  const fn = mutationFnOf(plain);
+  if (fn === null) return [...reasons, "no `mutationFn` the scan can read"];
+  // A closure: defined outside this `mutationFn` and over `api`. A value the
+  // `mutationFn` defines itself is in its own text, `api.` calls and all.
+  const reachesApi = (name: string) => definitions(file, name).some((text) => /\bapi\b/.test(text) && !fn.includes(text));
+
+  // Free calls: `name(`.
+  for (const found of fn.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*(?:<[^()]*?>)?\(/g)) {
+    const name = found[1]!;
+    if (KEYWORDS.has(name) || name === "mutationFn") continue;
+    const wrapper = methods.has(name) && /^\s*api\s*[,)]/.test(fn.slice(found.index + found[0].length));
+    if (wrapper) continue;
+    if (!(name in KNOWN_CALLS) && !hookBound(file, name)) reasons.push(`\`${name}(\` is not an ApiClient method, a known wrapper or a reviewed call`);
+    else if (reachesApi(name)) reasons.push(`\`${name}\` is defined in this file over \`api\``);
+  }
+  // Member calls: `root.….name(`, and `….name(` on any value.
+  for (const found of fn.matchAll(/(?:(?<![\w$.])([A-Za-z_$][\w$]*)((?:\s*\??\.\s*[\w$]+)*))?\s*\??\.\s*([\w$]+)\s*\(/g)) {
+    const root = found[1];
+    const name = found[3]!;
+    if (root === "api" && (found[2] ?? "") === "") {
+      if (!methods.has(name)) reasons.push(`\`api.${name}(\` is not an ApiClient method`);
+      continue;
+    }
+    const dotted = root === undefined ? name : `${root}${(found[2] ?? "").replace(/\s|\?/g, "")}.${name}`;
+    if (!(dotted in KNOWN_CALLS) && !BUILTIN_METHODS.has(name)) reasons.push(`\`${dotted}(\` is not an ApiClient method or a reviewed call`);
+    else if (root !== undefined && root !== "api" && reachesApi(root)) reasons.push(`\`${root}\` is defined in this file over \`api\``);
+  }
+  return reasons;
+}
 
 /**
  * Methods called by a mutation whose body names a type the scan cannot read
@@ -245,6 +442,8 @@ interface Site {
   methods: string[];
   /** Functions it hands `api` to that are not `ApiClient` methods: a helper the scan cannot follow. */
   handedTo: string[];
+  /** Why the scan cannot follow it to every method it reaches (`unfollowed`); empty when it can. */
+  unfollowed: string[];
 }
 
 interface Audit {
@@ -328,12 +527,19 @@ function audit(files: readonly Source[], api: string): Audit {
       const direct = [...options.matchAll(/\bapi\.(\w+)\(/g)].map((m) => m[1]!);
       const handed = [...options.matchAll(/\b(\w+)\(api[,)]/g)].map((m) => m[1]!);
       const all = [...new Set([...direct, ...handed])];
+      const called = all.filter((name) => methods.has(name));
+      const handedTo = [...new Set(handed.filter((name) => !methods.has(name)))];
       return {
         file,
         hook: match[1] as Site["hook"],
         options,
-        methods: all.filter((name) => methods.has(name)),
-        handedTo: [...new Set(handed.filter((name) => !methods.has(name)))],
+        methods: called,
+        handedTo,
+        unfollowed: [
+          ...(called.length === 0 ? ["calls no ApiClient method"] : []),
+          ...handedTo.map((name) => `hands \`api\` to \`${name}\``),
+          ...unfollowed(options, text, methods),
+        ],
       };
     }),
   );
@@ -356,7 +562,7 @@ function audit(files: readonly Source[], api: string): Audit {
     secretSiteNames: [...new Set(secret.map(({ site, method }) => siteName(site, method)))].sort(),
     unclassified: [...called]
       .filter((method) => {
-        const named = [...fieldsOf(methods.get(method)!)].filter((field) => SECRET_FIELD.test(field));
+        const named = [...fieldsOf(methods.get(method)!)].filter(secretField);
         if (named.length > 0) why.set(method, named.join(", "));
         return named.length > 0;
       })
@@ -365,8 +571,11 @@ function audit(files: readonly Source[], api: string): Audit {
     opaqueSites: [
       ...new Set(
         sites
-          .filter((site) => site.methods.length === 0 || site.handedTo.length > 0)
-          .map((site) => site.file)
+          .filter((site) => site.unfollowed.length > 0)
+          .map((site) => {
+            why.set(`${site.file}#site`, [...(why.get(`${site.file}#site`)?.split("; ") ?? []), ...site.unfollowed].join("; "));
+            return site.file;
+          })
           .filter((file) => !(file in OPAQUE_SITES)),
       ),
     ].sort(),
@@ -413,8 +622,8 @@ describe("the secret-bearing mutations", () => {
     expect(CONSOLE.unclassified.map((method) => `${method}: ${CONSOLE.why.get(method)}`)).toEqual([]);
   });
 
-  it("are every mutation the scan can follow: none hands `api` to a helper it cannot see into (check 4)", () => {
-    expect(CONSOLE.opaqueSites).toEqual([]);
+  it("are every mutation the scan can follow: none hands `api` to a helper it cannot see into, or calls one (check 4)", () => {
+    expect(CONSOLE.opaqueSites.map((file) => `${file}: ${CONSOLE.why.get(`${file}#site`)}`)).toEqual([]);
   });
 
   it("are every mutation whose body the scan can read to the end, or that one is reviewed (check 5)", () => {
@@ -426,8 +635,11 @@ describe("the secret-bearing mutations", () => {
     expect(Object.keys(SECRET_METHODS).filter((method) => !called.has(method))).toEqual([]);
     expect(Object.keys(NOT_SECRET).filter((method) => !called.has(method))).toEqual([]);
     expect(Object.keys(OPAQUE_BODIES).filter((method) => !called.has(method))).toEqual([]);
-    const opaque = new Set(CONSOLE.sites.filter((site) => site.methods.length === 0 || site.handedTo.length > 0).map((s) => s.file));
+    const opaque = new Set(CONSOLE.sites.filter((site) => site.unfollowed.length > 0).map((s) => s.file));
     expect(Object.keys(OPAQUE_SITES).filter((file) => !opaque.has(file))).toEqual([]);
+    // Every reviewed call is still made by some mutation (fix round 1 re-review, R1-M4).
+    const made = CONSOLE.sites.map((site) => mutationFnOf(code(site.options)) ?? "").join("\n");
+    expect(Object.keys(KNOWN_CALLS).filter((name) => !new RegExp(`(?<![\\w$])${name.replace(/[.$]/g, "\\$&")}\\s*(?:<[^()]*?>)?\\(`).test(made))).toEqual([]);
   });
 });
 
@@ -480,5 +692,204 @@ describe("the guard against what slipped through it", () => {
     expect(result.unclassified).not.toContain("renameThing");
     expect(result.unresolved).not.toContain("renameThing");
     expect(result.opaqueSites).not.toContain("modules/probe/ProbePage.tsx");
+  });
+});
+
+/**
+ * THE REVIEWER'S SECOND PROBES, KEPT (fix round 1 re-review, R1-M4). Each went
+ * through the rule above: a camelCase name, `credentials`, a prefix form, and
+ * two ways of reaching `api` that are not `api.<method>(`.
+ */
+describe("the guard against what slipped through it the second time", () => {
+  const probeMethod = (method: string, params: string) =>
+    `${API}\nclass Probe {\n  ${method}(${params}): Promise<void> {\n    return Promise.resolve();\n  }\n}\n`;
+  const hook = (body: string): Source => ({
+    file: "lib/probeMutation.ts",
+    text: `export function useProbe() {\n  const api = useApi();\n${body}\n}\n`,
+  });
+
+  it("goes red on a camelCase parameter: `apiKey`, positional", () => {
+    const result = audit(
+      [...FILES, hook("  return useMutation({ mutationFn: (v: { id: string; k: string }) => api.saveIntegrationProbe(v.id, v.k) });")],
+      probeMethod("saveIntegrationProbe", "id: string, apiKey: string"),
+    );
+    expect(result.unclassified).toContain("saveIntegrationProbe");
+  });
+
+  it.each([
+    ["credentials"],
+    ["credential"],
+    ["secret_value"],
+    ["token_value"],
+    ["clientSecret"],
+    ["newPassword"],
+    ["APIKey"],
+    ["privateKeyPem"],
+  ])("goes red on a body field `%s`", (field) => {
+    const result = audit(
+      [...FILES, hook("  return useMutation({ mutationFn: (b: ProbeBody) => api.saveIntegrationProbe(b) });")],
+      probeMethod("saveIntegrationProbe", `body: { name: string; ${field}: string }`),
+    );
+    expect(result.unclassified).toContain("saveIntegrationProbe");
+  });
+
+  it("goes red on a helper given `api` as its second argument, beside a known method", () => {
+    const result = audit(
+      [
+        ...FILES,
+        hook(
+          "  return useMutation({ mutationFn: async (body: EmailSettingsUpdate) => { await api.getEmailSettings(); return save(body, api); } });",
+        ),
+        { file: "lib/probeSave.ts", text: "export const save = (body: EmailSettingsUpdate, client: ApiClient) => client.updateEmailSettings(body);\n" },
+      ],
+      API,
+    );
+    expect(result.opaqueSites).toContain("lib/probeMutation.ts");
+    expect(result.why.get("lib/probeMutation.ts#site")).toMatch(/`api` handed on/);
+  });
+
+  it("goes red on a closure over `api` defined in the hook, beside a known method", () => {
+    const result = audit(
+      [
+        ...FILES,
+        hook(
+          "  const save = (body: EmailSettingsUpdate) => api.updateEmailSettings(body);\n  return useMutation({ mutationFn: async (body: EmailSettingsUpdate) => { await api.getEmailSettings(); return save(body); } });",
+        ),
+      ],
+      API,
+    );
+    expect(result.opaqueSites).toContain("lib/probeMutation.ts");
+    expect(result.why.get("lib/probeMutation.ts#site")).toMatch(/`save\(` is not an ApiClient method/);
+  });
+
+  it("goes red on a reviewed helper's name, where the local definition of that name reaches `api`", () => {
+    const result = audit(
+      [
+        ...FILES,
+        hook(
+          "  const requireKnown = (body: EmailSettingsUpdate) => api.updateEmailSettings(body);\n  return useMutation({ mutationFn: async (body: EmailSettingsUpdate) => { await api.getEmailSettings(); return requireKnown(body); } });",
+        ),
+      ],
+      API,
+    );
+    expect(result.opaqueSites).toContain("lib/probeMutation.ts");
+    expect(result.why.get("lib/probeMutation.ts#site")).toMatch(/`requireKnown` is defined in this file over `api`/);
+  });
+
+  it("goes red on a method called on an object that is not `api`", () => {
+    const result = audit(
+      [
+        ...FILES,
+        hook(
+          "  const helpers = { save: (body: EmailSettingsUpdate) => api.updateEmailSettings(body) };\n  return useMutation({ mutationFn: async (body: EmailSettingsUpdate) => { await api.getEmailSettings(); return helpers.save(body); } });",
+        ),
+      ],
+      API,
+    );
+    expect(result.opaqueSites).toContain("lib/probeMutation.ts");
+    expect(result.why.get("lib/probeMutation.ts#site")).toMatch(/`helpers\.save\(` is not an ApiClient method/);
+    // ...and a language method on that object is no way round it.
+    const mapped = audit(
+      [
+        ...FILES,
+        hook(
+          "  const helpers = [(body: EmailSettingsUpdate) => api.updateEmailSettings(body)];\n  return useMutation({ mutationFn: async (body: EmailSettingsUpdate) => { await api.getEmailSettings(); return helpers.map((save) => save(body)); } });",
+        ),
+      ],
+      API,
+    );
+    expect(mapped.why.get("lib/probeMutation.ts#site")).toMatch(/`helpers` is defined in this file over `api`/);
+  });
+
+  it("goes red on a mutation that names its client something other than `api`, or calls a method `api` does not have", () => {
+    const renamed = audit(
+      [...FILES, { file: "lib/probeMutation.ts", text: "export function useProbe() {\n  const client = useApi();\n  return useMutation({ mutationFn: async (body: EmailSettingsUpdate) => client.updateEmailSettings(body) });\n}\n" }],
+      API,
+    );
+    expect(renamed.why.get("lib/probeMutation.ts#site")).toMatch(/calls no ApiClient method/);
+    const unknown = audit(
+      [...FILES, hook("  return useMutation({ mutationFn: async (body: EmailSettingsUpdate) => { await api.getEmailSettings(); return api.sendSecretly(body); } });")],
+      API,
+    );
+    expect(unknown.why.get("lib/probeMutation.ts#site")).toMatch(/`api\.sendSecretly\(` is not an ApiClient method/);
+  });
+
+  it("stays green on names that are not a secret, and on calls it has reviewed (non-vacuity for the above)", () => {
+    for (const field of ["keyboard_layout", "keyboardLayout", "monkey_count", "tokenizer", "credential_id", "pinned", "postcode"]) {
+      const result = audit(
+        [...FILES, hook("  return useMutation({ mutationFn: (b: ProbeBody) => api.saveIntegrationProbe(b) });")],
+        probeMethod("saveIntegrationProbe", `body: { name: string; ${field}: string }`),
+      );
+      expect(result.unclassified, field).not.toContain("saveIntegrationProbe");
+    }
+    const reviewed = audit(
+      [
+        ...FILES,
+        hook(
+          "  const [, setNotMoved] = useState<string[]>([]);\n  return useMutation({ mutationFn: async (b: { id: string; name: string }) => { setNotMoved([]); return api.renameThing({ name: b.name.trim(), count: Number(b.id) }); } });",
+        ),
+      ],
+      probeMethod("renameThing", "body: { name: string; count: number }"),
+    );
+    expect(reviewed.opaqueSites).not.toContain("lib/probeMutation.ts");
+  });
+
+  it("still accepts a secret mutation fixed by hand: `useMutation` with `gcTime: 0` and `reset()`, listed with its test", () => {
+    // The shape a page's own new-password step takes (60cf695's seven, and
+    // the recover page's): a navigate and a state setter beside the call.
+    const page: Source = {
+      file: "modules/profile/api.ts",
+      text: [
+        "export function useChangePasswordMutation() {",
+        "  const api = useApi();",
+        "  const navigate = useNavigate();",
+        "  const [, setBusy] = useState(false);",
+        "  const change = useMutation({",
+        "    mutationFn: async (body: PasswordChange) => { setBusy(true); await api.changePassword(body); navigate(\"/profile\"); },",
+        "    gcTime: 0,",
+        "    onSettled: () => change.reset(),",
+        "  });",
+        "  return change;",
+        "}",
+      ].join("\n"),
+    };
+    const result = audit([...FILES.filter(({ file }) => file !== page.file), page], API);
+    expect(result.secretSiteNames).toContain("modules/profile/api.ts changePassword");
+    expect(result.unsafe).not.toContain("modules/profile/api.ts changePassword");
+    expect(result.opaqueSites).not.toContain("modules/profile/api.ts");
+  });
+});
+
+/**
+ * THE BACKSTOP (fix round 1 re-review, R1-M4): the app's `QueryClient` keeps
+ * no mutation once its page has unmounted, whatever the page asked. A secret
+ * the rules above did not see still leaves the cache with the page.
+ */
+// Imported while the file is collected, not inside a test: the whole app
+// takes seconds to load, longer than a test's timeout under a full run.
+const { queryClient: APP_QUERY_CLIENT } = await import("../App");
+
+describe("the app's QueryClient", () => {
+  // `createElement`, not JSX: this file is `.ts`, and other files name it.
+  function Saver({ client }: { client: QueryClient }) {
+    const save = useMutation({ mutationFn: async (_body: { client_secret: string }) => "saved" }, client);
+    return createElement("button", { type: "button", onClick: () => save.mutate({ client_secret: "s3cr3t-backstop" }) }, "Save");
+  }
+  async function leftAfterUnmount(client: QueryClient): Promise<string> {
+    const { unmount } = render(createElement(QueryClientProvider, { client }, createElement(Saver, { client })));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(client.getMutationCache().getAll()[0]?.state.status).toBe("success"));
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    return JSON.stringify(client.getMutationCache().getAll().map((mutation) => mutation.state.variables));
+  }
+
+  it("forgets every mutation when its page unmounts: `mutations.gcTime` is 0", async () => {
+    expect(APP_QUERY_CLIENT.getDefaultOptions().mutations?.gcTime).toBe(0);
+    expect(await leftAfterUnmount(APP_QUERY_CLIENT)).not.toContain("s3cr3t-backstop");
+  });
+
+  it("where TanStack's default would have kept it for five minutes (non-vacuity)", async () => {
+    expect(await leftAfterUnmount(new QueryClient())).toContain("s3cr3t-backstop");
   });
 });

@@ -373,6 +373,24 @@ describe("a session that ends while the person is here", () => {
     await expectEnded(queryClient);
     expect(window.localStorage.getItem(CLIENT_STORAGE_KEY)).toBeNull();
   });
+
+  it("leaves the client alone when ANOTHER person signed in: it is theirs now (fix round 1 re-review, R1-I1)", async () => {
+    // The new person chose this client in their own tab, in the same storage.
+    // Removing it would fire a `storage` event there, switch them to "All my
+    // clients" and remount their page under them.
+    let me: Answer = { status: 200, body: ME };
+    stubServer(() => me);
+    const { queryClient, ui } = guarded("/devices", <TenantPage />);
+    render(ui);
+    expect(await screen.findByText(TENANT_ROW)).toBeInTheDocument();
+    window.localStorage.setItem(CLIENT_STORAGE_KEY, "6b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d");
+
+    me = { status: 200, body: { ...ME, user_id: "u2", display_name: "Grace Hopper", email: "grace@example.test" } };
+    await act(() => queryClient.invalidateQueries({ queryKey: ["me"] }));
+
+    await expectEnded(queryClient);
+    expect(window.localStorage.getItem(CLIENT_STORAGE_KEY)).toBe("6b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d");
+  });
 });
 
 describe("one stale 401 (final re-review, I1)", () => {

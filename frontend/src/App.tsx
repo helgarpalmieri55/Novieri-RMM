@@ -163,7 +163,18 @@ export const queryClient = new QueryClient({
   // No retry in fixture mode: a `FixtureMissing` rejects the same way on the
   // second attempt, and the harmony walk should reach the page's error state
   // in one step rather than after a back-off.
-  defaultOptions: { queries: { retry: FIXTURE_MODE ? false : 1, staleTime: 5000 } },
+  //
+  // NO MUTATION OUTLIVES ITS PAGE (fix round 1 re-review, R1-M4): TanStack
+  // keeps a settled mutation's body and answer for five minutes after the
+  // page that ran it unmounts. Nothing in the console reads one back, and a
+  // secret the source guard (`test/secretMutations.test.ts`) did not
+  // recognise by name still leaves the cache with its page. A page that needs
+  // a mutation's state reads it from its own `useMutation`, which keeps it
+  // while mounted.
+  defaultOptions: {
+    queries: { retry: FIXTURE_MODE ? false : 1, staleTime: 5000 },
+    mutations: { gcTime: 0 },
+  },
 });
 
 /**
@@ -486,14 +497,18 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   // options builds the query afresh and asks the server again -- the next
   // person's `/me` landed in the emptied cache that way.
   //
-  // THE CLIENT CHOSEN IN THE TOP BAR GOES TOO, at every end and not only a
-  // sign-out (final re-review, M5): on a shared computer the next person
-  // would open on the previous person's client.
+  // THE CLIENT CHOSEN IN THE TOP BAR GOES TOO, at an idle or revoked end and
+  // not only a sign-out (final re-review, M5): on a shared computer the next
+  // person would open on the previous person's client. NOT WHEN ANOTHER
+  // PERSON SIGNED IN (`replaced`, fix round 1 re-review, R1-I1): the value in
+  // storage is now theirs, chosen in their tab before this one noticed, and
+  // removing it fires a `storage` event that resets their choice and remounts
+  // their page.
   const over = session.status === "ended" || session.status === "signing_out";
   useLayoutEffect(() => {
     if (!over) return;
     emptyQueryCache(queryClient);
-    forgetStoredClient();
+    if (sessionEndReason() !== "replaced") forgetStoredClient();
   }, [over, queryClient]);
 
   if (session.status === "ended") {
