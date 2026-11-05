@@ -91,4 +91,22 @@ export const components = {
     cronHelp:
       "Five fields: minute, hour, day of month, month, day of week. The grid draws expressions whose minute is 0 and whose day of month and month are both *.",
   },
+  // The recent confirmation of the second factor (`components/stepUp.tsx`).
+  stepUp: {
+    title: "Confirm it's you",
+    body: "This change needs your second factor again: you last confirmed it more than 10 minutes ago.",
+    loading: "Loading your second factors…",
+    usePasskey: "Use a passkey",
+    code: "Code from your authenticator app",
+    confirm: "Confirm",
+    useRecovery: "Use a recovery code instead",
+    recoveryCode: "Recovery code",
+    recoveryHelp: {
+      one: "You have {count} code left. It works once.",
+      other: "You have {count} codes left. Each works once.",
+    },
+    confirmRecovery: "Use this code",
+    noMethod: "Your account has no second factor, so this change cannot be confirmed. Ask an administrator to reset your second factors.",
+    cancelled: "Nothing was changed: the confirmation was closed.",
+  },
 } as const;
