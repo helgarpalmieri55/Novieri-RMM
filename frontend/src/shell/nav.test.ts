@@ -317,6 +317,10 @@ describe("ORPHAN_SECTION", () => {
       expect(crumb.sectionTo).toBeUndefined();
     }
   });
+
+  it("puts your security under your account, like your profile", () => {
+    expect(crumbFor("/profile/security")).toEqual({ section: "Your account", sectionTo: undefined, title: "ITMS" });
+  });
 });
 
 describe("crumbFor", () => {

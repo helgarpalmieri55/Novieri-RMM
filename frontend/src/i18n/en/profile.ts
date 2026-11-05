@@ -11,13 +11,12 @@ export const profile = {
     timezonePlaceholder: "e.g. Europe/Lisbon",
     smsNote: "Nothing on this platform sends SMS. A phone number here is directory information, not a second factor.",
     noChanges: "There are no unsaved changes",
-    languageNotMirrored: "Saved. The sign-in pages could not be switched to this language and may still appear in the previous one.",
   },
   security: {
     title: "Sign-in and security",
-    subtitle: "Your password, your second factors and the computers you trust",
-    note: "Your password, passkeys, authenticator app and recovery codes have a page of their own. Every change there asks you to confirm your second factor first.",
-    open: "Manage sign-in and security",
+    subtitle: "Your password, second factors, remembered devices and sessions",
+    note: "Change your password, add or remove a passkey or the authenticator app, make new recovery codes, and see where you are signed in.",
+    open: "Open your security",
   },
   // Your security (`/profile/security`, own authentication design §2.1-§2.6).
   securityPage: {

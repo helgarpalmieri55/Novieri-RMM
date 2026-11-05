@@ -14,13 +14,12 @@ export const profile: Shape<typeof en> = {
     timezonePlaceholder: "p. ej., Europe/Lisbon",
     smsNote: "Nada en esta plataforma envía SMS. Un número de teléfono aquí es información de directorio, no un segundo factor.",
     noChanges: "No hay cambios sin guardar",
-    languageNotMirrored: "Guardado. Las páginas de inicio de sesión no se pudieron cambiar a este idioma y podrían seguir apareciendo en el anterior.",
   },
   security: {
     title: "Inicio de sesión y seguridad",
-    subtitle: "Tu contraseña, tus segundos factores y los equipos en los que confías",
-    note: "Tu contraseña, tus claves de acceso, tu aplicación de autenticación y tus códigos de recuperación tienen su propia página. Cada cambio allí te pide antes confirmar tu segundo factor.",
-    open: "Administrar el inicio de sesión y la seguridad",
+    subtitle: "Tu contraseña, tus segundos factores, tus equipos recordados y tus sesiones",
+    note: "Cambia tu contraseña, añade o quita una clave de acceso o la aplicación de autenticación, genera códigos de recuperación nuevos y mira dónde tienes la sesión iniciada.",
+    open: "Abrir tu seguridad",
   },
   securityPage: {
     title: "Tu seguridad",

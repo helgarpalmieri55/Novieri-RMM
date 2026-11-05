@@ -1,22 +1,23 @@
 /**
- * Your profile — `GET/PATCH /api/v1/me`, and the way to Sign-in and security.
+ * Your profile -- `GET/PATCH /api/v1/me`, and the way to your security.
  *
- * THE SPLIT (own-auth design §1.1, §2). This page owns the presentation
- * preferences — display name, phone, timezone, locale — and has no password
- * field. Credentials are the platform's own since own-auth phase 1, and they
- * are changed on their own page, `/profile/security`, where every change asks
- * for a recent second factor first.
+ * THE SPLIT IS THE DESIGN. This page owns how the console shows you --
+ * display name, phone, timezone, locale. How you sign in -- password,
+ * passkeys, the authenticator app, recovery codes, remembered devices and
+ * sessions -- is one page further, at `/profile/security`.
  *
- * RE-POINTED (own-auth Task 10). Three tests held this page to three buttons
- * that each started one step at Keycloak (`startAccountAction`): that each
- * asked for its own action, that a step that could not start said so, and
- * that no link to Keycloak's account console survived. The page starts no
- * step anywhere now; it links to its own sign-in and security page, and the
- * tests hold it to that, and still to no second product.
+ * WHAT CHANGED, AND WHY (own authentication design §1.1, §2). These used to be
+ * three buttons that started one step each at the identity provider's own
+ * pages, and the tests here pinned which step each asked for and what happened
+ * when one could not be started. The platform is its own identity provider
+ * now: there is no second application to step into, the panel is a link
+ * inside this console, and `SecurityPage.test.tsx` pins that each change calls
+ * its own route. (Own-auth Task 10 first made the panel a link, "Manage
+ * sign-in and security"; Task 12 names it for the page it opens, "Open your
+ * security", and the tests that pinned the old name are re-pointed to it.)
  *
- * `PATCH /api/v1/me` is being written by a concurrent workstream. A 404
- * renders the form disabled and says why, exactly as the Organization tab
- * does — never an editable form that posts into the void.
+ * A 404 on `PATCH /me` renders the form disabled and says why, exactly as the
+ * Organization tab does -- never an editable form that posts into the void.
  */
 
 import { screen, waitFor } from "@testing-library/react";
@@ -41,10 +42,8 @@ beforeEach(() => {
 
 async function openProfile() {
   const user = userEvent.setup();
-  // A ROUTE NOW, NOT A TAB, so there is no tab to click: this used to render
-  // the whole of Settings and click through to "Profile". See the page's own
-  // header for why the tab could not survive -- its credential steps return to
-  // a URL, and the active tab was never in one.
+  // A ROUTE, NOT A TAB, so there is no tab to click: this used to render the
+  // whole of Settings and click through to "Profile".
   renderProfilePage();
   return user;
 }
@@ -146,45 +145,58 @@ describe("Your profile", () => {
     expect(screen.queryByLabelText("Display name")).not.toBeInTheDocument();
   });
 
-  it("sends sign-in and security to their own page, in this console", async () => {
-    // RE-POINTED: was "starts the credential step in place rather than
-    // opening another app" and "wires each of the three steps to its own
-    // action". The one control left is a link, and it stays on this origin.
+  it("offers your security page, a link inside this console", async () => {
+    // RE-POINTED (own authentication design §2) from "says so when a
+    // credential step cannot even be started": that test was about a step at a
+    // second application that could fail to begin. There is no second
+    // application; the panel is one link. (Task 10's "sends sign-in and
+    // security to their own page, in this console" pinned the same link under
+    // its old name, "Manage sign-in and security".)
     await openProfile();
-    const link = await screen.findByRole("link", { name: "Manage sign-in and security" });
+    const link = await screen.findByRole("link", { name: "Open your security" });
     expect(link).toHaveAttribute("href", "/profile/security");
-    const links = screen.queryAllByRole("link");
-    expect(links.filter((a) => /^https?:|account|realms/.test(a.getAttribute("href") ?? ""))).toEqual([]);
+  });
+
+  it("leaves for no other application", async () => {
+    // RE-POINTED from "starts the credential step in place rather than
+    // opening another app": THE SEAM THE BUYER SEES was a link to an account
+    // console. No anchor out of this console survives on the page.
+    await openProfile();
+    await screen.findByRole("link", { name: "Open your security" });
+    const outward = screen.queryAllByRole("link").filter((anchor) => {
+      const href = anchor.getAttribute("href") ?? "";
+      return href.includes("account") || href.includes("/realms/") || /^https?:/.test(href);
+    });
+    expect(outward).toEqual([]);
   });
 
   it("starts no credential step itself, so it has no failure of one to report", async () => {
-    // RE-POINTED: was "says so when a credential step cannot even be started"
-    // (a redirect to Keycloak that fetched its discovery document first). No
-    // button here leaves the page, so nothing can fail before it goes.
+    // KEPT FROM TASK 10, RE-POINTED to the link's new name ("Manage sign-in
+    // and security" -> "Open your security"): was "says so when a credential
+    // step cannot even be started" (a redirect to Keycloak that fetched its
+    // discovery document first). No button here leaves the page, so nothing
+    // can fail before it goes.
     await openProfile();
-    await screen.findByRole("link", { name: "Manage sign-in and security" });
+    await screen.findByRole("link", { name: "Open your security" });
     expect(screen.queryByRole("button", { name: /change password|mfa|passkey/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("never tells the reader there is a second product to go and understand", async () => {
     // Task 3's guard sweeps every source file; this one is the assertion at
-    // the place the word actually leaked — "Keycloak asks for your current
-    // password first" was rendered copy on this very panel.
+    // the place the word once leaked, and at the promise this page used to
+    // make that is no longer true ("never handled by this platform").
     await openProfile();
-    await screen.findByRole("link", { name: "Manage sign-in and security" });
+    await screen.findByRole("link", { name: "Open your security" });
     expect(document.body.textContent ?? "").not.toMatch(/keycloak/i);
     expect(document.body.textContent ?? "").not.toMatch(/account console/i);
+    expect(document.body.textContent ?? "").not.toMatch(/never handled by this platform/i);
   });
 
   it("lets the four fields fold to one column instead of holding two at any width", async () => {
     // At 390px "Display name" / "Phone" and "Timezone" / "Locale" stayed
-    // two-up at about 148px each — the only thing on the page still in two
-    // columns, with both panels and the sign-in buttons folding around them.
-    // The kit's own 640px fold has since landed, so this grid would reflow
-    // without the inline value; it keeps counting its own columns because
-    // `auto-fit` also caps the pair at one field's width in a wide panel,
-    // which no breakpoint expresses.
+    // two-up at about 148px each. `auto-fit` also caps the pair at one
+    // field's width in a wide panel, which no breakpoint expresses.
     await openProfile();
     const grid = (await screen.findByLabelText("Display name")).closest(".form-grid");
     expect(grid).not.toBeNull();
@@ -194,7 +206,10 @@ describe("Your profile", () => {
     expect(columns).not.toContain("repeat(2");
   });
 
-  it("has no password field, and no field for the email address (invariant 3, spec §7.1)", async () => {
+  it("has no password field and no field for the email address", async () => {
+    // RE-POINTED reason, same assertion: the password is changed on
+    // `/profile/security`, behind the recent confirmation (design §2.5), not
+    // in the profile's form; the address is not changed by this console.
     await openProfile();
     await screen.findByLabelText("Display name");
     expect(document.querySelectorAll('input[type="password"]')).toHaveLength(0);

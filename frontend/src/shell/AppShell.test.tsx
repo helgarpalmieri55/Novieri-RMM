@@ -511,6 +511,10 @@ describe("AppShell account menu", () => {
       "href",
       "/profile",
     );
+    expect(menu.getByRole("menuitem", { name: "Your security" })).toHaveAttribute(
+      "href",
+      "/profile/security",
+    );
     expect(menu.getByRole("menuitem", { name: "Settings" })).toHaveAttribute(
       "href",
       "/settings",

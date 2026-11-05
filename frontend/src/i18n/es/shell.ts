@@ -4,6 +4,7 @@ import type { shell as en } from "../en/shell";
 export const shell: Shape<typeof en> = {
   accountMenu: {
     yourProfile: "Tu perfil",
+    yourSecurity: "Tu seguridad",
     settings: "Configuración",
     language: "Idioma: {language}",
     signOut: "Cerrar sesión",

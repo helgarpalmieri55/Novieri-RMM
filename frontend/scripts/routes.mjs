@@ -189,4 +189,5 @@ export const ROUTES = [
   "/governance",
   "/assets",
   "/profile",
+  "/profile/security",
 ];

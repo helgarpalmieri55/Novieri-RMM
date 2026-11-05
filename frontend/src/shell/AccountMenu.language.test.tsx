@@ -24,7 +24,7 @@ describe("account menu: language", () => {
     renderMenu();
     await userEvent.click(screen.getByRole("button", { name: /Alex Morgan/ }));
     const items = within(screen.getByRole("menu")).getAllByRole("menuitem").map((el) => el.textContent);
-    expect(items).toEqual(["Your profile", "Settings", "Language: English", "Sign out"]);
+    expect(items).toEqual(["Your profile", "Your security", "Settings", "Language: English", "Sign out"]);
   });
 
   it("switches to Spanish, re-labels the menu and reports the choice to be saved", async () => {

@@ -846,12 +846,6 @@ export interface Me {
   phone?: string | null;
   timezone?: string | null;
   locale?: string | null;
-  /**
-   * Present only on the `PATCH /me` response, and only when `locale` was sent.
-   * `false`: the language was saved here but could not be written to the
-   * sign-in pages. `true` or absent/null: nothing for the person to be told.
-   */
-  identity_locale_synced?: boolean | null;
 }
 
 /**
