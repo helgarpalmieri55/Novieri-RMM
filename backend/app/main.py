@@ -283,6 +283,15 @@ def create_app(
         assert isinstance(exc, GlobalRowNotWritable)
         return JSONResponse(status_code=403, content={"detail": tr_marked(ALL_CLIENTS_REQUIRED)})
 
+    # A 422 never hands back what was submitted: Pydantic puts the failing
+    # value -- for a missing field, the whole body -- in each error's `input`,
+    # and a body can carry a password (`app/core/errors/validation.py`).
+    from fastapi.exceptions import RequestValidationError
+
+    from app.core.errors.validation import validation_error_without_input
+
+    app.add_exception_handler(RequestValidationError, validation_error_without_input)
+
     app.add_exception_handler(GlobalRowNotWritable, _global_row)
 
     # A write in an optional module (budget, BCP, change management) for a
