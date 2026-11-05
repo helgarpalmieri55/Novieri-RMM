@@ -130,7 +130,11 @@ export const profile = {
       codesSubject: { one: "{count} code left", other: "{count} codes left" },
       device: {
         title: "Forget device",
-        body: "The next sign-in from it asks for your second factor again.",
+        // `devices.revoke` also ends the sessions the device started (final review D2, Minor 3).
+        body: "The next sign-in from it asks for your second factor again, and the sessions it started are signed out.",
+        // On "This device": the session in use is one of them.
+        bodyCurrent:
+          "This is the device you are using: forgetting it signs you out here, now. The next sign-in from it asks for your second factor again.",
         action: "Forget device",
       },
       session: {

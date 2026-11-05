@@ -132,7 +132,9 @@ export const profile: Shape<typeof en> = {
       codesSubject: { one: "Queda {count} código", other: "Quedan {count} códigos" },
       device: {
         title: "Olvidar equipo",
-        body: "El próximo inicio de sesión desde él vuelve a pedir tu segundo factor.",
+        body: "El próximo inicio de sesión desde él vuelve a pedir tu segundo factor, y se cierran las sesiones que se iniciaron en él.",
+        bodyCurrent:
+          "Es el equipo que estás usando: al olvidarlo se cierra tu sesión aquí, ahora. El próximo inicio de sesión desde él vuelve a pedir tu segundo factor.",
         action: "Olvidar equipo",
       },
       session: {

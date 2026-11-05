@@ -311,7 +311,8 @@ export const settings = {
         title: "Reset second factors",
         question: "Reset the second factors of {email}?",
         action: "Reset second factors for {email}",
-        body: "Their passkeys, authenticator app and recovery codes stop working and their remembered devices are forgotten; at their next sign-in they register a new second factor. You may be asked for your own second factor first.",
+        // `service.reset_factors` also ends every open session (`end_all_for_user`, final review D2, Minor 3).
+        body: "Their passkeys, authenticator app and recovery codes stop working, their remembered devices are forgotten, and every session they have open is signed out now; at their next sign-in they register a new second factor. You may be asked for your own second factor first.",
       },
       endSessions: {
         title: "Sign out everywhere",

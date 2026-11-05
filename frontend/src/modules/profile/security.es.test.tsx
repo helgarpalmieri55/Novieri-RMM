@@ -100,4 +100,13 @@ describe("your security in Spanish", () => {
       "Se cambió tu contraseña. Se cerraron tus otras sesiones y los equipos que tenías recordados vuelven a pedir tu segundo factor.",
     );
   });
+
+  it("says, in Spanish, that forgetting este equipo signs you out now (D2, Minor 3)", async () => {
+    const user = userEvent.setup();
+    const { container } = renderSecurityPage();
+    await user.click(await screen.findByRole("button", { name: "Olvidar Firefox on Windows" }));
+    const dialog = await screen.findByRole("dialog", { name: "Olvidar equipo" });
+    expect(dialog).toHaveTextContent("Es el equipo que estás usando: al olvidarlo se cierra tu sesión aquí, ahora.");
+    expectNoEnglish(container, RECORDED);
+  });
 });

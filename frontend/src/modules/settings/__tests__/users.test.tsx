@@ -660,6 +660,17 @@ describe("Settings — Users tab", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("says, before the reset, that it signs the person out everywhere now (D2, Minor 3)", async () => {
+    calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, DANA_USER] });
+    const user = await openUsers();
+    const row = await screen.findByRole("row", { name: /dana@example\.com/ });
+    await openMoreActions(user, row);
+    await user.click(within(row).getByRole("button", { name: "Reset second factors for dana@example.com" }));
+    const confirm = await screen.findByRole("dialog", { name: "Reset second factors" });
+    expect(confirm).toHaveTextContent(/every session they have open is signed out now/);
+    expect(calls.resetUserFactors).not.toHaveBeenCalled();
+  });
+
   it("does not offer to reset your own second factors, and points at Your security instead", async () => {
     calls.listUsers.mockResolvedValue({ users: [OPERATOR_USER, DANA_USER] });
     const user = await openUsers();

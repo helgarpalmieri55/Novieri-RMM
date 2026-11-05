@@ -301,7 +301,7 @@ export const settings: Shape<typeof en> = {
         title: "Restablecer segundos factores",
         question: "¿Restablecer los segundos factores de {email}?",
         action: "Restablecer los segundos factores de {email}",
-        body: "Sus claves de acceso, su aplicación de autenticación y sus códigos de recuperación dejan de funcionar y se olvidan sus equipos recordados; la próxima vez que inicie sesión registrará un segundo factor nuevo. Puede que antes se te pida tu propio segundo factor.",
+        body: "Sus claves de acceso, su aplicación de autenticación y sus códigos de recuperación dejan de funcionar, se olvidan sus equipos recordados y se cierran ahora todas sus sesiones abiertas; la próxima vez que inicie sesión registrará un segundo factor nuevo. Puede que antes se te pida tu propio segundo factor.",
       },
       endSessions: {
         title: "Cerrar todas sus sesiones",
