@@ -6,10 +6,13 @@
  * can read (`HttpOnly`). So the console learns that it is over in three ways,
  * and every one of them lands here:
  *
- *   - THE SERVER ANSWERS 401. `ApiClient` reports every such answer
- *     (`ApiProvider`'s `onUnauthorized`) -- the 30 minutes of inactivity, the
- *     12-hour maximum, an administrator, a sign-out in another tab. A `/ws`
- *     4401 is learnt this way too: the socket asks `/me` again (`./ws.ts`).
+ *   - THE SERVER ANSWERS 401, AND `/me` CONFIRMS IT. `ApiClient` reports
+ *     every such answer (`ApiProvider`'s `onUnauthorized`), and one raw `/me`
+ *     decides (`./sessionCheck.ts`, final re-review I1): a request that left
+ *     with the cookie a password change just rotated is answered 401 while
+ *     the session lives on. The 30 minutes of inactivity, the 12-hour
+ *     maximum, an administrator, a sign-out in another tab: all confirmed. A
+ *     `/ws` 4401 is learnt the same way: the socket asks `/me` (`./ws.ts`).
  *   - `/me` NAMES SOMEBODY ELSE (`sessionPerson`, final review D1, Minor 3).
  *     Someone signed in on this browser in another tab; the cookie now holds
  *     their session, and this tab's person is gone. One rule for every path

@@ -360,6 +360,46 @@ describe("a session that ends while the person is here", () => {
   });
 });
 
+describe("one stale 401 (final re-review, I1)", () => {
+  it("leaves the page drawn when /me still answers for the same person", async () => {
+    // The reviewer's probe: a request that left with the cookie a password
+    // change just rotated is answered 401; the session lives on.
+    let orgs = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/v1/me")) return new Response(JSON.stringify(ME), { status: 200 });
+        if (url.endsWith("/api/v1/orgs/current")) {
+          orgs += 1;
+          return new Response(JSON.stringify({ code: "auth_required" }), { status: 401 });
+        }
+        return new Response("{}", { status: 404 });
+      }),
+    );
+    const { queryClient, ui } = guarded("/devices", <TenantPage />);
+    render(ui);
+    expect(await screen.findByText(TENANT_ROW)).toBeInTheDocument();
+    await waitFor(() => expect(orgs).toBeGreaterThan(0));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+
+    expect(screen.queryByRole("heading", { name: "Your session has ended" })).not.toBeInTheDocument();
+    expect(screen.getByText(TENANT_ROW)).toBeInTheDocument();
+    expect(cachedData(queryClient)).toContainEqual(["devices"]);
+  });
+
+  it("ends the session when /me answers 401 too", async () => {
+    let me: Answer = { status: 200, body: ME };
+    stubServer(() => me);
+    const { queryClient, ui } = guarded("/devices", <TenantPage />);
+    render(ui);
+    expect(await screen.findByText(TENANT_ROW)).toBeInTheDocument();
+    me = { status: 401, body: { code: "auth_required" } };
+    await act(() => queryClient.invalidateQueries({ queryKey: ["me"] }));
+    await expectEnded(queryClient);
+  });
+});
+
 describe("a refusal at `/me` (D1, Minor 7)", () => {
   it("shows the server's sentence and a way to sign out, rather than calling it an outage", async () => {
     stubServer(() => ({ status: 403, body: { detail: "This address may not sign in to the console." } }));
