@@ -313,6 +313,13 @@ def create_app(
 
     app.add_exception_handler(AuthRefusal, auth_refusal_handler)
 
+    # OpenBao down (own authentication Task 2's `AuthKeysUnavailable`): one
+    # 503 wherever a password is hashed or verified (plan decision 13).
+    from app.core.auth.guards import keys_unavailable_handler
+    from app.core.auth.keys import AuthKeysUnavailable
+
+    app.add_exception_handler(AuthKeysUnavailable, keys_unavailable_handler)
+
     from app.api.probes import build_registry
     from app.api.probes import router as probes_router
 
@@ -372,6 +379,14 @@ def create_app(
     app.include_router(user_admin_router, prefix="/api/v1")
     app.include_router(realm_settings_router, prefix="/api/v1")
     app.include_router(session_settings_router, prefix="/api/v1")
+    # The platform's own sign-in (P2 phase 1): `/auth/*` answers before there
+    # is a session; `/me/*` is the caller's own security. Both ungated by
+    # design -- see app/api/v1/auth.py.
+    from app.api.v1.auth import me_router as my_security_router
+    from app.api.v1.auth import router as auth_router
+
+    app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(my_security_router, prefix="/api/v1")
     # UNAUTHENTICATED BY NECESSITY: it answers before anybody can sign in.
     # What guards it is zero-users AND a one-time install code, never the
     # absence of a token — see app/api/v1/setup.py.

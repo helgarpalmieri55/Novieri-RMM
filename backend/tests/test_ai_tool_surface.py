@@ -592,7 +592,12 @@ from tests.tool_surface import (
 # PENDING_TOOL_REVIEW, as `/settings/email` does: how long a sign-in lasts
 # and whether a device may skip the second factor is reconnaissance about the
 # organisation's sign-in posture, and reading it is the AI module's decision.
-EXPECTED_GET_ROUTES = 254
+# 254 -> 255 (2026-11-04, P2 phase 1 Task 7): `GET /me/security`, the caller's
+# own sign-in factors and sessions. Ungated by design ("P2 gated" +1), typed,
+# documented and not a list, so P3, P4 and P5 do not move; failing P2 it is in
+# neither "passing five" nor "passing six", so neither set nor
+# PENDING_TOOL_REVIEW moves either.
+EXPECTED_GET_ROUTES = 255
 EXPECTED_PASSING_FIVE = 52
 
 # The registrable set, pinned by PATH rather than count: this is the number the
@@ -737,7 +742,8 @@ EXPECTED_PASSING_SIX = frozenset(
 # here: a number quoted in a document and measured nowhere is the exact thing
 # this file exists to stop.
 EXPECTED_FAILING_BY_PROPERTY = {
-    "P2 gated": 6,
+    # +1 (2026-11-04): `GET /me/security` (P2 phase 1 Task 7).
+    "P2 gated": 7,
     "P3 typed": 27,
     # 80 -> 81 (2026-09-08): `GET /api/v1/agent-push/host-keys` answers a bare
     # list, like the two agent-push routes already counted here. See the note
@@ -783,6 +789,11 @@ EXPECTED_UNGATED_PATHS = frozenset(
         # layout grants nothing either -- every widget renders from a module
         # query gated on its own.
         "/api/v1/dashboard/layout",
+        # Added 2026-11-04 (P2 phase 1, own sign-in). The caller's OWN second
+        # factors, remembered browsers and sessions; ungated like `/me`, and
+        # it needs the console session (`app/api/v1/auth.py::_console_ctx`).
+        # Not a tool (`NOT_FOR_MCP`).
+        "/api/v1/me/security",
     }
 )
 

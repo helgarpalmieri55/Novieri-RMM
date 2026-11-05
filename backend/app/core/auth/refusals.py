@@ -13,6 +13,8 @@ server's own wrapper (`app/mcp/server.py`), the in-process tool call's
 for it, which Starlette finds before the generic one by walking the MRO.
 """
 
+from collections.abc import Mapping
+
 from fastapi import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -23,15 +25,25 @@ CSRF = "csrf"
 
 
 class AuthRefusal(HTTPException):
-    def __init__(self, status_code: int, *, code: str, detail: str) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        *,
+        code: str,
+        detail: str,
+        extra: Mapping[str, int] | None = None,
+    ) -> None:
         super().__init__(status_code, detail)
         self.code = code
+        #: Fields of the body beside `detail` and `code` -- `wait_s` on a 429
+        #: (own authentication Task 7). Never a secret: numbers only.
+        self.extra: dict[str, int] = dict(extra or {})
 
 
 async def auth_refusal_handler(_request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, AuthRefusal)
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail, "code": exc.code},
+        content={**exc.extra, "detail": exc.detail, "code": exc.code},
         headers=exc.headers,
     )
