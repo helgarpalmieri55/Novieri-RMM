@@ -5,6 +5,7 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { Trans } from "../../i18n/Trans";
 import { ConfirmDialog } from "../../components/confirm";
+import { useStepUp } from "../../components/stepUp";
 import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -126,6 +127,11 @@ export function CredentialsPage() {
   const t = useT();
   const api = useApi();
   const queryClient = useQueryClient();
+  // A CHECKOUT MAY NEED THE SECOND FACTOR AGAIN (own authentication design
+  // §2.5): the server answers 403 `step_up_required` when it was not confirmed
+  // in the last 10 minutes, and `run` asks for it and sends the checkout once
+  // more. The secret still arrives only in the accepted answer.
+  const stepUp = useStepUp();
   const [createOpen, setCreateOpen] = useState(false);
   const [reveal, setReveal] = useState<{ name: string; secret: string } | null>(null);
   const [reasonFor, setReasonFor] = useState<Credential | null>(null);
@@ -153,7 +159,9 @@ export function CredentialsPage() {
   const checkout = useMutation({
     // The row's client decides `X-Client-Id`: every client's goes without it.
     mutationFn: (payload: { credential: Credential; reason: string }) =>
-      api.checkoutCredential(payload.credential.id, payload.reason, payload.credential.client_id),
+      stepUp.run(() =>
+        api.checkoutCredential(payload.credential.id, payload.reason, payload.credential.client_id),
+      ),
     onSuccess: (data, payload) => {
       setReveal({ name: payload.credential.name, secret: data.secret });
       setReasonFor(null);
@@ -476,6 +484,7 @@ export function CredentialsPage() {
         open={reasonFor != null}
         onClose={() => setReasonFor(null)}
         title={t("credentials.checkout.title", { name: reasonFor?.name ?? "" })}
+        dismissible={!stepUp.open}
       >
         <p className="cell-sub" style={{ marginBottom: 12 }}>
           {t("credentials.checkout.intro")}
@@ -536,6 +545,8 @@ export function CredentialsPage() {
           <Btn variant="primary" label={t("credentials.reveal.done")} onClick={() => setReveal(null)} />
         </div>
       </Dialog>
+      {/* Outside every form: the recent confirmation holds forms of its own. */}
+      {stepUp.dialog}
     </>
   );
 }

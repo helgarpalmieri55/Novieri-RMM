@@ -1002,3 +1002,68 @@ describe("CredentialsPage — a Windows domain account", () => {
     },
   );
 });
+
+/**
+ * THE VAULT ASKS FOR THE SECOND FACTOR AGAIN (own authentication design §2.5,
+ * falsifier 5). A checkout whose second factor was not confirmed in the last
+ * 10 minutes is the server's 403 `step_up_required`; the page asks for it and
+ * sends the checkout once more only after the server accepted it. The secret
+ * appears only in the answer to that second, accepted checkout.
+ */
+describe("CredentialsPage — a checkout asks for the second factor again when the server says so", () => {
+  const SECURITY = { has_totp: true, passkeys: [], recovery_codes_left: 0, trusted_devices: [], sessions: [] };
+  const STALE = () => new ApiError(403, JSON.stringify({ detail: { code: "step_up_required" } }));
+
+  async function askToReveal(user: ReturnType<typeof userEvent.setup>) {
+    await screen.findByText("Domain support admin");
+    await user.click(screen.getByRole("button", { name: /check out/i }));
+    await user.type(screen.getByPlaceholderText(/helpdesk ticket/i), "helpdesk ticket 4821");
+    await user.click(screen.getByRole("button", { name: "Reveal" }));
+  }
+
+  it("confirms the factor, then reveals", async () => {
+    const user = userEvent.setup();
+    const checkoutCredential = vi
+      .fn()
+      .mockRejectedValueOnce(STALE())
+      .mockResolvedValueOnce({ secret: "sup3r-s3cr3t-value" });
+    const stepUpTotp = vi.fn().mockResolvedValue(undefined);
+    renderPage({
+      listCredentials: () => Promise.resolve([credential()]),
+      checkoutCredential,
+      getMySecurity: vi.fn().mockResolvedValue(SECURITY),
+      stepUpTotp,
+    });
+    await askToReveal(user);
+
+    const confirm = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    expect(screen.queryByText("sup3r-s3cr3t-value")).not.toBeInTheDocument();
+    await user.type(await within(confirm).findByLabelText("Code from your authenticator app"), "123456");
+    await user.click(within(confirm).getByRole("button", { name: "Confirm" }));
+
+    expect(await screen.findByText("sup3r-s3cr3t-value")).toBeInTheDocument();
+    expect(stepUpTotp).toHaveBeenCalledExactlyOnceWith("123456");
+    expect(checkoutCredential).toHaveBeenCalledTimes(2);
+    expect(checkoutCredential).toHaveBeenLastCalledWith(credential().id, "helpdesk ticket 4821", null);
+  });
+
+  it("reveals nothing when the confirmation is closed, and says nothing changed", async () => {
+    const user = userEvent.setup();
+    const checkoutCredential = vi.fn().mockRejectedValue(STALE());
+    renderPage({
+      listCredentials: () => Promise.resolve([credential()]),
+      checkoutCredential,
+      getMySecurity: vi.fn().mockResolvedValue(SECURITY),
+      stepUpTotp: vi.fn(),
+    });
+    await askToReveal(user);
+
+    const confirm = await screen.findByRole("dialog", { name: "Confirm it's you" });
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+
+    const checkout = screen.getByRole("dialog", { name: "Check out Domain support admin" });
+    expect(await within(checkout).findByText(/Nothing was changed: the confirmation was closed\./)).toBeInTheDocument();
+    expect(checkoutCredential).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("sup3r-s3cr3t-value")).not.toBeInTheDocument();
+  });
+});
