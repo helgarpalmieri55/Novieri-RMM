@@ -40,6 +40,7 @@ Notice = Literal[
     "device_remembered",
     "recovery_code_used",
     "factors_reset",
+    "recovery_link_issued",
 ]
 
 
@@ -122,6 +123,16 @@ def _compose(
                 left=left,
             ),
         )
+    if kind == "recovery_link_issued":
+        return (
+            tr("A recovery link was issued for your {product} account", product=PRODUCT),
+            tr(
+                "On {when} someone with access to the server issued a one-time recovery link for "
+                "your account. It works for 15 minutes.\n\n"
+                "If you did not ask for this, tell whoever runs this installation now.",
+                when=when,
+            ),
+        )
     return (
         tr("Your {product} sign-in methods were reset", product=PRODUCT),
         tr(
@@ -141,6 +152,23 @@ def reset_mail(link: str) -> tuple[str, str]:
             "Open this link within 30 minutes to choose a new one. You will still need your "
             "second factor to sign in.\n{link}\n\n"
             "If it was not you, ignore this message: your password has not changed.",
+            product=PRODUCT,
+            link=link,
+        ),
+    )
+
+
+def invitation_mail(link: str, *, inviter: str) -> tuple[str, str]:
+    """The invitation (Task 8, design §7): the one-time link to choose a
+    password, the second secret a mail carries besides the reset link."""
+    return (
+        tr("You are invited to {product}", product=PRODUCT),
+        tr(
+            "{inviter} invited you to {product}.\n\n"
+            "Open this link within 72 hours to choose a password and set up your second "
+            "factor:\n{link}\n\n"
+            "If you did not expect this, ignore this message.",
+            inviter=inviter,
             product=PRODUCT,
             link=link,
         ),

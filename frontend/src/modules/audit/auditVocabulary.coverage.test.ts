@@ -225,6 +225,7 @@ const DYNAMIC: Dynamic[] = [
       "auth.factor_added",
       "auth.sessions_ended",
       "auth.password_changed",
+      "user.recovery_link_used",
     ],
   },
   {
@@ -434,8 +435,8 @@ const DYNAMIC: Dynamic[] = [
   },
   {
     file: "modules/user_admin/service.py",
-    how: "a conditional expression and _mail() literals",
-    codes: ["user.enabled", "user.disabled", "user.enrolment_resent", "user.password_reset_requested"],
+    how: "a conditional expression",
+    codes: ["user.enabled", "user.disabled"],
   },
   {
     file: "services/clients.py",
@@ -502,7 +503,6 @@ const REVIEWED_NON_LITERAL_ACTIONS: Record<string, number> = {
   "modules/remote/service.py": 1,
   "modules/service_desk/approvals.py": 1,
   "modules/service_desk/canned.py": 1,
-  "modules/user_admin/service.py": 1,
   "services/device_review.py": 1,
   "services/clients.py": 1,
   "services/install_link.py": 1,

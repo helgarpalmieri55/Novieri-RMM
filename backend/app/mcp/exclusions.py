@@ -79,10 +79,29 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
             ("logout-everywhere", "ends every console session of the person"),
             ("password/forgot", "mails a one-time password-reset link"),
             ("password/reset", "consumes a one-time link and sets a password"),
+            ("invite/details", "reads an invitation through its one-time link"),
+            ("recover/details", "reads a recovery link the server issued"),
+            (
+                "recover/accept",
+                "consumes a recovery link, removes the second factors and mints a session cookie",
+            ),
+            (
+                "invite/accept",
+                "consumes an invitation link, sets a password and mints a session cookie",
+            ),
         )
     },
     ("PUT", "/api/v1/me/password"): "takes the current password and sets a new one",
     ("POST", "/api/v1/me/recovery-codes"): "returns new recovery codes for the account",
+    # An invitation's answer carries its one-time link when no mail did: a
+    # link that lets a person into the organization (1c(c), like an
+    # enrollment token).
+    ("POST", "/api/v1/users/invite"): (
+        "returns a one-time invitation link when no mail carried it, which lets a person in"
+    ),
+    ("POST", "/api/v1/users/{user_id}/invite/resend"): (
+        "returns a new one-time invitation link when no mail carried it, which lets a person in"
+    ),
 }
 
 NEVER_EXPOSED: frozenset[tuple[str, str]] = frozenset(NEVER_EXPOSED_REASONS)
@@ -262,6 +281,11 @@ NOT_FOR_MCP: dict[tuple[str, str], str] = {
     ("DELETE", "/api/v1/me/totp"): _MY_SECURITY,
     ("DELETE", "/api/v1/me/trusted-devices/{device_id}"): _MY_SECURITY,
     ("DELETE", "/api/v1/me/sessions/{session_id}"): _MY_SECURITY,
+    # Needs the administrator's own second factor confirmed in the console in
+    # the last ten minutes (design §2.5), which the MCP channel cannot do.
+    ("POST", "/api/v1/users/{user_id}/factors/reset"): (
+        "needs the administrator's own recent second-factor confirmation in the console"
+    ),
 }
 
 

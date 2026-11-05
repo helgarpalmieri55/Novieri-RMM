@@ -163,6 +163,16 @@ UNGATED_BY_DESIGN: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/v1/auth/password/forgot"),
         # A one-time link is the credential (`action_tokens.consume`).
         ("POST", "/api/v1/auth/password/reset"),
+        # An invitation's page: a one-time link is the credential, read and
+        # left unused (`flows.invite_details`).
+        ("POST", "/api/v1/auth/invite/details"),
+        # The same link, consumed with the invitee's password (`flows.accept_invite`).
+        ("POST", "/api/v1/auth/invite/accept"),
+        # The server's recovery link is the credential, read and left unused
+        # (`flows.recovery_details`); only the recovery command issues one.
+        ("POST", "/api/v1/auth/recover/details"),
+        # The same link, consumed: the factors go, a pending session opens.
+        ("POST", "/api/v1/auth/recover/accept"),
         # MY SECURITY: `bound_auth_context` + the console session
         # (`auth.py::_console_ctx`); the caller's own rows only.
         ("GET", "/api/v1/me/security"),

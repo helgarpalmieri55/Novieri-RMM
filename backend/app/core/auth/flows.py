@@ -43,7 +43,7 @@ from app.core.audit import audit_service
 from app.core.auth import action_tokens, notices, staff_password
 from app.core.auth.devices import RememberingOff, recognised, revoke_all_for_user
 from app.core.auth.devices import remember as remember_device
-from app.core.auth.factors import count_failure, gate, summary
+from app.core.auth.factors import clear_second_factors, count_failure, gate, summary
 from app.core.auth.failures import check_allowed, record_success, reset_factor
 from app.core.auth.guards import (
     relying_party,
@@ -834,3 +834,107 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
         await revoke_all_for_user(session, user.id)
         await _audit(session, user, "auth.password_changed", {"via": row.purpose})
         await notices.tell(session, user, "password_changed", vault=_vault(request), actor_id=None)
+
+
+# --------------------------------------------------------------------------- #
+# the invitation (Task 8, design §7)
+# --------------------------------------------------------------------------- #
+
+
+async def _invited(session: AsyncSession, token: str, *, consume: bool) -> User:
+    """The invitee of a live, unaccepted invitation, or `invalid_link`.
+
+    Nothing is written before a refusal here but the `consume`, and the
+    refusal rolls it back with the block: a link that names nobody usable was
+    never a link to spend."""
+    if consume:
+        row = await action_tokens.consume(session, token=token, purposes=(action_tokens.INVITE,))
+    else:
+        row = await action_tokens.peek(session, token=token, purposes=(action_tokens.INVITE,))
+    user = await session.get(User, row.user_id) if row is not None else None
+    if (
+        row is None
+        or user is None
+        or user.kind != STAFF_KIND
+        or user.status != ACTIVE_STATUS
+        or await session.get(AuthPassword, user.id) is not None
+    ):
+        raise _invalid_link()
+    return user
+
+
+async def invite_details(request: Request, *, token: str) -> tuple[str, str]:
+    """The address and the name an invitation is for. Leaves the link unused."""
+    org_id = action_tokens.org_of(token)
+    if org_id is None:
+        raise _invalid_link()
+    async with _identity_session(org_id, _engine(request)) as session:
+        user = await _invited(session, token, consume=False)
+        return user.email, user.display_name
+
+
+async def accept_invite(request: Request, *, token: str, password: str) -> SignIn:
+    """The invitee's own password, and a session waiting for its first factor
+    (design §2.2: the person reaches the console only after registering one).
+    A refused password rolls the `consume` back: the link stays usable."""
+    org_id = action_tokens.org_of(token)
+    if org_id is None:
+        raise _invalid_link()
+    async with _identity_session(org_id, _engine(request)) as session:
+        user = await _invited(session, token, consume=True)
+        # Raises a 422 that rolls the `consume` back: the link stays usable.
+        await staff_password.require_acceptable(
+            password,
+            email=user.email,
+            display_name=user.display_name,
+            org_name=await staff_password.organization_name(session, org_id),
+        )
+        await staff_password.store(session, org_id=org_id, user_id=user.id, plain=password)
+        await _audit(session, user, "auth.password_changed", {"via": "invite"})
+        return await _started(session, request, user, state="enroll_required")
+
+
+# --------------------------------------------------------------------------- #
+# the server's recovery link (Task 8, design §7; plan decision 10)
+# --------------------------------------------------------------------------- #
+
+
+async def _recovering(session: AsyncSession, token: str, *, consume: bool) -> User:
+    """The holder of a live recovery link, still an active technician, or
+    `invalid_link`. Only `app.core.auth.recover` issues one (falsifier 9)."""
+    purposes = (action_tokens.RECOVER,)
+    if consume:
+        row = await action_tokens.consume(session, token=token, purposes=purposes)
+    else:
+        row = await action_tokens.peek(session, token=token, purposes=purposes)
+    user = await session.get(User, row.user_id) if row is not None else None
+    if row is None or user is None or user.kind != STAFF_KIND or user.status != ACTIVE_STATUS:
+        raise _invalid_link()
+    return user
+
+
+async def recovery_details(request: Request, *, token: str) -> str:
+    """The address a recovery link is for. Leaves the link unused."""
+    org_id = action_tokens.org_of(token)
+    if org_id is None:
+        raise _invalid_link()
+    async with _identity_session(org_id, _engine(request)) as session:
+        return (await _recovering(session, token, consume=False)).email
+
+
+async def accept_recovery(request: Request, *, token: str) -> SignIn:
+    """Every second factor, every remembered device and every session go; a
+    session waiting for a new first factor is opened. The password stays
+    (plan decision 10: who recovers lost the factors, not the password), and
+    the session opened here is pending until `enroll/finish`."""
+    org_id = action_tokens.org_of(token)
+    if org_id is None:
+        raise _invalid_link()
+    async with _identity_session(org_id, _engine(request)) as session:
+        user = await _recovering(session, token, consume=True)
+        await clear_second_factors(session, user.id)
+        await end_all_for_user(session, user.id, "factors_reset")
+        await revoke_all_for_user(session, user.id)
+        await _audit(session, user, "user.recovery_link_used", {"email": user.email})
+        await notices.tell(session, user, "factors_reset", vault=_vault(request), actor_id=None)
+        return await _started(session, request, user, state="enroll_required")

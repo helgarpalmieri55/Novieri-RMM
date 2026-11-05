@@ -6,12 +6,14 @@ phrase is an infinitive that fits the sentence it is printed in; the console's
 own words are "Deshabilitar", "Eliminar", "Quitar" and "invitación"
 (`settings.users` in `frontend/src/i18n/es/settings.ts`).
 
-Three tables, because the three sentences need three grammars:
+Two tables, because the two sentences need two grammars:
 
 - `ACTION_WORDS`: after "you cannot ... your own account".
 - `OUTCOME_WORDS`: after "cannot be ..." (the English participle; the Spanish
   infinitive of "no se puede ...").
-- `PROVIDER_ACTION_WORDS`: after "the identity provider ... to ...".
+
+(A third, for "the identity provider ... to ...", went with the identity
+provider's calls in P2 phase 1 Task 8.)
 """
 
 from app.core.i18n import N_
@@ -21,6 +23,7 @@ from app.core.i18n import N_
 # say, not a sentence handed to a raiser.
 DISABLE = "disable"
 DELETE = "delete"
+RESET_FACTORS = "reset the sign-in methods of"
 CANNOT_BE_DISABLED = "disabled"
 CANNOT_BE_DELETED = "deleted"
 CANNOT_BE_STRIPPED = "stripped of the role"
@@ -28,20 +31,11 @@ CANNOT_BE_STRIPPED = "stripped of the role"
 ACTION_WORDS = {
     DISABLE: N_("user admin, you cannot ... your own account: disable"),
     DELETE: N_("user admin, you cannot ... your own account: delete"),
+    RESET_FACTORS: N_("user admin, you cannot ... your own account: reset the sign-in methods of"),
 }
 
 OUTCOME_WORDS = {
     CANNOT_BE_DISABLED: N_("user admin, cannot be ...: disabled"),
     CANNOT_BE_DELETED: N_("user admin, cannot be ...: deleted"),
     CANNOT_BE_STRIPPED: N_("user admin, cannot be ...: stripped of the role"),
-}
-
-PROVIDER_ACTION_WORDS = {
-    "create the user": N_("identity provider action: create the user"),
-    "update the user": N_("identity provider action: update the user"),
-    "delete the user": N_("identity provider action: delete the user"),
-    "send the enrolment email": N_("identity provider action: send the enrolment email"),
-    "send the password-reset email": N_(
-        "identity provider action: send the password-reset email"
-    ),
 }

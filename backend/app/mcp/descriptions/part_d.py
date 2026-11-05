@@ -282,8 +282,8 @@ PART_D: dict[str, str] = {
         "request's scope; and the codes they hold on every client."
     ),
     "PATCH /api/v1/me": (
-        "Updates only the caller's own display name, phone, timezone or locale. A new locale is "
-        "also written to the identity provider. Audited with field names only."
+        "Updates only the caller's own display name, phone, timezone or locale. Audited with "
+        "field names only."
     ),
     # --- orgs ---
     "GET /api/v1/orgs/current": (
@@ -534,37 +534,32 @@ PART_D: dict[str, str] = {
     ),
     # --- users ---
     "GET /api/v1/users": (
-        "Lists every user in the organization with their status and role assignments. Needs no "
-        "identity-provider connection."
-    ),
-    "POST /api/v1/users": (
-        "Creates the sign-in identity in Keycloak and the local user with the given roles, then "
-        "emails an enrolment link. The email domain must match the organization's console domain; "
-        "the response says whether the mail was sent."
+        "Lists every user in the organization with their status, role assignments and, while an "
+        "invitation is open, when it expires."
     ),
     "DELETE /api/v1/users/{user_id}": (
-        "Deletes the user's sign-in identity so they can never sign in again; the local row is "
-        "retained, marked deleted, for audit. Refused for yourself, the last org-admin and "
-        "super-admins."
+        "Deletes a user so they can never sign in again: their grants, open invitation, sessions "
+        "and remembered browsers end; the row is retained, marked deleted, for audit. Refused for "
+        "yourself, the last org-admin and super-admins."
+    ),
+    "DELETE /api/v1/users/{user_id}/invite": (
+        "Cancels an invitation the person has not accepted: the link stops working and the account "
+        "is marked deleted. Refused once they have chosen a password."
     ),
     "POST /api/v1/users/{user_id}/disable": (
-        "Blocks the user from signing in, in Keycloak and locally. Refused for yourself, the "
-        "organization's last active org-admin and super-admins."
+        "Blocks the user from signing in and ends their sessions and remembered browsers at once. "
+        "Refused for yourself, the organization's last active org-admin and super-admins."
     ),
     "GET /api/v1/users/{user_id}/effective-permissions": (
         "Returns the permission codes a user holds, each annotated with the role that grants it "
         "and whether it is org-wide or limited to one device group."
     ),
     "POST /api/v1/users/{user_id}/enable": (
-        "Re-enables a disabled user in Keycloak and locally. Cannot revive a deleted user."
+        "Re-enables a disabled user; they sign in again with their password and second factor. "
+        "Cannot revive a deleted user."
     ),
-    "POST /api/v1/users/{user_id}/resend-enrolment": (
-        "Emails the user their first-contact enrolment link again. Fails with a 502 if the mail "
-        "cannot be sent."
-    ),
-    "POST /api/v1/users/{user_id}/reset-password": (
-        "Asks Keycloak to email the user a password-update link. No password is generated or "
-        "returned; fails with a 502 if the mail cannot be sent."
+    "DELETE /api/v1/users/{user_id}/sessions": (
+        "Ends every console session of a user at once; their remembered browsers stay. Audited."
     ),
     "POST /api/v1/users/{user_id}/roles": (
         "Grants a role to a user, organization-wide or limited to one device group. Takes effect "

@@ -70,10 +70,18 @@ OWN_SIGN_IN_NEVER_EXPOSED = {
             "logout-everywhere",
             "password/forgot",
             "password/reset",
+            # Task 8: the invitation's and the server's recovery link.
+            "invite/details",
+            "invite/accept",
+            "recover/details",
+            "recover/accept",
         )
     ),
     ("PUT", "/api/v1/me/password"),
     ("POST", "/api/v1/me/recovery-codes"),
+    # Task 8: an invitation's answer carries its one-time link when no mail did.
+    ("POST", "/api/v1/users/invite"),
+    ("POST", "/api/v1/users/{user_id}/invite/resend"),
 }
 
 
@@ -170,7 +178,7 @@ async def test_a_malformed_marker_is_401(mcp_env) -> None:
 
 
 def test_never_exposed_is_exactly_the_global_constraints_and_the_sign_in_routes() -> None:
-    assert len(NEVER_EXPOSED) == 30
+    assert len(NEVER_EXPOSED) == 36
     assert set(NEVER_EXPOSED) == GLOBAL_CONSTRAINTS_NEVER_EXPOSED | OWN_SIGN_IN_NEVER_EXPOSED
 
 
