@@ -227,12 +227,21 @@ def create_app(
     from app.api.request_context import request_context_middleware
     from app.api.security_headers import security_headers_middleware
 
-    # The MCP channel's never-exposed guard (`app/mcp/guard.py`) is added
-    # FIRST, so it is the INNERMOST of these layers: the locale is set when it
-    # answers, and its refusal still carries the security headers. Its route
-    # table is filled in after `modules.register_all` below.
+    # Starlette inserts each layer at the FRONT of the stack: the one added
+    # last runs first. The console's CSRF rule (`app/core/auth/csrf.py`, P2
+    # design §6.4: a write on the session cookie carries the console's header
+    # and Origin) is added FIRST, so it is the INNERMOST layer. The MCP
+    # channel's never-exposed guard (`app/mcp/guard.py`) is added next, so it
+    # runs BEFORE the CSRF rule: an in-process MCP call to a never-exposed
+    # route -- every `/api/v1/auth/` route among them -- gets the guard's
+    # refusal, never `csrf`. Both sit inside the layers added below: the
+    # locale is set when either answers, and their refusals still carry the
+    # security headers. The guard's route table is filled in after
+    # `modules.register_all` below.
+    from app.core.auth.csrf import RequireConsoleRequestHeader
     from app.mcp.guard import McpNeverExposedGuard
 
+    app.add_middleware(RequireConsoleRequestHeader)
     app.add_middleware(McpNeverExposedGuard)
     app.middleware("http")(security_headers_middleware)
     app.middleware("http")(request_context_middleware)
