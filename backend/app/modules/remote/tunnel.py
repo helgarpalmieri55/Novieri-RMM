@@ -86,24 +86,6 @@ async def owner_or_admin(
     return await has_permission(session, user_id, REMOTE_SUPERVISE, client_id=client_id)
 
 
-async def authorize_tunnel_session(
-    *,
-    connection: HTTPConnection,
-    session_id: UUID,
-    settings: Settings,
-    app_engine: AsyncEngine,
-) -> tuple[UUID, UUID, ClientScope]:
-    """`admit_tunnel_session` without the session it was admitted by:
-    ``(org_id, viewer_id, clients)``. No route calls it -- `session_screen`
-    needs the session for its watchdog -- but the door tests that only ask
-    "admitted or which close code" call it directly
-    (`tests/session_support.py::socket_connection`)."""
-    admitted = await admit_tunnel_session(
-        connection=connection, session_id=session_id, settings=settings, app_engine=app_engine
-    )
-    return admitted.org_id, admitted.viewer_id, admitted.clients
-
-
 @dataclass(frozen=True)
 class TunnelSession:
     """A viewer the console's session cookie admitted, and that session --
@@ -146,8 +128,8 @@ async def admit_tunnel_session(
     device of a client where they lack it does not exist for them (spec §2.6).
 
     Opening a screen is the person's own act, so it TOUCHES the session, as
-    an HTTP request does: an open remote screen counts as activity
-    (coordinator decision, Task 6 review; `watch_tunnel_session`)."""
+    an HTTP request does. Keeping it open is not (fix round 2, which reverses
+    the Task 6 decision): `watch_tunnel_session` re-checks without touching."""
     if not origin_allowed(connection.headers.get("origin"), settings):
         raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
             4403, "not the console's origin"
@@ -171,26 +153,44 @@ async def admit_tunnel_session(
     return TunnelSession(org_id=org_id, viewer_id=viewer_id, clients=clients, principal=principal)
 
 
-async def watch_tunnel_session(connection: HTTPConnection, principal: SessionPrincipal) -> int:
-    """Wait until the console session that admitted an open screen stops, and
-    return the code to close it with (4401).
+async def watch_tunnel_session(
+    connection: HTTPConnection,
+    principal: SessionPrincipal,
+    *,
+    session_id: UUID,
+    settings: Settings,
+    app_engine: AsyncEngine,
+) -> int:
+    """Wait until the console session that admitted an open screen stops, or
+    its door would refuse it now, and return the code to close it with.
 
     A SCREEN MUST NOT OUTLIVE ITS SIGN-IN. It is remote control of a live
     desktop, and design §2.4 cuts a person's sessions at once when they sign
     out, an administrator ends them, a sign-in replaces them, or the account
     is disabled. `session_screen` runs this beside the tunnel and cancels the
     tunnel when it returns. Every `RECHECK_INTERVAL_S` the handshake's cookie
-    is resolved again and must still name THE SAME session (`session_id`):
-    ended, replaced, its person no longer `active`, or past its maximum, it
-    stops. At the session's absolute maximum (`expires_at`) it stops on its
-    own, whenever the next re-check would fall.
+    is resolved again and must still name THE SAME session (`principal.
+    session_id`): ended, replaced, its person no longer `active`, or past its
+    maximum, it stops with 4401. At the session's absolute maximum
+    (`expires_at`) it stops on its own, whenever the next re-check would fall.
 
-    AN OPEN REMOTE SCREEN COUNTS AS ACTIVITY (coordinator decision, Task 6
-    review). The re-read TOUCHES the session (`touch=True`), so the inactivity
-    limit never cuts a screen while it is open -- the person is driving a
-    desktop through it -- while everything above still does. The live-status
-    socket decides the other way (`app/api/v1/ws.py`): a tab left open there
-    is not activity."""
+    NOR ITS DOOR (final review B-M5). The same re-check then runs the door's
+    tail again -- `read_session_identity` with ``remote.control``, then the
+    scope, the screen session (``session_id``) and its owner or supervisor
+    (`_authorize_person`), exactly as `admit_tunnel_session` ran them -- so a
+    domain rule switched on, a ``remote.control`` or ``remote.supervise``
+    grant revoked, or a client taken out of the person's scope closes the
+    screen with the code the door would refuse it with (4403, or 4404 for a
+    session no longer in scope), as `/api/v1/ws` re-runs its door.
+
+    AN OPEN REMOTE SCREEN IS NOT ACTIVITY (fix round 2, console re-review P1;
+    it reverses the Task 6 coordinator decision that it was). The re-read
+    does NOT touch the session (`touch=False`), as the live-status socket's
+    does not (`app/api/v1/ws.py`): an open screen nobody works is idle like
+    any tab, and the inactivity limit cuts it with 4401. A person driving the
+    desktop keeps the session alive through the console, which counts their
+    pointer and keyboard on the viewer page as activity and says so on its
+    next request (design §2.4; NIST SP 800-63B-4 §5.2)."""
     deadline = principal.expires_at.timestamp()
     while True:
         remaining = deadline - time.time()
@@ -199,9 +199,26 @@ async def watch_tunnel_session(connection: HTTPConnection, principal: SessionPri
         await asyncio.sleep(min(RECHECK_INTERVAL_S, remaining))
         if time.time() >= deadline:
             return CLOSE_SESSION_ENDED
-        current = await resolve(connection, touch=True)
+        current = await resolve(connection, touch=False)
         if current is None or current.session_id != principal.session_id:
             return CLOSE_SESSION_ENDED
+        identity = await read_session_identity(
+            door="remote-tunnel",
+            org_id=current.org_id,
+            user_id=current.user_id,
+            settings=settings,
+            engine=app_engine,
+            code=REMOTE_CONTROL,
+        )
+        try:
+            await _authorize_person(
+                org_id=current.org_id,
+                identity=identity,
+                session_id=session_id,
+                app_engine=app_engine,
+            )
+        except TunnelAuthError as refused:
+            return refused.code
 
 
 async def _authorize_person(

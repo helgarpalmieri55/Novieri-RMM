@@ -1,10 +1,12 @@
 """`python -m app.core.auth.recover --email <address>` (design §7, Q5).
 
 For the one administrator who lost every second factor and has nobody to
-reset them: it prints a one-time recovery link, valid 15 minutes, to the
-console's `/recover` page. Following it removes the person's factors and
-opens a session that enrols a new one (`flows.accept_recovery`); the
-password does not change.
+reset them: it prints a one-time recovery link, valid `action_tokens.
+RECOVER_TTL` (15 minutes today), to the console's `/recover` page. Since the
+operator's decision of 2026-11-05 it is also the way back when an
+administrator's factor reset is refused with `reset_needs_recovery`.
+Following it removes the person's factors and opens a session that enrols a
+new one (`flows.accept_recovery`); the password does not change.
 
     docker compose exec api python -m app.core.auth.recover --email <address>
 
@@ -14,7 +16,10 @@ holds the server (`tests/test_auth_recover_command.py`). Audited as
 `user.recovery_link_issued`, actor `system`, and the holder is told by mail
 (design §2.7: "toda recuperación avisa al titular").
 
-The link on stdout and nothing else; a refusal on stderr and exit status 1.
+The link on stdout and nothing else. On stderr, a warning that the link is
+the account -- it asks for no password, so whoever opens it before it expires
+owns the account: hand it over directly, never by email (final review C-M3;
+`deploy/README.md`, "Recovery link") -- or a refusal, and exit status 1.
 In English: it is the server operator's terminal, like the server's own log.
 """
 
@@ -99,10 +104,26 @@ async def issue_recovery_link(*, settings: Settings, email: str) -> str:
         await engine.dispose()
 
 
+def _minutes() -> int:
+    """The link's lifetime, from `action_tokens.RECOVER_TTL` -- never a number
+    typed into a sentence (re-review Minor 4)."""
+    return int(action_tokens.RECOVER_TTL.total_seconds()) // 60
+
+
+def _hand_it_over() -> str:
+    # In English: printed to the server operator's terminal, like the refusals.
+    return (
+        "WARNING: this link is the account. Hand it to the person directly; whoever "
+        f"opens it in the next {_minutes()} minutes gets the account, without a password. "
+        "Never send it by email."
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m app.core.auth.recover",
-        description="Print a one-time, 15-minute recovery link for a technician.",
+        description=f"Print a one-time recovery link for a technician, valid {_minutes()} "
+        "minutes.",
     )
     parser.add_argument("--email", required=True)
     args = parser.parse_args(argv)
@@ -111,6 +132,9 @@ def main(argv: list[str] | None = None) -> int:
     except RecoveryRefused as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
+    # On stderr, so stdout stays the link alone (final review C-M3): the link
+    # asks for no password (plan decision 10), so it IS the account.
+    print(_hand_it_over(), file=sys.stderr)
     print(link)
     return 0
 

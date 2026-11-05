@@ -235,6 +235,24 @@ door uses a distinct `4403` so "wrong domain" stays distinguishable from
 The same gate refuses `status != 'active'`, closing §0.4 and the window in which
 a disabled user's unexpired token still works.
 
+**Narrowed by own authentication, phase 1 (2026-11-05, final review B-M2 and
+the coordinator's decision on Task 13 M4).** On the console's session doors --
+the HTTP door's cookie path, the console WebSocket and the remote-control
+tunnel -- a disabled or deleted person's session is *no session*: their cookie
+gets `401` / `4401`, from `sessions.resolve`, and no `log_admission_refusal`
+line or `audit_admission_refusal` event. That is the true answer, not a gap:
+disabling and deleting end every session of the person in the same transaction
+(`user_admin/service.py`), and `user.disabled` / `user.deleted` already record
+the act in the hash chain; a line per later request would add only noise. The
+`403` sign-in-loop argument above does not apply, because a disabled person
+cannot sign in again. The logged, audited status refusal still exists where a
+credential names the person without a session row of their own: the
+assistant's loopback token (`deps._admit_session`, after `loopback.
+_live_session`) and the MCP channel's OAuth token. One WARNING in `resolve`
+remains on the session doors, and it is a defect detector, not a refusal log: a
+session that has NOT ended but belongs to a non-active person means a
+lifecycle path forgot to end it.
+
 ### 3.3 The lockout, which is the dangerous half
 
 Turning this on can lock out existing users **including the operator's own

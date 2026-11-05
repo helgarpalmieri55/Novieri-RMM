@@ -153,7 +153,10 @@ async def test_whoever_is_refused_is_refused_alike_and_in_the_same_time(
     """FALSIFIER 2. One argon2 verification per attempt whatever the account
     is (`PasswordHasher.verify`, the call inside both `verify_password` and
     `verify_against_nobody`): delete either `verify_against_nobody` call in
-    `flows.login` and the count below drops."""
+    `flows.login` and the count below drops. The 10-15 ms the known
+    address's queries add is accepted, not equalised: the argon2 work is the
+    same and the per-IP limits leave too few samples to see it
+    (`test_auth_falsifiers.py::test_falsifier_2_...`, final review C-M2)."""
     org = await auth_env.create_org("generic")
     known = await staff(auth_env, org, "technician")
     disabled = await staff(auth_env, org, "technician")
@@ -756,7 +759,9 @@ async def test_a_remembered_device_skips_the_factor_but_not_the_recent_confirmat
     changed = await auth_env.client.put("/api/v1/me/password", headers=who.headers(), json=body)
     assert changed.status_code == 204, changed.text
     # The change ends the OTHER sessions; the caller's, which the device
-    # started, is detached from it and stays (`account.change_password`).
+    # started, is detached from it and stays (`account.change_password`),
+    # under a new identifier the answer sets (final review B-I1).
+    who.session = cookie(changed, SESSION_COOKIE)
     me = await auth_env.client.get("/api/v1/me", headers=who.headers())
     assert me.status_code == 200, me.text
 
@@ -801,6 +806,47 @@ async def test_signing_out_ends_this_session_and_everywhere_ends_them_all(
     assert still == []
     ended = await _audit(auth_env, org, "auth.sessions_ended")
     assert [e.meta for e in ended] == [{"by": "self", "scope": "everywhere"}]
+
+
+async def test_signing_out_of_an_idle_session_ends_it(auth_env: Any) -> None:
+    """Final review B-M1. A person comes back to a tab left open past the idle
+    limit and presses "Sign out": `resolve` no longer admits that session,
+    but the row the cookie names is ended all the same -- otherwise it stays
+    resumable with the password alone (and a copy of the cookie) until its
+    maximum. Look the row up with `resolve` again and it is not ended: red."""
+    org = await auth_env.create_org("logout-idle")
+    who = await signed_in(auth_env, org, "technician")
+    idle = who.session
+    assert idle
+    async with AsyncSession(auth_env.admin_engine) as session:
+        await session.execute(
+            update(AuthSession)
+            .where(AuthSession.user_id == who.user_id, AuthSession.ended_at.is_(None))
+            .values(last_seen_at=datetime.now(UTC) - timedelta(minutes=31))
+        )
+        await session.commit()
+    assert (await auth_env.client.get("/api/v1/me", headers=who.headers())).status_code == 401
+
+    out = await auth_env.client.post("/api/v1/auth/logout", headers=who.headers())
+
+    assert out.status_code == 204
+    async with AsyncSession(auth_env.admin_engine) as session:
+        rows = (
+            await session.execute(
+                select(AuthSession.ended_reason).where(AuthSession.user_id == who.user_id)
+            )
+        ).scalars().all()
+    assert rows and all(reason is not None for reason in rows), rows
+    assert "signed_out" in rows
+    # The password alone no longer resumes it: the next sign-in asks for the factor.
+    who.session = idle
+    assert (await login(auth_env, who)).json()["state"] == "factor_required"
+
+
+async def test_signing_out_with_no_session_or_a_dead_one_is_the_same_204(auth_env: Any) -> None:
+    for jar in ({}, {"Cookie": f"{SESSION_COOKIE}={'A' * 43}"}):
+        out = await auth_env.client.post("/api/v1/auth/logout", headers={**browser(), **jar})
+        assert out.status_code == 204, out.text
 
 
 async def test_no_sign_in_answer_carries_a_secret(

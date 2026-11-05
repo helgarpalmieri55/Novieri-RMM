@@ -80,19 +80,33 @@ async def store(
     user_id: UUID,
     plain: str,
     now: datetime | None = None,
+    by_mail: bool = False,
 ) -> None:
     """argon2id over the pepper's HMAC (Task 2); one row per person. `now`,
     when given, is the change's own aware moment (`account.change_password`
-    uses the same one for the caller's session)."""
+    uses the same one for the caller's session).
+
+    `by_mail`: the password comes from a MAILED reset link (`flows.
+    reset_password`), so `mail_reset_at` is set and an administrator's factor
+    reset is refused until a second factor is verified (operator decision
+    2026-11-05). Every other password -- changed while signed in, an
+    invitation's, first boot's -- is the person's own and clears it."""
     digest, version = await hash_password(org_id, plain)
     now = now or datetime.now(UTC)
+    mark = now if by_mail else None
     row = await session.get(AuthPassword, user_id)
     if row is None:
         session.add(
             AuthPassword(
-                user_id=user_id, org_id=org_id, hash=digest, pepper_version=version, changed_at=now
+                user_id=user_id,
+                org_id=org_id,
+                hash=digest,
+                pepper_version=version,
+                changed_at=now,
+                mail_reset_at=mark,
             )
         )
     else:
         row.hash, row.pepper_version, row.changed_at = digest, version, now
+        row.mail_reset_at = mark
     await session.flush()

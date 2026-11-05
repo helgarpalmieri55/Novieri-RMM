@@ -26,8 +26,8 @@ from app.core.rbac import clients_holding, has_permission
 from app.core.tenancy import org_session
 from app.models import Client, Role, User, UserRole
 from app.modules.portal.principal import require_portal_permission, resolve_portal_principal
-from app.modules.remote.tunnel import REMOTE_CONTROL, TunnelAuthError, authorize_tunnel_session
-from tests.session_support import sign_in, socket_connection
+from app.modules.remote.tunnel import REMOTE_CONTROL, TunnelAuthError
+from tests.session_support import authorize_tunnel_session, sign_in, socket_connection
 
 Grants = list[tuple[str, str | None]]
 

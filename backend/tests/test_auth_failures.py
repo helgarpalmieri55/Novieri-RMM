@@ -7,6 +7,7 @@ restores it [S1 §3.2.2]; a success clears that factor's failures.
 """
 
 import asyncio
+import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -20,7 +21,7 @@ from app.core.auth.failures import Factor, FactorState
 from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import AuditEvent, Organization, User
-from app.models.auth import AuthFailure
+from app.models.auth import AuthFailure, AuthTrustedDevice
 
 NOW = datetime(2026, 11, 4, 12, 0, 0, tzinfo=UTC)
 
@@ -303,3 +304,215 @@ async def test_concurrent_attempts_at_99_failures_cannot_both_get_through(
 
     assert results == [True, False]
     assert await _consecutive(world) == failures.DISABLE_AT
+
+
+# --- the device-cookie counter (operator decision 2026-11-05, design §2.3) ---
+#
+# A password attempt from a browser that `devices.recognised` accepts for the
+# account waits and counts on THAT device's counter (`auth_trusted_devices.
+# password_failures`); every other browser on the account's row. The stop at
+# `DISABLE_AT` stays per account: it counts both. One advisory lock for both.
+
+
+async def _device(w: _World, *, user_id: UUID | None = None) -> UUID:
+    async with AsyncSession(w.admin_engine, expire_on_commit=False) as session:
+        device = AuthTrustedDevice(
+            org_id=w.org_id,
+            user_id=user_id or w.user_id,
+            token_hash=secrets.token_bytes(32),
+            created_at=NOW - timedelta(days=1),
+            expires_at=NOW + timedelta(days=14),
+        )
+        session.add(device)
+        await session.commit()
+        return device.id
+
+
+async def _fail_on(
+    w: _World, device_id: UUID | None, *, times: int = 1, at: datetime = NOW
+) -> FactorState:
+    state: FactorState | None = None
+    async with org_session(w.org_id, engine=w.app_engine, clients=ClientScope.all()) as session:
+        for _ in range(times):
+            state = await failures.record_failure(
+                session,
+                org_id=w.org_id,
+                user_id=w.user_id,
+                factor="password",
+                device_id=device_id,
+                now=at,
+            )
+    assert state is not None
+    return state
+
+
+async def _check_on(w: _World, device_id: UUID | None, *, at: datetime = NOW) -> FactorState:
+    async with org_session(w.org_id, engine=w.app_engine, clients=ClientScope.all()) as session:
+        return await failures.check_allowed(
+            session, w.user_id, "password", device_id=device_id, now=at
+        )
+
+
+async def _device_failures(w: _World, device_id: UUID) -> tuple[int, datetime | None]:
+    async with AsyncSession(w.admin_engine) as session:
+        row = (
+            await session.execute(
+                select(
+                    AuthTrustedDevice.password_failures, AuthTrustedDevice.password_failed_at
+                ).where(AuthTrustedDevice.id == device_id)
+            )
+        ).one()
+        return row.password_failures, row.password_failed_at
+
+
+async def test_a_recognised_device_waits_on_its_own_counter(world: _World) -> None:
+    """(a) The account's wait does not hold the recognised browser, and the
+    browser's failures do not feed the account's wait. Drop `device_id` from
+    `check_allowed` and the device sees the account's 15 minutes: red."""
+    device = await _device(world)
+    await _fail(world, "password", times=30)
+
+    assert (await _check_on(world, None)).wait_s == 900
+    assert await _check_on(world, device) == ALLOWED
+
+    assert (await _fail_on(world, device, times=5)) == FactorState(
+        allowed=False, wait_s=1, disabled=False
+    )
+    assert await _device_failures(world, device) == (5, NOW)
+    assert await _consecutive(world, "password") == 30
+    assert await _check_on(world, device, at=NOW + timedelta(seconds=1)) == ALLOWED
+
+
+async def test_another_persons_device_is_no_separate_counter(world: _World) -> None:
+    """(b) A device id that is not this person's names no counter: the attempt
+    waits on the account's row, and the stranger's device is not touched."""
+    _org, colleague = await _person(world.admin_engine, world.org_id)
+    theirs = await _device(world, user_id=colleague)
+    await _fail(world, "password", times=30)
+
+    assert (await _check_on(world, theirs)).wait_s == 900
+    await _fail_on(world, theirs)
+    assert await _consecutive(world, "password") == 31
+    assert await _device_failures(world, theirs) == (0, None)
+
+
+async def test_the_stop_counts_both_counters_and_is_audited_once(world: _World) -> None:
+    """(d) 100 consecutive failures disable the password whichever counter
+    they came from (NIST §3.2.2 is per authenticator, per account). Count only
+    the account's row toward `DISABLE_AT` and 50 + 50 never stops: red."""
+    device = await _device(world)
+    await _fail(world, "password", times=50)
+    assert not (await _fail_on(world, device, times=49)).disabled
+
+    assert (await _fail_on(world, device)).disabled
+    await _fail(world, "password")
+    await _fail_on(world, device)
+
+    assert (await _check_on(world, None, at=NOW + timedelta(days=365))).disabled
+    assert (await _check_on(world, device, at=NOW + timedelta(days=365))).disabled
+    (event,) = [e for e in await _audit(world) if e.action == "auth.factor_disabled"]
+    assert event.meta == {"factor": "password", "consecutive": failures.DISABLE_AT}
+
+
+async def test_a_success_clears_both_counters(world: _World) -> None:
+    """(e) A success from any browser clears the consecutive count: the
+    account's row and every device's counter of the person."""
+    device, other = await _device(world), await _device(world)
+    await _fail(world, "password", times=9)
+    await _fail_on(world, device, times=7)
+    await _fail_on(world, other, times=3)
+
+    await _succeed(world, "password")
+
+    assert await _consecutive(world, "password") is None
+    assert await _device_failures(world, device) == (0, None)
+    assert await _device_failures(world, other) == (0, None)
+
+
+async def test_a_reset_clears_both_counters(world: _World) -> None:
+    """`reset_factor` (the mail reset, a recovery link, an administrator's
+    reset) restores the password whichever counter disabled it."""
+    device = await _device(world)
+    await _fail(world, "password", times=60)
+    await _fail_on(world, device, times=40)
+    assert (await _check_on(world, device, at=NOW + timedelta(days=1))).disabled
+
+    async with org_session(
+        world.org_id, engine=world.app_engine, clients=ClientScope.all()
+    ) as session:
+        await failures.reset_factor(session, world.user_id, "password")
+
+    assert await _check_on(world, device) == ALLOWED
+    assert await _check_on(world, None) == ALLOWED
+    assert await _device_failures(world, device) == (0, None)
+
+
+async def test_the_device_counter_is_the_passwords_alone(world: _World) -> None:
+    device = await _device(world)
+    async with org_session(
+        world.org_id, engine=world.app_engine, clients=ClientScope.all()
+    ) as session:
+        with pytest.raises(ValueError):
+            await failures.check_allowed(session, world.user_id, "totp", device_id=device, now=NOW)
+        with pytest.raises(ValueError):
+            await failures.record_failure(
+                session,
+                org_id=world.org_id,
+                user_id=world.user_id,
+                factor="totp",
+                device_id=device,
+                now=NOW,
+            )
+
+
+async def _attempt_on(w: _World, device_id: UUID | None) -> bool:
+    """check -> (a wrong password) -> record, in ONE transaction, as login does."""
+    async with org_session(w.org_id, engine=w.app_engine, clients=ClientScope.all()) as session:
+        state = await failures.check_allowed(
+            session, w.user_id, "password", device_id=device_id, now=NOW
+        )
+        # Long enough for the rest of the burst to reach its own check.
+        await asyncio.sleep(0.05)
+        if state.allowed:
+            await failures.record_failure(
+                session,
+                org_id=w.org_id,
+                user_id=w.user_id,
+                factor="password",
+                device_id=device_id,
+                now=NOW,
+            )
+        return state.allowed
+
+
+async def test_a_parallel_burst_on_both_counters_stops_at_one_hundred(world: _World) -> None:
+    """(f) Both counters sit under ONE advisory lock (`check_allowed`), so a
+    burst of check -> wrong password -> record from both kinds of browser is
+    serialised: at 99 the first failure is the 100th, it disables the
+    password, and every other attempt of the burst sees it disabled. With a
+    lock per counter, both counters' first attempts pass the check before
+    either records: two failures counted and a count past the stop."""
+    device = await _device(world)
+    long_ago = NOW - timedelta(days=1)
+    await _fail(world, "password", times=60, at=long_ago)
+    await _fail_on(world, device, times=39, at=long_ago)
+
+    results = await asyncio.gather(*(_attempt_on(world, d) for d in [None, device] * 6))
+
+    assert results.count(True) == 1
+    account = await _consecutive(world, "password")
+    on_device, _at = await _device_failures(world, device)
+    assert account is not None and account + on_device == failures.DISABLE_AT
+    assert [e.action for e in await _audit(world)].count("auth.factor_disabled") == 1
+
+
+async def test_a_parallel_burst_on_one_device_waits_its_turn(world: _World) -> None:
+    """(f) The device's own wait holds under a burst: at 4 failures the next
+    one starts a wait, and the rest of the burst sees it."""
+    device = await _device(world)
+    await _fail_on(world, device, times=4, at=NOW - timedelta(days=1))
+
+    results = await asyncio.gather(*(_attempt_on(world, device) for _ in range(8)))
+
+    assert results.count(True) == 1
+    assert await _device_failures(world, device) == (5, NOW)

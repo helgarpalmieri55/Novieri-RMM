@@ -8,6 +8,7 @@ Each refusal names the line it protects.
 """
 
 import hashlib
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -228,6 +229,38 @@ async def test_a_disabled_person_has_no_session(api_env: Any) -> None:
     signed = await sign_in(api_env, org_id, sub)
     await _set(api_env, User, signed.user_id, status="disabled")
     assert await _resolve(api_env, signed.token) is None
+
+
+@pytest.mark.parametrize("status", ["disabled", "deleted"])
+async def test_a_live_session_of_a_person_who_is_not_active_is_a_defect_and_logged(
+    api_env: Any, status: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Task 13 M4 / final review B-M2, the coordinator's decision. The answer
+    stays None (a 401 / 4401 at the door), and ONE WARNING says that a
+    lifecycle path forgot to end this session -- disabling and deleting end
+    them in the same transaction, so a live one is a defect. The token is
+    never in it. A session that WAS ended is the normal case and says
+    nothing. Delete the WARNING in `resolve` and the first half is red."""
+    org_id, sub = await _person(api_env, "read-only")
+    forgotten, ended = await sign_in(api_env, org_id, sub), await sign_in(api_env, org_id, sub)
+    await _set(
+        api_env, AuthSession, ended.session_id, ended_at=datetime.now(UTC), ended_reason="disabled"
+    )
+    await _set(api_env, User, forgotten.user_id, status=status)
+
+    with caplog.at_level(logging.WARNING, logger="its.auth.sessions"):
+        assert await _resolve(api_env, forgotten.token) is None
+    (line,) = [r for r in caplog.records if r.name == "its.auth.sessions"]
+    assert line.levelno == logging.WARNING
+    assert line.session_id == forgotten.session_id
+    assert line.status == status
+    assert forgotten.token not in line.getMessage()
+    assert forgotten.token not in repr(line.__dict__)
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="its.auth.sessions"):
+        assert await _resolve(api_env, ended.token) is None
+    assert [r for r in caplog.records if r.name == "its.auth.sessions"] == []
 
 
 @pytest.mark.parametrize("cookie", ["", "short", "x" * 43 + "!", "A" * 44])

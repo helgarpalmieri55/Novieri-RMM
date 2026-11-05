@@ -63,6 +63,7 @@ from app.api.deps import (
     require_step_up,
 )
 from app.core.auth import notices
+from app.core.auth.refusals import AuthRefusal
 from app.core.i18n import tr
 from app.core.identity.policy import resolve_console_domain
 from app.core.tenancy import org_session
@@ -138,6 +139,10 @@ async def _mailer(session: AsyncSession, request: Request, ctx: AuthContext) -> 
 
 
 def _http(exc: UserAdminError) -> HTTPException:
+    """`{"detail": ...}`, and `"code"` beside it when the refusal carries one
+    the console acts on (`AuthRefusal`, whose handler writes both)."""
+    if exc.code is not None:
+        return AuthRefusal(exc.status_code, code=exc.code, detail=exc.detail)
     return HTTPException(exc.status_code, exc.detail)
 
 
@@ -430,7 +435,9 @@ async def cancel_invite(
     ctx: AuthContext = Depends(_MANAGE),
 ) -> Response:
     """Cancel an invitation not accepted yet: the link dies and the account is
-    marked deleted (its row is kept). Refused once they have chosen a password."""
+    marked deleted (its row is kept). Refused once they have chosen a password.
+    The address stays taken for good: a deleted account's address cannot be
+    invited again, in this organization, under any name."""
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
@@ -580,7 +587,10 @@ async def reset_factors(
     """Remove this person's passkeys, authenticator app and recovery codes,
     end their sessions and forget their devices; they set up a new second
     factor at their next sign-in, and are told by mail. Needs your own second
-    factor confirmed in the last ten minutes. Not for your own account."""
+    factor confirmed in the last ten minutes. Not for your own account.
+    Refused (409 `reset_needs_recovery`) while their password was set with an
+    emailed reset link and no second factor has been used since: use the
+    server's recovery command then."""
     # Design §2.5: the administrator's OWN second factor, confirmed in the last
     # ten minutes (Task 6; plan decision 5). Before anything is read.
     require_step_up(ctx)

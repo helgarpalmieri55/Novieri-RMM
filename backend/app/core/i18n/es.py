@@ -4474,6 +4474,21 @@ CATALOG: dict[str, str] = {
     "sign in to do this": "inicia sesión para hacer esto",
     "you are already signed in": "ya has iniciado sesión",
     "confirm your second factor first": "confirma primero tu segundo factor",
+    "This person's password was set with an emailed reset link, and no second factor has been "
+    "used since. Resetting their sign-in methods now would hand the account to whoever holds "
+    "that mailbox. Use the server's recovery command instead, and hand the link to the person "
+    "directly.": (
+        "La contraseña de esta persona se puso con un enlace de restablecimiento enviado por "
+        "correo y desde entonces no se ha usado ningún segundo factor. Restablecer ahora sus "
+        "métodos de inicio de sesión entregaría la cuenta a quien tenga ese buzón. Use el "
+        "comando de recuperación del servidor y entregue el enlace a la persona en mano."
+    ),
+    "your password is locked after too many failed attempts; set a new one with the link on "
+    "the sign-in page, or ask an administrator to reset your sign-in methods": (
+        "tu contraseña quedó bloqueada tras demasiados intentos fallidos; elige una nueva con el "
+        "enlace de la página de inicio de sesión, o pide a un administrador que restablezca tus "
+        "métodos de inicio de sesión"
+    ),
     "this second factor is locked after too many failed attempts; an administrator can reset "
     "your factors": (
         "este segundo factor quedó bloqueado tras demasiados intentos fallidos; un administrador "

@@ -278,6 +278,14 @@ cero filas y no puede escribir, igual que hoy pasa sin `app.current_org`
   - `app/core/identity/own_profile.py`: `GET` y `PATCH /me`. El perfil es de la
     persona, no de un cliente, y solo toca su propia fila de `users` y tablas
     G (asignaciones, roles, auditoría).
+  - *Añadidas por la autenticación propia, fase 1 (2026-11):* las tres que leen
+    la sesión de la consola antes de que exista un alcance.
+    `app/core/auth/sessions.py::resolve` encuentra la sesión que nombra la
+    cookie y lee y renueva su fila (un técnico no tiene cliente).
+    `app/api/deps.py::_admit_session` convierte esa sesión, o la del token
+    interno del asistente, en la persona y sus asignaciones, como `admit`.
+    `app/core/auth/loopback.py::_live_session` comprueba que la sesión que nombra
+    el token interno sigue viva y es de esa persona.
 
   `app/modules/portal/principal.py` no necesita el alcance "todos": usa `admit`
   y `person_scope`. El servidor MCP reenvía `X-Client-Id` en cada llamada

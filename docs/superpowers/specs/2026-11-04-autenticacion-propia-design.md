@@ -104,9 +104,42 @@ La persona no llega a la consola hasta registrar uno.
 
 - Contados por cuenta y por factor, nunca solo por IP [S5].
 - Desde el 5.º fallo, espera creciente: 1 s, duplicando hasta 15 min.
-- A los **100** fallos seguidos ese factor queda desactivado y solo un administrador lo restablece [S1 §3.2.2].
-- Un acierto borra los fallos previos de ese factor [S1].
-- Mensaje genérico, exista o no la cuenta, y mismo tiempo de respuesta [S5, S8].
+- **La contraseña lleva dos contadores** (decisión del operador del 2026-11-05, «Cookie de equipo», sobre la revisión
+  final B-I2). Un intento que llega con una cookie `__Host-itms_device` que `devices.recognised` acepta para esa
+  cuenta (§2.6: del equipo recordado de esa persona, sin revocar, sin caducar, recordado después del último cambio de
+  contraseña y con «Recordar este equipo» activado en la organización) espera y cuenta en el contador propio de ese
+  equipo (`auth_trusted_devices.password_failures`). Cualquier otro navegador espera y cuenta en el de la cuenta
+  (`auth_failures`). Quien conoce una dirección pero no tiene la cookie de esa persona solo deja esperando a los
+  navegadores que la plataforma no reconoce: OWASP, «Temporary account lockout after several failed attempts is too
+  simple of a target for DoS attacks against legitimate users» [S65]; NIST, «Additional techniques MAY be used to
+  reduce the likelihood that an attacker will lock the legitimate claimant out» [S1 §3.2.2]. La cookie de otra
+  cuenta, una revocada o caducada, o cualquier cookie con el recordatorio desactivado no da contador propio. La regla
+  vale donde se prueba la contraseña: al iniciar sesión y en «Cambiar contraseña» (Mi seguridad), para que quien
+  mantiene la espera no retenga también el remedio. Los dos contadores comparten un único bloqueo por persona y
+  factor, así que una ráfaga en paralelo no supera ningún límite.
+- **Lo que no cubre.** Una persona sin ningún equipo recordado, o en una organización con el recordatorio
+  desactivado, solo tiene el contador de la cuenta: quien conozca su dirección puede seguir manteniéndola en espera
+  desde navegadores no reconocidos. El remedio ahí sigue siendo el borde (bloquear la IP), el enlace de
+  restablecimiento (que borra ambos contadores, decisión 9 del plan) o el comando de recuperación. Y la parada de 100
+  sigue al alcance de cualquiera: quien conozca la dirección puede llegar a ella desde navegadores no reconocidos en
+  aproximadamente un día de intentos espaciados, si la persona no entra con su contraseña entretanto; la contraseña
+  queda entonces desactivada para todos los navegadores, el recordado incluido, y la restablece el enlace de
+  restablecimiento.
+- **El segundo factor no lleva contador por equipo.** Solo se llega a él con una sesión pendiente, que abre la
+  contraseña correcta: quien no la sabe no puede fallar el segundo factor, y quien la sabe ya ha comprometido la
+  cuenta, y el remedio es cambiarla. Además, cada factor cuenta aparte (bloquear la app TOTP no bloquea la llave ni
+  los códigos), y un equipo recordado no pide segundo factor al iniciar sesión.
+- A los **100** fallos seguidos ese factor queda desactivado [S1 §3.2.2]. La parada es **por cuenta**: para la
+  contraseña suma los dos contadores (los fallos seguidos desde el último acierto, vengan del navegador que vengan),
+  y la desactivación vale para todos los navegadores y se audita una sola vez. La restablecen un administrador
+  («Restablecer factores»), el enlace de recuperación del servidor y, para la contraseña, el enlace de
+  restablecimiento.
+- Un acierto borra los fallos previos de ese factor [S1]; para la contraseña, un acierto desde cualquier navegador
+  borra los dos contadores.
+- Mensaje genérico, exista o no la cuenta, y mismo trabajo de argon2 [S5, S8]. Un navegador en espera, reconocido o
+  no, recibe el mismo 401 genérico antes de probar la contraseña: los dos contadores no añaden ningún oráculo. Queda
+  una diferencia de tiempo de unos 10-15 ms entre una dirección conocida y una desconocida (las consultas de la
+  cuenta), aceptada en la revisión final C-M2: el trabajo de argon2 es el mismo y los límites por IP la hacen débil.
 
 ### 2.4 Sesión
 
@@ -115,6 +148,18 @@ La persona no llega a la consola hasta registrar uno.
   **15 días**) y duración máxima en un equipo recordado.
 - Tras la inactividad se pide solo la contraseña dentro de la duración máxima (lo que NIST permite en AAL2 [S1 §2.2.3]);
   al vencer la duración máxima, inicio de sesión completo.
+- **Qué cuenta como actividad** (ronda de corrección 2, revisión de la consola P1). Solo lo que hace la persona. NIST SP
+  800-63B-4 §5.2 (https://pages.nist.gov/800-63-4/sp800-63b/session/): «An inactivity timeout terminates a session
+  without activity from the subscriber for a specific period» y «Session activity SHALL reset the inactivity timeout».
+  La consola envía `X-ITMS-Background: 1` en toda petición hecha sin que la persona haya tocado el puntero o el
+  teclado en los últimos 60 s (los sondeos de cada minuto, las recargas al volver a la pestaña), y el servidor no
+  renueva la sesión con ella (`sessions.resolve`, en toda puerta HTTP). La cabecera solo puede declinar una renovación,
+  nunca concederla; cualquier otro cliente sigue igual. No son actividad: una pestaña abierta (el WebSocket de estado),
+  ni una pantalla remota abierta, cuyo vigilante tampoco renueva la sesión (esto invierte la decisión del coordinador
+  de la Tarea 6): quien trabaja en el escritorio remoto mantiene viva la sesión con su puntero y su teclado en la
+  página del visor, que la consola cuenta como cualquier otra. Así, una consola desatendida, con la pestaña visible,
+  llega al límite de inactividad. La gestión del tiempo de espera se impone en el servidor (OWASP [S6]: «Session
+  timeout management and expiration must be enforced server-side»).
 - El identificador de sesión cambia al iniciar sesión y al confirmar el segundo factor [S6].
 - Desactivar a una persona corta sus sesiones, sus tokens de IA y sus equipos recordados al instante.
 
@@ -141,7 +186,12 @@ recuperación avisa al titular [S1 §4.2.3].
 ### 2.8 Restablecer la contraseña por correo
 
 Permitido: un enlace de un solo uso que caduca a los 30 min; después **sigue pidiendo el segundo factor**. El segundo
-factor nunca se restablece por correo [S10].
+factor nunca se restablece por correo [S10]. Por eso **no se envía enlace a una cuenta sin segundo factor** (ni llave
+ni app TOTP confirmada; los códigos de recuperación solos no cuentan) y un enlace enviado antes de que los factores
+desaparecieran ya no restablece nada (410): tras el restablecimiento de un administrador, una invitación o un enlace
+de recuperación abandonados, o el dueño del primer arranque antes de su primer inicio, el buzón solo pondría la
+contraseña y registraría su propio factor (revisión final C-I1). La respuesta sigue siendo el mismo 202, al mismo
+tiempo.
 
 ---
 
@@ -268,11 +318,46 @@ MCP valida su JWT (`iss`, `aud`, `kid`, revocación).
 ## 7. Cuentas, correo y auditoría
 
 - **Invitar técnicos** (Ajustes → Usuarios): correo y asignaciones de rol por cliente; enlace de un solo uso de 72 h para
-  elegir contraseña, registrar el segundo factor y guardar los códigos. Reenviar o cancelar.
+  elegir contraseña, registrar el segundo factor y guardar los códigos. Reenviar o cancelar. **Cancelar quema la
+  dirección para siempre** (revisión final C-M4): la cuenta queda marcada como eliminada y su fila se conserva, como la
+  de toda cuenta eliminada, y una dirección que ya tiene fila (eliminada incluida) no se puede volver a invitar en esa
+  organización.
 - **Restablecer factores de otro técnico:** con confirmación reciente propia (§2.5), auditado, con aviso por correo.
+  Después de un restablecimiento, la persona entra con su contraseña y registra un factor nuevo; el correo solo no
+  basta: no se envía enlace de restablecimiento a una cuenta sin llave ni app TOTP confirmada (revisión final C-I1,
+  §2.8).
+  - **El residuo de la decisión 5, y cómo se cierra.** Quien tiene el buzón puede restablecer la contraseña por correo
+    mientras la cuenta aún tiene su segundo factor (está permitido: el factor se sigue pidiendo). Si después un
+    administrador restablece los factores, la contraseña que eligió el buzón abre el registro de un factor propio, y
+    la cuenta es suya. Es la consecuencia natural: el correo de restablecimiento cierra las sesiones de la persona y
+    cambia su contraseña, ella dice «no puedo entrar», y lo esperable es que un administrador restablezca sus
+    factores. Los avisos de «contraseña cambiada» y «factores restablecidos» llegan al mismo buzón.
+  - **Decisión del operador del 2026-11-05 («Rechazar y usar recuperación»).** «Restablecer métodos de inicio de
+    sesión» (`user_admin.service.reset_factors`, el mismo servicio para la consola y para MCP) se rechaza con 409
+    `reset_needs_recovery` mientras la contraseña actual de la persona se haya puesto con un enlace de
+    restablecimiento enviado por correo y desde entonces no se haya verificado ningún segundo factor (una llave, una
+    app TOTP confirmada o un código de recuperación, al iniciar sesión o en una confirmación reciente). Sin ventana de
+    tiempo. No cubre las contraseñas de una invitación: eso es el alta, por diseño. La marca
+    (`auth_passwords.mail_reset_at`) la borran cualquier segundo factor verificado después, un cambio de contraseña
+    con la sesión abierta y el enlace de recuperación, que sigue siendo el camino de vuelta. La comprobación del
+    restablecimiento por correo («¿tiene segundo factor?») y la del administrador («¿la puso el buzón?») toman el
+    mismo bloqueo por persona (`factors.lock_person`), así que ningún orden de esas dos deja una cuenta sin
+    factores con la contraseña del buzón. Y un segundo factor verificado no borra la marca en una sesión que el
+    restablecimiento por correo acaba de cerrar: el paso de inicio de sesión y la confirmación reciente deshacen
+    toda su transacción (401) cuando su sesión ya no está viva (revisión de la ronda 1, Important 1). Por MCP la
+    respuesta no llega a ser el 409: esa ruta exige la confirmación reciente del propio administrador en la
+    consola, así que MCP recibe antes un 403 `step_up_required`. Fuente: NIST SP 800-63B-4 §4.2.2.2
+    (https://pages.nist.gov/800-63-4/sp800-63b/events/): en AAL2, la recuperación necesita dos códigos de
+    recuperación obtenidos por métodos distintos, o un código de recuperación más la autenticación con un
+    autenticador de un factor vinculado a la cuenta, o una nueva verificación de identidad. Un buzón solo no es
+    ninguna de las tres.
+  - Un enlace de restablecimiento rechazado porque los factores ya no están se gasta (410), como cualquier enlace
+    muerto: no vuelve a valer cuando la persona registra un factor nuevo (revisión final, Minor 5).
 - **Comando de recuperación** (único administrador sin factores):
   `docker compose exec api python -m app.core.auth.recover --email <correo>` imprime un enlace de un solo uso de 15 min.
-  No existe por HTTP; exige acceso al servidor; queda auditado.
+  No existe por HTTP; exige acceso al servidor; queda auditado. **El enlace es la cuenta:** no pide contraseña, así
+  que quien lo abra en esos 15 minutos se queda con ella. Se entrega a la persona en mano, nunca por correo (Q5); el
+  comando lo advierte en stderr.
 - **Primer arranque:** la pantalla con el código de instalación (que ya existe) crea al dueño con contraseña y segundo
   factor.
 - **Correo de cuentas** (Ajustes → Correo): por el envío propio (el código SMTP / Microsoft 365 XOAUTH2 de
@@ -378,3 +463,4 @@ con S61–S62); se resume aquí. S61–S64 los verificó el coordinador directam
   https://learn.microsoft.com/en-us/entra/identity/authentication/howto-mfa-mfasettings
 - [S63] OWASP Cross-Site Request Forgery Prevention Cheat Sheet. https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
 - [S64] ChromeDevTools/devtools-protocol, `json/browser_protocol.json`, dominio WebAuthn. https://github.com/ChromeDevTools/devtools-protocol
+- [S65] OWASP, Slow Down Online Guessing Attacks with Device Cookies. https://community.owasp.org/Slow_Down_Online_Guessing_Attacks_with_Device_Cookies (owasp.org/www-community/… redirige con 308). Cita comprobada contra la página el 2026-11-05.

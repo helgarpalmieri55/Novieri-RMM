@@ -499,7 +499,13 @@ async def send_test_message(
     """
     state = request.app.state
     if not await rate_limit.hit(
-        state.redis, f"email-test:org:{ctx.org_id}", limit=TEST_SENDS_PER_MINUTE, window_s=60
+        state.redis,
+        f"email-test:org:{ctx.org_id}",
+        limit=TEST_SENDS_PER_MINUTE,
+        window_s=60,
+        # Nothing else caps a signed-in SMTP conversation per organization
+        # (final review A-M1): no counter, no test message.
+        fail_closed=True,
     ):
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,

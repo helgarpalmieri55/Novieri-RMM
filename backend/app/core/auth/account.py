@@ -27,10 +27,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
 from app.core.auth import notices, staff_password
-from app.core.auth.devices import revoke, revoke_all_for_user
-from app.core.auth.factors import count_failure, summary
-from app.core.auth.failures import check_allowed, record_success
-from app.core.auth.guards import signed_user
+from app.core.auth.devices import presented, revoke, revoke_all_for_user
+from app.core.auth.factors import count_failure, gate, summary
+from app.core.auth.failures import record_success
+from app.core.auth.guards import require_fresh, sign_in_again, signed_user
 from app.core.auth.keys import UnknownKeyVersion
 from app.core.auth.passwords import verify_password
 from app.core.auth.recovery import replace_codes
@@ -41,6 +41,7 @@ from app.core.auth.sessions import (
     SessionPrincipal,
     cookie_token,
     end_all_for_user,
+    rotate,
     token_hash,
 )
 from app.core.auth.sessions import end as end_session
@@ -239,21 +240,39 @@ async def _detach_from_device(
 
 async def change_password(
     request: Request, principal: SessionPrincipal, *, current: str, new: str
-) -> None:
+) -> tuple[str, datetime]:
     """The current password again (OWASP [S5]: "require the current credentials
     for an account before updating ... the user's password"), then: the other
     sessions end and every remembered device is forgotten (design §2.6). The
-    caller's own session stays, detached from any device first
-    (`_detach_from_device`).
+    caller's own session stays -- detached from any device first and capped
+    (`_detach_from_device`) -- under a NEW identifier (`sessions.rotate`,
+    final review B-I1): the answer is that cookie's value and the session's
+    capped expiry, for the route to set. The session is kept (coordinator
+    decision, keep, detach and cap); only its cookie value changes, so a copy
+    of the old one stops working.
+
+    A recent confirmation is asked HERE as well as at the route
+    (`guards.require_fresh`; the route's `require_step_up` is the first).
+
+    THE WAIT IS TOLD (B-M4): the caller is signed in, so a waiting or disabled
+    password is `factors.gate`'s 429 `factor_wait` / 403 `factor_disabled`,
+    never "the current password is not right". It waits on the counter this
+    browser waits on at sign-in (design §2.3): its remembered device's when
+    `devices.presented` accepts the cookie, else the account's -- or whoever
+    holds the sign-in wait would hold this remedy too.
 
     One transaction per attempt (Task 4's advisory lock): check, verify, count
     or change, and the refusal raised after the block commits the count."""
-    changed = False
+    require_fresh(principal)
+    changed: tuple[str, datetime] | None = None
     async with _own_session(principal, request) as session:
         user = await signed_user(session, principal)
         stored = await session.get(AuthPassword, user.id)
-        state = await check_allowed(session, user.id, "password")
-        if stored is not None and state.allowed:
+        device = await presented(session, user.id, request)
+        counter = device.id if device is not None else None
+        # Raised inside the block: nothing is written before it.
+        await gate(session, user.id, "password", device_id=counter)
+        if stored is not None:
             # Plan decision 16: an over-long current password is a wrong one,
             # counted, and never handed to the pepper (`SUBMITTED_MAX`).
             matches: bool | None = False
@@ -290,19 +309,33 @@ async def change_password(
                 )
                 await _detach_from_device(session, principal, now=now)
                 await revoke_all_for_user(session, user.id)
+                try:
+                    token = await rotate(session, principal.session_id)
+                except LookupError as exc:
+                    raise sign_in_again() from exc
+                expires_at = (
+                    await session.execute(
+                        select(AuthSession.expires_at).where(
+                            AuthSession.id == principal.session_id
+                        )
+                    )
+                ).scalar_one()
                 await _record(session, user, "auth.password_changed", {"via": "self"})
                 await notices.tell(
                     session, user, "password_changed", vault=_vault(request), actor_id=user.id
                 )
-                changed = True
+                changed = (token, expires_at)
             elif matches is False:
-                await count_failure(session, user, "password", vault=_vault(request))
-    if not changed:
+                await count_failure(
+                    session, user, "password", vault=_vault(request), device_id=counter
+                )
+    if changed is None:
         raise AuthRefusal(
             status.HTTP_403_FORBIDDEN,
             code="invalid_credentials",
             detail=tr("the current password is not right"),
         )
+    return changed
 
 
 def _last_factor() -> AuthRefusal:

@@ -18,10 +18,18 @@ A FIXED WINDOW. It starts at the first hit and ends `window_s` later whatever
 happens in between; `EXPIRE` is never pushed out, so a client that keeps
 knocking does not keep its own window open.
 
-IT FAILS OPEN, and logs that it did. Redis down must not take sign-in down with
-it: every limit counted here sits on top of one that needs no Redis (the
-per-factor counters in the database, RBAC, the audit chain). A caller that must
-fail CLOSED (`email_intake`'s connection test) keeps its own counter.
+IT FAILS OPEN BY DEFAULT, and logs that it did. Redis down must not take
+sign-in down with it: the per-address limits on the sign-in and factor routes
+(`_LOGIN`, `_FACTOR`) sit on top of the per-account counters in the database
+(`app/core/auth/failures.py`), which need no Redis. NOT EVERY LIMIT HERE HAS
+SUCH A FLOOR (final review A-M1): the per-address cap on reset mails
+(`flows.RESET_MAILS_PER_HOUR`) and the per-organization cap on test messages
+(`realm_settings.TEST_SENDS_PER_MINUTE`) are the only cap on the mail they
+send, so those pass `fail_closed=True`: during an outage the mail is not sent
+and that is logged too. The reset-mail cap runs after the 202, so failing
+closed changes no answer. `_FORGOT` and `_LINK` (per IP) still fail open: the
+per-address cap behind `_FORGOT` holds, and a link is a 256-bit secret. A
+caller with a counter of its own (`email_intake`'s connection test) keeps it.
 
 KEYS ARE NAMESPACED under `KEY_PREFIX`, so a caller's key can never collide with
 another subsystem's Redis key.
@@ -42,14 +50,17 @@ logger = logging.getLogger(__name__)
 KEY_PREFIX = "ratelimit:"
 
 
-async def hit(redis: Redis, key: str, *, limit: int, window_s: int) -> bool:
+async def hit(
+    redis: Redis, key: str, *, limit: int, window_s: int, fail_closed: bool = False
+) -> bool:
     """Count one request against `key`. True while the window holds at most
     `limit` requests, this one included; False for the one over and every one
     after it until the window ends.
 
     `redis` is the caller's client (`request.app.state.redis`). On a Redis
-    error the request is ALLOWED and a warning is logged -- see the module
-    docstring for why this limiter fails open.
+    error the request is ALLOWED and a warning is logged -- or, with
+    `fail_closed`, REFUSED and logged: see the module docstring for which
+    limits fail which way.
     """
     if limit < 1 or window_s < 1:
         raise ValueError(  # i18n-exempt: programming error, never reaches a person
@@ -61,6 +72,9 @@ async def hit(redis: Redis, key: str, *, limit: int, window_s: int) -> bool:
         if int(await redis.ttl(name)) < 0:
             await redis.expire(name, window_s)
     except RedisError:
+        if fail_closed:
+            logger.warning("rate limit unavailable; redis error, request refused", exc_info=True)
+            return False
         logger.warning("rate limit unavailable; redis error, request allowed", exc_info=True)
         return True
     return count <= limit

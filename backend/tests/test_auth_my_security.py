@@ -428,6 +428,20 @@ async def _session_row(env: Any, token: str) -> AuthSession:
         ).scalar_one()
 
 
+async def _session_by_id(env: Any, session_id: Any) -> AuthSession:
+    async with AsyncSession(env.admin_engine) as session:
+        return (
+            await session.execute(select(AuthSession).where(AuthSession.id == session_id))
+        ).scalar_one()
+
+
+def _max_age(response: Any, name: str) -> int:
+    for header in response.headers.get_list("set-cookie"):
+        if header.startswith(f"{name}="):
+            return int(header.lower().split("max-age=", 1)[1].split(";", 1)[0])
+    raise AssertionError(f"{name} not set")
+
+
 async def test_a_password_change_on_a_remembered_device_keeps_only_the_caller_signed_in(
     auth_env: Any,
 ) -> None:
@@ -439,7 +453,13 @@ async def test_a_password_change_on_a_remembered_device_keeps_only_the_caller_si
     the current password with a recent step-up: no session outlives the trust
     that gave it its length. Without the detach, Task 6's
     `revoke_all_for_user` ends the caller's session with the device and the
-    same cookie reads 401: red."""
+    new cookie reads 401: red.
+
+    THE SESSION KEEPS, ITS IDENTIFIER DOES NOT (final review B-I1, OWASP [S6],
+    "Renew the Session ID After Any Privilege Level Change"): the change sets
+    a new cookie on the same row, and a copy of the old one -- an infostealer's,
+    a HAR file's -- is a 401. Drop `sessions.rotate` from `change_password`
+    and the old cookie still reads 200: red."""
     org = await auth_env.create_org("mysec-pw-device")
     who = await signed_in(auth_env, org, "technician")
     done = await _second_session(auth_env, who, remember=True)
@@ -460,7 +480,8 @@ async def test_a_password_change_on_a_remembered_device_keeps_only_the_caller_si
         json={"code": await fresh_code(auth_env, who)},
     )
     assert confirm.status_code == 204, confirm.text
-    proved_at = (await _session_row(auth_env, mine)).factor_at
+    before_row = await _session_row(auth_env, mine)
+    proved_at = before_row.factor_at
     before = datetime.now(UTC)
 
     changed = await auth_env.client.put(
@@ -471,13 +492,21 @@ async def test_a_password_change_on_a_remembered_device_keeps_only_the_caller_si
 
     after = datetime.now(UTC)
     assert changed.status_code == 204, changed.text
+    renewed = cookie(changed, SESSION_COOKIE)
+    assert renewed and renewed != mine
+    old = await auth_env.client.get("/api/v1/me", headers=who.headers())
+    assert old.status_code == 401, old.text
+    who.session = renewed
     me = await auth_env.client.get("/api/v1/me", headers=who.headers())
     assert me.status_code == 200, me.text
-    row = await _session_row(auth_env, mine)
+    row = await _session_row(auth_env, renewed)
+    assert row.id == before_row.id  # the same session, a new identifier
     assert row.ended_at is None and row.trusted_device_id is None
     assert row.factor_at == proved_at  # Task 6's record of the proof is left alone
     ordinary = DEFAULT_POLICY.lifetime("staff", remembered=False)
     assert before < row.expires_at <= after + ordinary
+    # The new cookie expires with the capped row, not with the remembered one.
+    assert abs(_max_age(changed, SESSION_COOKIE) - (row.expires_at - after).total_seconds()) < 5
     other = await _session_row(auth_env, sibling)
     assert other.ended_at is not None
     async with AsyncSession(auth_env.admin_engine) as session:
@@ -534,7 +563,8 @@ async def test_a_password_change_keeps_a_remembered_session_older_than_an_ordina
         json={"code": await fresh_code(auth_env, who)},
     )
     assert confirm.status_code == 204, confirm.text
-    stepped_up_at = (await _session_row(auth_env, mine)).step_up_at
+    before_row = await _session_row(auth_env, mine)
+    stepped_up_at = before_row.step_up_at
 
     changed = await auth_env.client.put(
         "/api/v1/me/password",
@@ -544,9 +574,175 @@ async def test_a_password_change_keeps_a_remembered_session_older_than_an_ordina
 
     now = datetime.now(UTC)
     assert changed.status_code == 204, changed.text
+    # The identifier changed with the password (B-I1); the session is the same row.
+    who.session = cookie(changed, SESSION_COOKIE)
     me = await auth_env.client.get("/api/v1/me", headers=who.headers())
     assert me.status_code == 200, me.text
-    row = await _session_row(auth_env, mine)
+    row = await _session_by_id(auth_env, before_row.id)
     assert row.ended_at is None and row.trusted_device_id is None
     assert now < row.expires_at <= now + DEFAULT_POLICY.lifetime("staff", remembered=False)
     assert (row.factor_at, row.step_up_at) == (signed, stepped_up_at)
+
+
+async def test_a_password_change_renews_the_callers_identifier(auth_env: Any) -> None:
+    """B-I1 / C-I3, on an ordinary session: the same row, a new cookie, the
+    old value a 401, Max-Age to the row's expiry -- and only after the change
+    committed: a new password the rule refuses (422) renews nothing, so the
+    old cookie still works. Move `rotate` before the rule and the 422 leaves
+    a session whose cookie the browser never got: red."""
+    org = await auth_env.create_org("mysec-rotate")
+    who = await signed_in(auth_env, org, "technician")
+    first = who.session
+    assert first
+    row_id = (await _session_row(auth_env, first)).id
+
+    refused = await auth_env.client.put(
+        "/api/v1/me/password",
+        headers=who.headers(),
+        json={"current": who.password, "new": "short"},
+    )
+    assert refused.status_code == 422, refused.text
+    assert cookie(refused, SESSION_COOKIE) is None
+    assert (await auth_env.client.get("/api/v1/me", headers=who.headers())).status_code == 200
+
+    changed = await auth_env.client.put(
+        "/api/v1/me/password",
+        headers=who.headers(),
+        json={"current": who.password, "new": "Pelican-Orbit-Lantern-58"},
+    )
+
+    assert changed.status_code == 204, changed.text
+    renewed = cookie(changed, SESSION_COOKIE)
+    assert renewed and renewed != first
+    assert (await auth_env.client.get("/api/v1/me", headers=who.headers())).status_code == 401
+    who.session = renewed
+    assert (await auth_env.client.get("/api/v1/me", headers=who.headers())).status_code == 200
+    row = await _session_by_id(auth_env, row_id)
+    assert row.token_hash == token_hash(renewed) and row.ended_at is None
+    left = (row.expires_at - datetime.now(UTC)).total_seconds()
+    assert abs(_max_age(changed, SESSION_COOKIE) - left) < 5
+
+
+async def test_change_password_asks_for_a_recent_confirmation_itself(auth_env: Any) -> None:
+    """`guards.require_fresh` INSIDE `account.change_password` (Task 7 minor
+    (a)): the route's `require_step_up` is not the only thing between a stale
+    session and a new password. Called directly with a principal whose
+    step-up is eleven minutes old, it refuses before anything is read; delete
+    the line and the password changes: red."""
+    from app.core.auth import account
+    from app.core.auth.refusals import AuthRefusal
+    from app.core.auth.sessions import resolve
+    from tests.session_support import cookie_header, http_request
+
+    org = await auth_env.create_org("mysec-fresh")
+    who = await signed_in(auth_env, org, "technician")
+    await _age_step_up(auth_env, who)
+    request = http_request(auth_env, cookie=cookie_header(who.session))
+    principal = await resolve(request, touch=False)
+    assert principal is not None
+    async with AsyncSession(auth_env.admin_engine) as session:
+        before = (
+            await session.execute(
+                select(AuthPassword.hash).where(AuthPassword.user_id == who.user_id)
+            )
+        ).scalar_one()
+
+    with pytest.raises(AuthRefusal) as refused:
+        await account.change_password(
+            request, principal, current=who.password, new="Pelican-Orbit-Lantern-58"
+        )
+
+    assert refused.value.status_code == 403
+    assert refused.value.code == "step_up_required"
+    async with AsyncSession(auth_env.admin_engine) as session:
+        after = (
+            await session.execute(
+                select(AuthPassword.hash).where(AuthPassword.user_id == who.user_id)
+            )
+        ).scalar_one()
+    assert after == before
+
+
+async def _password_failures(
+    env: Any, who: Any, consecutive: int, *, disabled: bool = False
+) -> None:
+    now = datetime.now(UTC)
+    async with AsyncSession(env.admin_engine) as session:
+        session.add(
+            AuthFailure(
+                org_id=who.org_id,
+                user_id=who.user_id,
+                factor="password",
+                consecutive=consecutive,
+                last_failed_at=now,
+                disabled_at=now if disabled else None,
+            )
+        )
+        await session.commit()
+
+
+async def test_a_password_change_while_the_password_waits_says_so(auth_env: Any) -> None:
+    """B-M4 / C-M1: the caller is signed in, so the wait is told as every
+    step after the password tells it (`factors.gate`): 429 `factor_wait`,
+    `wait_s` and `Retry-After` -- never "the current password is not right"
+    for a password nobody tried. Use the bare `check_allowed` again and this
+    reads 403 `invalid_credentials`: red."""
+    org = await auth_env.create_org("mysec-pw-wait")
+    who = await signed_in(auth_env, org, "technician")
+    await _password_failures(auth_env, who, 20)
+
+    response = await auth_env.client.put(
+        "/api/v1/me/password",
+        headers=who.headers(),
+        json={"current": who.password, "new": "Pelican-Orbit-Lantern-58"},
+    )
+
+    assert response.status_code == 429, response.text
+    body = response.json()
+    assert body["code"] == "factor_wait"
+    assert isinstance(body["wait_s"], int) and 0 < body["wait_s"] <= 900
+    assert response.headers["Retry-After"] == str(body["wait_s"])
+    assert cookie(response, SESSION_COOKIE) is None
+
+
+async def test_a_password_change_with_the_password_locked_says_so(auth_env: Any) -> None:
+    """B-M4 / C-M1: a disabled password is 403 `factor_disabled`, with a
+    sentence about the password and what undoes it."""
+    org = await auth_env.create_org("mysec-pw-locked")
+    who = await signed_in(auth_env, org, "technician")
+    await _password_failures(auth_env, who, 100, disabled=True)
+
+    response = await auth_env.client.put(
+        "/api/v1/me/password",
+        headers=who.headers(),
+        json={"current": who.password, "new": "Pelican-Orbit-Lantern-58"},
+    )
+
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "factor_disabled"
+    assert "password" in response.json()["detail"]
+
+
+async def test_a_password_change_from_the_remembered_browser_is_not_held_by_the_wait(
+    auth_env: Any,
+) -> None:
+    """K3 at `/me/password` (design §2.3): the browser chooses the counter
+    wherever the password is tried. While somebody without the cookie keeps
+    the account's counter waiting, the person can still change the password
+    from the browser the platform recognises -- otherwise whoever holds the
+    sign-in wait also holds the remedy. Gate `change_password` on the
+    account's counter alone and this is a 429: red."""
+    org = await auth_env.create_org("mysec-pw-device-wait")
+    who = await signed_in(auth_env, org, "technician")
+    done = await _second_session(auth_env, who, remember=True)
+    who.session, who.device = cookie(done, SESSION_COOKIE), cookie(done, DEVICE_COOKIE)
+    assert who.device
+    await _password_failures(auth_env, who, 20)
+
+    response = await auth_env.client.put(
+        "/api/v1/me/password",
+        headers=who.headers(),
+        json={"current": who.password, "new": "Pelican-Orbit-Lantern-58"},
+    )
+
+    assert response.status_code == 204, response.text

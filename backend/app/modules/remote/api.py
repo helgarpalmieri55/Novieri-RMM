@@ -39,7 +39,7 @@ from sqlalchemy import func, select
 
 from app.api.deps import AuthContext, bound_auth_context, narrowed_to_any, require_permission
 from app.core.audit import audit_service
-from app.core.auth.sessions import SESSION_COOKIE, SessionPrincipal
+from app.core.auth.sessions import SESSION_COOKIE
 from app.core.global_rows import refuse_unless_every_client
 from app.core.i18n import tr
 from app.core.storage import ObjectStore
@@ -482,9 +482,10 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
     and receives rsp/1 frames as binary messages; text messages are ignored.
 
     The screen lives only as long as the console session that opened it
-    (``watch_tunnel_session``): signed out, cut, replaced, disabled or past its
-    maximum, the tunnel is cancelled and the socket closes 4401. An open
-    screen keeps that session from going idle.
+    (``watch_tunnel_session``): signed out, cut, replaced, disabled, idle or
+    past its maximum, the tunnel is cancelled and the socket closes 4401. An
+    open screen does not keep that session from going idle (fix round 2): the
+    person's input, which the console counts, does.
     """
     state = websocket.app.state
     if SESSION_COOKIE not in websocket.cookies:
@@ -542,7 +543,16 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
     )
     close_code = 1000
     try:
-        close_code = await _while_signed_in(tunnel, websocket, principal)
+        close_code = await _while_signed_in(
+            tunnel,
+            watch_tunnel_session(
+                websocket,
+                principal,
+                session_id=session_id,
+                settings=state.settings,
+                app_engine=state.app_engine,
+            ),
+        )
     finally:
         try:
             await websocket.close(code=close_code)
@@ -551,19 +561,21 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
 
 
 async def _while_signed_in(
-    tunnel: Coroutine[Any, Any, None], websocket: WebSocket, principal: SessionPrincipal
+    tunnel: Coroutine[Any, Any, None], watchdog: Coroutine[Any, Any, int]
 ) -> int:
     """Run the screen tunnel while the console session that admitted its
-    viewer lives, and return the socket's close code.
+    viewer lives and its door would still admit them, and return the
+    socket's close code.
 
-    The watchdog returning first (the session stopped) CANCELS the tunnel --
-    whose own cleanup still ends the remote session and keeps the recording
-    (``screen_tunnel._finish``) -- and the socket closes with its code, 4401.
-    The tunnel returning first (the browser or the agent hung up) ends the
-    watch; an error in either is raised after both have stopped, so a failed
-    re-check never leaves the desktop open."""
+    The watchdog (``watch_tunnel_session``) returning first CANCELS the
+    tunnel -- whose own cleanup still ends the remote session and keeps the
+    recording (``screen_tunnel._finish``) -- and the socket closes with its
+    code: 4401 for a session that stopped, the door's 4403/4404 for a viewer
+    it would refuse now. The tunnel returning first (the browser or the agent
+    hung up) ends the watch; an error in either is raised after both have
+    stopped, so a failed re-check never leaves the desktop open."""
     tunnel_task = asyncio.create_task(tunnel)
-    watch = asyncio.create_task(watch_tunnel_session(websocket, principal))
+    watch = asyncio.create_task(watchdog)
     try:
         await asyncio.wait({tunnel_task, watch}, return_when=asyncio.FIRST_COMPLETED)
     finally:

@@ -14,7 +14,7 @@ design §2, §6.4).
     POST   /auth/step-up/passkey/options
     POST   /auth/step-up/passkey
     POST   /auth/logout, /auth/logout-everywhere
-    POST   /auth/password/forgot            always 202
+    POST   /auth/password/forgot            202 for every address (429 per IP)
     POST   /auth/password/reset             a one-time link
     POST   /auth/invite/details             who a one-time invitation is for
     POST   /auth/invite/accept              its password -> the first factor
@@ -56,7 +56,6 @@ from app.core.auth.refusals import AuthRefusal
 from app.core.auth.sessions import (
     SessionPrincipal,
     clear_session_cookie,
-    resolve,
     set_device_cookie,
     set_session_cookie,
 )
@@ -68,9 +67,12 @@ me_router = APIRouter(prefix="/me", tags=["me"])
 
 
 def _limit(bucket: str, limit: int, window_s: int) -> Callable[[Request], Awaitable[None]]:
-    """At most `limit` calls per `window_s` from one address (Task 3's limiter;
-    it fails open when Redis does -- the per-account counters in the database
-    are the control that must hold, design §2.3)."""
+    """At most `limit` calls per `window_s` from one address (Task 3's limiter).
+    It fails open when Redis does, because each sits on a control that does
+    not need Redis: the per-account counters in the database for the password
+    and the factors (design §2.3), the per-address mail cap -- which fails
+    CLOSED (`flows.send_reset_link`) -- behind `_FORGOT`, and a 256-bit secret
+    behind `_LINK`."""
 
     async def within(request: Request) -> None:
         if not await hit(
@@ -467,8 +469,9 @@ async def step_up_passkey(body: StepUpPasskeyIn, request: Request) -> Response:
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(request: Request) -> Response:
-    """End this session and clear its cookie. Answered alike with no session."""
-    await flows.logout(request, await resolve(request))
+    """End this session -- idle or not -- and clear its cookie. Answered alike
+    with no session."""
+    await flows.logout(request)
     response = _no_content()
     clear_session_cookie(response)
     return response
@@ -489,8 +492,10 @@ async def logout_everywhere(request: Request) -> Response:
 async def forgot_password(
     body: ForgotIn, request: Request, background: BackgroundTasks
 ) -> Response:
-    """Always 202, at once: the link, when there is an account, goes after the
-    answer (plan decision 8)."""
+    """202 at once, the same for every address: the link, when there is an
+    account with a second factor, goes after the answer (plan decision 8).
+    Only the per-IP limit answers otherwise -- a 429, about the network,
+    never about the address."""
     background.add_task(
         flows.send_reset_link, request.app, email=body.email, locale=locale_var.get()
     )
@@ -579,10 +584,16 @@ async def my_security(request: Request, ctx: AuthContext = Depends(_console_ctx)
 async def change_password(
     body: PasswordChangeIn, request: Request, ctx: AuthContext = Depends(_console_ctx)
 ) -> Response:
-    """The current password and a new one, after a recent confirmation."""
+    """The current password and a new one, after a recent confirmation. The
+    caller's session stays under a new cookie; every other session ends."""
     require_step_up(ctx)
-    await account.change_password(request, _me(ctx), current=body.current, new=body.new)
-    return _no_content()
+    token, expires_at = await account.change_password(
+        request, _me(ctx), current=body.current, new=body.new
+    )
+    response = _no_content()
+    # The new identifier, expiring with the session as the change capped it.
+    set_session_cookie(response, token, expires_at=expires_at)
+    return response
 
 
 @me_router.delete("/passkeys/{passkey_id}", status_code=status.HTTP_204_NO_CONTENT)

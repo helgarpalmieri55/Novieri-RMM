@@ -27,7 +27,7 @@ the OpenBao pepper (`hash`, `pepper_version`); a TOTP secret is sealed by the
 vault (`secret_sealed`, the ASCII string `app.core.vault.seal_bytes` returns,
 bound to the user id); a
 session or device cookie and a single-use link are stored as a 32-byte digest
-(`token_hash`: SHA-256, or HMAC-SHA256 with the pepper), a recovery code as its
+(`token_hash`: the plain SHA-256 of a random 256-bit value), a recovery code as its
 salted argon2id hash (`code_hash`, the encoded form), and CHECKs hold the
 lengths. A WebAuthn challenge is not a secret
 (the browser signs it in the open) and is stored as issued.
@@ -256,6 +256,10 @@ def upgrade() -> None:
         sa.Column("hash", sa.Text(), nullable=False),
         sa.Column("pepper_version", sa.Integer(), nullable=False),
         _when("changed_at", now=True),
+        # Set when this password came from a mailed reset link and no second
+        # factor has been verified since: an administrator's factor reset is
+        # refused while it is (operator decision 2026-11-05).
+        _when("mail_reset_at", nullable=True),
         sa.CheckConstraint("pepper_version >= 1", name="ck_auth_passwords_pepper_version"),
     )
     op.create_table(
@@ -311,11 +315,19 @@ def upgrade() -> None:
         _when("expires_at"),
         _when("last_used_at", nullable=True),
         _when("revoked_at", nullable=True),
+        # The password's failures signed in FROM this device (design §2.3, the
+        # device-cookie counter): its own wait, apart from the account's.
+        sa.Column("password_failures", sa.Integer(), nullable=False, server_default="0"),
+        _when("password_failed_at", nullable=True),
         sa.UniqueConstraint("token_hash", name="uq_auth_trusted_devices_token_hash"),
         # The key `fk_auth_sessions_device_user` references below.
         sa.UniqueConstraint("id", "user_id", name="uq_auth_trusted_devices_id_user"),
         sa.CheckConstraint(
             "octet_length(token_hash) = 32", name="ck_auth_trusted_devices_token_hash"
+        ),
+        sa.CheckConstraint(
+            "password_failures >= 0 AND (password_failures = 0) = (password_failed_at IS NULL)",
+            name="ck_auth_trusted_devices_password_failures",
         ),
     )
     op.create_index("ix_auth_trusted_devices_user_id", "auth_trusted_devices", ["user_id"])

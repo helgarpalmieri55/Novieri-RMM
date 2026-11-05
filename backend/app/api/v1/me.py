@@ -26,8 +26,8 @@ WHAT THE PROFILE MAY WRITE, AND WHY THE LIST IS CLOSED. Four fields:
 `display_name`, `phone`, `timezone`, `locale`. `ProfileUpdate` forbids
 everything else (`extra="forbid"`) rather than ignoring it, because "ignored"
 and "written" are one careless model edit apart, and the fields not on the list
-are `email` (Keycloak's, per §7.1 -- changing it there is a re-authenticated
-flow that ITMS deliberately does not reimplement), `status` (the §3 admission
+are `email` (the address a person signs in with and is mailed at: changing
+it is an administrator's act, not a profile field), `status` (the §3 admission
 gate: a self-service form that re-enables a disabled account is the disable
 feature deleted), `org_id` and `external_subject` (identity, not preference),
 and anything role-shaped (privilege escalation, stated plainly). A request
@@ -160,10 +160,11 @@ async def me(request: Request, ctx: AuthContext = Depends(bound_auth_context)) -
 
     `display_name` used to be `ctx.claims.name`, which made the §7.1 override
     unobservable: the profile form could write it and this route would keep
-    reporting Keycloak's value. `email` reads from the row too, and that is
-    only correct because admission now refreshes it from the claim
-    (`app/api/deps.py`, §7.2) -- before that fix the row was the stale source
-    and this would have been the bug rather than the fix.
+    reporting the identity provider's value. `email` reads from the row too,
+    and since own authentication phase 1 the row IS the source: the console
+    session carries no claim, and the address is the one the person signs in
+    with (`app/core/auth/lookup.py`). (On the MCP channel `deps.admit` still
+    refreshes it from the Keycloak token's claim until phase 3.)
 
     Under EVERY client, not `ctx.clients`: the profile is the person's, and a
     person with no grant has the empty scope, which sees no staff row

@@ -219,7 +219,21 @@ async def test_falsifier_2_sign_in_answers_the_same_for_an_unknown_account(
 ) -> None:
     """Holds the dummy verification for an unknown address: without it the
     unknown account is answered faster -- zero argon2 verifications against
-    one -- which is the timing oracle §2.3 forbids."""
+    one -- which is the timing oracle §2.3 forbids.
+
+    WHAT IT DOES NOT CLAIM, ACCEPTED (final review C-M2). It counts argon2
+    verifications, not milliseconds. A known address also opens its
+    identity session (an advisory lock, three or four queries, a failure
+    written; a device cookie of ours adds one to three: the device lookup,
+    then, for a device it finds, the policy and the password's
+    `changed_at`), and an unknown or disabled
+    one does not: measured locally, medians of 25 were 130-139 ms unknown,
+    142 ms disabled, 147-149 ms known. That 10-15 ms is accepted rather than
+    equalised: the argon2 work -- most of each answer's time, and what a
+    timing oracle would need to be missing -- is the same, and the per-IP
+    limits (30 attempts per 10 minutes per address) leave too few samples
+    to separate a 10 % shift from the network's own jitter. Design §2.3
+    records the acceptance."""
     _, _, email = await _staff(api_env, monkeypatch)
     verifications: list[int] = []
     real = argon2.PasswordHasher.verify

@@ -42,9 +42,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
 from app.core.auth import action_tokens, notices, staff_password
-from app.core.auth.devices import RememberingOff, recognised, revoke_all_for_user
+from app.core.auth.devices import RememberingOff, presented, recognised, revoke_all_for_user
 from app.core.auth.devices import remember as remember_device
-from app.core.auth.factors import clear_second_factors, count_failure, gate, summary
+from app.core.auth.factors import (
+    clear_second_factors,
+    count_failure,
+    gate,
+    lock_person,
+    summary,
+)
 from app.core.auth.failures import check_allowed, record_success, reset_factor
 from app.core.auth.guards import (
     relying_party,
@@ -76,6 +82,7 @@ from app.core.auth.sessions import (
     start_session,
 )
 from app.core.auth.sessions import end as end_session
+from app.core.auth.sessions import named as named_session
 from app.core.auth.totp import (
     confirm_secret,
     has_totp,
@@ -321,19 +328,33 @@ async def login(request: Request, *, email: str, password: str) -> SignIn:
         await verify_against_nobody(found.org_id if found is not None else _NO_ORG, password)
         raise _invalid_credentials()
     outcome: SignIn | None = None
+    untried = False
     async with _identity_session(found.org_id, _engine(request)) as session:
         user = await session.get(User, found.user_id)
         stored = await session.get(AuthPassword, found.user_id)
-        state = await check_allowed(session, found.user_id, "password")
+        # The counter this browser waits and counts on (design §2.3, operator
+        # decision 2026-11-05): its device's when `recognised`'s rule accepts
+        # the cookie for THIS account, else the account's. Chosen before the
+        # password is tried, and changes no answer.
+        device = await presented(session, found.user_id, request)
+        counter = device.id if device is not None else None
+        state = await check_allowed(session, found.user_id, "password", device_id=counter)
         if user is None or stored is None or not state.allowed:
-            await verify_against_nobody(found.org_id, password)
+            untried = True
         else:
             matches = await _password_matches(found.org_id, password, stored)
             if matches is False:
-                await count_failure(session, user, "password", vault=_vault(request))
+                await count_failure(
+                    session, user, "password", vault=_vault(request), device_id=counter
+                )
             elif matches:
                 await record_success(session, user.id, "password")
                 outcome = await _after_password(session, request, user)
+    if untried:
+        # Falsifier 2: the same argon2 work as a wrong password. Done after
+        # the block, so a refused attempt does not hold the account's lock
+        # through it while the person's own browser waits its turn.
+        await verify_against_nobody(found.org_id, password)
     # The count, when there was one, is committed: refuse only now.
     if outcome is None:
         raise _invalid_credentials()
@@ -678,6 +699,20 @@ async def enroll_finish(request: Request, principal: SessionPrincipal) -> tuple[
 # --------------------------------------------------------------------------- #
 
 
+async def _stepped_up(session: AsyncSession, principal: SessionPrincipal) -> None:
+    """The recent confirmation on a session that must still be live. Raised
+    INSIDE the step-up's block on purpose, unlike a counted failure: a
+    session ended while the step-up ran (a mail reset ends every session)
+    rolls the whole step-up back -- the factor's success, the clearing of the
+    "password set by mail" mark, a recovery code's spend -- so nothing of it
+    commits and nothing is audited (re-review of fix round 1, Important 1).
+    The answer is a dead session's: 401 `auth_required`."""
+    try:
+        await mark_step_up(session, principal.session_id)
+    except LookupError as exc:
+        raise sign_in_again() from exc
+
+
 async def step_up_totp(request: Request, principal: SessionPrincipal, *, code: str) -> None:
     require_full(principal)
     accepted = False
@@ -688,7 +723,7 @@ async def step_up_totp(request: Request, principal: SessionPrincipal, *, code: s
         await gate(session, user.id, "totp")
         if await verify_totp(session, user.id, code, vault=_vault(request), now=_now()):
             await record_success(session, user.id, "totp")
-            await mark_step_up(session, principal.session_id)
+            await _stepped_up(session, principal)
             accepted = True
         else:
             await count_failure(session, user, "totp", vault=_vault(request))
@@ -706,7 +741,7 @@ async def step_up_recovery(request: Request, principal: SessionPrincipal, *, cod
         await gate(session, user.id, "recovery")
         accepted = await _spend_recovery_code(session, request, user, code)
         if accepted:
-            await mark_step_up(session, principal.session_id)
+            await _stepped_up(session, principal)
     if not accepted:
         raise _factor_failed(status.HTTP_400_BAD_REQUEST)
 
@@ -726,7 +761,7 @@ async def step_up_passkey(
         await gate(session, user.id, "passkey")
         accepted = await _passkey_matches(session, request, user, credential, "step_up")
         if accepted:
-            await mark_step_up(session, principal.session_id)
+            await _stepped_up(session, principal)
     if not accepted:
         raise _factor_failed(status.HTTP_400_BAD_REQUEST)
 
@@ -736,13 +771,16 @@ async def step_up_passkey(
 # --------------------------------------------------------------------------- #
 
 
-async def logout(request: Request, principal: SessionPrincipal | None) -> None:
-    """This session only; a remembered device stays remembered (that is what
-    remembering it means). Answered alike with no session."""
-    if principal is None:
+async def logout(request: Request) -> None:
+    """The session the cookie names -- idle or not (final review B-M1:
+    `sessions.named`, not `resolve`) -- and only it; a remembered device stays
+    remembered (that is what remembering it means). Answered alike with no
+    session."""
+    named = await named_session(request)
+    if named is None:
         return
-    async with _identity_session(principal.org_id, _engine(request)) as session:
-        await end_session(session, principal.session_id, "signed_out")
+    async with _identity_session(named.org_id, _engine(request)) as session:
+        await end_session(session, named.session_id, "signed_out")
 
 
 async def logout_everywhere(request: Request, principal: SessionPrincipal) -> None:
@@ -761,9 +799,27 @@ async def logout_everywhere(request: Request, principal: SessionPrincipal) -> No
 # --------------------------------------------------------------------------- #
 
 
+async def _has_second_factor(session: AsyncSession, user_id: UUID) -> bool:
+    """A passkey or a CONFIRMED authenticator app. Recovery codes alone do
+    not count: they are a fallback of a factor, not one (design §2.2)."""
+    has_passkey, has_totp, _codes = await summary(session, user_id)
+    return has_passkey or has_totp
+
+
 async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
     """Run AFTER the 202 (plan decision 8): nothing below changes the answer
-    or its time, so nothing tells whether the address has an account."""
+    or its time, so nothing tells whether the address has an account.
+
+    NEVER TO AN ACCOUNT WITHOUT A SECOND FACTOR (final review C-I1; design
+    §2.8, "después sigue pidiendo el segundo factor"; Q5, "nunca solo por
+    correo"). Such an account -- after an administrator's factor reset, an
+    invitation or a recovery link whose enrolment was abandoned, the
+    first-boot owner before their first sign-in -- would let the mailbox set
+    the password and then enrol ITS OWN factor: the mailbox alone, and a full
+    session. It is sent nothing, as an unknown address is; the person with the
+    password signs in and enrols, and one who has lost both uses the server's
+    recovery command. So the mail's "You will still need your second factor"
+    is true when it is sent."""
     with use_locale(locale):
         settings = app.state.settings
         engine: AsyncEngine = app.state.app_engine
@@ -776,6 +832,10 @@ async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
             f"auth-forgot:address:{per_address}",
             limit=RESET_MAILS_PER_HOUR,
             window_s=3600,
+            # The only cap on the mails one address is sent (final review
+            # A-M1): during a Redis outage none goes. After the 202, so the
+            # answer does not change.
+            fail_closed=True,
         ):
             return
         found = await find_staff(engine, org_slug=settings.default_org_slug, email=address)
@@ -783,7 +843,11 @@ async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
             return
         async with _identity_session(found.org_id, engine) as session:
             user = await session.get(User, found.user_id)
-            if user is None or await session.get(AuthPassword, user.id) is None:
+            if (
+                user is None
+                or await session.get(AuthPassword, user.id) is None
+                or not await _has_second_factor(session, user.id)
+            ):
                 return
             token = await action_tokens.issue(
                 session,
@@ -816,6 +880,7 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
     org_id = action_tokens.org_of(token)
     if org_id is None:
         raise _invalid_link()
+    spent_dead = False
     async with _identity_session(org_id, _engine(request)) as session:
         row = await action_tokens.consume(
             session, token=token, purposes=(action_tokens.RESET,)
@@ -823,19 +888,42 @@ async def reset_password(request: Request, *, token: str, password: str) -> None
         user = await session.get(User, row.user_id) if row is not None else None
         if row is None or user is None or user.kind != STAFF_KIND or user.status != ACTIVE_STATUS:
             raise _invalid_link()
-        # Raises a 422 that rolls the `consume` back: the link stays usable.
-        await staff_password.require_acceptable(
-            password,
-            email=user.email,
-            display_name=user.display_name,
-            org_name=await staff_password.organization_name(session, org_id),
-        )
-        await staff_password.store(session, org_id=org_id, user_id=user.id, plain=password)
-        await reset_factor(session, user.id, "password")
-        await end_all_for_user(session, user.id, "password_changed")
-        await revoke_all_for_user(session, user.id)
-        await _audit(session, user, "auth.password_changed", {"via": row.purpose})
-        await notices.tell(session, user, "password_changed", vault=_vault(request), actor_id=None)
+        # One lock with an administrator's factor reset (`factors.
+        # lock_person`, item 8): the factors read below, and the mark the store
+        # writes, cannot interleave with a reset that removes the factors.
+        await lock_person(session, user.id)
+        if not await _has_second_factor(session, user.id):
+            # A link sent while the account had a factor, used after the
+            # factors went (an administrator's reset): the same mailbox-only
+            # path as `send_reset_link`'s. It is SPENT, then refused like
+            # every dead link (re-review Minor 5): nothing else is written,
+            # the `consume` commits with the block, and the 410 is raised
+            # after it. Left live, the link would work again once the person
+            # enrols a new factor.
+            spent_dead = True
+        else:
+            # Raises a 422 that rolls the `consume` back: the link stays usable.
+            await staff_password.require_acceptable(
+                password,
+                email=user.email,
+                display_name=user.display_name,
+                org_name=await staff_password.organization_name(session, org_id),
+            )
+            # `by_mail`: the mailbox chose this password, so an administrator's
+            # factor reset is refused until a second factor is verified
+            # (operator decision 2026-11-05).
+            await staff_password.store(
+                session, org_id=org_id, user_id=user.id, plain=password, by_mail=True
+            )
+            await reset_factor(session, user.id, "password")
+            await end_all_for_user(session, user.id, "password_changed")
+            await revoke_all_for_user(session, user.id)
+            await _audit(session, user, "auth.password_changed", {"via": row.purpose})
+            await notices.tell(
+                session, user, "password_changed", vault=_vault(request), actor_id=None
+            )
+    if spent_dead:
+        raise _invalid_link()
 
 
 # --------------------------------------------------------------------------- #

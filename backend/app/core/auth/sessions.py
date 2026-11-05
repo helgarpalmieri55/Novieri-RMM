@@ -45,6 +45,7 @@ their own), and never audit or mail: the act that calls them does, once.
 """
 
 import hashlib
+import logging
 import re
 import secrets
 from dataclasses import dataclass
@@ -64,8 +65,14 @@ from app.core.tenancy import org_session
 from app.models import User
 from app.models.auth import AuthSession
 
+logger = logging.getLogger("its.auth.sessions")
+
 SESSION_COOKIE = "__Host-itms_session"
 DEVICE_COOKIE = "__Host-itms_device"
+#: Sent by the console, as `X-ITMS-Background: 1`, on a request no person
+#: caused in the last 60 s (a poll, a refetch): `resolve` does not renew the
+#: session for it (fix round 2; design §2.4).
+BACKGROUND_HEADER = "X-ITMS-Background"
 
 #: Random bytes behind a session or device cookie (256 bits, design §6.4).
 TOKEN_BYTES = 32
@@ -173,6 +180,13 @@ def step_up_fresh(principal: SessionPrincipal, now: datetime) -> bool:
     return principal.step_up_at is not None and now - principal.step_up_at <= STEP_UP_WINDOW
 
 
+def background(connection: HTTPConnection) -> bool:
+    """The request says no person caused it: exactly one `X-ITMS-Background`
+    header, exactly `1`. Anything else -- absent, another value, sent twice --
+    is a request like any other."""
+    return connection.headers.getlist(BACKGROUND_HEADER) == ["1"]
+
+
 async def resolve(connection: HTTPConnection, *, touch: bool = True) -> SessionPrincipal | None:
     """The live session the request's cookie names, or None.
 
@@ -180,9 +194,25 @@ async def resolve(connection: HTTPConnection, *, touch: bool = True) -> SessionP
     ended session, one past its maximum (`expires_at`), one idle for longer
     than the organisation's policy allows, and a person whose account is not
     `active` -- disabling somebody stops their sessions on the next request,
-    whatever else forgot to end them. `touch` renews `last_seen_at` (at most
-    once a minute); a WebSocket re-check passes False, so an open tab is not
-    activity."""
+    whatever else forgot to end them (and a live session in that state is
+    logged once per request as the defect it is).
+
+    WHAT COUNTS AS ACTIVITY (design §2.4; fix round 2). `touch` renews
+    `last_seen_at` (at most once a minute) -- unless the request says no
+    person caused it: a single `X-ITMS-Background: 1` header (`background`),
+    which the console sends on its polls and refetches. NIST SP 800-63B-4
+    §5.2: "An inactivity timeout terminates a session without activity from
+    the subscriber for a specific period"; a poll is not the subscriber's.
+    THE HEADER CAN ONLY DECLINE A RENEWAL, NEVER GRANT ONE: with it a
+    `touch=True` caller does not touch, a `touch=False` caller stays so, and
+    nothing about who is admitted changes. Because the rule lives here, every
+    HTTP door honours it (`deps._admit_session`, `guards.session_of`) and no
+    door can forget it. The console WebSocket's re-check and the remote
+    screen's watchdog pass False: an open tab or an open screen is not
+    activity; the console counts the person's pointer and keyboard on the
+    page, the screen viewer's included (fix round 2 reverses the Task 6
+    decision that an open screen was)."""
+    touch = touch and not background(connection)
     token = cookie_token(connection, SESSION_COOKIE)
     if token is None:
         return None
@@ -199,12 +229,18 @@ async def resolve(connection: HTTPConnection, *, touch: bool = True) -> SessionP
             )
         ).one_or_none()
     now = _now()
-    if (
-        row is None
-        or row.ended_at is not None
-        or row.expires_at <= now
-        or row.status != "active"
-    ):
+    if row is None or row.ended_at is not None or row.expires_at <= now:
+        return None
+    if row.status != "active":
+        # A 401 / 4401 at the door, and no admission-refusal line (core/
+        # identity, "THE STATUS RULE ON A SESSION DOOR"). But disabling and
+        # deleting end every session in the same transaction, so a LIVE one
+        # here means a lifecycle path forgot to: a defect, said once per
+        # request that meets it. The row id and the status; never the token.
+        logger.warning(
+            "a live session belongs to a person who is not active; it was not ended",
+            extra={"session_id": row.session_id, "status": row.status},
+        )
         return None
     async with org_session(
         row.org_id, engine=state.app_engine, clients=ClientScope.all()
@@ -234,6 +270,36 @@ async def resolve(connection: HTTPConnection, *, touch: bool = True) -> SessionP
         display_name=person.display_name,
         expires_at=row.expires_at,
     )
+
+
+@dataclass(frozen=True)
+class NamedSession:
+    """The row a session cookie names, idle or not: what signing out ends."""
+
+    session_id: UUID
+    org_id: UUID
+
+
+async def named(connection: HTTPConnection) -> NamedSession | None:
+    """The NOT-ENDED session the request's cookie names, whether or not it is
+    idle, past its maximum or its person still active -- `resolve` without
+    the tests that decide whether to ADMIT it. For signing out (final review
+    B-M1): a person back at a tab left open past the idle limit presses "Sign
+    out", and the row must end, or it stays resumable with the password alone
+    until its maximum. Never a door: nothing here admits anybody."""
+    token = cookie_token(connection, SESSION_COOKIE)
+    if token is None:
+        return None
+    async with AsyncSession(connection.app.state.app_engine) as lookup:
+        row = (
+            await lookup.execute(
+                text("SELECT session_id, org_id, ended_at FROM its_auth_session(:token_hash)"),
+                {"token_hash": token_hash(token)},
+            )
+        ).one_or_none()
+    if row is None or row.ended_at is not None:
+        return None
+    return NamedSession(session_id=row.session_id, org_id=row.org_id)
 
 
 async def start_session(
@@ -353,14 +419,48 @@ async def mark_factor(session: AsyncSession, session_id: UUID) -> str:
     return token
 
 
+async def rotate(session: AsyncSession, session_id: UUID) -> str:
+    """A NEW identifier for a live session, returned; nothing else changes --
+    not `factor_at`, `step_up_at` nor the expiry. For a password change (final
+    review B-I1): OWASP "The session ID must be renewed or regenerated ...
+    after any privilege level change" [S6], and a password change is what a
+    person does who fears their cookie was copied. NOT at a step-up: the
+    screen's watchdog re-reads the cookie of its handshake
+    (`modules/remote/tunnel.py`), and a new one there would cut the screen at
+    every vault checkout."""
+    token = new_token()
+    row = (
+        await session.execute(
+            update(AuthSession)
+            .where(AuthSession.id == session_id, AuthSession.ended_at.is_(None))
+            .values(token_hash=token_hash(token))
+            .returning(AuthSession.id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise LookupError("no live session")  # i18n-exempt: the caller answers 401
+    return token
+
+
 async def mark_step_up(session: AsyncSession, session_id: UUID) -> None:
-    """A second factor was verified again (design §2.5)."""
+    """A second factor was verified again (design §2.5). Raises `LookupError`
+    when the session is no longer live, as `mark_factor` does: the caller
+    answers 401 from INSIDE its block, so its whole transaction -- the
+    factor's success and the clearing of the "password set by mail" mark
+    with it (`failures.record_success`) -- rolls back. A silent no-op here
+    let a step-up whose session a mail reset had just ended clear that mark
+    and commit (re-review of fix round 1, Important 1)."""
     now = _now()
-    await session.execute(
-        update(AuthSession)
-        .where(AuthSession.id == session_id, AuthSession.ended_at.is_(None))
-        .values(step_up_at=now, last_seen_at=now)
-    )
+    row = (
+        await session.execute(
+            update(AuthSession)
+            .where(AuthSession.id == session_id, AuthSession.ended_at.is_(None))
+            .values(step_up_at=now, last_seen_at=now)
+            .returning(AuthSession.id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise LookupError("no live session")  # i18n-exempt: the caller answers 401
 
 
 async def end(session: AsyncSession, session_id: UUID, reason: EndReason) -> bool:

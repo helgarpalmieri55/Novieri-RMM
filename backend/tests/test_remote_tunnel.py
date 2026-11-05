@@ -19,8 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.sessions import SESSION_COOKIE
 from app.models import Device, RemoteSession, User
-from app.modules.remote.tunnel import TunnelAuthError, authorize_tunnel_session
-from tests.session_support import sign_in, socket_connection, ws_cookie
+from app.modules.remote.tunnel import TunnelAuthError
+from tests.session_support import authorize_tunnel_session, sign_in, socket_connection, ws_cookie
 
 # --------------------------------------------------------------------------- #
 # The WS route's auth/ownership gate (no live socket needed)
