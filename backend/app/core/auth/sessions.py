@@ -443,13 +443,24 @@ async def rotate(session: AsyncSession, session_id: UUID) -> str:
 
 
 async def mark_step_up(session: AsyncSession, session_id: UUID) -> None:
-    """A second factor was verified again (design §2.5)."""
+    """A second factor was verified again (design §2.5). Raises `LookupError`
+    when the session is no longer live, as `mark_factor` does: the caller
+    answers 401 from INSIDE its block, so its whole transaction -- the
+    factor's success and the clearing of the "password set by mail" mark
+    with it (`failures.record_success`) -- rolls back. A silent no-op here
+    let a step-up whose session a mail reset had just ended clear that mark
+    and commit (re-review of fix round 1, Important 1)."""
     now = _now()
-    await session.execute(
-        update(AuthSession)
-        .where(AuthSession.id == session_id, AuthSession.ended_at.is_(None))
-        .values(step_up_at=now, last_seen_at=now)
-    )
+    row = (
+        await session.execute(
+            update(AuthSession)
+            .where(AuthSession.id == session_id, AuthSession.ended_at.is_(None))
+            .values(step_up_at=now, last_seen_at=now)
+            .returning(AuthSession.id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise LookupError("no live session")  # i18n-exempt: the caller answers 401
 
 
 async def end(session: AsyncSession, session_id: UUID, reason: EndReason) -> bool:

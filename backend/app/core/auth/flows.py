@@ -699,6 +699,20 @@ async def enroll_finish(request: Request, principal: SessionPrincipal) -> tuple[
 # --------------------------------------------------------------------------- #
 
 
+async def _stepped_up(session: AsyncSession, principal: SessionPrincipal) -> None:
+    """The recent confirmation on a session that must still be live. Raised
+    INSIDE the step-up's block on purpose, unlike a counted failure: a
+    session ended while the step-up ran (a mail reset ends every session)
+    rolls the whole step-up back -- the factor's success, the clearing of the
+    "password set by mail" mark, a recovery code's spend -- so nothing of it
+    commits and nothing is audited (re-review of fix round 1, Important 1).
+    The answer is a dead session's: 401 `auth_required`."""
+    try:
+        await mark_step_up(session, principal.session_id)
+    except LookupError as exc:
+        raise sign_in_again() from exc
+
+
 async def step_up_totp(request: Request, principal: SessionPrincipal, *, code: str) -> None:
     require_full(principal)
     accepted = False
@@ -709,7 +723,7 @@ async def step_up_totp(request: Request, principal: SessionPrincipal, *, code: s
         await gate(session, user.id, "totp")
         if await verify_totp(session, user.id, code, vault=_vault(request), now=_now()):
             await record_success(session, user.id, "totp")
-            await mark_step_up(session, principal.session_id)
+            await _stepped_up(session, principal)
             accepted = True
         else:
             await count_failure(session, user, "totp", vault=_vault(request))
@@ -727,7 +741,7 @@ async def step_up_recovery(request: Request, principal: SessionPrincipal, *, cod
         await gate(session, user.id, "recovery")
         accepted = await _spend_recovery_code(session, request, user, code)
         if accepted:
-            await mark_step_up(session, principal.session_id)
+            await _stepped_up(session, principal)
     if not accepted:
         raise _factor_failed(status.HTTP_400_BAD_REQUEST)
 
@@ -747,7 +761,7 @@ async def step_up_passkey(
         await gate(session, user.id, "passkey")
         accepted = await _passkey_matches(session, request, user, credential, "step_up")
         if accepted:
-            await mark_step_up(session, principal.session_id)
+            await _stepped_up(session, principal)
     if not accepted:
         raise _factor_failed(status.HTTP_400_BAD_REQUEST)
 

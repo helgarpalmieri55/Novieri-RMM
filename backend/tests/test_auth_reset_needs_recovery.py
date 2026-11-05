@@ -378,6 +378,60 @@ async def test_the_mcp_channel_is_refused_too(
     assert await _factors_reset_events(auth_env, org) == []
 
 
+@pytest.mark.parametrize("method", ["totp", "recovery", "passkey"])
+async def test_a_step_up_on_a_session_the_mail_reset_ended_clears_nothing(
+    auth_env: Any, monkeypatch: pytest.MonkeyPatch, method: str
+) -> None:
+    """Re-review of fix round 1, Important 1 (the reviewer's probe, kept).
+    The person's step-up is admitted on a live session; the mailbox holder's
+    reset then commits -- the mark set, every session ended; the step-up's
+    factor then verifies. `record_success` clears the mark in that
+    transaction, so the step-up must see that its session is gone and roll
+    the whole transaction back: a dead session's answer, the mark still set,
+    and the administrator's reset still refused. Let `mark_step_up` stay a
+    silent no-op on an ended row and the step-up commits, the mark is gone
+    and the reset is a 204: red."""
+    from app.core.auth import flows
+    from app.core.auth.refusals import AuthRefusal
+    from app.core.auth.sessions import resolve
+    from app.models.auth import AuthPasskey
+    from tests.auth_support import add_passkey
+    from tests.session_support import cookie_header, http_request
+
+    org = await auth_env.create_org(f"rnr-stepup-race-{method}")
+    admin = await signed_in(auth_env, org, "org-admin")
+    who = await signed_in(auth_env, org, "technician")
+    passkey = await add_passkey(auth_env, who) if method == "passkey" else None
+    request = http_request(auth_env, cookie=cookie_header(who.session))
+    principal = await resolve(request, touch=False)
+    assert principal is not None and principal.factor_done
+    code = await fresh_code(auth_env, who)
+
+    await _mail_reset(auth_env, who)
+    assert await _mark(auth_env, who) is not None
+
+    with pytest.raises(AuthRefusal) as refused:
+        if method == "totp":
+            await flows.step_up_totp(request, principal, code=code)
+        elif method == "recovery":
+            await flows.step_up_recovery(request, principal, code=who.recovery_codes[0])
+        else:
+
+            async def verify(session: Any, credential: Any, **_kw: Any) -> AuthPasskey:
+                return (
+                    await session.execute(select(AuthPasskey).where(AuthPasskey.id == passkey))
+                ).scalar_one()
+
+            monkeypatch.setattr(flows, "verify_authentication", verify)
+            await flows.step_up_passkey(request, principal, credential={"id": "mine"})
+
+    assert (refused.value.status_code, refused.value.code) == (401, "auth_required")
+    assert await _mark(auth_env, who) is not None
+    reset = await _reset_factors(auth_env, admin, who)
+    assert reset.status_code == 409, reset.text
+    assert reset.json()["code"] == "reset_needs_recovery"
+
+
 # --- the race: both orders, forced ---------------------------------------
 
 

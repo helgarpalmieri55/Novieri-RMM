@@ -17,8 +17,12 @@ final fix wave item 8). A mail reset's consume-time "has a second factor"
 check (`flows.reset_password`), an administrator's factor reset and its
 "password set by mail" check (`user_admin.service.reset_factors`), and the
 recovery link's wipe (`clear_second_factors`) all take it first, so no
-interleaving of them leaves a factor-less account whose password a mailbox
-chose.
+interleaving OF THESE THREE leaves a factor-less account whose password a
+mailbox chose. The mark's clearing by a second factor's success
+(`failures.record_success`) does not take it: it is safe because the
+sign-in and step-up steps that call it roll back when their session is no
+longer live (`sessions.mark_factor`, `sessions.mark_step_up`), and a mail
+reset ends every session.
 """
 
 from uuid import UUID

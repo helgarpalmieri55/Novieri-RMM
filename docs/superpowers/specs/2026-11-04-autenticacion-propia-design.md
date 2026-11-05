@@ -333,7 +333,7 @@ MCP valida su JWT (`iss`, `aud`, `kid`, revocación).
     cambia su contraseña, ella dice «no puedo entrar», y lo esperable es que un administrador restablezca sus
     factores. Los avisos de «contraseña cambiada» y «factores restablecidos» llegan al mismo buzón.
   - **Decisión del operador del 2026-11-05 («Rechazar y usar recuperación»).** «Restablecer métodos de inicio de
-    sesión» (`user_admin.service.reset_factors`, la consola y MCP por igual) se rechaza con 409
+    sesión» (`user_admin.service.reset_factors`, el mismo servicio para la consola y para MCP) se rechaza con 409
     `reset_needs_recovery` mientras la contraseña actual de la persona se haya puesto con un enlace de
     restablecimiento enviado por correo y desde entonces no se haya verificado ningún segundo factor (una llave, una
     app TOTP confirmada o un código de recuperación, al iniciar sesión o en una confirmación reciente). Sin ventana de
@@ -341,8 +341,12 @@ MCP valida su JWT (`iss`, `aud`, `kid`, revocación).
     (`auth_passwords.mail_reset_at`) la borran cualquier segundo factor verificado después, un cambio de contraseña
     con la sesión abierta y el enlace de recuperación, que sigue siendo el camino de vuelta. La comprobación del
     restablecimiento por correo («¿tiene segundo factor?») y la del administrador («¿la puso el buzón?») toman el
-    mismo bloqueo por persona (`factors.lock_person`), así que ningún orden de las dos deja una cuenta sin factores
-    con la contraseña del buzón. Fuente: NIST SP 800-63B-4 §4.2.2.2
+    mismo bloqueo por persona (`factors.lock_person`), así que ningún orden de esas dos deja una cuenta sin
+    factores con la contraseña del buzón. Y un segundo factor verificado no borra la marca en una sesión que el
+    restablecimiento por correo acaba de cerrar: el paso de inicio de sesión y la confirmación reciente deshacen
+    toda su transacción (401) cuando su sesión ya no está viva (revisión de la ronda 1, Important 1). Por MCP la
+    respuesta no llega a ser el 409: esa ruta exige la confirmación reciente del propio administrador en la
+    consola, así que MCP recibe antes un 403 `step_up_required`. Fuente: NIST SP 800-63B-4 §4.2.2.2
     (https://pages.nist.gov/800-63-4/sp800-63b/events/): en AAL2, la recuperación necesita dos códigos de
     recuperación obtenidos por métodos distintos, o un código de recuperación más la autenticación con un
     autenticador de un factor vinculado a la cuenta, o una nueva verificación de identidad. Un buzón solo no es

@@ -1045,7 +1045,11 @@ async def reset_factors(
     without a second factor) the mailbox can supply a password neither after
     a reset nor, through this rule, before one. The check runs under
     `factors.lock_person`, the lock `flows.reset_password` takes before its
-    own factor check, so neither order of the two can slip between them.
+    own factor check, so neither order of those two can slip between them.
+    The mark's other writer, a second factor's success, cannot clear it on a
+    session the mail reset ended: the sign-in and step-up steps roll their
+    whole transaction back when their session is no longer live
+    (`sessions.mark_factor`, `sessions.mark_step_up`).
 
     The refusals follow this module's convention (`_refuse_self`,
     `_require_pending_invitation`): a `UserAdminError` raised before any
