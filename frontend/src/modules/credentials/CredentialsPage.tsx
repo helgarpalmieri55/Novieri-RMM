@@ -5,6 +5,7 @@ import { useT } from "../../i18n/context";
 import { translate } from "../../i18n/core";
 import { Trans } from "../../i18n/Trans";
 import { ConfirmDialog } from "../../components/confirm";
+import { useStepUp } from "../../components/stepUp";
 import { UnassignedRefusal } from "../../components/UnassignedRefusal";
 import { attemptProblems, describeSubmitError, Form, FormActions } from "../../components/form";
 import type { Attempt, FieldRule } from "../../components/form";
@@ -53,10 +54,12 @@ import {
 // is never written to a log, and is never returned by an ordinary API
 // response. The checkout secret below is the one deliberate exception -- the
 // operator asked for it, gave a reason that is audited server-side, and sees
-// it exactly once. It is held ONLY in local component state (`reveal`),
-// never placed in the react-query cache (which would persist it across
-// re-renders and remain inspectable in devtools), and is cleared the moment
-// the "Done" dialog closes. Nothing here calls `console.*` with it, and no
+// it exactly once. It is held ONLY in local component state (`reveal`), and
+// is cleared the moment the "Done" dialog closes. It does not stay in the
+// react-query cache (which would keep it inspectable in devtools): the
+// checkout mutation that brought it is reset as soon as it is in `reveal`,
+// and its `gcTime: 0` drops it from the mutation cache then -- `reset()`
+// alone only detaches it, and TanStack would keep it five more minutes. Nothing here calls `console.*` with it, and no
 // list/table column renders `credential.secret` -- there is no such field on
 // `Credential` (see `lib/api.ts`) because the API never sends the value back
 // on a read.
@@ -126,6 +129,11 @@ export function CredentialsPage() {
   const t = useT();
   const api = useApi();
   const queryClient = useQueryClient();
+  // A CHECKOUT MAY NEED THE SECOND FACTOR AGAIN (own authentication design
+  // §2.5): the server answers 403 `step_up_required` when it was not confirmed
+  // in the last 10 minutes, and `run` asks for it and sends the checkout once
+  // more. The secret still arrives only in the accepted answer.
+  const stepUp = useStepUp();
   const [createOpen, setCreateOpen] = useState(false);
   const [reveal, setReveal] = useState<{ name: string; secret: string } | null>(null);
   const [reasonFor, setReasonFor] = useState<Credential | null>(null);
@@ -153,13 +161,17 @@ export function CredentialsPage() {
   const checkout = useMutation({
     // The row's client decides `X-Client-Id`: every client's goes without it.
     mutationFn: (payload: { credential: Credential; reason: string }) =>
-      api.checkoutCredential(payload.credential.id, payload.reason, payload.credential.client_id),
+      stepUp.run(() =>
+        api.checkoutCredential(payload.credential.id, payload.reason, payload.credential.client_id),
+      ),
     onSuccess: (data, payload) => {
       setReveal({ name: payload.credential.name, secret: data.secret });
       setReasonFor(null);
       setReason("");
       setReasonAttempt(null);
     },
+    // Its answer is the secret: dropped from the mutation cache once reset.
+    gcTime: 0,
   });
 
   function openCheckout(credential: Credential) {
@@ -178,7 +190,11 @@ export function CredentialsPage() {
       checkout.reset();
       return;
     }
-    if (reasonFor) checkout.mutate({ credential: reasonFor, reason: reason.trim() });
+    // Reset once the secret is in `reveal` (the hook's `onSuccess` above runs
+    // first): the page's state is the one place it is held.
+    if (reasonFor) {
+      checkout.mutate({ credential: reasonFor, reason: reason.trim() }, { onSuccess: () => checkout.reset() });
+    }
   }
   // AUDIT CLASS, /credentials → Delete: the mutation had NO `onError` and no
   // call site rendered `remove.error`. A refused delete -- a 403 from RBAC, a
@@ -476,6 +492,7 @@ export function CredentialsPage() {
         open={reasonFor != null}
         onClose={() => setReasonFor(null)}
         title={t("credentials.checkout.title", { name: reasonFor?.name ?? "" })}
+        dismissible={!stepUp.open}
       >
         <p className="cell-sub" style={{ marginBottom: 12 }}>
           {t("credentials.checkout.intro")}
@@ -536,6 +553,8 @@ export function CredentialsPage() {
           <Btn variant="primary" label={t("credentials.reveal.done")} onClick={() => setReveal(null)} />
         </div>
       </Dialog>
+      {/* Outside every form: the recent confirmation holds forms of its own. */}
+      {stepUp.dialog}
     </>
   );
 }

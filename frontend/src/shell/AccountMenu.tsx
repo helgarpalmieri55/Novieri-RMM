@@ -122,6 +122,9 @@ export function AccountMenu({ user, onSignOut }: AccountMenuProps) {
           <Link className="menu-item" role="menuitem" to="/profile" onClick={() => close(false)}>
             {t("shell.accountMenu.yourProfile")}
           </Link>
+          <Link className="menu-item" role="menuitem" to="/profile/security" onClick={() => close(false)}>
+            {t("shell.accountMenu.yourSecurity")}
+          </Link>
           <Link className="menu-item" role="menuitem" to="/settings" onClick={() => close(false)}>
             {t("shell.accountMenu.settings")}
           </Link>

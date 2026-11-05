@@ -185,8 +185,12 @@ export const ROUTES = [
   // `__fixtures` flag with `&`. Settings -> AI connections is walked because
   // it is the console's door for connecting AI apps (MCP design §8).
   "/settings?tab=ai-connections",
+  // Settings -> Sessions (own authentication design §2.4) is walked for the
+  // same reason: `/settings` alone never opens it.
+  "/settings?tab=sessions",
   "/admin",
   "/governance",
   "/assets",
   "/profile",
+  "/profile/security",
 ];

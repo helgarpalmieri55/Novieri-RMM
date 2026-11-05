@@ -1,10 +1,13 @@
 /**
- * Your profile in Spanish: the form, the refusal of a clean save, the way to
- * Sign-in and security, the loading and failed-to-load states. (RE-POINTED,
- * own-auth Task 10: the three Keycloak credential steps and their failure
- * became one link to the platform's own page.)
- * The save bar (`modules/settings/SaveBar`) is shared with the Settings page
- * and speaks Spanish with it, so these renders take no allowance for it.
+ * Your profile in Spanish: the form, the refusal of a clean save, the link to
+ * your security, the loading and failed-to-load states. The save bar
+ * (`modules/settings/SaveBar`) is shared with the Settings page and speaks
+ * Spanish with it, so these renders take no allowance for it.
+ *
+ * RE-POINTED (own-auth Tasks 10 and 12): the three Keycloak credential steps
+ * and their failure became one link to the platform's own page, first named
+ * "Administrar el inicio de sesión y la seguridad" and now "Abrir tu
+ * seguridad", after the page it opens.
  */
 
 import { screen } from "@testing-library/react";
@@ -32,7 +35,7 @@ beforeEach(() => {
 });
 
 describe("your profile in Spanish", () => {
-  it("shows the form, the notes and the way to sign-in and security in Spanish", async () => {
+  it("shows the form, the notes and the way to your security in Spanish", async () => {
     const { container } = renderProfilePage();
     expect(screen.getByText("Cargando…")).toBeInTheDocument();
     expect(await screen.findByLabelText("Nombre para mostrar")).toBeInTheDocument();
@@ -43,10 +46,8 @@ describe("your profile in Spanish", () => {
     expect(screen.getByText(/Has iniciado sesión como operator@example\.com\./)).toBeInTheDocument();
     expect(screen.getByText(/Nada en esta plataforma envía SMS/)).toBeInTheDocument();
     expect(screen.getByText("Inicio de sesión y seguridad")).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "Administrar el inicio de sesión y la seguridad" }),
-    ).toHaveAttribute("href", "/profile/security");
-    expect(screen.getByText(/tus claves de acceso, tu aplicación de autenticación/)).toBeInTheDocument();
+    expect(screen.getByText("Tu contraseña, tus segundos factores, tus equipos recordados y tus sesiones")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Abrir tu seguridad" })).toBeInTheDocument();
     expectNoEnglish(container, ["Operator"]);
   });
 
@@ -59,13 +60,15 @@ describe("your profile in Spanish", () => {
     expect(calls.updateMe).not.toHaveBeenCalled();
   });
 
-  // RE-POINTED: was "says in Spanish when a credential step cannot be
-  // started". No step starts here; the Spanish property left is the panel.
-  it("says in Spanish where sign-in and security are managed", async () => {
+  it("links to your security in Spanish, and to nowhere else", async () => {
+    // RE-POINTED from "says in Spanish when a credential step cannot be
+    // started" (Task 10: "says in Spanish where sign-in and security are
+    // managed"): there is no step at another application to fail to start.
     const { container } = renderProfilePage();
-    await screen.findByRole("link", { name: "Administrar el inicio de sesión y la seguridad" });
+    const link = await screen.findByRole("link", { name: "Abrir tu seguridad" });
+    expect(link).toHaveAttribute("href", "/profile/security");
     expect(screen.getByText("Inicio de sesión y seguridad")).toBeInTheDocument();
-    expect(screen.getByText(/Cada cambio allí te pide antes confirmar tu segundo factor/)).toBeInTheDocument();
+    expect(screen.getByText(/^Cambia tu contraseña, añade o quita una clave de acceso/)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expectNoEnglish(container, ["Operator"]);
   });

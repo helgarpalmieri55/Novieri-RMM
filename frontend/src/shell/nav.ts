@@ -273,10 +273,13 @@ export const ADD_COMPUTER_TO = "/devices/onboard";
 
 /**
  * A ROUTE THAT BELONGS TO NO SECTION AT ALL, and is not a defect: `/profile`
- * is reached from the account menu, and there is no page behind "Your
- * account" to link to.
+ * and `/profile/security` are reached from the account menu, and there is no
+ * page behind "Your account" to link to.
  */
-export const ORPHAN_SECTION: Readonly<Record<string, string>> = named({}, { "/profile": "shell.nav.yourAccount" });
+export const ORPHAN_SECTION: Readonly<Record<string, string>> = named(
+  {},
+  { "/profile": "shell.nav.yourAccount", "/profile/security": "shell.nav.yourAccount" },
+);
 
 /** What the shell's breadcrumb and the tab title are made of, for one route. */
 export interface Crumb {

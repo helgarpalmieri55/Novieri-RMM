@@ -53,12 +53,16 @@ describe("Your profile: language", () => {
     expect(await screen.findByLabelText<HTMLSelectElement>("Idioma")).toHaveValue("es");
   });
 
-  it("says so, without blocking, when the sign-in pages could not be switched", async () => {
+  it("saves the language and switches the console, and says nothing more", async () => {
+    // RE-POINTED from "says so, without blocking, when the sign-in pages could
+    // not be switched": the sign-in pages are this console's own now (own
+    // authentication phase 1), so there is no second place the language must
+    // reach, and `PATCH /me` no longer says whether another system took it (Task 8).
     calls.me.mockResolvedValue({ ...ME_FIXTURE, permissions: [...ALL_PERMISSIONS] });
     // The refetch after the save serves what was saved, as the real API does.
     calls.updateMe.mockImplementation(async () => {
       calls.me.mockResolvedValue({ ...ME_FIXTURE, locale: "es", permissions: [...ALL_PERMISSIONS] });
-      return { ...ME_FIXTURE, locale: "es", identity_locale_synced: false };
+      return { ...ME_FIXTURE, locale: "es" };
     });
     renderProfilePage();
     const select = await screen.findByLabelText<HTMLSelectElement>("Language");
@@ -66,33 +70,38 @@ describe("Your profile: language", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
     // The save went through and the console switched, in Spanish.
     await waitFor(() => expect(getLanguage()).toBe("es"));
-    const note = await screen.findByText(/Guardado\. Las páginas de inicio de sesión no se pudieron cambiar/);
-    expect(note.closest("p")).toHaveAttribute("role", "status");
+    await waitFor(() => expect(calls.me.mock.calls.length).toBeGreaterThan(1));
+    expect(calls.updateMe).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/páginas de inicio de sesión no se pudieron/)).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("shows the English note when the console switches to English", async () => {
+  it("switches to English and says nothing more", async () => {
+    // RE-POINTED from "shows the English note when the console switches to
+    // English": the same save the other way round, with no note to show.
     setActiveLanguage("es");
     calls.me.mockResolvedValue({ ...ME_FIXTURE, locale: "es", permissions: [...ALL_PERMISSIONS] });
     calls.updateMe.mockImplementation(async () => {
       calls.me.mockResolvedValue({ ...ME_FIXTURE, locale: "en", permissions: [...ALL_PERMISSIONS] });
-      return { ...ME_FIXTURE, locale: "en", identity_locale_synced: false };
+      return { ...ME_FIXTURE, locale: "en" };
     });
     renderProfilePage();
     const select = await screen.findByLabelText<HTMLSelectElement>("Idioma");
     await userEvent.selectOptions(select, "en");
     await userEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
     await waitFor(() => expect(getLanguage()).toBe("en"));
-    expect(
-      await screen.findByText(/Saved\. The sign-in pages could not be switched to this language/),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(calls.me.mock.calls.length).toBeGreaterThan(1));
+    expect(screen.queryByText(/sign-in pages could not be switched/)).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("shows no note when the sign-in pages followed", async () => {
+  it("shows no note after the save", async () => {
+    // RE-POINTED from "shows no note when the sign-in pages followed": the
+    // assertions are the same; the answer no longer carries the flag.
     calls.me.mockResolvedValue({ ...ME_FIXTURE, permissions: [...ALL_PERMISSIONS] });
     calls.updateMe.mockImplementation(async () => {
       calls.me.mockResolvedValue({ ...ME_FIXTURE, locale: "es", permissions: [...ALL_PERMISSIONS] });
-      return { ...ME_FIXTURE, locale: "es", identity_locale_synced: true };
+      return { ...ME_FIXTURE, locale: "es" };
     });
     renderProfilePage();
     await userEvent.selectOptions(await screen.findByLabelText<HTMLSelectElement>("Language"), "es");

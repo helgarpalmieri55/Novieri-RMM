@@ -1,6 +1,7 @@
 export const shell = {
   accountMenu: {
     yourProfile: "Your profile",
+    yourSecurity: "Your security",
     settings: "Settings",
     language: "Language: {language}",
     signOut: "Sign out",

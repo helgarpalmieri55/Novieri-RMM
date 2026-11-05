@@ -16,8 +16,9 @@ import type { RenderResult } from "@testing-library/react";
 import { MemoryRouter, useLocation, type Location } from "react-router-dom";
 import { vi } from "vitest";
 
-import type { ApiClient } from "../../../lib/api";
+import { ApiError, type ApiClient } from "../../../lib/api";
 import { ProfilePage } from "../../profile/ProfilePage";
+import { SecurityPage } from "../../profile/SecurityPage";
 import { SettingsPage } from "../SettingsPage";
 
 export const ALL_PERMISSIONS = [
@@ -380,6 +381,91 @@ export const ME_FIXTURE = {
   permissions: [] as string[],
 };
 
+// --------------------------------------------------------------------------
+// Your security (`/profile/security`), the recent confirmation, the invitation
+// and the session settings (own authentication design §2, §7)
+// --------------------------------------------------------------------------
+
+/**
+ * `GET /api/v1/me/security`: two passkeys (one synced), the app, eight codes
+ * left, two remembered devices (this one and another), two sessions (this one
+ * and another).
+ */
+export const MY_SECURITY_FIXTURE = {
+  has_totp: true,
+  passkeys: [
+    { id: "pk-1", name: "Work laptop", created_at: "2026-10-01T09:00:00Z", last_used_at: "2026-11-03T08:00:00Z", backup_state: false },
+    { id: "pk-2", name: "Phone", created_at: "2026-10-02T09:00:00Z", last_used_at: null, backup_state: true },
+  ],
+  recovery_codes_left: 8,
+  trusted_devices: [
+    { id: "td-1", label: "Firefox on Windows", created_at: "2026-11-01T09:00:00Z", expires_at: "2026-11-16T09:00:00Z", last_used_at: "2026-11-04T08:00:00Z", current: true },
+    { id: "td-2", label: "Safari on macOS", created_at: "2026-10-25T09:00:00Z", expires_at: "2026-11-09T09:00:00Z", last_used_at: null, current: false },
+  ],
+  sessions: [
+    { id: "s-1", created_at: "2026-11-04T07:00:00Z", last_seen_at: "2026-11-04T08:00:00Z", expires_at: "2026-11-04T19:00:00Z", user_agent: "Mozilla/5.0 (Windows NT 10.0) Firefox/140.0", ip: "10.0.0.5", current: true },
+    { id: "s-2", created_at: "2026-11-03T15:00:00Z", last_seen_at: "2026-11-03T16:00:00Z", expires_at: "2026-11-04T03:00:00Z", user_agent: "Mozilla/5.0 (Macintosh) Safari/605.1", ip: "10.0.0.9", current: false },
+  ],
+  // Not in `MySecurity` -- a server bug returning the authenticator secret.
+  // The page renders named fields only, so it must never reach the screen.
+  totp_secret: PLANTED_SECRET,
+};
+
+/** What `POST /auth/enroll/totp/start` answers. Its key is `JBSWY3DPEHPK3PXP`. */
+export const OTPAUTH_URI_FIXTURE =
+  "otpauth://totp/Novieri:operator%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=Novieri";
+
+/** W3C creation options, as py_webauthn serves them (`POST /auth/enroll/passkey/options`). */
+export const CREATION_OPTIONS_FIXTURE = {
+  rp: { name: "Novieri", id: "itms.example.test" },
+  user: { id: "dXNlcg", name: "operator@example.com", displayName: "Operator" },
+  challenge: "Y2hhbGxlbmdl",
+  pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+  authenticatorSelection: { residentKey: "preferred", userVerification: "required" },
+  attestation: "none",
+};
+
+/** W3C request options for the recent confirmation (`POST /auth/step-up/passkey/options`). */
+export const REQUEST_OPTIONS_FIXTURE = {
+  challenge: "c3RlcC11cA",
+  rpId: "itms.example.test",
+  allowCredentials: [],
+  userVerification: "required",
+};
+
+/** Ten fresh codes in the Crockford alphabet (no I, L, O or U). */
+export const RECOVERY_CODES_FIXTURE = [
+  "7KQ2M-X9D4P", "3HV8N-QW2ZR", "M4T6C-8YJKD", "R2XPA-5N7GE", "Z9W3K-HT6QV",
+  "C8D5M-2PRXN", "Q6J4T-W8ZAH", "N3F7V-K2MXD", "E5Y9R-6TQPC", "W2H8K-D4NZJ",
+];
+
+/** The server's refusal of a change whose second factor is not fresh (own authentication design §2.5). */
+export function stepUpRequired(): ApiError {
+  return new ApiError(403, JSON.stringify({ detail: { code: "step_up_required" } }));
+}
+
+/** `GET /api/v1/settings/sessions`, at the defaults (design §2.4, §2.6, §3). */
+export const SESSION_SETTINGS_FIXTURE = {
+  staff_idle_minutes: 30,
+  staff_max_hours: 12,
+  remember_device_enabled: true,
+  remember_device_days: 15,
+  remembered_max_hours: 168,
+  contact_idle_minutes: 60,
+  contact_max_days: 7,
+  updated_at: "2026-11-01T00:00:00Z",
+};
+
+/** Invited and not yet accepted (own authentication design §7). Not in `USERS_FIXTURE`: a test that wants it says so. */
+export const INVITED_USER = {
+  id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  email: "invitee@example.com",
+  display_name: "Invitee",
+  status: "active",
+  roles: [],
+  invite_pending: true,
+};
+
 export const calls = {
   me: vi.fn(),
   getCurrentOrg: vi.fn(),
@@ -414,14 +500,33 @@ export const calls = {
   listUsers: vi.fn(),
   listClients: vi.fn(),
   getUserEffectivePermissions: vi.fn(),
-  createUser: vi.fn(),
   assignUserRole: vi.fn(),
   removeUserRole: vi.fn(),
   setUserEnabled: vi.fn(),
-  resetUserPassword: vi.fn(),
-  resendUserEnrolment: vi.fn(),
   deleteUser: vi.fn(),
   updateMe: vi.fn(),
+  getMySecurity: vi.fn(),
+  changePassword: vi.fn(),
+  removePasskey: vi.fn(),
+  removeTotp: vi.fn(),
+  regenerateRecoveryCodes: vi.fn(),
+  revokeTrustedDevice: vi.fn(),
+  endMySession: vi.fn(),
+  stepUpTotp: vi.fn(),
+  stepUpPasskeyOptions: vi.fn(),
+  stepUpPasskey: vi.fn(),
+  stepUpRecovery: vi.fn(),
+  enrollTotpStart: vi.fn(),
+  enrollTotpConfirm: vi.fn(),
+  enrollPasskeyOptions: vi.fn(),
+  enrollPasskey: vi.fn(),
+  inviteUser: vi.fn(),
+  resendInvite: vi.fn(),
+  cancelInvite: vi.fn(),
+  resetUserFactors: vi.fn(),
+  endUserSessions: vi.fn(),
+  getSessionSettings: vi.fn(),
+  putSessionSettings: vi.fn(),
   getMcpConnections: vi.fn(),
   revokeMcpConnection: vi.fn(),
 };
@@ -490,12 +595,6 @@ export function installDefaults(permissions: readonly string[] = ALL_PERMISSIONS
   calls.listUsers.mockResolvedValue(USERS_FIXTURE);
   calls.listClients.mockResolvedValue(CLIENTS_FIXTURE);
   calls.getUserEffectivePermissions.mockResolvedValue(EFFECTIVE_PERMISSIONS_FIXTURE);
-  calls.createUser.mockResolvedValue({
-    ...CASEY_USER,
-    status: "active",
-    enrolment_email_sent: true,
-    enrolment_email_error: null,
-  });
   calls.assignUserRole.mockResolvedValue({
     assignment_id: "a2222222-2222-4222-8222-222222222222",
     role_id: AUDITOR_ROLE.id,
@@ -504,10 +603,32 @@ export function installDefaults(permissions: readonly string[] = ALL_PERMISSIONS
   });
   calls.removeUserRole.mockResolvedValue(undefined);
   calls.setUserEnabled.mockResolvedValue({ ...OPERATOR_USER, status: "disabled" });
-  calls.resetUserPassword.mockResolvedValue({ sent: true });
-  calls.resendUserEnrolment.mockResolvedValue({ sent: true });
   calls.deleteUser.mockResolvedValue(undefined);
   calls.updateMe.mockResolvedValue({ ...ME_FIXTURE, permissions: [...permissions] });
+  calls.getMySecurity.mockResolvedValue(MY_SECURITY_FIXTURE);
+  calls.changePassword.mockResolvedValue(undefined);
+  calls.removePasskey.mockResolvedValue(undefined);
+  calls.removeTotp.mockResolvedValue(undefined);
+  calls.regenerateRecoveryCodes.mockResolvedValue({ recovery_codes: [...RECOVERY_CODES_FIXTURE] });
+  calls.revokeTrustedDevice.mockResolvedValue(undefined);
+  calls.endMySession.mockResolvedValue(undefined);
+  calls.stepUpTotp.mockResolvedValue(undefined);
+  calls.stepUpPasskeyOptions.mockResolvedValue(REQUEST_OPTIONS_FIXTURE);
+  calls.stepUpPasskey.mockResolvedValue(undefined);
+  calls.stepUpRecovery.mockResolvedValue(undefined);
+  calls.enrollTotpStart.mockResolvedValue({ otpauth_uri: OTPAUTH_URI_FIXTURE });
+  calls.enrollTotpConfirm.mockResolvedValue(undefined);
+  calls.enrollPasskeyOptions.mockResolvedValue(CREATION_OPTIONS_FIXTURE);
+  calls.enrollPasskey.mockResolvedValue(undefined);
+  // The CONFIGURED state is the default here too: the invitation is emailed,
+  // so a test about the link shown once has to say so.
+  calls.inviteUser.mockResolvedValue({ user_id: INVITED_USER.id, invite_link: null });
+  calls.resendInvite.mockResolvedValue({ invite_link: null });
+  calls.cancelInvite.mockResolvedValue(undefined);
+  calls.resetUserFactors.mockResolvedValue(undefined);
+  calls.endUserSessions.mockResolvedValue(undefined);
+  calls.getSessionSettings.mockResolvedValue(SESSION_SETTINGS_FIXTURE);
+  calls.putSessionSettings.mockResolvedValue(SESSION_SETTINGS_FIXTURE);
   calls.getMcpConnections.mockResolvedValue(MCP_CONNECTIONS_FIXTURE);
   calls.revokeMcpConnection.mockResolvedValue({ revoked: true, keycloak_failures: 0 });
 
@@ -533,6 +654,43 @@ export function renderProfilePage(): RenderResult {
   );
 }
 
+/** A render, and the QueryClient it ran against, for asserting what the caches still hold. */
+export type HarnessRender = RenderResult & { queryClient: QueryClient };
+
+/**
+ * Everything TanStack's mutation cache still holds -- each mutation's answer
+ * and the body it was sent -- as one string. A value shown once (an
+ * invitation link, an authenticator key, recovery codes, a password) must not
+ * be in it once the person has it: `reset()` only detaches the observer, and a
+ * detached mutation is collected after its `gcTime` (5 minutes by default).
+ */
+export function mutationCacheText(queryClient: QueryClient): string {
+  return JSON.stringify(
+    queryClient
+      .getMutationCache()
+      .getAll()
+      .map((mutation) => ({ data: mutation.state.data, variables: mutation.state.variables })),
+  );
+}
+
+/** Your security (`/profile/security`), with the same mocked API surface. */
+export function renderSecurityPage(): HarnessRender {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return {
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/profile/security"]}>
+          <SecurityPage />
+          <LocationProbe />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    ),
+    queryClient,
+  };
+}
+
 /**
  * The router's current location, for asserting what the page wrote to the
  * URL. Set by `LocationProbe`, which renders nothing.
@@ -548,18 +706,21 @@ function LocationProbe() {
  * The Settings page under a router, at `/settings` unless `path` says
  * otherwise (`/settings?tab=users`): the active tab lives in `?tab=`.
  */
-export function renderSettings(path = "/settings"): RenderResult {
+export function renderSettings(path = "/settings"): HarnessRender {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[path]}>
-        <SettingsPage />
-        <LocationProbe />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  return {
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[path]}>
+          <SettingsPage />
+          <LocationProbe />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    ),
+    queryClient,
+  };
 }
 
 /** The body of the nth `fetch` call, parsed. */

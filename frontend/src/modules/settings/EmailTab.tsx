@@ -1,12 +1,12 @@
 // Email — `GET /settings/email`, `PUT /settings/email`, `POST /settings/email/test`.
-// Read and write are both `orgs.manage`.
+// Read and write are both `orgs.manage` (the write on every client).
 //
-// WHAT THIS TAB REPLACES. Configuring the relay used to mean opening the
-// identity provider's admin console — a second product, a second password, and
-// an afternoon of the operator's life spent looking for a setting they had no
-// reason to know lived somewhere else. Everything that matters about this form
-// follows from the one thing that makes it awkward: THE SERVER NEVER RETURNS
-// THE PASSWORD, and it is right not to.
+// THE MAIL SERVER FOR INVITATIONS, PASSWORD RESETS AND ACCOUNT NOTICES (own
+// authentication design §7). The platform sends them itself now; this used to
+// be the identity provider's realm setting. Everything that matters about this
+// form follows from the one thing that makes it awkward: THE SERVER NEVER
+// RETURNS THE PASSWORD, and it is right not to -- it keeps it encrypted in the
+// vault (invariant 3) and opens it only to send.
 //
 // So the box is always empty, and "Password: set" is the honest way to report a
 // stored credential — a masked value would imply this console received
@@ -15,21 +15,20 @@
 // blank a working credential the first time somebody corrected the port, and the
 // only symptom would be invitations that quietly stop arriving.
 //
-// THE TEST BUTTON REPORTS WHAT HAPPENED AND NOT MORE. The identity provider
-// accepting a message is not the relay delivering it — a relay that takes mail
-// from an unknown sender and drops it silently is the common case, and this
-// platform's own runbook already warns about it. So: "Sent to <mailbox> — check
-// that mailbox", never a green tick.
+// THE TEST BUTTON REPORTS WHAT HAPPENED AND NOT MORE. The mail server accepting
+// a message is not it delivering it — a relay that takes mail from an unknown
+// sender and drops it silently is the common case, and this platform's own
+// runbook already warns about it. So: "Sent to <mailbox> — check that mailbox",
+// never a green tick. Each test opens a real conversation with the mail server,
+// so the server allows five a minute per organization and says so in its own
+// words when they are spent.
 //
 // THE TEST GOES WHERE THE OPERATOR SAYS, WITHIN THEIR OWN DOMAINS. The box is
-// pre-filled with the operator's own address tagged `+itms-test`: the identity
-// provider will not send a test to a sign-in account's own address, and a
-// tagged one lands in the same inbox on Microsoft 365 and Gmail. Until
-// 2026-09-23 the test could only go to the sending mailbox itself, which an
-// operator had to go and open separately. The server refuses any address
-// other than the sending address, the operator's own mailbox, or the
-// organization's sign-in domain (backend `realm_config`), so this box is not a
-// way to mail strangers.
+// pre-filled with the operator's own address tagged `+itms-test`, which lands
+// in the same inbox on Microsoft 365 and Gmail and is easy to find there. The
+// server refuses any address other than the sending address, the operator's
+// own mailbox, or the organization's sign-in domain (`app/core/mail.py`), so
+// this box is not a way to mail strangers.
 //
 // TLS IS ONE CHOICE OF THREE, not two independent switches. A configuration
 // carrying both StartTLS and SSL leaves the relay to decide what was meant.
@@ -39,10 +38,14 @@
 // save.
 //
 // SIGN-IN IS A PASSWORD OR A MICROSOFT 365 APPLICATION. For Microsoft the
-// realm's sign-in service fetches the token itself; the client secret follows
-// the password's rule exactly (never shown, sent only when typed). Switching
-// modes replaces the other credential server-side, so the console says so
-// before the save. Design: docs/superpowers/specs/2026-09-11-mail-oauth-design.md §3.
+// platform fetches a token for each message at Microsoft's own address,
+// `login.microsoftonline.com/<directory>`, built from the directory ID and
+// nowhere else -- the server refuses any other address with 422, because it is
+// where the client secret is presented -- so there is no field for it. The
+// client secret follows the password's rule exactly (never shown, sent only
+// when typed). Switching modes replaces the other credential server-side, so
+// the console says so before the save. Design:
+// docs/superpowers/specs/2026-09-11-mail-oauth-design.md §3.
 
 import { useEffect, useState } from "react";
 
@@ -210,7 +213,9 @@ export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolea
     form.authType === "token" &&
     (form.username.trim() === "" ||
       form.tokenClientId.trim() === "" ||
-      form.tokenUrl.trim() === "" ||
+      // Microsoft's own address, or nothing: a saved address that is not one
+      // reads as no directory, and the server would refuse it.
+      tenantOf(form.tokenUrl) === "" ||
       (!savedAsMicrosoft && form.tokenClientSecret === ""));
   const complete =
     form.host.trim() !== "" &&
@@ -219,7 +224,6 @@ export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolea
     !passwordWithoutUsername &&
     !microsoftIncomplete;
   const passwordSaved = settings.data?.authenticated === true && !savedAsMicrosoft;
-  const customTokenUrl = form.tokenUrl !== "" && tenantOf(form.tokenUrl) === "";
   const editable = canEdit && settings.data != null;
 
   function set<K extends keyof EmailForm>(key: K, value: EmailForm[K]) {
@@ -386,15 +390,12 @@ export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolea
               {form.authType === "password" ? (
                 <Field
                   label={t("settings.email.password")}
-                  // THE PASSWORD LIVES AT THE IDENTITY PROVIDER, IN BOTH STATES.
-                  // Confirmed against `backend/app/modules/user_admin/realm_config.py`:
-                  // `set_smtp` writes it into the Keycloak realm's own
-                  // `smtpServer` block, `get_smtp` strips it on every read, and
-                  // it is Keycloak itself — via `kc_client.py`'s
-                  // `execute-actions-email` — that connects to the mail server
-                  // and sends with it. This platform never stores it; that is
-                  // true whether or not one is currently set, so both branches
-                  // below say the same thing about custody, not opposite ones.
+                  // THE PASSWORD LIVES IN THE VAULT, IN BOTH STATES (own
+                  // authentication design §7, invariant 3): the server keeps
+                  // it as a `Credential(type="account_mail")`, opens it only to
+                  // send, and returns it on no read. That is true whether or not
+                  // one is currently set, so both branches below say the same
+                  // thing about custody, not opposite ones.
                   help={
                     passwordSaved
                       ? t("settings.email.passwordHelpSet")
@@ -453,17 +454,9 @@ export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolea
               )}
             </div>
             {form.authType === "token" ? (
-              <details className="form-hint" open={customTokenUrl} style={{ marginTop: 10 }}>
+              <details className="form-hint" style={{ marginTop: 10 }}>
                 <summary>{t("settings.email.advanced")}</summary>
                 <div className="form-grid" style={FOLDING_FORM_GRID}>
-                  <Field label={t("settings.email.tokenAddress")}>
-                    <input
-                      className={inputClass}
-                      value={form.tokenUrl}
-                      disabled={!editable}
-                      onChange={(event) => set("tokenUrl", event.target.value)}
-                    />
-                  </Field>
                   <Field
                     label={t("settings.email.scope")}
                     help={t("settings.email.scopeHelp")}
@@ -479,7 +472,7 @@ export function EmailTab({ canManage, canEdit = canManage }: { canManage: boolea
               </details>
             ) : null}
             {form.authType === "token" && !savedAsMicrosoft && settings.data?.authenticated ? (
-              // Said before the save: the realm holds one credential for the
+              // Said before the save: the vault holds one credential for the
               // mail server, and choosing Microsoft replaces it.
               <p role="status" className="notice gold" style={{ marginTop: 10 }}>
                 <Icon name={KIND_ICON.warn} size={16} />

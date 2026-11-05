@@ -116,6 +116,9 @@ import { AuditPage } from "./modules/audit/AuditPage";
 import { AgentReleasesPage } from "./modules/agent-releases/AgentReleasesPage";
 import { EnrollmentPage } from "./modules/enrollment/EnrollmentPage";
 import { ProfilePage } from "./modules/profile/ProfilePage";
+// Your own sign-in security (`/profile/security`), not the fleet's security
+// posture above (`modules/security`): two pages with the same component name.
+import { SecurityPage as YourSecurityPage } from "./modules/profile/SecurityPage";
 import { SettingsPage } from "./modules/settings/SettingsPage";
 import { ClientDetailPage } from "./modules/clients/ClientDetailPage";
 import { ClientsPage } from "./modules/clients/ClientsPage";
@@ -287,8 +290,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   // A REQUESTER ON AN OPERATOR PAGE IS SENT TO THE PORTAL. Every such page
   // would answer them with permission errors; the server refuses the data
-  // either way, so this is a courtesy, not a control (invariant 6).
-  if (portalOnly && !location.pathname.startsWith("/portal") && location.pathname !== "/profile") {
+  // either way, so this is a courtesy, not a control (invariant 6). Their own
+  // profile and their own security are every person's.
+  if (
+    portalOnly &&
+    !location.pathname.startsWith("/portal") &&
+    location.pathname !== "/profile" &&
+    location.pathname !== "/profile/security"
+  ) {
     return <Navigate to="/portal" replace />;
   }
 
@@ -506,20 +515,14 @@ export function LanguageBridge({ children }: { children: React.ReactNode }) {
       if (!hasSession(queryClient)) return;
       api
         .updateMe({ locale: language })
-        .then((saved) => {
-          // Saved here, but the sign-in pages did not follow: not an error,
-          // so not the red toast -- the language did change and was kept.
-          if (saved.identity_locale_synced === false) {
-            setToasts((current) => [
-              ...current,
-              { id: `lang-${++toastSeq}`, title: translate("profile.page.languageNotMirrored"), tone: "info" },
-            ]);
-          }
+        .then(() =>
           // The cached `/me` carries the saved locale; left stale, the profile
           // page would seed its form from the old value and an unrelated save
-          // could flip the language back.
-          return queryClient.invalidateQueries({ queryKey: ["me"] });
-        })
+          // could flip the language back. The sign-in pages are this console's
+          // own (own authentication phase 1): there is no second place the
+          // language must reach, and nothing more to tell the person.
+          queryClient.invalidateQueries({ queryKey: ["me"] }),
+        )
         .catch(() => {
           setToasts((current) => [
             ...current,
@@ -1411,11 +1414,8 @@ export default function App() {
             {/* A landing page until 2026-09-23, when its pages moved into the
                 rail itself. Kept as a redirect so a bookmark still lands. */}
             <Route path="/assets" element={<Navigate to="/licenses" replace />} />
-            {/* YOUR OWN RECORD, AND A ROUTE RATHER THAN A TAB. The credential
-                steps this page hosts leave for the sign-in pages and return to
-                a URL; a Settings tab lives in React state and is not in the
-                URL, so every one of them used to land back on Settings'
-                default tab. Gated on authentication and on nothing else --
+            {/* YOUR OWN RECORD, AND A ROUTE RATHER THAN A TAB: it is not
+                administration. Gated on authentication and on nothing else --
                 `PATCH /me` takes no user id, and a permission that could
                 withhold a person's own display name from them would have no
                 purpose. */}
@@ -1424,6 +1424,19 @@ export default function App() {
               element={
                 <RequireAuth>
                   <ProfilePage />
+                </RequireAuth>
+              }
+            />
+            {/* YOUR SECURITY: password, passkeys, the authenticator app,
+                recovery codes, remembered devices and sessions (own
+                authentication design §2). Gated like `/profile`, for the same
+                reason: every route behind it answers for the session's own
+                person. */}
+            <Route
+              path="/profile/security"
+              element={
+                <RequireAuth>
+                  <YourSecurityPage />
                 </RequireAuth>
               }
             />

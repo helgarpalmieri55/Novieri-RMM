@@ -46,9 +46,10 @@ describe("Settings: configuration every client shares (phase 3 design §2)", () 
     holdOnSomeClients();
     renderSettings("/settings?tab=users");
     expect(await screen.findByRole("row", { name: /casey@example\.com/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create user" })).toBeDisabled();
-    // "Create user" is also disabled while the email is empty, for anyone: the
-    // field itself is what only `users.manage` on every client unlocks.
+    // RE-POINTED (own authentication design §7): "Create user" is "Send invitation".
+    expect(screen.getByRole("button", { name: "Send invitation" })).toBeDisabled();
+    // "Send invitation" is also disabled while the email is empty, for anyone:
+    // the field itself is what only `users.manage` on every client unlocks.
     expect(screen.getByLabelText("Email")).toBeDisabled();
   });
 

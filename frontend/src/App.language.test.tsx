@@ -96,30 +96,40 @@ describe("LanguageBridge without a session (D20)", () => {
 });
 
 describe("LanguageBridge: the sign-in pages", () => {
-  it("says so, without an error tone, when the save worked but the sign-in pages did not follow", async () => {
-    apiRef.current = {
-      updateMe: vi.fn().mockResolvedValue({ locale: "es", identity_locale_synced: false }),
-      me: vi.fn().mockResolvedValue({ locale: "es" }),
-    };
-    render(withClient(<LanguageBridge><Picker /></LanguageBridge>));
-    await userEvent.click(screen.getByRole("button", { name: "current en" }));
-    const toast = await screen.findByText(/Guardado\. Las páginas de inicio de sesión no se pudieron cambiar/);
-    expect(toast).toBeInTheDocument();
-    expect(screen.queryByText("No se pudo guardar el idioma.")).toBeNull();
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(getLanguage()).toBe("es");
-  });
-
-  it.each([true, null, undefined])("is silent when identity_locale_synced is %s", async (flag) => {
-    const updateMe = vi.fn().mockResolvedValue({ locale: "es", identity_locale_synced: flag });
+  // RE-POINTED (own authentication phase 1): these pinned a note for a
+  // language the identity provider's sign-in pages did not take (a flag
+  // `PATCH /me` used to carry). Those pages are this console's own now and
+  // the flag is gone (Task 8), so a save that worked says nothing at all --
+  // which is what is pinned now.
+  it("says nothing after a save that worked: the sign-in pages are the console's own", async () => {
+    const updateMe = vi.fn().mockResolvedValue({ locale: "es" });
     apiRef.current = { updateMe, me: vi.fn().mockResolvedValue({ locale: "es" }) };
     render(withClient(<LanguageBridge><Picker /></LanguageBridge>));
     await userEvent.click(screen.getByRole("button", { name: "current en" }));
     await waitFor(() => expect(updateMe).toHaveBeenCalledTimes(1));
     // Let the promise chain behind the click settle before asserting an absence.
     await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText(/páginas de inicio de sesión no se pudieron/)).toBeNull();
+    // Kept from the test this re-points: a save that worked is not a failure.
+    expect(screen.queryByText("No se pudo guardar el idioma.")).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(getLanguage()).toBe("es");
   });
+
+  it.each([{ locale: "es" }, { locale: "es", display_name: "Ada" }, {}])(
+    "is silent whatever the saved profile carries (%o)",
+    async (answer) => {
+      const updateMe = vi.fn().mockResolvedValue(answer);
+      apiRef.current = { updateMe, me: vi.fn().mockResolvedValue({ locale: "es" }) };
+      render(withClient(<LanguageBridge><Picker /></LanguageBridge>));
+      await userEvent.click(screen.getByRole("button", { name: "current en" }));
+      await waitFor(() => expect(updateMe).toHaveBeenCalledTimes(1));
+      // Let the promise chain behind the click settle before asserting an absence.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(screen.queryByRole("status")).toBeNull();
+    },
+  );
 });
 
 describe("LanguageBridge: the cached /me", () => {

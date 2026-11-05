@@ -53,13 +53,13 @@ import type {
 import type { CategoryOut, QueueOut } from "../service-desk/types";
 import type { SettingsOut as SlaSettingsOut, SettingsUpdate as SlaSettingsUpdate } from "../sla/types";
 import type {
-  CreatedUserOut,
   CurrentOrgOut,
   CurrentOrgUpdate,
   EffectivePermissionsOut,
   EmailSettingsOut,
   EmailSettingsUpdate,
-  MailResultOut,
+  InviteLinkOut,
+  InviteOut,
   MeProfileUpdate,
   PermissionCatalogueOut,
   RoleAssign,
@@ -69,12 +69,15 @@ import type {
   RoleOut,
   RolePermissionsOut,
   RoleUpdate,
+  SessionSettingsOut,
+  SessionSettingsUpdate,
   TestSendIn,
   TestSendOut,
-  UserCreate,
+  UserInvite,
   UserListOut,
   UserOut,
 } from "./types";
+import type { StepUpRun } from "../../components/stepUp";
 
 // A 403 is an answer, not a fault: retrying a permission wall changes nothing
 // and delays the "you do not hold this" message the operator needs.
@@ -90,6 +93,7 @@ export const HEALTH_SETTINGS_KEY = "health-settings";
 export const BUDGET_SETTINGS_KEY = "budget-settings";
 export const EMAIL_SETTINGS_KEY = "email-settings";
 export const MCP_CONNECTIONS_KEY = "mcp-connections";
+export const SESSION_SETTINGS_KEY = "session-settings";
 
 // --------------------------------------------------------------------------
 // Organization profile — GET/PATCH /api/v1/orgs/current
@@ -504,6 +508,31 @@ export function useTestEmailMutation() {
 }
 
 // --------------------------------------------------------------------------
+// Sessions — GET/PUT /settings/sessions (own authentication design §2.4)
+// --------------------------------------------------------------------------
+
+export function useSessionSettings(enabled: boolean) {
+  const api = useApi();
+  return useQuery<SessionSettingsOut, ApiError>({
+    queryKey: [SESSION_SETTINGS_KEY],
+    queryFn: () => api.getSessionSettings(),
+    enabled,
+    ...NO_RETRY,
+  });
+}
+
+export function useUpdateSessionSettingsMutation() {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation<SessionSettingsOut, ApiError, SessionSettingsUpdate>({
+    mutationFn: (body) => api.putSessionSettings(body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [SESSION_SETTINGS_KEY] });
+    },
+  });
+}
+
+// --------------------------------------------------------------------------
 // Access control — roles, the permission matrix, users, the account profile
 // --------------------------------------------------------------------------
 //
@@ -679,15 +708,25 @@ export function useEffectivePermissions(userId: string | null) {
   });
 }
 
-export function useCreateUserMutation() {
+/**
+ * The invitation (own authentication design §7). Invalidates the directory
+ * (the person is listed, invited) and the roles (their holder counts moved).
+ *
+ * `gcTime: 0`: without mail its answer is the one-time link. The tab moves it
+ * into its own state and resets the mutation, and `reset()` alone only
+ * detaches it -- TanStack would keep it for five minutes (Task 12 review,
+ * Important 1).
+ */
+export function useInviteUserMutation() {
   const api = useApi();
   const queryClient = useQueryClient();
-  return useMutation<CreatedUserOut, ApiError, UserCreate>({
-    mutationFn: (body) => api.createUser(body),
+  return useMutation<InviteOut, ApiError, UserInvite>({
+    mutationFn: (body) => api.inviteUser(body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [USERS_KEY] });
       void queryClient.invalidateQueries({ queryKey: [ROLES_KEY] });
     },
+    gcTime: 0,
   });
 }
 
@@ -729,23 +768,48 @@ export function useSetUserEnabledMutation() {
 }
 
 /**
- * The two mails.
- *
- * Neither writes a row this page reads, so neither invalidates anything; the
- * result is ephemeral and is rendered where it was triggered — the same shape
- * `useTestChannelMutation` above uses, for the same reason.
+ * A fresh invitation link, emailed or shown once without mail. Writes no row
+ * this page reads, so it invalidates nothing; its result is rendered where it
+ * was triggered. `gcTime: 0` for the link, as for the invitation.
  */
-export function useResetPasswordMutation() {
+export function useResendInviteMutation() {
   const api = useApi();
-  return useMutation<MailResultOut, ApiError, string>({
-    mutationFn: (userId) => api.resetUserPassword(userId),
+  return useMutation<InviteLinkOut, ApiError, string>({
+    mutationFn: (userId) => api.resendInvite(userId),
+    gcTime: 0,
   });
 }
 
-export function useResendEnrolmentMutation() {
+/** The invitation's link stops working; the directory is read again. */
+export function useCancelInviteMutation() {
   const api = useApi();
-  return useMutation<MailResultOut, ApiError, string>({
-    mutationFn: (userId) => api.resendUserEnrolment(userId),
+  const queryClient = useQueryClient();
+  return useMutation<void, ApiError, string>({
+    mutationFn: (userId) => api.cancelInvite(userId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [USERS_KEY] });
+      void queryClient.invalidateQueries({ queryKey: [ROLES_KEY] });
+    },
+  });
+}
+
+/**
+ * Reset another person's second factors (design §7), through the caller's
+ * `useStepUp().run`: the server asks for YOUR OWN second factor when it was
+ * not confirmed in the last 10 minutes (§2.5).
+ */
+export function useResetUserFactorsMutation(run: StepUpRun) {
+  const api = useApi();
+  return useMutation<void, Error, string>({
+    mutationFn: (userId) => run(() => api.resetUserFactors(userId)),
+  });
+}
+
+/** End every session the person has open. Nothing this page reads changes. */
+export function useEndUserSessionsMutation() {
+  const api = useApi();
+  return useMutation<void, ApiError, string>({
+    mutationFn: (userId) => api.endUserSessions(userId),
   });
 }
 

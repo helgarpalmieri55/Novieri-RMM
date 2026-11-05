@@ -91,4 +91,21 @@ export const components: Shape<typeof en> = {
     cronHelp:
       "Cinco campos: minuto, hora, día del mes, mes y día de la semana. La cuadrícula dibuja las expresiones cuyo minuto es 0 y cuyo día del mes y mes son ambos *.",
   },
+  stepUp: {
+    title: "Confirma que eres tú",
+    body: "Confirma tu segundo factor para continuar.",
+    loading: "Cargando tus segundos factores…",
+    usePasskey: "Usar una clave de acceso",
+    code: "Código de tu aplicación de autenticación",
+    confirm: "Confirmar",
+    useRecovery: "Usar un código de recuperación",
+    recoveryCode: "Código de recuperación",
+    recoveryHelp: {
+      one: "Te queda {count} código. Funciona una sola vez.",
+      other: "Te quedan {count} códigos. Cada uno funciona una sola vez.",
+    },
+    confirmRecovery: "Usar este código",
+    noMethod: "Tu cuenta no tiene ningún segundo factor, así que este cambio no se puede confirmar. Pide a un administrador que restablezca tus segundos factores.",
+    cancelled: "No se cambió nada: se cerró la confirmación.",
+  },
 };
