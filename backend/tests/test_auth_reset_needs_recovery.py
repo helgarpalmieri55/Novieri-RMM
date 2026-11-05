@@ -14,7 +14,8 @@ mailed reset link and no second factor has been verified since -- a passkey, a
 confirmed TOTP or a recovery code, at sign-in or at step-up. The mark
 (`auth_passwords.mail_reset_at`) is cleared by any later second-factor
 verification, by a password change while signed in (or any password not set
-by mail), and by the server's recovery link, which stays the way back.
+by mail), and by the server's recovery link, which stays the way back -- and,
+while the mark is set, makes the person choose a new password first.
 Invitation-set passwords are not covered: that is onboarding.
 
 THE RACE. `reset_password`'s consume-time factor check and `reset_factors`'
@@ -311,7 +312,10 @@ async def test_a_password_set_by_invitation_is_not_covered(auth_env: Any) -> Non
 
 async def test_the_recovery_link_clears_the_mark(auth_env: Any) -> None:
     """The way back the refusal names: the recovery link removes the factors
-    and the mark together, so the administrator's reset is allowed again."""
+    and the mark together, so the administrator's reset is allowed again.
+    With the mark set it asks for a new password first (operator decision
+    2026-11-05, «Pedir contraseña nueva si hay marca»;
+    `tests/test_auth_recover_command.py`), so the person gives one."""
     org = await auth_env.create_org("rnr-recover")
     admin = await signed_in(auth_env, org, "org-admin")
     who = await signed_in(auth_env, org, "technician")
@@ -319,7 +323,9 @@ async def test_the_recovery_link_clears_the_mark(auth_env: Any) -> None:
     link = await recover.issue_recovery_link(settings=auth_env.settings, email=who.email)
 
     accepted = await auth_env.client.post(
-        "/api/v1/auth/recover/accept", headers=browser(), json={"token": link.split("#", 1)[1]}
+        "/api/v1/auth/recover/accept",
+        headers=browser(),
+        json={"token": link.split("#", 1)[1], "password": "Saffron-Harbour-Quartz-4127"},
     )
 
     assert accepted.json() == {"state": "enroll_required"}, accepted.text

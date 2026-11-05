@@ -19,7 +19,7 @@ design §2, §6.4).
     POST   /auth/invite/details             who a one-time invitation is for
     POST   /auth/invite/accept              its password -> the first factor
     POST   /auth/recover/details            who the server's recovery link is for
-    POST   /auth/recover/accept             the factors go -> a new first factor
+    POST   /auth/recover/accept             the factors go (a mailed password too) -> a new factor
     GET    /me/security                     the caller's factors, devices, sessions
     PUT    /me/password
     DELETE /me/passkeys/{id}, /me/totp, /me/trusted-devices/{id}, /me/sessions/{id}
@@ -201,6 +201,18 @@ class InviteAcceptIn(BaseModel):
     password: str
 
 
+class RecoveryAcceptIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: No Pydantic bound on either (Task 7's decision 16), as `InviteAcceptIn`:
+    #: a field failure repeats its input in the 422, and both are secrets.
+    #: `action_tokens.org_of` bounds the token, `staff_password.require_acceptable`
+    #: the password. The password is needed while an emailed link set the
+    #: current one, optional otherwise, and applied whenever it is given
+    #: (operator decisions 2026-11-05, `flows.accept_recovery`).
+    token: str
+    password: str | None = None
+
+
 class InviteOut(BaseModel):
     """Who an invitation is for, for its page."""
 
@@ -209,9 +221,16 @@ class InviteOut(BaseModel):
 
 
 class RecoveryOut(BaseModel):
-    """Who a recovery link is for, for its page."""
+    """Who a recovery link is for, and whether it asks for a new password, for its page."""
 
     email: str
+    password_required: bool = Field(
+        description=(
+            "True while the account's password was last set with an emailed link: accepting "
+            "the link then needs a new `password`. Otherwise one is optional, and applied "
+            "when given."
+        ),
+    )
 
 
 class SignInOut(BaseModel):
@@ -532,8 +551,10 @@ async def accept_invite(body: InviteAcceptIn, request: Request, response: Respon
 
 @router.post("/recover/details", response_model=RecoveryOut, dependencies=[Depends(_LINK)])
 async def recovery_details(body: LinkTokenIn, request: Request) -> RecoveryOut:
-    """The address a recovery link is for. Leaves the link unused."""
-    return RecoveryOut(email=await flows.recovery_details(request, token=body.token))
+    """The address a recovery link is for, and whether accepting it needs a
+    new password. Leaves the link unused."""
+    email, password_required = await flows.recovery_details(request, token=body.token)
+    return RecoveryOut(email=email, password_required=password_required)
 
 
 @router.post(
@@ -542,10 +563,14 @@ async def recovery_details(body: LinkTokenIn, request: Request) -> RecoveryOut:
     response_model_exclude_unset=True,
     dependencies=[Depends(_LINK)],
 )
-async def accept_recovery(body: LinkTokenIn, request: Request, response: Response) -> SignInOut:
+async def accept_recovery(
+    body: RecoveryAcceptIn, request: Request, response: Response
+) -> SignInOut:
     """Use the server's recovery link: the second factors, remembered browsers
-    and sessions go, and a new first factor is set up next."""
-    step = await flows.accept_recovery(request, token=body.token)
+    and sessions go, and a new first factor is set up next. A new `password`
+    is applied when given, and needed while the current one was last set with
+    an emailed link (409 `recovery_needs_password` without one)."""
+    step = await flows.accept_recovery(request, token=body.token, password=body.password)
     return _answer(response, step)
 
 

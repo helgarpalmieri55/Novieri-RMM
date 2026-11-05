@@ -9,6 +9,7 @@ does.
 """
 
 import json
+import logging
 import smtplib
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -495,6 +496,85 @@ async def test_a_failure_is_classified_without_provider_text(
     assert str(refused) == reason.value
     assert refused.__cause__ is None and refused.__suppress_context__
     assert RELAY_PASSWORD not in str(refused)
+
+
+#: Where OpenBao lives in the HTTP errors below: it must reach no log line.
+_VAULT_URL = "https://openbao.internal.SENTINEL:8200/v1/transit/decrypt/org-1"
+
+
+def _vault_errors() -> list[httpx.HTTPError]:
+    """What `OpenBaoVaultService._unwrap_dek` raises when OpenBao does not
+    open the data key: a transport error (refused, timed out) or its
+    `raise_for_status` on a sealed (503) or refusing (403) vault."""
+    request = httpx.Request("POST", _VAULT_URL)
+    return [
+        httpx.ConnectError(f"connection refused to {_VAULT_URL}", request=request),
+        httpx.ReadTimeout(f"timed out reading {_VAULT_URL}", request=request),
+        httpx.HTTPStatusError(
+            f"Server error '503 Service Unavailable' for url '{_VAULT_URL}'",
+            request=request,
+            response=httpx.Response(503, request=request),
+        ),
+        httpx.HTTPStatusError(
+            f"Client error '403 Forbidden' for url '{_VAULT_URL}'",
+            request=request,
+            response=httpx.Response(403, request=request),
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    "error", _vault_errors(), ids=["connect", "timeout", "sealed", "forbidden"]
+)
+async def test_a_vault_that_does_not_open_the_sign_in_is_sign_in_unavailable(
+    world: _World,
+    smtp: type[_RecordingSMTP],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    error: httpx.HTTPError,
+) -> None:
+    """Fix 3 review, Minor 2: the vault's backend not answering is a send that
+    failed (`MailSendFailed(SIGN_IN_UNAVAILABLE)`), not an exception out of
+    the caller's transaction -- so `notices.deliver` never raises for
+    delivery, and a later notice can never roll back an earlier one. Nothing
+    was checked out, so nothing is recorded and nothing is sent. One static
+    WARNING says so, with neither the exception's text (it names OpenBao's
+    address and the key) nor a traceback. Let the httpx error through and
+    this raises it: red."""
+    await _save(world)
+
+    async def unavailable(*_args: Any, **_kwargs: Any) -> str:
+        raise error
+
+    monkeypatch.setattr(world.vault, "checkout", unavailable)
+    with caplog.at_level(logging.WARNING, logger="app.core.mail"):
+        refused = await _send_refused(world)
+
+    assert refused.reason is MailFailure.SIGN_IN_UNAVAILABLE
+    assert refused.__cause__ is None and refused.__suppress_context__
+    assert smtp.instances == []
+    assert [e for e in await _audit(world) if e.action == "email.credential_used"] == []
+    (record,) = [r for r in caplog.records if r.name == "app.core.mail"]
+    assert record.levelno == logging.WARNING
+    assert record.getMessage() == "account mail not sent: the vault did not open the relay sign-in"
+    assert record.exc_info is None
+    assert "SENTINEL" not in caplog.text and "openbao" not in caplog.text
+
+
+async def test_an_error_that_is_not_the_vaults_is_not_swallowed(
+    world: _World, smtp: type[_RecordingSMTP], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the vault's transport and HTTP errors are a failed send: anything
+    else -- a programming error -- still raises, as it did."""
+    await _save(world)
+
+    async def broken(*_args: Any, **_kwargs: Any) -> str:
+        raise RuntimeError("a defect, not the vault")
+
+    monkeypatch.setattr(world.vault, "checkout", broken)
+    with pytest.raises(RuntimeError):
+        await _send(world)
+    assert smtp.instances == []
 
 
 async def test_a_header_the_relay_cannot_carry_is_unsendable(

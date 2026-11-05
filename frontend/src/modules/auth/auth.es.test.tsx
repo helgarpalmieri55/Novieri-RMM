@@ -92,6 +92,18 @@ describe("the sign-in pages in Spanish", () => {
     const { container } = renderAuth("/recover#tok");
     expect(await screen.findByRole("heading", { name: "Recupera tu cuenta" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Recuperar mi cuenta" })).toBeInTheDocument();
+    expect(screen.getByText(/Opcional: elige ahora una contraseña nueva/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Contraseña nueva")).toHaveAttribute("type", "password");
+    expectNoEnglish(container);
+  });
+
+  it("the server's recovery link, when an emailed link set the password", async () => {
+    calls.getRecovery.mockResolvedValue({ email: "owner@example.test", password_required: true });
+    const { container } = renderAuth("/recover#tok");
+    expect(await screen.findByText(/Tu contraseña se puso por última vez con un enlace enviado por correo/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Contraseña nueva")).toHaveAttribute("type", "password");
+    expect(screen.getByLabelText("La misma contraseña otra vez")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Recuperar mi cuenta" })).toBeInTheDocument();
     expectNoEnglish(container);
   });
 

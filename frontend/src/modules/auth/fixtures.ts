@@ -44,7 +44,7 @@ export const fixtures: FixtureMap = {
   resetPassword: () => undefined,
   getInvite: () => ({ email: "dana.okafor@toeshee.example", display_name: "Dana Okafor" }),
   acceptInvite: () => undefined,
-  getRecovery: () => ({ email: "helgar.palmieri@toeshee.example" }),
+  getRecovery: () => ({ email: "helgar.palmieri@toeshee.example", password_required: false }),
   acceptRecovery: () => undefined,
   logoutEverywhere: () => undefined,
 };

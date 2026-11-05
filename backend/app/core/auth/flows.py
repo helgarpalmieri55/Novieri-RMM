@@ -49,6 +49,7 @@ from app.core.auth.factors import (
     count_failure,
     gate,
     lock_person,
+    set_by_mail,
     summary,
 )
 from app.core.auth.failures import check_allowed, record_success, reset_factor
@@ -1047,32 +1048,114 @@ async def _recovering(session: AsyncSession, token: str, *, consume: bool) -> Us
     return user
 
 
-async def recovery_details(request: Request, *, token: str) -> str:
-    """The address a recovery link is for. Leaves the link unused."""
+#: The `code` of `accept_recovery`'s refusal while an emailed link set the
+#: password and the request brought no new one (operator decision 2026-11-05,
+#: «Pedir contraseña nueva si hay marca»). The console's recovery page
+#: matches it: change it with `frontend/src/modules/auth/RecoverPage.tsx`.
+RECOVERY_NEEDS_PASSWORD = "recovery_needs_password"
+
+
+def _needs_password() -> AuthRefusal:
+    return AuthRefusal(
+        status.HTTP_409_CONFLICT,
+        code=RECOVERY_NEEDS_PASSWORD,
+        detail=tr(
+            "Your password was last set with an emailed link. Choose a new password to finish "
+            "recovering your account."
+        ),
+    )
+
+
+async def recovery_details(request: Request, *, token: str) -> tuple[str, bool]:
+    """The address a recovery link is for, and whether accepting it needs a
+    new password: the "password set by mail" mark (`factors.set_by_mail`).
+    Leaves the link unused.
+
+    Read WITHOUT the person's lock: it is what the page asks first, and only
+    a hint. `accept_recovery` reads the mark again under the lock, so a mail
+    reset that lands between this answer and the press is caught there."""
     org_id = action_tokens.org_of(token)
     if org_id is None:
         raise _invalid_link()
     async with _identity_session(org_id, _engine(request)) as session:
-        return (await _recovering(session, token, consume=False)).email
+        user = await _recovering(session, token, consume=False)
+        return user.email, await set_by_mail(session, user.id)
 
 
-async def accept_recovery(request: Request, *, token: str) -> SignIn:
+async def accept_recovery(request: Request, *, token: str, password: str | None = None) -> SignIn:
     """Every second factor, every remembered device and every session go; a
-    session waiting for a new first factor is opened. The password stays
-    (plan decision 10: who recovers lost the factors, not the password), and
-    the session opened here is pending until `enroll/finish`."""
+    session waiting for a new first factor is opened, pending until
+    `enroll/finish`.
+
+    A NEW PASSWORD IS ALWAYS OFFERED, AND APPLIED WHEN GIVEN (operator
+    decision 2026-11-05, «Ofrecerla siempre, aplicar»; design §7). The link
+    already grants the whole account, so letting its holder also set the
+    password grants nothing new; and it closes what the mark alone cannot: a
+    mark cleared between the details and this press, and a later recovery
+    after somebody holding the mailbox and a factor cleared it by signing in.
+    A given `password` is held to `staff_password.require_acceptable` (422
+    `password_rejected`, the answer of every other password route), stored by
+    `staff_password.store` (which clears the mark) in this transaction, and
+    recorded and told as a mailed reset's is (`reset_password`):
+    `auth.password_changed` with `via` the link's purpose, and the
+    `password_changed` notice. No password, and an empty one, is none: the
+    password stays (plan decision 10: who recovers lost the factors, not the
+    password) --
+
+    UNLESS AN EMAILED LINK SET IT (operator decision 2026-11-05, «Pedir
+    contraseña nueva si hay marca»). While the "password set by mail" mark is
+    set (`factors.set_by_mail`) the current password may be whoever holds the
+    mailbox's. Kept, it would still work after the person recovered; and the
+    mark goes at their first factor, so a later factor reset would hand the
+    account to the mailbox again. So then no password is a 409
+    `recovery_needs_password`, and the page asks.
+
+    Both refusals are raised inside the block, when nothing but the `consume`
+    has been written and BEFORE any notice: it rolls back, the link stays
+    usable, and no mail went. The mark is read under `factors.lock_person` --
+    the lock `reset_password` and `user_admin.service.reset_factors` take --
+    and before `clear_second_factors`, which clears it; so a mail reset that
+    commits between the details (`recovery_details`) and this press is waited
+    for and seen, never read as absent.
+
+    THE NOTICES ARE THE LAST ACTS (fix round 3): a notice is mail, which does
+    not roll back. Both follow the new session's creation, the last step that
+    can fail: `password_changed` first, when this press set one, then
+    `factors_reset`."""
     org_id = action_tokens.org_of(token)
     if org_id is None:
         raise _invalid_link()
     async with _identity_session(org_id, _engine(request)) as session:
         user = await _recovering(session, token, consume=True)
+        await lock_person(session, user.id)
+        # Read HERE, under the lock and before `clear_second_factors`, which
+        # clears the mark: read after it, this refusal would never run.
+        if not password and await set_by_mail(session, user.id):
+            raise _needs_password()
+        password_set = False
+        if password:
+            # Raises a 422 that rolls the `consume` back: the link stays usable.
+            await staff_password.require_acceptable(
+                password,
+                email=user.email,
+                display_name=user.display_name,
+                org_name=await staff_password.organization_name(session, org_id),
+            )
+            await staff_password.store(session, org_id=org_id, user_id=user.id, plain=password)
+            await _audit(session, user, "auth.password_changed", {"via": action_tokens.RECOVER})
+            password_set = True
         await clear_second_factors(session, user.id)
         await end_all_for_user(session, user.id, "factors_reset")
         await revoke_all_for_user(session, user.id)
         await _audit(session, user, "user.recovery_link_used", {"email": user.email})
         started = await _started(session, request, user, state="enroll_required")
-        # The last act (fix round 3): after the new session is made, so a
+        # The last acts (fix round 3): after the new session is made, so a
         # failure there cannot leave a mail -- and a relay checkout whose
-        # audit row rolled back -- for a recovery that did not happen.
+        # audit row rolled back -- for a recovery that did not happen. The
+        # password first, in the order the acts were done, then the factors.
+        if password_set:
+            await notices.tell(
+                session, user, "password_changed", vault=_vault(request), actor_id=None
+            )
         await notices.tell(session, user, "factors_reset", vault=_vault(request), actor_id=None)
         return started

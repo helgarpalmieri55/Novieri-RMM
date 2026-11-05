@@ -112,6 +112,12 @@ export const auth = {
     title: "Recover your account",
     intro: "This link was made on the server for <b>{email}</b>.",
     what: "Recovering removes this account's second factors and recovery codes. You then add a new second factor and save new recovery codes before the console opens.",
+    // The details said an emailed link set the password (operator decision 2026-11-05).
+    newPassword:
+      "Your password was last set with an emailed link. Choose a new password to finish recovering your account; the old one stops working.",
+    // Every other recovery offers one (operator decision 2026-11-05, «Ofrecerla siempre, aplicar»).
+    optionalPassword:
+      "Optional: set a new password now, and the old one stops working. Leave both fields empty to keep your current password.",
     submit: "Recover my account",
     invalid: "This recovery link has expired or was already used. Someone with access to the server can make a new one.",
   },

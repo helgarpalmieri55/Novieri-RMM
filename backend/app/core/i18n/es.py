@@ -4483,6 +4483,11 @@ CATALOG: dict[str, str] = {
         "métodos de inicio de sesión entregaría la cuenta a quien tenga ese buzón. Use el "
         "comando de recuperación del servidor y entregue el enlace a la persona en mano."
     ),
+    "Your password was last set with an emailed link. Choose a new password to finish "
+    "recovering your account.": (
+        "Su contraseña se puso por última vez con un enlace enviado por correo. Elija una "
+        "contraseña nueva para terminar de recuperar su cuenta."
+    ),
     "your password is locked after too many failed attempts; set a new one with the link on "
     "the sign-in page, or ask an administrator to reset your sign-in methods": (
         "tu contraseña quedó bloqueada tras demasiados intentos fallidos; elige una nueva con el "

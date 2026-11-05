@@ -187,7 +187,11 @@ async def deliver(
 ) -> bool:
     """True when the relay took it. Never raises for delivery: no configured
     relay, or a relay that refused (`MailSendFailed`, whose `reason` is from a
-    fixed vocabulary and already audited by Task 3), is False."""
+    fixed vocabulary and already audited by Task 3), is False -- and so is a
+    vault that did not open the relay's sign-in (`SIGN_IN_UNAVAILABLE`, fix 3
+    review Minor 2), so a notice that closes a transaction after another one
+    cannot roll back the first. A database error still raises: the
+    transaction it happened in is already aborted."""
     try:
         await send_account_mail(
             session,

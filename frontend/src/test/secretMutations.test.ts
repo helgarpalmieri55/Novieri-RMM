@@ -51,6 +51,7 @@ const SRC = resolve(import.meta.dirname, "..");
 const SECRET_METHODS: Record<string, string> = {
   // A secret SENT, in the body.
   changePassword: "both passwords",
+  acceptRecovery: "the recovery link's token, and a new password: required while an emailed link set the current one, offered otherwise",
   enrollTotpConfirm: "a code from the authenticator app",
   updateEmailSettings: "the relay password, or the token client secret",
   createNotificationChannel: "a webhook secret, an SMTP password or a Microsoft client secret",
@@ -134,7 +135,8 @@ const NOT_SECRET: Record<string, string> = {
  * THE SECRET-BEARING MUTATION SITES, by file and method: the inventory. A new
  * one fails check 2 until it is added here, and check 1 until it is safe.
  * `reviewed` marks the seven 60cf695 fixed by hand, `useMutation` with
- * `gcTime: 0` and a `reset()` in the page, each pinned by the test named.
+ * `gcTime: 0` and a `reset()` in the page, each pinned by the test named --
+ * and the recovery page's `useSecretMutation`, whose test reads the cache too.
  */
 const SECRET_SITES: Record<string, { reviewed?: string }> = {
   "modules/profile/api.ts changePassword": { reviewed: "modules/profile/SecurityPage.test.tsx" },
@@ -144,6 +146,8 @@ const SECRET_SITES: Record<string, { reviewed?: string }> = {
   "modules/settings/api.ts inviteUser": { reviewed: "modules/settings/__tests__/users.test.tsx" },
   "modules/settings/api.ts resendInvite": { reviewed: "modules/settings/__tests__/users.test.tsx" },
   "modules/credentials/CredentialsPage.tsx checkoutCredential": { reviewed: "modules/credentials/CredentialsPage.test.tsx" },
+  // `useSecretMutation`; its test reads the mutation cache after a refused new password.
+  "modules/auth/RecoverPage.tsx acceptRecovery": { reviewed: "modules/auth/__tests__/recover.test.tsx" },
   "modules/settings/api.ts updateEmailSettings": {},
   "modules/settings/api.ts createNotificationChannel": {},
   "modules/settings/api.ts updateNotificationChannel": {},

@@ -33,7 +33,10 @@ and every checkout is followed at once by an `email.credential_used` audit row
 CALLER'S session, A CALLER MUST NOT LET `MailSendFailed` ROLL ITS SESSION
 BACK: catch it inside the `org_session` block and refuse afterwards, or the
 record of the checkout goes with the rollback.
-`app/api/v1/realm_settings.py::send_test_message` is the pattern.
+`app/api/v1/realm_settings.py::send_test_message` is the pattern. A vault
+whose backend does not answer is such a failure too
+(`SIGN_IN_UNAVAILABLE`, `_sign_in`), not an exception that ends the caller's
+transaction: then a notice sent after another can never roll the first back.
 
 MICROSOFT 365 (`auth_type="token"`). The relay signs in with a Microsoft
 application's client id and secret, exchanged per message for an app-only
@@ -53,6 +56,7 @@ to get that wrong. Neither imports this module.
 
 import asyncio
 import json
+import logging
 import re
 import smtplib
 import ssl
@@ -64,6 +68,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
+import httpx
 from cryptography.exceptions import InvalidTag
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -97,6 +102,8 @@ __all__ = [
     "send_smtp_sync",
     "split_address",
 ]
+
+logger = logging.getLogger(__name__)
 
 #: Seconds. Bounds one SMTP conversation (it was `delivery.py`'s
 #: `_SMTP_TIMEOUT_S`): an unbounded one holds a worker slot forever.
@@ -630,6 +637,21 @@ async def _sign_in(
         secret = await vault.checkout(session, org_id=org_id, credential_id=credential_id)
     except (ValueError, InvalidTag):
         raise MailSendFailed(MailFailure.SIGN_IN_MISSING) from None
+    except httpx.HTTPError:
+        # The vault's backend did not open the data key (fix 3 review, Minor
+        # 2): `OpenBaoVaultService._unwrap_dek` met a transport error --
+        # refused, reset, timed out -- or its `raise_for_status` met a sealed
+        # (503) or refusing (403) OpenBao. That is a send that failed, not an
+        # exception out of the caller's transaction: so `notices.deliver`
+        # truly never raises for delivery, and a later notice can never roll
+        # back one already sent. Nothing was checked out, so nothing is
+        # audited. Static, and no `exc_info`: the error's text names
+        # OpenBao's address and the organization's key.
+        logger.warning(
+            "account mail not sent: the vault did not open the relay sign-in",
+            extra={"org_id": org_id},
+        )
+        raise MailSendFailed(MailFailure.SIGN_IN_UNAVAILABLE) from None
     await audit_service.record(
         session,
         org_id=org_id,

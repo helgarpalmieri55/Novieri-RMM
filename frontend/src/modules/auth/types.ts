@@ -74,4 +74,20 @@ export interface InviteDetails {
 /** `POST /auth/recover/details {token}`: whose account the server's recovery link is for. */
 export interface RecoveryLink {
   email: string;
+  /**
+   * True while the account's password was last set with an emailed link: the
+   * recovery then needs a new password (operator decision 2026-11-05).
+   */
+  password_required: boolean;
+}
+
+/**
+ * `POST /auth/recover/accept`: the link's token, and a new password -- needed
+ * while the server asks for one (`RecoveryLink.password_required`, or a 409
+ * `recovery_needs_password`), optional otherwise, and applied whenever it is
+ * sent (operator decision 2026-11-05, «Ofrecerla siempre, aplicar»).
+ */
+export interface RecoveryAccept {
+  token: string;
+  password?: string;
 }

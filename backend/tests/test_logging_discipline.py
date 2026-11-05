@@ -438,7 +438,17 @@ def test_the_sweep_actually_finds_log_calls() -> None:
     `modules/agent_update/reconcile.py`, where one org's rollout tick fails
     and every other org is still ticked. It names the org and nothing else.
 
-    NOW 107, own authentication phase 1 final fix wave, two sites. K4 (Task
+    NOW 108, own authentication phase 1, fix 3 review Minor 2: one static
+    WARNING in `app/core/mail.py::_sign_in`, "account mail not sent: the
+    vault did not open the relay sign-in", when the vault's backend raises an
+    `httpx.HTTPError` at the relay credential's checkout (OpenBao refused,
+    timed out, sealed or forbidding). The send becomes `MailSendFailed(
+    SIGN_IN_UNAVAILABLE)` instead of an exception out of the caller's
+    transaction, so a notice can never roll back one sent before it.
+    `extra` = the org id; no `exc_info`, because the error's text names
+    OpenBao's address and the organization's transit key.
+
+    BEFORE THAT, 107, own authentication phase 1 final fix wave, two sites. K4 (Task
     13 M4 / review B-M2): one static WARNING in `app/core/auth/sessions.py::
     resolve`, for a session that has NOT ended but whose person is not
     active. Disabling and deleting end every session in the same
@@ -559,8 +569,8 @@ def test_the_sweep_actually_finds_log_calls() -> None:
         total += sum(
             1 for n in ast.walk(tree) if isinstance(n, ast.Call) and _is_log_call(n)
         )
-    assert total == 107, (
-        f"the AST sweep found {total} log call sites, expected 107 -- if a log "
+    assert total == 108, (
+        f"the AST sweep found {total} log call sites, expected 108 -- if a log "
         "call was legitimately added or removed, update this number AND the "
         "running count in §2.2 of docs/superpowers/specs/"
         "2026-08-14-logging-kernel-design.md, together. NOT line 13: that is "

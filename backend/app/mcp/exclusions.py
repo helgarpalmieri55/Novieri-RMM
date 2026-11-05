@@ -83,7 +83,8 @@ NEVER_EXPOSED_REASONS: dict[tuple[str, str], str] = {
             ("recover/details", "reads a recovery link the server issued"),
             (
                 "recover/accept",
-                "consumes a recovery link, removes the second factors and mints a session cookie",
+                "consumes a recovery link, takes a new password (required when an emailed link "
+                "set the current one), removes the second factors and mints a session cookie",
             ),
             (
                 "invite/accept",

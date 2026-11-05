@@ -116,6 +116,10 @@ export const auth: Shape<typeof en> = {
     title: "Recupera tu cuenta",
     intro: "Este enlace se creó en el servidor para <b>{email}</b>.",
     what: "Al recuperarla se quitan los segundos factores y los códigos de recuperación de esta cuenta. Después añades un segundo factor nuevo y guardas códigos nuevos antes de que se abra la consola.",
+    newPassword:
+      "Tu contraseña se puso por última vez con un enlace enviado por correo. Elige una contraseña nueva para terminar de recuperar tu cuenta; la anterior deja de funcionar.",
+    optionalPassword:
+      "Opcional: elige ahora una contraseña nueva, y la anterior deja de funcionar. Deja los dos campos vacíos para conservar tu contraseña actual.",
     submit: "Recuperar mi cuenta",
     invalid: "Este enlace de recuperación caducó o ya se usó. Alguien con acceso al servidor puede crear otro.",
   },
