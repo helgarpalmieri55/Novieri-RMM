@@ -777,7 +777,14 @@ async def cancel_invite(
     """Plan decision 3: the link dies, the grants go, the account is marked
     deleted -- with delete's rails, the own-account one included (it is a
     second way to delete an account). Anything but a pending invitation is a
-    409 (`_require_pending_invitation`)."""
+    409 (`_require_pending_invitation`).
+
+    THE ADDRESS IS BURNT FOR GOOD (final review C-M4). The row is kept, as
+    every deleted account's is (rule 2), and `create_user` refuses any row
+    with the address -- deleted ones included -- as does the
+    `ux_users_org_lower_email_staff` index. So a cancelled invitation's
+    address, like a deleted technician's, can never be invited again in this
+    organization. The route's description says so."""
     user = await _target(session, org_id, user_id)
     _require_live(user)
     _refuse_self(actor_id, user.id, DELETE)
@@ -1017,9 +1024,12 @@ async def reset_factors(
     is told. Their next sign-in enrols a new factor (design §7). The route
     has already checked the administrator's own recent confirmation.
 
-    No `super-admin` rail (plan decision 5): a reset removes factors and gives
-    nobody access without the password. `_refuse_self` stays: one's own
-    factors are changed under My security."""
+    No `super-admin` rail (plan decision 5, kept by the operator on
+    2026-11-05): a reset removes factors and gives nobody access without the
+    password -- and since the final fix wave (K1) no reset link goes to an
+    account left without a second factor, so the mailbox cannot supply the
+    password either. `_refuse_self` stays: one's own factors are changed
+    under My security."""
     user = await _target(session, org_id, user_id)
     _require_live(user)
     _refuse_self(actor_id, user.id, RESET_FACTORS)
@@ -1043,8 +1053,12 @@ async def end_sessions(
     session: AsyncSession, *, org_id: UUID, actor_id: UUID, user_id: UUID
 ) -> None:
     """Every console session of the person ends; their remembered devices stay
-    (a reset or a disable forgets those)."""
+    (a reset or a disable forgets those). A deleted account is refused
+    (`_require_live`, final review C-M5): deleting ended its sessions, and a
+    record of ending them again would be about nobody. No `super-admin` rail
+    (operator decision 2, 2026-11-05)."""
     user = await _target(session, org_id, user_id)
+    _require_live(user)
     await end_all_for_user(session, user.id, "ended_by_admin")
     await audit_service.record(
         session,

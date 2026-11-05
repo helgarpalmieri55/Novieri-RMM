@@ -627,6 +627,30 @@ async def test_an_administrator_ends_a_persons_sessions(lifecycle_env: Any) -> N
     ]
 
 
+async def test_ending_a_deleted_persons_sessions_is_refused_and_records_nothing(
+    lifecycle_env: Any,
+) -> None:
+    """Final review C-M5 (the ledger's Task 8 minor): `end_sessions` checks
+    its target like every other lifecycle act (`_require_live`). A deleted
+    account has no session to end -- deleting ended them -- so the act is a
+    409 and writes no `auth.sessions_ended` for it. Delete the check and this
+    is a 204 with a record about nobody: red. No super-admin rail here
+    (operator decision 2, 2026-11-05)."""
+    env = lifecycle_env
+    org = await env.create_org("sessions-deleted")
+    admin = await signed_in(env, org, "org-admin")
+    member = await signed_in(env, org, "technician")
+    gone = await env.client.delete(f"/api/v1/users/{member.user_id}", headers=admin.headers())
+    assert gone.status_code == 204, gone.text
+
+    ended = await env.client.delete(
+        f"/api/v1/users/{member.user_id}/sessions", headers=admin.headers()
+    )
+
+    assert ended.status_code == 409, ended.text
+    assert await _audit(env, org, "auth.sessions_ended") == []
+
+
 async def test_an_invitation_needs_the_console_address(
     lifecycle_env: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

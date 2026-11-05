@@ -170,7 +170,12 @@ recuperación avisa al titular [S1 §4.2.3].
 ### 2.8 Restablecer la contraseña por correo
 
 Permitido: un enlace de un solo uso que caduca a los 30 min; después **sigue pidiendo el segundo factor**. El segundo
-factor nunca se restablece por correo [S10].
+factor nunca se restablece por correo [S10]. Por eso **no se envía enlace a una cuenta sin segundo factor** (ni llave
+ni app TOTP confirmada; los códigos de recuperación solos no cuentan) y un enlace enviado antes de que los factores
+desaparecieran ya no restablece nada (410): tras el restablecimiento de un administrador, una invitación o un enlace
+de recuperación abandonados, o el dueño del primer arranque antes de su primer inicio, el buzón solo pondría la
+contraseña y registraría su propio factor (revisión final C-I1). La respuesta sigue siendo el mismo 202, al mismo
+tiempo.
 
 ---
 
@@ -297,11 +302,19 @@ MCP valida su JWT (`iss`, `aud`, `kid`, revocación).
 ## 7. Cuentas, correo y auditoría
 
 - **Invitar técnicos** (Ajustes → Usuarios): correo y asignaciones de rol por cliente; enlace de un solo uso de 72 h para
-  elegir contraseña, registrar el segundo factor y guardar los códigos. Reenviar o cancelar.
+  elegir contraseña, registrar el segundo factor y guardar los códigos. Reenviar o cancelar. **Cancelar quema la
+  dirección para siempre** (revisión final C-M4): la cuenta queda marcada como eliminada y su fila se conserva, como la
+  de toda cuenta eliminada, y una dirección que ya tiene fila (eliminada incluida) no se puede volver a invitar en esa
+  organización.
 - **Restablecer factores de otro técnico:** con confirmación reciente propia (§2.5), auditado, con aviso por correo.
+  Después de un restablecimiento, la persona entra con su contraseña y registra un factor nuevo; el correo solo no
+  basta: no se envía enlace de restablecimiento a una cuenta sin llave ni app TOTP confirmada (revisión final C-I1,
+  §2.8).
 - **Comando de recuperación** (único administrador sin factores):
   `docker compose exec api python -m app.core.auth.recover --email <correo>` imprime un enlace de un solo uso de 15 min.
-  No existe por HTTP; exige acceso al servidor; queda auditado.
+  No existe por HTTP; exige acceso al servidor; queda auditado. **El enlace es la cuenta:** no pide contraseña, así
+  que quien lo abra en esos 15 minutos se queda con ella. Se entrega a la persona en mano, nunca por correo (Q5); el
+  comando lo advierte en stderr.
 - **Primer arranque:** la pantalla con el código de instalación (que ya existe) crea al dueño con contraseña y segundo
   factor.
 - **Correo de cuentas** (Ajustes → Correo): por el envío propio (el código SMTP / Microsoft 365 XOAUTH2 de

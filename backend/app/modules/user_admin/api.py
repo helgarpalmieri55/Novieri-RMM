@@ -430,7 +430,9 @@ async def cancel_invite(
     ctx: AuthContext = Depends(_MANAGE),
 ) -> Response:
     """Cancel an invitation not accepted yet: the link dies and the account is
-    marked deleted (its row is kept). Refused once they have chosen a password."""
+    marked deleted (its row is kept). Refused once they have chosen a password.
+    The address stays taken for good: a deleted account's address cannot be
+    invited again, in this organization, under any name."""
     async with org_session(
         ctx.org_id, engine=request.app.state.app_engine, clients=ctx.clients
     ) as session:
