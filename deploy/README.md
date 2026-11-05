@@ -26,6 +26,15 @@ same symptoms if you ever diverge from these versions.
 **What is NOT verified** is marked inline as ⚠ **UNVERIFIED** wherever it
 appears. Nothing else in the first-boot section is a guess.
 
+**Since own authentication phase 1 (2026-11) the console signs in on the
+platform's own screens** -- password and a second factor, a session cookie --
+and not at Keycloak (`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`).
+Keycloak still signs MCP clients in until phase 3. The sections of this
+runbook that describe the console's sign-in through Keycloak -- the
+enrolment link in step 9, branding and extending sign-in, Keycloak SMTP --
+predate that change; the runbook is rewritten with the deployment project
+(design §9).
+
 ---
 
 ## Prerequisites (Ubuntu Server 24.04 / 26.04)
@@ -427,6 +436,14 @@ root CA, the `agent` role (client certificates, Ed25519, with the
 the `gateway` role (the gateway's own server certificate). The credential vault
 (`ITS_VAULT_BACKEND=openbao`) reuses the same `transit` mount for its per-org
 keys, created on first use — nothing extra to provision.
+
+Since own authentication phase 1 it also creates two transit keys for sign-in:
+`auth-pepper` (HMAC, the versioned pepper every password verifier is
+computed with) and `auth-signing` (ECDSA P-256, which signs the assistant's
+internal tokens and, from phase 3, MCP access tokens). Neither key ever leaves
+OpenBao. **On an install that ran `openbao-init` before, re-run it and re-load
+the policy** (`bao policy write its-app /bao/its-app.hcl`, as in 3.4), or the
+API cannot verify a password.
 
 **If this exits 2 with `Vault is sealed`,** unseal (3.3) and re-run. It is
 idempotent.
@@ -1070,6 +1087,10 @@ docker compose exec keycloak /opt/keycloak/bin/kcadm.sh --help
 
 ## Branding and extending sign-in (VENDOR-ONLY)
 
+> **Not the console's sign-in any more.** Since own authentication phase 1 the
+> console signs in on the platform's own screens. What follows is Keycloak's
+> login page, which only MCP clients meet until own authentication phase 3.
+
 > **Every "Admin console →" step in this section runs inside the SSH tunnel
 > above, not on the public hostname.** The console is not routed on `:443`;
 > `https://itms.toeshee.com/admin/` answers with the ITMS console's own
@@ -1294,16 +1315,12 @@ org slug (the same one as `ITS_DEFAULT_ORG_SLUG` in `.env`).
 **The mapper is not optional, and its absence is masked.** With
 `ITS_MULTI_TENANT=false` a federated user carrying no `org` attribute falls back
 to the default org — so sign-in *works*, and every Microsoft account silently
-lands in one tenant. Verify the **claim**, not the login: sign in through
-Microsoft once, then in the browser's devtools console on the console page:
-
-```js
-const k = Object.keys(sessionStorage).find(k => k.startsWith("oidc.user"));
-JSON.parse(atob(JSON.parse(sessionStorage[k]).access_token.split(".")[1])).org
-```
-
-That must print your org slug. `undefined` means the mapper is missing and the
-fallback is carrying the login.
+lands in one tenant. Verify the **claim**, not the login. The console page
+used to hold a Keycloak token that could be decoded in the browser's devtools;
+since own authentication phase 1 it holds none (its session is an `HttpOnly`
+cookie naming a server-side session), so the claim is now only in the access
+tokens MCP clients obtain, and the devtools one-liner that read it from the
+console's session storage is gone with that token.
 
 **Trust Email off is deliberate.** With it on, a Microsoft identity that merely
 claims an existing user's email address is linked to that account
@@ -3151,7 +3168,7 @@ again if you pin different versions.
 | 10 | first administrator authenticates but gets `403 requires ...` on everything | JIT user provisioning assigns **no role**, and nothing granted one | step 10 added to this runbook |
 | 11 | `enroll: certificate and key do not form a pair: tls: failed to find any PEM data in certificate input` | OpenBao returns PEM **without a trailing newline**; the agent concatenates `cert_pem + chain_pem`, producing `-----END CERTIFICATE----------BEGIN CERTIFICATE-----`. **No device could enroll against the production CA backend.** Tests were green because they use `LocalCA`, whose PEM is newline-terminated | one-line normalisation in `backend/app/core/ca.py` (server-side, so it repairs agents already in the field) |
 | 12 | an `app.deploy` job dispatches, reaches the endpoint, and fails at the artifact download with a name-resolution error; nothing in the control plane looks wrong | MinIO had **no published port and no Traefik router**, and presigned URLs were signed against `ITS_S3_ENDPOINT` (`http://minio:9000`) — a Docker-internal name. Every grant was correctly scoped, correctly time-bounded and unreachable | a `minio` router on `:443` matching `/<bucket>/`, and a separate `ITS_S3_PUBLIC_ENDPOINT` used only for signing (required in production). See "Object storage on :443" |
-| 13 | the console's **Sign in** button does nothing; devtools shows repeated 0-byte `openid-configuration` fetches and no container logs anything | `lib/auth.ts` read the OIDC authority from `VITE_OIDC_AUTHORITY`, which is set **nowhere** in this repository, so every image ever built carried the fallback `http://localhost:8080/realms/it-suite` — each browser asked *its own machine* for the discovery document. Nothing server-side can log a request that never left the laptop | the authority is derived from `window.location.origin`; Keycloak is on the same origin under `/realms`, so it cannot drift from the deployment's hostname. `frontend/.env.development` keeps the override for the dev server |
+| 13 | the console's **Sign in** button does nothing; devtools shows repeated 0-byte `openid-configuration` fetches and no container logs anything | `lib/auth.ts` read the OIDC authority from `VITE_OIDC_AUTHORITY`, which is set **nowhere** in this repository, so every image ever built carried the fallback `http://localhost:8080/realms/it-suite` — each browser asked *its own machine* for the discovery document. Nothing server-side can log a request that never left the laptop | the authority is derived from `window.location.origin`; Keycloak is on the same origin under `/realms`, so it cannot drift from the deployment's hostname. `frontend/.env.development` keeps the override for the dev server. (Since own authentication phase 1 the console has no OIDC client at all -- `lib/auth.ts` is gone -- and fetches no discovery document) |
 | 14 | Keycloak answers **`Invalid parameter: redirect_uri`** on a correctly-formed authorization request | the `it-suite-web` client shipped `redirectUris: ["https://*/auth/callback"]`. Keycloak honours a wildcard **only as a trailing `*`**; one in the host position is compared as a literal string and matches nothing. `rootUrl` was also `https://localhost`, so even a relative URI resolved to the wrong host | `rootUrl` emptied and the redirect made **relative** (`/auth/callback`), which resolves against the request and is therefore correct at any hostname. **A running realm is not re-imported** — an existing deployment must be patched through the admin API |
 
 Two smaller things worth knowing:

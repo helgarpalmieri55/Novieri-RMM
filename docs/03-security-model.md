@@ -53,7 +53,8 @@ this document.
   (`gateway.identity_mismatch`). So "never to job command" is not a scope that
   needed carving out of a certificate; it is the default, enforced in two
   places.
-- **Operators** are gated by SSO + MFA + RBAC.
+- **Operators** are gated by their own password, a mandatory second factor (a
+  passkey or a TOTP app), a server-side session and RBAC.
 
 ## The signed-job invariant
 
@@ -120,9 +121,22 @@ the system.
 
 ## Authentication & RBAC
 
-- **Authentication:** operators authenticate through **Keycloak** (OIDC/SAML),
-  federated to AD/Entra where present, with **MFA enforced**. Sessions are
-  server-managed with sane expiry.
+- **Authentication:** technicians sign in to the console with the platform's
+  own authentication (`docs/superpowers/specs/2026-11-04-autenticacion-propia-design.md`):
+  a password of 12 to 128 characters, checked against a shipped blocklist and
+  stored as argon2id with a pepper held in OpenBao, plus a **mandatory second
+  factor** -- a passkey with user verification required, or a TOTP app --
+  with ten single-use recovery codes. Failures are counted per account and per
+  factor, with an increasing wait from the fifth and the factor disabled at
+  the hundredth. Sessions are server-side, carried in a `__Host-` cookie that
+  holds only a random identifier, with a 30-minute idle timeout and a 12-hour
+  maximum by default; every write needs a custom header and a matching
+  `Origin`. "Remember this device" (15 days by default) skips the second
+  factor at sign-in only, never for a recent-confirmation action, and **does
+  not meet AAL2** on that device -- the operator accepted this knowingly
+  (design §0, S2b). Not built: SAML and on-premises Active Directory
+  federation (out of scope); sign-in with Microsoft and the contacts' portal
+  are phase 2. MCP clients still authenticate through Keycloak until phase 3.
 - **Authorization:** role-based, enforced **server-side** on every privileged
   endpoint and every job dispatch. The frontend never makes security decisions.
 - **Baseline roles** (extensible):
@@ -172,6 +186,8 @@ the system.
 | Tampered agent binary / malicious update | Update only by a signed job pinning the release SHA-256, re-checked at the install location; human-started ring rollout; local rollback; Authenticode against a compiled-in pin once signing exists (`spec-self-update.md`) |
 | Credential theft from the vault | Envelope encryption, decrypt-at-use, no plaintext in DB/logs, audited checkout |
 | Operator abuse / over-privilege | RBAC scoped to org + client (per-client grants, the client scope enforced by RLS, invariant 5a); MFA; full audit trail |
+| Stolen or guessed operator password | Mandatory second factor; shipped blocklist; per-account and per-factor failure counters with backoff and a 100-failure disable; generic answers that take the same work whether or not the account exists |
+| Theft of the platform database | Passwords stored only as peppered argon2id (pepper in OpenBao), TOTP secrets sealed by the vault, session and device identifiers stored only as SHA-256 |
 | Cross-tenant data leakage | `org_id` everywhere + PostgreSQL RLS + cert-bound tenant on gateway |
 | Replay of a captured job | Nonce + expiry in signed payload; agent rejects replays |
 | Audit tampering to hide activity | Hash-chained append-only log |
