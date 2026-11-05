@@ -25,11 +25,6 @@ import {
   renderSettings,
 } from "./harness";
 
-vi.mock("../../../lib/auth", () => ({
-  accessToken: () => "test-token",
-  oidcAuthority: "https://id.example.test/realms/it-suite",
-}));
-
 vi.mock("../../../lib/ApiContext", () => ({ useApi: () => apiClient() }));
 
 beforeEach(() => {

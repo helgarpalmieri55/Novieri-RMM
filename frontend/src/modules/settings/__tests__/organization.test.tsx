@@ -15,14 +15,6 @@ import { ORG_FIXTURE, PLANTED_SECRET, apiClient, calls, installDefaults, renderS
 // The OIDC client is not under test and constructs a UserManager (with a
 // silent-renew timer) at import time. `../api.ts`'s org request only needs the
 // bearer token, so the token source is stubbed.
-vi.mock("../../../lib/auth", () => ({
-  accessToken: () => "test-token",
-  // The Profile tab deep-links into Keycloak's account console, so the
-  // authority is now part of what `SettingsPage` needs from this module.
-  // A factory mock is a strict namespace: a missing export throws.
-  oidcAuthority: "https://id.example.test/realms/it-suite",
-}));
-
 // `apiClient` is referenced LAZILY — inside the returned closure, never while
 // the factory runs. Importing the harness from within the factory instead
 // deadlocks: the harness imports `SettingsPage`, which imports the very module

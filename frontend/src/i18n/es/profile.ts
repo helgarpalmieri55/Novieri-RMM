@@ -18,20 +18,8 @@ export const profile: Shape<typeof en> = {
   },
   security: {
     title: "Inicio de sesión y seguridad",
-    subtitle: "Contraseñas y claves, administradas donde corresponde",
-    note: "Cada una de estas acciones ejecuta un paso en las páginas de inicio de sesión y te devuelve a ITMS. Esta plataforma nunca maneja contraseñas, segundos factores ni claves de acceso.",
-    startFailed: "No se pudo iniciar ese paso, así que no se cambió nada de tu inicio de sesión. {reason}",
-    changePassword: {
-      label: "Cambiar contraseña",
-      hint: "Primero se te pedirá tu contraseña actual. Esta plataforma nunca ve ninguna de las dos.",
-    },
-    manageMfa: {
-      label: "Administrar dispositivo MFA",
-      hint: "Añade, reemplaza o elimina tu segundo factor.",
-    },
-    addPasskey: {
-      label: "Añadir una clave de acceso",
-      hint: "Una credencial sin contraseña vinculada a este dispositivo.",
-    },
+    subtitle: "Tu contraseña, tus segundos factores y los equipos en los que confías",
+    note: "Tu contraseña, tus claves de acceso, tu aplicación de autenticación y tus códigos de recuperación tienen su propia página. Cada cambio allí te pide antes confirmar tu segundo factor.",
+    open: "Administrar el inicio de sesión y la seguridad",
   },
 };
