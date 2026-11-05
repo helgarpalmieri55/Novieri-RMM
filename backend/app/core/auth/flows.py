@@ -76,6 +76,7 @@ from app.core.auth.sessions import (
     start_session,
 )
 from app.core.auth.sessions import end as end_session
+from app.core.auth.sessions import named as named_session
 from app.core.auth.totp import (
     confirm_secret,
     has_totp,
@@ -750,13 +751,16 @@ async def step_up_passkey(
 # --------------------------------------------------------------------------- #
 
 
-async def logout(request: Request, principal: SessionPrincipal | None) -> None:
-    """This session only; a remembered device stays remembered (that is what
-    remembering it means). Answered alike with no session."""
-    if principal is None:
+async def logout(request: Request) -> None:
+    """The session the cookie names -- idle or not (final review B-M1:
+    `sessions.named`, not `resolve`) -- and only it; a remembered device stays
+    remembered (that is what remembering it means). Answered alike with no
+    session."""
+    named = await named_session(request)
+    if named is None:
         return
-    async with _identity_session(principal.org_id, _engine(request)) as session:
-        await end_session(session, principal.session_id, "signed_out")
+    async with _identity_session(named.org_id, _engine(request)) as session:
+        await end_session(session, named.session_id, "signed_out")
 
 
 async def logout_everywhere(request: Request, principal: SessionPrincipal) -> None:

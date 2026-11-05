@@ -248,6 +248,36 @@ async def resolve(connection: HTTPConnection, *, touch: bool = True) -> SessionP
     )
 
 
+@dataclass(frozen=True)
+class NamedSession:
+    """The row a session cookie names, idle or not: what signing out ends."""
+
+    session_id: UUID
+    org_id: UUID
+
+
+async def named(connection: HTTPConnection) -> NamedSession | None:
+    """The NOT-ENDED session the request's cookie names, whether or not it is
+    idle, past its maximum or its person still active -- `resolve` without
+    the tests that decide whether to ADMIT it. For signing out (final review
+    B-M1): a person back at a tab left open past the idle limit presses "Sign
+    out", and the row must end, or it stays resumable with the password alone
+    until its maximum. Never a door: nothing here admits anybody."""
+    token = cookie_token(connection, SESSION_COOKIE)
+    if token is None:
+        return None
+    async with AsyncSession(connection.app.state.app_engine) as lookup:
+        row = (
+            await lookup.execute(
+                text("SELECT session_id, org_id, ended_at FROM its_auth_session(:token_hash)"),
+                {"token_hash": token_hash(token)},
+            )
+        ).one_or_none()
+    if row is None or row.ended_at is not None:
+        return None
+    return NamedSession(session_id=row.session_id, org_id=row.org_id)
+
+
 async def start_session(
     session: AsyncSession,
     user: User,

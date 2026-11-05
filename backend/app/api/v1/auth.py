@@ -56,7 +56,6 @@ from app.core.auth.refusals import AuthRefusal
 from app.core.auth.sessions import (
     SessionPrincipal,
     clear_session_cookie,
-    resolve,
     set_device_cookie,
     set_session_cookie,
 )
@@ -467,8 +466,9 @@ async def step_up_passkey(body: StepUpPasskeyIn, request: Request) -> Response:
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(request: Request) -> Response:
-    """End this session and clear its cookie. Answered alike with no session."""
-    await flows.logout(request, await resolve(request))
+    """End this session -- idle or not -- and clear its cookie. Answered alike
+    with no session."""
+    await flows.logout(request)
     response = _no_content()
     clear_session_cookie(response)
     return response
