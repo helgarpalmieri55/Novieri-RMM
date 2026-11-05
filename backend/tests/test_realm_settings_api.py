@@ -638,6 +638,37 @@ async def test_test_sends_are_limited_per_organization(email_env: Any) -> None:
     assert len(email_env.smtp.instances) == TEST_SENDS_PER_MINUTE
 
 
+async def test_with_redis_down_no_test_message_is_sent(
+    email_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Final review A-M1: the per-organization cap FAILS CLOSED
+    (`rate_limit.hit(..., fail_closed=True)`). Nothing else caps a signed-in
+    SMTP conversation per organization, so while the counter cannot count,
+    the press is refused and no message goes. Let it fail open and this is a
+    200 with a message sent: red."""
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    org, sub, headers = await _admin(email_env, "email-test-redis-down")
+    await _seed(email_env, org, sub)
+
+    class _Down:
+        async def incr(self, key: str) -> int:
+            raise RedisConnectionError("Connection refused.")
+
+        async def ttl(self, key: str) -> int:
+            raise RedisConnectionError("Connection refused.")
+
+        async def expire(self, key: str, seconds: int) -> bool:
+            raise RedisConnectionError("Connection refused.")
+
+    monkeypatch.setattr(email_env.app.state, "redis", _Down())
+
+    response = await email_env.client.post("/api/v1/settings/email/test", headers=headers)
+
+    assert response.status_code == 429, response.text
+    assert email_env.smtp.instances == []
+
+
 async def test_the_settings_suggest_a_tagged_form_of_the_callers_address(email_env: Any) -> None:
     _org, sub, headers = await _admin(email_env, "email-test-suggest")
 

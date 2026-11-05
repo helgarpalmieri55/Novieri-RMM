@@ -438,15 +438,19 @@ def test_the_sweep_actually_finds_log_calls() -> None:
     `modules/agent_update/reconcile.py`, where one org's rollout tick fails
     and every other org is still ticked. It names the org and nothing else.
 
-    NOW 106, own authentication phase 1 final fix wave (K4, Task 13 M4 /
-    review B-M2): one static WARNING in `app/core/auth/sessions.py::
+    NOW 107, own authentication phase 1 final fix wave, two sites. K4 (Task
+    13 M4 / review B-M2): one static WARNING in `app/core/auth/sessions.py::
     resolve`, for a session that has NOT ended but whose person is not
     active. Disabling and deleting end every session in the same
     transaction, so that state is a lifecycle path that forgot to -- a defect
     detector, not a refusal log: the door's answer stays a silent 401/4401.
     `extra` = the session's row id and the status; never the cookie or its
-    hash. (K9 in the same wave rate-limits the loopback refusal's network
-    case inside its existing call site: no new site.)
+    hash. K11 (review A-M1): one static WARNING in `app/core/rate_limit.py::
+    hit`, "request refused", when a limit called with `fail_closed=True`
+    (the reset-mail and test-send caps) meets a Redis error; `exc_info=True`,
+    nothing in `extra` -- never the key, which names an address. (K9 in the
+    same wave rate-limits the loopback refusal's network case inside its
+    existing call site: no new site.)
 
     BEFORE THAT, 105, P2 phase 1 Task 8: five WARNINGs go with the identity provider's
     calls they described -- `user_admin/service.py::_translating`, the
@@ -555,8 +559,8 @@ def test_the_sweep_actually_finds_log_calls() -> None:
         total += sum(
             1 for n in ast.walk(tree) if isinstance(n, ast.Call) and _is_log_call(n)
         )
-    assert total == 106, (
-        f"the AST sweep found {total} log call sites, expected 106 -- if a log "
+    assert total == 107, (
+        f"the AST sweep found {total} log call sites, expected 107 -- if a log "
         "call was legitimately added or removed, update this number AND the "
         "running count in §2.2 of docs/superpowers/specs/"
         "2026-08-14-logging-kernel-design.md, together. NOT line 13: that is "

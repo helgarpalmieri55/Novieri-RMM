@@ -452,6 +452,42 @@ async def test_the_mailbox_alone_does_not_reach_the_console_after_a_factor_reset
     assert (await auth_env.client.get("/api/v1/me", headers=victim.headers())).status_code == 200
 
 
+async def test_with_redis_down_the_per_address_cap_sends_nothing(
+    auth_env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Final review A-M1: the per-address cap of three links an hour FAILS
+    CLOSED. Nothing else caps the mails one address can be sent, and each
+    one spends the link before it; failing open, an anonymous caller could
+    mail a technician without end during an outage. It runs after the 202,
+    so the answer is unchanged and tells nothing. Let it fail open and the
+    mail goes: red."""
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    org = await auth_env.create_org("k11-redis-down")
+    who = await signed_in(auth_env, org, "technician")
+
+    class _Down:
+        async def incr(self, key: str) -> int:
+            raise RedisConnectionError("Connection refused.")
+
+        async def ttl(self, key: str) -> int:
+            raise RedisConnectionError("Connection refused.")
+
+        async def expire(self, key: str, seconds: int) -> bool:
+            raise RedisConnectionError("Connection refused.")
+
+    real = auth_env.app.state.redis
+    monkeypatch.setattr(auth_env.app.state, "redis", _Down())
+    down = await _forgot(auth_env, who.email)
+    assert (down.status_code, down.content) == (202, b"")
+    assert [m for m in _reset_links(auth_env) if m.to == who.email] == []
+
+    monkeypatch.setattr(auth_env.app.state, "redis", real)
+    up = await _forgot(auth_env, who.email)
+    assert (up.status_code, up.content) == (202, b"")
+    assert len([m for m in _reset_links(auth_env) if m.to == who.email]) == 1
+
+
 async def test_the_reset_mails_sentence_about_the_second_factor_is_true(auth_env: Any) -> None:
     """"You will still need your second factor to sign in" (`notices.reset_mail`):
     the link is only sent to an account that has one, and after the reset

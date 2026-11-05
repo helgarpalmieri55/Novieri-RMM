@@ -67,9 +67,12 @@ me_router = APIRouter(prefix="/me", tags=["me"])
 
 
 def _limit(bucket: str, limit: int, window_s: int) -> Callable[[Request], Awaitable[None]]:
-    """At most `limit` calls per `window_s` from one address (Task 3's limiter;
-    it fails open when Redis does -- the per-account counters in the database
-    are the control that must hold, design §2.3)."""
+    """At most `limit` calls per `window_s` from one address (Task 3's limiter).
+    It fails open when Redis does, because each sits on a control that does
+    not need Redis: the per-account counters in the database for the password
+    and the factors (design §2.3), the per-address mail cap -- which fails
+    CLOSED (`flows.send_reset_link`) -- behind `_FORGOT`, and a 256-bit secret
+    behind `_LINK`."""
 
     async def within(request: Request) -> None:
         if not await hit(

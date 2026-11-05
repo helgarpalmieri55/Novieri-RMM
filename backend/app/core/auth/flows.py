@@ -812,6 +812,10 @@ async def send_reset_link(app: FastAPI, *, email: str, locale: str) -> None:
             f"auth-forgot:address:{per_address}",
             limit=RESET_MAILS_PER_HOUR,
             window_s=3600,
+            # The only cap on the mails one address is sent (final review
+            # A-M1): during a Redis outage none goes. After the 202, so the
+            # answer does not change.
+            fail_closed=True,
         ):
             return
         found = await find_staff(engine, org_slug=settings.default_org_slug, email=address)

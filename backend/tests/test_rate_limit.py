@@ -133,6 +133,30 @@ async def test_it_fails_open_and_says_so(caplog: pytest.LogCaptureFixture) -> No
     assert record.getMessage() == "rate limit unavailable; redis error, request allowed"
 
 
+async def test_a_limit_that_must_hold_fails_closed_and_says_so(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Final review A-M1: `fail_closed=True` (the per-address reset-mail cap,
+    the per-organization test-send cap) refuses while Redis is down, because
+    nothing else caps what it caps -- a mail. Logged once, statically, and
+    never the key or the error's text. Drop `fail_closed` from `hit` and this
+    is True: red."""
+    broken: Any = _BrokenRedis()
+    with caplog.at_level(logging.WARNING, logger="app.core.rate_limit"):
+        allowed = await rate_limit.hit(broken, _key(), limit=1, window_s=60, fail_closed=True)
+
+    assert allowed is False
+    (record,) = [r for r in caplog.records if r.name == "app.core.rate_limit"]
+    assert record.getMessage() == "rate limit unavailable; redis error, request refused"
+    assert "redis:6379" not in record.getMessage()
+
+
+async def test_fail_closed_changes_nothing_while_redis_answers(redis: aioredis.Redis) -> None:
+    key = _key()
+    assert await rate_limit.hit(redis, key, limit=1, window_s=60, fail_closed=True) is True
+    assert await rate_limit.hit(redis, key, limit=1, window_s=60, fail_closed=True) is False
+
+
 def _request(peer: str | None, forwarded: str | None, trusted: str) -> Request:
     app = FastAPI()
     app.state.trusted_proxies = parse_trusted_proxies(trusted)
