@@ -246,6 +246,30 @@ def test_the_command_warns_that_the_link_is_the_account(
     assert "gets the account" not in capsys.readouterr().err
 
 
+def test_the_warning_states_the_links_real_lifetime(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Re-review Minor 4: the window in the warning is `RECOVER_TTL`, not a
+    number typed into a sentence. Change the TTL and the warning changes with
+    it; hard-code "15 minutes" again and this is red."""
+    from datetime import timedelta
+
+    from app.core.auth import action_tokens
+
+    async def gives(*, settings: Any, email: str) -> str:
+        return f"{CONSOLE}/recover#abc"
+
+    monkeypatch.setattr(recover, "get_settings", lambda: None)
+    monkeypatch.setattr(recover, "issue_recovery_link", gives)
+    monkeypatch.setattr(action_tokens, "RECOVER_TTL", timedelta(minutes=7))
+
+    assert recover.main(["--email", "ada@toeshee.test"]) == 0
+    warning = capsys.readouterr().err
+
+    assert "in the next 7 minutes gets the account" in warning
+    assert "15 minutes" not in warning
+
+
 def test_the_recovery_command_does_not_exist_over_http() -> None:
     """FALSIFIER 9. Each assertion fails if somebody wires the command to a route."""
     for path, route in flatten(build_router_only_app().router):

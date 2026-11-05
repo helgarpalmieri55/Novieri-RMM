@@ -224,7 +224,9 @@ async def test_falsifier_2_sign_in_answers_the_same_for_an_unknown_account(
     WHAT IT DOES NOT CLAIM, ACCEPTED (final review C-M2). It counts argon2
     verifications, not milliseconds. A known address also opens its
     identity session (an advisory lock, three or four queries, a failure
-    written; a device cookie of ours adds one), and an unknown or disabled
+    written; a device cookie of ours adds one to three: the device lookup,
+    then, for a device it finds, the policy and the password's
+    `changed_at`), and an unknown or disabled
     one does not: measured locally, medians of 25 were 130-139 ms unknown,
     142 ms disabled, 147-149 ms known. That 10-15 ms is accepted rather than
     equalised: the argon2 work -- most of each answer's time, and what a
