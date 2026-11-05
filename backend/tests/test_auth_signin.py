@@ -755,7 +755,12 @@ async def test_a_remembered_device_skips_the_factor_but_not_the_recent_confirmat
     assert confirm.status_code == 204, confirm.text
     changed = await auth_env.client.put("/api/v1/me/password", headers=who.headers(), json=body)
     assert changed.status_code == 204, changed.text
+    # The change ends the OTHER sessions; the caller's, which the device
+    # started, is detached from it and stays (`account.change_password`).
+    me = await auth_env.client.get("/api/v1/me", headers=who.headers())
+    assert me.status_code == 200, me.text
 
+    # A new sign-in from this browser: the device is forgotten, so the factor.
     who.session, who.password = None, new_password
     after = await login(auth_env, who)
     assert after.json()["state"] == "factor_required"

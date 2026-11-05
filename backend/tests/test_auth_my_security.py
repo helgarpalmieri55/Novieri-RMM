@@ -15,9 +15,10 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth.sessions import DEVICE_COOKIE, SESSION_COOKIE
+from app.core.auth.session_policy import DEFAULT_POLICY
+from app.core.auth.sessions import DEVICE_COOKIE, SESSION_COOKIE, token_hash
 from app.models import AuditEvent
-from app.models.auth import AuthFailure, AuthPassword, AuthSession
+from app.models.auth import AuthFailure, AuthPassword, AuthSession, AuthTrustedDevice
 from tests.auth_support import (
     add_passkey,
     capture_mail,
@@ -410,3 +411,73 @@ async def test_a_new_authenticator_app_does_not_clear_the_failures(auth_env: Any
             )
         ).scalar_one_or_none()
     assert failure is not None and failure.consecutive == 3
+
+
+async def _session_row(env: Any, token: str) -> AuthSession:
+    async with AsyncSession(env.admin_engine) as session:
+        return (
+            await session.execute(
+                select(AuthSession).where(AuthSession.token_hash == token_hash(token))
+            )
+        ).scalar_one()
+
+
+async def test_a_password_change_on_a_remembered_device_keeps_only_the_caller_signed_in(
+    auth_env: Any,
+) -> None:
+    """Design §2.8/[S8] and `account.change_password`'s rule: the OTHER
+    sessions end, the caller's does not -- even when a remembered device
+    started it. The device is still revoked (falsifier 5), so the caller's
+    session is first detached from it (`account._detach_from_device`) and cut
+    to an ordinary session's lifetime from its sign-in: no session outlives the
+    trust that gave it its length. Without the detach, Task 6's
+    `revoke_all_for_user` ends the caller's session with the device and the
+    same cookie reads 401: red."""
+    org = await auth_env.create_org("mysec-pw-device")
+    who = await signed_in(auth_env, org, "technician")
+    done = await _second_session(auth_env, who, remember=True)
+    who.device = cookie(done, DEVICE_COOKIE)
+    assert who.device
+    # Two sessions started by the remembered device: the caller's, and another.
+    who.session = None
+    assert (await login(auth_env, who)).json() == {"state": "signed_in"}
+    mine = who.session
+    who.session = None
+    assert (await login(auth_env, who)).json() == {"state": "signed_in"}
+    sibling = who.session
+    assert mine and sibling and mine != sibling
+    who.session = mine
+    confirm = await auth_env.client.post(
+        "/api/v1/auth/step-up/totp",
+        headers=who.headers(),
+        json={"code": await fresh_code(auth_env, who)},
+    )
+    assert confirm.status_code == 204, confirm.text
+
+    changed = await auth_env.client.put(
+        "/api/v1/me/password",
+        headers=who.headers(),
+        json={"current": who.password, "new": "Pelican-Orbit-Lantern-58"},
+    )
+
+    assert changed.status_code == 204, changed.text
+    me = await auth_env.client.get("/api/v1/me", headers=who.headers())
+    assert me.status_code == 200, me.text
+    row = await _session_row(auth_env, mine)
+    assert row.ended_at is None and row.trusted_device_id is None
+    assert row.factor_at is not None
+    assert row.expires_at <= row.factor_at + DEFAULT_POLICY.lifetime("staff", remembered=False)
+    other = await _session_row(auth_env, sibling)
+    assert other.ended_at is not None
+    async with AsyncSession(auth_env.admin_engine) as session:
+        revoked = (
+            await session.execute(
+                select(AuthTrustedDevice.revoked_at).where(
+                    AuthTrustedDevice.user_id == who.user_id
+                )
+            )
+        ).scalars().all()
+    assert len(revoked) == 1 and revoked[0] is not None
+    # A new sign-in from that browser (its device cookie still sent): the factor.
+    who.session, who.password = None, "Pelican-Orbit-Lantern-58"
+    assert (await login(auth_env, who)).json()["state"] == "factor_required"

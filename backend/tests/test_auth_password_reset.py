@@ -18,13 +18,16 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.passwords import STAFF_MINIMUM, PasswordRejected
+from app.core.auth.sessions import DEVICE_COOKIE
 from app.models import AuditEvent, Organization
-from app.models.auth import AuthActionToken, AuthSession
+from app.models.auth import AuthActionToken, AuthFailure, AuthSession, AuthTrustedDevice
 from tests.auth_support import (
     CONSOLE,
     browser,
     capture_mail,
     console_ready,
+    cookie,
+    fresh_code,
     link_token,
     login,
     signed_in,
@@ -216,3 +219,91 @@ async def test_a_password_built_on_the_organizations_name_is_refused(auth_env: A
         "code": "password_rejected",
         "detail": PasswordRejected(reason="context", minimum=STAFF_MINIMUM).message,
     }
+
+
+async def test_a_reset_forgets_every_device_and_unlocks_the_password(auth_env: Any) -> None:
+    """Plan decision 9 and design §2.6: the reset revokes every remembered
+    device (`revoke_all_for_user` in `flows.reset_password`) and clears the
+    password's failures, a lockout included (`reset_factor`). Delete the first
+    and the device keeps `revoked_at` NULL; delete the second and the locked
+    password keeps its row, so the login after a reset that said 204 still
+    gets the generic 401: red either way. (The login alone could not tell the
+    first apart: Task 6's `devices.recognised` already ignores a device older
+    than the password, so the row itself is checked.)"""
+    org = await auth_env.create_org("reset-device")
+    who = await signed_in(auth_env, org, "technician")
+    who.session = None
+    await login(auth_env, who)
+    remembered = await auth_env.client.post(
+        "/api/v1/auth/factor/totp",
+        headers=who.headers(),
+        json={"code": await fresh_code(auth_env, who), "remember_device": True},
+    )
+    assert remembered.status_code == 200, remembered.text
+    who.device = cookie(remembered, DEVICE_COOKIE)
+    assert who.device
+    now = datetime.now(UTC)
+    async with AsyncSession(auth_env.admin_engine) as session:
+        session.add(
+            AuthFailure(
+                org_id=org,
+                user_id=who.user_id,
+                factor="password",
+                consecutive=100,
+                last_failed_at=now,
+                disabled_at=now,
+            )
+        )
+        await session.commit()
+    await _forgot(auth_env, who.email)
+    token = link_token(_resets(auth_env)[-1].text)
+
+    done = await _reset(auth_env, token, "Pelican-Orbit-Lantern-58")
+
+    assert done.status_code == 204, done.text
+    async with AsyncSession(auth_env.admin_engine) as session:
+        revoked = (
+            await session.execute(
+                select(AuthTrustedDevice.revoked_at).where(
+                    AuthTrustedDevice.user_id == who.user_id
+                )
+            )
+        ).scalars().all()
+        failures = (
+            await session.execute(
+                select(AuthFailure).where(
+                    AuthFailure.user_id == who.user_id, AuthFailure.factor == "password"
+                )
+            )
+        ).scalars().all()
+    assert len(revoked) == 1 and revoked[0] is not None
+    assert failures == []
+    # The same browser, its device cookie still sent, and the new password.
+    who.session, who.password = None, "Pelican-Orbit-Lantern-58"
+    after = await login(auth_env, who)
+    assert after.status_code == 200, after.text
+    assert after.json()["state"] == "factor_required"
+
+
+async def test_an_over_long_link_is_a_dead_one_and_never_repeated(auth_env: Any) -> None:
+    """Global Constraints: a field that carries a secret has no Pydantic bound,
+    and the one-time token is one. An over-long or ill-shaped token is a dead
+    link like any other -- 410 `invalid_link`, refused by
+    `action_tokens.org_of` before anything is read -- and the body does not
+    repeat it. Put `max_length` back on `ResetIn.token` and the first of
+    these is a 422: red. The live link still works afterwards."""
+    org = await auth_env.create_org("reset-long-token")
+    who = await signed_in(auth_env, org, "technician")
+    await _forgot(auth_env, who.email)
+    token = link_token(_resets(auth_env)[-1].text)
+    head = token.split(".", 1)[0]
+    dead = ["x" * 2000, token + "x" * 2000, f"{head}.{'A' * 5000}"]
+
+    answers = [await _reset(auth_env, value, "Pelican-Orbit-Lantern-58") for value in dead]
+    good = await _reset(auth_env, token, "Pelican-Orbit-Lantern-58")
+
+    for answer, value in zip(answers, dead, strict=True):
+        assert answer.status_code == 410, answer.text
+        assert answer.json()["code"] == "invalid_link"
+        assert value not in answer.text
+    assert good.status_code == 204, good.text

@@ -93,16 +93,18 @@ _LINK = _limit("auth-link", 20, 600)
 # --------------------------------------------------------------------------- #
 # models -- every request body `extra="forbid"`
 #
-# A FIELD THAT CARRIES A SECRET -- a password, a TOTP code, a recovery code --
-# IS A PLAIN `str` (plan decision 16). A Pydantic constraint that fails puts
-# the field's INPUT in the 422 body, and the input would be the secret (Task
-# 3's `test_an_over_long_password_is_refused_without_repeating_it`: "The bound
+# A FIELD THAT CARRIES A SECRET -- a password, a TOTP code, a recovery code, a
+# one-time link's token -- IS A PLAIN `str` (plan decision 16). A Pydantic
+# constraint that fails puts the field's INPUT in the 422 body, and the input
+# would be the secret (Task 3's
+# `test_an_over_long_password_is_refused_without_repeating_it`: "The bound
 # lives in the route, not on the field"). The flows bound them instead:
 # `flows.login` and `account.change_password` hold a password to verify to
 # `staff_password.SUBMITTED_MAX` (`invalid_credentials`); a new password is
 # `check_new_password`'s (`password_rejected`, `too_short`/`too_long`); a code
 # goes to Task 4's `verify_totp`/`confirm_secret` (spaces dropped, six digits)
-# or `recovery.normalise`, and any other shape is `factor_failed`.
+# or `recovery.normalise`, and any other shape is `factor_failed`; a link's
+# token goes to `action_tokens.org_of`, and any other shape is `invalid_link`.
 # --------------------------------------------------------------------------- #
 
 
@@ -163,7 +165,10 @@ class ForgotIn(BaseModel):
 
 class ResetIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    token: str = Field(max_length=200)
+    # The one-time token is a secret like the password: no Pydantic bound.
+    # `action_tokens.org_of` refuses anything not shaped like a link it issued,
+    # and a dead link of any kind is the one 410 `invalid_link`.
+    token: str
     password: str
 
 

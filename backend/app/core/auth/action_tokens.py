@@ -17,6 +17,7 @@ A NEW LINK REPLACES THE OLD ONES of the same purpose: `issue` marks them used.
 """
 
 import hashlib
+import re
 import secrets
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
@@ -36,6 +37,12 @@ RESET_TTL = timedelta(minutes=30)
 RECOVER_TTL = timedelta(minutes=15)
 
 _SEPARATOR = "."
+#: What `issue` writes: the organization's id in lower-case hex, the
+#: separator, and `secrets.token_urlsafe(32)` (43 base64url characters). The
+#: request field is a plain `str` (a secret has no Pydantic bound, Global
+#: Constraints), so this is where a value of any other length or shape stops:
+#: it names no link, and it is neither hashed nor looked up.
+_SHAPE = re.compile(r"[0-9a-f]{32}\.[A-Za-z0-9_-]{43}")
 
 
 def _digest(token: str) -> bytes:
@@ -43,13 +50,10 @@ def _digest(token: str) -> bytes:
 
 
 def org_of(token: str) -> UUID | None:
-    head, separator, tail = token.partition(_SEPARATOR)
-    if not separator or not tail or len(head) != 32:
+    if not _SHAPE.fullmatch(token):
         return None
-    try:
-        return UUID(hex=head)
-    except ValueError:
-        return None
+    head, _separator, _tail = token.partition(_SEPARATOR)
+    return UUID(hex=head)
 
 
 def link(console_url: str, page: str, token: str) -> str:

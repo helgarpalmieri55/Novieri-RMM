@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import Request, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.audit import audit_service
@@ -35,6 +35,7 @@ from app.core.auth.keys import UnknownKeyVersion
 from app.core.auth.passwords import verify_password
 from app.core.auth.recovery import replace_codes
 from app.core.auth.refusals import AuthRefusal
+from app.core.auth.session_policy import read_policy
 from app.core.auth.sessions import (
     DEVICE_COOKIE,
     SessionPrincipal,
@@ -201,12 +202,42 @@ async def my_security(request: Request, principal: SessionPrincipal) -> MySecuri
     )
 
 
+async def _detach_from_device(session: AsyncSession, principal: SessionPrincipal) -> None:
+    """The caller's own session, when a remembered device started it, stops
+    depending on that device before every device is revoked: Task 6's
+    `revoke_all_for_user` ends the sessions a revoked device started, and the
+    caller is not one of the OTHER sessions a password change ends (design
+    §2.8, OWASP [S8]). It keeps no more than an ordinary session's lifetime
+    from its sign-in, so no session outlives the trust that gave it its length.
+
+    THE ANCHOR IS `factor_at`, not `created_at`. `sessions.start_session` sets
+    a new session's `expires_at` from `now`, which is its `created_at` and, on
+    a remembered device, its `factor_at` too; a RESUMED session inherits the
+    `expires_at` and the `factor_at` of the one it resumed, so there only
+    `factor_at` still names the sign-in the lifetime was counted from."""
+    policy = await read_policy(session, principal.org_id)
+    ordinary = policy.lifetime(principal.kind, remembered=False)
+    await session.execute(
+        update(AuthSession)
+        .where(
+            AuthSession.id == principal.session_id,
+            AuthSession.trusted_device_id.is_not(None),
+        )
+        .values(
+            trusted_device_id=None,
+            expires_at=func.least(AuthSession.expires_at, AuthSession.factor_at + ordinary),
+        )
+    )
+
+
 async def change_password(
     request: Request, principal: SessionPrincipal, *, current: str, new: str
 ) -> None:
     """The current password again (OWASP [S5]: "require the current credentials
     for an account before updating ... the user's password"), then: the other
-    sessions end and every remembered device is forgotten (design §2.6).
+    sessions end and every remembered device is forgotten (design §2.6). The
+    caller's own session stays, detached from any device first
+    (`_detach_from_device`).
 
     One transaction per attempt (Task 4's advisory lock): check, verify, count
     or change, and the refusal raised after the block commits the count."""
@@ -230,9 +261,10 @@ async def change_password(
                     # the person did not fail (`flows._password_matches`).
                     matches = None
             if matches:
-                # A refused new password raises its 422 here, inside the
-                # block: that undoes the `record_success` too, which is right
-                # (there is no count to lose; the current password was good).
+                # A refused new password raises its 422 here, inside the block
+                # and BEFORE anything below has run: nothing is written, the
+                # failure count is left as it was (`record_success` comes after
+                # the rule), and the rollback only releases the advisory lock.
                 await staff_password.require_acceptable(
                     new,
                     email=user.email,
@@ -244,6 +276,7 @@ async def change_password(
                 await end_all_for_user(
                     session, user.id, "password_changed", except_id=principal.session_id
                 )
+                await _detach_from_device(session, principal)
                 await revoke_all_for_user(session, user.id)
                 await _record(session, user, "auth.password_changed", {"via": "self"})
                 await notices.tell(
