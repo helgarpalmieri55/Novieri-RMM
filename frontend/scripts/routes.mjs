@@ -9,10 +9,11 @@
  * gate, and never something the gate quietly stopped doing.
  *
  * `EXCLUDED` are the ones the gate cannot or must not walk: the dev-only
- * preview harness (it has its own browser pass, `a11y-browser.mjs`), the two
- * sign-in callbacks (the console's own and Email intake's Microsoft return,
- * pages whose only job is to consume an authorization code the gate does not
- * have) and the `*` redirect.
+ * preview harness (it has its own browser pass, `a11y-browser.mjs`), Email
+ * intake's Microsoft return (a page whose only job is to consume an
+ * authorization code the gate does not have) and the `*` redirect. The
+ * console's own OIDC callback, `/auth/callback`, left with `oidc-client-ts`
+ * (own-auth plan, Task 10).
  *
  * Read by `harmony.mjs` (Node) and by the vitest guard, so it is plain ESM
  * with no imports. The `.d.mts` beside it is what lets the TypeScript test
@@ -48,7 +49,6 @@ export const PARAMS = Object.freeze({
 
 export const EXCLUDED = new Set([
   "/__preview",
-  "/auth/callback",
   "/settings/email-intake/oauth/callback",
   "*",
 ]);

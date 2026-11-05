@@ -23,6 +23,8 @@
  * neither implement nor let a test replace.
  */
 
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "./api";
@@ -39,6 +41,22 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   window.history.pushState({}, "", "/");
+});
+
+function sources(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) return sources(path);
+    return /\.(ts|tsx)$/.test(name) && !/\.test\./.test(name) ? [path] : [];
+  });
+}
+
+describe("no step starts at an identity provider", () => {
+  it("is named nowhere in the console's source", () => {
+    const files = sources(resolve(import.meta.dirname, ".."));
+    expect(files.length).toBeGreaterThan(300);
+    expect(files.filter((file) => /kc_action|signinRedirect|signoutRedirect/.test(readFileSync(file, "utf8")))).toEqual([]);
+  });
 });
 
 describe("goToSignIn", () => {

@@ -53,6 +53,14 @@ describe("the sign-in address", () => {
     const source = readFileSync(resolve(import.meta.dirname, "session.ts"), "utf8");
     expect(source).not.toMatch(/import\.meta\.env/);
   });
+
+  it("needs no OIDC client: the package is gone and nothing imports it", () => {
+    const pkg = JSON.parse(readFileSync(resolve(import.meta.dirname, "../../package.json"), "utf8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    expect({ ...pkg.dependencies, ...pkg.devDependencies }).not.toHaveProperty("oidc-client-ts");
+  });
 });
 
 describe("the pages reached without a session", () => {
