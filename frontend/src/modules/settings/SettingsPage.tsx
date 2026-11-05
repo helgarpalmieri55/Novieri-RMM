@@ -4,7 +4,7 @@
  * The operator's requirement is explicit: "Everything under the Settings menu
  * must be editable — all configurations will take place there and not directly
  * on the server files." The previous version of this file was a read-only
- * summary that linked out to five other editors; this one is ten forms.
+ * summary that linked out to five other editors; this one is eleven forms.
  *
  * WHAT EACH TAB WRITES, AND THE ROUTE BEHIND IT:
  *
@@ -13,7 +13,8 @@
  * | Organization   | `GET /orgs/current`           | `PATCH /orgs/current`              | — / `orgs.manage`                |
  * | Email          | `GET /settings/email`         | `PUT /settings/email`, `POST /settings/email/test` | `orgs.manage` / `orgs.manage` |
  * | Roles          | `GET /roles`, `/permissions`  | `POST`/`PATCH`/`DELETE /roles`, `PUT /roles/{id}/permissions` | `roles.read` / `roles.manage` |
- * | Users          | `GET /users`, `/users/{id}/effective-permissions` | `POST /users`, role assign/revoke, disable/enable, the two mails, `DELETE` | `users.read` / `users.manage` |
+ * | Users          | `GET /users`, `/users/{id}/effective-permissions` | `POST /users/invite`, role assign/revoke, disable/enable, resend/cancel an invitation, reset second factors, sign out everywhere, `DELETE` | `users.read` / `users.manage` |
+ * | Sessions       | `GET /settings/sessions`      | `PUT /settings/sessions`           | `orgs.manage` / `orgs.manage`    |
  * | Assistant      | `GET /ai/settings`, `/ai/providers` | `PUT /ai/settings`           | `ai.admin` / `ai.admin`          |
  * | AI connections | `GET /orgs/current`, `GET /mcp/connections` | `PATCH /orgs/current` (`mcp_enabled` only), `POST /mcp/connections/{client_id}/revoke` | `mcp.use` OR `orgs.manage` / switch and "for everyone" `orgs.manage`, "for me" `mcp.use` |
  * | Notifications  | `GET /notifications/channels`, `/rules` | `POST`/`PATCH` both, `POST .../test` | `notification.read` / `notification.admin` |
@@ -66,7 +67,7 @@
  * | Default timezone, data residency | No endpoint carries either. They will appear on the Organization tab automatically if they enter the server's org-settings allowlist — the form renders the keys the server returns |
  * | "Authorization completeness" panel | A claim about backend route coverage, measured by `router_inspect.py` in the BACKEND's suite. Restating it here would be this console vouching for something it cannot observe |
  * | "Integrations" cards (AD, Sentinel, Odoo, Power BI, S3) with Connected/Available | No integration registry endpoint; every state in the mock is a literal. SMTP is the one that is real — it is a notification CHANNEL, and it is editable on the Notifications tab |
- * | "Security defaults" (MFA, session timeout, recording, approval, retention) | Realm policy (Keycloak), remote-module policy and audit retention live in deployment configuration and separate modules. No settings endpoint accepts any of them |
+ * | "Security defaults" (MFA, recording, approval, retention) | The second factor is required of every technician (own authentication design §2.2), and how long a sign-in lasts is the Sessions tab. Remote-module policy and audit retention live in separate modules; no settings endpoint accepts them |
  * | "Trust posture" panel | The five security invariants rendered as if a request had confirmed them. They hold because of how the platform is built, not because a screen checked |
  * | "Deployment profile" (gateway URL, object storage, identity broker, secrets service) and topology map | Deployment configuration. Nothing serves it, and nothing should accept it from a browser — a gateway URL writable from the console is a fleet-wide redirect primitive |
  * | The "Patch policy" body v3 draws under Settings | It is the patch module's own policy editor (`/patch/policies`), which owns the maintenance-window painter. One server-side policy must not have two editors |
@@ -94,6 +95,7 @@ import {
 import { ORGS_MANAGE, OrganizationTab } from "./OrganizationTab";
 import { ROLES_MANAGE, ROLES_READ, RolesTab } from "./RolesTab";
 import { USERS_MANAGE, USERS_READ, UsersTab } from "./UsersTab";
+import { SessionsTab } from "./SessionsTab";
 import { SLA_ADMIN, SLA_READ, ServiceLevelsTab } from "./ServiceLevelsTab";
 import { DEFAULT_SETTINGS_TAB, isSettingsTab, type SettingsTabKey as TabKey } from "./tabs";
 
@@ -319,6 +321,9 @@ export function SettingsPage() {
     ...(canManageOrg ? [{ key: "email", label: t("settings.page.tabs.email"), state: emailState }] : []),
     ...(canReadRoles ? [{ key: "roles", label: t("settings.page.tabs.roles") }] : []),
     ...(canReadUsers ? [{ key: "users", label: t("settings.page.tabs.users") }] : []),
+    // SESSIONS IS OFFERED WITH `orgs.manage`, like Email: its read is the
+    // same code, and it is one setting for the whole organization.
+    ...(canManageOrg ? [{ key: "sessions", label: t("settings.page.tabs.sessions") }] : []),
     ...(canAiAdmin ? [{ key: "assistant", label: t("settings.page.tabs.assistant") }] : []),
     // AI connections is offered for EITHER code: the switch is an org-admin's
     // whether or not they use an AI app, and a person who uses one owns their
@@ -402,6 +407,9 @@ export function SettingsPage() {
               canManage={everywhere.has(USERS_MANAGE)}
               canReadEmail={canManageOrg}
             />
+          ) : null}
+          {current === "sessions" ? (
+            <SessionsTab canRead={canManageOrg} canEdit={everywhere.has(ORGS_MANAGE)} />
           ) : null}
           {current === "assistant" ? (
             <AssistantTab canAdmin={canAiAdmin} canEdit={everywhere.has(AI_ADMIN)} />

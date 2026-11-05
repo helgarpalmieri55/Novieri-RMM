@@ -126,6 +126,7 @@ describe("the settings page in Spanish", () => {
       "Correo electrónico",
       "Roles",
       "Usuarios",
+      "Sesiones",
       "Asistente",
       "Conexiones de IA",
       "Notificaciones",
@@ -692,6 +693,35 @@ describe("the users tab in Spanish", () => {
     expect(screen.getByText("disabled")).toBeInTheDocument();
     expect(screen.getByText(/· everywhere/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Disable operator@example.com" })).toBeInTheDocument();
+  });
+});
+
+// ----------------------------------------------------------------- Sessions
+
+describe("the sessions tab in Spanish", () => {
+  it("words the three groups, the ranges, the switch and the warning", async () => {
+    const { container } = await openIn("sessions");
+    expect(await screen.findByLabelText("Cerrar la sesión tras la inactividad")).toHaveValue(30);
+    for (const group of ["Técnicos", "Recordar este equipo", "Contactos del portal"]) {
+      expect(screen.getByRole("heading", { name: group })).toBeInTheDocument();
+    }
+    expect(screen.getByRole("switch", { name: "Ofrecer «Recordar este equipo» al iniciar sesión" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getAllByText("Entre 5 y 480 minutos.")).toHaveLength(2);
+    expect(screen.getByText(/^En un equipo recordado no se pide el segundo factor/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Guardar cambios" })).toBeInTheDocument();
+    expectNoEnglish(container, RECORDED);
+  });
+
+  it("refuses a value out of range in Spanish", async () => {
+    const user = userEvent.setup();
+    await openIn("sessions");
+    const days = await screen.findByLabelText("Duración máxima de la sesión de un contacto");
+    await user.clear(days);
+    await user.type(days, "45");
+    expect(screen.getByText("Cada valor tiene que estar dentro del intervalo indicado debajo.")).toBeInTheDocument();
   });
 });
 

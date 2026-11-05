@@ -75,6 +75,7 @@ const ALL_TABS = [
   "Organization",
   "Roles",
   "Users",
+  "Sessions",
   "Assistant",
   "Notifications",
   "Service levels",
@@ -199,12 +200,13 @@ describe("SettingsPage", () => {
     expect(await screen.findByRole("tab", { name: "Notifications" })).toBeInTheDocument();
     // The organization tab is always offered: every session belongs to an org.
     expect(screen.getByRole("tab", { name: "Organization" })).toBeInTheDocument();
-    for (const label of ["Assistant", "Service levels", "Health", "Budget", "Roles", "Users"]) {
+    for (const label of ["Assistant", "Service levels", "Health", "Budget", "Roles", "Users", "Sessions"]) {
       expect(screen.queryByRole("tab", { name: new RegExp(label) })).not.toBeInTheDocument();
     }
     expect(calls.listRoles).not.toHaveBeenCalled();
     expect(calls.listPermissions).not.toHaveBeenCalled();
     expect(calls.listUsers).not.toHaveBeenCalled();
+    expect(calls.getSessionSettings).not.toHaveBeenCalled();
     expect(calls.getAiSettings).not.toHaveBeenCalled();
     expect(calls.getSlaSettings).not.toHaveBeenCalled();
     expect(calls.getHealthSettings).not.toHaveBeenCalled();

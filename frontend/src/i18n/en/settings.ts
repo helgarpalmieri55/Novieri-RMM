@@ -1,7 +1,7 @@
 /**
- * Settings: the section list and the ten tabs (organization, email, roles,
- * users, assistant, AI connections, notifications, service levels, health,
- * budget), plus the
+ * Settings: the section list and the eleven tabs (organization, email, roles,
+ * users, sessions, assistant, AI connections, notifications, service levels,
+ * health, budget), plus the
  * pieces they share (the save bar, the "did not load" notice). Organization
  * names, hostnames, addresses, role and channel names, queue names and every
  * value an operator recorded read as recorded and are never catalogued; the
@@ -20,6 +20,7 @@ export const settings = {
       email: "Email",
       roles: "Roles",
       users: "Users",
+      sessions: "Sessions",
       assistant: "Assistant",
       "ai-connections": "AI connections",
       notifications: "Notifications",
@@ -330,6 +331,33 @@ export const settings = {
         body: "This removes just this one. A role held twice — for a different client, or everywhere — keeps the other.",
       },
     },
+  },
+  // How long a sign-in lasts (own authentication design §2.4, §2.6, §3).
+  sessions: {
+    title: "Sessions",
+    subtitle: "How long a sign-in lasts before it is asked for again",
+    loading: "Loading…",
+    forbidden: "Session settings are not available (insufficient permissions: {code}).",
+    groups: {
+      staff: "Technicians",
+      remember: "Remember this device",
+      contacts: "Portal contacts",
+    },
+    staffIdle: "Sign out after inactivity",
+    staffMax: "Longest session",
+    staffNote: "After the inactivity time only the password is asked again; after the longest session, the second factor too.",
+    rememberEnabled: "Offer \"Remember this device\" at sign-in",
+    rememberDays: "Remember a device for",
+    rememberedMax: "Longest session on a remembered device",
+    rememberRisk: "On a remembered device the second factor is not asked until the device is forgotten or its time runs out, so a stolen, unlocked device can sign in with the password alone. Each person can forget their devices in Your security; an administrator forgets all of a person's devices by resetting their second factors or disabling them, and a password change forgets them too.",
+    contactIdle: "Sign a contact out after inactivity",
+    contactMax: "Longest contact session",
+    contactsNote: "Portal contacts sign in to the portal only, never to this console. Their sessions follow these two values.",
+    rangeMinutes: "Between {min} and {max} minutes.",
+    rangeHours: "Between {min} and {max} hours.",
+    rangeDays: "Between {min} and {max} days.",
+    outOfRange: "Each value has to be within the range shown under it.",
+    correct: "Correct the values outside their range before saving.",
   },
   assistant: {
     title: "Assistant",
