@@ -90,9 +90,27 @@ export function safeNext(raw: unknown): string {
   if (typeof raw !== "string") return DEFAULT_AFTER_SIGN_IN;
   if (/[\u0000-\u001f\u007f\s]/.test(raw)) return DEFAULT_AFTER_SIGN_IN;
   if (!/^\/(?![/\\])/.test(raw)) return DEFAULT_AFTER_SIGN_IN;
-  const pathname = raw.split(/[?#]/, 1)[0] ?? raw;
-  if (isPublicPath(pathname)) return DEFAULT_AFTER_SIGN_IN;
+  // RESOLVE IT THE WAY THE BROWSER WILL, then judge the result: `/x/../sign-in`
+  // and `/%2e%2e/sign-in` are the sign-in page once normalised, and a
+  // same-origin path under an edge prefix is not a console page at all
+  // (`/i/<code>/windows` would download an agent installer for a person who
+  // just signed in).
+  let url: URL;
+  try {
+    url = new URL(raw, window.location.origin);
+  } catch {
+    return DEFAULT_AFTER_SIGN_IN;
+  }
+  if (url.origin !== window.location.origin) return DEFAULT_AFTER_SIGN_IN;
+  if (isPublicPath(url.pathname) || isEdgePath(url.pathname)) return DEFAULT_AFTER_SIGN_IN;
   return raw;
+}
+
+/** Paths the edge serves itself, never the console's router. */
+const EDGE_PREFIXES: readonly string[] = ["/i", "/api", "/enroll", "/mcp", "/.well-known", "/realms", "/resources", "/js"];
+
+function isEdgePath(pathname: string): boolean {
+  return EDGE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
 /** `/sign-in`, with `?next=` when there is somewhere better than the root to come back to. */

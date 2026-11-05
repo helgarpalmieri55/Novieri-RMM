@@ -26,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSelectedClient } from "./clientChoice";
 import { RESYNC_KIND } from "./resync";
-import { sessionEnded } from "./sessionEnd";
+import { isSessionEnded, sessionEnded } from "./sessionEnd";
 import { CLOSE_SESSION_ENDED, liveUrl, useLiveEvents } from "./ws";
 
 /**
@@ -175,6 +175,36 @@ describe("useLiveEvents", () => {
     });
     act(() => vi.advanceTimersByTime(60_000));
     expect(sockets()).toHaveLength(1);
+  });
+
+  it("on 4401, treats another person's session in the cookie as the session ending", async () => {
+    queryClient.setQueryData(["me"], { user_id: "u-1" });
+    vi.spyOn(queryClient, "invalidateQueries").mockImplementation(() => {
+      queryClient.setQueryData(["me"], { user_id: "u-2" });
+      return Promise.resolve();
+    });
+    renderHook(() => useLiveEvents(vi.fn()), { wrapper });
+    act(() => sockets()[0]!.open());
+
+    await act(async () => {
+      sockets()[0]!.ended(CLOSE_SESSION_ENDED);
+      await Promise.resolve();
+    });
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(sockets()).toHaveLength(1);
+    expect(isSessionEnded()).toBe(true);
+  });
+
+  it("on 4401, reconnects when the same person is still there", async () => {
+    queryClient.setQueryData(["me"], { user_id: "u-1" });
+    vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue(undefined);
+    renderHook(() => useLiveEvents(vi.fn()), { wrapper });
+    act(() => sockets()[0]!.open());
+    await act(async () => {
+      sockets()[0]!.ended(CLOSE_SESSION_ENDED);
+      await Promise.resolve();
+    });
+    expect(sockets()).toHaveLength(2);
   });
 
   it("after a 4401, a refused handshake backs off rather than looping", async () => {

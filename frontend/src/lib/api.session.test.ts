@@ -84,9 +84,10 @@ describe("the session cookie", () => {
     // `api.clientScope.test.ts` holds every call to its route.
     const source = readFileSync(resolve(import.meta.dirname, "api.ts"), "utf8");
     const calls: string[] = [];
-    for (let at = source.indexOf("await fetch("); at !== -1; at = source.indexOf("await fetch(", at + 1)) {
+    for (const found of source.matchAll(/(?<![\w.])fetch\(/g)) {
+      const at = found.index;
       let depth = 0;
-      let end = at + "await fetch".length;
+      let end = at + "fetch".length;
       for (; end < source.length; end += 1) {
         if (source[end] === "(") depth += 1;
         if (source[end] === ")") {

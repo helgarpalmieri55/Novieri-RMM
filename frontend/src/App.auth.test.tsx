@@ -104,10 +104,12 @@ describe("a visitor with no session", () => {
   });
 
   it("is sent once, not on every render", async () => {
-    // The navigation replaces the document; firing it twice is two loads,
-    // and React strict mode runs effects twice on purpose -- so the test runs
-    // under it, or removing the `leaving` ref would still pass.
+    // The navigation replaces the document; firing it twice is two loads.
+    // The session is already marked ended BEFORE the first render, so
+    // `mustSignIn` is true on mount and StrictMode's double-run of the
+    // effect would navigate twice -- without the `leaving` ref.
     stubServer(() => ({ status: 401 }));
+    sessionEnded();
     const { ui } = guarded();
     const { rerender } = render(<StrictMode>{ui}</StrictMode>);
     await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));

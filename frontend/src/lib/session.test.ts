@@ -103,6 +103,17 @@ describe("?next=, which anyone can write into a link", () => {
     ["/sign-in", "the sign-in page itself: signing in would ask again"],
     ["/sign-in/factor?next=%2Fdevices", "a sign-in step"],
     ["/invite/abc", "a page reached without a session"],
+    ["/x/../sign-in", "normalises to the sign-in page"],
+    ["/%2e%2e/sign-in", "encoded dot-dot normalises to the sign-in page"],
+    ["/i/abc123/windows", "an agent-installer download, not a console page"],
+    ["/api/v1/me", "the API"],
+    ["/enroll", "agent enrolment"],
+    ["/mcp", "the MCP endpoint"],
+    ["/.well-known/openid-configuration", "edge discovery"],
+    ["/realms/itms", "the identity provider's path"],
+    ["/resources/x", "the identity provider's assets"],
+    ["/js/x", "the identity provider's scripts"],
+    ["/x/../i/abc/windows", "normalises into an edge prefix"],
   ])("refuses %j and lands on the root (%s)", (hostile) => {
     expect(safeNext(hostile)).toBe(DEFAULT_AFTER_SIGN_IN);
   });

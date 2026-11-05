@@ -50,7 +50,8 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import { FIXTURE_MODE } from "../fixtures/mode";
 import { selectedClient, subscribeClient } from "./clientChoice";
 import { RESYNC_KIND } from "./resync";
-import { isSessionEnded, subscribeSessionEnd } from "./sessionEnd";
+import type { Me } from "./api";
+import { isSessionEnded, sessionEnded, subscribeSessionEnd } from "./sessionEnd";
 
 export interface UiEvent {
   kind: string;
@@ -126,8 +127,17 @@ export function useLiveEvents(onEvent: (event: UiEvent) => void): void {
     // socket opened here is refused or closed by this effect's cleanup once
     // the fallback lands -- a planned close, no gap and no reconnect.
     const recheck = async () => {
+      // WHO THE TAB WAS BEFORE: a cookie that now holds ANOTHER person's
+      // session (someone signed in on this browser in another tab) is this
+      // session ending, not a rotation -- reconnecting would stream the new
+      // person's events into the previous person's cache.
+      const before = queryClient.getQueryData<Me>(["me"])?.user_id;
       await queryClient.invalidateQueries({ queryKey: ["me"] });
       if (disposed) return;
+      if (before !== undefined && queryClient.getQueryData<Me>(["me"])?.user_id !== before) {
+        sessionEnded();
+        return;
+      }
       if (rechecked) {
         backoff();
         return;
