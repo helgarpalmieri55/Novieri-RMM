@@ -63,6 +63,7 @@ export const auditActions = {
   asset_updated: "Asset updated",
   auth_admission_refused: "Auth admission refused",
   auth_email_changed: "Auth email changed",
+  auth_factor_disabled: "Auth factor disabled",
   auth_identity_linked: "Auth identity linked",
   auth_identity_unlinked: "Auth identity unlinked",
   auth_login: "Auth login",

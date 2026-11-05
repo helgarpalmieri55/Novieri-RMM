@@ -175,7 +175,12 @@ there is, because a platform with zero users has no audit chain either. Static
 templates, variables in `extra`, and the install code never appears in any of
 them.
 
-**NOW 108, own authentication phase 1 (Task 3).** One static WARNING in
+**NOW 109, own authentication phase 1 (Task 4).** One static WARNING in
+`app/core/auth/totp.py::_open`, when a person's sealed TOTP secret does not
+open for their row (moved from another row, or damaged) and the code is
+refused. Nothing in `extra`: never the seal, the code or the person.
+
+**BEFORE THAT, 108, own authentication phase 1 (Task 3).** One static WARNING in
 `app/core/rate_limit.py::hit`, when Redis fails and the shared limiter lets
 the request through (`exc_info=True`). Nothing in `extra`: never the key,
 which names a person's address or account, nor the count.
