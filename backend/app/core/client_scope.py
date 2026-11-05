@@ -106,6 +106,10 @@ ALL_SCOPE_ALLOWLIST: dict[str, str] = {
         "door 1 for a console session (P2 design §6.5): the person's row and grants, read "
         "before the scope they define exists, as admit reads them for a token"
     ),
+    "app/core/identity/door.py::read_session_identity": (
+        "doors 2 and 3 for a console session (P2 design §6.5): read_door_identity's reads, "
+        "keyed by the session's person instead of a token"
+    ),
     "app/core/identity/door.py::person_scope": (
         "an admitted person's grants for one code (require_permission, the portal's gate, "
         "MCP): read before the scope they define exists, and only ever intersected with "

@@ -81,11 +81,13 @@ RAW_SESSIONS_BY_DESIGN: dict[str, str] = {
         "the very next statement opens `org_session(org_id)` for everything "
         "else the dependency does."
     ),
-    "api/v1/ws.py::ui_websocket": (
+    "api/v1/ws.py::_admit_bearer": (
         "admin_engine, the same pre-tenant org-slug lookup as `auth_context`, "
         "for the same reason: a socket carries its token in the subprotocol "
         "header and the org is not known until that token is validated. "
-        "Read-only; the handler moves onto tenant-scoped reads afterwards."
+        "Read-only; the handler moves onto tenant-scoped reads afterwards. "
+        "(Moved out of `ui_websocket` by P2 Task 6, which gave the socket a "
+        "second door, the session cookie, beside this one.)"
     ),
     "api/v1/errors.py::list_error_groups": (
         "app_engine WITHOUT a tenant GUC, deliberately: `platform_error_group` "

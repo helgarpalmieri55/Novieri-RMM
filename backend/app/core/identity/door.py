@@ -114,6 +114,47 @@ async def read_door_identity(
     return DoorIdentity(refusal=None, user_id=user_id, clients=scope)
 
 
+async def read_session_identity(
+    *,
+    door: str,
+    org_id: UUID,
+    user_id: UUID,
+    settings: Settings,
+    engine: AsyncEngine,
+    code: str | None = None,
+) -> DoorIdentity:
+    """`read_door_identity` for a console session (P2 design §6.5), keyed by
+    the session's person instead of a token's `sub`: the same domain rule,
+    status and kind, in the same order, then the same scope.
+
+    The domain rule is read against the ROW's address, which is the one the
+    platform verifies now that it owns sign-in. ``user_id`` is ``None`` in the
+    answer only when the row is gone. Nothing is written."""
+    nobody = ClientScope.only([])
+    async with org_session(org_id, engine=engine, clients=ClientScope.all()) as session:
+        row = (
+            await session.execute(
+                select(User.email, User.status, User.kind).where(User.id == user_id)
+            )
+        ).one_or_none()
+        if row is None:
+            return DoorIdentity(refusal=None, user_id=None, clients=nobody)
+        email, user_status, user_kind = row
+        who = f"user:{user_id}"
+        domain_reason = domain_refusal(
+            email, await resolve_console_domain(session, org_id, settings)
+        )
+        if domain_reason is not None:
+            log_admission_refusal(door, sub=who, email=email, reason=domain_reason)
+            return DoorIdentity(refusal=domain_reason, user_id=user_id, clients=nobody)
+        reason = status_refusal(user_status) or contact_refusal(user_kind)
+        if reason is not None:
+            log_admission_refusal(door, sub=who, email=email, reason=reason)
+            return DoorIdentity(refusal=reason, user_id=user_id, clients=nobody)
+        scope = await clients_holding(session, user_id, code)
+    return DoorIdentity(refusal=None, user_id=user_id, clients=scope)
+
+
 async def person_scope(
     *, org_id: UUID, user_id: UUID, code: str | None, engine: AsyncEngine
 ) -> ClientScope:

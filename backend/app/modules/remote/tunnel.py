@@ -13,10 +13,13 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from starlette.requests import HTTPConnection
 
+from app.core.auth.csrf import origin_allowed
+from app.core.auth.sessions import resolve
 from app.core.client_scope import ClientScope
 from app.core.config import Settings
-from app.core.identity.door import read_door_identity
+from app.core.identity.door import DoorIdentity, read_door_identity, read_session_identity
 from app.core.rbac import has_permission
 from app.core.security import (
     JwksCache,
@@ -156,6 +159,51 @@ async def authorize_tunnel(
         engine=app_engine,
         code=REMOTE_CONTROL,
     )
+    return await _authorize_person(
+        org_id=org_id, identity=identity, session_id=session_id, app_engine=app_engine
+    )
+
+
+async def authorize_tunnel_session(
+    *,
+    connection: HTTPConnection,
+    session_id: UUID,
+    settings: Settings,
+    app_engine: AsyncEngine,
+) -> tuple[UUID, UUID, ClientScope]:
+    """`authorize_tunnel` for the console's session cookie (P2 design §6.5;
+    coordinator D15): the handshake's `Origin` must be the console's -- the
+    cookie rides on a handshake any page opens, and a WebSocket is not subject
+    to CORS -- else 4403; then a live, signed-in session (untouched: a screen
+    being watched is not activity), else 4401; then the same identity, scope,
+    session and ownership rules, in the same order and with the same codes."""
+    if not origin_allowed(connection.headers.get("origin"), settings):
+        raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
+            4403, "not the console's origin"
+        )
+    principal = await resolve(connection, touch=False)
+    if principal is None or not principal.factor_done:
+        raise TunnelAuthError(  # i18n-exempt: only the close code reaches the browser
+            4401, "no live session"
+        )
+    identity = await read_session_identity(
+        door="remote-tunnel",
+        org_id=principal.org_id,
+        user_id=principal.user_id,
+        settings=settings,
+        engine=app_engine,
+        code=REMOTE_CONTROL,
+    )
+    return await _authorize_person(
+        org_id=principal.org_id, identity=identity, session_id=session_id, app_engine=app_engine
+    )
+
+
+async def _authorize_person(
+    *, org_id: UUID, identity: DoorIdentity, session_id: UUID, app_engine: AsyncEngine
+) -> tuple[UUID, UUID, ClientScope]:
+    """The tail both doors share: refusal (4403), no person (4401), no
+    `remote.control` (4403), then the session and its owner under that scope."""
     if identity.refusal is not None:
         raise TunnelAuthError(4403, identity.refusal)
     if identity.user_id is None:

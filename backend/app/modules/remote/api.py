@@ -38,6 +38,7 @@ from sqlalchemy import func, select
 
 from app.api.deps import AuthContext, bound_auth_context, narrowed_to_any, require_permission
 from app.core.audit import audit_service
+from app.core.auth.sessions import SESSION_COOKIE
 from app.core.global_rows import refuse_unless_every_client
 from app.core.i18n import tr
 from app.core.storage import ObjectStore
@@ -47,7 +48,12 @@ from app.models import Device, RemotePolicy, RemoteSession
 from app.modules.remote.models import RECORDING_MAX_BYTES
 from app.modules.remote.screen_tunnel import run_screen_tunnel
 from app.modules.remote.service import SCREEN, InvalidSessionState, ScreenUnavailable
-from app.modules.remote.tunnel import TunnelAuthError, authorize_tunnel, owner_or_admin
+from app.modules.remote.tunnel import (
+    TunnelAuthError,
+    authorize_tunnel,
+    authorize_tunnel_session,
+    owner_or_admin,
+)
 
 router = APIRouter(prefix="/remote", tags=["remote"])
 
@@ -469,8 +475,9 @@ async def upsert_policy(
 async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
     """Browser-facing rsp/1 stream for a screen session.
 
-    Admission: the bearer token from the ``Sec-WebSocket-Protocol`` header
-    (never the query string, which access logs record), then
+    Admission: the console's session cookie with the console's ``Origin``
+    (P2 design §6.5), or the bearer token from the ``Sec-WebSocket-Protocol``
+    header (never the query string, which access logs record); then
     ``remote.control`` and owner-or-admin, all server-side. The browser sends
     and receives rsp/1 frames as binary messages; text messages are ignored.
     """
@@ -479,14 +486,23 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
     try:
         # The person admitted is the viewer, whose closing the viewer is
         # their own act (phase 3 design §5.3): the owner, or a supervisor.
-        org_id, viewer_id, _clients = await authorize_tunnel(
-            token=token,
-            session_id=session_id,
-            settings=state.settings,
-            jwks=state.jwks,
-            admin_engine=state.admin_engine,
-            app_engine=state.app_engine,
-        )
+        # No token offered and a session cookie present: the session door.
+        if not token and SESSION_COOKIE in websocket.cookies:
+            org_id, viewer_id, _clients = await authorize_tunnel_session(
+                connection=websocket,
+                session_id=session_id,
+                settings=state.settings,
+                app_engine=state.app_engine,
+            )
+        else:
+            org_id, viewer_id, _clients = await authorize_tunnel(
+                token=token,
+                session_id=session_id,
+                settings=state.settings,
+                jwks=state.jwks,
+                admin_engine=state.admin_engine,
+                app_engine=state.app_engine,
+            )
     except TunnelAuthError as exc:
         await websocket.close(code=exc.code)
         return
@@ -498,7 +514,8 @@ async def session_screen(websocket: WebSocket, session_id: UUID) -> None:
         await websocket.close(code=4409)
         return
 
-    await websocket.accept(subprotocol=AUTH_SUBPROTOCOL)
+    # The subprotocol is echoed only when one was offered (the bearer path).
+    await websocket.accept(subprotocol=AUTH_SUBPROTOCOL if token else None)
 
     async def browser_send(data: bytes) -> None:
         await websocket.send_bytes(data)
