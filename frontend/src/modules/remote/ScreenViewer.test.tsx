@@ -12,7 +12,20 @@ vi.mock("../../lib/ApiContext", () => ({ useApi: () => mockUseApi() }));
 // token the stream's handshake carried. The session cookie is the credential
 // now; what the page can know is whether this tab's session has ended.
 const mockSessionEnded = vi.fn<() => boolean>(() => false);
-vi.mock("../../lib/sessionEnd", () => ({ isSessionEnded: () => mockSessionEnded() }));
+// Who is listening for the end (final review D1, Minor 2): the test ends the
+// session the way `lib/sessionEnd.ts` does -- the flag, then the listeners.
+const sessionEndListeners = new Set<() => void>();
+vi.mock("../../lib/sessionEnd", () => ({
+  isSessionEnded: () => mockSessionEnded(),
+  subscribeSessionEnd: (listener: () => void) => {
+    sessionEndListeners.add(listener);
+    return () => sessionEndListeners.delete(listener);
+  },
+}));
+function endSession(): void {
+  mockSessionEnded.mockReturnValue(true);
+  for (const listener of [...sessionEndListeners]) listener();
+}
 
 /** A WebSocket the test drives: it records what the page sends. */
 class FakeSocket {
@@ -291,6 +304,19 @@ describe("ScreenViewer", () => {
     renderViewer();
     await act(async () => socket().shut(4409));
     expect(await screen.findByText(/already open in another window/)).toBeInTheDocument();
+  });
+
+  it("closes the open screen when this tab learns its session ended, and says why (D1, Minor 2)", async () => {
+    renderViewer();
+    const ws = socket();
+    await goLive(ws);
+    expect(ws.readyState).toBe(1);
+
+    act(() => endSession());
+
+    expect(ws.readyState).toBe(3);
+    expect(FakeSocket.last).toBe(ws);
+    expect(await screen.findByText(/session in this console has ended/)).toBeInTheDocument();
   });
 
   it("opens no socket once the session has ended, and says why", async () => {

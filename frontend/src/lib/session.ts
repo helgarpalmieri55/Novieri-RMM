@@ -20,25 +20,46 @@
  * signing out (`signOut`) all navigate the document. The query cache, the
  * client chosen in the top bar, the live socket and the session-ended flag of
  * whoever was here never reach the next person's console on a shared
- * computer, and nothing has to remember to clear them.
+ * computer, and nothing has to remember to clear them. A session that ends
+ * WITHOUT a navigation -- inactivity, the maximum, an administrator, another
+ * person in the cookie -- is hidden and emptied by the guard at once
+ * (`App.tsx`'s `RequireAuth`, operator decision 3, 2026-11-05).
  */
 import { useQuery, type QueryClient } from "@tanstack/react-query";
-import { useSyncExternalStore } from "react";
+import { useLayoutEffect, useSyncExternalStore } from "react";
 
 import { ApiError, type ApiClient, type Me } from "./api";
 import { useApi } from "./ApiContext";
-import { isSessionEnded, subscribeSessionEnd } from "./sessionEnd";
+import {
+  hadSession,
+  isSessionEnded,
+  sessionEndReason,
+  sessionPerson,
+  sessionSignedOut,
+  subscribeSessionEnd,
+} from "./sessionEnd";
 
-export type SessionStatus = "loading" | "signed_out" | "signed_in";
+/**
+ * - `signed_in`: `/me` answered, and nothing has ended it since.
+ * - `signed_out`: no session, and this tab never had one -- a visitor, sent
+ *   to sign in.
+ * - `ended`: the session this tab had is over (inactivity, the maximum, an
+ *   administrator, another person in the cookie). The guard hides the page
+ *   behind its notice and never navigates by itself.
+ * - `signing_out`: the person signed out here, and `signOut` is loading the
+ *   sign-in page.
+ * - `loading`: not known yet.
+ */
+export type SessionStatus = "loading" | "signed_out" | "signed_in" | "ended" | "signing_out";
 
 export interface Session {
   status: SessionStatus;
   /**
-   * The person, once `/me` answered. KEPT AFTER THE SESSION ENDS, so the page
-   * they were on stays drawn under the shell's notice instead of vanishing.
+   * The person, while `signed_in` only. NOT KEPT AFTER THE SESSION ENDS: the
+   * cache it came from is emptied then (operator decision 3).
    */
   me?: Me;
-  /** `/me` failed for a reason that is not "no session": the server could not say. */
+  /** `/me` failed for a reason that is not "no session": the server could not say, or refused. */
   failure?: unknown;
 }
 
@@ -178,6 +199,11 @@ export function enterConsole(next: unknown): void {
  * shared computer who clicked "Sign out" and was shown the sign-in page while
  * the server never heard would walk away from an open session; the shell says
  * it is still open instead (`shell.app.signOutFailed`).
+ *
+ * ONCE THE SERVER HAS ENDED IT, NOTHING OF THE SESSION WAITS FOR THE LOAD:
+ * the guard empties the query cache and hides the page at once
+ * (`sessionSignedOut`, operator decision 3) -- the browser keeps the old page
+ * on screen until the sign-in page has loaded.
  */
 export async function signOut(api: Pick<ApiClient, "logout">): Promise<void> {
   try {
@@ -185,6 +211,7 @@ export async function signOut(api: Pick<ApiClient, "logout">): Promise<void> {
   } catch (error: unknown) {
     if (!(error instanceof ApiError && error.status === 401)) throw error;
   }
+  sessionSignedOut();
   navigation.assign(SIGN_IN_PATH);
 }
 
@@ -199,23 +226,33 @@ export function hasSession(queryClient: QueryClient): boolean {
 }
 
 /**
- * The session, from `GET /me` and the 401s this tab has seen.
+ * The session, from `GET /me` and what this tab has learnt since
+ * (`./sessionEnd.ts`). The states are `SessionStatus`'s; `loading` carries
+ * `failure` when `/me` failed for a reason that is not "no session".
  *
- * - `signed_in`, with `me`: `/me` answered and nothing has refused since.
- * - `signed_out`: no session. With `me` when it ended while the person was
- *   here (the shell keeps their page and raises its notice); without `me`
- *   when this tab never had one (the guard sends them to sign in).
- * - `loading`: not known yet -- with `failure` when `/me` failed for another
- *   reason and the server could not say.
+ * THE PERSON `/me` NAMES IS REMEMBERED, the first time it answers, and an
+ * answer naming anybody else ends the session (`sessionPerson`, final review
+ * D1, Minor 3): someone signed in on this browser in another tab. The socket's
+ * re-check applies the same rule (`./ws.ts`). In a LAYOUT effect, so the new
+ * person's `/me` is never painted: the end runs before the browser draws, and
+ * the page it reads the typed text from is still in the document.
+ *
+ * NOT ASKED AGAIN ONCE THE SESSION HAS ENDED: the answer is a 401, or the
+ * next person's `/me`, and neither is this tab's to hold.
  *
  * The query is the shell's own `["me"]`: one request answers the guard, the
  * shell, the client selector and `Landing`.
  */
 export function useSession(): Session {
   const api = useApi();
-  const ended = useSyncExternalStore(subscribeSessionEnd, isSessionEnded, isSessionEnded);
-  const me = useQuery({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000 });
-  if (ended) return { status: "signed_out", me: me.data };
+  const ended = useSyncExternalStore(subscribeSessionEnd, sessionEndReason, sessionEndReason);
+  const me = useQuery({ queryKey: ["me"], queryFn: () => api.me(), staleTime: 60_000, enabled: ended === null });
+  const userId = me.data?.user_id;
+  useLayoutEffect(() => {
+    if (userId !== undefined) sessionPerson(userId);
+  }, [userId]);
+  if (ended === "signed_out") return { status: "signing_out" };
+  if (ended === "ended") return { status: hadSession() ? "ended" : "signed_out" };
   if (me.data !== undefined) return { status: "signed_in", me: me.data };
   if (me.error instanceof ApiError && me.error.status === 401) return { status: "signed_out" };
   if (me.error) return { status: "loading", failure: me.error };

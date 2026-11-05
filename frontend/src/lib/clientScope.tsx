@@ -12,7 +12,7 @@
  * 1. IT EMPTIES THE QUERY CACHE before anything renders again (§1.4). Every
  *    cached answer was read under the previous choice; none may be shown
  *    under the next one. The one query kept is the setup gate's, which
- *    names no client and lives above this provider (`emptyForNewClient`).
+ *    names no client and lives above this provider (`emptyQueryCache`).
  * 2. IT STARTS THE PAGE AGAIN (a `key` on its children). Emptying removes the
  *    queries, but a mounted component keeps the result it last rendered until
  *    something renders it again -- so the shell and the page under it are
@@ -97,19 +97,22 @@ export function orderClients(clients: readonly MeClient[]): MeClient[] {
 }
 
 /**
- * WHAT A CHANGE OF CLIENT EMPTIES: every query but the setup gate's, and
- * every mutation, the way `clear()` does -- in-flight requests are cancelled
- * and whatever they answer lands nowhere.
+ * WHAT A CHANGE OF CLIENT EMPTIES, AND WHAT A SESSION THAT ENDS EMPTIES
+ * (`App.tsx`'s `RequireAuth`, operator decision 3): every query but the setup
+ * gate's, and every mutation, the way `clear()` does -- in-flight requests are
+ * cancelled and whatever they answer lands nowhere. The mutations go with
+ * the bodies they were sent, passwords among them.
  *
  * `["setup", ...]` IS KEPT because it is `App.tsx`'s `SetupGate`, which sits
  * ABOVE this provider and is not started again with the page. Its request
- * bypasses `ApiClient`, so it never carried `X-Client-Id`, and it asks the
- * one thing about the platform no client changes: whether it has been
- * claimed. Emptied with the rest, the gate's next re-render found no query,
- * drew "Starting..." in place of the whole routes tree, and asked again.
- * Nothing read under the previous client survives this.
+ * bypasses `ApiClient`, so it never carried `X-Client-Id` or a session, and it
+ * asks the one thing about the platform no client and no person changes:
+ * whether it has been claimed. Emptied with the rest, the gate's next
+ * re-render found no query, drew "Starting..." in place of the whole routes
+ * tree -- the session-ended notice included -- and asked again. Nothing read
+ * under the previous client, or by the previous session, survives this.
  */
-function emptyForNewClient(queryClient: QueryClient): void {
+export function emptyQueryCache(queryClient: QueryClient): void {
   queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "setup" });
   queryClient.getMutationCache().clear();
 }
@@ -165,7 +168,7 @@ export function ClientScopeProvider({ children }: { children: ReactNode }) {
 
   // 1. Inside the change itself: listeners run synchronously when the choice
   //    moves, and React only renders after the change has returned.
-  useEffect(() => subscribeClient(() => emptyForNewClient(queryClient)), [queryClient]);
+  useEffect(() => subscribeClient(() => emptyQueryCache(queryClient)), [queryClient]);
 
   // A choice made in another tab. `key === null` is that tab clearing storage.
   useEffect(() => {

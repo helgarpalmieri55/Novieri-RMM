@@ -3,35 +3,89 @@
  * design §1.1, §2.4).
  *
  * The session is the `__Host-itms_session` cookie, which no script on the page
- * can read (`HttpOnly`). So the console learns that it is over in one way
- * only: the server answers 401. `ApiClient` reports every such answer here
- * (`ApiProvider`'s `onUnauthorized`), and what has to stop reads it: the guard
- * and the shell's notice (`lib/session.ts::useSession`), the live socket
- * (`lib/ws.ts`), the screen viewer and the language save.
+ * can read (`HttpOnly`). So the console learns that it is over in three ways,
+ * and every one of them lands here:
+ *
+ *   - THE SERVER ANSWERS 401. `ApiClient` reports every such answer
+ *     (`ApiProvider`'s `onUnauthorized`) -- the 30 minutes of inactivity, the
+ *     12-hour maximum, an administrator, a sign-out in another tab. A `/ws`
+ *     4401 is learnt this way too: the socket asks `/me` again (`./ws.ts`).
+ *   - `/me` NAMES SOMEBODY ELSE (`sessionPerson`, final review D1, Minor 3).
+ *     Someone signed in on this browser in another tab; the cookie now holds
+ *     their session, and this tab's person is gone. One rule for every path
+ *     that reads `/me`: the guard's own query (`./session.ts::useSession`)
+ *     and the socket's re-check alike.
+ *   - THE PERSON SIGNED OUT here (`sessionSignedOut`, `./session.ts::signOut`).
+ *
+ * What has to stop reads it: the guard, which hides the page and empties the
+ * query cache (`App.tsx`'s `RequireAuth`, operator decision 3, 2026-11-05),
+ * the live socket (`./ws.ts`), the screen viewer and the language save.
  *
  * ONE WAY, FOR THE LIFE OF THE PAGE. Nothing here un-ends a session. Signing
- * in again is a whole-document load (`lib/session.ts::enterConsole`), which
- * starts this module at `false`; a test starts from `false` through
- * `resetSessionEnd` (`src/test/setup.ts`).
+ * in again is a whole-document load (`./session.ts::enterConsole`), which
+ * starts this module at "not ended" with nobody known; a test starts there
+ * through `resetSessionEnd` (`src/test/setup.ts`).
  *
- * APART FROM `lib/session.ts` because `ApiContext.tsx` writes this and
- * `lib/session.ts` reads `useApi` from `ApiContext.tsx`: one module holding
+ * APART FROM `./session.ts` because `ApiContext.tsx` writes this and
+ * `./session.ts` reads `useApi` from `ApiContext.tsx`: one module holding
  * both would be an import cycle -- the reason `clientChoice.ts` sits apart
  * from `clientScope.tsx`.
  */
 
-let ended = false;
+/** How the session ended: under the person (`ended`), or because they signed out (`signed_out`). */
+export type SessionEndReason = "ended" | "signed_out";
+
+let reason: SessionEndReason | null = null;
+/** The person `/me` first named in this tab, or `null` until it has answered. */
+let person: string | null = null;
 const listeners = new Set<() => void>();
 
-/** The server answered 401: the session this tab used is gone. Listeners hear it once. */
-export function sessionEnded(): void {
-  if (ended) return;
-  ended = true;
+function end(why: SessionEndReason): void {
+  if (reason !== null) return;
+  reason = why;
   for (const listener of listeners) listener();
 }
 
+/** The session this tab used is gone. Listeners hear it once, synchronously, before React renders again. */
+export function sessionEnded(): void {
+  end("ended");
+}
+
+/** The person signed out here: the server ended the session they asked it to end. */
+export function sessionSignedOut(): void {
+  end("signed_out");
+}
+
 export function isSessionEnded(): boolean {
-  return ended;
+  return reason !== null;
+}
+
+/** How it ended, or `null` while it has not. The first word stands. */
+export function sessionEndReason(): SessionEndReason | null {
+  return reason;
+}
+
+/**
+ * `/me` answered for `userId`. The first answer names this tab's person; a
+ * later one naming anybody else ends the session -- reconnecting, or drawing
+ * the page again, would put the new person's data under the previous
+ * person's page and form.
+ */
+export function sessionPerson(userId: string): void {
+  if (person === null) {
+    person = userId;
+    return;
+  }
+  if (person !== userId) sessionEnded();
+}
+
+/**
+ * Whether `/me` ever answered in this tab. An ended session that had one is
+ * a person who was HERE (the guard shows the notice); one that never had
+ * one is a visitor with no session (the guard sends them to sign in).
+ */
+export function hadSession(): boolean {
+  return person !== null;
 }
 
 /** For `useSyncExternalStore`. Returns an unsubscribe function. */
@@ -42,7 +96,8 @@ export function subscribeSessionEnd(listener: () => void): () => void {
   };
 }
 
-/** For tests: the next test starts with a session that has not ended. */
+/** For tests: the next test starts with a session that has not ended, and nobody known. */
 export function resetSessionEnd(): void {
-  ended = false;
+  reason = null;
+  person = null;
 }

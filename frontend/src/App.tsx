@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   BrowserRouter,
   Navigate,
@@ -15,7 +15,7 @@ import { crumbFor, isPortalOnly, portalCrumbFor, searchDestinations } from "./sh
 import { AreaPage } from "./shell/AreaPage";
 import { searchPrompt, useRecordSearch } from "./shell/recordSearch";
 import { ApiProvider, useApi } from "./lib/ApiContext";
-import { ClientScopeProvider, useEnabledModules } from "./lib/clientScope";
+import { ClientScopeProvider, emptyQueryCache, useEnabledModules } from "./lib/clientScope";
 import { ClientSelector, useClientMark } from "./shell/ClientSelector";
 import { I18nProvider, readStoredLanguage, useLanguage, useT } from "./i18n/context";
 import { setActiveLanguage, subscribe, translate } from "./i18n/core";
@@ -24,9 +24,22 @@ import type { Language } from "./i18n/types";
 import { Toaster, type ToastItem } from "./shell/Toaster";
 import { FIXTURE_MODE } from "./fixtures/mode";
 import { PreviewPage } from "./preview/PreviewPage";
-import { goToSignIn, hasSession, signOut, useSession } from "./lib/session";
+import {
+  SIGN_IN_PATH,
+  goToSignIn,
+  hasSession,
+  isPublicPath,
+  navigation,
+  signOut,
+  useSession,
+} from "./lib/session";
+import { sessionEndReason, subscribeSessionEnd } from "./lib/sessionEnd";
+import { watchTyping, type KeptText } from "./lib/unsavedText";
+import { ApiError } from "./lib/api";
 import { describeSubmitError } from "./components/form";
-import { KIND_ICON } from "./shell/components";
+import { AuthAlert, AuthCard } from "./modules/auth/AuthCard";
+import { SessionEnded } from "./shell/SessionEnded";
+import { Btn, KIND_ICON } from "./shell/components";
 import { Icon } from "./shell/icons";
 import { roleChipName } from "./modules/settings/types";
 import { CandidatesPage } from "./modules/devices/CandidatesPage";
@@ -141,7 +154,7 @@ import { PortalTicketDetailPage } from "./modules/portal/PortalTicketDetailPage"
 // (`setup/status`, held with `staleTime: Infinity`) would satisfy the next one
 // without a request ever being made.
 //
-// A change of the top bar's client empties it (`emptyForNewClient`, in
+// A change of the top bar's client empties it (`emptyQueryCache`, in
 // `lib/clientScope.tsx`'s provider, which reaches this same client through
 // `useQueryClient`): nothing read for one client is shown under another.
 // `SetupGate`'s query is the one kept: it names no client.
@@ -223,13 +236,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
     return Object.keys(counts).length > 0 ? counts : undefined;
   }, [health.openAlerts, reviewCount]);
 
-  // THE SESSION NOTICE (own-auth design §2.4). A 401 after `/me` answered is
-  // a session that ended while the person was here -- the 30 minutes of
-  // inactivity, the 12-hour maximum, an administrator. The page stays drawn
-  // and the shell says so; the person copies what they were writing and
-  // chooses when to sign in again (auditor A, HIGH: "the session drops
-  // mid-task ... total loss of context").
-  const session = useSession();
+  // A SESSION THAT ENDS IS NOT THE SHELL'S TO SHOW: the guard replaces the
+  // shell and the page with its notice (`RequireAuth`, operator decision 3).
+  //
   // A SIGN-OUT THE SERVER NEVER HEARD IS SAID OUT LOUD. Shown the sign-in page
   // while the session stays open, a person on a shared computer walks away
   // from it (`lib/session.ts::signOut`).
@@ -349,8 +358,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
         setSignOutFailed(false);
         signOut(api).catch(() => setSignOutFailed(true));
       }}
-      sessionExpiring={session.status === "signed_out"}
-      onSignIn={() => goToSignIn(location.pathname + location.search)}
     >
       {signOutFailed ? (
         <p role="alert" className="notice red">
@@ -389,12 +396,46 @@ export function Landing() {
  * WHAT DECIDES IS `GET /me` (`lib/session.ts::useSession`). An answer renders
  * the page. A 401 in a tab that never had a session sends it to sign in --
  * once: `leaving` is a ref because the navigation replaces the document, and
- * React strict mode runs this effect twice on purpose. A 401 AFTER the person
- * was here keeps the shell and the page drawn and raises the shell's notice
- * instead (`Shell`). A failure that is not a 401 -- the server down, a proxy's
- * 502 -- is said, inside an alert, with its reason: this screen replaces a
- * page the person expected, and a redirect to sign in would blame their
- * session for the server's outage.
+ * React strict mode runs this effect twice on purpose. A failure that is not
+ * a 401 -- the server down, a proxy's 502 -- is said, inside an alert, with
+ * its reason: this screen replaces a page the person expected, and a redirect
+ * to sign in would blame their session for the server's outage. A 403 is not
+ * an outage but a refusal -- the console's email-domain rule changed after
+ * sign-in, say -- so it shows the server's own sentence and a way to sign out
+ * (final review D1, Minor 7).
+ *
+ * A SESSION THAT ENDS WHILE THE PERSON IS HERE IS HIDDEN AND EMPTIED
+ * (operator decision 3, 2026-11-05, "Ocultar y vaciar"; own-auth design
+ * §2.4). However the end is learnt -- a 401 after `/me` answered, a `/ws` 4401
+ * whose `/me` then answers 401, another person's session in the cookie
+ * (`lib/sessionEnd.ts::sessionPerson`), a sign-out -- `lib/sessionEnd.ts`
+ * hears it first, and this guard:
+ *
+ *   1. READS WHAT THE PERSON TYPED out of the page, synchronously in the
+ *      end, while the page is still in the document (`lib/unsavedText.ts`):
+ *      never a password, never another secret. Not on a sign-out -- they
+ *      chose to leave;
+ *   2. renders `SessionEnded` IN PLACE OF THE SHELL AND THE PAGE: no rail, no
+ *      top bar, no client, no organisation, no name -- an idle timeout on a
+ *      shared computer must not leave the last page for whoever sits down
+ *      next (final review D1, Minor 1). The page's components unmount, and
+ *      with them the live socket and an open remote screen;
+ *   3. EMPTIES THE QUERY CACHE AND THE MUTATION CACHE in that same commit,
+ *      before the browser paints it, the way a change of client does
+ *      (`lib/clientScope.tsx::emptyQueryCache`): in-flight requests are
+ *      cancelled and whatever they answer lands nowhere.
+ *
+ * The notice never navigates by itself (plan decision D20): the emptied `/me`
+ * does not make the person a visitor with no session, because the tab
+ * remembers that `/me` answered (`hadSession`). "Sign in again" is theirs to
+ * press, once they have copied what they want.
+ *
+ * AN UNKNOWN PATH UNDER A PUBLIC PREFIX (`/sign-in/x`, a path-form
+ * `/invite/<token>`) reaches this guard through the `*` route, and
+ * `goToSignIn` refuses to leave a public path (D20), so it waited on
+ * "Redirecting" for ever (final review D1, Minor 8). This guard is never
+ * mounted on a page that exists, so going to the sign-in page from here
+ * cannot loop.
  *
  * FIXTURE MODE NEEDS NO BRANCH HERE. Its client answers `/me`
  * (`fixtures/core.ts`), so the review harness renders every route signed in;
@@ -403,18 +444,54 @@ export function Landing() {
  */
 export function RequireAuth({ children }: { children: React.ReactNode }) {
   const t = useT();
+  const api = useApi();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const session = useSession();
   const leaving = useRef(false);
-  const mustSignIn = session.status === "signed_out" && session.me === undefined;
+  const [kept, setKept] = useState<readonly KeptText[]>([]);
+  const [signOutFailed, setSignOutFailed] = useState(false);
+  const mustSignIn = session.status === "signed_out";
   const here = location.pathname + location.search;
+  const publicPath = isPublicPath(location.pathname);
 
   useEffect(() => {
     if (!mustSignIn || leaving.current) return;
     leaving.current = true;
-    goToSignIn(here);
-  }, [mustSignIn, here]);
+    if (publicPath) navigation.assign(SIGN_IN_PATH);
+    else goToSignIn(here);
+  }, [mustSignIn, here, publicPath]);
 
+  // 1 above, inside the end itself: `sessionEnd`'s listeners run before
+  // React renders anything for it, while the page is still drawn.
+  useEffect(() => {
+    const typing = watchTyping(document);
+    const stop = subscribeSessionEnd(() => {
+      if (sessionEndReason() === "ended") setKept(typing.keep());
+    });
+    return () => {
+      stop();
+      typing.stop();
+    };
+  }, []);
+
+  // 2 above, IN THE COMMIT THAT DRAWS THE NOTICE, once the page's components
+  // have unmounted, and before the browser paints it. Not inside the end:
+  // emptied while the page is still mounted, every query of the page's is
+  // left with an observer, and the effect by which TanStack re-reads a hook's
+  // options builds the query afresh and asks the server again -- the next
+  // person's `/me` landed in the emptied cache that way.
+  const over = session.status === "ended" || session.status === "signing_out";
+  useLayoutEffect(() => {
+    if (over) emptyQueryCache(queryClient);
+  }, [over, queryClient]);
+
+  if (session.status === "ended") {
+    return <SessionEnded kept={kept} onSignIn={() => goToSignIn(here)} />;
+  }
+  if (session.status === "signing_out") {
+    return <p className="p-8 text-[var(--muted)]">{t("shell.app.signingOut")}</p>;
+  }
   // INSIDE THE GUARD, AROUND THE SHELL: the client selection needs `/me`, which
   // only a signed-in session can ask, and a change of client starts the shell
   // and the page again (`lib/clientScope.tsx`).
@@ -423,6 +500,24 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
       <ClientScopeProvider>
         <Shell>{children}</Shell>
       </ClientScopeProvider>
+    );
+  }
+  if (session.failure instanceof ApiError && session.failure.status === 403) {
+    return (
+      <AuthCard title={t("shell.app.refused")}>
+        <AuthAlert text={describeSubmitError(session.failure)} />
+        <AuthAlert text={signOutFailed ? t("shell.app.signOutFailed") : null} />
+        <div>
+          <Btn
+            variant="primary"
+            label={t("shell.accountMenu.signOut")}
+            onClick={() => {
+              setSignOutFailed(false);
+              signOut(api).catch(() => setSignOutFailed(true));
+            }}
+          />
+        </div>
+      </AuthCard>
     );
   }
   if (session.failure !== undefined) {

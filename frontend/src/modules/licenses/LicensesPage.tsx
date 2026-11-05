@@ -644,7 +644,10 @@ function NewLicenseDialog({ open, onClose }: { open: boolean; onClose: () => voi
                 makes a transcription error undetectable until the vendor
                 refuses the activation. The toggle says which state it is in, so
                 nobody has to infer it from the dots. */}
-            <div className="flex items-center gap-2">
+            {/* `data-secret`: shown, it is a secret typed in clear, and the
+                watch that keeps typed text when a session ends
+                (`lib/unsavedText.ts`) must never keep it. */}
+            <div className="flex items-center gap-2" data-secret>
               <input
                 className={inputClass}
                 type={keyVisible ? "text" : "password"}

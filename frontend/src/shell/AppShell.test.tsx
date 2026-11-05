@@ -111,8 +111,6 @@ function renderShellWith(
   overrides: {
     permissions?: string[];
     onSignOut?: () => void;
-    sessionExpiring?: boolean;
-    onSignIn?: () => void;
     searchItems?: ComponentProps<typeof AppShell>["searchItems"];
     health?: ComponentProps<typeof AppShell>["health"];
   } = {},
@@ -126,8 +124,6 @@ function renderShellWith(
         title="Devices & Inventory"
         user={{ name: "Alex Morgan", email: "alex@toeshee.com", role: "Administrator" }}
         onSignOut={overrides.onSignOut ?? vi.fn()}
-        sessionExpiring={overrides.sessionExpiring ?? false}
-        onSignIn={overrides.onSignIn ?? vi.fn()}
         searchItems={overrides.searchItems}
         health={overrides.health}
       >
@@ -604,39 +600,22 @@ describe("AppShell skip link", () => {
 });
 
 /**
- * The session-expiry banner (UX remediation cycle 2 remnant).
+ * The session notice (UX remediation cycle 2 remnant), MOVED OUT OF THE SHELL.
  *
  * Auditor A, HIGH: "The session drops mid-task during continuous active use,
- * with no warning, no expiry notice, and total loss of context." The console
- * knows a failed renewal has happened roughly a minute before the user finds
- * out by having a request fail. Saying so lets them finish the sentence they
- * are typing and save.
+ * with no warning, no expiry notice, and total loss of context." The shell
+ * used to answer it with a banner over a page left drawn. Operator decision 3
+ * (2026-11-05, "Ocultar y vaciar") takes the shell away with the session: the
+ * guard draws `SessionEnded` in its place and keeps what the person typed to
+ * copy. RE-POINTED: "warns when renewal has failed ..." and "offers the way
+ * out ..." now hold `SessionEnded` (`./SessionEnded.test.tsx`); this one holds
+ * the shell to drawing no notice of its own.
  */
 describe("AppShell session notice", () => {
-  it("says nothing while the session is healthy", () => {
+  it("draws no session notice of its own: the guard shows the end in its place", () => {
     renderShell(["devices.read"]);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
-  it("warns when renewal has failed, without stealing focus or blocking the page", async () => {
-    renderShellWith({ sessionExpiring: true });
-
-    const notice = screen.getByRole("status");
-    expect(notice).toHaveTextContent(/sign in again/i);
-    // NOT a dialog. Interrupting someone mid-form to announce that they are
-    // about to be interrupted is the same defect in politer clothing, and a
-    // modal here would discard the unsaved work the warning exists to save.
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByText("page content")).toBeInTheDocument();
-  });
-
-  it("offers the way out, rather than only naming the problem", async () => {
-    const onSignIn = vi.fn();
-    renderShellWith({ sessionExpiring: true, onSignIn });
-
-    await user.click(within(screen.getByRole("status")).getByRole("button", { name: /sign in/i }));
-
-    expect(onSignIn).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /sign in again/i })).not.toBeInTheDocument();
   });
   /* --- The mobile drawer (UX cycle 10) ---------------------------------- */
 

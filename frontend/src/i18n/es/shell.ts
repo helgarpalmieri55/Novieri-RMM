@@ -122,16 +122,25 @@ export const shell: Shape<typeof en> = {
     addComputer: "Añadir un equipo",
     askAssistant: "Preguntar al Asistente",
     assistantObject: "al Asistente",
-    sessionExpired:
-      "Tu sesión ha caducado. Lo que no hayas guardado sigue en esta página: copia lo que quieras conservar y vuelve a iniciar sesión.",
     signInAgain: "Iniciar sesión de nuevo",
     breadcrumb: "Ruta de navegación",
     signInUnavailable: "El inicio de sesión no está disponible",
     serverUnreachable: "La consola no pudo preguntar al servidor si has iniciado sesión. {reason}",
+    refused: "Esta cuenta no puede usar la consola",
     redirecting: "Redirigiendo al inicio de sesión…",
     starting: "Iniciando…",
+    signingOut: "Cerrando sesión…",
     signOutFailed: "El cierre de sesión no llegó al servidor, así que tu sesión sigue abierta. Inténtalo de nuevo.",
     pageType: "Página",
+  },
+  sessionEnded: {
+    title: "Tu sesión ha terminado",
+    body: "La página en la que estabas se cerró y sus datos se borraron, para que nadie más pueda leerlos en este equipo. Vuelve a iniciar sesión para continuar.",
+    bodyKept:
+      "La página en la que estabas se cerró y sus datos se borraron, para que nadie más pueda leerlos en este equipo. Lo que habías escrito está abajo: copia lo que quieras conservar y vuelve a iniciar sesión.",
+    keptTitle: "Lo que estabas escribiendo",
+    keptHint: "Solo lectura y sin guardar en ningún sitio: desaparece cuando sales de esta página. Las contraseñas y los códigos nunca se conservan.",
+    keptField: "Texto {n}",
   },
   health: {
     base: "Estado de salud y alertas",

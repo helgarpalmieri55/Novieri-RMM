@@ -250,8 +250,11 @@ function StepUpDialog({
           <Form onSubmit={() => void attempt(() => api.stepUpRecovery(recovery.trim()))}>
             <div className="form-grid">
               <Field label={t("components.stepUp.recoveryCode")} help={t("components.stepUp.recoveryHelp", { count: codesLeft })}>
+                {/* `data-secret`: a single-use code typed in clear, never
+                    kept when the session ends (`lib/unsavedText.ts`). */}
                 <input
                   className={inputClass}
+                  data-secret
                   value={recovery}
                   autoComplete="off"
                   spellCheck={false}

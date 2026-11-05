@@ -125,16 +125,28 @@ export const shell = {
     askAssistant: "Ask the Assistant",
     // The Assistant as the object of "Ask …" in the search panel.
     assistantObject: "the Assistant",
-    sessionExpired:
-      "Your session has expired. Anything unsaved is still on this page — copy what you want to keep, then sign in again.",
     signInAgain: "Sign in again",
     breadcrumb: "Breadcrumb",
     signInUnavailable: "Sign-in is unavailable",
     serverUnreachable: "The console could not ask the server whether you are signed in. {reason}",
+    // `/me` answered 403: signed in, but this account may not use the console now.
+    refused: "This account cannot use the console",
     redirecting: "Redirecting to sign-in…",
     starting: "Starting…",
+    signingOut: "Signing out…",
     signOutFailed: "Sign-out did not reach the server, so your session is still open. Try again.",
     pageType: "Page",
+  },
+  // In place of the shell and the page once the session has ended
+  // (`shell/SessionEnded.tsx`): nothing of the page is left on screen.
+  sessionEnded: {
+    title: "Your session has ended",
+    body: "The page you were on was closed and its data cleared, so nobody else can read it on this computer. Sign in again to carry on.",
+    bodyKept:
+      "The page you were on was closed and its data cleared, so nobody else can read it on this computer. What you had typed is below: copy what you want to keep, then sign in again.",
+    keptTitle: "What you were typing",
+    keptHint: "Read-only, and not saved anywhere: it is gone when you leave this page. Passwords and codes are never kept.",
+    keptField: "Text {n}",
   },
   health: {
     base: "Health and alerts",
