@@ -665,3 +665,423 @@ async def test_both_verify_calls_ask_the_library_to_require_user_verification(
             purpose="authenticate",
         )
     assert seen == [True, True]
+
+
+# --- review round: hostile inputs and the filters that scope a person --------
+
+
+def _insert_statements(engine: AsyncEngine) -> list[str]:
+    """Collect every `INSERT INTO auth_passkeys` the engine sends from now on."""
+    from sqlalchemy import event
+
+    seen: list[str] = []
+
+    @event.listens_for(engine.sync_engine, "before_cursor_execute")
+    def _capture(conn: Any, cursor: Any, statement: str, *rest: Any) -> None:
+        if statement.lstrip().upper().startswith("INSERT INTO AUTH_PASSKEYS"):
+            seen.append(statement)
+
+    return seen
+
+
+async def _register_again(
+    app_engine: AsyncEngine, user: User, authenticator: SoftPasskey, name: str = "Again"
+) -> str:
+    """Answer a fresh registration with `authenticator`; the refusal's reason."""
+    async with _session(app_engine, user.org_id) as s:
+        options = await registration_options(s, user, rp_id=RP_ID, rp_name=RP_NAME)
+        return await _reason(
+            verify_registration(
+                s,
+                user,
+                authenticator.create(options, origin=ORIGIN),
+                name=name,
+                expected_origin=ORIGIN,
+                rp_id=RP_ID,
+            )
+        )
+
+
+async def test_a_credential_id_registered_twice_in_one_organisation_is_refused(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Protects the `taken` pre-check: the duplicate is refused BEFORE any
+    INSERT is sent (without it the unique constraint would also refuse, so the
+    reason alone could not tell the two apart)."""
+    user = await _person(admin_engine)
+    authenticator, _ = await _registered(app_engine, user)
+    inserts = _insert_statements(app_engine)
+    assert await _register_again(app_engine, user, authenticator) == "credential"
+    assert inserts == []
+
+
+async def test_a_credential_id_registered_in_another_organisation_is_refused_not_an_error(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Protects the savepoint + IntegrityError handler: the unique constraint is
+    platform-wide while the pre-check sees one organisation (RLS), so the second
+    organisation reaches the INSERT. It must get the SAME refusal as a duplicate
+    at home -- not an exception that tells it the id exists elsewhere -- and the
+    challenge it spent stays spent (the savepoint, not the transaction, rolled back)."""
+    first = await _person(admin_engine)
+    authenticator, _ = await _registered(app_engine, first)
+    second = await _person(admin_engine)
+    async with _session(app_engine, second.org_id) as s:
+        options = await registration_options(s, second, rp_id=RP_ID, rp_name=RP_NAME)
+        reason = await _reason(
+            verify_registration(
+                s,
+                second,
+                authenticator.create(options, origin=ORIGIN),
+                name="Copy",
+                expected_origin=ORIGIN,
+                rp_id=RP_ID,
+            )
+        )
+        spent = (
+            await s.execute(
+                select(AuthWebauthnChallenge.used_at).where(
+                    AuthWebauthnChallenge.user_id == second.id
+                )
+            )
+        ).scalar_one()
+        mine = (await s.execute(select(func.count()).select_from(AuthPasskey))).scalar_one()
+    assert reason == "credential"
+    assert spent is not None
+    assert mine == 0
+
+
+async def test_the_modules_own_user_verification_check_refuses_when_the_library_does_not(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Protects the `verified.user_verified` checks in BOTH verify functions
+    (decision 6): with the library forced to `require_user_verification=False`
+    an unverified response gets through it, and only the module refuses."""
+    from app.core.auth import passkeys
+
+    def lax(original: Any) -> Any:
+        def wrapper(**kwargs: Any) -> Any:
+            kwargs["require_user_verification"] = False
+            return original(**kwargs)
+
+        return wrapper
+
+    user = await _person(admin_engine)
+    authenticator, _ = await _registered(app_engine, user)
+    monkeypatch.setattr(
+        passkeys, "verify_registration_response", lax(passkeys.verify_registration_response)
+    )
+    monkeypatch.setattr(
+        passkeys, "verify_authentication_response", lax(passkeys.verify_authentication_response)
+    )
+    other = SoftPasskey(rp_id=RP_ID, user_handle=user_handle(user.id))
+    async with _session(app_engine, user.org_id) as s:
+        options = await registration_options(s, user, rp_id=RP_ID, rp_name=RP_NAME)
+        registered = await _reason(
+            verify_registration(
+                s,
+                user,
+                other.create(options, origin=ORIGIN, uv=False),
+                name="Key",
+                expected_origin=ORIGIN,
+                rp_id=RP_ID,
+            )
+        )
+        options = await authentication_options(
+            s, user.id, org_id=user.org_id, rp_id=RP_ID, purpose="authenticate"
+        )
+        asserted = await _reason(
+            verify_authentication(
+                s,
+                authenticator.get(options, origin=ORIGIN, uv=False),
+                expected_origin=ORIGIN,
+                rp_id=RP_ID,
+                purpose="authenticate",
+            )
+        )
+    assert (registered, asserted) == ("verification", "verification")
+
+
+@pytest.mark.parametrize(
+    ("origin", "rp_id"),
+    [("https://itms.example.org", RP_ID), (ORIGIN, "itms.example.org")],
+    ids=["another-origin", "another-rp"],
+)
+async def test_an_assertion_for_another_origin_or_rp_is_refused(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine, origin: str, rp_id: str
+) -> None:
+    """Protects `expected_origin` / `expected_rp_id` on the authentication call."""
+    user = await _person(admin_engine)
+    authenticator, _ = await _registered(app_engine, user)
+    authenticator.rp_id = rp_id
+    async with _session(app_engine, user.org_id) as s:
+        options = await authentication_options(
+            s, user.id, org_id=user.org_id, rp_id=RP_ID, purpose="authenticate"
+        )
+        reason = await _reason(
+            verify_authentication(
+                s,
+                authenticator.get(options, origin=origin),
+                expected_origin=ORIGIN,
+                rp_id=RP_ID,
+                purpose="authenticate",
+            )
+        )
+        count = (
+            await s.execute(select(AuthPasskey.sign_count).where(AuthPasskey.user_id == user.id))
+        ).scalar_one()
+    assert reason == "verification"
+    assert count == 0
+
+
+async def test_the_options_list_only_the_persons_own_passkeys(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Protects `AuthPasskey.user_id == …` in `registration_options` (the
+    exclude list) and `authentication_options` (the allow list): with two
+    passkey holders in one organisation, each sees only their own."""
+    alice = await _person(admin_engine)
+    bob = await _person(admin_engine, alice.org_id)
+    a_key, _ = await _registered(app_engine, alice)
+    b_key, _ = await _registered(app_engine, bob)
+    async with _session(app_engine, alice.org_id) as s:
+        creation = await registration_options(s, alice, rp_id=RP_ID, rp_name=RP_NAME)
+        request = await authentication_options(
+            s, alice.id, org_id=alice.org_id, rp_id=RP_ID, purpose="authenticate"
+        )
+    assert [c["id"] for c in creation["excludeCredentials"]] == [b64url(a_key.credential_id)]
+    assert [c["id"] for c in request["allowCredentials"]] == [b64url(a_key.credential_id)]
+    assert b64url(b_key.credential_id) not in str([creation, request])
+
+
+async def test_one_persons_new_options_do_not_retire_anothers_challenge(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Protects the owner term of `_issue`: Bob asking for options leaves Alice's
+    live challenge (same purpose, same organisation) answerable."""
+    alice = await _person(admin_engine)
+    bob = await _person(admin_engine, alice.org_id)
+    a_key, _ = await _registered(app_engine, alice)
+    async with _session(app_engine, alice.org_id) as s:
+        a_options = await authentication_options(
+            s, alice.id, org_id=alice.org_id, rp_id=RP_ID, purpose="authenticate"
+        )
+        await authentication_options(
+            s, bob.id, org_id=alice.org_id, rp_id=RP_ID, purpose="authenticate"
+        )
+        await authentication_options(
+            s, None, org_id=alice.org_id, rp_id=RP_ID, purpose="authenticate"
+        )
+        passkey = await verify_authentication(
+            s,
+            a_key.get(a_options, origin=ORIGIN),
+            expected_origin=ORIGIN,
+            rp_id=RP_ID,
+            purpose="authenticate",
+        )
+    assert passkey.user_id == alice.id
+
+
+def _break(path: tuple[str, ...], value: Any) -> Any:
+    def apply(credential: dict[str, Any]) -> None:
+        node = credential
+        for key in path[:-1]:
+            node = node[key]
+        if value is _GONE:
+            node.pop(path[-1], None)
+        else:
+            node[path[-1]] = value
+
+    return apply
+
+
+_GONE = object()
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        _break(("rawId",), "%%%"),
+        _break(("rawId",), _GONE),
+        _break(("rawId",), 7),
+        _break(("response", "userHandle"), "%%%"),
+        _break(("response", "userHandle"), 7),
+        _break(("response", "authenticatorData"), "%%%"),
+        _break(("response", "authenticatorData"), "AAAA"),
+        _break(("response", "authenticatorData"), _GONE),
+        _break(("response", "signature"), "%%%"),
+        _break(("response", "signature"), _GONE),
+    ],
+    ids=[
+        "rawId-bad-base64",
+        "rawId-missing",
+        "rawId-number",
+        "handle-bad-base64",
+        "handle-number",
+        "authdata-bad-base64",
+        "authdata-too-short",
+        "authdata-missing",
+        "signature-bad-base64",
+        "signature-missing",
+    ],
+)
+async def test_a_damaged_assertion_with_a_live_challenge_is_a_refusal_not_an_error(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine, damage: Any
+) -> None:
+    user = await _person(admin_engine)
+    authenticator, _ = await _registered(app_engine, user)
+    async with _session(app_engine, user.org_id) as s:
+        options = await authentication_options(
+            s, user.id, org_id=user.org_id, rp_id=RP_ID, purpose="authenticate"
+        )
+        credential = authenticator.get(options, origin=ORIGIN)
+        damage(credential)
+        await _reason(
+            verify_authentication(
+                s, credential, expected_origin=ORIGIN, rp_id=RP_ID, purpose="authenticate"
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        _break(("rawId",), "%%%"),
+        _break(("response", "attestationObject"), "%%%"),
+        _break(("response", "attestationObject"), "AAAA"),
+        _break(("response", "attestationObject"), _GONE),
+        _break(("response", "transports"), "internal"),
+        _break(("response", "transports"), _GONE),
+    ],
+    ids=["rawId", "attestation-bad-base64", "attestation-short", "attestation-missing",
+         "transports-string", "transports-missing"],
+)
+async def test_a_damaged_registration_with_a_live_challenge_never_raises_anything_else(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine, damage: Any
+) -> None:
+    """A damaged response is refused, or (a harmless field like a missing
+    transports list) accepted -- but never an uncaught exception."""
+    user = await _person(admin_engine)
+    authenticator = SoftPasskey(rp_id=RP_ID, user_handle=user_handle(user.id))
+    async with _session(app_engine, user.org_id) as s:
+        options = await registration_options(s, user, rp_id=RP_ID, rp_name=RP_NAME)
+        credential = authenticator.create(options, origin=ORIGIN)
+        damage(credential)
+        try:
+            await verify_registration(
+                s, user, credential, name="Key", expected_origin=ORIGIN, rp_id=RP_ID
+            )
+        except PasskeyRejected:
+            pass
+
+
+async def test_a_credential_id_longer_than_1023_bytes_is_refused(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Protects `CREDENTIAL_ID_MAX` (WebAuthn Level 3 §7.1)."""
+    user = await _person(admin_engine)
+    long_id = SoftPasskey(
+        rp_id=RP_ID, user_handle=user_handle(user.id), credential_id=b"\xa5" * 1024
+    )
+    assert await _register_again(app_engine, user, long_id) == "credential"
+    edge = SoftPasskey(
+        rp_id=RP_ID, user_handle=user_handle(user.id), credential_id=b"\xa6" * 1023
+    )
+    async with _session(app_engine, user.org_id) as s:
+        options = await registration_options(s, user, rp_id=RP_ID, rp_name=RP_NAME)
+        passkey = await verify_registration(
+            s,
+            user,
+            edge.create(options, origin=ORIGIN),
+            name="Edge",
+            expected_origin=ORIGIN,
+            rp_id=RP_ID,
+        )
+    assert len(passkey.credential_id) == 1023
+
+
+async def test_a_cross_origin_registration_is_refused(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Protects the `crossOrigin` refusal (WebAuthn Level 3 §7.1), registration half."""
+    user = await _person(admin_engine)
+    authenticator = SoftPasskey(rp_id=RP_ID, user_handle=user_handle(user.id))
+    async with _session(app_engine, user.org_id) as s:
+        options = await registration_options(s, user, rp_id=RP_ID, rp_name=RP_NAME)
+        reason = await _reason(
+            verify_registration(
+                s,
+                user,
+                authenticator.create(options, origin=ORIGIN, cross_origin=True),
+                name="Key",
+                expected_origin=ORIGIN,
+                rp_id=RP_ID,
+            )
+        )
+    assert reason == "verification"
+
+
+async def test_a_cross_origin_assertion_is_refused(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Protects the `crossOrigin` refusal, authentication half."""
+    user = await _person(admin_engine)
+    authenticator, _ = await _registered(app_engine, user)
+    async with _session(app_engine, user.org_id) as s:
+        options = await authentication_options(
+            s, user.id, org_id=user.org_id, rp_id=RP_ID, purpose="authenticate"
+        )
+        reason = await _reason(
+            verify_authentication(
+                s,
+                authenticator.get(options, origin=ORIGIN, cross_origin=True),
+                expected_origin=ORIGIN,
+                rp_id=RP_ID,
+                purpose="authenticate",
+            )
+        )
+    assert reason == "verification"
+
+
+async def test_a_discoverable_assertion_without_a_user_handle_is_refused(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine
+) -> None:
+    """Protects the `owner is None and handle is None` refusal (WebAuthn Level 3
+    §7.2): with no person on the challenge, the handle is the only claim to one."""
+    user = await _person(admin_engine)
+    authenticator, _ = await _registered(app_engine, user)
+    async with _session(app_engine, user.org_id) as s:
+        options = await authentication_options(
+            s, None, org_id=user.org_id, rp_id=RP_ID, purpose="authenticate"
+        )
+        credential = authenticator.get(options, origin=ORIGIN)
+        del credential["response"]["userHandle"]
+        reason = await _reason(
+            verify_authentication(
+                s, credential, expected_origin=ORIGIN, rp_id=RP_ID, purpose="authenticate"
+            )
+        )
+    assert reason == "credential"
+
+
+@pytest.mark.parametrize("name", ["a\x00b", "a\nb", "a\x1fb", "\x00", "tab\there"])
+async def test_a_passkey_name_with_a_control_character_is_refused(
+    admin_engine: AsyncEngine, app_engine: AsyncEngine, name: str
+) -> None:
+    """Protects the control-character test on the name: a NUL would otherwise
+    reach PostgreSQL and come back as a database error."""
+    user = await _person(admin_engine)
+    authenticator = SoftPasskey(rp_id=RP_ID, user_handle=user_handle(user.id))
+    async with _session(app_engine, user.org_id) as s:
+        options = await registration_options(s, user, rp_id=RP_ID, rp_name=RP_NAME)
+        reason = await _reason(
+            verify_registration(
+                s,
+                user,
+                authenticator.create(options, origin=ORIGIN),
+                name=name,
+                expected_origin=ORIGIN,
+                rp_id=RP_ID,
+            )
+        )
+    assert reason == "name"

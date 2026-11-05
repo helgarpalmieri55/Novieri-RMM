@@ -44,6 +44,13 @@ rather than duplicates their credential, and free of anything personal -- the
 users table's ids are UUIDv7, whose first 48 bits are the account's creation
 time.
 
+THE CALLER'S TRANSACTION. Spending a challenge is an UPDATE in the caller's
+transaction. A refusal raised after it (`PasskeyRejected`) is only recorded as
+spent if that transaction COMMITS: the caller must catch `PasskeyRejected`,
+leave the transaction block (so it commits), and only then answer with the
+refusal. Letting the exception unwind through the session's context manager
+rolls the spend back and the challenge stays live for another try.
+
 THE SESSION PASSED IN is the caller's, and it must be able to write a staff
 row: `auth_passkeys` and `auth_webauthn_challenges` are O tables keyed to
 `users` (Task 1), whose staff rows have no client, so only an every-client
@@ -55,11 +62,13 @@ them match nothing, which here only ever means "refused".
 import hashlib
 import json
 import secrets
+import unicodedata
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 from uuid import UUID
 
 from sqlalchemy import delete, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from webauthn import (
     generate_authentication_options,
@@ -91,6 +100,9 @@ CHALLENGE_TTL = timedelta(minutes=5)
 CEREMONY_TIMEOUT_MS = int(CHALLENGE_TTL.total_seconds() * 1000)
 #: The longest name a person may give a passkey ("Work laptop").
 NAME_MAX = 100
+#: The longest credential id W3C accepts (WebAuthn Level 3 §7.1: "at most 1023
+#: bytes"); a longer one is refused before it is stored.
+CREDENTIAL_ID_MAX = 1023
 #: Domain separation for `user_handle`: no other hash of a user id collides.
 _USER_HANDLE_CONTEXT = b"itms.webauthn.user-handle\x00"
 #: The transports W3C defines, as py_webauthn spells them; anything else a
@@ -210,6 +222,10 @@ async def _spend(
     ).one_or_none()
     if row is None:
         raise PasskeyRejected(reason="challenge")
+    # Spent already (above); a ceremony run from inside another origin's frame
+    # is refused (WebAuthn Level 3 §7.1/§7.2 step "crossOrigin").
+    if client_data.cross_origin:
+        raise PasskeyRejected(reason="verification")
     return row.challenge, row.user_id
 
 
@@ -257,12 +273,19 @@ async def verify_registration(
 ) -> AuthPasskey:
     """Verify `navigator.credentials.create()`'s answer and store the passkey.
 
-    Refused (`PasskeyRejected`): a name that is empty or longer than
-    `NAME_MAX`; a challenge that is not this person's live registration
-    challenge; anything py_webauthn refuses -- another origin or RP ID, no user
+    The challenge is spent in the caller's transaction: after a refusal the
+    caller must COMMIT (module docstring) or the challenge stays live.
+
+    Refused (`PasskeyRejected`): a name that is empty, longer than `NAME_MAX`
+    or holding a control character; a challenge that is not this person's live
+    registration challenge; anything py_webauthn refuses -- another origin or RP ID, no user
     presence, NO USER VERIFICATION; a credential id already registered."""
     label = name.strip()
-    if not label or len(label) > NAME_MAX:
+    if (
+        not label
+        or len(label) > NAME_MAX
+        or any(unicodedata.category(ch) == "Cc" for ch in label)
+    ):
         raise PasskeyRejected(reason="name")
     expected, owner = await _spend(session, credential, purpose="register")
     if owner != user.id:
@@ -281,6 +304,8 @@ async def verify_registration(
     # the rule, so the property does not rest on one keyword argument alone.
     if not verified.user_verified:
         raise PasskeyRejected(reason="verification")
+    if len(verified.credential_id) > CREDENTIAL_ID_MAX:
+        raise PasskeyRejected(reason="credential")
     taken = (
         await session.execute(
             select(AuthPasskey.id).where(AuthPasskey.credential_id == verified.credential_id)
@@ -300,8 +325,17 @@ async def verify_registration(
         name=label,
         created_at=_now(),
     )
-    session.add(passkey)
-    await session.flush()
+    # `uq_auth_passkeys_credential_id` is platform-wide while the pre-check above
+    # sees only this organisation's rows (RLS): an id registered in another
+    # organisation is refused by the constraint, in a savepoint so the spend
+    # above survives, and with the same reason as a duplicate here -- it does
+    # not tell this organisation that the id exists elsewhere.
+    try:
+        async with session.begin_nested():
+            session.add(passkey)
+            await session.flush()
+    except IntegrityError as exc:
+        raise PasskeyRejected(reason="credential") from exc
     return passkey
 
 
@@ -354,6 +388,9 @@ async def verify_authentication(
 
     The challenge says whose ceremony this is; the passkey must be that
     person's, and the response's user handle (when sent) must be theirs too.
+    The challenge is spent in the caller's transaction: after a refusal the
+    caller must COMMIT (module docstring) or the challenge stays live.
+
     Refused (`PasskeyRejected`): an unknown, spent, expired or other-purpose
     challenge; a passkey that is not that person's; anything py_webauthn
     refuses -- origin, RP ID, signature, presence, NO USER VERIFICATION, a
@@ -370,6 +407,10 @@ async def verify_authentication(
     if owner is not None:
         query = query.where(AuthPasskey.user_id == owner)
     passkey = (await session.execute(query)).scalar_one_or_none()
+    if owner is None and handle is None:
+        # A discoverable assertion names its person only through `userHandle`
+        # (WebAuthn Level 3 §7.2).
+        raise PasskeyRejected(reason="credential")
     if passkey is None or (handle is not None and handle != user_handle(passkey.user_id)):
         raise PasskeyRejected(reason="credential")
     try:

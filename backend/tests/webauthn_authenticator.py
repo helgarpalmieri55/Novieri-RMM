@@ -109,6 +109,7 @@ class SoftPasskey:
         uv: bool = True,
         up: bool = True,
         challenge: str | None = None,
+        cross_origin: bool = False,
     ) -> dict[str, Any]:
         """The `RegistrationResponseJSON` for `options` (a creation-options
         JSON dict, as the server sent it). `challenge` overrides the one in
@@ -118,7 +119,7 @@ class SoftPasskey:
                 "type": "webauthn.create",
                 "challenge": challenge or options["challenge"],
                 "origin": origin,
-                "crossOrigin": False,
+                "crossOrigin": cross_origin,
             },
             separators=(",", ":"),
         ).encode("utf-8")
@@ -152,6 +153,7 @@ class SoftPasskey:
         up: bool = True,
         advance: int = 1,
         challenge: str | None = None,
+        cross_origin: bool = False,
     ) -> dict[str, Any]:
         """The `AuthenticationResponseJSON` for request options `options`.
         `advance` is how far the counter moves (0 replays the last value)."""
@@ -161,7 +163,7 @@ class SoftPasskey:
                 "type": "webauthn.get",
                 "challenge": challenge or options["challenge"],
                 "origin": origin,
-                "crossOrigin": False,
+                "crossOrigin": cross_origin,
             },
             separators=(",", ":"),
         ).encode("utf-8")
