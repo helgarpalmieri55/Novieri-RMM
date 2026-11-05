@@ -175,7 +175,18 @@ there is, because a platform with zero users has no audit chain either. Static
 templates, variables in `extra`, and the install code never appears in any of
 them.
 
-**NOW 105, P2 phase 1 Task 8.** Five WARNINGs go with the identity provider's
+**NOW 106, own authentication phase 1, final fix wave (K4).** One static
+WARNING in `app/core/auth/sessions.py::resolve`, for a session that has NOT
+ended but belongs to a person who is not active (Task 13 M4, final review
+B-M2, the coordinator's decision). Disabling and deleting end every session in
+the same transaction, so that state means a lifecycle path forgot to end one:
+the line is a defect detector, not a refusal log -- the door's answer stays a
+silent 401 / 4401, the narrowing the RBAC design §3.2 now records. `extra` =
+the session's row id and the status; never the cookie or its hash. The same
+wave rate-limits the loopback refusal's network case (K9) inside its existing
+call site, so that adds none.
+
+**BEFORE THAT, 105, P2 phase 1 Task 8.** Five WARNINGs go with the identity provider's
 calls they described -- `user_admin/service.py::_translating`, the language
 mirror (`app/api/v1/me.py::_mirror_locale`), and three on the first-boot path
 (`setup.py::_provisioning`, `_refusal_detail`, `_invitation_error`). The

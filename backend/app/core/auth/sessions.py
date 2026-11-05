@@ -45,6 +45,7 @@ their own), and never audit or mail: the act that calls them does, once.
 """
 
 import hashlib
+import logging
 import re
 import secrets
 from dataclasses import dataclass
@@ -63,6 +64,8 @@ from app.core.client_scope import ClientScope
 from app.core.tenancy import org_session
 from app.models import User
 from app.models.auth import AuthSession
+
+logger = logging.getLogger("its.auth.sessions")
 
 SESSION_COOKIE = "__Host-itms_session"
 DEVICE_COOKIE = "__Host-itms_device"
@@ -180,9 +183,12 @@ async def resolve(connection: HTTPConnection, *, touch: bool = True) -> SessionP
     ended session, one past its maximum (`expires_at`), one idle for longer
     than the organisation's policy allows, and a person whose account is not
     `active` -- disabling somebody stops their sessions on the next request,
-    whatever else forgot to end them. `touch` renews `last_seen_at` (at most
-    once a minute); a WebSocket re-check passes False, so an open tab is not
-    activity."""
+    whatever else forgot to end them (and a live session in that state is
+    logged once per request as the defect it is). `touch` renews
+    `last_seen_at` (at most once a minute). The console WebSocket's re-check
+    passes False, so an open tab is not activity; the remote screen's
+    watchdog passes True, so watching an open screen is (coordinator
+    decision, Task 6 review: a person at a remote desktop sends no HTTP)."""
     token = cookie_token(connection, SESSION_COOKIE)
     if token is None:
         return None
@@ -199,12 +205,18 @@ async def resolve(connection: HTTPConnection, *, touch: bool = True) -> SessionP
             )
         ).one_or_none()
     now = _now()
-    if (
-        row is None
-        or row.ended_at is not None
-        or row.expires_at <= now
-        or row.status != "active"
-    ):
+    if row is None or row.ended_at is not None or row.expires_at <= now:
+        return None
+    if row.status != "active":
+        # A 401 / 4401 at the door, and no admission-refusal line (core/
+        # identity, "THE STATUS RULE ON A SESSION DOOR"). But disabling and
+        # deleting end every session in the same transaction, so a LIVE one
+        # here means a lifecycle path forgot to: a defect, said once per
+        # request that meets it. The row id and the status; never the token.
+        logger.warning(
+            "a live session belongs to a person who is not active; it was not ended",
+            extra={"session_id": row.session_id, "status": row.status},
+        )
         return None
     async with org_session(
         row.org_id, engine=state.app_engine, clients=ClientScope.all()
