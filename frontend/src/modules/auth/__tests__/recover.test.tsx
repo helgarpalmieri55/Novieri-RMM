@@ -12,6 +12,11 @@
  * the recovery finishes -- said by the details' `password_required`, or by a
  * 409 `recovery_needs_password` when a mail reset landed after the page
  * opened. The page asks as the invitation does, and sends it.
+ *
+ * AND ON EVERY RECOVERY (operator decision 2026-11-05, «Ofrecerla siempre,
+ * aplicar»): without the mark the same fields are offered, optional. Left
+ * empty, only the token travels and the password stays; filled in, it is
+ * checked as the invitation checks it and sent, and the server applies it.
  */
 import type { UserEvent } from "@testing-library/user-event";
 import { screen, waitFor } from "@testing-library/react";
@@ -88,13 +93,69 @@ describe("recovering an account from the server's link", () => {
   });
 });
 
-describe("recovering an account whose password an emailed link set", () => {
-  it("asks for no password when the details say none is needed", async () => {
+describe("a new password, offered on every recovery", () => {
+  it("offers it, optional, when the details say none is needed", async () => {
     renderAuth("/recover#tok-recover-1");
     expect(await screen.findByRole("button", { name: "Recover my account" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("New password")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("The same password again")).not.toBeInTheDocument();
+    expect(screen.getByText(/Optional: set a new password now/)).toBeInTheDocument();
+    const field = screen.getByLabelText("New password");
+    expect(field).toHaveAttribute("type", "password");
+    expect(field).not.toHaveAttribute("data-keep");
+    expect(screen.getByLabelText("The same password again")).toHaveAttribute("type", "password");
     expect(screen.queryByText(/last set with an emailed link/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Recover my account" })).toBeEnabled();
+  });
+
+  it("left empty, sends only the token: the password stays", async () => {
+    const user = userEvent.setup();
+    renderAuth("/recover#tok-recover-1");
+    expect(await screen.findByLabelText("New password")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Recover my account" }));
+    expect(calls.acceptRecovery).toHaveBeenCalledExactlyOnceWith({ token: "tok-recover-1" });
+    await waitFor(() => expect(where.location?.pathname).toBe("/sign-in/enroll"));
+  });
+
+  it("filled in, sends it with the token", async () => {
+    const user = userEvent.setup();
+    renderAuth("/recover#tok-recover-1");
+    await choose(user, GOOD);
+    await user.click(screen.getByRole("button", { name: "Recover my account" }));
+    expect(calls.acceptRecovery).toHaveBeenCalledExactlyOnceWith({ token: "tok-recover-1", password: GOOD });
+    await waitFor(() => expect(where.location?.pathname).toBe("/sign-in/enroll"));
+  });
+
+  it.each([
+    ["too short", "eleven char", "eleven char", "Use at least 12 characters."],
+    ["not the same twice", GOOD, "a different long phrase", "The two passwords are not the same."],
+    ["typed only once", GOOD, "", "The two passwords are not the same."],
+  ])("checks one that is %s before asking, as the invitation does", async (_, password, again, sentence) => {
+    const user = userEvent.setup();
+    renderAuth("/recover#tok-recover-1");
+    await user.type(await screen.findByLabelText("New password"), password);
+    if (again) await user.type(screen.getByLabelText("The same password again"), again);
+    await user.click(screen.getByRole("button", { name: "Recover my account" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(sentence);
+    expect(calls.acceptRecovery).not.toHaveBeenCalled();
+  });
+
+  it("says the server's reason when the offered password is refused, and stays", async () => {
+    const sentence = "That password contains your email address.";
+    calls.acceptRecovery.mockRejectedValue(new ApiError(422, JSON.stringify({ code: "password_rejected", detail: sentence })));
+    const user = userEvent.setup();
+    renderAuth("/recover#tok-recover-1");
+    await choose(user, GOOD);
+    await user.click(screen.getByRole("button", { name: "Recover my account" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(sentence);
+    expect(where.location?.pathname).toBe("/recover");
+  });
+});
+
+describe("recovering an account whose password an emailed link set", () => {
+  it("does not call the field optional", async () => {
+    mailSetPassword();
+    renderAuth("/recover#tok-recover-1");
+    expect(await screen.findByText(/Your password was last set with an emailed link/)).toBeInTheDocument();
+    expect(screen.queryByText(/Optional: set a new password now/)).not.toBeInTheDocument();
   });
 
   it("asks for a new password, twice, when the details say so, and sends it with the token", async () => {
@@ -141,6 +202,9 @@ describe("recovering an account whose password an emailed link set", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(NEEDS_PASSWORD);
     expect(where.location?.pathname).toBe("/recover");
     expect(screen.queryByText(/This recovery link has expired/)).not.toBeInTheDocument();
+    // Required now: no longer offered as optional, and an empty press is not possible.
+    expect(screen.queryByText(/Optional: set a new password now/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Recover my account" })).toBeDisabled();
 
     await choose(user, GOOD);
     await user.click(screen.getByRole("button", { name: "Recover my account" }));

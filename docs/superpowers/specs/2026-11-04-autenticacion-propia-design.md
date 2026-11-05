@@ -362,20 +362,36 @@ MCP valida su JWT (`iss`, `aud`, `kid`, revocación).
     avisos son los últimos actos de la transacción, después de crear la sesión nueva: primero `password_changed`,
     después `factors_reset` (ronda 3: un aviso es correo, y el correo no se deshace). La marca se lee bajo
     `factors.lock_person` y antes de `clear_second_factors`, que la borra, así que un restablecimiento por correo que
-    llega entre `details` y la pulsación se espera y se ve (409), no se lee como ausente. **Sin la marca, la decisión 10 del plan sigue en pie:** quien recupera perdió los factores, no la
-    contraseña, y la contraseña se queda; una contraseña enviada igualmente se ignora. **Por qué la marca lo cambia:**
-    la marca dice que la contraseña actual pudo ponerla quien tiene el buzón, y la recuperación es el camino de vuelta
-    que nombra `reset_needs_recovery`. Si la conservara, quien tiene el buzón la seguiría sabiendo después de que la
-    persona recupere la cuenta; la marca desaparece con el primer segundo factor que la persona verifique, así que un
-    restablecimiento de factores posterior (por ejemplo, uno que pida quien tiene el buzón haciéndose pasar por la
-    persona) volvería a abrir el agujero; y la persona puede no conocer siquiera su propia contraseña.
+    llega entre `details` y la pulsación se espera y se ve (409), no se lee como ausente. **Sin la marca, la decisión
+    10 del plan sigue en pie:** quien recupera perdió los factores, no la contraseña, y si no elige otra, la
+    contraseña se queda (lo que pasa con una contraseña enviada sin la marca lo fija la decisión siguiente). **Por qué
+    la marca lo cambia:** la marca dice que la contraseña actual pudo ponerla quien tiene el buzón, y la recuperación
+    es el camino de vuelta que nombra `reset_needs_recovery`. Si la conservara, quien tiene el buzón la seguiría
+    sabiendo después de que la persona recupere la cuenta; la marca desaparece con el primer segundo factor que la
+    persona verifique, así que un restablecimiento de factores posterior (por ejemplo, uno que pida quien tiene el
+    buzón haciéndose pasar por la persona) volvería a abrir el agujero; y la persona puede no conocer siquiera su
+    propia contraseña.
+  - **Decisión del operador del 2026-11-05 («Ofrecerla siempre, aplicar»).** Sustituye a «una contraseña enviada sin
+    la marca se ignora». La página de recuperación ofrece siempre el campo «Contraseña nueva»: obligatorio mientras la
+    marca esté puesta, exactamente como arriba, y opcional sin ella. Una contraseña enviada se aplica siempre, con la
+    marca o sin ella: la misma regla (`require_acceptable`, 422 `password_rejected` antes de cualquier aviso y sin
+    gastar el enlace), el mismo `staff_password.store`, la misma auditoría `auth.password_changed` `{"via":
+    "recover"}` y el mismo aviso `password_changed`. Sin la marca y sin contraseña (o con el campo vacío), la
+    recuperación funciona como antes y la contraseña se queda. `recovery_details` sigue diciendo `password_required`,
+    y la consola lo usa para marcar el campo como obligatorio u opcional. El enlace ya da la cuenta entera, así que
+    dejar que quien lo tiene ponga también la contraseña no da nada nuevo. **Cierra los dos huecos que la revisión
+    señaló** y que la marca sola no cubre, porque la persona puede cerrarlos poniendo una contraseña: la carrera
+    inversa (la marca se borra entre `details` y la pulsación porque alguien con la contraseña del buzón y un factor
+    inicia sesión, y la contraseña que la persona escribió se ignoraba), y una recuperación posterior después de que
+    un atacante borrara la marca del mismo modo (`details` dice `false` y antes no había forma de cambiar la
+    contraseña desde el enlace).
   - Un enlace de restablecimiento rechazado porque los factores ya no están se gasta (410), como cualquier enlace
     muerto: no vuelve a valer cuando la persona registra un factor nuevo (revisión final, Minor 5).
 - **Comando de recuperación** (único administrador sin factores):
   `docker compose exec api python -m app.core.auth.recover --email <correo>` imprime un enlace de un solo uso de 15 min.
   No existe por HTTP; exige acceso al servidor; queda auditado. **El enlace es la cuenta:** no pide la contraseña
-  actual (si la puso un enlace por correo, pide una nueva: arriba), así que quien lo abra en esos 15 minutos se queda
-  con ella. Se entrega a la persona en mano, nunca por correo (Q5); el
+  actual (ofrece siempre una nueva, y la exige si la actual la puso un enlace por correo: arriba), así que quien lo
+  abra en esos 15 minutos se queda con ella. Se entrega a la persona en mano, nunca por correo (Q5); el
   comando lo advierte en stderr.
 - **Primer arranque:** la pantalla con el código de instalación (que ya existe) crea al dueño con contraseña y segundo
   factor.

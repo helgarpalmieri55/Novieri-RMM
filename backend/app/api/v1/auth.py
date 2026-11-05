@@ -206,9 +206,9 @@ class RecoveryAcceptIn(BaseModel):
     #: No Pydantic bound on either (Task 7's decision 16), as `InviteAcceptIn`:
     #: a field failure repeats its input in the 422, and both are secrets.
     #: `action_tokens.org_of` bounds the token, `staff_password.require_acceptable`
-    #: the password. The password is needed only while an emailed link set the
-    #: current one (operator decision 2026-11-05, `flows.accept_recovery`), and
-    #: is ignored otherwise.
+    #: the password. The password is needed while an emailed link set the
+    #: current one, optional otherwise, and applied whenever it is given
+    #: (operator decisions 2026-11-05, `flows.accept_recovery`).
     token: str
     password: str | None = None
 
@@ -227,7 +227,8 @@ class RecoveryOut(BaseModel):
     password_required: bool = Field(
         description=(
             "True while the account's password was last set with an emailed link: accepting "
-            "the link then needs a new `password`."
+            "the link then needs a new `password`. Otherwise one is optional, and applied "
+            "when given."
         ),
     )
 
@@ -566,9 +567,9 @@ async def accept_recovery(
     body: RecoveryAcceptIn, request: Request, response: Response
 ) -> SignInOut:
     """Use the server's recovery link: the second factors, remembered browsers
-    and sessions go, and a new first factor is set up next. While the
-    password was last set with an emailed link, a new `password` is needed
-    first (409 `recovery_needs_password` without one)."""
+    and sessions go, and a new first factor is set up next. A new `password`
+    is applied when given, and needed while the current one was last set with
+    an emailed link (409 `recovery_needs_password` without one)."""
     step = await flows.accept_recovery(request, token=body.token, password=body.password)
     return _answer(response, step)
 

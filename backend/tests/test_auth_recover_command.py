@@ -5,9 +5,10 @@ reset them: a one-time, 15-minute link, printed on the server's terminal.
 Following it (`POST /auth/recover/accept`) removes the factors, forgets the
 devices, ends the sessions and opens a session that goes straight to
 enrolling a new factor; the password does not change (plan decision 10) --
-unless an emailed link set it, when the link asks for a new one first (operator
-decision 2026-11-05, «Pedir contraseña nueva si hay marca»; the tests at the
-end). Audited at both ends, and the holder is told.
+unless the person sets a new one, which the page always offers and requires
+while an emailed link set the current one (operator decisions 2026-11-05,
+«Pedir contraseña nueva si hay marca» and «Ofrecerla siempre, aplicar»; the
+tests at the end). Audited at both ends, and the holder is told.
 
 FALSIFIER 9: it does not exist over HTTP -- no route reaches the module,
 nothing in `app/` imports it, it builds no router, and no other module issues a
@@ -38,6 +39,7 @@ from tests.auth_support import (
     console_ready,
     cookie,
     enrol_totp,
+    fresh_code,
     link_token,
     login,
     signed_in,
@@ -207,7 +209,9 @@ async def test_a_disabled_technician_gets_no_link(auth_env: Any) -> None:
 # contraseña nueva si hay marca»; design §7). That password may be whoever
 # holds the mailbox's, so while `auth_passwords.mail_reset_at` is set the link
 # asks for a new one before it finishes, and the mailbox's stops working.
-# Without the mark, plan decision 10 is unchanged: the password stays.
+# And on every recovery the page offers one, applied whenever it is given
+# (operator decision 2026-11-05, «Ofrecerla siempre, aplicar»). Without the
+# mark and without a password, plan decision 10 is unchanged: it stays.
 # --------------------------------------------------------------------------- #
 
 #: The person's own new password, chosen on the recovery page.
@@ -372,12 +376,14 @@ async def test_with_the_mark_a_good_password_replaces_the_mailboxs(auth_env: Any
     assert all(RECOVERED not in m.text for m in auth_env.mail.sent)
 
 
-async def test_without_the_mark_a_password_sent_anyway_is_ignored(auth_env: Any) -> None:
-    """Plan decision 10, unchanged: with no mark the password stays, whatever
-    the body carries. The console sends one only after the details, or a
-    409, said the mark was set; if it went in between, the request is
-    answered as it would be without the field. Nothing records or tells a
-    password change that did not happen."""
+async def test_without_the_mark_a_password_sent_is_applied(auth_env: Any) -> None:
+    """Operator decision 2026-11-05, «Ofrecerla siempre, aplicar»: the page
+    offers a new password on every recovery, and one that is given is
+    applied, mark or not -- the same rule, the same store, the same record
+    and notice. It closes the later recovery after somebody holding the
+    mailbox and a factor cleared the mark by signing in: the person sets a
+    password and theirs is the only one that works. Ignore the field
+    without the mark and the old password still signs in: red."""
     org = await auth_env.create_org("recover-nomark-sent")
     who = await signed_in(auth_env, org, "technician")
     token = await _link(auth_env, who)
@@ -387,11 +393,96 @@ async def test_without_the_mark_a_password_sent_anyway_is_ignored(auth_env: Any)
 
     assert accepted.json() == {"state": "enroll_required"}, accepted.text
     who.session, who.network = None, browser()
-    assert (await login(auth_env, who, password=RECOVERED)).status_code == 401
+    assert (await login(auth_env, who)).status_code == 401
+    assert (await login(auth_env, who, password=RECOVERED)).json() == {"state": "enroll_required"}
+    changed = await _events(auth_env, org, "auth.password_changed")
+    assert [e.meta for e in changed] == [{"via": "recover"}]
+    assert (changed[0].actor_type, changed[0].actor_id) == ("user", who.user_id)
+    subjects = [m.subject.lower() for m in auth_env.mail.sent if m.to == who.email]
+    assert any("password was changed" in s for s in subjects), subjects
+    assert any("sign-in methods were reset" in s for s in subjects), subjects
+
+
+@pytest.mark.parametrize("empty", [None, ""], ids=["no-field", "empty-field"])
+async def test_without_the_mark_an_empty_field_keeps_the_password(
+    auth_env: Any, empty: str | None
+) -> None:
+    """The field is optional without the mark: left empty, the recovery works
+    as before and the password stays (plan decision 10). Nothing records or
+    tells a password change that did not happen."""
+    org = await auth_env.create_org(f"recover-nomark-empty-{'none' if empty is None else 'blank'}")
+    who = await signed_in(auth_env, org, "technician")
+    token = await _link(auth_env, who)
+    auth_env.mail.sent.clear()
+
+    accepted = await (
+        _accept(auth_env, token) if empty is None else _accept(auth_env, token, password=empty)
+    )
+
+    assert accepted.json() == {"state": "enroll_required"}, accepted.text
+    who.session, who.network = None, browser()
     assert (await login(auth_env, who)).json() == {"state": "enroll_required"}
     assert await _events(auth_env, org, "auth.password_changed") == []
     subjects = [m.subject.lower() for m in auth_env.mail.sent if m.to == who.email]
     assert not any("password was changed" in s for s in subjects), subjects
+
+
+async def test_without_the_mark_a_weak_password_is_refused_and_the_link_stays(
+    auth_env: Any,
+) -> None:
+    """An offered password is held to the same rule: 422 `password_rejected`
+    before anything but the `consume` is written, so the link stays usable
+    and the old password still signs in."""
+    org = await auth_env.create_org("recover-nomark-weak")
+    who = await signed_in(auth_env, org, "technician")
+    token = await _link(auth_env, who)
+    weak = "tiny-pass"
+
+    refused = await _accept(auth_env, token, password=weak)
+
+    assert refused.status_code == 422, refused.text
+    assert refused.json() == {"code": "password_rejected", "detail": "Use at least 12 characters."}
+    assert weak not in refused.text
+    assert (await _details(auth_env, token)).json() == {
+        "email": who.email,
+        "password_required": False,
+    }
+    assert await _has_totp(auth_env, who)
+    who.session, who.network = None, browser()
+    assert (await login(auth_env, who)).json()["state"] == "factor_required"
+
+
+async def test_a_mark_cleared_between_the_details_and_the_press_still_takes_the_password(
+    auth_env: Any,
+) -> None:
+    """THE REVERSE RACE (fix 3 review, Minor 1). The details said a new
+    password is needed; before the press, whoever holds the mailbox's
+    password and a factor signs in with both, and that clears the mark
+    (`failures.record_success`). The person's typed password is applied all
+    the same, so the mailbox's stops working. Read it only while the mark is
+    set and the mailbox's password survives the recovery: red."""
+    org = await auth_env.create_org("recover-reverse-race")
+    who = await signed_in(auth_env, org, "technician")
+    await _mail_reset(auth_env, who)
+    token = await _link(auth_env, who)
+    assert (await _details(auth_env, token)).json()["password_required"] is True
+    assert (await login(auth_env, who)).json()["state"] == "factor_required"
+    signed = await auth_env.client.post(
+        "/api/v1/auth/factor/totp",
+        headers=who.headers(),
+        json={"code": await fresh_code(auth_env, who), "remember_device": False},
+    )
+    assert signed.json() == {"state": "signed_in"}, signed.text
+    assert await _mark(auth_env, who) is None
+
+    accepted = await _accept(auth_env, token, password=RECOVERED)
+
+    assert accepted.json() == {"state": "enroll_required"}, accepted.text
+    who.session, who.network = None, browser()
+    assert (await login(auth_env, who, password=MAILED)).status_code == 401
+    assert (await login(auth_env, who, password=RECOVERED)).json() == {"state": "enroll_required"}
+    changed = await _events(auth_env, org, "auth.password_changed")
+    assert [e.meta for e in changed] == [{"via": "reset"}, {"via": "recover"}]
 
 
 async def test_a_mail_reset_between_the_details_and_the_press_is_caught(

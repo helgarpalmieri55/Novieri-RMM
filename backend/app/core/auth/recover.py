@@ -6,10 +6,11 @@ RECOVER_TTL` (15 minutes today), to the console's `/recover` page. Since the
 operator's decision of 2026-11-05 it is also the way back when an
 administrator's factor reset is refused with `reset_needs_recovery`.
 Following it removes the person's factors and opens a session that enrols a
-new one (`flows.accept_recovery`); the password does not change, unless an
-emailed link set it -- then the page asks for a new one first (operator
-decision 2026-11-05, «Pedir contraseña nueva si hay marca»). Either way it
-never asks for the current password.
+new one (`flows.accept_recovery`); the password does not change unless the
+person sets a new one there, which the page always offers and requires while
+an emailed link set the current one (operator decisions 2026-11-05, «Pedir
+contraseña nueva si hay marca» and «Ofrecerla siempre, aplicar»). Either way
+it never asks for the current password.
 
     docker compose exec api python -m app.core.auth.recover --email <address>
 

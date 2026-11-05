@@ -11,18 +11,24 @@
  * new codes (§2.2). The page shows whose account the link is for and asks for
  * one deliberate press; opening the link does nothing by itself.
  *
- * A PASSWORD AN EMAILED LINK SET IS REPLACED (operator decision 2026-11-05,
- * «Pedir contraseña nueva si hay marca»; design §7). That password may be
+ * A NEW PASSWORD IS OFFERED ON EVERY RECOVERY (operator decision 2026-11-05,
+ * «Ofrecerla siempre, aplicar»; design §7), and the server applies one that
+ * is given. Optional, it may be left empty: only the token travels, and the
+ * password stays.
+ *
+ * REQUIRED WHEN AN EMAILED LINK SET THE PASSWORD (operator decision
+ * 2026-11-05, «Pedir contraseña nueva si hay marca»). That password may be
  * whoever holds the mailbox's, so the server then asks for a new one before
  * the recovery finishes. The page knows from the details (`password_required`)
  * or, when a mail reset landed after the page opened, from the accept's 409
- * `recovery_needs_password`: then it shows the server's sentence and the
- * field, spends nothing, and the person presses again. The field is the
- * invitation's (`NewPasswordFields`, `checkNewPassword`, the server's
- * `password_rejected` sentence shown as sent); a secret, so `type="password"`
- * and never `data-keep`, and the accept is a `useSecretMutation`
- * (`src/test/secretMutations.test.ts`): neither the password nor the token
- * stays in TanStack's mutation cache.
+ * `recovery_needs_password`: then it shows the server's sentence, the field
+ * becomes required, nothing is spent, and the person presses again.
+ *
+ * The field is the invitation's (`NewPasswordFields`, `checkNewPassword`, the
+ * server's `password_rejected` sentence shown as sent); a secret, so
+ * `type="password"` and never `data-keep`, and the accept is a
+ * `useSecretMutation` (`src/test/secretMutations.test.ts`): neither the
+ * password nor the token stays in TanStack's mutation cache.
  *
  * A link the server no longer honours (410 `invalid_link`: used, expired or
  * unknown) reads as one state, and says who can make another. The token comes
@@ -80,8 +86,10 @@ export function RecoverPage() {
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
 
-  async function recover(withPassword: boolean) {
+  async function recover(required: boolean) {
     if (inFlight.current) return;
+    // Optional and left empty: only the token, and the password stays.
+    const withPassword = required || password !== "" || again !== "";
     if (withPassword) {
       const problem = checkNewPassword(password, again);
       if (problem) {
@@ -132,7 +140,8 @@ export function RecoverPage() {
     );
   }
   const { email, password_required } = recovery.data;
-  const submitLabel = busy ? t("auth.common.working") : t("auth.recover.submit");
+  // Required while an emailed link set the password, or once the accept said so (409).
+  const required = password_required || raced;
   return (
     <AuthCard
       title={t("auth.recover.title")}
@@ -143,37 +152,32 @@ export function RecoverPage() {
       <p className="note" style={{ margin: 0 }}>
         {t("auth.recover.what")}
       </p>
-      {password_required || raced ? (
-        <Form onSubmit={() => void recover(true)}>
-          {password_required ? (
-            <p className="note" style={{ margin: 0 }}>
-              {t("auth.recover.newPassword")}
-            </p>
-          ) : null}
-          {/* For the password manager: the account the new password belongs to. */}
-          <Field label={t("auth.common.email")}>
-            <input className={inputClass} type="email" autoComplete="username" value={email} readOnly />
-          </Field>
-          <NewPasswordFields password={password} again={again} onPassword={setPassword} onAgain={setAgain} />
-          <AuthAlert text={error} />
-          <div className="form-actions">
-            <Btn
-              type="submit"
-              variant="primary"
-              icon="key"
-              label={submitLabel}
-              disabled={busy || !password || !again}
-            />
-          </div>
-        </Form>
-      ) : (
-        <>
-          <AuthAlert text={error} />
-          <div className="form-actions">
-            <Btn variant="primary" icon="key" label={submitLabel} disabled={busy} onClick={() => void recover(false)} />
-          </div>
-        </>
-      )}
+      <Form onSubmit={() => void recover(required)}>
+        {password_required ? (
+          <p className="note" style={{ margin: 0 }}>
+            {t("auth.recover.newPassword")}
+          </p>
+        ) : raced ? null : (
+          <p className="note" style={{ margin: 0 }}>
+            {t("auth.recover.optionalPassword")}
+          </p>
+        )}
+        {/* For the password manager: the account the new password belongs to. */}
+        <Field label={t("auth.common.email")}>
+          <input className={inputClass} type="email" autoComplete="username" value={email} readOnly />
+        </Field>
+        <NewPasswordFields password={password} again={again} onPassword={setPassword} onAgain={setAgain} />
+        <AuthAlert text={error} />
+        <div className="form-actions">
+          <Btn
+            type="submit"
+            variant="primary"
+            icon="key"
+            label={busy ? t("auth.common.working") : t("auth.recover.submit")}
+            disabled={busy || (required && (!password || !again))}
+          />
+        </div>
+      </Form>
     </AuthCard>
   );
 }

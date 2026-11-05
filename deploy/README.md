@@ -1029,8 +1029,8 @@ Users → Reset second factors), whoever holds the server prints a one-time
 recovery link (design §7, Q5). Opening it removes the person's second
 factors, remembered browsers and sessions, and starts a session that sets up
 a new factor. **It asks for no current password: the link alone is the
-account.** When the person's password was set by an emailed link, the
-recovery page asks for a new password.
+account.** The recovery page always offers a new password, and requires one
+when the person's password was set by an emailed link.
 
 **It is also what to do when "Reset second factors" is refused with
 `reset_needs_recovery`** (operator decision 2026-11-05). That refusal means the

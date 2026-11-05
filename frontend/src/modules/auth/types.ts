@@ -82,9 +82,10 @@ export interface RecoveryLink {
 }
 
 /**
- * `POST /auth/recover/accept`: the link's token, and the new password while
- * the server asks for one (`RecoveryLink.password_required`, or a 409
- * `recovery_needs_password`). Without that, the server ignores a password.
+ * `POST /auth/recover/accept`: the link's token, and a new password -- needed
+ * while the server asks for one (`RecoveryLink.password_required`, or a 409
+ * `recovery_needs_password`), optional otherwise, and applied whenever it is
+ * sent (operator decision 2026-11-05, «Ofrecerla siempre, aplicar»).
  */
 export interface RecoveryAccept {
   token: string;

@@ -1087,22 +1087,28 @@ async def accept_recovery(request: Request, *, token: str, password: str | None 
     session waiting for a new first factor is opened, pending until
     `enroll/finish`.
 
-    THE PASSWORD STAYS (plan decision 10: who recovers lost the factors, not
-    the password) -- UNLESS AN EMAILED LINK SET IT (operator decision
-    2026-11-05, «Pedir contraseña nueva si hay marca»; design §7). While the
-    "password set by mail" mark is set (`factors.set_by_mail`) the current
-    password may be whoever holds the mailbox's. Kept, it would still work
-    after the person recovered; and the mark goes at their first factor, so a
-    later factor reset would hand the account to the mailbox again. So, while
-    it is set:
+    A NEW PASSWORD IS ALWAYS OFFERED, AND APPLIED WHEN GIVEN (operator
+    decision 2026-11-05, «Ofrecerla siempre, aplicar»; design §7). The link
+    already grants the whole account, so letting its holder also set the
+    password grants nothing new; and it closes what the mark alone cannot: a
+    mark cleared between the details and this press, and a later recovery
+    after somebody holding the mailbox and a factor cleared it by signing in.
+    A given `password` is held to `staff_password.require_acceptable` (422
+    `password_rejected`, the answer of every other password route), stored by
+    `staff_password.store` (which clears the mark) in this transaction, and
+    recorded and told as a mailed reset's is (`reset_password`):
+    `auth.password_changed` with `via` the link's purpose, and the
+    `password_changed` notice. No password, and an empty one, is none: the
+    password stays (plan decision 10: who recovers lost the factors, not the
+    password) --
 
-    * no `password` is a 409 `recovery_needs_password`, and the page asks;
-    * one the rule refuses is `staff_password.require_acceptable`'s 422
-      `password_rejected`, the answer of every other password route;
-    * an acceptable one is stored (`staff_password.store`, which clears the
-      mark) in this transaction, and recorded and told as a mailed reset's
-      is (`reset_password`): `auth.password_changed`, `via` the link's
-      purpose, and the `password_changed` notice.
+    UNLESS AN EMAILED LINK SET IT (operator decision 2026-11-05, «Pedir
+    contraseña nueva si hay marca»). While the "password set by mail" mark is
+    set (`factors.set_by_mail`) the current password may be whoever holds the
+    mailbox's. Kept, it would still work after the person recovered; and the
+    mark goes at their first factor, so a later factor reset would hand the
+    account to the mailbox again. So then no password is a 409
+    `recovery_needs_password`, and the page asks.
 
     Both refusals are raised inside the block, when nothing but the `consume`
     has been written and BEFORE any notice: it rolls back, the link stays
@@ -1115,11 +1121,7 @@ async def accept_recovery(request: Request, *, token: str, password: str | None 
     THE NOTICES ARE THE LAST ACTS (fix round 3): a notice is mail, which does
     not roll back. Both follow the new session's creation, the last step that
     can fail: `password_changed` first, when this press set one, then
-    `factors_reset`.
-
-    WITHOUT THE MARK A `password` IS IGNORED: decision 10 holds whatever the
-    body carries. The console sends one only when the details or a 409 said
-    the mark was set."""
+    `factors_reset`."""
     org_id = action_tokens.org_of(token)
     if org_id is None:
         raise _invalid_link()
@@ -1127,11 +1129,11 @@ async def accept_recovery(request: Request, *, token: str, password: str | None 
         user = await _recovering(session, token, consume=True)
         await lock_person(session, user.id)
         # Read HERE, under the lock and before `clear_second_factors`, which
-        # clears the mark: read after it, this branch would never run.
+        # clears the mark: read after it, this refusal would never run.
+        if not password and await set_by_mail(session, user.id):
+            raise _needs_password()
         password_set = False
-        if await set_by_mail(session, user.id):
-            if not password:
-                raise _needs_password()
+        if password:
             # Raises a 422 that rolls the `consume` back: the link stays usable.
             await staff_password.require_acceptable(
                 password,

@@ -1900,8 +1900,9 @@ export class ApiClient {
   /**
    * `POST /auth/recover/accept`: the server removes the account's second
    * factors and recovery codes, and leaves a session that has none -- the
-   * next page is the first factor. While an emailed link set the password it
-   * needs a new one too (`password`), or answers 409 `recovery_needs_password`.
+   * next page is the first factor. A `password` sent is applied; while an
+   * emailed link set the current one it is needed, or the answer is 409
+   * `recovery_needs_password`.
    */
   acceptRecovery(body: RecoveryAccept): Promise<void> {
     return this.request<void>("/auth/recover/accept", { method: "POST", body: JSON.stringify(body) }, { anonymous: true });
