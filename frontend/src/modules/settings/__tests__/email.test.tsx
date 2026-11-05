@@ -132,20 +132,19 @@ describe("Settings — Email tab", () => {
 
   /**
    * Defect: `:282` (password set) and `:283` (password not set) used to make
-   * OPPOSITE claims about which system holds the SMTP password — one said
-   * "this platform never stores it", the other said "identity provider".
-   * `backend/app/modules/user_admin/realm_config.py` settles which is true:
-   * the password is written to the Keycloak realm's own `smtpServer` block
-   * (`_SMTP = "smtpServer"`, `set_smtp`), `get_smtp` strips it on every read,
-   * and `kc_client.py`'s `execute-actions-email` is Keycloak itself sending
-   * the mail with it. So "identity provider" was the correct system in both
-   * states, and both branches must say so IDENTICALLY — not just each
-   * separately passing its own regex, but both matching the very same
-   * pattern, so an edit that drifts one branch's claim away from the other's
-   * fails here rather than passing because nobody compared them.
+   * OPPOSITE claims about which system holds the SMTP password.
+   *
+   * RE-POINTED (own authentication design §7, Task 3). This pinned "the
+   * identity provider stores it and uses it to send mail -- this platform
+   * never stores it", which was true while the SMTP password lived in the
+   * Keycloak realm's own `smtpServer` block. It lives in this platform's vault
+   * now, as a `Credential(type="account_mail")` opened only to send, and is
+   * returned by no read. Both branches still make the IDENTICAL claim -- the
+   * true one now -- and both must match the very same pattern, so an edit
+   * that drifts one branch's claim away from the other's fails here.
    */
   const PASSWORD_CUSTODY_CLAIM =
-    /identity provider.*stores it and uses it to send mail.*this platform never stores it/is;
+    /kept encrypted in this platform's vault.*used only to send mail.*never shown again/is;
 
   it("makes the identical claim about who holds the password — set branch", async () => {
     await openEmail();
@@ -235,9 +234,8 @@ describe("Settings — Email tab", () => {
   });
 
   it("proposes the operator's own inbox, tagged, and sends to what the box says", async () => {
-    // The identity provider refuses a sign-in account's own address, so the
-    // box offers a tagged form of it that reaches the same inbox. Whatever the
-    // operator leaves in the box is what the request names.
+    // The box offers the operator's own address, tagged, which reaches the
+    // same inbox. Whatever the operator leaves in the box is what the request names.
     calls.getEmailSettings.mockResolvedValue({
       ...EMAIL_SETTINGS_FIXTURE,
       suggested_test_recipient: "helgar+itms-test@toeshee.com",
@@ -265,6 +263,19 @@ describe("Settings — Email tab", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/HTTP 500/);
     expect(screen.queryByText(/^Sent/)).not.toBeInTheDocument();
+  });
+
+  it("says the server's words when this minute's test sends are spent", async () => {
+    // NEW (Task 3): the platform opens an SMTP conversation for each test now,
+    // so the server allows five a minute per organization and answers 429.
+    calls.sendTestEmail.mockRejectedValue(
+      new ApiError(429, JSON.stringify({ detail: "too many test messages for this organization; try again in a minute" })),
+    );
+    const user = await openEmail();
+    await user.click(await screen.findByRole("button", { name: "Send a test message" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/^Not sent\./);
+    expect(alert).toHaveTextContent("too many test messages for this organization; try again in a minute");
   });
 
   /**
@@ -676,5 +687,42 @@ describe("Settings — Email tab, signing in with Microsoft 365", () => {
 
     const panel = screen.getByRole("tabpanel");
     expect(panel.textContent).not.toMatch(/oauth|xoauth2|client.credentials/i);
+  });
+
+  /**
+   * NEW (Task 3): the platform presents the client secret to Microsoft itself
+   * now, so the token address is Microsoft's own, built from the directory ID,
+   * and the server refuses any other with 422. "Advanced" keeps only the
+   * access requested.
+   */
+  it("offers no token address of its own: the sign-in is Microsoft's", async () => {
+    const user = await openEmail();
+    await chooseMicrosoft(user);
+    await user.click(screen.getByText("Advanced"));
+    expect(screen.queryByLabelText("Token address")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Access requested")).toHaveValue("https://outlook.office365.com/.default");
+    expect(screen.getByLabelText("Directory (tenant) ID")).toHaveAccessibleDescription(
+      /login\.microsoftonline\.com and nowhere else/,
+    );
+  });
+
+  it("will not save a sign-in whose saved address is not Microsoft's until the directory is given", async () => {
+    calls.getEmailSettings.mockResolvedValue({
+      ...MICROSOFT_FIXTURE,
+      microsoft_sign_in_url: "https://login.example.gov/oauth2/v2.0/token",
+    });
+    const user = await openEmail();
+    expect(await screen.findByLabelText("Directory (tenant) ID")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    // A clean form is disabled anyway, so make it dirty with an unrelated edit:
+    // it is still refused, because the saved address names no Microsoft
+    // directory -- and the server would refuse it with 422.
+    const name = screen.getByLabelText("Sender name");
+    await user.clear(name);
+    await user.type(name, "IT desk");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    await user.type(screen.getByLabelText("Directory (tenant) ID"), "contoso.onmicrosoft.com");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 });

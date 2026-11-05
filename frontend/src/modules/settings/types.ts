@@ -684,8 +684,8 @@ export const SESSION_BOUNDS: Readonly<Record<SessionNumberKey, readonly [number,
 /**
  * What the profile form writes, and the complete list of it.
  *
- * NOT `email` (Keycloak owns it, and changing it there is a re-authenticated,
- * verified flow this console must not reimplement), NOT `status`, and nothing
+ * NOT `email` (a sign-in address changes through a re-authenticated, verified
+ * flow this console does not offer), NOT `status`, and nothing
  * role-shaped — spec falsifier 12 calls a self-service form that writes those
  * a privilege-escalation path. The route takes no `user_id` either: the target
  * is the calling token's own user.
@@ -710,7 +710,7 @@ export interface EmailSettingsOut {
   /** False until a relay is set — the state this platform ships in. */
   configured: boolean;
   host: string;
-  /** As the identity provider stores it: a string, empty when unset. */
+  /** A string, empty when unset. */
   port: string;
   from_address: string;
   from_display_name: string;
@@ -726,9 +726,10 @@ export interface EmailSettingsOut {
    */
   authenticated: boolean;
   /**
-   * `password` or `token`. `token` is a Microsoft 365 sign-in: the realm's
-   * sign-in service fetches the token itself, so the console never sees one.
-   * Absent from a server older than this field, which means `password`.
+   * `password` or `token`. `token` is a Microsoft 365 sign-in: the server
+   * fetches a token at Microsoft's own address for each message, so the
+   * console never sees one. Absent from a server older than this field, which
+   * means `password`.
    */
   auth_type?: string;
   /** The Microsoft application (client) ID. Its secret has no field here. */
@@ -739,9 +740,8 @@ export interface EmailSettingsOut {
   microsoft_scope?: string;
   /**
    * The caller's own address with `+itms-test` before the @ — where the
-   * console proposes sending a test. The identity provider will not send a
-   * test to a sign-in account's own address; a tagged one reaches the same
-   * inbox. Empty or absent when there is nothing to suggest.
+   * console proposes sending a test; a tagged address reaches the same inbox.
+   * Empty or absent when there is nothing to suggest.
    */
   suggested_test_recipient?: string;
 }
@@ -774,10 +774,10 @@ export interface EmailSettingsUpdate {
   token_client_secret?: string;
 }
 
-/** What came of asking the identity provider to send a test message. */
+/** What came of asking the server to send a test message. */
 export interface TestSendOut {
   /**
-   * The identity provider ACCEPTED the message. Acceptance is not delivery —
+   * The mail server ACCEPTED the message. Acceptance is not delivery —
    * a relay can take a message from an unknown sender and drop it silently —
    * so nothing in this console renders this as a green tick.
    */

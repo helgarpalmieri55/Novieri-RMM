@@ -314,7 +314,13 @@ describe("the email tab in Spanish", () => {
   it("says email is not set up, and disables the test", async () => {
     calls.getEmailSettings.mockResolvedValue(EMAIL_UNCONFIGURED_FIXTURE);
     const { container } = await openIn("email");
-    expect(await screen.findByText("El correo no está configurado, así que no se puede invitar a nadie ni restablecer ninguna contraseña.")).toBeInTheDocument();
+    // RE-POINTED (design §7): without mail an invitation shows its link once;
+    // what is lost is the mail, and the forgotten password.
+    expect(
+      await screen.findByText(
+        "El correo no está configurado: cada invitación muestra su enlace una sola vez para que lo entregues tú, y nadie puede restablecer por correo una contraseña olvidada.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText(/^Contraseña: sin establecer\./)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Enviar un mensaje de prueba" })).toBeDisabled();
     expect(screen.getByText("Antes de guardar, indica un servidor de correo, una dirección del remitente y un puerto válido.")).toBeInTheDocument();
@@ -332,7 +338,9 @@ describe("the email tab in Spanish", () => {
     expect(screen.getByText(/^Secreto de cliente: sin establecer\./)).toBeInTheDocument();
     expect(screen.getByText(/^Al guardar, la contraseña guardada del servidor de correo se sustituirá por un inicio de sesión de Microsoft 365\./)).toBeInTheDocument();
     expect(screen.getByText("Microsoft 365 envía a través de smtp.office365.com, puerto 587, StartTLS.")).toBeInTheDocument();
-    expect(screen.getByText(/^Avanzado: solo para una nube de Microsoft gubernamental o nacional/)).toBeInTheDocument();
+    // RE-POINTED (Task 3): the box is no longer "solo para una nube
+    // gubernamental o nacional" -- there is no address but Microsoft's.
+    expect(screen.getByText("Avanzado")).toBeInTheDocument();
     expect(screen.getByText(/^Antes de guardar, indica un servidor de correo, una dirección del remitente, un puerto válido, el nombre de usuario/)).toBeInTheDocument();
     expectNoEnglish(container, [...RECORDED, "smtp.internal", "itms@toeshee.com", "support@toeshee.com", "ITMS", "itms", "smtp.office365.com"]);
   });

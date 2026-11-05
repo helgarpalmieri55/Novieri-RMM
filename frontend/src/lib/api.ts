@@ -840,8 +840,9 @@ export interface Me {
    * They are read with `?? ""` at the one place they are rendered, so an
    * absent value is an empty box and never the string "undefined".
    *
-   * `email` is NOT in that set — Keycloak owns the address, and this console
-   * shows it rather than editing it.
+   * `email` is NOT in that set — a sign-in address changes through a
+   * re-authenticated, verified flow this console does not offer, so it shows
+   * it rather than editing it.
    */
   phone?: string | null;
   timezone?: string | null;
@@ -2221,10 +2222,10 @@ export class ApiClient {
   /**
    * Save the relay settings.
    *
-   * THE ONE REQUEST IN THIS CLIENT THAT CARRIES A PASSWORD, and only when the
-   * operator typed one. It is written straight through to the identity
-   * provider and is never stored by this platform or returned by any response —
-   * so `EmailSettingsOut` has no field that could echo it back.
+   * CARRIES A PASSWORD (or a Microsoft client secret) ONLY WHEN THE OPERATOR
+   * TYPED ONE. The server keeps it encrypted in the vault (invariant 3) and
+   * returns it in no response -- so `EmailSettingsOut` has no field that could
+   * echo it back.
    */
   updateEmailSettings(body: EmailSettingsUpdate): Promise<EmailSettingsOut> {
     return this.request<EmailSettingsOut>("/settings/email", {
