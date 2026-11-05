@@ -586,8 +586,14 @@ from tests.tool_surface import (
 # `GET /ipam/sites` is gone. It answered a bare, undescribed list, so P4 93 ->
 # 92 and P5 177 -> 176; it passed neither five nor six, so neither set moves.
 # Its replacement for the console is `GET /clients/{client_id}/sites`, above.
-EXPECTED_GET_ROUTES = 253
-EXPECTED_PASSING_FIVE = 51
+# 253 -> 254 (2026-11-04): own authentication (P2 phase 1, Task 6) adds
+# `GET /settings/sessions`, gated (`orgs.manage`), typed, described and
+# closed: passing five 51 -> 52. It passes all six and waits in
+# PENDING_TOOL_REVIEW, as `/settings/email` does: how long a sign-in lasts
+# and whether a device may skip the second factor is reconnaissance about the
+# organisation's sign-in posture, and reading it is the AI module's decision.
+EXPECTED_GET_ROUTES = 254
+EXPECTED_PASSING_FIVE = 52
 
 # The registrable set, pinned by PATH rather than count: this is the number the
 # whole exercise is about, it is small, and "which routes" is the actionable
@@ -641,6 +647,9 @@ EXPECTED_PASSING_SIX = frozenset(
         # one GET.
         "/api/v1/orgs/current/console-domain-preview",
         "/api/v1/settings/email",
+        # Added 2026-11-04 (P2 Task 6, sign-in lifetimes); reasoning above
+        # EXPECTED_GET_ROUTES.
+        "/api/v1/settings/sessions",
         # Added 2026-08-21 (patch approvals list). Eligible, and deliberately
         # not registered: the list names every patch cleared to reach a
         # machine, and hands out the ids `DELETE /approvals/{id}` takes.
@@ -975,6 +984,9 @@ PENDING_TOOL_REVIEW = frozenset(
         # EXPECTED_PASSING_SIX above.
         "/api/v1/orgs/current/console-domain-preview",
         "/api/v1/settings/email",
+        # Added 2026-11-04 (P2 Task 6, sign-in lifetimes); reasoning above
+        # EXPECTED_GET_ROUTES.
+        "/api/v1/settings/sessions",
         # Added 2026-08-21 (patch approvals list); reasoning beside
         # EXPECTED_PASSING_SIX above.
         "/api/v1/patch/approvals",

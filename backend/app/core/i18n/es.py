@@ -4979,4 +4979,7 @@ CATALOG: dict[str, str] = {
     "confirm your second factor again to do this": (
         "confirma de nuevo tu segundo factor para hacer esto"
     ),
+    "the inactivity limit cannot be longer than the longest sign-in": (
+        "el límite de inactividad no puede ser mayor que la duración máxima de la sesión"
+    ),
 }

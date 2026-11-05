@@ -459,6 +459,16 @@ PART_D: dict[str, str] = {
         "default. Only the sender, the caller or the console domain are allowed. Success means the "
         "relay accepted it, not delivery."
     ),
+    "GET /api/v1/settings/sessions": (
+        "Returns how long a sign-in lasts for this organization: minutes of inactivity and the "
+        "longest sign-in for technicians and for portal contacts, and whether and for how many "
+        "days a device may be remembered."
+    ),
+    "PUT /api/v1/settings/sessions": (
+        "Saves every sign-in lifetime at once and returns what is then in force; the next request "
+        "of every open session obeys it. Needs every client. The audit log records each changed "
+        "value, before and after."
+    ),
     # --- software ---
     "GET /api/v1/software": (
         "Searches installed software across the fleet, grouped by name, version and publisher with "

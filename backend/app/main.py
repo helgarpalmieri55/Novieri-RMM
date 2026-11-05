@@ -334,6 +334,7 @@ def create_app(
     from app.api.v1.platform import router as platform_router
     from app.api.v1.realm_settings import router as realm_settings_router
     from app.api.v1.roles import router as roles_router
+    from app.api.v1.session_settings import router as session_settings_router
     from app.api.v1.setup import router as setup_router
     from app.api.v1.ws import router as ws_router
     from app.modules.user_admin.api import router as user_admin_router
@@ -370,6 +371,7 @@ def create_app(
     app.include_router(roles_router, prefix="/api/v1")
     app.include_router(user_admin_router, prefix="/api/v1")
     app.include_router(realm_settings_router, prefix="/api/v1")
+    app.include_router(session_settings_router, prefix="/api/v1")
     # UNAUTHENTICATED BY NECESSITY: it answers before anybody can sign in.
     # What guards it is zero-users AND a one-time install code, never the
     # absence of a token — see app/api/v1/setup.py.

@@ -65,6 +65,7 @@ export const auditActions: Shape<typeof enActions> = {
   auth_login: "Sesión iniciada",
   auth_passkey_registered: "Clave de acceso registrada",
   auth_passkey_removed: "Clave de acceso eliminada",
+  auth_session_settings_updated: "Ajustes de sesión modificados",
   backup_dedup_refused: "Deduplicación de copia de seguridad rechazada",
   backup_dispatch_refused: "Despacho de copia de seguridad rechazado",
   backup_dispatched: "Copia de seguridad despachada",
