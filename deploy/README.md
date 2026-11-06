@@ -269,14 +269,34 @@ ITS_PUBLIC_CONSOLE_URL=https://itms.toeshee.com
 
 **The per-address sign-in limits are optional** (`ITS_AUTH_LOGIN_IP_LIMIT` and
 `ITS_AUTH_FACTOR_IP_LIMIT`). Unset, one address may send 30 requests in 10
-minutes to the password step and 30 to the second-factor steps; every request
-counts, successes included, and the next one answers 429 until the 10 minutes
-are up. The address is the one Traefik saw, so technicians signing in from
-behind one office NAT address share one budget — raise them for that, within
-5-1000; a value outside that range stops the api, the gateway and the workers
-at startup, since each reads `.env`. They protect against guessing from one
-address; the per-account wait and the stop after 100 failures in a row are
-separate and do not change.
+minutes to the password step, and 30 to the second-factor steps: the code or
+passkey at sign-in, setting one up, and confirming it again inside the console.
+Every request counts, successes included, and the next one answers 429 until
+the 10 minutes are up. On the second-factor budget a typed code is one request
+and a passkey two; setting up the first factor at first sign-in is three, so
+ten technicians doing that on the first day spend all 30. The address is the
+one Traefik saw, so technicians behind one office NAT address share one budget.
+Raise them for that, within 5-1000, and only as far as the office needs. They
+protect against guessing from one address, and the password limit also bounds
+how often one address can time whether an email has an account (a difference
+of about 10-15 ms the sign-in design accepted because this limit exists). The
+per-account wait and the stop after 100 failures in a row are separate and do
+not change. A value outside 5-1000 stops the api, the gateway and the workers
+at startup, since each reads `.env`. A change takes effect on the next
+`docker compose up -d`, which recreates every service that reads `.env`, the
+gateway included, so the agents reconnect even for a valid value. A misspelled
+name is ignored and the limit stays 30. To see the values the api container
+was started with — unset, both are 30 (⚠ **UNVERIFIED** on a deployed host:
+the Python part was run against this release's settings, not inside the
+container):
+
+```sh
+docker compose exec api python -c "from app.core.config import get_settings; s = get_settings(); print(s.auth_login_ip_limit, s.auth_factor_ip_limit)"
+```
+
+```
+30 30
+```
 
 ### Step 2 — Postgres
 

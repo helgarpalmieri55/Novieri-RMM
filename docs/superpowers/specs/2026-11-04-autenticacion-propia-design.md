@@ -103,12 +103,15 @@ La persona no llega a la consola hasta registrar uno.
 ### 2.3 Intentos fallidos
 
 - Contados por cuenta y por factor, nunca solo por IP [S5].
-- **Límites por dirección, configurables** (decisión del operador del 2026-11-06, «Hacerlo configurable»): 30 peticiones
-  cada 600 s a la contraseña (`ITS_AUTH_LOGIN_IP_LIMIT`) y 30 a los pasos del segundo factor
-  (`ITS_AUTH_FACTOR_IP_LIMIT`) por defecto, aciertos incluidos, ajustables entre 5 y 1000 para una oficina tras una sola
-  NAT; son un freno y no la defensa: OWASP, «Blocking IP addresses [...] should not be used as the sole or primary
-  defense due to the ease in circumvention» [S9]; NIST trata la IP como señal de riesgo, «the use of the claimant’s IP
-  address, geolocation, timing of request patterns, or browser metadata» [S1 §3.2.2].
+- **Límites por IP, configurables** (decisión del operador del 2026-11-06, «Hacerlo configurable»): por defecto, 30
+  peticiones cada 600 s desde una IP a la contraseña (`ITS_AUTH_LOGIN_IP_LIMIT`) y 30 a los pasos del segundo factor
+  (`ITS_AUTH_FACTOR_IP_LIMIT`: el código o la llave al iniciar sesión, darlo de alta y la confirmación reciente),
+  aciertos incluidos, ajustables entre 5 y 1000 para una oficina tras una sola NAT. Son un freno y no la defensa:
+  OWASP, «Blocking IP addresses [...] should not be used as the sole or primary defense due to the ease in
+  circumvention» [S9]; NIST trata la IP como señal de riesgo, «the use of the claimant’s IP address, geolocation,
+  timing of request patterns, or browser metadata» [S1 §3.2.2]. El de la contraseña acota además cuántas veces una IP
+  puede medir la diferencia de tiempo aceptada en C-M2 (último punto de esta sección): subirlo le da más muestras, así
+  que se sube solo lo que la oficina necesite.
 - Desde el 5.º fallo, espera creciente: 1 s, duplicando hasta 15 min.
 - **La contraseña lleva dos contadores** (decisión del operador del 2026-11-05, «Cookie de equipo», sobre la revisión
   final B-I2). Un intento que llega con una cookie `__Host-itms_device` que `devices.recognised` acepta para esa
@@ -145,7 +148,9 @@ La persona no llega a la consola hasta registrar uno.
 - Mensaje genérico, exista o no la cuenta, y mismo trabajo de argon2 [S5, S8]. Un navegador en espera, reconocido o
   no, recibe el mismo 401 genérico antes de probar la contraseña: los dos contadores no añaden ningún oráculo. Queda
   una diferencia de tiempo de unos 10-15 ms entre una dirección conocida y una desconocida (las consultas de la
-  cuenta), aceptada en la revisión final C-M2: el trabajo de argon2 es el mismo y los límites por IP la hacen débil.
+  cuenta), aceptada en la revisión final C-M2: el trabajo de argon2 es el mismo y los límites por IP la hacen débil
+  (30 intentos cada 10 minutos por defecto; desde el 2026-11-06 el operador puede subirlos hasta 1000, segundo punto
+  de esta sección).
 
 ### 2.4 Sesión
 
