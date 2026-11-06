@@ -21,13 +21,18 @@ is counted one attempt at a time (check, verify and count in one transaction).
 
 import asyncio
 import base64
+import ipaddress
 import json
 import logging
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
+import pyotp
 import pytest
 from argon2 import PasswordHasher
+from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +40,7 @@ from app.core.auth import flows, keys
 from app.core.auth.keys import AuthKeysUnavailable
 from app.core.auth.session_policy import SessionPolicy
 from app.core.auth.sessions import DEVICE_COOKIE, SESSION_COOKIE
+from app.core.config import Settings
 from app.models import AuditEvent, Client, User
 from app.models.auth import (
     AuthFailure,
@@ -345,7 +351,7 @@ async def test_the_login_is_refused_without_the_console_header_or_its_origin(
 
 
 async def test_one_address_is_slowed_down_and_another_is_not(auth_env: Any) -> None:
-    """The per-IP limit of `api/v1/auth.py::_LOGIN` (30 in 10 minutes)."""
+    """The per-IP limit of `api/v1/auth.py::_LOGIN` (by default 30 in 10 minutes)."""
     org = await auth_env.create_org("ip-limit")
     await point_at(auth_env, org)
     noisy = browser()
@@ -360,6 +366,216 @@ async def test_one_address_is_slowed_down_and_another_is_not(auth_env: Any) -> N
     assert limited.headers["Retry-After"] == "600"
     other = await auth_env.client.post("/api/v1/auth/login", headers=browser(), json=body)
     assert other.status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# The two per-IP sign-in limits are the operator's (decision of 2026-11-06,
+# «Hacerlo configurable», design §2.3): `ITS_AUTH_LOGIN_IP_LIMIT` and
+# `ITS_AUTH_FACTOR_IP_LIMIT`, 30 by default, 5 to 1000, read by `_limit` at
+# request time from `app.state.settings`. What is counted -- every request,
+# successes included -- and the 600 s window do not change, and neither do the
+# bucket names, so the Redis keys a running deployment holds stay its own.
+# --------------------------------------------------------------------------- #
+
+#: Each limiter: a request it guards that answers the same 401 every time (an
+#: unknown address's password; a code with no session waiting for it), the
+#: setting that sizes it and its bucket.
+_IP_LIMITED = [
+    pytest.param(
+        "/api/v1/auth/login",
+        {"email": "nobody@test.local", "password": "Not-The-Password-41"},
+        "auth_login_ip_limit",
+        "auth-login",
+        id="login",
+    ),
+    pytest.param(
+        "/api/v1/auth/factor/totp",
+        {"code": "000000", "remember_device": False},
+        "auth_factor_ip_limit",
+        "auth-factor",
+        id="factor",
+    ),
+]
+_IP_LIMITED_ARGS = ("path", "body", "setting", "bucket")
+
+#: What `Settings` needs to construct at all, so a refusal below can only be
+#: the limit's.
+_REQUIRED: dict[str, Any] = {
+    "database_url": "postgresql+asyncpg://app_user:app@localhost/x",
+    "database_admin_url": "postgresql+asyncpg://admin:a@localhost/x",
+    "oidc_issuer": "https://kc.example/realms/it-suite",
+    "oidc_jwks_url": "https://kc.example/realms/it-suite/certs",
+    "ca_dir": Path("/tmp/ca"),
+}
+
+
+async def _knock(
+    env: Any, path: str, body: dict[str, Any], network: dict[str, str], times: int
+) -> list[int]:
+    """`times` requests to `path` from one address; their status codes."""
+    statuses = []
+    for _ in range(times):
+        answer = await env.client.post(path, headers=network, json=body)
+        statuses.append(answer.status_code)
+    return statuses
+
+
+def _slowed_down(answer: Any) -> None:
+    """The per-IP refusal, with the window it always had."""
+    assert answer.status_code == 429, answer.text
+    assert answer.json()["code"] == "rate_limited"
+    assert answer.json()["wait_s"] == 600
+    assert answer.headers["Retry-After"] == "600"
+
+
+@pytest.mark.parametrize(_IP_LIMITED_ARGS, _IP_LIMITED)
+async def test_by_default_thirty_from_one_address_pass_and_the_next_is_slowed_down(
+    auth_env: Any, path: str, body: dict[str, Any], setting: str, bucket: str
+) -> None:
+    """The default is the setting's and is the 30 `_limit` was given before,
+    counted under the bucket's existing Redis key -- so a deployment that sets
+    nothing sees no change. Another address keeps a budget of its own."""
+    assert getattr(auth_env.settings, setting) == 30
+    org = await auth_env.create_org("ip-default")
+    await point_at(auth_env, org)
+    noisy = browser()
+
+    assert await _knock(auth_env, path, body, noisy, 30) == [401] * 30
+    _slowed_down(await auth_env.client.post(path, headers=noisy, json=body))
+
+    address = ipaddress.ip_address(noisy["X-Forwarded-For"])
+    assert await auth_env.app.state.redis.get(f"ratelimit:{bucket}:ip:{address}") == "31"
+    other = await auth_env.client.post(path, headers=browser(), json=body)
+    assert other.status_code == 401, other.text
+
+
+@pytest.mark.parametrize(_IP_LIMITED_ARGS, _IP_LIMITED)
+async def test_a_lowered_limit_is_honoured(
+    auth_env: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    body: dict[str, Any],
+    setting: str,
+    bucket: str,
+) -> None:
+    """`ITS_AUTH_*_IP_LIMIT=5`: the sixth request from one address is refused,
+    with the same window. A limiter that kept its own 30, or read the other
+    route's setting, lets it through: red."""
+    monkeypatch.setattr(auth_env.settings, setting, 5)
+    org = await auth_env.create_org("ip-lowered")
+    await point_at(auth_env, org)
+    noisy = browser()
+
+    assert await _knock(auth_env, path, body, noisy, 5) == [401] * 5
+    _slowed_down(await auth_env.client.post(path, headers=noisy, json=body))
+
+
+@pytest.mark.parametrize(_IP_LIMITED_ARGS, _IP_LIMITED)
+async def test_a_raised_limit_is_honoured(
+    auth_env: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    body: dict[str, Any],
+    setting: str,
+    bucket: str,
+) -> None:
+    """`ITS_AUTH_*_IP_LIMIT=40` -- an office behind one NAT address: the 31st
+    request passes, which the hard-coded 30 refused, and the 41st does not."""
+    monkeypatch.setattr(auth_env.settings, setting, 40)
+    org = await auth_env.create_org("ip-raised")
+    await point_at(auth_env, org)
+    noisy = browser()
+
+    assert await _knock(auth_env, path, body, noisy, 40) == [401] * 40
+    _slowed_down(await auth_env.client.post(path, headers=noisy, json=body))
+
+
+@pytest.mark.parametrize("value", [4, 1001, 0])
+@pytest.mark.parametrize("setting", ["auth_login_ip_limit", "auth_factor_ip_limit"])
+def test_a_limit_outside_five_to_a_thousand_stops_startup(setting: str, value: int) -> None:
+    """5 to 1000, refused rather than clamped: the floor keeps the limit from
+    being switched off, and `create_app` builds `Settings()`, so the api does
+    not start. The only error is this field's."""
+    with pytest.raises(ValidationError) as refused:
+        Settings(**_REQUIRED, **{setting: value})
+    assert [error["loc"] for error in refused.value.errors()] == [(setting,)]
+
+
+@pytest.mark.parametrize(
+    ("setting", "variable"),
+    [
+        ("auth_login_ip_limit", "ITS_AUTH_LOGIN_IP_LIMIT"),
+        ("auth_factor_ip_limit", "ITS_AUTH_FACTOR_IP_LIMIT"),
+    ],
+)
+def test_the_limits_come_from_their_variables_within_their_bounds(
+    monkeypatch: pytest.MonkeyPatch, setting: str, variable: str
+) -> None:
+    """The names `deploy/.env.example` documents, both ends of the range, and
+    an out-of-range value in `.env` stopping startup."""
+    monkeypatch.delenv(variable, raising=False)
+    assert getattr(Settings(**_REQUIRED), setting) == 30
+    for value in (5, 1000):
+        monkeypatch.setenv(variable, str(value))
+        assert getattr(Settings(**_REQUIRED), setting) == value
+    monkeypatch.setenv(variable, "4")
+    with pytest.raises(ValidationError) as refused:
+        Settings(**_REQUIRED)
+    assert [error["loc"] for error in refused.value.errors()] == [(setting,)]
+
+
+async def _factor_count(env: Any, who: Any) -> int:
+    """What `who`'s address has spent of the `auth-factor` budget so far."""
+    address = ipaddress.ip_address(who.network["X-Forwarded-For"])
+    return int(await env.app.state.redis.get(f"ratelimit:auth-factor:ip:{address}") or 0)
+
+
+async def test_what_setting_up_the_app_costs_is_what_the_deploy_docs_say(auth_env: Any) -> None:
+    """Two of the costs `deploy/.env.example` gives the operator (review M6;
+    `test_deploy_env_documentation.py` holds the sentences), counted on one
+    address's `auth-factor` bucket while the console's own requests are
+    replayed in its order:
+
+    - at first sign-in, 3: `EnrollPage.tsx` sends `enrollTotpStart`,
+      `enrollTotpConfirm`, then `enrollFinish` (`enrol_totp`);
+    - later from Sign-in and security with no recent confirmation, 4 when it
+      is a code: `_enrollable`'s `require_fresh` refuses the start with 403
+      `step_up_required`, and `_FACTOR` has counted it already; `stepUp.tsx`'s
+      `run` confirms (`/auth/step-up/totp`), sends the start once more, and the
+      page then sends the confirm."""
+    org = await auth_env.create_org("ip-costs")
+    who = await signed_in(auth_env, org, "technician")
+    assert await _factor_count(auth_env, who) == 3
+
+    async with AsyncSession(auth_env.admin_engine) as session:
+        await session.execute(
+            update(AuthSession)
+            .where(AuthSession.user_id == who.user_id)
+            .values(step_up_at=datetime.now(UTC) - timedelta(minutes=11))
+        )
+        await session.commit()
+    who.network = browser()
+
+    refused = await auth_env.client.post("/api/v1/auth/enroll/totp/start", headers=who.headers())
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["code"] == "step_up_required"
+    assert await _factor_count(auth_env, who) == 1
+    confirmed = await auth_env.client.post(
+        "/api/v1/auth/step-up/totp",
+        headers=who.headers(),
+        json={"code": await fresh_code(auth_env, who)},
+    )
+    assert confirmed.status_code == 204, confirmed.text
+    start = await auth_env.client.post("/api/v1/auth/enroll/totp/start", headers=who.headers())
+    assert start.status_code == 200, start.text
+    secret = parse_qs(urlsplit(start.json()["otpauth_uri"]).query)["secret"][0]
+    confirm = await auth_env.client.post(
+        "/api/v1/auth/enroll/totp/confirm",
+        headers=who.headers(),
+        json={"code": pyotp.TOTP(secret).now()},
+    )
+    assert confirm.status_code == 204, confirm.text
+    assert await _factor_count(auth_env, who) == 4
 
 
 async def test_a_code_is_not_taken_twice(auth_env: Any) -> None:

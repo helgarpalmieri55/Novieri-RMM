@@ -153,3 +153,55 @@ def test_the_console_address_says_every_push_install_needs_it() -> None:
     flat = " ".join(line.lstrip("# ").strip() for line in block.splitlines())
     assert "EVERY PUSH INSTALL IS REFUSED WITHOUT IT" in flat
     assert "Set ITS_PUBLIC_CONSOLE_URL so a pushed computer knows where to enroll." in flat
+
+
+def _sign_in_limits_block() -> tuple[str, str]:
+    """The `.env.example` block on the per-address sign-in limits, from its
+    header to the next one, as written and flattened to one line."""
+    text = ENV_EXAMPLE.read_text()
+    start = text.index("# --- Sign-in limits per address")
+    block = text[start : text.index("\n# --- ", start)]
+    return block, " ".join(line.lstrip("# ").strip() for line in block.splitlines())
+
+
+@pytest.mark.parametrize(
+    ("variable", "field"),
+    [
+        ("ITS_AUTH_LOGIN_IP_LIMIT", "auth_login_ip_limit"),
+        ("ITS_AUTH_FACTOR_IP_LIMIT", "auth_factor_ip_limit"),
+    ],
+)
+def test_the_sign_in_limits_per_address_are_documented_as_the_code_has_them(
+    variable: str, field: str
+) -> None:
+    """The operator raises these for an office behind one NAT address (decision
+    of 2026-11-06, design §2.3), so they are named where `.env` is edited and in
+    the README, and the default and range `.env.example` gives are the ones
+    `Settings` enforces: a range that says 1-1000 over a field that refuses 4
+    teaches the operator a value that stops the api.
+
+    Checked against THIS block, cut out from its header to the next one: the
+    file is 600-odd lines, and a range another key documents must not stand in
+    for this one's (review M5)."""
+    from app.core.config import Settings
+
+    info = Settings.model_fields[field]
+    bounds = {type(rule).__name__: rule for rule in info.metadata}
+    block, flat = _sign_in_limits_block()
+    assert f"\n# {variable}={info.default}\n" in block, (
+        f"{variable} is not documented, commented out, at its default {info.default}"
+    )
+    assert f"Range {bounds['Ge'].ge}-{bounds['Le'].le}:" in flat, flat
+    assert variable in DEPLOY_README.read_text()
+
+
+def test_the_factor_costs_the_operator_sizes_by_are_the_measured_ones() -> None:
+    """The two costs `tests/test_auth_signin.py::
+    test_what_setting_up_the_app_costs_is_what_the_deploy_docs_say` counts on
+    the `auth-factor` bucket: 3 at first sign-in, 4 for setting up the app
+    later with no recent confirmation (5 when that confirmation is a passkey,
+    one request more). Review M6: the first version said "two" for the second
+    one, which holds only within 10 minutes of a confirmation."""
+    _block, flat = _sign_in_limits_block()
+    assert "Setting up the first factor at first sign-in is 3." in flat, flat
+    assert "setting up the app costs 4 or 5" in flat, flat

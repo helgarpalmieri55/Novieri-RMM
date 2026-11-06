@@ -65,7 +65,7 @@ class _Browser:
     address of its own, as Task 7's `tests/auth_support.py::browser` does. The
     test client's peer (127.0.0.1) is trusted as the proxy, so the
     `X-Forwarded-For` names this browser and its per-IP sign-in limits
-    (`auth-login`, `auth-factor`: 30 in 10 minutes) are its own: a second run
+    (`auth-login`, `auth-factor`: by default 30 in 10 minutes) are its own: a second run
     of this file inside ten minutes does not meet the first one's 429."""
 
     def __init__(self, env: Any) -> None:
